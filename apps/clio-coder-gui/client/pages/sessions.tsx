@@ -18,6 +18,7 @@ import { ConversationOutline } from "../chat/ConversationOutline.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
+import { FilePreviewDialog } from "../chat/FilePreviewDialog.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
@@ -43,6 +44,7 @@ import { setPageTitle } from "../interaction/announcer.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
+import { PathOpenerContext, type PathTarget } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
@@ -156,6 +158,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		() => ({ show: (target: PaneTarget) => pane.show(target, ids.pane) }),
 		[pane.show, ids.pane],
 	);
+	const [previewing, setPreviewing] = useState<PathTarget | null>(null);
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
 	useShortcut("agents", () => pane.show("agents", ids.pane));
@@ -396,289 +399,304 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	);
 	return (
 		<PaneContext.Provider value={paneActions}>
-			<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
-				<div className="conversation__main">
-					<TopBar
-						title={title}
-						titleLabel={title}
-						rename={{
-							active: renaming,
-							onStart: () => setRenaming(true),
-							onCancel: () => setRenaming(false),
-							onSave: (label) => {
-								setRenaming(false);
-								renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
-							},
-						}}
-					>
-						{snapshot.telemetry?.eggs?.includes("duck") ? (
-							<span
-								className="conversation__duck"
-								role="img"
-								aria-label="Rubber duck badge active for this conversation"
-								title="Rubber duck · /eggs off to let her sleep"
-							>
-								🦆
-							</span>
-						) : null}
-						{memoryMark ? (
-							<StatusMark tone={memoryMark.tone} label={memoryMark.label} title={memoryMark.title} live={memoryMark.live} />
-						) : null}
-						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
-						<Menu label="Task actions">
-							<MenuItem icon="search" onClick={() => setOutline(true)}>
-								Find in conversation
-							</MenuItem>
-							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
-								Rename task
-							</MenuItem>
-							<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`, client.token)}>
-								Open in new window
-							</MenuItem>
-							<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
-								Project settings
-							</MenuItem>
-							<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
-								All tasks in {workspaceName}
-							</MenuItem>
-							<MenuItem
-								icon="close"
-								tone="danger"
-								disabled={!canClose || controlling}
-								onClick={() => requestClose({ id, workspaceId: snapshot.workspaceId, title, currentTurnId: null })}
-							>
-								Close task
-							</MenuItem>
-						</Menu>
-						<Link
-							className="wb-chip wb-chip--place"
-							to={`/workspaces/${snapshot.workspaceId}/sessions`}
-							title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
+			<PathOpenerContext.Provider value={setPreviewing}>
+				<section className="conversation" data-pane={paneOpen ? "open" : "closed"}>
+					<div className="conversation__main">
+						<TopBar
+							title={title}
+							titleLabel={title}
+							rename={{
+								active: renaming,
+								onStart: () => setRenaming(true),
+								onCancel: () => setRenaming(false),
+								onSave: (label) => {
+									setRenaming(false);
+									renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
+								},
+							}}
 						>
-							<Icon name="folder" />
-							<span>{workspaceName}</span>
-						</Link>
-						{chip ? (
-							<span className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
-								{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
-								<span>{chip.label}</span>
-								{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
-							</span>
-						) : null}
-						<span className="wb-bar__spacer" />
-						<TelemetryChips
-							client={client}
-							sessionId={snapshot.id}
-							state={snapshot.state}
-							turns={snapshot.turns}
-							onOpen={pane.show}
-						/>
-						<div className="wb-bar__end">
-							<OutputDetailPicker value={outputDetail} onChange={setOutputDetail} />
-							<button
-								type="button"
-								className="wb-chip conversation__find"
-								aria-label="Find in conversation"
-								title="Find a request or response in this conversation"
-								onClick={() => setOutline(true)}
-							>
-								<Icon name="search" /> Find
-							</button>
-							<PaneToggles
-								client={client}
-								sessionId={snapshot.id}
-								workspaceRoot={workspaceRoot}
-								open={pane.open}
-								view={pane.view}
-								ids={ids}
-								onToggle={pane.toggle}
-							/>
-						</div>
-					</TopBar>
-					<div className="conversation__approval">
-						{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
-							<ConversationBanner
-								tone="warn"
-								title={session.error ? "Could not refresh this task." : "Live updates are reconnecting."}
-								action={
-									<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
-										{session.isFetching ? "Refreshing…" : "Refresh"}
-									</button>
-								}
-							>
-								{session.error
-									? session.error.message
-									: "What you see is the last state received. New activity appears when the connection returns."}
-							</ConversationBanner>
-						) : null}
-						{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
-							<ConversationBanner
-								tone="quiet"
-								title={
-									snapshot.state === "closed"
-										? "This task is closed."
-										: snapshot.state === "unknown"
-											? "Clio is no longer connected to this task."
-											: "This task could not continue."
-								}
-								action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}
-							>
-								The recorded conversation is still available below.
-							</ConversationBanner>
-						) : null}
-						{snapshot.state === "parked" ? (
-							<ConversationBanner
-								tone="quiet"
-								title="Paused. You can read the conversation below."
-								action={
-									<button
-										type="button"
-										disabled={resume.isPending || controlling}
-										onClick={() => resume.mutate(snapshot.workspaceId)}
-									>
-										{resume.isPending ? "Resuming…" : "Resume task"}
-									</button>
-								}
-							>
-								Resume when you want to continue. New requests wait for a slot when other work is running.
-							</ConversationBanner>
-						) : null}
-						{resume.error ? (
-							<ConversationBanner tone="warn" title="Could not resume this task.">
-								{resume.error.message}
-							</ConversationBanner>
-						) : null}
-						<ControlBanner client={client} session={snapshot} />
-						<BudgetBanner client={client} session={snapshot} />
-						<ApprovalBanner client={client} session={snapshot} />
-					</div>
-					<div
-						className="chat-transcript"
-						data-detail={outputDetail}
-						id={ids.transcript}
-						ref={scroll}
-						onClickCapture={(event) => {
-							// Opening a detail is reading intent. Freeze before its height changes, so the live
-							// edge observer cannot carry an expanded request or tool result out of view.
-							if (event.target instanceof Element && event.target.closest("summary")) {
-								follow.restore({ ...follow.snapshot(), following: false });
-							}
-						}}
-					>
-						<div className="chat-transcript__content">
-							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
-							{transcript.start > 0 ? (
-								<div className="transcript-history">
-									<p>{transcript.start} earlier turns in this conversation</p>
-									<div>
-										<button type="button" onClick={transcript.earlier} aria-controls={ids.transcript}>
-											<Icon name="arrowUp" />
-											Show {Math.min(TRANSCRIPT_PAGE_SIZE, transcript.start)} earlier turns
-										</button>
-										<button type="button" onClick={() => setOutline(true)}>
-											<Icon name="search" />
-											Find in full conversation
-										</button>
-									</div>
-								</div>
+							{snapshot.telemetry?.eggs?.includes("duck") ? (
+								<span
+									className="conversation__duck"
+									role="img"
+									aria-label="Rubber duck badge active for this conversation"
+									title="Rubber duck · /eggs off to let her sleep"
+								>
+									🦆
+								</span>
 							) : null}
-
-							{transcript.turns.map((item) => (
-								<ChatTurnView
-									key={item.turnId}
-									turn={item}
-									row={turnRows.get(item.turnId)}
-									client={client}
-									session={snapshot}
-									pending={pending}
-									pendingPermissionId={pending?.id ?? null}
-									nowMs={item.settled ? 0 : now}
-									stopping={false}
-									notices={NO_ROWS}
-									workspaceRoot={workspaceRoot}
-									liveWorkers={item.settled ? 0 : liveWorkers}
-								/>
-							))}
-							<LiveWorkers
+							{memoryMark ? (
+								<StatusMark tone={memoryMark.tone} label={memoryMark.label} title={memoryMark.title} live={memoryMark.live} />
+							) : null}
+							{/* The task's own actions sit with its name, not with the view controls at the far end. */}
+							<Menu label="Task actions">
+								<MenuItem icon="search" onClick={() => setOutline(true)}>
+									Find in conversation
+								</MenuItem>
+								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
+									Rename task
+								</MenuItem>
+								<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`, client.token)}>
+									Open in new window
+								</MenuItem>
+								<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>
+									Project settings
+								</MenuItem>
+								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
+									All tasks in {workspaceName}
+								</MenuItem>
+								<MenuItem
+									icon="close"
+									tone="danger"
+									disabled={!canClose || controlling}
+									onClick={() => requestClose({ id, workspaceId: snapshot.workspaceId, title, currentTurnId: null })}
+								>
+									Close task
+								</MenuItem>
+							</Menu>
+							<Link
+								className="wb-chip wb-chip--place"
+								to={`/workspaces/${snapshot.workspaceId}/sessions`}
+								title={workspaceRoot ? `All tasks in ${workspaceRoot}` : "All tasks in this project"}
+							>
+								<Icon name="folder" />
+								<span>{workspaceName}</span>
+							</Link>
+							{chip ? (
+								<span className="wb-chip wb-chip--status" data-tone={chip.tone} role="status">
+									{chip.tone === "working" ? <ClioPulse size={PULSE_SIZE.inline} /> : null}
+									<span>{chip.label}</span>
+									{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
+								</span>
+							) : null}
+							<span className="wb-bar__spacer" />
+							<TelemetryChips
 								client={client}
 								sessionId={snapshot.id}
-								sessionOpen={snapshot.state === "open"}
-								fleet={snapshot.fleet}
+								state={snapshot.state}
+								turns={snapshot.turns}
+								onOpen={pane.show}
 							/>
-							<LiveJobs client={client} sessionId={snapshot.id} sessionOpen={snapshot.state === "open"} jobs={snapshot.jobs} />
-							{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+							<div className="wb-bar__end">
+								<OutputDetailPicker value={outputDetail} onChange={setOutputDetail} />
+								<button
+									type="button"
+									className="wb-chip conversation__find"
+									aria-label="Find in conversation"
+									title="Find a request or response in this conversation"
+									onClick={() => setOutline(true)}
+								>
+									<Icon name="search" /> Find
+								</button>
+								<PaneToggles
+									client={client}
+									sessionId={snapshot.id}
+									workspaceRoot={workspaceRoot}
+									open={pane.open}
+									view={pane.view}
+									ids={ids}
+									onToggle={pane.toggle}
+								/>
+							</div>
+						</TopBar>
+						<div className="conversation__approval">
+							{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
+								<ConversationBanner
+									tone="warn"
+									title={session.error ? "Could not refresh this task." : "Live updates are reconnecting."}
+									action={
+										<button type="button" disabled={session.isFetching} onClick={() => void session.refetch()}>
+											{session.isFetching ? "Refreshing…" : "Refresh"}
+										</button>
+									}
+								>
+									{session.error
+										? session.error.message
+										: "What you see is the last state received. New activity appears when the connection returns."}
+								</ConversationBanner>
+							) : null}
+							{snapshot.state === "unknown" || snapshot.state === "failed" || snapshot.state === "closed" ? (
+								<ConversationBanner
+									tone="quiet"
+									title={
+										snapshot.state === "closed"
+											? "This task is closed."
+											: snapshot.state === "unknown"
+												? "Clio is no longer connected to this task."
+												: "This task could not continue."
+									}
+									action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}
+								>
+									The recorded conversation is still available below.
+								</ConversationBanner>
+							) : null}
+							{snapshot.state === "parked" ? (
+								<ConversationBanner
+									tone="quiet"
+									title="Paused. You can read the conversation below."
+									action={
+										<button
+											type="button"
+											disabled={resume.isPending || controlling}
+											onClick={() => resume.mutate(snapshot.workspaceId)}
+										>
+											{resume.isPending ? "Resuming…" : "Resume task"}
+										</button>
+									}
+								>
+									Resume when you want to continue. New requests wait for a slot when other work is running.
+								</ConversationBanner>
+							) : null}
+							{resume.error ? (
+								<ConversationBanner tone="warn" title="Could not resume this task.">
+									{resume.error.message}
+								</ConversationBanner>
+							) : null}
+							<ControlBanner client={client} session={snapshot} />
+							<BudgetBanner client={client} session={snapshot} />
+							<ApprovalBanner client={client} session={snapshot} />
 						</div>
-					</div>
-					{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
+						<div
+							className="chat-transcript"
+							data-detail={outputDetail}
+							id={ids.transcript}
+							ref={scroll}
+							onClickCapture={(event) => {
+								// Opening a detail is reading intent. Freeze before its height changes, so the live
+								// edge observer cannot carry an expanded request or tool result out of view.
+								if (event.target instanceof Element && event.target.closest("summary")) {
+									follow.restore({ ...follow.snapshot(), following: false });
+								}
+							}}
+						>
+							<div className="chat-transcript__content">
+								{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+								{transcript.start > 0 ? (
+									<div className="transcript-history">
+										<p>{transcript.start} earlier turns in this conversation</p>
+										<div>
+											<button type="button" onClick={transcript.earlier} aria-controls={ids.transcript}>
+												<Icon name="arrowUp" />
+												Show {Math.min(TRANSCRIPT_PAGE_SIZE, transcript.start)} earlier turns
+											</button>
+											<button type="button" onClick={() => setOutline(true)}>
+												<Icon name="search" />
+												Find in full conversation
+											</button>
+										</div>
+									</div>
+								) : null}
+
+								{transcript.turns.map((item) => (
+									<ChatTurnView
+										key={item.turnId}
+										turn={item}
+										row={turnRows.get(item.turnId)}
+										client={client}
+										session={snapshot}
+										pending={pending}
+										pendingPermissionId={pending?.id ?? null}
+										nowMs={item.settled ? 0 : now}
+										stopping={false}
+										notices={NO_ROWS}
+										workspaceRoot={workspaceRoot}
+										liveWorkers={item.settled ? 0 : liveWorkers}
+									/>
+								))}
+								<LiveWorkers
+									client={client}
+									sessionId={snapshot.id}
+									sessionOpen={snapshot.state === "open"}
+									fleet={snapshot.fleet}
+								/>
+								<LiveJobs
+									client={client}
+									sessionId={snapshot.id}
+									sessionOpen={snapshot.state === "open"}
+									jobs={snapshot.jobs}
+								/>
+								{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+							</div>
+						</div>
+						{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
 				    it the pill resolves against the viewport and pushes the document sideways. */}
-					<div className="jump-anchor">
-						<JumpToLatest follow={follow} />
-					</div>
-					<div className="conversation__dock">
-						{contextView && (contextView.live || contextView.id !== dismissedContext) ? (
-							<ContextWorkCard
-								key={contextView.id}
-								view={contextView}
-								compact
-								cancelling={stopContext.stopping === contextView.id}
-								cancelLabel={running ? "Stop task and context work" : "Stop context work"}
-								{...(contextView.live
-									? { onCancel: () => stopContext.stop(contextView.id) }
-									: {
-											onDismiss: (keyboard: boolean) => {
-												setDismissedContext(contextView.id);
-												// The card holding focus is leaving; the composer is where the keyboard goes next.
-												if (keyboard) focusComposer(snapshot.id);
-											},
-										})}
+						<div className="jump-anchor">
+							<JumpToLatest follow={follow} />
+						</div>
+						<div className="conversation__dock">
+							{contextView && (contextView.live || contextView.id !== dismissedContext) ? (
+								<ContextWorkCard
+									key={contextView.id}
+									view={contextView}
+									compact
+									cancelling={stopContext.stopping === contextView.id}
+									cancelLabel={running ? "Stop task and context work" : "Stop context work"}
+									{...(contextView.live
+										? { onCancel: () => stopContext.stop(contextView.id) }
+										: {
+												onDismiss: (keyboard: boolean) => {
+													setDismissedContext(contextView.id);
+													// The card holding focus is leaving; the composer is where the keyboard goes next.
+													if (keyboard) focusComposer(snapshot.id);
+												},
+											})}
+								/>
+							) : null}
+							{stopContext.error ? <p role="alert">{stopContext.error.message}</p> : null}
+							<Composer
+								client={client}
+								sessionId={snapshot.id}
+								workspaceId={snapshot.workspaceId}
+								sessionState={snapshot.state}
+								initialFocus={snapshot.timeline.length === 0}
+								runningTurnId={turn?.status === "running" ? turn.id : null}
+								contextRunning={contextRunning}
+								contextOperation={contextOperationRef}
+								route={route}
 							/>
-						) : null}
-						{stopContext.error ? <p role="alert">{stopContext.error.message}</p> : null}
-						<Composer
+						</div>
+						<Interview
 							client={client}
 							sessionId={snapshot.id}
-							workspaceId={snapshot.workspaceId}
-							sessionState={snapshot.state}
-							initialFocus={snapshot.timeline.length === 0}
-							runningTurnId={turn?.status === "running" ? turn.id : null}
-							contextRunning={contextRunning}
-							contextOperation={contextOperationRef}
-							route={route}
+							sessionOpen={snapshot.state === "open"}
+							capabilities={capabilities.data}
 						/>
 					</div>
-					<Interview
+					<SessionPane
+						open={pane.open}
+						onClose={pane.close}
 						client={client}
 						sessionId={snapshot.id}
-						sessionOpen={snapshot.state === "open"}
-						capabilities={capabilities.data}
+						title={title}
+						workspaceRoot={workspaceRoot}
+						nowMs={now}
+						view={pane.view}
+						onViewChange={pane.setView}
+						route={route}
 					/>
-				</div>
-				<SessionPane
-					open={pane.open}
-					onClose={pane.close}
-					client={client}
-					sessionId={snapshot.id}
-					title={title}
-					workspaceRoot={workspaceRoot}
-					nowMs={now}
-					view={pane.view}
-					onViewChange={pane.setView}
-					route={route}
-				/>
-				{outline ? (
-					<ConversationOutline
-						turns={turns}
-						rows={turnRows}
-						truncated={snapshot.timelineTruncated === true}
-						onClose={() => setOutline(false)}
-						onSelect={(turnId) => {
-							transcript.revealTurn(turnId);
-							pendingJump.current = turnId;
-							setOutline(false);
-						}}
-					/>
-				) : null}
-			</section>
+					{outline ? (
+						<ConversationOutline
+							turns={turns}
+							rows={turnRows}
+							truncated={snapshot.timelineTruncated === true}
+							onClose={() => setOutline(false)}
+							onSelect={(turnId) => {
+								transcript.revealTurn(turnId);
+								pendingJump.current = turnId;
+								setOutline(false);
+							}}
+						/>
+					) : null}
+					{previewing ? (
+						<FilePreviewDialog
+							client={client}
+							workspaceId={snapshot.workspaceId}
+							target={previewing}
+							onClose={() => setPreviewing(null)}
+						/>
+					) : null}
+				</section>
+			</PathOpenerContext.Provider>
 		</PaneContext.Provider>
 	);
 }

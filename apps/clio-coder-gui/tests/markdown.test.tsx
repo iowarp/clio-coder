@@ -2,7 +2,14 @@ import { deepEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import type { Tokens } from "marked";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Blocks, CodeBlock, decodeEntities, MarkdownContent, MermaidBlock } from "../client/render/Markdown.js";
+import {
+	Blocks,
+	CodeBlock,
+	decodeEntities,
+	MarkdownContent,
+	MermaidBlock,
+	PathOpenerContext,
+} from "../client/render/Markdown.js";
 import type { MathToken } from "../client/render/markdown-model.js";
 import {
 	codeLanguage,
@@ -383,4 +390,18 @@ test("a code span that names a file and line reads as a path; ordinary code does
 		/<code class="md-path" title="src\/a.ts, line 3">src\/a.ts:3<\/code>/u,
 	);
 	match(renderMarkdown("See `npm`."), /<code>npm<\/code>/u);
+});
+
+test("a named file is a preview button only where the host can open one", () => {
+	const opened = renderToStaticMarkup(
+		<PathOpenerContext.Provider value={() => {}}>
+			<MarkdownContent source="See `src/a.ts:3` and `npm`." complete />
+		</PathOpenerContext.Provider>,
+	);
+	match(
+		opened,
+		/<button type="button" class="md-path-open" title="Preview src\/a.ts, line 3"><code class="md-path">src\/a.ts:3<\/code><\/button>/u,
+	);
+	match(opened, /<code>npm<\/code>/u);
+	doesNotMatch(renderMarkdown("See `src/a.ts:3`."), /<button/u);
 });

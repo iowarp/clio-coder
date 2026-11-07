@@ -1,8 +1,9 @@
-import assert from "node:assert/strict";
+import assert, { deepEqual, equal } from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { previewView } from "../client/chat/file-preview-model.js";
 import { routes } from "../contracts/routes.js";
 import { PREVIEW_MAX_BYTES, readFilePreview, withheldPath } from "../server/services/file-preview.js";
 import { harness, json } from "./harness/app.js";
@@ -88,4 +89,26 @@ test("the workspace file route answers a preview over HTTP", { timeout: 20000 },
 	});
 	assert.equal((await read(".env")).status, "withheld");
 	assert.equal((await read("../x")).status, "outside");
+});
+
+test("a preview view centres a long file on the named line and says what it leaves out", () => {
+	const text = Array.from({ length: 50 }, (_, index) => `line ${index + 1}`).join("\n");
+	const preview = { status: "text", path: "a.ts", text: `${text}\n`, size: 400, truncated: false } as const;
+	const whole = previewView(preview, 7);
+	equal(whole.lines.length, 50);
+	equal(whole.focus, 7);
+	deepEqual(
+		whole.lines.filter((line) => line.focus).map((line) => line.text),
+		["line 7"],
+	);
+	deepEqual(whole.notes, []);
+	const windowed = previewView(preview, 40, 12);
+	deepEqual([windowed.lines[0]?.number, windowed.lines.at(-1)?.number], [36, 47]);
+	deepEqual(windowed.notes, ["Showing lines 36 to 47 of 50."]);
+	deepEqual(previewView(preview, 49, 12).lines.at(-1)?.number, 50);
+	deepEqual(previewView(preview, 80).notes, ["The file has 50 lines, so line 80 is not in it now."]);
+	deepEqual(previewView({ ...preview, truncated: true, size: 9_000 }, 80).notes, [
+		"Line 80 is past the first 50 lines this preview reads.",
+		"The file is 9,000 bytes; the preview stops at the first 50 lines.",
+	]);
 });

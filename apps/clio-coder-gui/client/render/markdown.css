@@ -442,6 +442,16 @@
 }
 
 /* A code span that names a file reads as a place: no code tint, a quiet underline and no wrap inside a segment. */
+.markdown .md-path-open {
+	display: inline;
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	color: inherit;
+	text-align: start;
+	cursor: pointer;
+}
 .markdown code.md-path {
 	background: transparent;
 	padding-inline: 0;
@@ -449,6 +459,11 @@
 	text-decoration: underline dotted color-mix(in srgb, var(--ink-muted) 60%, transparent);
 	text-underline-offset: 3px;
 	overflow-wrap: anywhere;
+}
+.markdown .md-path-open:hover code.md-path,
+.markdown .md-path-open:focus-visible code.md-path {
+	color: var(--accent-strong);
+	text-decoration-style: solid;
 }
 
 .md-footnote-ref {

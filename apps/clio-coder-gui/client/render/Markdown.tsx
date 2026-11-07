@@ -405,17 +405,38 @@ function Footnote({ token }: { token: FootnoteToken }) {
 	);
 }
 
+/** A file a transcript named, and the line when it named one. */
+export interface PathTarget {
+	readonly path: string;
+	readonly line: number | null;
+}
+/**
+ * Opens a named file for reading. A host that can preview workspace files provides it; without one a path
+ * is styled as a place but stays plain text.
+ */
+export const PathOpenerContext = createContext<((target: PathTarget) => void) | null>(null);
+
 /** A code span naming a file, and a line when it has one, so it reads as a place rather than as code. */
 function CodeSpan({ text }: { text: string }) {
 	const reference = useMemo(() => pathReference(text), [text]);
+	const openPath = useContext(PathOpenerContext);
 	if (reference === null) return <code>{text}</code>;
+	const place = reference.line === null ? reference.path : `${reference.path}, line ${reference.line}`;
+	if (openPath === null)
+		return (
+			<code className="md-path" title={place}>
+				{text}
+			</code>
+		);
 	return (
-		<code
-			className="md-path"
-			title={reference.line === null ? reference.path : `${reference.path}, line ${reference.line}`}
+		<button
+			type="button"
+			className="md-path-open"
+			title={`Preview ${place}`}
+			onClick={() => openPath({ path: reference.path, line: reference.line })}
 		>
-			{text}
-		</code>
+			<code className="md-path">{text}</code>
+		</button>
 	);
 }
 
