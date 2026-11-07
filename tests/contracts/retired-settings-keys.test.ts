@@ -148,10 +148,9 @@ test("every settings field name is still a key some settings schema reads", () =
 		}
 	};
 	walk(DEFAULT_SETTINGS);
-	const schemaSources = [
-		"src/core/config.ts",
-		"src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts",
-	].map((path) => readFileSync(path, "utf8"));
+	const schemaSources = ["src/core/config.ts", "src/domains/lifecycle/migrations/2026-09-01-settings-v2.ts"].map(
+		(path) => readFileSync(path, "utf8"),
+	);
 	const stale = SETTINGS_FIELD_NAMES.filter(
 		(name) => !keys.has(name) && !schemaSources.some((source) => new RegExp(`["'.]${name}["'.\\[]`, "u").test(source)),
 	);
