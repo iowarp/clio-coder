@@ -31,8 +31,13 @@ export interface MemoryPromptRequest {
 export interface MemoryPromptReaderOptions {
 	onSelection?: (selection: MemoryPromptSelection) => void;
 	getDataDir: () => string;
-	/** Explicit experiment only; production leaves relevance off. */
+	/** Explicit experiment only: rank by the turn without dropping anything. */
 	experimentalRelevance?: boolean;
+	/**
+	 * Carry only records the turn plainly concerns (`selectRelevantMemory`).
+	 * `demoted` is read at each fresh selection; a throw counts as none.
+	 */
+	relevanceGate?: { demoted?: () => ReadonlySet<string> };
 	selection?: Pick<MemoryPromptOptions, "scopes" | "tokenBudget" | "maxItems">;
 	/** Source seam for deterministic read-count tests; production reads the real bounded store. */
 	readStore?: typeof readMemoryStoreSnapshot;
@@ -54,7 +59,15 @@ export const MEMORY_MAIN_PROMPT_SCOPES: ReadonlyArray<MemoryScope> = ["global", 
 export function createMemoryPromptReader(options: MemoryPromptReaderOptions): MemoryPromptReader {
 	// Copy options now: mutable caller arrays must not silently change eligibility.
 	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? MEMORY_MAIN_PROMPT_SCOPES)] };
-	const experimentalRelevance = options.experimentalRelevance === true;
+	const relevanceGate = options.relevanceGate;
+	const experimentalRelevance = options.experimentalRelevance === true || relevanceGate !== undefined;
+	const demotedNow = (): ReadonlySet<string> => {
+		try {
+			return relevanceGate?.demoted?.() ?? new Set();
+		} catch {
+			return new Set();
+		}
+	};
 	const readStore = options.readStore ?? readMemoryStoreSnapshot;
 	let frame: { key: string; section: string } | null = null;
 	let selected: { key: string; section: string; items: MemoryPromptSelection["items"] } | null = null;
@@ -83,6 +96,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 				activePaths: [...request.activePaths],
 				activeSymbols: [...(request.activeSymbols ?? [])],
 			};
+			const demoted = relevanceGate === undefined ? null : demotedNow();
 			const key = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -91,6 +105,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 						selection,
 						relevance,
 						experimentalRelevance,
+						demoted === null ? null : [...demoted].sort(),
 						MEMORY_RELEVANCE_VERSION,
 					]),
 				)
@@ -102,6 +117,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
+					...(demoted === null ? {} : { gate: { demoted } }),
 				});
 				section = renderMemoryPromptSection(built.records);
 				const records = new Map(snapshot.records.map((record) => [record.id, record]));

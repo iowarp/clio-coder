@@ -76,6 +76,57 @@ export function lessonsForTask<T extends { readonly text: string }>(task: string
 		.map(({ lesson }) => lesson);
 }
 
+/**
+ * Coding vocabulary nearly every task and lesson shares. Two records that both
+ * say "fix the test file" are not about the same thing, so these never count
+ * toward the gate below. Ranking scores are unaffected.
+ */
+const GENERIC_TASK_TERMS = new Set(
+	"add added adding build change changed changes check code error errors file files fix fixed fixing function line lines make new output run running test tests update use used using value work".split(
+		" ",
+	),
+);
+/** Distinctive subject terms a record must share with the turn to ride in unasked. */
+export const MEMORY_GATE_MIN_TERMS = 2;
+/** What a record the model kept leaving unused must share instead. */
+export const MEMORY_GATE_DEMOTED_MIN_TERMS = 4;
+
+/** Distinctive subject terms, plural folded, generic coding words dropped; shared with recall-use detection. */
+export function memoryGateTerms(value: string): Set<string> {
+	return new Set(
+		subjectTerms(value)
+			.map((term) => (term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term))
+			.filter((term) => !GENERIC_TASK_TERMS.has(term)),
+	);
+}
+
+/**
+ * The records a turn carries without asking: those sharing an active path or
+ * symbol with it, or at least `MEMORY_GATE_MIN_TERMS` distinctive subject terms
+ * of the lesson's own text and conditions. A record with no overlap is never
+ * promoted, so an unrelated lesson stays out of the request; `memory_recall`
+ * still reaches it. A `demoted` record, one the model kept leaving unused when
+ * it was carried, needs `MEMORY_GATE_DEMOTED_MIN_TERMS` shared terms. Order is
+ * the ranking's, fallback promotion excluded.
+ */
+export function selectRelevantMemory(
+	records: ReadonlyArray<MemoryRecord>,
+	options: Omit<MemoryRetrievalOptions, "tokenBudget">,
+	input: MemoryRelevanceInput,
+	demoted: ReadonlySet<string> = new Set(),
+): RankedMemoryCandidate[] {
+	const task = memoryGateTerms(input.taskText.slice(0, TASK_TEXT_LIMIT));
+	return rankMemoryByRelevance(records, options, input)
+		.filter((candidate) => {
+			const own = memoryGateTerms([candidate.record.lesson, ...candidate.record.appliesWhen].join("\n"));
+			const shared = [...task].filter((term) => own.has(term)).length;
+			if (demoted.has(candidate.record.id)) return shared >= MEMORY_GATE_DEMOTED_MIN_TERMS;
+			return candidate.matches.paths.length + candidate.matches.symbols.length > 0 || shared >= MEMORY_GATE_MIN_TERMS;
+		})
+		.map((candidate) => (candidate.fallback ? { ...candidate, fallback: false } : candidate))
+		.sort((a, b) => b.score - a.score);
+}
+
 function pathKey(value: string): string {
 	return normalized(value).replaceAll("\\", "/").replace(/^\.\//, "");
 }

@@ -191,6 +191,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	#promptSelection: MemoryPromptSelection | null = null;
 	/** What the last request carried, so lifecycle rows record changes rather than every request. */
 	#submittedSection: string | null = null;
+	/** Records carried into the turn in progress (section, reminders, recall hits), for recall-versus-use accounting. */
+	readonly #turnRecalled = new Set<string>();
 	/** Incremental, bounded discovery of retention markers left by earlier processes. */
 	#retentionScan: { names: string[]; index: number } | null = null;
 	/** Pending history candidates may exist on disk; cleared once a replay finds none. */
@@ -412,6 +414,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#retention = EMPTY_RETENTION;
 		this.#promptSelection = null;
 		this.#submittedSection = null;
+		this.#turnRecalled.clear();
 	}
 
 	#source(): ObservationSource | null {
@@ -1046,6 +1049,14 @@ export class MemoryRuntime implements MemoryObservationCommands {
 
 	recordRecall(ids: readonly string[]): void {
 		this.#event("memory-recall-results", { count: ids.length, ids });
+		for (const id of ids) this.#turnRecalled.add(id);
+	}
+
+	/** The record ids carried into the turn now ending, cleared by the read. */
+	takeTurnRecalledMemory(): string[] {
+		const ids = [...this.#turnRecalled];
+		this.#turnRecalled.clear();
+		return ids;
 	}
 
 	recordPromptSelection(selection: MemoryPromptSelection): void {
@@ -1071,6 +1082,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		);
 		const recordIds =
 			selection?.items.filter((item) => item.reason === "selected" && delivered.has(item.id)).map((item) => item.id) ?? [];
+		for (const id of recordIds) this.#turnRecalled.add(id);
 		const section = recordIds.length > 0 ? (selection?.section ?? "") : "";
 		const at = new Date().toISOString();
 		if (selection && section) this.#promptSelection = { ...selection, submittedAt: at };
@@ -1092,6 +1104,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		const registration = this.#registration;
 		if (!registration?.hasPendingOffers()) return;
 		const submitted = registration.acknowledgeSubmission(framed.filter((text) => text.includes("Memory:")));
+		for (const offer of submitted) for (const lesson of offer.lessons) this.#turnRecalled.add(lesson.id);
 		if (submitted.length)
 			this.#event("memory-reminders-submitted", {
 				count: submitted.length,

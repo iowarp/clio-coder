@@ -1,7 +1,12 @@
 import { ceilChars } from "../session/context-accounting.js";
 import { keptLessonLabel, projectKeptLesson } from "./lesson-projection.js";
 import { eligibleMemoryRecords } from "./operations.js";
-import { type MemoryRelevanceInput, type RankedMemoryCandidate, rankMemoryByRelevance } from "./relevance.js";
+import {
+	type MemoryRelevanceInput,
+	type RankedMemoryCandidate,
+	rankMemoryByRelevance,
+	selectRelevantMemory,
+} from "./relevance.js";
 import type {
 	MemoryAgentIdentity,
 	MemoryRecord,
@@ -27,6 +32,11 @@ export const MEMORY_PROMPT_DEFAULT_SCOPES: ReadonlyArray<MemoryScope> = ["global
 export interface MemoryPromptOptions {
 	/** Explicit experiment only; omitted options preserve legacy priority. */
 	relevance?: MemoryRelevanceInput;
+	/**
+	 * With `relevance`, carry only records the turn plainly concerns
+	 * (`selectRelevantMemory`); `demoted` ids need a stronger match.
+	 */
+	gate?: { demoted?: ReadonlySet<string> };
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget?: number;
 	maxItems?: number;
@@ -76,10 +86,10 @@ export function inspectMemoryPromptSelection(
 	const base: LexicalCandidate[] =
 		options.relevance === undefined
 			? eligibleMemoryRecords(records, eligibility).map((record) => ({ record, relevance: undefined }))
-			: rankMemoryByRelevance(records, eligibility, options.relevance).map(({ record, ...relevance }) => ({
-					record,
-					relevance,
-				}));
+			: (options.gate === undefined
+					? rankMemoryByRelevance(records, eligibility, options.relevance)
+					: selectRelevantMemory(records, eligibility, options.relevance, options.gate.demoted)
+				).map(({ record, ...relevance }) => ({ record, relevance }));
 	const selected: MemoryRecord[] = [];
 	const decisions: MemoryPromptDecision[] = [];
 	for (const { record, relevance } of base) {
