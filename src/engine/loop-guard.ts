@@ -1030,6 +1030,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		redundantRepeat = false,
 	): ReadonlyArray<MiddlewareEffect> => {
 		const marker = redundantRepeat ? ({ redundantRepeat: true } as const) : {};
+		if (!lastBlockedCallByTurn.has(turnKey) && lastBlockedCallByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+			const oldest = lastBlockedCallByTurn.keys().next().value;
+			if (oldest !== undefined) lastBlockedCallByTurn.delete(oldest);
+		}
 		lastBlockedCallByTurn.set(turnKey, callIdentity(tool, input.toolArgs));
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
 		const reachedBudget = blocksThisTurn >= budget;
