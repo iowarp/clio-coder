@@ -30,9 +30,9 @@ import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // The 0.7.0 read-only contract: no file outside Clio's home changes. Clio still
 // writes its own home, so a read-only run keeps its session. The test
-// fingerprints the workspace (less Clio's project directory, and with its Git
-// metadata, where a workspace snapshot would land) and a sentinel directory
-// outside both, and never looks at the home.
+// fingerprints the whole workspace, its Git metadata (where a workspace
+// snapshot would land) and project directory included, and a sentinel
+// directory outside both, and never looks at the home.
 
 const root = mkdtempSync(join(tmpdir(), "clio-coder-read-only-user-files-"));
 const home = join(root, "home");
@@ -143,12 +143,11 @@ function clio(args: string[]): Promise<Result> {
 }
 
 /** Every entry under `dir` with its kind, mode, size, mtime and content hash; `skip` names top-level entries left out. */
-function fingerprint(dir: string, skip: ReadonlyArray<string> = []): string[] {
+function fingerprint(dir: string): string[] {
 	const rows: string[] = [];
 	const walk = (current: string): void => {
 		for (const name of readdirSync(current)) {
 			const path = join(current, name);
-			if (current === dir && skip.includes(name)) continue;
 			const stat = lstatSync(path);
 			const facts = `${relative(dir, path)}\t${stat.mode}\t${stat.mtimeMs}`;
 			if (stat.isDirectory()) {
@@ -164,7 +163,7 @@ function fingerprint(dir: string, skip: ReadonlyArray<string> = []): string[] {
 	return rows.sort();
 }
 
-const userFiles = () => ({ workspace: fingerprint(work, [".clio-coder"]), sentinel: fingerprint(sentinel) });
+const userFiles = () => ({ workspace: fingerprint(work), sentinel: fingerprint(sentinel) });
 
 function sessionIds(): string[] {
 	const dir = join(home, "state", "sessions");
