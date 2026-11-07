@@ -30,6 +30,7 @@ Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compa
 | **Failures & Refusals** | Up to 4 rows actionable reason | Up to 4 rows actionable reason | Up to 12 rows with context |
 | **Notices & Retries** | Level mark + bounded message | Level mark + bounded message | Diagnostic detail |
 | **Turn Receipt** | None | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
+| **Approval & Question Cards** | Every decision input | Every decision input | Every decision input |
 
 - **Preview Budgets**: Counted *after terminal wrapping*, including the `… N rows · /view` overflow hint. Short terminals scale a budget down to `max(2, floor((terminal rows - 8) / 2))` when that is smaller than the style's own limit (`previewBudget` in [preview.ts](../../src/interactive/renderers/preview.ts)).
 - **Worker Inspection**: Retained transcript and output artifacts are inspectable through `/view`; per-artifact readers apply their own bounds.
@@ -310,6 +311,23 @@ Assistant text renders through stock pi-tui `Markdown` ([chat-panel.ts](../../sr
 
 Clio cannot inspect how its replies render on the operator's screen. The surface lays out the generated text using the terminal width and the settings above; the drawn rows are not returned to the model. A report of an incorrect display therefore describes rendering that the model cannot inspect. Guidance for this limitation, including keeping diagrams top-to-bottom with short labels, is in the attended-only `identity.clio-attended` fragment, so headless runs and workers do not receive it.
 
+### 5.2 Cards
+
+A card is the block the TUI draws about one piece of work: a tool call, an approval, a question, a diff or a notice. Inline cards share one geometry from [card.ts](../../src/interactive/card.ts):
+
+```text
+$ ran `npm test` · exit 1 ✗ · 4.1s       head: hanging wrap, status tail never split
+  │ not ok 3 - retries once               body: rail, budgeted by output style
+  │ … 12 earlier lines · /view            what was cut, and where to read it
+```
+
+- **Head**: Wraps with a hanging indent in the content column. The status tail (glyph, duration) joins the last row when it fits and otherwise takes a row of its own, whole (`cardHead`).
+- **Body**: Rows sit behind a `│` rail in `gutter`, or in `error` on a failed card so the whole block reads as the failure (`cardRail`, `cardRows`).
+- **Callouts**: A framed notice is indented by the gutter and stops growing at 88 columns.
+- **Foreground cards**: Approval and question cards wait on the operator. They show every decision input at every output style: the target, the reason, the effect, the mutation, the safety judge's advisory, the timer and the choices. Output style budgets apply to background cards only.
+- **Nothing twice**: While an approval card is docked, its call's transcript row keeps only its head (`⏸ awaiting approval`). The reason and target return to the row if the card leaves unanswered or cannot mount. A single question has no `Question 1 of 1` row. A shell row names the model that asked for it only when the turn had more than one model, because `Reply from` already names it. A failed command that printed nothing shows `exit N ✗` with no body and no size.
+- **Inspection**: `/view` and the inspect toggle show a card in full without changing the output style.
+
 ---
 
 ## 6. Overlays & Inspection
@@ -332,6 +350,7 @@ Clio cannot inspect how its replies render on the operator's screen. The surface
 | Glyph Constants | [glyphs.ts](../../src/interactive/theme/glyphs.ts) | `GLYPH`, `SPINNER_FRAMES` |
 | Frames and rules | [rules.ts](../../src/interactive/theme/rules.ts) | `frame`, `innerDivider`, `rule` |
 | Output style budgets | [transcript-detail.ts](../../src/interactive/transcript-detail.ts) | `transcriptDetail` |
+| Cards | [card.ts](../../src/interactive/card.ts) | `cardHead`, `cardRail`, `cardRows` |
 | Layout | [layout.ts](../../src/interactive/layout.ts) | `buildLayout` |
 | Dock | [dock.ts](../../src/interactive/dock.ts) | `dockMount`, `DOCK_BODY_ROWS_MAX` |
 | Welcome Dashboard | [welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts) | `buildWelcomeDashboardLines`, `createBootWelcome` |
