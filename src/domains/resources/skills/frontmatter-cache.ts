@@ -48,6 +48,21 @@ interface LoadedCache {
 }
 
 let loaded: LoadedCache | null = null;
+/** Nonzero while a caller that promises to leave the home unchanged runs; parses stay in memory, unflushed. */
+let readOnlyDepth = 0;
+
+/**
+ * Run `work` with the cache read but never written. `doctor` without `--fix`
+ * must leave the home byte-identical, and it loads skill catalogs.
+ */
+export async function withFrontmatterCacheReadOnly<T>(work: () => Promise<T>): Promise<T> {
+	readOnlyDepth += 1;
+	try {
+		return await work();
+	} finally {
+		readOnlyDepth -= 1;
+	}
+}
 
 function cacheFilePath(): string | null {
 	try {
@@ -205,7 +220,7 @@ function pruneMissing(cache: LoadedCache): void {
 
 function flushFrontmatterCache(): void {
 	const cache = loaded;
-	if (!cache) return;
+	if (!cache || readOnlyDepth > 0) return;
 	// A pass touches every skill it loaded, so this stats only entries from other roots.
 	pruneMissing(cache);
 	if (!cache.dirty) return;
