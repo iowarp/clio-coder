@@ -588,6 +588,7 @@ function withDispatchMemory(
 			section = buildDispatchMemorySection({
 				dataDir: clioDataDir(),
 				cwd: process.cwd(),
+				...(request.cwd !== undefined ? { workerCwd: request.cwd } : {}),
 				settings,
 				route: {
 					agentId: request.agentId,
