@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertProjectIndexWritable, ensureProjectIgnore } from "../../../core/project-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
@@ -381,13 +380,6 @@ export function readCodewiki(cwd: string): Codewiki | null {
 	if (!existsSync(path)) return null;
 	try {
 		return parseCodewikiRaw(readFileSync(path, "utf8"));
-	} catch {
-		return null;
-	}
-}
-export async function readCodewikiAsync(cwd: string): Promise<Codewiki | null> {
-	try {
-		return parseCodewikiRaw(await readFile(codewikiPath(cwd), "utf8"));
 	} catch {
 		return null;
 	}

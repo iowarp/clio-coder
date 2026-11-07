@@ -37,7 +37,6 @@ export {
 	codewikiPath,
 	parseCodewikiRaw,
 	readCodewiki,
-	readCodewikiAsync,
 	serializeCodewiki,
 	structuralCodewikiHash,
 	writeCodewiki,
