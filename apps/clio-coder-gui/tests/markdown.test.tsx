@@ -2,6 +2,7 @@ import { deepEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import type { Tokens } from "marked";
 import { renderToStaticMarkup } from "react-dom/server";
+import { type HighlightToken, highlightCode } from "../client/render/highlight.js";
 import {
 	Blocks,
 	CodeBlock,
@@ -428,4 +429,34 @@ test("LaTeX \\(…\\) and \\[…\\], inline $$…$$ and ```math fences are math;
 	// Until the lazy typesetter arrives, a settled fence reads as its TeX, without the fence.
 	equal(renderMarkdown("```math\n\\frac{a}{b}\n```\n"), '<div class="markdown is-complete">\\frac{a}{b}</div>');
 	match(renderMarkdown("```math\n\\frac{a}{b}", false), /class="code-block/u);
+});
+
+test("the languages of scientific code reach a grammar, and a batch script's directives are not comments", async () => {
+	for (const [info, grammar] of [
+		["f90", "fortran"],
+		["F08", "fortran"],
+		["jl", "julia"],
+		["R", "r"],
+		["hpp", "cpp"],
+		["cu", "cpp"],
+		["sbatch", "slurm"],
+		["CMakeLists", "cmake"],
+		["toml", "toml"],
+		["yml", "yaml"],
+		["jsonl", "json"],
+		["log", "log"],
+	] as const)
+		equal(codeLanguage(info).grammar, grammar, info);
+	const flat = (tokens: readonly HighlightToken[]): string[] =>
+		tokens.flatMap((token) =>
+			token.type === null
+				? []
+				: [`${token.type}:${typeof token.content === "string" ? token.content : flat(token.content).join(",")}`],
+		);
+	deepEqual(flat((await highlightCode("#SBATCH --nodes=4\n# a note\nsrun ./a.out", "slurm")) ?? []), [
+		"directive:keyword:#SBATCH,property: --nodes,operator:=",
+		"comment:# a note",
+	]);
+	ok(flat((await highlightCode("find_package(MPI REQUIRED)", "cmake")) ?? []).includes("keyword:find_package"));
+	ok(flat((await highlightCode("12:00:01 ERROR diverged", "log")) ?? []).includes("level error important:ERROR"));
 });

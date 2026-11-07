@@ -307,6 +307,18 @@
 .token.selector {
 	color: var(--syntax-property);
 }
+/* Log levels: an error or a warning is set in weight as well as colour, so it never reads by hue alone. */
+.code-block[data-language="log"] .token.level.error {
+	color: var(--syntax-deleted);
+	font-weight: 700;
+}
+.code-block[data-language="log"] .token.level.warning {
+	color: var(--status-warn-fg);
+	font-weight: 700;
+}
+.token.directive {
+	color: var(--syntax-property);
+}
 .token.deleted {
 	color: var(--syntax-deleted);
 }

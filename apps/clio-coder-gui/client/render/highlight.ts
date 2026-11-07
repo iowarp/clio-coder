@@ -17,7 +17,10 @@ interface PrismToken {
 }
 
 interface PrismLike {
-	readonly languages: Record<string, unknown>;
+	readonly languages: Record<string, unknown> & {
+		extend(id: string, redef: Record<string, unknown>): Record<string, unknown>;
+		insertBefore(inside: string, before: string, insert: Record<string, unknown>): unknown;
+	};
 	tokenize(text: string, grammar: unknown): ReadonlyArray<string | PrismToken>;
 }
 
@@ -50,7 +53,29 @@ const GRAMMAR_LOADERS: Readonly<Record<string, () => Promise<unknown>>> = {
 	julia: () => import("prismjs/components/prism-julia.js"),
 	matlab: () => import("prismjs/components/prism-matlab.js"),
 	fortran: () => import("prismjs/components/prism-fortran.js"),
+	cmake: () => import("prismjs/components/prism-cmake.js"),
+	log: () => import("prismjs/components/prism-log.js"),
+	slurm: async () => defineSlurm(await loadCore()),
 };
+
+/**
+ * A batch script is a shell script whose leading `#SBATCH`, `#PBS`, `#BSUB`, `#$` (Grid Engine) and
+ * `#COBALT`/`# flux:` lines are scheduler directives, not comments, so they read as directives.
+ */
+function defineSlurm(prism: PrismLike): void {
+	if (prism.languages.slurm !== undefined) return;
+	prism.languages.slurm = prism.languages.extend("bash", {});
+	prism.languages.insertBefore("slurm", "comment", {
+		directive: {
+			pattern: /^[ \t]*#(?:SBATCH|PBS|BSUB|COBALT|\$|[ \t]*flux:)(?=[ \t]).*$/im,
+			inside: {
+				keyword: /^[ \t]*#[^ \t]+/,
+				property: /(?:^|[ \t])--?[\w-]+/,
+				operator: /=/,
+			},
+		},
+	});
+}
 
 const GRAMMAR_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = {
 	javascript: ["clike"],
@@ -62,6 +87,7 @@ const GRAMMAR_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = {
 	go: ["clike"],
 	markdown: ["markup"],
 	"shell-session": ["bash"],
+	slurm: ["bash"],
 };
 
 let core: Promise<PrismLike> | null = null;
