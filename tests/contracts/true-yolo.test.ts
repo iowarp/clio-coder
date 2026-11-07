@@ -341,6 +341,7 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		[`echo x >> ${join(home.dir, "state", "notes")}`, "clio-owned-state"],
 		[`cp evil.yaml ${join(home.dir, "config", "settings.yaml")}`, "clio-owned-state"],
 		["clio-coder config trust safety", "trust-authority"],
+		["clio-coder configure --id gw --runtime openai-compat", "settings-authority"],
 	];
 	for (const [command, ruleId] of floor) {
 		const decision = engine.evaluate(bash(command), "yolo", OPERATOR_YOLO);

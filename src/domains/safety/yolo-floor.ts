@@ -39,6 +39,8 @@ export const YOLO_FLOOR_RULE_IDS = {
 	clioOwned: "clio-owned-state",
 	/** Existing rail id: a workspace trust grant made from a tool call. */
 	trustAuthority: "trust-authority",
+	/** Clio's settings, credential or trust CLI run from a tool call, at every autonomy level. */
+	settingsAuthority: "settings-authority",
 	/** A read of Clio's own provider credential store, at every autonomy level. */
 	clioCredentials: "yolo-floor-clio-credentials",
 } as const;

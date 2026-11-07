@@ -114,6 +114,11 @@ import {
 	type ScriptShell,
 } from "./script-shell.js";
 import { clioCredentialStorePaths } from "./secret-paths.js";
+import {
+	invokesSettingsMutation,
+	SETTINGS_AUTHORITY_REASON,
+	SETTINGS_AUTHORITY_RULE_ID,
+} from "./settings-authority.js";
 import type { MutationCandidate } from "./skill-authority.js";
 import {
 	activeClioSkillRoots,
@@ -785,6 +790,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				policySource: "builtin-classifier",
 			};
 		}
+		if (mutationCommand !== null && invokesSettingsMutation(mutationCommand)) {
+			return {
+				reasonCode: SETTINGS_AUTHORITY_RULE_ID,
+				reasons: [SETTINGS_AUTHORITY_REASON],
+				policySource: "builtin-classifier",
+			};
+		}
 		if (
 			skillMutationReason(
 				[path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
@@ -910,6 +922,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return floorMatch({
 				ruleId: YOLO_FLOOR_RULE_IDS.trustAuthority,
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.trustAuthority}: workspace trust grants require the operator CLI`,
+			});
+		}
+		if (invokesSettingsMutation(command)) {
+			return floorMatch({
+				ruleId: YOLO_FLOOR_RULE_IDS.settingsAuthority,
+				reason: `matched ${YOLO_FLOOR_RULE_IDS.settingsAuthority}: ${SETTINGS_AUTHORITY_REASON}`,
 			});
 		}
 		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command } }, callCwd, command, trees)) {

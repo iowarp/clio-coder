@@ -729,7 +729,7 @@ export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy):
 	if (policy.readOnly === true) {
 		return `sandbox: this run is read-only, so this command could write only to its scratch directory ${displayWritableRoots(policy.writableRoots)} and a private /tmp; the workspace and every other file outside Clio's home stay unchanged, and a read-only run has no unsandboxed commands.`;
 	}
-	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (Clio's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 
 /** One line for doctor: how the main session's shell calls run on this host, and where a contained one can write. */
