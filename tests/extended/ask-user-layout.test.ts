@@ -182,8 +182,9 @@ for (const [columns, rows] of [
 		ok(!text.some((row) => row.includes("Conversational answer")), "tier boilerplate is folded away");
 		ok(!text.some((row) => row.includes("[Enter]")), "rows carry no key affordance");
 		ok(!text.some((row) => row.includes("…")), "nothing is elided");
+		ok(!text.some((row) => row.includes("Question 1 of 1")), "a lone question has no position row");
 		strictEqual(
-			text[2],
+			text[0],
 			"Clio asks you · Research Exploration; Material Science",
 			"the speaker and question header lead the dialog",
 		);

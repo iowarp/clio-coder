@@ -905,22 +905,15 @@ class AskUserOverlayView implements Component {
 			: !named.includes("[n]") && !named.includes("[?]") && width >= OTHER_ROW_ALL_KEYS_MIN_WIDTH
 				? OTHER_POINTER_ALL_KEYS
 				: OTHER_POINTER;
+		const position = this.harnessInterview
+			? this.harnessPosition()
+			: // A confirmation the operator's own key raised is one choice, not a numbered question in a round.
+				this.confirmation && this.questions.length === 1
+				? "Choose one"
+				: this.positionWords();
 		const strip = fit.headers
 			? [
-					fitRow(
-						theme.style(
-							"positionCount",
-							this.harnessInterview
-								? this.harnessPosition()
-								: // A confirmation the operator's own key raised is one choice, not a numbered question in a round.
-									this.confirmation && this.questions.length === 1
-									? "Choose one"
-									: this.positionWords(),
-							{ bold: true },
-						),
-						width,
-					),
-					...gap,
+					...(position.length === 0 ? [] : [fitRow(theme.style("positionCount", position, { bold: true }), width), ...gap]),
 					...countdown,
 					...(hasMenu ? [] : this.renderQuestionStrip(width, fit.spacing)),
 				]
@@ -1421,13 +1414,17 @@ class AskUserOverlayView implements Component {
 	/**
 	 * Where the operator is in the set: which question, how many are answered,
 	 * and the round only once there has been more than one, since `Round 1` on an
-	 * interview that never has a second says nothing.
+	 * interview that never has a second says nothing. A lone question has no
+	 * position, so `Question 1 of 1` is not drawn.
 	 */
 	private positionWords(): string {
 		const total = this.questions.length;
 		const answered = this.states.filter((state) => Boolean(state?.answer.trim())).length;
-		const parts = [`Question ${this.index + 1} of ${total}`];
-		if (total > 1) parts.push(answered === total ? "all answered" : `${answered} answered`);
+		const parts: string[] = [];
+		if (total > 1) {
+			parts.push(`Question ${this.index + 1} of ${total}`);
+			parts.push(answered === total ? "all answered" : `${answered} answered`);
+		}
 		if (this.roundsAnswered > 0) parts.push(`Round ${this.roundsAnswered + 1}`);
 		return parts.join(" · ");
 	}
