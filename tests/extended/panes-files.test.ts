@@ -1,9 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import { terminalBackground } from "../../src/core/terminal-background.js";
 import { roleHex } from "../../src/core/theme-roles.js";
@@ -19,6 +21,7 @@ import {
 	resolvePanesPresetId,
 } from "../../src/domains/mux/operations.js";
 import type { MuxPaneRecord } from "../../src/domains/mux/types.js";
+import { renderPosixShellShim } from "../../src/domains/mux/workspace/platform-posix.js";
 import {
 	createYaziSession,
 	sweepStaleTransportFiles,
@@ -29,7 +32,7 @@ import { renderHerdrThemeBlock, renderYaziTheme } from "../../src/domains/mux/ya
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { GLOBAL_ACTION_ORDER } from "../../src/interactive/application-controller.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
-import { createYaziBridge } from "../../src/interactive/yazi-bridge.js";
+import { createYaziBridge, runYaziTerminalChooser } from "../../src/interactive/yazi-bridge.js";
 import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { createPanesTool } from "../../src/tools/panes.js";
 import { panesToolSurface } from "../../src/tools/panes-surface.js";
@@ -515,6 +518,23 @@ describe("contracts/files pane session transport", () => {
 				strictEqual(host.requests[0]?.env?.XDG_RUNTIME_DIR, runtime);
 				strictEqual(host.requests[0]?.env?.XDG_STATE_HOME, runtime);
 				strictEqual(host.requests[0]?.env?.TMPDIR, runtime);
+				if (process.platform !== "win32") {
+					const shim = join(cacheDir, "pane-shell");
+					const fake = join(cacheDir, "fake-shell");
+					writeFileSync(shim, renderPosixShellShim("linux"));
+					writeFileSync(fake, '#!/bin/sh\nprintf "%s" "$XDG_STATE_HOME"\n', { mode: 0o755 });
+					const child = spawnSync("/bin/sh", [shim], {
+						encoding: "utf8",
+						env: {
+							...process.env,
+							SHELL: fake,
+							CLIO_CODER_PANE_XDG_STATE_HOME: join(cacheDir, "operator-state"),
+							...host.requests[0]?.env,
+						},
+					});
+					strictEqual(child.status, 0, child.stderr);
+					strictEqual(child.stdout, runtime);
+				}
 			} finally {
 				await result.session.close();
 			}
@@ -600,24 +620,138 @@ describe("contracts/files pane session close", () => {
 });
 
 describe("contracts/files pane transport sweep", () => {
-	it("removes transport files older than a day and leaves live ones", () => {
+	it("removes old dead-owner transports, but retains unowned and foreign-host files", () => {
 		const dir = mkdtempSync(join(tmpdir(), "clio-coder-files-sweep-"));
 		try {
 			const old = join(dir, "old.stream");
 			const fresh = join(dir, "fresh.chooser");
 			const other = join(dir, "notes.txt");
-			for (const path of [old, fresh, other]) writeFileSync(path, "");
+			const unowned = join(dir, "legacy.stream");
+			const foreign = join(dir, "foreign.stream");
+			for (const path of [old, fresh, other, unowned, foreign]) writeFileSync(path, "");
+			const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], {
+				encoding: "utf8",
+			});
+			strictEqual(dead.status, 0, dead.stderr);
+			const owner = { version: 1, host: hostname(), pid: Number(dead.stdout), birthToken: null };
+			const ownerPath = join(dir, "old.owner.json");
+			const foreignOwner = join(dir, "foreign.owner.json");
+			writeFileSync(ownerPath, JSON.stringify(owner));
+			writeFileSync(foreignOwner, JSON.stringify({ ...owner, host: `${hostname()}-other` }));
 			const past = Date.now() - YAZI_STALE_TRANSPORT_MS - 60_000;
-			utimesSync(old, past / 1000, past / 1000);
-			utimesSync(other, past / 1000, past / 1000);
+			for (const path of [old, other, unowned, foreign, ownerPath, foreignOwner]) {
+				utimesSync(path, past / 1000, past / 1000);
+			}
 			strictEqual(sweepStaleTransportFiles(dir), 1);
 			strictEqual(existsSync(old), false);
+			strictEqual(existsSync(ownerPath), false);
 			ok(existsSync(fresh));
+			ok(existsSync(unowned));
+			ok(existsSync(foreign));
 			ok(existsSync(other), "only transport files are swept");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+
+	it("does not expire an idle live companion's return channel", async (t) => {
+		const cacheDir = mkdtempSync(join(tmpdir(), "files-live-owner-"));
+		t.after(() => rmSync(cacheDir, { recursive: true, force: true }));
+		const host = fakeMux();
+		const result = await createYaziSession({
+			mux: host.mux,
+			mode: "companion",
+			profileMode: "user",
+			cwd: cacheDir,
+			cacheDir,
+			sessionId: "live",
+			onEvent: () => undefined,
+			onChooser: () => undefined,
+			resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: null, missingYaziDetail: "" }),
+		});
+		strictEqual(result.status, "opened");
+		if (result.status !== "opened") return;
+		try {
+			const dir = join(cacheDir, "yazi", "sessions");
+			const old = (Date.now() - YAZI_STALE_TRANSPORT_MS - 60_000) / 1000;
+			for (const name of readdirSync(dir)) utimesSync(join(dir, name), old, old);
+			strictEqual(sweepStaleTransportFiles(dir), 0);
+			ok(existsSync(join(dir, "live.stream")));
+		} finally {
+			await result.session.close();
+		}
+		deepStrictEqual(readdirSync(join(cacheDir, "yazi", "sessions")), []);
+	});
+});
+
+describe("plain-terminal files chooser cleanup", () => {
+	for (const outcome of ["chosen", "error"] as const) {
+		it(`reports failed cleanup without replacing the ${outcome} result`, async (t) => {
+			const cacheDir = mkdtempSync(join(tmpdir(), "files-cleanup-warning-"));
+			t.after(() => rmSync(cacheDir, { recursive: true, force: true }));
+			const diagnostics: Array<{ text: string; level: string }> = [];
+			t.after(installDiagnosticSink((text, level) => diagnostics.push({ text, level })));
+			let failedPath = "";
+			const result = await runYaziTerminalChooser({
+				cwd: cacheDir,
+				profileMode: "user",
+				cacheDir,
+				stopUi: () => undefined,
+				startUi: () => undefined,
+				requestRender: () => undefined,
+				resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: null, missingYaziDetail: "" }),
+				spawnYazi: (_file, args) => {
+					failedPath = args[4]!;
+					rmSync(failedPath);
+					mkdirSync(failedPath);
+					writeFileSync(join(failedPath, "held"), "");
+					if (outcome === "error") return { error: new Error("launch failed") };
+					writeFileSync(args[2]!, "selected.ts\n");
+					return {};
+				},
+			});
+			deepStrictEqual(
+				result,
+				outcome === "chosen"
+					? { status: "chosen", choice: { paths: ["selected.ts"], cwd: cacheDir } }
+					: { status: "unavailable", reason: "yazi chooser failed: launch failed" },
+			);
+			strictEqual(diagnostics.length, 1);
+			strictEqual(diagnostics[0]?.level, "warning");
+			ok(diagnostics[0]?.text.includes(failedPath));
+			match(diagnostics[0]?.text ?? "", /cleanup failed/);
+		});
+	}
+
+	for (const outcome of ["chosen", "cancelled", "error", "throw"] as const) {
+		it(`removes owned transport files after ${outcome}`, async (t) => {
+			const cacheDir = mkdtempSync(join(tmpdir(), "files-terminal-"));
+			t.after(() => rmSync(cacheDir, { recursive: true, force: true }));
+			const calls: string[] = [];
+			const result = await runYaziTerminalChooser({
+				cwd: cacheDir,
+				profileMode: "user",
+				cacheDir,
+				stopUi: () => calls.push("stop"),
+				startUi: () => calls.push("start"),
+				requestRender: () => calls.push("render"),
+				resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: null, missingYaziDetail: "" }),
+				spawnYazi: (_file, args) => {
+					if (outcome === "throw") throw new Error("failed");
+					if (outcome === "error") return { error: new Error("failed") };
+					if (outcome === "chosen") {
+						writeFileSync(args[2]!, "selected.ts\n");
+						writeFileSync(args[4]!, cacheDir);
+					}
+					return {};
+				},
+			});
+			strictEqual(result.status, outcome === "error" || outcome === "throw" ? "unavailable" : outcome);
+			if (result.status === "chosen") deepStrictEqual(result.choice, { paths: ["selected.ts"], cwd: cacheDir });
+			deepStrictEqual(calls, ["stop", "start", "render"]);
+			deepStrictEqual(readdirSync(join(cacheDir, "yazi", "sessions")), []);
+		});
+	}
 });
 
 describe("contracts/files pane theme", () => {

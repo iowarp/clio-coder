@@ -149,7 +149,9 @@ private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 ### A second terminal in the same folder attaches to the same session
 
-Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing private host. The launcher shares one host per project directory, so both terminals see the same running Clio session. To start an independent plain-terminal session, run it with a non-terminal stdin or with `TERM=dumb`. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
+Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing private host within the same Clio state root. The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate Clio roots get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Both attached terminals see the same running Clio session. To start an independent plain-terminal session outside herdr, use `--with-panes`; non-terminal stdin or `TERM=dumb` also skips hosting. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
+
+When the creator launcher receives SIGTERM, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running.
 
 ## What doctor says
 
@@ -401,7 +403,7 @@ what" above.
 | --- | --- |
 | `<data>/tools/<id>/<version>/` | Vendored programs with their license files and an install marker. |
 | `<cache>/yazi/profile/` | Clio Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
-| `<cache>/yazi/sessions/` | Per-pane transport files, removed when the pane closes; anything older than a day is swept on the next open. |
+| `<cache>/yazi/sessions/` | Per-pane transport files and `.owner.json` receipts (host, PID and process birth token), removed when the pane closes. An open sweeps receipts older than a day only when the recorded local owner is demonstrably dead. Live, unknown, foreign-host and legacy unowned transports are retained. The plain-terminal chooser removes its files after every invocation. |
 | `<state>/runs/<runId>/feed.jsonl` | The run's display feed, which the logs pane follows. |
 | `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal. |
 | `<state>/watch-selection`, `<state>/watch-dock-taps` | The request and tap files shared with the workers dashboard. See [Fleet Dispatch](fleet-dispatch.md). |

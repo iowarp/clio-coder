@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { writeDiagnostic } from "../core/diagnostics.js";
 import { clioCacheDir } from "../core/xdg.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import { YAZI_DOCK_EVENT, type YaziEvent } from "../domains/mux/yazi/event-stream.js";
@@ -131,7 +132,7 @@ function readOptional(path: string): string {
  * before the TUI lease is released. A missing or below-floor binary therefore
  * leaves the screen intact and returns the shared doctor sentence verbatim.
  */
-async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Promise<YaziTerminalChooserResult> {
+export async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Promise<YaziTerminalChooserResult> {
 	const binaries = (options.resolveBinaries ?? resolveYaziBinaries)();
 	if (!binaries.yaziPath) {
 		return { status: "missing-binary", binary: "yazi", detail: binaries.missingYaziDetail };
@@ -161,34 +162,46 @@ async function runYaziTerminalChooser(options: YaziTerminalChooserOptions): Prom
 	if (options.profileMode === "managed" && !profile) {
 		return { status: "profile-error", reason: "Clio could not generate a valid managed Yazi profile" };
 	}
-	writeFileSync(chooserPath, "");
-	writeFileSync(cwdPath, "");
-
-	const args = [options.cwd, "--chooser-file", chooserPath, "--cwd-file", cwdPath] as const;
-	const env = { ...process.env, ...(profile ? { YAZI_CONFIG_HOME: profile.dir } : {}) };
-	let processError: Error | undefined;
-	options.stopUi();
 	try {
-		const result = options.spawnYazi
-			? options.spawnYazi(binaries.yaziPath, args, { cwd: options.cwd, env })
-			: spawnSync(binaries.yaziPath, args, { cwd: options.cwd, env, stdio: "inherit" });
-		processError = result.error;
-	} catch (error) {
-		processError = error instanceof Error ? error : new Error(String(error));
-	} finally {
-		options.startUi();
-		options.requestRender();
-	}
-	if (processError) return { status: "unavailable", reason: `yazi chooser failed: ${processError.message}` };
+		writeFileSync(chooserPath, "");
+		writeFileSync(cwdPath, "");
+		const args = [options.cwd, "--chooser-file", chooserPath, "--cwd-file", cwdPath] as const;
+		const env = { ...process.env, ...(profile ? { YAZI_CONFIG_HOME: profile.dir } : {}) };
+		let processError: Error | undefined;
+		options.stopUi();
+		try {
+			const result = options.spawnYazi
+				? options.spawnYazi(binaries.yaziPath, args, { cwd: options.cwd, env })
+				: spawnSync(binaries.yaziPath, args, { cwd: options.cwd, env, stdio: "inherit" });
+			processError = result.error;
+		} catch (error) {
+			processError = error instanceof Error ? error : new Error(String(error));
+		} finally {
+			options.startUi();
+			options.requestRender();
+		}
+		if (processError) return { status: "unavailable", reason: `yazi chooser failed: ${processError.message}` };
 
-	const paths = readOptional(chooserPath)
-		.split("\n")
-		.filter((path) => path.length > 0);
-	if (paths.length === 0) return { status: "cancelled" };
-	return {
-		status: "chosen",
-		choice: { paths, cwd: readOptional(cwdPath).trim() || options.cwd },
-	};
+		const paths = readOptional(chooserPath)
+			.split("\n")
+			.filter((path) => path.length > 0);
+		if (paths.length === 0) return { status: "cancelled" };
+		return {
+			status: "chosen",
+			choice: { paths, cwd: readOptional(cwdPath).trim() || options.cwd },
+		};
+	} finally {
+		for (const path of [chooserPath, cwdPath]) {
+			try {
+				rmSync(path, { force: true });
+			} catch (error) {
+				writeDiagnostic(
+					`[clio-coder:files] chooser cleanup failed for ${path}: ${error instanceof Error ? error.message : String(error)}`,
+					"warning",
+				);
+			}
+		}
+	}
 }
 
 function containsAsciiWhitespace(value: string): boolean {

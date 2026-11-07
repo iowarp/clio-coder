@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
+import { processBirthToken, processIdentityAlive } from "../../../core/process-identity.js";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioCacheDir } from "../../../core/xdg.js";
 import { findPinnedTool } from "../../toolchain/registry.js";
 import { describeResolution, resolveToolBinary, toolStatus } from "../../toolchain/resolve.js";
@@ -116,14 +119,10 @@ function readOptional(path: string): string {
 	}
 }
 
-/** Transport files older than this are leftovers of a process that never reached its cleanup. */
+/** Only old ownership records are candidates for crash recovery. Age alone never proves death. */
 export const YAZI_STALE_TRANSPORT_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Drop transport files no live session can own. A crash, a kill, or a
- * release before cleanup existed leaves `.stream`, `.chooser`, and `.cwd`
- * files behind; a day is long past any pane's life, so anything older goes.
- */
+/** Drop only transport sets whose recorded local owner is demonstrably dead. */
 export function sweepStaleTransportFiles(sessionsDir: string, now: number = Date.now()): number {
 	let removed = 0;
 	let entries: string[];
@@ -133,15 +132,31 @@ export function sweepStaleTransportFiles(sessionsDir: string, now: number = Date
 		return 0;
 	}
 	for (const name of entries) {
-		if (!/\.(stream|chooser|cwd)$/u.test(name)) continue;
-		const path = join(sessionsDir, name);
+		if (!name.endsWith(".owner.json")) continue;
+		const ownerPath = join(sessionsDir, name);
 		try {
-			if (now - statSync(path).mtimeMs > YAZI_STALE_TRANSPORT_MS) {
-				rmSync(path, { force: true });
+			if (now - statSync(ownerPath).mtimeMs <= YAZI_STALE_TRANSPORT_MS) continue;
+			const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown> | null;
+			if (
+				!owner ||
+				owner.version !== 1 ||
+				typeof owner.host !== "string" ||
+				typeof owner.pid !== "number" ||
+				!Number.isSafeInteger(owner.pid) ||
+				owner.pid <= 0 ||
+				!(owner.birthToken === null || typeof owner.birthToken === "string")
+			)
+				continue;
+			if (processIdentityAlive({ host: owner.host, pid: owner.pid, birthToken: owner.birthToken }) !== false) continue;
+			const stem = join(sessionsDir, name.slice(0, -".owner.json".length));
+			for (const suffix of [".stream", ".chooser", ".cwd"]) {
+				if (!existsSync(`${stem}${suffix}`)) continue;
+				rmSync(`${stem}${suffix}`, { force: true });
 				removed += 1;
 			}
+			rmSync(ownerPath, { force: true });
 		} catch {
-			// A file that vanished between readdir and stat was someone else's to remove.
+			// Unknown owners and files still held open are not ours to reclaim.
 		}
 	}
 	return removed;
@@ -181,12 +196,20 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	const streamPath = join(sessionsDir, `${sessionId}.stream`);
 	const chooserPath = join(sessionsDir, `${sessionId}.chooser`);
 	const cwdPath = join(sessionsDir, `${sessionId}.cwd`);
+	const ownerPath = join(sessionsDir, `${sessionId}.owner.json`);
 	const token = options.mode === "companion" ? (options.pickToken ?? randomUUID()) : null;
 	const socketPath = options.mux.detection().socketPath;
 	const runtimeDir =
 		process.platform !== "win32" && socketPath && isClioHostSocket(socketPath) ? posixHostRuntimeDir(socketPath) : null;
 	const env: Record<string, string> = {
-		...(runtimeDir ? { XDG_RUNTIME_DIR: runtimeDir, XDG_STATE_HOME: runtimeDir, TMPDIR: runtimeDir } : {}),
+		...(runtimeDir
+			? {
+					XDG_RUNTIME_DIR: runtimeDir,
+					XDG_STATE_HOME: runtimeDir,
+					CLIO_CODER_PANE_XDG_STATE_HOME: runtimeDir,
+					TMPDIR: runtimeDir,
+				}
+			: {}),
 		...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
 		...(token ? { CLIO_CODER_YAZI_PICK_TOKEN: token } : {}),
 	};
@@ -213,32 +236,57 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	// Removing them here is what keeps `<cache>/yazi/sessions` from growing by
 	// three files per open for the life of the install.
 	const removeTransportFiles = (): void => {
+		let removed = true;
 		for (const path of [streamPath, chooserPath, cwdPath]) {
 			try {
 				rmSync(path, { force: true });
 			} catch {
+				removed = false;
 				// Windows refuses while the pane's Yazi still writes the stream; close()
 				// tries again once the pane is gone, and the stale sweep after that.
 			}
 		}
+		if (removed) {
+			try {
+				rmSync(ownerPath, { force: true });
+			} catch {
+				// A leftover receipt is reclaimed after this owner exits.
+			}
+		}
 	};
 
-	const pane = await options.mux.openUtilityPane({
-		argv,
-		cwd: options.cwd,
-		label: "files",
-		title: "files",
-		// The files dock: split down from the anchor at the configured share.
-		// Degrades to a plain split inside the contract when the layout tier is
-		// absent.
-		dock: {
-			slot: "files",
-			...(options.dockShare === undefined ? {} : { share: options.dockShare }),
-			...(options.hidden ? { hidden: true } : {}),
-		},
-		...(Object.keys(env).length > 0 ? { env } : {}),
-		...(stdoutPath ? { stdoutPath } : {}),
-	});
+	let pane: MuxPaneRef | null;
+	try {
+		safeResourceWrite(
+			ownerPath,
+			JSON.stringify({
+				version: 1,
+				host: hostname(),
+				pid: process.pid,
+				birthToken: processBirthToken(),
+			}),
+			{ mode: 0o600 },
+		);
+		pane = await options.mux.openUtilityPane({
+			argv,
+			cwd: options.cwd,
+			label: "files",
+			title: "files",
+			// The files dock: split down from the anchor at the configured share.
+			// Degrades to a plain split inside the contract when the layout tier is
+			// absent.
+			dock: {
+				slot: "files",
+				...(options.dockShare === undefined ? {} : { share: options.dockShare }),
+				...(options.hidden ? { hidden: true } : {}),
+			},
+			...(Object.keys(env).length > 0 ? { env } : {}),
+			...(stdoutPath ? { stdoutPath } : {}),
+		});
+	} catch (error) {
+		removeTransportFiles();
+		throw error;
+	}
 	if (!pane) {
 		removeTransportFiles();
 		return { status: "unavailable", reason: "the pane host refused to open the files pane" };
