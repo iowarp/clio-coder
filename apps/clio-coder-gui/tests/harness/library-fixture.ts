@@ -8,8 +8,16 @@ export async function seedLibrary(cwd: string, env: NodeJS.ProcessEnv) {
 		{ env, timeout: 30_000, maxBuffer: 1024 * 1024 },
 	);
 }
+/**
+ * The CLI both sides of a library comparison run: the server through `CLIO_CODER_WEB_CLI`, the oracle directly.
+ * It is the checkout's source, so a missing or stale `dist/` cannot make the server answer with a problem or
+ * agree with old code.
+ */
+export const sourceCli = fileURLToPath(new URL("../fixtures/source-cli.mjs", import.meta.url));
+export const sourceCliEnv = { CLIO_CODER_WEB_CLI: sourceCli } as const;
+
 export async function libraryOracle(cwd: string, env: NodeJS.ProcessEnv) {
-	const cli = fileURLToPath(new URL("../../../../dist/cli/index.js", import.meta.url));
+	const cli = sourceCli;
 	const run = async (argv: string[]) =>
 		JSON.parse(
 			(

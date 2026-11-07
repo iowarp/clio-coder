@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { TSchema } from "typebox";
 import {
 	LibraryAgents,
 	LibraryApplyResult,
@@ -13,18 +14,24 @@ import {
 	LibraryVerifiers,
 } from "../contracts/library.js";
 import { harness, json } from "./harness/app.js";
-import { libraryOracle, seedLibrary } from "./harness/library-fixture.js";
+import { libraryOracle, seedLibrary, sourceCliEnv } from "./harness/library-fixture.js";
 
 test("all library collections agree with the canonical CLI in the same scratch home and never run a verifier", async () => {
-	const h = await harness();
+	const h = await harness({}, { env: sourceCliEnv });
 	try {
 		await seedLibrary(h.home.path, h.home.env);
 		const workspace = await h.workspaces.open(h.home.path),
 			base = `/api/workspaces/${workspace.id}/library`;
-		const inventory = await json(await h.request(base), LibraryInventory);
-		const agents = await json(await h.request(`${base}/agents`), LibraryAgents);
-		const extensions = await json(await h.request(`${base}/extensions`), LibraryExtensions);
-		const verifiers = await json(await h.request(`${base}/verifiers`), LibraryVerifiers);
+		// A problem body would otherwise surface as a schema mismatch that hides the server's own reason.
+		const read = async <S extends TSchema>(path: string, schema: S) => {
+			const response = await h.request(path);
+			assert.equal(response.status, 200, await response.clone().text());
+			return json(response, schema);
+		};
+		const inventory = await read(base, LibraryInventory);
+		const agents = await read(`${base}/agents`, LibraryAgents);
+		const extensions = await read(`${base}/extensions`, LibraryExtensions);
+		const verifiers = await read(`${base}/verifiers`, LibraryVerifiers);
 		const oracle = await libraryOracle(h.home.path, h.home.env);
 		for (const kind of ["skill", "prompt", "playbook", "agent"]) {
 			const actual = inventory.resources.filter((row) => row.kind === kind);
