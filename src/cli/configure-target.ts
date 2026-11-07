@@ -492,7 +492,7 @@ export function probeLines(descriptor: TargetDescriptor, probe: ProbeResult): st
 				probe.failureKind === "missing"
 					? "install the Copilot SDK component with `clio-coder tools install copilot-sdk`, then re-run `clio-coder targets --probe`"
 					: probe.failureKind === "authentication"
-						? "sign in with the official GitHub Copilot CLI (`copilot login`); Clio never signs in to Copilot itself"
+						? "sign in with `copilot login` or `gh auth login`; Clio never signs in to Copilot itself. A login kept only in the system keychain is closed to headless runs; `clio-coder doctor` in a terminal shows which login the runtime sees"
 						: "check that `copilot login` succeeded and the account has Copilot models enabled, then re-run `clio-coder targets --probe`";
 			return [`probe failed${latency}: ${probe.error ?? "unknown"}`, `  ${next}`];
 		}

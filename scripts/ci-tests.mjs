@@ -75,6 +75,7 @@ export const coreTests = [
 	"approval-card-arguments",
 	"footer-snapshot",
 	"copilot-sdk-route",
+	"copilot-keychain",
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
 	"plugin-engine",

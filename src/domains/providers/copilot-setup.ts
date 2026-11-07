@@ -1,4 +1,5 @@
-import { copilotSdkAccount, listCopilotSdkModels } from "../../engine/ai.js";
+import { allowCopilotKeychain } from "../../core/copilot-keychain.js";
+import { copilotSdkAccount, copilotSdkSignInProbe, listCopilotSdkModels } from "../../engine/ai.js";
 import { ensureCopilotSdk, resolveCopilotSdkEntry } from "../lifecycle/copilot-sdk-install.js";
 import {
 	type CopilotAccount,
@@ -22,6 +23,8 @@ export type CopilotSetupResult = { ok: true; account: CopilotAccount } | { ok: f
  * `auth login copilot-sdk` run it; the stream itself refuses when consent is missing.
  */
 export async function prepareCopilotSdk(io: CopilotSetupIo): Promise<CopilotSetupResult> {
+	// Someone who can answer the setup questions can answer a keychain prompt too.
+	if (io.confirm) allowCopilotKeychain();
 	try {
 		await ensureCopilotSdk(io.confirm ? { confirm: io.confirm } : {});
 		const account = await copilotSdkAccount();
@@ -70,5 +73,30 @@ export async function detectCopilotLogin(timeoutMs: number): Promise<DetectedCop
 		return await Promise.race([probe, deadline]);
 	} finally {
 		clearTimeout(timer);
+	}
+}
+
+export type CopilotSignInCheck =
+	| { kind: "signed-in"; login: string; authType?: string }
+	| { kind: "keychain-only"; login: string }
+	| { kind: "not-signed-in"; keychainChecked: boolean }
+	| { kind: "unavailable"; error: string };
+
+/**
+ * Which login the runtime sees with the keychain closed, the way headless runs and workers start it. When it
+ * sees none and an operator can answer a keychain prompt, a second runtime asks with the keychain open, so a
+ * `copilot login` only the keychain holds is named instead of reported as no login. Never reads a token.
+ */
+export async function checkCopilotSignIn(operatorPresent: boolean): Promise<CopilotSignInCheck> {
+	try {
+		const closed = await copilotSdkSignInProbe(false);
+		if (closed.signedIn && closed.login)
+			return { kind: "signed-in", login: closed.login, ...(closed.authType ? { authType: closed.authType } : {}) };
+		if (!operatorPresent) return { kind: "not-signed-in", keychainChecked: false };
+		const open = await copilotSdkSignInProbe(true);
+		if (open.signedIn && open.login) return { kind: "keychain-only", login: open.login };
+		return { kind: "not-signed-in", keychainChecked: true };
+	} catch (error) {
+		return { kind: "unavailable", error: error instanceof Error ? error.message : String(error) };
 	}
 }

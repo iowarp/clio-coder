@@ -1104,6 +1104,17 @@ function nearestModelId(model: string, catalog: readonly string[]): string | nul
 	);
 }
 
+/** Whether chat, memory or the fleet routes to the target, which makes its failures errors instead of warnings. */
+export function targetIsActive(settings: ReturnType<typeof readSettings>, id: string): boolean {
+	return (
+		settings.chat.target === id ||
+		settings.context.memory.target === id ||
+		settings.fleet.default.target === id ||
+		Object.values(settings.fleet.profiles).some((profile) => profile.target === id) ||
+		Object.values(settings.fleet.rosters).some((roster) => roster.members.some((member) => member.target === id))
+	);
+}
+
 export async function runDoctorModelChecks(
 	options: { fix?: boolean; confirm?: (question: string) => Promise<boolean> } = {},
 ): Promise<DoctorFinding[]> {
@@ -1157,14 +1168,7 @@ export async function runDoctorModelChecks(
 				];
 			}
 			const roles = configuredModelRoles(settings, target);
-			const active =
-				settings.chat.target === target.id ||
-				settings.context.memory.target === target.id ||
-				settings.fleet.default.target === target.id ||
-				Object.values(settings.fleet.profiles).some((profile) => profile.target === target.id) ||
-				Object.values(settings.fleet.rosters).some((roster) =>
-					roster.members.some((member) => member.target === target.id),
-				);
+			const active = targetIsActive(settings, target.id);
 			const requiredCredential = targetRequiresAuth(target, runtime);
 			let credentialAvailable = !requiredCredential;
 			let credentialDetail = requiredCredential

@@ -2,22 +2,28 @@
  * One Copilot runtime per process, started through the official SDK as a signed-in user.
  *
  * Clio passes no token and reads no token store. `useLoggedInUser` lets the runtime pick the login
- * itself: the official `copilot login` stored on disk under `COPILOT_HOME` (default `~/.copilot`), or the
- * GitHub CLI's `gh auth login`. The SDK's `empty` mode Clio runs in turns the system keychain off, so a
- * `copilot login` kept only in the keychain is invisible here. GitHub token variables are removed from
- * the runtime's environment so an ambient `GH_TOKEN` cannot stand in for a login. The SDK identifies
- * itself to GitHub with its own client identity plus `clientName`; Clio sets no request headers of its own.
+ * itself: the official `copilot login` stored on disk under `COPILOT_HOME` (default `~/.copilot`), the
+ * GitHub CLI's `gh auth login`, or a `copilot login` kept in the system keychain. The SDK's `empty` mode
+ * Clio runs in turns the keychain off; a process where an operator can answer a keychain prompt
+ * (`src/core/copilot-keychain.ts`) turns it back on and keeps every other empty-mode setting. GitHub token
+ * variables are removed from the runtime's environment so an ambient `GH_TOKEN` cannot stand in for a login.
+ * The SDK identifies itself to GitHub with its own client identity plus `clientName`; Clio sets no request
+ * headers of its own.
  */
 import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
+import { COPILOT_HEADLESS_LOGIN_FIX, copilotKeychainAllowed } from "../../core/copilot-keychain.js";
 import type { CopilotAccount } from "../../domains/providers/copilot-consent.js";
-import { loadCopilotSdk } from "./sdk-module.js";
+import { type CopilotSdkModule, loadCopilotSdk } from "./sdk-module.js";
 import { copilotSessionFsConfig } from "./session-fs.js";
 
 export const COPILOT_CLIENT_NAME = "clio-coder";
 
 export const COPILOT_LOGIN_MESSAGE =
-	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry; a `copilot login` kept only in the system keychain is not visible to the runtime Clio starts. Clio never signs in to Copilot itself.";
+	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. Clio never signs in to Copilot itself.";
+
+/** Why a process without an operator can miss a login the TUI sees. */
+const KEYCHAIN_CLOSED_NOTE = `This process has no operator to answer a keychain prompt (headless \`clio-coder run\`, fleet workers, scripts), so the Copilot runtime keeps the system keychain closed and a \`copilot login\` stored only there is not visible here; the TUI, ACP and the GUI can use it. For headless use, ${COPILOT_HEADLESS_LOGIN_FIX}. \`clio-coder doctor\` in a terminal shows which login the runtime sees.`;
 
 /** Environment variables that would authenticate the runtime as someone other than a signed-in user. */
 const TOKEN_ENV_VARS = [
@@ -30,8 +36,12 @@ const TOKEN_ENV_VARS = [
 
 export class CopilotLoginRequiredError extends Error {
 	readonly code = "COPILOT_LOGIN_REQUIRED";
-	constructor(detail?: string) {
-		super(detail ? `${COPILOT_LOGIN_MESSAGE} (${detail})` : COPILOT_LOGIN_MESSAGE);
+	constructor(detail?: string, keychainClosed = false) {
+		super(
+			[COPILOT_LOGIN_MESSAGE, ...(keychainClosed ? [KEYCHAIN_CLOSED_NOTE] : []), ...(detail ? [`(${detail})`] : [])].join(
+				" ",
+			),
+		);
 		this.name = "CopilotLoginRequiredError";
 	}
 }
@@ -42,7 +52,7 @@ function runtimeEnvironment(): Record<string, string | undefined> {
 	return env;
 }
 
-let shared: { client: CopilotClient; started: Promise<void> } | null = null;
+let shared: { client: CopilotClient; started: Promise<void>; keychain: boolean } | null = null;
 let holds = 0;
 
 /** The private fields of pinned SDK 1.0.26 this module relies on; nothing public exposes them. */
@@ -148,6 +158,51 @@ async function held<T>(use: () => Promise<T>): Promise<T> {
 	}
 }
 
+type RuntimeEnv = Record<string, string | undefined>;
+
+/**
+ * Let the runtime read its own system keychain. Pinned SDK 1.0.26 sets `COPILOT_DISABLE_KEYTAR=1` in
+ * `buildRuntimeEnv` for `mode: "empty"`, after the caller's `env`, so no option can clear it. The wrapper drops
+ * only that variable from the child's environment; the empty-mode prompt, tool and persistence settings and
+ * its file-logging default are untouched. The SDK is a separately installed component, so a dependency patch
+ * would never reach an npm install. A different SDK fails the start here instead of silently keeping the
+ * keychain closed.
+ */
+function openRuntimeKeychain(client: CopilotClient): void {
+	const internals = client as unknown as { buildRuntimeEnv?: (this: unknown) => RuntimeEnv };
+	const build = internals.buildRuntimeEnv;
+	if (typeof build !== "function")
+		throw new Error(
+			"@github/copilot-sdk no longer has buildRuntimeEnv (pinned 1.0.26); Clio cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
+		);
+	internals.buildRuntimeEnv = function (this: unknown): RuntimeEnv {
+		const env = build.call(this);
+		if (env.COPILOT_DISABLE_KEYTAR !== "1")
+			throw new Error(
+				"@github/copilot-sdk no longer sets COPILOT_DISABLE_KEYTAR where Clio expects it (pinned 1.0.26); Clio cannot open the Copilot runtime's keychain. Re-verify the keychain override in src/engine/copilot/client.ts.",
+			);
+		delete env.COPILOT_DISABLE_KEYTAR;
+		return env;
+	};
+}
+
+/** A client in Clio's isolation settings; `keychain` decides whether the runtime may read the system keychain. */
+export function createCopilotClient(sdk: CopilotSdkModule, keychain: boolean): CopilotClient {
+	const client = new sdk.CopilotClient({
+		useLoggedInUser: true,
+		// "empty" keeps the runtime's own memory, skills, session store and config discovery off: Clio
+		// supplies the prompt and every tool, and keeps the transcript.
+		mode: "empty",
+		// Empty mode needs a persistence location; session records go under Clio's cache, or stay in memory in
+		// read-only mode (session-fs.ts).
+		sessionFs: copilotSessionFsConfig(),
+		env: runtimeEnvironment(),
+		logLevel: "error",
+	});
+	if (keychain) openRuntimeKeychain(client);
+	return client;
+}
+
 /** The process's runtime client, started on first use; concurrent callers share one start. */
 export async function copilotClient(): Promise<CopilotClient> {
 	if (shared && disconnected(shared.client)) {
@@ -158,22 +213,14 @@ export async function copilotClient(): Promise<CopilotClient> {
 	if (!shared) {
 		const sdk = await loadCopilotSdk();
 		if (!shared) {
-			const client = new sdk.CopilotClient({
-				useLoggedInUser: true,
-				// "empty" keeps the runtime's own memory, skills, session store and config discovery off: Clio
-				// supplies the prompt and every tool, and keeps the transcript.
-				mode: "empty",
-				// Empty mode needs a persistence location; session records go under Clio's cache, or stay in memory in
-				// read-only mode (session-fs.ts).
-				sessionFs: copilotSessionFsConfig(),
-				env: runtimeEnvironment(),
-				logLevel: "error",
-			});
+			// Read once per runtime start: a surface opts in before its first Copilot use.
+			const keychain = copilotKeychainAllowed();
+			const client = createCopilotClient(sdk, keychain);
 			const started = client.start().then(() => {
 				watchRuntime(client);
 				setRuntimeReferenced(client, holds > 0);
 			});
-			shared = { client, started };
+			shared = { client, started, keychain };
 			started.catch(() => {
 				if (shared?.client === client) shared = null;
 			});
@@ -190,9 +237,37 @@ export function copilotAccount(): Promise<CopilotAccount> {
 	return held(async () => {
 		const client = await copilotClient();
 		const status = await client.getAuthStatus();
-		if (!status.isAuthenticated || !status.login) throw new CopilotLoginRequiredError(status.statusMessage);
+		if (!status.isAuthenticated || !status.login)
+			throw new CopilotLoginRequiredError(status.statusMessage, shared?.client === client && !shared.keychain);
 		return { login: status.login, host: status.host ?? "https://github.com" };
 	});
+}
+
+export interface CopilotSignInStatus {
+	signedIn: boolean;
+	login?: string;
+	/** Where the runtime found the login: `user` (a `copilot login`) or `gh-cli` (`gh auth login`). */
+	authType?: string;
+}
+
+/**
+ * Ask a short-lived runtime, separate from the process's shared one, whether it is signed in with the
+ * keychain open or closed. Doctor compares the two to spot a login only the keychain holds; Clio sees only
+ * the runtime's answer, never a token.
+ */
+export async function probeCopilotSignIn(keychain: boolean): Promise<CopilotSignInStatus> {
+	const client = createCopilotClient(await loadCopilotSdk(), keychain);
+	try {
+		await client.start();
+		const status = await client.getAuthStatus();
+		return {
+			signedIn: status.isAuthenticated && Boolean(status.login),
+			...(status.login ? { login: status.login } : {}),
+			...(status.authType ? { authType: status.authType } : {}),
+		};
+	} finally {
+		await client.stop().catch(() => client.forceStop());
+	}
 }
 
 export interface CopilotModelRow {

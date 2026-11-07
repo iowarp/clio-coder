@@ -1,4 +1,5 @@
 import { formatBootTrace } from "../core/boot-trace.js";
+import { allowCopilotKeychain } from "../core/copilot-keychain.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { initializeClioHome } from "../core/init.js";
 import { isRestartHandoff } from "../core/restart-status.js";
@@ -46,6 +47,9 @@ export async function runClioCommand(
 	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_CODER_INTERACTIVE = "1";
 	}
+	// ACP (and the GUI's sessions over it) and the interactive TUI have an operator to answer a keychain
+	// prompt; headless runs and the non-interactive boot keep the Copilot runtime's keychain closed.
+	if (options.acp || terminalLeaseEligible(options)) allowCopilotKeychain();
 	if (!options.headless && !options.acp) {
 		const { confirmStartupWorkspace } = await import("./workspace-check.js");
 		if (!(await confirmStartupWorkspace())) return 1;

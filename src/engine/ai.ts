@@ -63,6 +63,12 @@ export async function listCopilotSdkModels() {
 	return client.listCopilotModels();
 }
 
+/** Whether a short-lived Copilot runtime with the keychain open or closed is signed in; for doctor. */
+export async function copilotSdkSignInProbe(keychain: boolean) {
+	const client = await import("./copilot/client.js");
+	return client.probeCopilotSignIn(keychain);
+}
+
 /** The account the official Copilot runtime is signed in as; loads the optional SDK on first use. */
 export async function copilotSdkAccount() {
 	const client = await import("./copilot/client.js");
