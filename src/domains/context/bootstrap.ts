@@ -1063,6 +1063,16 @@ function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGr
 
 /** CI named in prose: an acronym, never a lowercase `ci-tests` stem. */
 const CI_PROSE_RE = /\bCI\b|\b[Cc]ontinuous [Ii]ntegration\b|\bGitHub Actions\b/;
+const WORKFLOW_PATH_RE = /\.github\/workflows\b/;
+
+/** Cut each sentence of a line that `drops`; the line is empty when none remains. */
+function withoutSentences(line: string, drops: (sentence: string) => boolean): string {
+	const { prefix, sentences } = proseSentences(line);
+	const kept = sentences.filter((sentence) => !drops(sentence));
+	if (kept.length === sentences.length) return line;
+	const body = kept.join("").trim();
+	return body ? `${prefix}${body}` : "";
+}
 
 /**
  * Cut each sentence of a model line that speaks for CI, in either voice. Clio
@@ -1072,11 +1082,18 @@ const CI_PROSE_RE = /\bCI\b|\b[Cc]ontinuous [Ii]ntegration\b|\bGitHub Actions\b/
  * "CI will reject" through. The line drops when no sentence remains.
  */
 function withoutCiStatements(line: string): string {
-	const { prefix, sentences } = proseSentences(line);
-	const kept = sentences.filter((sentence) => !CI_PROSE_RE.test(sentence.replace(/`[^`\n]*`/g, "")));
-	if (kept.length === sentences.length) return line;
-	const body = kept.join("").trim();
-	return body ? `${prefix}${body}` : "";
+	return withoutSentences(line, (sentence) => CI_PROSE_RE.test(sentence.replace(/`[^`\n]*`/g, "")));
+}
+
+/**
+ * Cut each sentence that cites a workflow file. A workflow defines what CI
+ * runs, and every generated handbook cited `.github/workflows/release.yml` for
+ * an owner review that only `CONTRIBUTING.md` states; the path is real, so the
+ * citation grounded. A citation list that also names a supporting guide has
+ * already lost the workflow (`withUnsupportedReviewRequirementsMarked`).
+ */
+function withoutWorkflowCitations(line: string): string {
+	return withoutSentences(line, (sentence) => WORKFLOW_PATH_RE.test(sentence));
 }
 
 const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
@@ -1216,9 +1233,11 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options
 			evidence,
 		);
 		const marked = withUnsupportedReviewRequirementsMarked(cited, evidence);
-		const line = inFence
-			? cited
-			: withUnsupportedPreloadsMarked(options.keepCiStatements ? marked : withoutCiStatements(marked), evidence);
+		const line = withoutWorkflowCitations(
+			inFence
+				? cited
+				: withUnsupportedPreloadsMarked(options.keepCiStatements ? marked : withoutCiStatements(marked), evidence),
+		);
 		if (!line) continue;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
@@ -1541,13 +1560,14 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
  * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
  * invariants, and reworded the published-tag rule only `CONTRIBUTING.md`
  * states. A rule whose citations no longer ground is not carried; a carried
- * rule keeps every word, including a sentence that names CI.
+ * rule keeps every word, including a sentence that names CI, but not one that
+ * cites a workflow file.
  */
 function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): string[] {
 	const carried: string[] = [];
 	for (const invariant of input.previousInvariants ?? []) {
-		const rule = invariant.replace(/\s+/g, " ").trim();
-		if (groundedModelLine(rule, corpus, { keepCiStatements: true }) !== null) pushUnique(carried, rule);
+		const rule = withoutWorkflowCitations(invariant.replace(/\s+/g, " ").trim());
+		if (rule && groundedModelLine(rule, corpus, { keepCiStatements: true }) !== null) pushUnique(carried, rule);
 	}
 	return carried;
 }

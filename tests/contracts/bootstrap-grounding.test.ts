@@ -46,8 +46,9 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 				projectName: "harbor",
 				identity: "A widget renderer.",
 				invariants: [
-					"Keep the `ci (22)` job name in `.github/workflows/ci.yml`; branch protection keys on it.",
+					"Keep the `ci (22)` job name; branch protection keys on it.",
 					"Never ship `src/missing-module.ts`; it holds credentials.",
+					"Pin every action in `.github/workflows/ci.yml` to a commit.",
 				],
 				conventions: [
 					"Follow `CONTRIBUTING.md` before review.",
@@ -75,14 +76,31 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	ok(handbook.includes("\n  - The export lives in `src/index.ts`"), handbook);
 	strictEqual(handbook.includes("src/missing-module.ts"), false, handbook);
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
+	strictEqual(handbook.includes(".github/workflows"), false, handbook);
 });
 
-it("keeps a reviewer requirement its cited policy states, and marks one its cited file does not state", async () => {
+it("keeps a reviewer requirement its cited policy states, marks one its file does not state, and cuts workflow citations", async () => {
 	writeFileSync(
 		join(cwd, ".github", "workflows", "release.yml"),
 		"jobs:\n  publish:\n    environment: release\n    steps:\n      - name: Present the approval receipt\n",
 	);
 	writeFileSync(join(cwd, "CONTRIBUTING.md"), "The `release` environment needs the owner as required reviewer.\n");
+	mkdirSync(join(cwd, "docs"));
+	writeFileSync(join(cwd, "docs", "release.md"), "Tag from main, then publish.\n");
+	const carried = "Never push a release tag by hand: `CONTRIBUTING.md` documents the release.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"A widget renderer.",
+			"",
+			"## Hard invariants",
+			"",
+			`1. ${carried} The publish job lives in \`.github/workflows/release.yml\`.`,
+			"",
+		].join("\n"),
+	);
 	const approval =
 		"- The publish job needs the protected `release` environment with owner approval (`CONTRIBUTING.md`, `.github/workflows/release.yml`).";
 	writeFileSync(
@@ -91,6 +109,7 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	);
 	await runBootstrap({
 		cwd,
+		rewriteClioMd: true,
 		generate: async (input) => {
 			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
 			return {
@@ -105,6 +124,7 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 							"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer. Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
 							"- `.github/branch-protection.json` requires a reviewer before merging.",
 							"- Follow `CONTRIBUTING.md` before review.",
+							"- `docs/release.md` requires the owner as reviewer before publishing. Tag from `main` first.",
 							approval,
 							"- Owner approval of the `release` environment gates the publish job in `.github/workflows/release.yml`.",
 						].join("\n"),
@@ -114,26 +134,22 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(`1. ${carried}\n`), handbook);
+	ok(handbook.includes("- `.github/branch-protection.json` requires a reviewer before merging.\n"), handbook);
+	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 	ok(
 		handbook.includes(
-			"- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer (unverified: `.github/workflows/release.yml` states no review policy). Keep the `ci (22)` job name in `.github/workflows/ci.yml`.",
+			"- `docs/release.md` requires the owner as reviewer before publishing (unverified: `docs/release.md` states no review policy). Tag from `main` first.\n",
 		),
 		handbook,
 	);
-	ok(handbook.includes("- `.github/branch-protection.json` requires a reviewer before merging.\n"), handbook);
-	ok(handbook.includes("- Follow `CONTRIBUTING.md` before review."), handbook);
 	ok(
 		handbook.includes(
 			"- The publish job needs the protected `release` environment with owner approval (`CONTRIBUTING.md`).\n",
 		),
 		handbook,
 	);
-	ok(
-		handbook.includes(
-			"- Owner approval of the `release` environment gates the publish job in `.github/workflows/release.yml` (unverified: `.github/workflows/release.yml` states no review policy).",
-		),
-		handbook,
-	);
+	strictEqual(handbook.includes(".github/workflows"), false, handbook);
 });
 
 it("cuts every sentence of a model line that names CI, but keeps a carried invariant verbatim", async () => {
