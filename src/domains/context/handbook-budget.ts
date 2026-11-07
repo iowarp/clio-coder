@@ -41,10 +41,11 @@ export function handbookBlocks(body: string): string[] {
 	return result;
 }
 
-/** What stabilization keeps whatever the model wrote: checker, carried and authored invariants, and carried sections. */
+/** What stabilization keeps whatever the model wrote: checker, carried and authored invariants, and carried blocks. */
 export interface ProtectedHandbook {
 	invariants: ReadonlyArray<string>;
-	sectionTitles: ReadonlyArray<string>;
+	/** Each section's carried blocks under its title. The model's additions to that section fit like any other. */
+	sections: ReadonlyArray<ClioMdSection>;
 }
 
 /**
@@ -61,9 +62,9 @@ function ruleClauses(text: string): string[] {
 
 /**
  * Fit whole rules and recipe blocks; a cut sentence must never lose its remedy.
- * Protected rules and sections are placed whole and counted before any model
- * content, so model content gives way to them. When they alone exceed the
- * target they still stay, and `onOverflow` hears the handbook's size.
+ * Protected rules and carried blocks are placed whole and counted before any
+ * model content, so model content gives way to them. When they alone exceed
+ * the target they still stay, and `onOverflow` hears the handbook's size.
  */
 export function fitGeneratedHandbook(
 	output: BootstrapStructuredOutput,
@@ -78,10 +79,13 @@ export function fitGeneratedHandbook(
 		sections: [],
 	};
 	const protectedInvariants = new Set(protectedContent?.invariants ?? []);
-	const protectedTitles = new Set(protectedContent?.sectionTitles ?? []);
+	const carriedParts = new Map((protectedContent?.sections ?? []).map((section) => [section.title, section]));
 	const sections = output.sections ?? [];
-	// Sections not placed yet that every size check counts: protected sections, then the verification gate.
-	let reserved: ClioMdSection[] = sections.filter((section) => protectedTitles.has(section.title));
+	// Content not placed yet that every size check counts: carried blocks, then the verification gate.
+	let reserved: ClioMdSection[] = sections.flatMap((section) => {
+		const carried = carriedParts.get(section.title);
+		return carried ? [carried] : [];
+	});
 	const size = (): { chars: number; lines: number } => {
 		const text = serializeClioMd({ ...result, sections: [...(result.sections ?? []), ...reserved] });
 		return { chars: text.length, lines: text.trimEnd().split("\n").length };
@@ -139,12 +143,10 @@ export function fitGeneratedHandbook(
 	result.sections = [];
 	reserved = [...reserved, ...retained];
 	for (const section of sections.filter((section) => !verification.includes(section))) {
-		if (protectedTitles.has(section.title)) {
-			reserved = reserved.filter((pending) => pending !== section);
-			result.sections.push(section);
-			continue;
-		}
-		const candidate = { title: section.title, body: "" };
+		// A section starts from its carried blocks; the model's additions fit after them.
+		const carried = carriedParts.get(section.title);
+		if (carried) reserved = reserved.filter((pending) => pending !== carried);
+		const candidate = { title: section.title, body: carried?.body ?? "" };
 		result.sections.push(candidate);
 		for (const block of handbookBlocks(section.body)) {
 			if (covered(block)) continue;

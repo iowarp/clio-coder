@@ -1796,28 +1796,37 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
-	// A previous section returns under its title when the draft dropped the title. Under a kept title, each
-	// enforced block returns unless a protected rule or the kept section states it word for word: naming the
-	// same check is not stating the same instruction. A section holding a previous block is protected, even
-	// when the model already wrote the block, so neither the section limit nor the final fit cuts it.
-	const carriedSections = new Set<ClioMdSection>();
+	// A previous section returns under its title when the draft dropped the title. Under a kept title, its
+	// enforced blocks lead, verbatim, and the model's blocks follow unless one states a carried block word for
+	// word: naming the same check is not stating the same instruction. A block a protected rule or an earlier
+	// carried block states word for word is not repeated. Only the carried blocks are protected, so neither the
+	// section limit nor the final fit cuts them, while the model's additions fit like any other content.
+	const carriedSections = new Map<ClioMdSection, string[]>();
+	const carriedSeen = new Set(protectedKeys);
 	for (const section of carriedBlocks) {
+		const blocks = handbookBlocks(section.body).filter((block) => {
+			const blockKey = normalizeHandbookRule(block);
+			if (carriedSeen.has(blockKey)) return false;
+			carriedSeen.add(blockKey);
+			return true;
+		});
+		if (blocks.length === 0) continue;
 		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
 		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
 		const current = ordinarySections[index];
 		if (!current) {
-			const retained = addSection(section, false, true) ? ordinarySections.at(-1) : undefined;
-			if (retained) carriedSections.add(retained);
+			const retained = addSection({ title: section.title, body: blocks.join("\n") }, false, true)
+				? ordinarySections.at(-1)
+				: undefined;
+			if (retained) carriedSections.set(retained, handbookBlocks(retained.body));
 			continue;
 		}
-		const blocks = handbookBlocks(section.body).filter((block) => !protectedKeys.has(normalizeHandbookRule(block)));
-		if (blocks.length === 0) continue;
-		const currentKeys = new Set(handbookBlocks(current.body).map(normalizeHandbookRule));
-		const missing = blocks.filter((block) => !currentKeys.has(normalizeHandbookRule(block)));
-		const merged = missing.length === 0 ? current : { ...current, body: [current.body, ...missing].join("\n") };
+		const blockKeys = new Set(blocks.map(normalizeHandbookRule));
+		const additions = handbookBlocks(current.body).filter((block) => !blockKeys.has(normalizeHandbookRule(block)));
+		const merged = { ...current, body: [...blocks, ...additions].join("\n") };
 		ordinarySections[index] = merged;
-		if (merged !== current && modelSections.delete(current)) modelSections.add(merged);
-		carriedSections.add(merged);
+		if (modelSections.delete(current)) modelSections.add(merged);
+		carriedSections.set(merged, blocks);
 	}
 	const checkerSection = uncoveredCheckerSection(
 		checkerRules.filter((rule) => !rule.architectural),
@@ -1834,7 +1843,7 @@ function stabilizeGeneratedOutput(
 	}
 	onProtected?.({
 		invariants: protectedInvariants,
-		sectionTitles: [...carriedSections].map((section) => section.title),
+		sections: [...carriedSections].map(([section, blocks]) => ({ title: section.title, body: blocks.join("\n") })),
 	});
 	return {
 		...base,
@@ -2596,7 +2605,7 @@ async function runBootstrapWork(
 		output = fitGeneratedHandbook(output, protectedContent, ({ chars, lines }) =>
 			warn(
 				input.io,
-				`  warning: the carried and authored hard invariants and carried sections exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
+				`  warning: the carried and authored hard invariants and carried section blocks exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
 			),
 		);
 	}

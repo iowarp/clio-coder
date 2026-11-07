@@ -468,7 +468,7 @@ it("keeps rules that share a carried rule's citations but state another obligati
 	ok(handbook.includes(`- ${convention}`), handbook);
 	ok(handbook.includes(recipe), handbook);
 	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
-	strictEqual(docs, [modelDocs, previousDocs].join("\n"), handbook);
+	strictEqual(docs, [previousDocs, modelDocs].join("\n"), handbook);
 });
 
 it("keeps every carried invariant when the model repeats one at the end of a full list", async () => {
@@ -597,7 +597,7 @@ it("returns a previous block under a kept title unless a protected rule states i
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
-	strictEqual(docs, [modelDocs, previousCorpus].join("\n"), handbook);
+	strictEqual(docs, [previousCorpus, modelDocs].join("\n"), handbook);
 });
 
 /** Rules of distinct words, so no rule restates another and only the budget decides what stays. */
@@ -733,6 +733,13 @@ it("returns a previous block a model rule restates, since the final fit may cut 
 	strictEqual(docs, [DOCS_RULE, `- ${names}`].join("\n"));
 });
 
+it("protects a section's carried blocks once each, but not the model's additions to it", async () => {
+	const reworded =
+		"- Each page under `docs/` must be reachable from `docs/guide.md`, or the corpus check in `scripts/check.js` fails.";
+	const docs = await docsUnderFullBudget([DOCS_RULE, DOCS_RULE], [DOCS_RULE.toLowerCase(), reworded], []);
+	strictEqual(docs, DOCS_RULE);
+});
+
 it("keeps protected invariants that alone exceed the budget and reports the overflow", () => {
 	const rules = Array.from({ length: 40 }, (_, i) =>
 		`Rule ${i + 1}: ${"keep every obligation whole ".repeat(25)}`.trim(),
@@ -746,7 +753,7 @@ it("keeps protected invariants that alone exceed the budget and reports the over
 			conventions: [],
 			sections: [],
 		},
-		{ invariants: rules, sectionTitles: [] },
+		{ invariants: rules, sections: [] },
 		(size) => overflows.push(size),
 	);
 	deepStrictEqual(fitted.invariants, rules);
