@@ -297,6 +297,7 @@ import { serializeConversation } from "../domains/session/compaction/branch-summ
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
+import { createStaleEditGuardRegistration } from "../domains/session/compaction/stale-edit-guard.js";
 import {
 	ceilChars,
 	estimateAgentContextBreakdown,
@@ -2694,6 +2695,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const dispatchDedup = createDispatchDedupRegistration();
 	middleware.registerHook(dispatchDedup.registration);
+	middleware.registerHook(
+		createStaleEditGuardRegistration({
+			readEntries: () => {
+				const meta = session?.current();
+				if (!session || !meta) return [];
+				return filterEntriesToActivePath(session.readEntries(), session.tree(meta.id).leafId ?? undefined);
+			},
+			cwd: () => process.cwd(),
+		}),
+	);
 	// Observers run after the guards; they emit no effects and their sinks are
 	// best-effort (session ledger, codewiki refresh).
 	middleware.registerHook(

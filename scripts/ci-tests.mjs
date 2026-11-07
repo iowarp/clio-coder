@@ -61,6 +61,7 @@ export const coreTests = [
 	"bootstrap-grounding",
 	"in-prefix-summary",
 	"compaction-exact-facts",
+	"stale-edit-guard",
 	"packed-source-directory",
 	"code-nav",
 	"skill-frontmatter-cache",
