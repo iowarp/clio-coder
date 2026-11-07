@@ -160,6 +160,16 @@ function subjectOf(toolName: string, args: Record<string, unknown> | undefined):
 	return parts.length > 0 ? `${toolName} ${parts.join(" ")}` : toolName;
 }
 
+/**
+ * Whether a shell command's exit status speaks for the whole command. After `;`, `|`, `||` or `&` it is the last
+ * stage's: a live run carried `exit=0` for `node check.mjs; echo "exit=$?"` and the model took it as the suite's.
+ */
+function exitSpeaksForCommand(command: string | undefined): boolean {
+	if (command === undefined) return true;
+	const bare = command.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "").replace(/&&|\d?>&\d|&>/g, "");
+	return !/[;|&\n]/.test(bare.trim());
+}
+
 /** The exact numbers one tool result returned, or null when it returned none worth carrying. */
 function numericResult(payload: Record<string, unknown>, call: CallFacts | undefined): string | null {
 	if (payload.outcome === "blocked") return null;
@@ -170,7 +180,9 @@ function numericResult(payload: Record<string, unknown>, call: CallFacts | undef
 	const result = isRecord(payload.result) ? payload.result : undefined;
 	const details = isRecord(result?.details) ? result.details : undefined;
 	const facts: string[] = [];
-	if (typeof details?.exitCode === "number") facts.push(`exit=${details.exitCode}`);
+	const command = call?.args?.command ?? call?.args?.cmd;
+	if (typeof details?.exitCode === "number" && exitSpeaksForCommand(typeof command === "string" ? command : undefined))
+		facts.push(`exit=${details.exitCode}`);
 	if (details?.timedOut === true) facts.push("timed-out");
 	const observation = isRecord(details?.observation) ? details.observation : undefined;
 	if (observation && typeof observation.unit === "string" && observation.unit !== "lines") {

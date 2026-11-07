@@ -106,6 +106,29 @@ describe("compaction exact facts", () => {
 		doesNotMatch(block, /re-?read/i);
 	});
 
+	it("reports a shell exit status only where it belongs to the whole command", async () => {
+		const entries = chain([
+			message("u1", "user", { text: "Run the suite" }),
+			...toolTurn(
+				"call_tail",
+				"bash",
+				{ command: 'node check.mjs; echo "exit=$?"' },
+				"suite: 57 passed, 3 failed\nexit=1",
+				{ exitCode: 0 },
+			),
+			...toolTurn("call_and", "bash", { command: "node check.mjs 2>&1 && echo 'a; b | c'" }, "57 passed, 3 failed", {
+				exitCode: 1,
+			}),
+			message("u2", "user", { text: "Continue" }),
+		]);
+		const result = await compact({ entries, model: model(), keepRecentTokens: 10, cwd });
+		match(result.summary, /^bash `node check\.mjs; echo "exit=\$\?"`: 57 passed, 3 failed call=call_tail$/m);
+		match(
+			result.summary,
+			/^bash `node check\.mjs 2>&1 && echo 'a; b \| c'`: exit=1, 57 passed, 3 failed call=call_and$/m,
+		);
+	});
+
 	it("carries files and results into the next checkpoint and re-measures the files on disk", async () => {
 		const first = await compact({ entries: history(), model: model(), keepRecentTokens: 10, cwd });
 		writeFileSync(join(cwd, "src/a.ts"), `${helpers(41)}\n`);
