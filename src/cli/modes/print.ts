@@ -39,6 +39,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
@@ -181,6 +182,12 @@ interface HeadlessMainAgentResult {
 	 * cannot read. Its notice is the failure, and text mode has already printed it.
 	 */
 	admissionRefused: boolean;
+	/**
+	 * The answer a citation check sent back for corrected line ranges. The
+	 * reply to that check can hold only the corrections, so the printed answer
+	 * keeps this one unless the reply restates it.
+	 */
+	citationCheckedAnswer: string | null;
 }
 
 interface HeadlessMainAgentRunStats {
@@ -297,6 +304,26 @@ function assistantError(message: AgentMessage | undefined): string | null {
  * never masquerade as the assistant's answer, and an assistant message is
  * the answer only when its stop reason is not a failure.
  */
+/** Share of the checked answer's lines a reply must repeat to count as restating it. */
+const RESTATED_LINE_SHARE = 0.6;
+
+/**
+ * The answer to print after a citation check. A reply that restates the
+ * checked answer stands alone; a reply that holds only the corrections follows
+ * the answer it corrects, as the transcript shows them, so the caller never
+ * receives the corrections without the answer.
+ */
+function answerAfterCitationCheck(checked: string | null, reply: string): string {
+	if (checked === null || checked.length === 0 || reply.length === 0 || reply === checked) return reply;
+	const lines = checked
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+	const repeated = lines.filter((line) => reply.includes(line)).length;
+	if (lines.length > 0 && repeated / lines.length >= RESTATED_LINE_SHARE) return reply;
+	return `${checked}\n\n${reply}`;
+}
+
 function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
 	if (event.type === "tool_execution_end") {
 		const result = event.result as { terminate?: boolean; content?: unknown } | undefined;
@@ -319,6 +346,9 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		}
 		if (event.key === "turn.interrupted") {
 			return { ...current, lastNotice: text, abortReason: text };
+		}
+		if (event.text.startsWith(CITATION_CHECK_PREFIX) && current.text.length > 0) {
+			return { ...current, lastNotice: text, citationCheckedAnswer: current.text };
 		}
 		return { ...current, lastNotice: text };
 	}
@@ -823,6 +853,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		endedQuietly: false,
 		callsNotRun: null,
 		admissionRefused: false,
+		citationCheckedAnswer: null,
 	};
 	const runStats: HeadlessMainAgentRunStats = {
 		toolRounds: [],
@@ -1203,7 +1234,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// chatter the model never offered as a reply. Printing that chatter instead
 			// hands the operator a dangling "let me try..." for a turn that succeeded.
 			const answer =
-				result.sawTerminatingToolResult && result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
+				result.sawTerminatingToolResult && result.terminatingToolText.length > 0
+					? result.terminatingToolText
+					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text);
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
 		// The answer stands, so the run still succeeds; the caller still learns that its last calls never ran.
@@ -1220,7 +1253,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			startedAt,
 			endedAt,
 			exitCode,
-			text: settledAnswer(result.sawTerminatingToolResult ? result.terminatingToolText : result.text),
+			text: settledAnswer(
+				result.sawTerminatingToolResult
+					? result.terminatingToolText
+					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text),
+			),
 			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 			// The run's own verdict, so a host bridge reads why the run ended,
 			// and which calls a headless run refused, without parsing prose.

@@ -30,6 +30,8 @@ import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration 
 import { mutationPathsForTool } from "./finish-contract.js";
 
 export const CITATION_GROUNDING_REGISTRATION_ID = "assessor.citation-grounding";
+/** Opens the check's reminder, which also reaches the transcript as a notice. */
+export const CITATION_CHECK_PREFIX = "[Clio Coder] Citation check:";
 
 /** How many unbacked citations one nudge names before it counts the rest. */
 const NAMED_CITATION_LIMIT = 8;
@@ -216,7 +218,7 @@ function buildCitationGroundingMessage(unbacked: ReadonlyArray<LineCitation>): s
 	const named = unbacked.slice(0, NAMED_CITATION_LIMIT).map(formatCitation).join(", ");
 	const rest = unbacked.length - NAMED_CITATION_LIMIT;
 	return (
-		`[Clio Coder] Citation check: ${named}${rest > 0 ? ` and ${rest} more` : ""} cite line numbers no tool printed; ` +
+		`${CITATION_CHECK_PREFIX} ${named}${rest > 0 ? ` and ${rest} more` : ""} cite line numbers no tool printed; ` +
 		"those files were read without line numbers, so the ranges were counted or recalled. Before answering, " +
 		"re-read each cited region with read line_numbers=true (grep the symbol first to find its offset) and correct " +
 		"the ranges, or cite the symbol name without a line number. Keep the rest of the answer as it is; this check " +
