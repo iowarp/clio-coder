@@ -1,7 +1,11 @@
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
 import { type ClioMdSection, HANDBOOK_TARGETS, serializeClioMd } from "./clio-md.js";
 
-/** Ignore prose punctuation, but keep operators and glob syntax inside code. */
+/**
+ * Ignore prose punctuation, but keep operators and glob syntax inside code. A
+ * clause-final colon goes too, so "Keep X: Y." splits into a clause equal to
+ * the rule "Keep X.".
+ */
 export function normalizeHandbookRule(text: string): string {
 	return text
 		.replace(/^\s*(?:[-*+]\s|\d+\.\s)/, "")
@@ -12,7 +16,7 @@ export function normalizeHandbookRule(text: string): string {
 				? part
 				: part
 						.replace(/[*]/g, "")
-						.replace(/[.,;](?=\s|$)/g, " ")
+						.replace(/[.,;:](?=\s|$)/g, " ")
 						.toLowerCase(),
 		)
 		.join("")

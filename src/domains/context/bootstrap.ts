@@ -1643,6 +1643,15 @@ function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: Model
 	return carried;
 }
 
+/**
+ * A carried rule and each run of its leading clauses: a model that shortened
+ * "Keep X: Y." to "Keep X." restated the carried rule and adds nothing to it.
+ */
+function carriedRuleKeys(rule: string): string[] {
+	const clauses = rule.split(/(?<=[.;:!?])\s+/);
+	return clauses.map((_, index) => clauses.slice(0, index + 1).join(" "));
+}
+
 interface CarriedInvariant {
 	rule: string;
 	/** What grounding leaves of a model copy of the previous rule: its sentences that name CI are cut whole. */
@@ -1835,13 +1844,13 @@ function stabilizeGeneratedOutput(
 		: [];
 	const carried = carriedInvariants.map((entry) => entry.rule);
 	const carriedBlocks = carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : [];
-	// A model rule gives way to carried content only when it states it word for word. One that resembles a
-	// carried rule may add a clause, flip a prohibition or change its scope, so both stay. A model copy of a
-	// carried invariant loses its CI sentences, so what remains of it counts as the carried rule too.
+	// A model rule gives way to carried content only when it states it, or its leading clauses, word for word.
+	// One that resembles a carried rule may add a clause, flip a prohibition or change its scope, so both stay.
+	// A model copy of a carried invariant loses its CI sentences, so what remains of it counts as the carried rule too.
 	const carriedKeys = new Set(
 		[
-			...carriedInvariants.flatMap((entry) => [entry.rule, entry.modelCopy]),
-			...carriedBlocks.flatMap((section) => handbookBlocks(section.body)),
+			...carriedInvariants.flatMap((entry) => [...carriedRuleKeys(entry.rule), entry.modelCopy]),
+			...carriedBlocks.flatMap((section) => handbookBlocks(section.body)).flatMap(carriedRuleKeys),
 		]
 			.filter((rule) => rule.length > 0)
 			.map(normalizeHandbookRule),

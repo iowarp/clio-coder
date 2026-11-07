@@ -206,6 +206,52 @@ it("cuts every sentence of a model line that names CI, and only the CI clauses o
 	strictEqual(/scripts\/check\.js` on every push|breaks `scripts\/check\.js`/.test(handbook), false, handbook);
 });
 
+// A rewrite kept the model's "Keep X." beside the carried "Keep X: Y." as a second invariant.
+it("drops a model rule that repeats a carried rule's leading clause", async () => {
+	// Under 40 characters, so the final fit's clause test does not apply and only the carried keys catch it.
+	const carried = "Keep `renderWidget()` exported: `src/widgets/render.ts` defines it.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		["# harbor", "", "A widget renderer.", "", "## Hard invariants", "", `1. ${carried}`, ""].join("\n"),
+	);
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: ["Keep `renderWidget()` exported."],
+				conventions: [],
+				sections: [],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
+	deepStrictEqual(
+		[...hard.matchAll(/^\d+\. (.+)$/gm)].map((match) => match[1]),
+		[carried],
+		handbook,
+	);
+});
+
+it("drops a model rule that a protected rule states as the clause before its colon", () => {
+	const rule = "Keep `src/index.ts` exporting `renderWidget()` for every release";
+	const fitted = fitGeneratedHandbook(
+		{
+			projectName: "harbor",
+			identity: "A widget renderer.",
+			invariants: [`${rule}: \`src/widgets/render.ts\` defines it.`, `${rule}.`],
+			conventions: [],
+			sections: [],
+		},
+		{ invariants: [`${rule}: \`src/widgets/render.ts\` defines it.`], sections: [] },
+	);
+	deepStrictEqual(fitted.invariants, [`${rule}: \`src/widgets/render.ts\` defines it.`]);
+});
+
 it("marks a module a rule calls preloaded when no plain node script preloads it", async () => {
 	mkdirSync(join(cwd, "tests", "harness"), { recursive: true });
 	mkdirSync(join(cwd, "scripts"));
