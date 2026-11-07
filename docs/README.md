@@ -40,29 +40,39 @@ current source for implementation decisions.
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 | Run a parameter sweep as Slurm experiments and judge each run | [Slurm parameter sweeps](guide/slurm.md#parameter-sweeps) |
 
-A minimal first run needs a model to talk to: a local app such as Ollama or LM
-Studio, a lab gateway, an AI subscription, or a cloud API. Guided setup starts
-from those recognizable choices, fills in Clio Coder's internal connection name,
-checks the endpoint when possible, and offers the models it can discover. The
-endpoint shortcut is available for operators who already know a server URL.
+## Your first hour
 
-The installer brings its own Node.js and needs no root. Installing from npm
-needs Node.js 22.19 or newer.
+Each step names one command and the section to read next. Skip what you
+already know.
 
-```bash
-curl -fsSL https://coder.iowarp.ai/install.sh | sh
-clio-coder configure
-cd /path/to/your/project
-clio-coder
-```
+1. **Install and connect.** Run the installer, then `clio-coder` in a project.
+   The first launch opens setup: pick what you already have, and the first
+   connection you save (a *target*) becomes the model for chat and workers.
+   Read [First-run flow](guide/configuration-and-targets.md#first-run-flow);
+   if it fails, see [Install and startup](guide/troubleshooting.md#install-and-startup).
+2. **Check the install.** `clio-coder doctor` lists problems first and
+   `doctor --fix` makes only the repairs it reports. See [Doctor](guide/doctor.md).
+3. **Ask a read-only question.** Ask how the project builds and tests, with
+   "do not change files". `/help` lists commands; Clio also answers questions
+   about itself from these docs. See
+   [Interactive slash commands](guide/commands-and-modes.md#interactive-slash-commands).
+4. **Make one small change.** Name the finish line: which test must pass,
+   which number must match. Approval cards appear for commands Clio cannot
+   sandbox or recognize; see
+   [Operating posture and autonomy](guide/commands-and-modes.md#operating-posture-and-autonomy).
+   `/view` shows the evidence it kept.
+5. **Write the finish line down.** `.clio-coder/quality.yaml` names the checks
+   each changed path needs. See [Project quality policies](guide/quality-policy.md).
+6. **Use a second model.** Add another target with `/config`, switch chat with
+   `/model`, or send workers elsewhere: see
+   [Configure a different model for workers](guide/configuration-and-targets.md#configure-a-different-model-for-workers).
+7. **Add your field's tools.** `clio-coder library search <topic>` finds packs
+   such as `plugin:hpc`. See [Science packs](guide/resource-library.md#science-packs).
 
-`npm install -g @iowarp/clio-coder` replaces the first command when you manage
-Node.js yourself. [Graphical Application](guide/gui.md) covers the browser
-interface, which has its own guided setup.
-
-Use `clio-coder --help` for the installed command surface and `/help` inside an
-interactive session. `clio-coder doctor` is a read-only installation check;
-`doctor --fix` performs only the repairs it reports.
+`/resume` continues an earlier conversation. Scripts and CI use
+`clio-coder run`; see [Headless run flags](guide/commands-and-modes.md#headless-run-flags).
+The [GUI guide](guide/gui.md) covers the browser interface, which runs the same
+setup.
 
 ## Using Clio Coder day to day
 

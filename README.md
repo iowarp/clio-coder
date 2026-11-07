@@ -4,32 +4,32 @@
 
 # Clio Coder
 
-**One coding agent for every model you can reach, built for the code science runs on.**
+**The meta-harness for scientific software: every model you have, one way of
+working, and checks you can inspect.**
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm version" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?color=00a6ad&amp;style=flat-square" /></a>
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
 </p>
 
-Your models change every few months. The way you work shouldn't have to.
-Clio Coder is an open-source coding agent harness that runs on the model
-access you already have: a local server, your lab's inference gateway, a cloud
-API key, or the subscriptions you already pay for, such as ChatGPT, Claude, and
-GitHub Copilot. Your project guidance, tools, safety rules, and history stay
-the same whichever model is answering.
+You probably reach models in more than one way: Ollama or vLLM on a GPU box,
+your lab's gateway, a cloud API key, and a ChatGPT, Claude, or GitHub Copilot
+subscription. Each usually comes with its own agent and its own habits.
+Clio Coder is one open-source harness over all of them. Your project guidance,
+tools, safety rules, sessions, and evidence stay the same whichever model is
+answering, and switching models takes one command.
 
-It is built for scientific software: simulation codes, numerical libraries,
+It is built for the code science runs on: simulations, numerical libraries,
 data pipelines, and HPC workflows, where a change is done only when the checks
 say so.
 
-- **Bring every model.** Chat on one model, send workers to others, and switch
-  with `/model`. No Clio account, no lock-in.
-- **Check the work, not just the diff.** Clio runs your tests, compares numbers
-  within a declared tolerance, and reruns computations from pinned inputs. It
-  records every result so you can see what passed, what failed, and what was
-  never checked.
-- **Speaks science.** Reads HDF5, NetCDF, and Parquet. Drives Slurm through MCP.
-  Ships library packs for HPC, science data, literature, and life science.
+- **Every model, one workflow.** Chat on one model and send workers to others:
+  a local model for searches, a strong one for review. No Clio account.
+- **Checks you can inspect.** Clio runs your tests, compares numbers within a
+  stated tolerance, and reruns computations from pinned inputs. It records
+  what passed, what failed, and what was never checked.
+- **Speaks science.** Reads HDF5, NetCDF, and Parquet, drives Slurm through
+  MCP, and installs on HPC login nodes without root.
 - **You set the authority.** Approvals, read-only runs, OS sandboxing, and
   damage-control rules decide what the agent may touch.
 
@@ -50,7 +50,7 @@ say so.
 
 ## Get started
 
-You need **a model that supports tool calling**. Linux, macOS, and WSL are the
+You need a model that supports tool calling. Linux, macOS, and WSL are the
 primary platforms; native Windows is best effort.
 
 **1. Install.** The installer brings its own Node.js and needs no root:
@@ -59,58 +59,55 @@ primary platforms; native Windows is best effort.
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
 ```
 
-Already have **Node.js 22.19 or newer**? Use npm instead:
+With Node.js 22.19 or newer already installed, npm works too:
 
 ```bash
 npm install -g @iowarp/clio-coder
 ```
 
-**2. Open a project and connect a model.**
+**2. Start it in a project.**
 
 ```bash
 cd /path/to/your/project
 clio-coder
 ```
 
-On first launch Clio opens a guided setup. Pick what you have, such as a local
-app (Ollama, LM Studio), a model server URL, a subscription sign-in, or an API
-key, and choose a model. Use `/model` later to switch and `/config` to rerun setup.
+The first launch opens setup. Pick what you already have (an app on this
+computer, a model server, a subscription, or an API key), and Clio checks the
+connection and lists the models it can reach. Later, `/model` switches models
+and `/config` reruns setup.
 
-**3. Ask for something useful.** Start by learning the repository:
+**3. Ask for something real.** Start read-only:
 
-> Explain how this repository builds and runs its tests, identify the main
-> entry points, and suggest one verification task. Do not change files yet.
+> Explain how this repository builds and runs its tests, and name its main
+> entry points. Do not change files.
 
-Then give it a focused change with a clear acceptance criterion:
+Then a focused change with a clear finish line:
 
-> Investigate the failing numerical check. Make the smallest fix that keeps
-> the public API, run the relevant checks, show me the diff, and tell me
-> anything you could not verify.
+> The test in tests/test_solver.py fails. Make the smallest fix, run the
+> tests, show me the diff, and tell me anything you could not verify.
 
-`/help` lists commands, and `clio-coder doctor` checks the installation and
-connections. If your shell cannot find `clio-coder`, follow the installer's
-`PATH` instruction, then run `command -v clio-coder` to see which file the
-bare name reaches.
+Clio asks before commands it cannot sandbox or recognize, and before outward
+actions such as `git push`. Ask it about itself too, such as "how do I send
+workers to a different model?": it searches its own bundled documentation.
+`/help` lists commands, `clio-coder doctor` checks the installation, and
+[your first hour](docs/README.md#your-first-hour) walks through the next
+steps. If your shell cannot find `clio-coder`, follow the installer's `PATH`
+instruction, then run `command -v clio-coder` to see which file the bare name
+reaches.
 
 <details>
-<summary><strong>Other package managers, no-install use, and building from source</strong></summary>
+<summary><strong>Other package managers, and building from source</strong></summary>
 
 ```bash
-# pnpm
 pnpm add -g @iowarp/clio-coder
-
-# Bun; clio-coder still runs on Node.js 22.19 or newer from PATH
-bun add -g @iowarp/clio-coder
-
-# Run without a global install
-npx --yes @iowarp/clio-coder@latest
-
-# Include the optional Claude Agent SDK at install time
-curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --include-claude-sdk
+bun add -g @iowarp/clio-coder         # still runs on Node.js 22.19+ from PATH
+npx --yes @iowarp/clio-coder@latest   # no global install
 ```
 
-The installer skips the Claude Agent SDK, about 224 MB, by default. Interactive
-Claude setup can offer it on first use.
+The installer skips the optional Claude Agent SDK (about 224 MB); Claude setup
+offers it on first use, or install it up front with
+`curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --include-claude-sdk`.
 
 From source, build the release tag:
 
@@ -130,141 +127,68 @@ See the [contributor guide](CONTRIBUTING.md) for development on the version bran
 </details>
 
 <details>
-<summary><strong>HPC hosts, installer locations, and download verification</strong></summary>
+<summary><strong>HPC login nodes, native Windows, and pre-releases</strong></summary>
 
 The native installer supports x64 Linux with glibc 2.17 or newer, including
-HPC login nodes. Its private runtime leaves system Node unchanged.
+HPC login nodes, and leaves system Node unchanged. It installs under
+`~/.local/share/clio-coder-install` (macOS: `~/Library/Application
+Support/clio-coder/install`) with the launcher at `~/.local/bin/clio-coder`.
+It checks Node downloads against `SHASUMS256.txt` and verifies release
+signatures when `gpgv` or `gpg` is available. If the website is unreachable,
+use `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
+On Linux it offers the desktop app; `--gui` or `--no-gui` answers up front.
+[HPC clusters](docs/guide/hpc-clusters.md) covers proxies, older glibc,
+mirrors, and air-gapped sites.
 
-| Platform | Default install root | Launcher |
-| --- | --- | --- |
-| Linux | `~/.local/share/clio-coder-install` | `~/.local/bin/clio-coder` |
-| macOS | `~/Library/Application Support/clio-coder/install` | `~/.local/bin/clio-coder` |
+On native Windows, run `irm https://coder.iowarp.ai/install.ps1 | iex` in
+PowerShell. It needs no administrator rights and writes the launcher to
+`%USERPROFILE%\.local\bin\clio-coder.cmd`. Release checks only boot the
+package on Windows, so interactive use there is best effort.
 
-If the website is unreachable, use the installer attached to the GitHub release:
-
-```bash
-curl -fsSL https://github.com/iowarp/clio-coder/releases/latest/download/install.sh | sh
-```
-
-The installer checks Node downloads against SHASUMS256.txt and attempts
-release-signature verification when `gpgv` or `gpg` is available.
-
-On a Linux terminal, the installer also offers the desktop app. Pass `--gui`
-or `--no-gui` to answer up front. See [HPC clusters](docs/guide/hpc-clusters.md)
-for proxies, older glibc, mirrors, and airgapped sites, and
-[installation and lifecycle](docs/guide/installation-and-lifecycle.md) for
-runtime and launcher management.
+Release candidates ship on the `beta` channel:
+`curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta`,
+`npm install -g @iowarp/clio-coder@beta`, or `clio-coder upgrade --channel beta`.
+Return with `clio-coder upgrade --channel latest`.
 
 </details>
 
 <details>
-<summary><strong>Native Windows installation — best effort</strong></summary>
+<summary><strong>Updates, rollback, reset, and uninstall</strong></summary>
 
-WSL uses the Unix installation path. Native Windows has a separate installer:
-
-```powershell
-irm https://coder.iowarp.ai/install.ps1 | iex
-```
-
-From CMD:
-
-```cmd
-curl.exe -fsSL https://coder.iowarp.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
-```
-
-The native installers need no administrator rights. They install under
-`%LOCALAPPDATA%\clio-coder\install` and write the launcher to
-`%USERPROFILE%\.local\bin\clio-coder.cmd`. PowerShell adds that launcher
-directory to your user `PATH` unless you pass `-NoModifyPath`.
-
-Use the current stable release. Native installer verification remains limited:
-the optional release job boots the packed candidate on Windows, but does not
-verify the complete installer lifecycle. Interactive native terminal use is
-best effort; see the [installation guide](docs/guide/installation-and-lifecycle.md).
-
-</details>
-
-<details>
-<summary><strong>Beta releases, development snapshots, and returning to stable</strong></summary>
-
-`beta` follows release candidates and newer stable releases:
-
-```bash
-curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta
-npm install -g @iowarp/clio-coder@beta
-clio-coder upgrade --channel beta
-```
-
-In PowerShell:
-
-```powershell
-& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel beta
-```
-
-**New dev snapshots are currently disabled** while CI trusted publishing is
-unavailable. The `dev` channel may point to an existing published version; it
-is not a promise of a fresh snapshot of the development branch. Snapshot
-version support remains in the release tooling for when publishing resumes.
-
-Return to stable with `clio-coder upgrade --channel latest`, or rerun the
-installer with `--channel latest` (`-Channel latest` in PowerShell). This can
-install stable even when its version is lower than the prerelease. The notice
-names recorded dated lifecycle migrations; switching binaries does not undo
-those migrations.
-
-For managed installs, `clio-coder upgrade --rollback` returns to the previous
-supported binary and disables background updates. Global npm, pnpm, and Bun
-users can select `@iowarp/clio-coder@latest` through their package manager.
-
-</details>
-
-<details>
-<summary><strong>Updates, version pins, rollback, reset, and uninstall</strong></summary>
-
-| Goal | Command or setting |
+| Goal | Command |
 | --- | --- |
-| Update on demand | `clio-coder upgrade`, or `/upgrade` inside the terminal |
-| Follow stable | `clio-coder upgrade --channel latest` |
-| Restore the previous managed binary | `clio-coder upgrade --rollback` |
-| Disable background installation | `--no-auto-update` or `CLIO_CODER_AUTO_UPDATE=0` |
-| Pin a managed install | Install an exact version with `--version` |
-| Clear session state while keeping the launcher | `clio-coder reset --state` |
-| Remove Clio: settings, credentials, data, state, caches, the launcher, and a managed install's runtime and versions | `clio-coder uninstall` |
-| Preserve settings and credentials during uninstall | Add `--keep-config` |
-| Keep the launcher, runtime, and installed versions during uninstall | Add `--keep-binary` |
+| Update now | `clio-coder upgrade`, or `/upgrade` in the terminal |
+| Restore the previous installer version | `clio-coder upgrade --rollback` |
+| Turn off background updates | Install with `--no-auto-update`, or set `CLIO_CODER_AUTO_UPDATE=0` |
+| Clear sessions but keep settings | `clio-coder reset --state` |
+| Start model setup over | `clio-coder reset --settings` |
+| Remove Clio Coder, keeping settings and credentials | `clio-coder uninstall --keep-config` |
+| Remove everything | `clio-coder uninstall` |
 
-An idle interactive session checks a managed install's channel at most once a
-day. It installs a newer release beside the current one and switches the
-launcher; the running session keeps its loaded version until restart. Resume
-your conversation afterward with `/resume`. An exact version pin holds the
-install there until you explicitly choose to follow a channel again.
-
-For global npm, pnpm, and Bun installations, the terminal checks for updates
-and shows a notice. `clio-coder upgrade` updates an npm install; for pnpm and
-Bun it prints the package-manager command. Rollback changes the binary and
-disables background updates; it does not undo changes made to your project.
-
-See [installation and lifecycle](docs/guide/installation-and-lifecycle.md)
-before removing an installation that contains work you want to retain.
+An installer install checks its channel at most once a day while idle,
+installs a newer release beside the current one, and switches over at the
+next start; `/resume` picks your conversation back up. npm, pnpm, and Bun
+installs show a notice instead. Reset and uninstall preview what they remove
+and ask first. See [installation and lifecycle](docs/guide/installation-and-lifecycle.md).
 
 </details>
-
 
 ## For AI agents: installing Clio Coder
 
-If a user asked you to install or set up Clio Coder for them, follow these
-steps. Every command is non-interactive unless marked otherwise.
+If a user asked you to install or set up Clio Coder, follow these steps. Every
+command here is non-interactive and was run as written; steps that need the
+human are listed at the end.
 
-1. **Install** (no root needed; brings its own Node.js):
+1. **Install** without root. `--no-gui` skips the desktop-app question:
 
    ```bash
-   curl -fsSL https://coder.iowarp.ai/install.sh | sh
+   curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --no-gui
    ```
 
-   If Node.js 22.19 or newer is already on `PATH`, `npm install -g @iowarp/clio-coder`
-   also works. On native Windows, use `irm https://coder.iowarp.ai/install.ps1 | iex`.
+   With Node.js 22.19 or newer on `PATH`, `npm install -g @iowarp/clio-coder`
+   also works. On native Windows: `irm https://coder.iowarp.ai/install.ps1 | iex`.
 
-2. **Verify** the launcher. The installer writes it to `~/.local/bin`:
+2. **Verify** the launcher the installer wrote:
 
    ```bash
    export PATH="$HOME/.local/bin:$PATH"
@@ -272,108 +196,116 @@ steps. Every command is non-interactive unless marked otherwise.
    command -v clio-coder
    ```
 
-   If `command -v` prints nothing or a different file, tell the user to add
-   `~/.local/bin` to their shell profile.
+   The installer does not edit shell profiles unless given `--modify-path`.
+   If `command -v` prints nothing or another file, tell the user to add
+   `~/.local/bin` to `PATH` in their shell profile, or rerun the installer
+   with `--modify-path` if they agree.
 
-3. **Connect a model.** Ask the user which model access they have, then save a
-   target and make it the default:
+3. **Connect a model.** Ask the user what they use, then save it as a
+   *target* (a named connection) and make it the chat default:
 
    ```bash
-   clio-coder configure --list                 # runtimes and what each needs
-   # A local server, e.g. Ollama:
+   clio-coder configure --list    # every runtime id and what it needs
+
+   # A local Ollama server
    clio-coder configure --id local --runtime ollama \
      --url http://127.0.0.1:11434 --model <model> --set-orchestrator
-   # A cloud API, with the key in an environment variable:
+
+   # A lab gateway (LiteLLM or another OpenAI-compatible server)
+   clio-coder configure --id lab --runtime litellm \
+     --url https://gateway.example.org --model <model> \
+     --api-key-env LAB_API_KEY --set-orchestrator
+
+   # A cloud API key the user already exports
    clio-coder configure --id work --runtime anthropic \
      --model <model> --api-key-env ANTHROPIC_API_KEY --set-orchestrator
-   clio-coder targets --probe                  # check the connection
    ```
 
-   Never write an API key into a file or a command line yourself; use
-   `--api-key-env` with a variable the user already exports.
+   `clio-coder models --target <id>` lists the model ids a target offers, and
+   `clio-coder targets --probe` checks each connection. Never write a key into
+   a file or onto a command line yourself: `--api-key-env` names a variable,
+   and Clio reads it at call time.
 
-4. **Check the installation:** `clio-coder doctor`. Fix what it reports, or run
-   `clio-coder doctor --fix` for the repairs it can make safely.
+4. **Check the installation:** `clio-coder doctor` lists problems first, and
+   `clio-coder doctor --fix` makes the repairs it can make safely.
 
-5. **Smoke test** in the user's project:
+5. **Smoke test** in the user's project. `--read-only` guarantees no file
+   changes; exit code 0 means the model answered:
 
    ```bash
-   clio-coder run "Summarize this repository's entry points. Do not change files."
+   clio-coder run --read-only "Summarize this repository and how to run its tests."
    ```
 
-**Leave these to the human:** subscription sign-ins open a browser or ask
-for a pasted code. Tell the user to run `clio-coder auth login openai-codex`
-(ChatGPT), `clio-coder auth login anthropic-max` (Claude), or `clio-coder auth
-login alcf` (Argonne), or `copilot login` then `clio-coder auth login
-copilot-sdk` (GitHub Copilot). The interactive terminal (`clio-coder`) and
-`/config` setup also need a person at the keyboard.
+**Leave these to the human:**
 
-**Looking something up:** `clio-coder --help`, `clio-coder <command> --help`,
-and `clio-coder paths` (where settings and data live). The guides in
-[docs/](docs/README.md) ship inside the package. Inside a Clio session, the
-offline `clio_docs` capability answers questions about Clio itself.
+- Subscription sign-ins open a browser or ask for a pasted code:
+  `clio-coder auth login openai-codex` (ChatGPT),
+  `clio-coder auth login anthropic-max` (Claude), or
+  `clio-coder auth login alcf` (Argonne). For GitHub Copilot, the user signs in
+  with `copilot login` or `gh auth login`, then runs
+  `clio-coder auth login copilot-sdk` to finish setup.
+- The interactive terminal (`clio-coder`), the setup wizard
+  (`clio-coder configure` with no flags), and approving project trust.
+
+A headless `run` denies anything that would need an approval, so put limits
+and decisions in the prompt. For more, use `clio-coder --help`,
+`clio-coder <command> --help`, and `clio-coder paths`. The guides in
+[docs/](docs/README.md) ship inside the package.
 
 <details>
 <summary><strong>Working on this repository instead</strong></summary>
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [architecture guide](docs/architecture/architecture.md). A local
-`CLIO-CODER.md` gives checkout guidance when present. Resolve implementation
-questions from source, schemas, and focused behavioral checks. Contributions
-target the current version branch; `main` advances with releases.
+`CLIO-CODER.md` gives checkout guidance when present. Contributions target the
+current version branch; `main` advances with releases.
 
 </details>
 
 ## What you can do
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder in the terminal" width="49%" />
-  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/gui-conversation.webp" alt="Clio Coder desktop app" width="49%" />
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal at start, with the project, its Git state, the selected model, and the composer" width="100%" /></a>
 </p>
 
-**Change scientific code and prove it.** Declare what "done" means: tests,
-numerical comparisons with a tolerance, performance budgets. Clio runs the
-checks, records the results as evidence, and keeps a claims ledger of what was
-proposed, tested, supported, or refuted. `reproduce` reruns a computation from
-sha256-pinned inputs and compares the output.
+**Change scientific code and prove it.** Say what "done" means: tests, a
+numerical comparison with a tolerance, a performance budget. Clio runs the
+checks and keeps the results as evidence; `clio-coder evidence list` and
+`/view` show them. A `reproduce` check reruns an analysis from sha256-pinned
+inputs, and `clio-coder claims` lists what was supported or refuted.
 
 **Read scientific data.** The `data` tool inspects HDF5, NetCDF, and Parquet
-files with summary statistics, so the agent can reason about real outputs
-instead of guessing at them.
+files with summary statistics, so the agent reasons about real outputs instead
+of guessing.
 
-**Run on clusters.** Clio installs on HPC login nodes without root, works with
-air-gapped sites, and drives Slurm jobs through MCP. See
+**Run on clusters.** Install on a login node without root, work on air-gapped
+sites, and submit and watch Slurm jobs through MCP. See
 [HPC clusters](docs/guide/hpc-clusters.md) and [Slurm](docs/guide/slurm.md).
 
-**Split the work across models.** Send workers to other targets: a fast local
-model for a search, a strong cloud model for a design review. `/oracle` asks a
-model from a different family for a second opinion. Each worker gets a fixed
-permit for its tools and returns a receipt. See
-[fleet dispatch](docs/guide/fleet-dispatch.md).
+**Split the work across models.** Workers run on other targets with a fixed
+permit for their tools and return a receipt. `/oracle` asks a read-only
+advisor to challenge a decision, and `/council` puts one task to a roster of
+read-only members. See [fleet dispatch](docs/guide/fleet-dispatch.md).
 
-**Know what it cost.** `/usage` shows spend per target, including the cost per
-verified outcome, and `clio-coder telemetry insights` summarizes where time and
-tokens went. All of it stays on your machine.
+**Know what it cost.** `/usage` shows spend per target and the cost per
+verified outcome. Sessions, evidence, and telemetry stay on your machine.
 
-**Keep long sessions going.** Compaction summarizes old turns inside the cached
-prompt prefix, so long sessions stay fast and cheap.
-
-**Add skills and tools.** Install reviewed packages from the library, including
-packs for `hpc`, `science-data`, `literature`, and `life-science`:
+**Add skills and tools.** Install reviewed packs from the bundled library,
+including `hpc`, `science-data`, `literature`, and `life-science`:
 
 ```bash
 clio-coder library search slurm
-clio-coder library install plugin:hpc
+clio-coder library install plugin:hpc --with-requirements
 ```
 
-Clio also loads MCP servers, skills, agents, prompts, and its own process-isolated
-extensions. See the [library](docs/guide/resource-library.md) and
-[harness extensions](docs/guide/harness-extensions.md).
+Clio also loads MCP servers, skills, agents, prompts, and its own
+process-isolated extensions. See the [library](docs/guide/resource-library.md)
+and [extensions](docs/guide/harness-extensions.md).
 
 ## Models
 
-A saved connection is a **target**. Chat and workers can use different targets,
-models, and thinking levels. `/model` switches the conversation.
+A saved connection is a **target**. Chat and workers can use different
+targets, models, and thinking levels, and `/model` switches the conversation.
 
 | Connection | Supported |
 | --- | --- |
@@ -382,15 +314,13 @@ models, and thinking levels. `/model` switches the conversation.
 | Cloud APIs | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock, Inception |
 | Subscriptions | ChatGPT (`openai-codex`), Claude (`anthropic-max`), GitHub Copilot (`copilot-sdk`) |
 | Institutional | Argonne ALCF Sophia and Metis through Globus |
-| Other coding agents | Delegate to Claude Code, Codex, OpenCode, Pi, and Antigravity |
+| Other coding agents, as workers | Claude Code, Codex, OpenCode, Pi, Antigravity |
 
-Start with a model whose tool calling works reliably on your runtime. A
-supported protocol does not guarantee every model's quality. See
-[connections and targets](docs/guide/configuration-and-targets.md) and the
+Start with a model whose tool calling works reliably on your runtime; a
+supported protocol does not guarantee every model's quality. The providers
+you configure receive the requests sent to them. See
+[configuration and targets](docs/guide/configuration-and-targets.md) and the
 [model catalog](docs/architecture/model-catalog.md).
-
-Sessions, evidence, and telemetry are stored locally. The providers you
-configure receive the requests sent to them.
 
 ## Interfaces
 
@@ -402,9 +332,7 @@ configure receive the requests sent to them.
 | **Editors** | `clio-coder acp` | Agent Client Protocol clients |
 
 All surfaces share the same connections, project context, and tool policy.
-A headless run has no one to answer questions, so permission asks are denied;
-put decisions and limits in the prompt. See
-[commands and modes](docs/guide/commands-and-modes.md),
+See [commands and modes](docs/guide/commands-and-modes.md),
 [the GUI guide](docs/guide/gui.md), and [interoperability](docs/guide/interop.md).
 
 ## Safety and control
@@ -414,9 +342,9 @@ of that it may do on its own.
 
 | Control | What it does |
 | --- | --- |
-| **Approvals** | Reads, edits, and recognized checks run; unfamiliar commands and outward actions ask first. |
+| **Approvals** | Reads, edits, and sandboxed or recognized commands run; other commands and outward actions such as `git push` ask first. |
 | **Read-only** | `--read-only` leaves every user file exactly as it was. Clio may still write its own logs and memory. |
-| **Sandbox** | Workers and read-only shell commands run in an OS sandbox (bubblewrap on Linux) when one is available. |
+| **Sandbox** | Workers and shell commands at default autonomy run in an OS sandbox (bubblewrap on Linux) when one is available. |
 | **Damage control** | Hard blocks and protected paths apply even in Yolo mode, which only removes ordinary prompts. |
 | **Secrets** | Credentials are masked in command output and approval cards. |
 | **Project trust** | Project plugins and extensions wait for your approval before they load. |
@@ -430,18 +358,20 @@ the [safety model](docs/architecture/safety-model.md) and
 
 | You want to… | Start here |
 | --- | --- |
-| Install, connect, troubleshoot | [Website docs](https://coder.iowarp.ai/docs.html) · [Installation](docs/guide/installation-and-lifecycle.md) · [Troubleshooting](docs/guide/troubleshooting.md) |
+| Get productive in the first hour | [Your first hour](docs/README.md#your-first-hour) |
+| Install, connect, troubleshoot | [Installation](docs/guide/installation-and-lifecycle.md) · [Connect a model](docs/guide/configuration-and-targets.md) · [Troubleshooting](docs/guide/troubleshooting.md) |
 | Find a command or setting | [Commands and modes](docs/guide/commands-and-modes.md) · [Configuration reference](docs/guide/configuration-reference.md) |
 | Define checks or coordinate workers | [Quality policies](docs/guide/quality-policy.md) · [Fleet dispatch](docs/guide/fleet-dispatch.md) |
-| Understand context and memory | [Project context](docs/architecture/project-context.md) · [Context continuity](docs/guide/context-continuity.md) |
 | Explore the implementation | [Architecture](docs/architecture/architecture.md) · [Documentation map](docs/README.md) |
+
+The same guides are on the [website](https://coder.iowarp.ai/docs.html).
 
 ## Contribute and get help
 
-Clio Coder is pre-1.0 and moving fast. Good reports describe the task, what you
-expected, what happened, Clio and Node versions, and a reproduction; output from
-`clio-coder doctor` helps. Redact credentials and private data first.
-Experience reports from scientific projects are especially welcome.
+Good reports describe the task, what you expected, what happened, the Clio and
+Node versions, and a reproduction; output from `clio-coder doctor` helps.
+Redact credentials and private data first. Experience reports from scientific
+projects are especially welcome.
 
 [Issues](https://github.com/iowarp/clio-coder/issues) ·
 [Discussions](https://github.com/iowarp/clio-coder/discussions) ·
