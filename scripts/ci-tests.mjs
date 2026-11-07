@@ -77,6 +77,7 @@ export const coreTests = [
 	"telemetry-multi-install",
 	"approval-card-arguments",
 	"footer-snapshot",
+	"quota-tui",
 	"tui-presentation-modes",
 	"copilot-sdk-route",
 	"copilot-keychain",
