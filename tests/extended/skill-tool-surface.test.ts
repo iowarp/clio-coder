@@ -135,11 +135,11 @@ it("awaits a captured skill install before admission and preserves its FIFO queu
 	try {
 		await new Promise((resolve) => setImmediate(resolve));
 		strictEqual(admitted, false, "confirmation has not answered");
-		deepStrictEqual(submitted, []);
+		strictEqual(submitted.length, 0);
 		answer({ answers: [{ question: "Install?", answer: "Install and run" }] });
 		await new Promise((resolve) => setImmediate(resolve));
 		strictEqual(admitted, false, "resource reload has not settled");
-		deepStrictEqual(submitted, []);
+		strictEqual(submitted.length, 0);
 		finishReload();
 		await admission;
 		strictEqual(submitted.length, 1);
