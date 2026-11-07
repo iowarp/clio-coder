@@ -84,3 +84,52 @@
 .conversation__find {
 	flex: none;
 }
+
+/* The transcript detail menu beside Find. */
+.output-detail {
+	flex: none;
+}
+.output-detail__panel {
+	margin: 0;
+	min-width: 18rem;
+	padding: var(--space-2);
+	gap: 2px;
+}
+.output-detail__legend {
+	float: left;
+	width: 100%;
+	padding: var(--space-1) var(--space-2) var(--space-2);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.output-detail__option {
+	display: flex;
+	gap: var(--space-2);
+	align-items: baseline;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+}
+.output-detail__option:hover,
+.output-detail__option:has(input:checked) {
+	background: var(--well);
+}
+.output-detail__option > span {
+	display: grid;
+	gap: 2px;
+}
+.output-detail__option small {
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	line-height: 1.4;
+}
+.output-detail__note {
+	margin: var(--space-1) var(--space-2) var(--space-1);
+	font-size: var(--text-exact);
+	color: var(--ink-subtle);
+}
+@container bar (max-width: 900px) {
+	.output-detail__value {
+		display: none;
+	}
+}

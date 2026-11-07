@@ -24,6 +24,7 @@ import type { HealthRow } from "../chat/health.js";
 import { summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
 import { LiveJobs } from "../chat/JobStrip.js";
+import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { routeFacts } from "../chat/route.js";
@@ -33,6 +34,7 @@ import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { memoryGuardianMark } from "../chat/telemetry-model.js";
 import { TRANSCRIPT_PAGE_SIZE } from "../chat/transcript-view-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { useOutputDetail } from "../chat/use-output-detail.js";
 import { useShown } from "../chat/use-shown.js";
 import { useTranscriptView } from "../chat/use-transcript-view.js";
 import { Icon } from "../design/icons.js";
@@ -210,6 +212,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const [dismissedContext, setDismissedContext] = useState<string | null>(null);
 	const stopContext = useStopContext(client, id);
 	const scroll = useRef<HTMLDivElement | null>(null);
+	const [outputDetail, setOutputDetail] = useOutputDetail();
 	const previousTurns = useRef<readonly ChatTurn[]>([]);
 	const snapshot = session.data;
 	useShown(client, id, snapshot?.state);
@@ -471,6 +474,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							onOpen={pane.show}
 						/>
 						<div className="wb-bar__end">
+							<OutputDetailPicker value={outputDetail} onChange={setOutputDetail} />
 							<button
 								type="button"
 								className="wb-chip conversation__find"
@@ -550,6 +554,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					</div>
 					<div
 						className="chat-transcript"
+						data-detail={outputDetail}
 						id={ids.transcript}
 						ref={scroll}
 						onClickCapture={(event) => {

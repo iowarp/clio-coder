@@ -684,3 +684,17 @@
 		animation: turn-enter var(--motion-base) var(--ease-standard) both;
 	}
 }
+
+/* Transcript detail, the terminal's interface.outputDetail tiers. The tier is a data attribute on the
+   transcript, so switching it restyles the page without re-rendering a single settled turn. No tier
+   hides an approval, a failure or a stop: those carry their own tone and stay in every rule below. */
+.chat-transcript[data-detail="compact"] .reasoning__preview,
+.chat-transcript[data-detail="compact"] .turn-outcome[data-tone="success"] .turn-outcome__line > :not(.status-mark) {
+	display: none;
+}
+.chat-transcript[data-detail="compact"] .turn-outcome[data-tone="success"] {
+	color: var(--ink-subtle);
+}
+.chat-transcript[data-detail="detailed"] .turn-outcome__nerd {
+	display: flex;
+}

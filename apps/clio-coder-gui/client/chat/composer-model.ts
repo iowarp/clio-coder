@@ -788,6 +788,11 @@ export function messageActionOffers(context: MessageActionContext): readonly Mes
 
 export type OutcomeTone = "neutral" | "running" | "success" | "warn" | "fail" | "unverified";
 
+export interface OutcomeFact {
+	readonly label: string;
+	readonly value: string;
+}
+
 export interface TurnOutcomeView {
 	readonly tone: OutcomeTone;
 	readonly glyph: string;
@@ -795,6 +800,7 @@ export interface TurnOutcomeView {
 	/** The problem detail, when the turn carried one. */
 	readonly detail: string | null;
 	readonly stopReason: string | null;
+	/** The one line under a settled answer: time taken, tokens, a known cost and the tool calls. */
 	readonly facts: readonly string[];
 	/** Input and output together, in the short form the line has room for. Null when nothing was reported. */
 	readonly usageLabel: string | null;
@@ -802,6 +808,8 @@ export interface TurnOutcomeView {
 	readonly usage: Usage | null;
 	readonly usageTitle: string | null;
 	readonly finishedAt: string | null;
+	/** The second line the Detailed view adds: model, speed and cache, each only when it was reported. */
+	readonly nerd: readonly OutcomeFact[];
 	readonly breakdown: readonly {
 		group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools";
 		label: string;
@@ -823,6 +831,24 @@ export function usageTitle(usage: Usage): string {
 		: "not journaled";
 }
 
+type Quantity = NonNullable<Usage["quantities"]>["input"];
+/** The reported number behind a quantity, or null when it was not measured or estimated. */
+export function quantityValue(quantity: Quantity): number | null {
+	const fact = quantity.fact;
+	if (!("kind" in fact))
+		return fact.coverage.measured + fact.coverage.estimated > 0 ? fact.measured + fact.estimated : null;
+	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
+}
+
+/** Tokens per second as a reader says it: one decimal under ten, whole above. */
+export function tokenRate(perSecond: number): string {
+	return `${perSecond < 10 ? perSecond.toFixed(1) : Math.round(perSecond).toLocaleString()} tok/s`;
+}
+
+function shortDuration(ms: number): string {
+	return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+
 const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: string; label: string }>> = {
 	running: { tone: "running", glyph: "▸", label: "Running" },
 	succeeded: { tone: "success", glyph: "✓", label: "Done" },
@@ -832,13 +858,15 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 };
 
 /**
- * The footer carries per-turn facts: how long the turn took, how many tool calls it made and what
- * it spent. The time is the difference of the two recorded instants, so a replayed turn with no
- * recorded start has none; the counts are reported values.
+ * The footer carries per-turn facts: how long the turn took, what it read and wrote, what it spent
+ * and how many tool calls it made. The time is the difference of the two recorded instants, so a
+ * replayed turn with no recorded start has none; the counts are reported values. A quantity that was
+ * not measured stays out of the line and is stated, with its reason, in the breakdown.
  */
 export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 	const shape = OUTCOME[turn.status];
 	const facts: string[] = [];
+	const nerd: OutcomeFact[] = [];
 	const elapsed =
 		turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : Number.NaN;
 	// Under a second is not a duration worth a place in the line.
@@ -849,24 +877,64 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		value: string;
 		factRef?: string;
 	}[] = [];
-	if (turn.details?.model) breakdown.push({ group: "Model", label: "Model", value: turn.details.model });
+	const model = turn.details?.model;
+	if (model) {
+		breakdown.push({ group: "Model", label: "Model", value: model });
+		nerd.push({ label: "Model", value: model });
+	}
 	const usage = turn.usage;
 	const quantities = usage?.quantities;
-	const cost = quantities?.usd.display ?? null;
+	const ttft = turn.details?.ttftMs;
+	const rate = turn.details?.outputTokensPerSecond;
 	if (quantities) {
-		for (const [key, label, group] of [
-			["input", "Input", "Usage"],
-			["output", "Output", "Usage"],
-			["reasoning", "Reasoning", "Usage"],
-			["cacheRead", "Cache read", "Cache"],
-			["cacheWrite", "Cache write", "Cache"],
-			["firstToken", "First token", "Speed"],
-			["usd", "Cost", "Cost"],
+		for (const [key, label] of [
+			["input", "Input"],
+			["output", "Output"],
+			["reasoning", "Reasoning"],
 		] as const)
-			breakdown.push({ group, label, value: quantities[key].display, factRef: quantities[key].ref });
+			breakdown.push({ group: "Usage", label, value: quantities[key].display, factRef: quantities[key].ref });
+	}
+	if (ttft !== undefined) {
+		breakdown.push({ group: "Speed", label: "First token", value: shortDuration(ttft) });
+		nerd.push({ label: "First token", value: shortDuration(ttft) });
+	} else if (quantities && quantityValue(quantities.firstToken) !== null) {
+		breakdown.push({
+			group: "Speed",
+			label: "First token",
+			value: quantities.firstToken.display,
+			factRef: quantities.firstToken.ref,
+		});
+		nerd.push({ label: "First token", value: quantities.firstToken.display });
+	}
+	if (rate !== undefined && rate > 0) {
+		breakdown.push({ group: "Speed", label: "Output", value: tokenRate(rate) });
+		nerd.push({ label: "Speed", value: tokenRate(rate) });
+	}
+	if (quantities) {
+		// The share of the prompt the provider served from its cache: what a warm session saves.
+		const read = quantityValue(quantities.cacheRead);
+		const prompt = quantityValue(quantities.prompt);
+		if (read !== null && prompt !== null && prompt > 0) {
+			const share = `${Math.round((100 * read) / prompt)}%`;
+			breakdown.push({ group: "Cache", label: "Hit share", value: share });
+			nerd.push({ label: "Cache hit", value: share });
+		}
+		breakdown.push({
+			group: "Cache",
+			label: "Written",
+			value: quantities.cacheWrite.display,
+			factRef: quantities.cacheWrite.ref,
+		});
+		const reasoning = quantityValue(quantities.reasoning);
+		if (reasoning !== null && reasoning > 0) nerd.push({ label: "Reasoning", value: quantities.reasoning.display });
+		const calls = quantityValue(quantities.calls);
+		if (calls !== null && calls > 1) nerd.push({ label: "Model calls", value: quantities.calls.display });
+		breakdown.push({ group: "Cost", label: "Cost", value: quantities.usd.display, factRef: quantities.usd.ref });
 	}
 	if (toolCount > 0) breakdown.push({ group: "Tools", label: "Calls", value: String(toolCount) });
-	if (cost !== null) facts.push(cost);
+	const usageLabel = quantities ? `${quantities.prompt.display} in · ${quantities.output.display} out` : null;
+	if (usageLabel !== null && quantities && quantityValue(quantities.output) !== null) facts.push(usageLabel);
+	if (quantities && quantityValue(quantities.usd) !== null) facts.push(quantities.usd.display);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
 	return {
 		tone: shape.tone,
@@ -875,10 +943,11 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
 		stopReason: turn.status === "failed" ? turn.stopReason : null,
 		facts,
-		usageLabel: quantities ? `${quantities.prompt.display} in / ${quantities.output.display} out` : null,
+		usageLabel,
 		usage: turn.usage,
 		usageTitle: turn.usage === null ? null : usageTitle(turn.usage),
 		finishedAt: turn.finishedAt,
+		nerd,
 		breakdown,
 	};
 }

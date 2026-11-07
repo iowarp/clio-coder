@@ -539,8 +539,17 @@
 	min-height: 0;
 	list-style: none;
 	white-space: nowrap;
-	overflow-x: auto;
+	overflow: hidden;
 	cursor: pointer;
+}
+/* The clock gives way first when the column is narrow; the outcome and the figures keep their place. */
+.turn-outcome__line > time {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.turn-outcome__line > .turn-outcome__fact {
+	flex-shrink: 0;
 }
 .turn-outcome__line::-webkit-details-marker {
 	display: none;
@@ -569,6 +578,26 @@
 .turn-outcome__code {
 	font: inherit;
 	color: var(--status-fail-fg);
+}
+.turn-details__empty {
+	margin: var(--space-2) 0 0;
+}
+/* The Detailed view's second line: model, speed and cache, in the same quiet voice as the first. */
+.turn-outcome__nerd {
+	display: none;
+	flex-wrap: wrap;
+	gap: var(--space-1) var(--space-4);
+	margin: var(--space-1) 0 0;
+	color: var(--ink-subtle);
+}
+.turn-outcome__nerd > div {
+	display: flex;
+	gap: var(--space-1);
+	white-space: nowrap;
+}
+.turn-outcome__nerd dd {
+	margin: 0;
+	color: var(--ink-muted);
 }
 .turn-details {
 	display: flex;

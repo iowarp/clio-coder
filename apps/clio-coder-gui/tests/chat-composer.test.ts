@@ -14,6 +14,7 @@ import {
 	noticeForRefusal,
 	PROMPT_TEXT_MAX_CHARACTERS,
 	projectQueue,
+	quantityValue,
 	queueAccess,
 	queueActions,
 	queueSummary,
@@ -25,6 +26,7 @@ import {
 	steerModeOffers,
 	submitIntent,
 	submitLabel,
+	tokenRate,
 	turnOutcome,
 	usageSummary,
 	usageTitle,
@@ -376,10 +378,15 @@ test("copy is offered only for text that exists", () => {
 
 // --- the outcome footer ----------------------------------------------------
 
-const quantity = (display: string) => ({
-	fact: { kind: "measured" as const, value: 0, source: "local-count" as const },
+const quantity = (display: string, value = Number(display.replaceAll(",", "")) || 0) => ({
+	fact: { kind: "measured" as const, value, source: "local-count" as const },
 	display,
 	ref: "session:s1#input",
+});
+const unmeasured = (display: string) => ({
+	fact: { kind: "unknown" as const, reason: "not-observed" as const },
+	display,
+	ref: "session:s1#usd",
 });
 const usage: Usage = {
 	quantities: {
@@ -392,7 +399,7 @@ const usage: Usage = {
 		total: quantity("13,114"),
 		calls: quantity("1"),
 		firstToken: quantity("0 ms"),
-		usd: quantity("not measured"),
+		usd: unmeasured("not measured"),
 	},
 };
 
@@ -419,13 +426,27 @@ test("usage shows two numbers and carries five in the tooltip", () => {
 	);
 });
 
-test("a completed turn footer carries its reported tool count and spend, and nothing else", () => {
+test("a completed turn footer carries its time, tokens and tool count, and an unmeasured cost stays out of the line", () => {
 	const view = turnOutcome(turn(), 3);
 	assert.equal(view.tone, "success");
 	assert.equal(view.label, "Done");
-	assert.deepEqual(view.facts, ["12s", "not measured", "3 tool calls"]);
+	assert.deepEqual(view.facts, ["12s", "12,436 in · 678 out", "3 tool calls"]);
+	assert.deepEqual(
+		view.breakdown.find((row) => row.label === "Cost"),
+		{ group: "Cost", label: "Cost", value: "not measured", factRef: "session:s1#usd" },
+		"the breakdown still says the cost was not measured",
+	);
 	assert.deepEqual(view.breakdown.at(-1), { group: "Tools", label: "Calls", value: "3" });
-	assert.equal(view.usageLabel, "12,436 in / 678 out");
+	assert.equal(view.usageLabel, "12,436 in · 678 out");
+	const priced = turnOutcome(
+		turn({
+			usage: {
+				quantities: { ...(usage.quantities as NonNullable<Usage["quantities"]>), usd: quantity("$0.0123", 0.0123) },
+			},
+		}),
+		0,
+	);
+	assert.deepEqual(priced.facts, ["12s", "12,436 in · 678 out", "$0.0123"], "a known cost is said once");
 	assert.equal(view.usage, usage, "the full reported accounting stays reachable from the compact outcome");
 	assert.equal(view.detail, null);
 	assert.equal(view.stopReason, null, "a stop reason on a successful turn is noise");
@@ -439,6 +460,27 @@ test("a completed turn footer carries its reported tool count and spend, and not
 		"a replayed turn has no recorded start",
 	);
 	assert.equal(withoutUsage.usage, null);
+});
+
+test("the Detailed line reports model, speed and cache only when they were reported", () => {
+	const view = turnOutcome(turn({ details: { model: "qwen3.8-27b", ttftMs: 420, outputTokensPerSecond: 38.4 } }), 0);
+	assert.deepEqual(view.nerd, [
+		{ label: "Model", value: "qwen3.8-27b" },
+		{ label: "First token", value: "420 ms" },
+		{ label: "Speed", value: "38 tok/s" },
+		{ label: "Cache hit", value: "1%" },
+		{ label: "Reasoning", value: "234" },
+	]);
+	assert.deepEqual(
+		view.breakdown.filter((row) => row.group === "Cache").map((row) => [row.label, row.value]),
+		[
+			["Hit share", "1%"],
+			["Written", "1"],
+		],
+	);
+	assert.deepEqual(turnOutcome(turn({ usage: null }), 0).nerd, [], "nothing reported, nothing claimed");
+	assert.equal(tokenRate(7.25), "7.3 tok/s");
+	assert.equal(quantityValue(unmeasured("unknown")), null);
 });
 
 test("a failed turn shows its problem detail and its stop reason; a stopped one is not a failure", () => {

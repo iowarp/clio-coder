@@ -66,8 +66,9 @@ export function MessageActions({ sessionId, row, requestText, responseText, stat
 
 /**
  * The outcome footer, one quiet line of facts from the `Turn` row: how it ended, how long it
- * took, the calls it made, what it spent and when. The token total opens the complete reported
- * accounting; the clock's title carries the full date.
+ * took, the tokens it read and wrote, a known cost, the calls it made and when. The line opens the
+ * complete reported accounting; the clock's title carries the full date. The Detailed view adds the
+ * `nerd` line under it. A failure's detail sits outside the disclosure, so no tier can fold it away.
  */
 export function TurnOutcome({
 	client,
@@ -81,33 +82,19 @@ export function TurnOutcome({
 	return (
 		<div className="turn-outcome" data-tone={outcome.tone}>
 			<details>
-				<summary className="turn-outcome__line">
+				<summary className="turn-outcome__line" title="Show the reported accounting for this turn">
 					<StatusMark tone={outcome.tone} label={outcome.label} />
-					{outcome.facts
-						.filter((fact) => fact !== outcome.usage?.quantities?.usd.display)
-						.slice(0, 1)
-						.map((fact) => (
-							<span className="turn-outcome__fact" key={fact}>
-								{fact}
-							</span>
-						))}
-
-					{outcome.facts
-						.filter((fact) => fact !== outcome.usage?.quantities?.usd.display)
-						.slice(1)
-						.map((fact) => (
-							<span className="turn-outcome__fact" key={fact}>
-								{fact}
-							</span>
-						))}
+					{outcome.facts.map((fact) => (
+						<span className="turn-outcome__fact" key={fact}>
+							{fact}
+						</span>
+					))}
 					{outcome.finishedAt ? (
 						<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
 							{formatClock(outcome.finishedAt)}
 						</time>
 					) : null}
 				</summary>
-				{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
-				{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
 				{outcome.breakdown.length > 0 ? (
 					<div className="turn-details">
 						{outcomeDetailGroups(outcome).map((group) => (
@@ -126,25 +113,21 @@ export function TurnOutcome({
 							</section>
 						))}
 					</div>
-				) : null}
+				) : (
+					<p className="turn-details__empty">Nothing further was reported for this turn.</p>
+				)}
 			</details>
-			{outcome.usage?.quantities ? (
-				<div className="turn-outcome__line">
-					{(
-						[
-							["prompt", "Input"],
-							["output", "Output"],
-							["usd", "Cost"],
-						] as const
-					).map(([key, label]) => {
-						const q = outcome.usage?.quantities?.[key];
-						return q ? (
-							<span className="turn-outcome__fact" key={key}>
-								{label}: <Explained client={client} label={label} value={q.display} factRef={q.ref} />
-							</span>
-						) : null;
-					})}
-				</div>
+			{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
+			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
+			{outcome.nerd.length > 0 ? (
+				<dl className="turn-outcome__nerd">
+					{outcome.nerd.map((fact) => (
+						<div key={fact.label}>
+							<dt>{fact.label}</dt>
+							<dd>{fact.value}</dd>
+						</div>
+					))}
+				</dl>
 			) : null}
 		</div>
 	);
