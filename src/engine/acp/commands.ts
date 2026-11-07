@@ -333,7 +333,10 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "clearSkillSurface"
 			| "exportShareArchive"
 			| "getAgentRoleFacts"
+			| "getChatModel"
+			| "getChatTarget"
 			| "getDecisionBoard"
+			| "getFleetAgentProfiles"
 			| "importShareArchive"
 			| "isTurnInFlight"
 			| "standingTurnConstraints"
@@ -640,6 +643,9 @@ function sessionCommandContext(
 		...(host.importShareArchive ? { importShareArchive: host.importShareArchive } : {}),
 		...(host.runDoctor ? { runDoctor: host.runDoctor } : {}),
 		...(host.oracleBriefing ? { oracleBriefing: host.oracleBriefing } : {}),
+		...(host.getChatTarget ? { getChatTarget: host.getChatTarget } : {}),
+		...(host.getChatModel ? { getChatModel: host.getChatModel } : {}),
+		...(host.getFleetAgentProfiles ? { getFleetAgentProfiles: host.getFleetAgentProfiles } : {}),
 		...(host.isTurnInFlight ? { isTurnInFlight: host.isTurnInFlight } : {}),
 		...(host.standingTurnConstraints ? { standingTurnConstraints: host.standingTurnConstraints } : {}),
 		...(host.jobs ? { jobs: host.jobs } : {}),

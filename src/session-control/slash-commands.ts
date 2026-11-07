@@ -40,6 +40,11 @@ import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } 
 import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { acceptsImageInput, resolveModelCapabilities, resolveModelReference } from "../domains/providers/index.js";
+import {
+	chooseSecondOpinionRoute,
+	type SecondOpinionCandidate,
+	secondOpinionIndependence,
+} from "../domains/providers/model-lineage.js";
 import type {
 	LibraryEntryKind,
 	PromptTemplate,
@@ -637,6 +642,8 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 	}
 	const digest = packOracleDigest({ ...sources, question });
 	const turnConstraints = ctx.standingTurnConstraints?.();
+	const mainModel = oracleMainModel(ctx);
+	const crossLineage = oracleCrossLineageRoute(ctx, mainModel);
 	const request: DispatchRequest = {
 		agentId: ORACLE_AGENT_ID,
 		task: ORACLE_TASK,
@@ -647,11 +654,24 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		}),
 		requestOrigin: "internal",
 		readOnly: true,
+		...(crossLineage ? { target: crossLineage.target, model: crossLineage.model } : {}),
 		...(turnConstraints !== undefined ? { turnConstraints } : {}),
 	};
 	const progressBus = ctx.dispatch.ownsProgressBus?.(ctx.bus) === true ? undefined : ctx.bus;
 	try {
-		const handle = await ctx.dispatch.dispatch(request);
+		let handle: Awaited<ReturnType<typeof ctx.dispatch.dispatch>>;
+		try {
+			handle = await ctx.dispatch.dispatch(request);
+		} catch (err) {
+			if (!crossLineage) throw err;
+			// The pin is a preference: a route admission refuses must not cost the answer.
+			ctx.notice(
+				"warn",
+				`/oracle could not use ${crossLineage.target}/${crossLineage.model} for an independent opinion (${err instanceof Error ? err.message : String(err)}); asking the default route`,
+			);
+			const { target: _target, model: _model, ...unpinned } = request;
+			handle = await ctx.dispatch.dispatch(unpinned);
+		}
 		for await (const event of handle.events) {
 			const typed = event as { type?: string };
 			if (!typed.type || typed.type === "heartbeat") continue;
@@ -670,7 +690,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 			agentId: ORACLE_AGENT_ID,
 			runId: receipt.runId,
 			outcome: receipt.outcome,
-			text: formatOracleAnswer(parsed),
+			text: `${formatOracleAnswer(parsed)}\n\n${oracleIndependenceLine(mainModel.model, receipt.targetId, receipt.wireModelId)}`,
 		});
 		if (note === null) {
 			ctx.notice("error", `/oracle run ${receipt.runId} produced no text to share`);
@@ -679,6 +699,51 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		ctx.submitOperatorNote(note);
 	} catch (err) {
 		ctx.notice("error", `/oracle failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+/** The main chat route, live: a session-scoped `/model` switch is what the host reports. */
+function oracleMainModel(ctx: SlashCommandContext): { target: string | null; model: string | null } {
+	const target = ctx.getChatTarget?.() ?? null;
+	const model = ctx.getChatModel?.() ?? (target ? (ctx.providers.getTarget(target)?.defaultModel ?? null) : null);
+	return { target, model };
+}
+
+/**
+ * A second opinion from the main model's own family mostly repeats it, so
+ * `/oracle` pins a reachable model of another family when one is configured.
+ * An operator who bound the oracle to a worker profile keeps that binding; the
+ * answer then says whether it was independent.
+ */
+function oracleCrossLineageRoute(
+	ctx: SlashCommandContext,
+	main: { target: string | null; model: string | null },
+): { target: string; model: string } | null {
+	if (ctx.getFleetAgentProfiles?.()[ORACLE_AGENT_ID] !== undefined) return null;
+	let statuses: ReturnType<ProvidersContract["list"]>;
+	try {
+		statuses = ctx.providers.list();
+	} catch {
+		return null;
+	}
+	const candidates: SecondOpinionCandidate[] = statuses.flatMap((status) =>
+		[...new Set([status.target.defaultModel, ...(status.target.wireModels ?? [])])]
+			.filter((model): model is string => typeof model === "string" && model.length > 0)
+			.map((model) => ({ target: status.target.id, model, health: status.health.status, available: status.available })),
+	);
+	return chooseSecondOpinionRoute(main, candidates);
+}
+
+/** The line the oracle note closes with, so the main agent weighs agreement by how independent the advisor was. */
+function oracleIndependenceLine(mainModel: string | null, advisorTarget: string, advisorModel: string): string {
+	const advisor = `${advisorTarget}/${advisorModel}`;
+	switch (secondOpinionIndependence(mainModel, advisorModel)) {
+		case "independent":
+			return `Advisor: ${advisor}, a different model family from the main model; its agreement is independent corroboration.`;
+		case "same-lineage":
+			return `Advisor: ${advisor}, the same model family as the main model; its agreement is weak corroboration, not independent review.`;
+		default:
+			return `Advisor: ${advisor}; whether it shares the main model's family is unknown, so do not count its agreement as independent.`;
 	}
 }
 
@@ -1064,6 +1129,10 @@ export interface SessionCommandContext {
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
 	getChatTarget?: () => string | null | undefined;
+	/** The live chat model, including a session-scoped `/model` switch. */
+	getChatModel?: () => string | null | undefined;
+	/** `fleet.agentProfiles`: recipes the operator bound to a worker profile. */
+	getFleetAgentProfiles?: () => Readonly<Record<string, string>>;
 	/**
 	 * Apply a resolved model reference, or hand it to the scope dialog. "pending"
 	 * means the operator has yet to choose session or global and nothing has
