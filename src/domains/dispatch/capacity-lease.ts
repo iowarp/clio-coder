@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
 import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import {
@@ -117,7 +118,15 @@ function validDrain(value: unknown): value is CapacityDrain {
 		validTimestamp(drain.expiresAt)
 	);
 }
+/**
+ * A read-only process admits against the leases it read and keeps its own here
+ * instead of publishing them: other processes cannot see its leases, and it
+ * stops seeing theirs change once it holds one.
+ */
+let withheldState: CapacityStateFile | null = null;
+
 export function readCapacityStateUnsafe(): CapacityStateFile {
+	if (withheldState !== null) return structuredClone(withheldState);
 	if (!existsSync(capacityStatePath())) return { version: 2, draining: null, leases: [], reservations: [] };
 	let parsed: CapacityStateFile;
 	try {
@@ -139,6 +148,10 @@ export function readCapacityStateUnsafe(): CapacityStateFile {
 }
 export function writeCapacityStateUnsafe(file: CapacityStateFile): void {
 	assertCapacityLeaseBound(file);
+	if (stateWritesWithheld()) {
+		withheldState = structuredClone(file);
+		return;
+	}
 	atomicWrite(capacityStatePath(), JSON.stringify(file, null, 2));
 }
 
@@ -165,6 +178,10 @@ export async function updateCapacityStateAsync<T>(
 			if (changed) assertCapacityLeaseBound(state);
 			return { before, contents: JSON.stringify(state, null, 2), result, changed };
 		});
+		if (prepared.changed && stateWritesWithheld()) {
+			withheldState = JSON.parse(prepared.contents) as CapacityStateFile;
+			return prepared.result;
+		}
 		if (!prepared.changed) {
 			// A sibling may have renamed this state and still be flushing it (#428).
 			await fsyncDirectoryAsync(dirname(capacityStatePath()));

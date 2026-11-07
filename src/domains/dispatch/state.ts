@@ -22,11 +22,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Compile } from "typebox/compile";
 import { Value } from "typebox/value";
 import { resolveGuardrail } from "../../core/guardrails.js";
+import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { spendSumsOf, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { RunSpendSumsSchema, RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
-import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { removeRunFeeds } from "./run-feed.js";
@@ -296,7 +297,7 @@ function capRuns(all: RunEnvelope[], maxRuns: number): RunEnvelope[] {
 let queuedPersist: Promise<unknown> = Promise.resolve();
 function withRunsLock(target: string, fn: () => Promise<void>): Promise<void> {
 	// Checked again after the queue wait, since acquiring the lock mkdirs the root.
-	const run = queuedPersist.then(() => (stateRootRemoved() ? undefined : withStateFileLock(target, fn)));
+	const run = queuedPersist.then(() => (stateWritesWithheld() ? undefined : withStateFileLock(target, fn)));
 	queuedPersist = run.catch(() => {});
 	return run;
 }
@@ -393,7 +394,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			// Checked twice: before the lock because acquiring it mkdirs the state
 			// root back, and again under it because the removal can land while this
 			// call waits for a sibling process to finish its own critical section.
-			if (stateRootRemoved()) return;
+			if (stateWritesWithheld()) return;
 			// Dispatch drains persist on every shutdown, twice for a headless run. A clean ledger whose disk rows are
 			// already in ring order and within the cap would rewrite runs.json byte for byte under the lock with two
 			// fsyncs, so it adopts those rows instead. A lowered cap still evicts through the write below.
@@ -407,7 +408,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			}
 			const target = runsPath();
 			await withRunsLock(target, async () => {
-				if (stateRootRemoved()) return;
+				if (stateWritesWithheld()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs, dirty);
 				const capped = capRuns(merged, resolveMaxRuns(opts?.maxRuns));
@@ -415,13 +416,13 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				const written = new Map(capped.map((run) => [run.id, run]));
 				const contents = JSON.stringify(capped, null, 2);
 				for (let attempt = 0; ; attempt += 1) {
-					if (stateRootRemoved()) return;
+					if (stateWritesWithheld()) return;
 					let skipped = false;
 					try {
 						await safeResourceWriteAsync(target, contents, {
 							// The awaited fsync is a window an uninstall can land in (#428).
 							withRename: (commit) => {
-								if (stateRootRemoved()) skipped = true;
+								if (stateWritesWithheld()) skipped = true;
 								else commit();
 							},
 						});
@@ -441,7 +442,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				if (merged.length > capped.length) {
 					const kept = new Set(capped.map((run) => run.id));
 					const evicted = merged.filter((run) => !kept.has(run.id)).map((run) => run.id);
-					if (!stateRootRemoved()) {
+					if (!stateWritesWithheld()) {
 						removeRunFeeds(clioStateDir(), evicted);
 					}
 				}

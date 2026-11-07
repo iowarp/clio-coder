@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync, watch } from "node:fs";
 import { join } from "node:path";
+import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
@@ -16,6 +17,8 @@ const MAX_ASSIGNMENT_RECORDS = 1_000;
 // lands; watches still wake only once the rename is durable (#428).
 const pendingWrites = new Map<string, DurableAssignmentRecord[]>();
 const observers = new Map<string, Set<() => void>>();
+// A read-only process keeps its own assignment rows here, over the store it read first.
+let withheldStore: DurableAssignmentRecord[] | null = null;
 
 /**
  * Who decides a record's status.
@@ -107,6 +110,7 @@ function validRecord(value: unknown): value is DurableAssignmentRecord {
 }
 
 function readStore(): DurableAssignmentRecord[] {
+	if (withheldStore !== null) return withheldStore.map(copyRecord);
 	const path = storePath();
 	if (!existsSync(path)) return [];
 	try {
@@ -153,6 +157,11 @@ async function writeStore(assignments: ReadonlyArray<DurableAssignmentRecord>): 
 		assignments: assignments.slice(0, MAX_ASSIGNMENT_RECORDS).map(copyRecord),
 	};
 	const target = storePath();
+	if (stateWritesWithheld()) {
+		withheldStore = file.assignments;
+		for (const listener of observers.get(target) ?? []) queueMicrotask(listener);
+		return;
+	}
 	// Durability is about crashes, not visibility: a retry or settlement this
 	// process already decided must be readable while the fsync runs (#428).
 	pendingWrites.set(target, file.assignments);

@@ -476,6 +476,9 @@ async function executeRunCommand(
 						);
 						return 1;
 					}
+					process.stderr.write(
+						"clio-coder run: --read-only writes nothing to the Clio home; this run keeps no session, run record or telemetry\n",
+					);
 				}
 			}
 			if (parsed.constraints && parsed.agentId !== undefined) {

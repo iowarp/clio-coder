@@ -31,8 +31,9 @@ import {
 	writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
-import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import type { CutHeadGuard } from "../safety/redaction.js";
@@ -93,7 +94,7 @@ export function runFeedPath(runId: string, stateDir: string = clioStateDir()): s
 
 /** The run whose display feed was written most recently, for `/panes open logs` (#434). */
 export function newestRunFeedRunId(stateDir: string = clioStateDir()): string | null {
-	if (stateRootRemoved()) return null;
+	if (stateWritesWithheld()) return null;
 	let names: string[];
 	try {
 		names = readdirSync(join(stateDir, "runs"));
@@ -322,7 +323,7 @@ function carryAfter(body: RunEventJournalBody): "keep" | "release" | "hold" {
  * never learns about it.
  */
 export function appendRunFeed(runId: string, body: RunEventJournalBody, at: string = new Date().toISOString()): void {
-	if (!isSafeRunId(runId) || stateRootRemoved()) return;
+	if (!isSafeRunId(runId) || stateWritesWithheld()) return;
 	try {
 		const stateDir = clioStateDir();
 		const path = runFeedPath(runId, stateDir);

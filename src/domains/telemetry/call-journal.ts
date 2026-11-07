@@ -4,7 +4,8 @@ import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { clioHomeWriteRefused } from "../../core/home-write-guard.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
@@ -261,6 +262,7 @@ export function seedForkCallJournal(
 /** One lease for the writer's lifetime, adjudicated by host, pid and birth token (#434). */
 export async function openCallJournal(options: CallJournalOptions): Promise<CallJournal> {
 	const path = telemetryJournalPath(options.directory);
+	if (clioHomeWriteRefused(path)) return openWithheldCallJournal(options);
 	await mkdir(dirname(path), { recursive: true });
 	let ready!: (journal: CallJournal) => void;
 	let reject!: (error: unknown) => void;
@@ -781,6 +783,250 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 	return opened;
 }
 
+/**
+ * Batches a read-only process journaled, by scope directory. Its scopes are never written: the records live here,
+ * framed as a segment of their own, and `readCallJournal` folds them in after what the scope holds on disk, so the
+ * process's own readers see its records as a cold read of a writable scope would.
+ */
+const withheldJournals = new Map<string, Array<{ bytes: Buffer; origin: ClockOrigin }>>();
+/** Bytes a read-only process keeps per scope; past it, records drop and the writer counts them. */
+const WITHHELD_JOURNAL_BYTES = 32 * 1024 * 1024;
+
+function foldWithheld(result: CallJournalRead, directory: string): CallJournalRead {
+	for (const batch of withheldJournals.get(resolve(directory)) ?? []) appendPersistedTelemetry(result, batch);
+	return result;
+}
+
+/**
+ * The writer of a scope read-only mode refuses (`src/core/home-write-guard.ts`). It admits, redacts and encodes
+ * records exactly as the durable writer does and publishes each batch to live readers, but keeps the bytes in memory.
+ * Nothing durable exists, so there is nothing to lease, repair or seal: a seal reports success while the writer is
+ * healthy, and preimages go to the in-memory object store.
+ */
+function openWithheldCallJournal(options: CallJournalOptions): CallJournal {
+	const key = resolve(options.directory);
+	const batches = withheldJournals.get(key) ?? [];
+	withheldJournals.set(key, batches);
+	let size = batches.reduce((total, batch) => total + batch.bytes.length, 0);
+	const hubOwner = telemetryOwner(options.context);
+	const captureNow = (): TelemetryCapture => {
+		try {
+			return options.capture?.() ?? STANDARD_CAPTURE;
+		} catch {
+			return STANDARD_CAPTURE;
+		}
+	};
+	let capture = captureNow();
+	let header = callJournalHeader(options.writer, capture);
+	let opening: Buffer | undefined = encodeTelemetryLine(header);
+	const researchCap = options.researchBytes ?? RESEARCH_SESSION_BYTES;
+	let researchBytes = 0;
+	const capacity = options.queueCapacity ?? 4096;
+	const queue: PendingTelemetry[] = [];
+	let dropped = 0;
+	let reportedDrops = 0;
+	let invalid = 0;
+	let filtered = 0;
+	let capped = 0;
+	let reportedCapped = 0;
+	let persisted = 0;
+	let closed = false;
+	let scheduled: NodeJS.Immediate | undefined;
+	let flushing: Promise<void> = Promise.resolve();
+	const gap = (reason: "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap", count: number) =>
+		encodeTelemetryLine(
+			makeTelemetryRecord("journal.gap", { sink: TELEMETRY_JOURNAL_FILE, reason, count }, options.context, {
+				t: new Date().toISOString(),
+				mono: performance.now(),
+			}),
+		);
+	const drain = async (): Promise<void> => {
+		const lines: Buffer[] = [];
+		const next = captureNow();
+		if (!sameTelemetryCapture(next, capture)) {
+			capture = next;
+			header = callJournalHeader(options.writer, capture);
+			if (opening === undefined)
+				lines.push(
+					encodeTelemetryLine(
+						makeTelemetryRecord("journal.segment_closed", { reason: "mode-change" }, options.context, {
+							t: new Date().toISOString(),
+							mono: performance.now(),
+						}),
+					),
+				);
+			opening = encodeTelemetryLine(header);
+		}
+		let batchCount = 0;
+		let invalidBatch = 0;
+		let filteredBatch = 0;
+		for (const pending of queue.splice(0)) {
+			if (!captureAdmits(capture, pending.kind)) {
+				filteredBatch += 1;
+				continue;
+			}
+			let data = pending.data;
+			if (pending.preimage !== undefined) {
+				const subject = Object.hasOwn(PREIMAGE_SUBJECTS, pending.kind)
+					? PREIMAGE_SUBJECTS[pending.kind as PreimageEventName]
+					: undefined;
+				let bytes: number;
+				try {
+					if (subject === undefined) throw new Error("kind carries no preimage");
+					bytes = Buffer.byteLength(canonicalJson(pending.preimage));
+				} catch {
+					invalidBatch += 1;
+					continue;
+				}
+				if (researchBytes + bytes > researchCap) {
+					capped += 1;
+					continue;
+				}
+				try {
+					const content = await storeTelemetryObject(options.directory, subject, pending.preimage);
+					researchBytes += bytes;
+					data = { ...pending.data, content, bytes } as typeof data;
+				} catch {
+					dropped += 1;
+					continue;
+				}
+			}
+			const record = redactSecretsDeep(
+				{
+					...makeTelemetryRecord(pending.kind, data, pending.ctx, {
+						t: new Date(pending.wallMs).toISOString(),
+						mono: pending.mono,
+					}),
+					...(pending.recordId ? { id: pending.recordId } : {}),
+					...(pending.origin ? { origin: pending.origin } : {}),
+				},
+				createRedactionTally(),
+			);
+			const accepted = readTelemetryRecord(record);
+			if (accepted.kind !== "record") {
+				invalidBatch += 1;
+				continue;
+			}
+			const line = encodeAcceptedTelemetryLine(accepted.record);
+			if (record.tier === "research") {
+				if (researchBytes + line.length > researchCap) {
+					capped += 1;
+					continue;
+				}
+				researchBytes += line.length;
+			}
+			lines.push(line);
+			batchCount += 1;
+		}
+		invalid += invalidBatch;
+		if (invalidBatch) lines.push(gap("invalid-record", invalidBatch));
+		filtered += filteredBatch;
+		if (filteredBatch) lines.push(gap("mode-filtered", filteredBatch));
+		if (dropped > reportedDrops) {
+			lines.push(gap("writer-drop", dropped - reportedDrops));
+			reportedDrops = dropped;
+		}
+		if (capped > reportedCapped) {
+			lines.push(gap("research-cap", capped - reportedCapped));
+			reportedCapped = capped;
+		}
+		if (lines.length === 0) return;
+		if (opening !== undefined) lines.unshift(opening);
+		const bytes = Buffer.concat(lines);
+		if (size + bytes.length > WITHHELD_JOURNAL_BYTES) {
+			dropped += batchCount;
+			reportedDrops = dropped;
+			return;
+		}
+		opening = undefined;
+		size += bytes.length;
+		const batch = { bytes, origin: header.clockOrigin };
+		batches.push(batch);
+		persisted += batchCount;
+		if (subscribed(hubOwner)) publishPersisted(hubOwner, { kind: "appended", ...batch });
+	};
+	const flush = (): Promise<void> => {
+		if (scheduled) {
+			clearImmediate(scheduled);
+			scheduled = undefined;
+		}
+		flushing = flushing.then(drain, drain);
+		return flushing;
+	};
+	const schedule = (): void => {
+		if (scheduled || closed) return;
+		scheduled = setImmediate(() => {
+			scheduled = undefined;
+			void flush();
+		});
+	};
+	let unregister: (() => void) | undefined;
+	const finish = async (): Promise<boolean> => {
+		if (!closed) {
+			closed = true;
+			unregister?.();
+			if (openJournals.get(hubOwner) === journal) {
+				openJournals.delete(hubOwner);
+				openJournalHealth.delete(hubOwner);
+			}
+		}
+		await flush();
+		return true;
+	};
+	const journal: CallJournal = {
+		admits: (kind) => captureAdmits(captureNow(), kind),
+		enqueue(record) {
+			if (closed || telemetryOwner(record.ctx) !== hubOwner || queue.length >= capacity) {
+				dropped += 1;
+				schedule();
+				return false;
+			}
+			queue.push(record);
+			schedule();
+			return true;
+		},
+		flush,
+		close: () => finish().then(() => undefined),
+		sealAndClose: finish,
+		seal: () => (closed ? Promise.resolve(false) : flush().then(() => true)),
+		health: () => ({
+			queueDepth: queue.length,
+			persisted,
+			dropped,
+			invalid,
+			filtered,
+			capped,
+			writeErrors: 0,
+			skipped: 0,
+		}),
+		reserveResearchBytes(bytes) {
+			if (closed || !Number.isSafeInteger(bytes) || bytes < 0 || researchBytes + bytes > researchCap) {
+				capped += 1;
+				schedule();
+				return false;
+			}
+			researchBytes += bytes;
+			return true;
+		},
+		dropUnstored(bytes) {
+			if (Number.isSafeInteger(bytes) && bytes > 0) researchBytes = Math.max(0, researchBytes - bytes);
+			dropped += 1;
+			schedule();
+		},
+		storeObject(subject, value) {
+			if (closed) return Promise.reject(new Error("call journal is closed"));
+			return storeTelemetryObject(options.directory, subject, value);
+		},
+	};
+	if ("processId" in options.context) unregister = registerProcessJournalSink(options.context.processId, journal);
+	else if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
+	else if (options.context.sessionId !== null) unregister = registerTelemetrySink(options.context.sessionId, journal);
+	else throw new Error("telemetry journal requires a session or run owner");
+	openJournalHealth.set(hubOwner, journal.health);
+	openJournals.set(hubOwner, journal);
+	return journal;
+}
+
 async function appendAll(handle: FileHandle, bytes: Buffer): Promise<void> {
 	let offset = 0;
 	while (offset < bytes.length) {
@@ -802,7 +1048,7 @@ export interface CallJournalRead {
 
 /** Read-only readers preserve future records and never repair a writer's file (#434). */
 export async function readCallJournal(directory: string): Promise<CallJournalRead> {
-	return readCallJournalSnapshot(directory, 3);
+	return foldWithheld(await readCallJournalSnapshot(directory, 3), directory);
 }
 
 async function readCallJournalSnapshot(directory: string, retries: number): Promise<CallJournalRead> {
@@ -868,12 +1114,12 @@ export function readCallJournalSync(directory: string): CallJournalRead {
 		try {
 			files = names();
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return foldWithheld(result, directory);
 			throw error;
 		}
 		try {
 			for (const file of files) appendReadSegment(result, readRegularFileSync(join(directory, file)));
-			if (files.join("\n") === names().join("\n")) return result;
+			if (files.join("\n") === names().join("\n")) return foldWithheld(result, directory);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}

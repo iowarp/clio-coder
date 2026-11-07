@@ -1,11 +1,12 @@
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
+import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { ClioSessionMeta, ClioSessionOwner, ClioSessionWriter } from "../../engine/session.js";
 
 /**
@@ -369,7 +370,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 	let ending = false;
 
 	const publish = (): void => {
-		if (stateRootRemoved()) return;
+		if (stateWritesWithheld()) return;
 		const record: LiveSessionRecord = {
 			...base,
 			at: new Date().toISOString(),
@@ -394,7 +395,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 	};
 
 	const beat = (): void => {
-		if (stopped || ending || stateRootRemoved()) return;
+		if (stopped || ending || stateWritesWithheld()) return;
 		const fenced = writer.fenced || existsSync(releasedFencePath(meta.id));
 		const fence = fenced ? readReleasedFence(meta.id) : null;
 		const current = readLiveRecord(meta.id);
@@ -449,7 +450,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 
 	return () => {
 		stop();
-		if (writer.fenced || stateRootRemoved()) return;
+		if (writer.fenced || stateWritesWithheld()) return;
 		// Remove only a record that still names this process; a successor's is not ours.
 		const current = readLiveRecord(meta.id);
 		if (current !== null && sameOwner(current, owner)) removeQuietly(liveRecordPath(meta.id));
