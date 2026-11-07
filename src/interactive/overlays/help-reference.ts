@@ -170,7 +170,7 @@ export function openHelpOverlay(
 			detail: () => [
 				"# Keyboard model",
 				"Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: Alt+M model, Alt+L library, Alt+O output, Alt+U dashboard, Alt+W workers, Alt+E files, Alt+A music, Alt+S send now, Alt+Q queue, Alt+G external editor; Shift+Tab cycles thinking effort.",
-				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: t thinking, d background worker, x dismiss notice, y autonomy. Arrows and Enter reach every entry.`,
+				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: d background worker, x dismiss notice, y autonomy. Shift+Tab is t there. Arrows and Enter reach every entry.`,
 				"On an empty composer: ? shows the key card, / commands, ! shell, @ a file, left arrow the workers, down arrow the tasks. Esc stops a run; Ctrl+C twice or Ctrl+D exits.",
 				"Rebinding a direct key never moves its menu letter. An explicit [] disables both. This help lists your effective keys; settings are never rewritten.",
 			],
