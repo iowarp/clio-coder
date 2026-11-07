@@ -69,6 +69,37 @@ test("multiline slash notices and extension results use report cards without fla
 	}
 });
 
+test("clipped report cells point to complete inspection even when every row fits", async () => {
+	for (const line of [
+		`Endpoint  https://example.com/${"segment/".repeat(20)}`,
+		"An unusually long report field label  ready",
+	]) {
+		const panel = createChatPanel({ getOutputStyle: () => "standard" });
+		createCommandOutputRunIo({ appendReplayBlock: panel.appendReplayBlock, requestRender: () => {} }).stdout(
+			`Report\n${line}\n`,
+		);
+		match(plain(panel.render(40)), /Detailed or \/view for all/);
+		const artifact = panel.inspectionArtifacts()[0];
+		ok(artifact);
+		const full = plain((await artifact.load()).lines)
+			.replace(/^ {2}\S /gmu, "")
+			.replace(/\s/gu, "");
+		ok(full.includes(line.replace(/\s/gu, "")));
+	}
+});
+
+test("a clipped Minimal report keeps its inspection path on the single counter row", () => {
+	const panel = createChatPanel({ getOutputStyle: () => "compact" });
+	createCommandOutputRunIo({ appendReplayBlock: panel.appendReplayBlock, requestRender: () => {} }).stdout(
+		"An unusually long installation health report title\nErrors  2\nWarnings  1\n",
+	);
+	const rows = panel.render(40);
+	strictEqual(rows.length, 1);
+	match(plain(rows), /Errors 2.*Warnings 1/);
+	match(plain(rows), /\/view$/);
+	ok(visibleWidth(rows[0] ?? "") <= 40);
+});
+
 test("streamed tool arguments show preparation before execution and clear on answer text", () => {
 	const ctx = { now: 1000, localRuntime: true };
 	let state = reduceStatus(INITIAL_STATUS, { type: "agent_start" } as never, ctx);

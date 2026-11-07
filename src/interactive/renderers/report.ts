@@ -86,9 +86,18 @@ export function renderTranscriptReport(
 				: GLYPH.info;
 	const clean = (text: string) => sanitizeCallTargetText(redactUrlCredentials(text));
 	const summary = style === "compact" && !unbounded ? (report.compactSummary ?? report.summary) : report.summary;
-	const head = `${theme.fg(token, `${mark} ${clean(report.title)}`)} ${theme.fg("annotation", `${GLYPH.dot} ${clean(summary)}`)}`;
-	if (style === "compact" && !unbounded)
-		return cardHead(truncateToWidth(head, safeWidth, GLYPH.ellipsis, false), "", safeWidth);
+	const label = theme.fg(token, `${mark} ${clean(report.title)}`);
+	const facts = theme.fg("annotation", `${GLYPH.dot} ${clean(summary)}`);
+	const head = `${label} ${facts}`;
+	if (style === "compact" && !unbounded) {
+		const hint = visibleWidth(head) > safeWidth ? " /view" : "";
+		const titleWidth = safeWidth - visibleWidth(facts) - 1 - hint.length;
+		const compactHead =
+			titleWidth > 2
+				? `${truncateToWidth(label, titleWidth, GLYPH.ellipsis, false)} ${facts}`
+				: `${theme.fg(token, mark)} ${facts}`;
+		return cardHead(truncateToWidth(compactHead, safeWidth - hint.length, GLYPH.ellipsis, false) + hint, "", safeWidth);
+	}
 	const lines = cardHead(head, "", safeWidth);
 	if (style === "detailed" || unbounded) {
 		if (report.text !== undefined) {
@@ -111,16 +120,22 @@ export function renderTranscriptReport(
 		Math.floor(inner / 3),
 		Math.max(0, ...shown.map((row) => visibleWidth(clean(row.label)))),
 	);
+	let clipped = false;
 	for (const row of shown) {
-		const label = truncateToWidth(clean(row.label), labelWidth, GLYPH.ellipsis, false);
+		const labelText = clean(row.label);
+		const valueText = clean(row.value);
+		const label = truncateToWidth(labelText, labelWidth, GLYPH.ellipsis, false);
 		const lead = labelWidth === 0 ? "" : `${label}${" ".repeat(labelWidth - visibleWidth(label))}  `;
-		const value = truncateToWidth(clean(row.value), Math.max(1, inner - visibleWidth(lead)), GLYPH.ellipsis, false);
+		const valueWidth = Math.max(1, inner - visibleWidth(lead));
+		const value = truncateToWidth(valueText, valueWidth, GLYPH.ellipsis, false);
+		clipped ||= visibleWidth(labelText) > labelWidth || visibleWidth(valueText) > valueWidth;
 		lines.push(...cardRows(`${theme.fg("annotation", lead)}${value}`, safeWidth, failure, row.token));
 	}
-	if (report.rows.length > shown.length)
+	const remaining = report.rows.length - shown.length;
+	if (remaining > 0 || clipped)
 		lines.push(
 			...cardRows(
-				`${GLYPH.ellipsis} ${report.rows.length - shown.length} more ${GLYPH.dot} Detailed or /view for all`,
+				`${GLYPH.ellipsis} ${remaining > 0 ? `${remaining} more ${GLYPH.dot} ` : ""}Detailed or /view for all`,
 				safeWidth,
 				failure,
 				"commandHint",
