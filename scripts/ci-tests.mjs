@@ -60,6 +60,7 @@ export const coreTests = [
 	"url-credential-surfaces",
 	"bootstrap-grounding",
 	"in-prefix-summary",
+	"compaction-exact-facts",
 	"packed-source-directory",
 	"code-nav",
 	"skill-frontmatter-cache",

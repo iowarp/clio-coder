@@ -481,7 +481,7 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(result.firstKeptTurnId, entries[3]?.turnId);
 		strictEqual(result.tokensBefore, calculateContextTokens(projectWorkingSet(entries, foldWorkingSet(entries))));
 		ok(result.tokensBefore < 1000, "pre-eviction provider usage must not override the projected estimate");
-		match(result.summary, /<read-files>\nsrc\/evidence.ts\n<\/read-files>/);
+		match(result.summary, /<exact-facts source="clio">\n[^\n]*\nread src\/evidence.ts\n<\/exact-facts>/);
 		match(result.summary, /<recallable-refs>[\s\S]*r1/);
 		match(result.summary, /Preview only[\s\S]*scope="recall"[\s\S]*nextOffset/);
 		strictEqual(observations.length, 1);

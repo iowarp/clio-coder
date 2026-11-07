@@ -1704,6 +1704,7 @@ async function runCompactionFlow(
 						}
 					: {}),
 				entries,
+				cwd: meta.cwd,
 				offerMemory: (slice, ordinary, projected) => {
 					const scope = admission?.memory?.observationStatus().scope;
 					if (!scope) return null;

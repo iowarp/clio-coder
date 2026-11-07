@@ -61,13 +61,14 @@ import {
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
+import {
+	type FileOperations,
+	formatExactFacts,
+	recordPriorFileOperations,
+	stripEchoedExactFacts,
+} from "./exact-facts.js";
 import { noteSummaryUsage, summaryReasoningShare } from "./reasoning-share.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
-
-interface FileOperations {
-	read: Set<string>;
-	modified: Set<string>;
-}
 
 /** Validate the history checkpoint, never the intentionally different split-turn prompt. */
 function validateHistorySummary(text: string): void {
@@ -154,6 +155,8 @@ export interface CompactInput extends SideCallAuth {
 		| undefined;
 	/** Ordered active-path session entries to compact; returned cut indexes address this same array. */
 	entries: ReadonlyArray<SessionEntry>;
+	/** Session working directory; the exact-facts block measures the files it names against it. */
+	cwd?: string;
 	/** Authoritative main-agent selection; omitted for unknown legacy state. */
 	skillContextState?: SkillContextState | null;
 	/**
@@ -794,15 +797,6 @@ function extractFileOpsFromMessage(entry: SessionEntry, fileOps: FileOperations)
 	}
 }
 
-function extractFileOpsFromPriorSummary(summary: string, fileOps: FileOperations): void {
-	for (const [, body] of summary.matchAll(/<read-files>\n([\s\S]*?)\n<\/read-files>/g)) {
-		for (const filePath of (body ?? "").split("\n")) recordFileOperation(fileOps, "read", filePath);
-	}
-	for (const [, body] of summary.matchAll(/<modified-files>\n([\s\S]*?)\n<\/modified-files>/g)) {
-		for (const filePath of (body ?? "").split("\n")) recordFileOperation(fileOps, "edit", filePath);
-	}
-}
-
 function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
 	const fileOps = createFileOps();
 	// Chained read, write and edit steps touch files the summary must name.
@@ -812,21 +806,12 @@ function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
 			continue;
 		}
 		if (entry.kind === "compactionSummary") {
-			extractFileOpsFromPriorSummary(entry.summary, fileOps);
+			recordPriorFileOperations(entry.summary, (operation, filePath) => recordFileOperation(fileOps, operation, filePath));
 			continue;
 		}
 		extractFileOpsFromMessage(entry, fileOps);
 	}
 	return fileOps;
-}
-
-function formatFileOperations(fileOps: FileOperations): string {
-	const modified = [...fileOps.modified].sort();
-	const readOnly = [...fileOps.read].filter((filePath) => !fileOps.modified.has(filePath)).sort();
-	const sections: string[] = [];
-	if (readOnly.length > 0) sections.push(`<read-files>\n${readOnly.join("\n")}\n</read-files>`);
-	if (modified.length > 0) sections.push(`<modified-files>\n${modified.join("\n")}\n</modified-files>`);
-	return sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "";
 }
 
 function formatRecallableRefs(
@@ -1182,7 +1167,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				providerCheckpoint: prepared.handle,
 				publishProviderCheckpoint: prepared.publish,
 				checkpointParentTurnId: cutCursor,
-				summary: `Native Codex checkpoint; original history is retained for recall.${formatOperatorNotes(extractOperatorNotes(input.entries, input.instructions))}${formatRecallableRefs(input.entries, input.entries.length, workingSet)}`,
+				summary: `Native Codex checkpoint; original history is retained for recall.${formatOperatorNotes(extractOperatorNotes(input.entries, input.instructions))}${formatExactFacts(extractFileOps(input.entries), input.entries, input.cwd)}${formatRecallableRefs(input.entries, input.entries.length, workingSet)}`,
 				firstKeptEntryIndex: input.entries.length,
 				firstKeptTurnId: null,
 				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
@@ -1314,10 +1299,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
 	const rawPriorSuffix = priorCompactionContextEntries(input.entries, prevCompactionIndex).slice(1);
 	const previousContextText = serializeConversation(previousContextEntries);
-	const fileOps = extractFileOps([
+	const compactedEntries = [
 		...priorCompactionContextEntries(input.entries, prevCompactionIndex),
 		...input.entries.slice(boundaryStart, cut.firstKeptEntryIndex),
-	]);
+	];
+	const fileOps = extractFileOps(compactedEntries);
 	const firstKept = input.entries[cut.firstKeptEntryIndex] ?? null;
 	// The newest complete exchange can begin immediately after the checkpoint.
 	// Its earlier retained suffix is still live context, even though it sits
@@ -1573,12 +1559,13 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		],
 		compactInstructions ? `/compact: ${compactInstructions}` : undefined,
 	);
-	const summary = `${summaryParts
-		.join("\n\n---\n\n")
-		// The model sees the prior block inside <previous-context> and may echo it;
-		// the extracted notes below are the one authoritative copy.
-		.replace(/\n*<operator-notes\b[^>]*>[\s\S]*?(?:<\/operator-notes\s*>|$)\n*/giu, "\n\n")
-		.trim()}${formatOperatorNotes(operatorNotes)}${formatFileOperations(fileOps)}${formatRecallableRefs(
+	const summary = `${stripEchoedExactFacts(
+		summaryParts
+			.join("\n\n---\n\n")
+			// The model sees the prior blocks inside <previous-context> and may echo them;
+			// the harness-built copies below are the one authoritative copy.
+			.replace(/\n*<operator-notes\b[^>]*>[\s\S]*?(?:<\/operator-notes\s*>|$)\n*/giu, "\n\n"),
+	).trim()}${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd)}${formatRecallableRefs(
 		input.entries,
 		cut.firstKeptEntryIndex,
 		workingSet,
