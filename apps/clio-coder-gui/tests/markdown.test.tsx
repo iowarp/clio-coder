@@ -15,6 +15,7 @@ import type { MathToken } from "../client/render/markdown-model.js";
 import {
 	codeLanguage,
 	diffLineKind,
+	diffLines,
 	IncrementalMarkdown,
 	lexMarkdown,
 	MERMAID_MAX_LINES,
@@ -383,8 +384,44 @@ test("a diff block tints added and removed lines but not its headers", () => {
 		["meta", "meta", "hunk", "remove", "add", "context", "meta"],
 	);
 	const html = renderToStaticMarkup(<CodeBlock code={"@@ -1 +1 @@\n-old\n+new"} info="diff" settled />);
-	match(html, /<span class="diff-line diff-line--remove" data-change="removed">-old\n<\/span>/u);
-	match(html, /<span class="diff-line diff-line--add" data-change="added">\+new<\/span>/u);
+	match(html, /<span class="diff-line diff-line--remove" data-change="removed" data-ln="1 {2}">-old\n<\/span>/u);
+	match(html, /<span class="diff-line diff-line--add" data-change="added" data-ln=" {2}1">\+new<\/span>/u);
+});
+
+test("a diff with hunk ranges numbers its lines in the old and new file, and a removed `--- x` stays a change", () => {
+	const lines = diffLines(
+		[
+			"--- a/x.f90",
+			"+++ b/x.f90",
+			"@@ -9,3 +9,3 @@",
+			" keep",
+			"--- note",
+			"+++ note",
+			"",
+			"\\ No newline at end of file",
+			"trailing",
+		].join("\n"),
+	);
+	deepEqual(
+		lines.map((line) => [line.kind, line.old, line.new]),
+		[
+			["meta", null, null],
+			["meta", null, null],
+			["hunk", null, null],
+			["context", 9, 9],
+			["remove", 10, null],
+			["add", null, 10],
+			["context", 11, 11],
+			["meta", null, null],
+			["context", null, null],
+		],
+	);
+	const html = renderToStaticMarkup(<CodeBlock code={"@@ -98,2 +98,3 @@\n x\n+y\n z"} info="diff" settled />);
+	match(html, /data-ln=" 98 {2}98"> x/u);
+	match(html, /data-ln=" {5}99">\+y/u);
+	match(html, /data-ln=" 99 100"> z/u);
+	const bare = renderToStaticMarkup(<CodeBlock code={"-old\n+new"} info="diff" settled />);
+	ok(!bare.includes("data-ln"), "a diff without ranges has nothing to number");
 });
 
 test("a code span that names a file and line reads as a path; ordinary code does not", () => {

@@ -27,7 +27,7 @@ import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
 	codeLanguage,
 	type DiffLineKind,
-	diffLineKind,
+	diffLines,
 	type FootnoteRefToken,
 	type FootnoteToken,
 	HIGHLIGHT_MAX_CHARS,
@@ -238,23 +238,32 @@ const DIFF_LINE_LABEL: Readonly<Partial<Record<DiffLineKind, string>>> = { add: 
 
 /**
  * A diff reads by line: each added or removed line carries a full-width tint, so the change shows before the
- * signs are read. Lines are plain text, which also keeps a streaming diff cheap.
+ * signs are read. Lines are plain text, which also keeps a streaming diff cheap. When the diff has hunk
+ * ranges, a gutter numbers each line in the old and new file; it is drawn content, so a selection or a
+ * copy takes only the diff.
  */
 function DiffLines({ code }: { code: string }) {
-	const lines = useMemo(() => code.split("\n"), [code]);
+	const lines = useMemo(() => diffLines(code), [code]);
+	const width = useMemo(() => {
+		let widest = 0;
+		for (const line of lines) widest = Math.max(widest, line.old ?? 0, line.new ?? 0);
+		return widest === 0 ? 0 : String(widest).length;
+	}, [lines]);
+	const text = useMemo(() => code.split("\n"), [code]);
+	const number = (value: number | null) => (value === null ? "".padStart(width) : String(value).padStart(width));
 	return (
 		<>
 			{lines.map((line, index) => {
-				const kind = diffLineKind(line);
-				const label = DIFF_LINE_LABEL[kind];
+				const label = DIFF_LINE_LABEL[line.kind];
 				return (
 					<span
 						// biome-ignore lint/suspicious/noArrayIndexKey: A diff line is identified by its position; lines only append.
 						key={index}
-						className={`diff-line diff-line--${kind}`}
+						className={`diff-line diff-line--${line.kind}`}
 						{...(label === undefined ? {} : { "data-change": label })}
+						{...(width === 0 ? {} : { "data-ln": `${number(line.old)} ${number(line.new)}` })}
 					>
-						{line}
+						{text[index]}
 						{index < lines.length - 1 ? "\n" : null}
 					</span>
 				);

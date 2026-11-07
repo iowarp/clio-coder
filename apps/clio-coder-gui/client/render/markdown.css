@@ -462,6 +462,15 @@
 	margin-inline: calc(-1 * var(--space-4));
 	padding-inline: var(--space-4);
 }
+/* The gutter is generated content: it never enters a selection, and its spaces keep the columns aligned. */
+.diff-line[data-ln]::before {
+	content: attr(data-ln);
+	margin-right: var(--space-3);
+	color: var(--code-ink-muted);
+	white-space: pre;
+	font-variant-numeric: tabular-nums;
+	user-select: none;
+}
 .diff-line--add {
 	background: color-mix(in srgb, var(--syntax-inserted) 16%, transparent);
 	color: var(--syntax-inserted);

@@ -136,6 +136,7 @@ export type DiffLineKind = "add" | "remove" | "hunk" | "meta" | "context";
 /** How a line of a unified diff reads: file headers and hunk ranges are not changes, and `+++`/`---` are headers. */
 export function diffLineKind(line: string): DiffLineKind {
 	if (line.startsWith("@@")) return "hunk";
+	if (line.startsWith("\\ ")) return "meta";
 	if (
 		/^(?:\+\+\+|---)(?: |$)|^(?:diff |index |new file mode|deleted file mode|similarity |rename (?:from|to) )/u.test(line)
 	)
@@ -143,6 +144,59 @@ export function diffLineKind(line: string): DiffLineKind {
 	if (line.startsWith("+")) return "add";
 	if (line.startsWith("-")) return "remove";
 	return "context";
+}
+
+export interface DiffLine {
+	readonly kind: DiffLineKind;
+	readonly old: number | null;
+	readonly new: number | null;
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u;
+
+/**
+ * Reads a unified diff line by line, numbering each line in the old and new file from its hunk header. A
+ * hunk's counts decide where it ends, so a removed line that reads `--- x` is a change, not a header, and
+ * a diff without `@@` ranges carries no numbers at all.
+ */
+export function diffLines(code: string): DiffLine[] {
+	const out: DiffLine[] = [];
+	let oldAt = 0;
+	let newAt = 0;
+	let oldLeft = 0;
+	let newLeft = 0;
+	for (const line of code.split("\n")) {
+		if (oldLeft > 0 || newLeft > 0) {
+			const sign = line[0];
+			if (sign === "-" && oldLeft > 0) {
+				out.push({ kind: "remove", old: oldAt++, new: null });
+				oldLeft--;
+				continue;
+			}
+			if (sign === "+" && newLeft > 0) {
+				out.push({ kind: "add", old: null, new: newAt++ });
+				newLeft--;
+				continue;
+			}
+			if ((sign === " " || line === "") && oldLeft > 0 && newLeft > 0) {
+				out.push({ kind: "context", old: oldAt++, new: newAt++ });
+				oldLeft--;
+				newLeft--;
+				continue;
+			}
+			oldLeft = 0;
+			newLeft = 0;
+		}
+		const hunk = HUNK_HEADER.exec(line);
+		if (hunk) {
+			oldAt = Number(hunk[1]);
+			newAt = Number(hunk[3]);
+			oldLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+			newLeft = hunk[4] === undefined ? 1 : Number(hunk[4]);
+		}
+		out.push({ kind: diffLineKind(line), old: null, new: null });
+	}
+	return out;
 }
 
 /** Without a directory, `a.b` is as likely a member access (`process.env`) as a file, so only these extensions count. */
