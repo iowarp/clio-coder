@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import {
 	closeServer,
 	type OpenAICompatFixture,
@@ -227,6 +228,51 @@ describe("--read-only leaves every user file unchanged", { timeout: 600_000 }, (
 			deepEqual(userFiles(), baseline);
 		});
 	}
+
+	it("acp --read-only keeps its session and changes no user file", async () => {
+		writeSettings();
+		const before = sessionIds();
+		const env = Object.fromEntries(
+			Object.entries({
+				...process.env,
+				...scratchClioEnvVars(home),
+				HOME: home,
+				TMPDIR: runTmp,
+				CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+			}).filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+		const acp = createStdioTransport(
+			process.execPath,
+			["--import", import.meta.resolve("tsx"), entry, "--no-context-files", "acp", "--read-only"],
+			{ cwd: work, env },
+		);
+		try {
+			await acp.request("initialize", { protocolVersion: 1 });
+			// One session per probe: the fixture answers a turn whose last message is a tool result with text.
+			const probe = async (call: OpenAICompatToolCallScript): Promise<string> => {
+				const { sessionId } = await acp.request<{ sessionId: string }>("session/new", { cwd: work, mcpServers: [] });
+				mainToolCall = call;
+				toolResults.length = 0;
+				await acp.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "Run the probe." }] });
+				await acp.request("session/close", { sessionId });
+				return toolResults.join("\n");
+			};
+			const write = await probe({
+				name: "write",
+				arguments: { path: join(work, "notes.txt"), content: "changed over ACP\n" },
+			});
+			match(write, /write denied: this (?:run|task|session) is read-only/u);
+			if (bwrap) {
+				const shell = await probe({ name: "bash", arguments: { command: shellCommand() } });
+				match(shell, /tmp-ok \/tmp\b/u, shell);
+			}
+		} finally {
+			await acp.forceTerminate();
+		}
+		ok(sessionIds().length > before.length, "the read-only ACP session was recorded");
+		equal(existsSync(join(home, "state", "planted")), false);
+		deepEqual(userFiles(), baseline);
+	});
 
 	it("an unsandboxed or uncontained shell command is refused", async () => {
 		writeSettings((settings) => {
