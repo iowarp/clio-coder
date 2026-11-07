@@ -1,3 +1,4 @@
+import { cardHead, cardRail, cardRows } from "../card.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { groupWrappedRows, previewBudget, previewLines, previewRows } from "./preview.js";
@@ -29,7 +30,7 @@ import {
 } from "../../domains/safety/redaction.js";
 import { withoutModelRejectionAdvice } from "../../domains/safety/rejection-feedback.js";
 import { formatSize } from "../../engine/truncate.js";
-import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import {
 	chainStepToolCallId,
 	displayToolCall,
@@ -100,11 +101,8 @@ const FULL_RESULT_ROW_LIMIT = 120;
 const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
 
-// Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
-// styled strings per rendered line; by precomputing the structural and error variants
-// once at module scope, repeated rendering of long result blocks stays cheap.
-const RAIL_NORMAL = () => `${CONTENT_INDENT}${theme.fg("gutter", "│ ")}`;
-const RAIL_ERROR = () => `${CONTENT_INDENT}${red("│ ")}`;
+const RAIL_NORMAL = (): string => cardRail();
+const RAIL_ERROR = (): string => cardRail(true);
 
 export interface ToolExecutionStart {
 	toolCallId: string;
@@ -852,7 +850,7 @@ export function renderToolAwaitingApproval(
 		view.axis.kind === "autonomy"
 			? `At ${approvalAxisText(view)}, Clio asks you before a call that ${actionWords}`
 			: `${approvalAxisText(view)} held this call for you; it ${actionWords}`;
-	lines.push(...indentAndWrap(toolMeta(why), width, false));
+	lines.push(...cardRows(toolMeta(why), width, false));
 	const facts = [
 		...(target !== undefined && target.length > 0 && !leadShowsTarget ? [["target", target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
@@ -860,7 +858,7 @@ export function renderToolAwaitingApproval(
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
 	] as const;
 	for (const [label, value] of facts) {
-		lines.push(...indentAndWrap(`${toolMeta(`${label} ·`)} ${value}`, width, false));
+		lines.push(...cardRows(`${toolMeta(`${label} ·`)} ${value}`, width, false));
 	}
 	return lines;
 }
@@ -892,7 +890,7 @@ function operatorGrantRows(
 	if (axis === undefined) return [];
 	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
 	// that had already been allowed.
-	return indentAndWrap(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
+	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -1339,67 +1337,8 @@ function sublineParts(
 	return visibleWidth(`${lean.lead}${lean.tail}`) <= width ? lean : full;
 }
 
-/**
- * Wrap a collapsed subline while keeping its status tail atomic. The lead wraps
- * normally; the tail (status glyph, duration, offload, and the optional expand
- * hint) is placed as a single unit. When the whole line fits it renders on one
- * row; otherwise the tail joins the lead's last wrapped line if it fits there,
- * and only falls to its own row when it cannot, so the status glyph and
- * duration are never separated by a wrap.
- */
-function wrapSublineWithTail(lead: string, tail: string, width: number): string[] {
-	if (tail.length === 0) return wrapHanging(lead, width);
-	if (visibleWidth(`${lead}${tail}`) <= width) return [releaseSpaces(`${lead}${tail}`)];
-	const leadLines = wrapHanging(lead, width);
-	const last = leadLines[leadLines.length - 1];
-	if (last !== undefined && visibleWidth(`${last}${tail}`) <= width) {
-		leadLines[leadLines.length - 1] = releaseSpaces(`${last}${tail}`);
-		return leadLines;
-	}
-	// The tail cannot sit beside the lead: give it its own row in the content
-	// column, dropping the joining leading space.
-	return [...leadLines, ...indentRows(wrap(tail.replace(/^ +/u, ""), contentWidth(width)))];
-}
-
-function wrap(line: string, width: number): string[] {
-	return wrapTextWithAnsi(line, width).map(releaseSpaces);
-}
-
 function contentWidth(width: number): number {
 	return Math.max(1, width - CONTENT_INDENT_WIDTH);
-}
-
-function indentRows(rows: string[]): string[] {
-	return rows.map((row) => `${CONTENT_INDENT}${row}`);
-}
-
-/**
- * Wrap an action row with a hanging indent. The first row keeps the `▸` in the
- * gutter; every continuation starts in the content column, so a long dispatch
- * or command row never wraps back to column 0 where it would read as the next
- * action.
- */
-function wrapHanging(line: string, width: number): string[] {
-	if (visibleWidth(line) <= width) return [theme.base("toolSummary", releaseSpaces(line))];
-	const rows = wrap(line, contentWidth(width));
-	return rows.map((row, index) => theme.base("toolSummary", index === 0 ? row : `${CONTENT_INDENT}${row}`));
-}
-
-/**
- * Apply the body rail to a line and wrap it. The rail (`│ `) is quiet by
- * default and red on error so the tool block reads as a single visual unit
- * even when its result spans many lines. Uses the hoisted `RAIL_NORMAL()` /
- * `RAIL_ERROR` constants so we do not allocate a fresh styled prefix per
- * wrapped line.
- */
-function indentAndWrap(line: string, width: number, isError: boolean): string[] {
-	const rail = isError ? RAIL_ERROR() : RAIL_NORMAL();
-	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	const out: string[] = [];
-	for (const wrapped of wrap(line, bodyWidth)) {
-		out.push(`${rail}${theme.base("toolSummary", wrapped)}`);
-	}
-	return out;
 }
 
 function isScalarList(value: unknown): value is Array<string | number | boolean> {
@@ -1479,7 +1418,7 @@ export function renderToolArguments(
 					: highlightJsonLine(safe);
 		};
 		out.push(
-			...indentAndWrap(
+			...cardRows(
 				`${theme.fg("toolArgumentName", sanitizeCallTargetText(key))} ${toolMeta("›")} ${argumentLine(lines[0] ?? "")}`,
 				width,
 				isError,
@@ -1487,12 +1426,12 @@ export function renderToolArguments(
 		);
 		for (const line of lines.slice(1)) {
 			if (out.length > maxRows) break;
-			out.push(...indentAndWrap(`  ${argumentLine(line)}`, width, isError));
+			out.push(...cardRows(`  ${argumentLine(line)}`, width, isError));
 		}
 		if (out.length > maxRows || full.length > chars) {
 			return [
 				...out.slice(0, Math.max(0, maxRows - 1)),
-				...indentAndWrap(toolMeta("… more arguments · /view"), width, isError),
+				...cardRows(toolMeta("… more arguments · /view"), width, isError),
 			];
 		}
 	}
@@ -1675,7 +1614,7 @@ function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isErr
 function renderOutputRows(text: string, width: number, isError: boolean, rowLimit: number): string[] {
 	const rows: string[] = [];
 	for (const raw of toolOutputInk(text)) {
-		rows.push(...indentAndWrap(raw, width, isError));
+		rows.push(...cardRows(raw, width, isError));
 	}
 	return truncateRowsMiddle(rows, rowLimit, isError);
 }
@@ -1695,7 +1634,7 @@ function renderStructuredOutputRows(
 			: tryRenderJson(unwrapped, bodyWidth, { lineLimit: rowLimit });
 	if (!structured) return null;
 	const out: string[] = [];
-	for (const row of structured) out.push(...indentAndWrap(row, width, isError));
+	for (const row of structured) out.push(...cardRows(row, width, isError));
 	return out;
 }
 
@@ -1830,7 +1769,7 @@ function renderOutputMeta(
 ): string[] {
 	const facts = outputFacts(finished);
 	const suffix = facts.length > 0 ? toolMeta(` · ${facts.join(" · ")}`) : "";
-	return indentAndWrap(`${theme.fg("toolSummary", label)}${suffix}`, width, isError);
+	return cardRows(`${theme.fg("toolSummary", label)}${suffix}`, width, isError);
 }
 
 function renderOutputFooter(finished: ToolExecutionFinished, width: number, isError: boolean): string[] {
@@ -1838,11 +1777,11 @@ function renderOutputFooter(finished: ToolExecutionFinished, width: number, isEr
 	const offloadPath = didNotRun(finished) ? null : offloadPathOf(finished);
 	if (offloadPath !== null) {
 		const pointer = offloadFileMissing(finished) ? "gone after the 14-day retention sweep" : offloadPath;
-		out.push(...indentAndWrap(`${informational("full output")}  ${pointer}`, width, isError));
+		out.push(...cardRows(`${informational("full output")}  ${pointer}`, width, isError));
 	}
 	const hint =
 		stringField(resultSizeOf(finished), "followUpHint") ?? stringField(finished.resultSummary ?? null, "followUpHint");
-	if (hint !== null) out.push(...indentAndWrap(`${toolMeta("next")}  ${hint}`, width, isError));
+	if (hint !== null) out.push(...cardRows(`${toolMeta("next")}  ${hint}`, width, isError));
 	return out;
 }
 
@@ -1862,10 +1801,10 @@ function renderBashResultBlock(
 ): string[] {
 	const out: string[] = [];
 	const commandLine = `${shellMark("$")} ${highlightBashCommand(stripShellWrapperForDisplay(args.command))}`;
-	out.push(...indentAndWrap(commandLine, width, isError));
+	out.push(...cardRows(commandLine, width, isError));
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		out.push(...indentAndWrap(toolMeta("(no output)"), width, isError));
+		out.push(...cardRows(toolMeta("(no output)"), width, isError));
 		return out;
 	}
 	out.push(...renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts)));
@@ -1880,7 +1819,7 @@ function renderResultBlock(
 ): string[] {
 	const unwrapped = unwrapResultEnvelope(result);
 	if (isEmptyResult(unwrapped)) {
-		return indentAndWrap(toolMeta("(no output)"), width, isError);
+		return cardRows(toolMeta("(no output)"), width, isError);
 	}
 	const structured = renderStructuredOutputRows(unwrapped, width, isError, resultRowLimit(opts));
 	if (structured) return structured;
@@ -1936,7 +1875,7 @@ function previewActionRows(call: ToolExecutionStart | ToolExecutionFinished, wid
 	// a fact in half to stay on one line, so it wraps between its facts instead.
 	// A path or URL keeps its own tail when cut, so only a command wraps.
 	if (overflow > 0 && width < 60 && objectDisplay(resolveRow(call), width)?.style === "code")
-		return wrapSublineWithTail(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
+		return cardHead(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
 	if (overflow > 0) {
 		const row = resolveRow(call);
 		const finished = "result" in call ? call : null;
@@ -1957,7 +1896,7 @@ export function renderToolSubline(wire: ToolExecutionStart | ToolExecutionFinish
 	// A failed call always shows its bounded body, which carries the diagnosis;
 	// the row states the outcome once and never excerpts the body onto itself.
 	const parts = sublineParts(call, status, meta, width);
-	return wrapSublineWithTail(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
+	return cardHead(parts.lead, parts.tail, width).map((line) => theme.base("toolSummary", line));
 }
 
 /**
@@ -1994,7 +1933,7 @@ export function renderToolExecution(
 	};
 	const row = resolveRow(finished);
 	const out: string[] = [];
-	out.push(...wrapHanging(headerLine(finished, status, statusMeta, width), width));
+	out.push(...cardHead(headerLine(finished, status, statusMeta, width), "", width));
 	out.push(...operatorGrantRows(finished, width, finished.isError));
 
 	// A mutation produces one bounded numbered diff on result.details. It is the
@@ -2057,7 +1996,7 @@ export function renderToolResultOnly(
 		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
-	out.push(...wrapHanging(headerLine({ ...finished, args: undefined }, status, statusMeta, width), width));
+	out.push(...cardHead(headerLine({ ...finished, args: undefined }, status, statusMeta, width), "", width));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -2535,7 +2474,7 @@ export function renderToolPreview(
 		const pairRows: string[] = [];
 		for (const { question, answer } of pairs) {
 			pairRows.push(
-				...indentAndWrap(
+				...cardRows(
 					`${toolMeta(sanitizeCallTargetText(question))} ${toolMeta("→")} ${theme.fg("body", sanitizeCallTargetText(answer))}`,
 					width,
 					false,
@@ -2607,7 +2546,7 @@ export function renderToolPreview(
 			// failed tool's body is the harness's error text, so its paths abbreviate.
 			const shownText = failure && !command ? displayEmbeddedPaths(text, row.context.cwd ?? process.cwd()) : text;
 			const body = toolOutputInk(redactStreamingSecretString(shownText, finished !== undefined).trimEnd()).map((line) =>
-				indentAndWrap(line, width, failure),
+				cardRows(line, width, failure),
 			);
 			rows.push(
 				...previewLines(
@@ -2757,7 +2696,7 @@ function chainStepRows(call: ToolExecutionStart | ToolExecutionFinished, width: 
 							: plannedStepLine(planned, "not run", width);
 					}),
 				];
-	return lines.flatMap((line) => indentAndWrap(line, width, failure));
+	return lines.flatMap((line) => cardRows(line, width, failure));
 }
 
 /**
@@ -2773,8 +2712,8 @@ function chainOutputRows(finished: ToolExecutionFinished, width: number, failure
 		const shown = call.isError && command ? withoutCommandStatus(call.result) : call.result;
 		const { body } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
 		if (body.trim().length === 0) continue;
-		rows.push(...indentAndWrap(toolMeta(sanitizeCallTargetText(`${call.toolName} · ${id} ›`)), width, failure));
-		rows.push(...indentAndWrap(redactSecretString(body), width, failure));
+		rows.push(...cardRows(toolMeta(sanitizeCallTargetText(`${call.toolName} · ${id} ›`)), width, failure));
+		rows.push(...cardRows(redactSecretString(body), width, failure));
 	}
 	return rows;
 }
@@ -2815,9 +2754,7 @@ function renderChainPreview(
 		const result = finished?.result ?? options.partialResult;
 		const text = result === undefined ? "" : resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
 		body =
-			text.trim().length === 0
-				? []
-				: indentAndWrap(redactStreamingSecretString(text, finished !== undefined), width, failure);
+			text.trim().length === 0 ? [] : cardRows(redactStreamingSecretString(text, finished !== undefined), width, failure);
 	}
 	rows.push(...previewRows(body, limit, width, finished === undefined, rail, BODY_INDENT_VISIBLE_WIDTH));
 	return rows;
@@ -2831,7 +2768,7 @@ function renderChainExecution(finished: ToolExecutionFinished, width: number, op
 		outcome: finished.outcome,
 		blockReason: finished.blockReason,
 	};
-	const out = [...wrapHanging(headerLine(finished, status, statusMeta, width), width)];
+	const out = [...cardHead(headerLine(finished, status, statusMeta, width), "", width)];
 	out.push(...operatorGrantRows(finished, width, finished.isError));
 	out.push(...chainStepRows(finished, width, finished.isError));
 	const steps = settledChainSteps(finished);
@@ -2939,9 +2876,9 @@ export function renderFoldedGroup(
 	const verb = family === "explore" ? "explored" : family === "knowledge" ? "consulted" : "edited";
 	const totals = family === "mutate" && complete ? `${toolMeta(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
 	const head = `${classMark(toolClass)}${styledVerb(verb)} ${theme.fg("toolSummary", countNouns(calls))}${totals} ${green(STATUS_OK_GLYPH)}`;
-	const body = indentAndWrap(joinFacts(targets, toolMeta), width, false);
+	const body = cardRows(joinFacts(targets, toolMeta), width, false);
 	return [
-		...wrapHanging(head, width),
+		...cardHead(head, "", width),
 		...previewRows(body, maxRows, width, false, RAIL_NORMAL(), BODY_INDENT_VISIBLE_WIDTH),
 	];
 }
