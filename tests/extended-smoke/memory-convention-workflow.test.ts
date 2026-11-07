@@ -208,7 +208,7 @@ test("operator promotion persists a convention and only approval admits it into 
 		// scripted model. No approved flag is seeded or patched in the fixture.
 		await command(["approve", unrelated.id]);
 		const beforeApproval = await consume(workspace);
-		ok(beforeApproval.includes(UNRELATED));
+		strictEqual(beforeApproval.includes(UNRELATED), false, "the relevance gate keeps an approved off-task record out of the prompt");
 		strictEqual(beforeApproval.includes(MARKER), false, "unrelated approved memory is not retention of this convention");
 		await command(["list"]);
 		await command(["approve", convention.id]);
@@ -239,7 +239,7 @@ test("operator promotion persists a convention and only approval admits it into 
 				approval: "explicit test-driver CLI action",
 				persistence: "reloaded records.json",
 				consumption: "fresh process request includes exact record, lesson and evidence after approval only",
-				unrelatedMemory: "present before target approval; graded separately",
+				unrelatedMemory: "approved but off-task, kept out by the relevance gate",
 				transcriptRecovery: "absent",
 				wrongRepository: "excluded",
 				rejectedRecord: "excluded",
