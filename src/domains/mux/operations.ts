@@ -90,7 +90,6 @@ export interface PanesInventoryEntry {
 
 /** Effective pane settings, as `/panes` prints them. */
 export interface PanesEffectiveSettings {
-	enabled: string;
 	notifications: string;
 	/** Boot composition: off, workers, or cockpit. */
 	layout: string;

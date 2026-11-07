@@ -1,5 +1,6 @@
 import { match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { MuxDetection } from "../../src/domains/mux/detect.js";
 import type { DockState } from "../../src/domains/mux/dock-controller.js";
 import type { MuxPaneRecord } from "../../src/domains/mux/types.js";
 import { describePanesLeftBehind } from "../../src/interactive/panes-runtime.js";
@@ -7,6 +8,8 @@ import { describePanesLeftBehind } from "../../src/interactive/panes-runtime.js"
 function record(paneId: string, label: string, purpose: MuxPaneRecord["purpose"] = "utility"): MuxPaneRecord {
 	return { ref: { paneId, tabId: "t1", workspaceId: "w1" }, purpose, label, openedAt: 1 };
 }
+
+const userHost = { socketPath: "/run/user/1000/herdr.sock" } as MuxDetection;
 
 function dock(paneId: string, slot: DockState["slot"]): DockState {
 	return { slot, paneId, tabId: "t1", targetShare: 0.3, lastAppliedShare: 0.3, hidden: false };
@@ -19,6 +22,7 @@ describe("contracts/panes /quit names the utility panes it leaves open (#272)", 
 		const left = describePanesLeftBehind({
 			list: () => [files, watch],
 			docks: () => [dock("p1", "files"), dock("p2", "workers")],
+			detection: () => userHost,
 		});
 		strictEqual(left, null);
 	});
@@ -26,7 +30,11 @@ describe("contracts/panes /quit names the utility panes it leaves open (#272)", 
 	it("names each utility pane with its id, the pre-quit command, and the herdr command that closes it now", () => {
 		const shell = record("wK:p2A", "bash in panes");
 		const files = record("p1", "files");
-		const left = describePanesLeftBehind({ list: () => [files, shell], docks: () => [dock("p1", "files")] });
+		const left = describePanesLeftBehind({
+			list: () => [files, shell],
+			docks: () => [dock("p1", "files")],
+			detection: () => userHost,
+		});
 		strictEqual(
 			left,
 			"Clio left 1 pane open in herdr: bash in panes (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.",
@@ -37,8 +45,23 @@ describe("contracts/panes /quit names the utility panes it leaves open (#272)", 
 		const left = describePanesLeftBehind({
 			list: () => [record("p3", "bash in panes"), record("p4", "logs: run-1")],
 			docks: () => [],
+			detection: () => userHost,
 		});
 		match(left ?? "", /^Clio left 2 panes open in herdr: bash in panes \(p3\), logs: run-1 \(p4\)\./);
 		match(left ?? "", /close them now with `herdr pane close <paneId>`\.$/);
+	});
+
+	it("says nothing in Clio's own host, because the launcher closes that whole workspace on quit", () => {
+		for (const socketPath of [
+			"/run/user/1000/clio-coder/clio-coder-0123456789ab.sock",
+			"C:\\Users\\u\\AppData\\Roaming\\herdr\\sessions\\clio-coder-0123456789ab\\herdr.sock",
+		]) {
+			const left = describePanesLeftBehind({
+				list: () => [record("w1:p3", "logs: run-1")],
+				docks: () => [],
+				detection: () => ({ socketPath }) as MuxDetection,
+			});
+			strictEqual(left, null);
+		}
 	});
 });

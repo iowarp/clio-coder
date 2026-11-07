@@ -11,6 +11,10 @@ export async function runVersionCommand(args: ReadonlyArray<string> = []): Promi
 		process.stdout.write(`${WORKER_SPEC_VERSIONS.join(" ")}\n`);
 		return 0;
 	}
-	process.stdout.write(`Clio Coder ${readClioVersionLabel()}\n`);
+	// The version stays alone on the first line: fleet preflight reads only that one.
+	const { findPinnedTool } = await import("../domains/toolchain/registry.js");
+	const herdr = findPinnedTool("herdr");
+	const credit = herdr === null ? "" : `Panes powered by herdr ${herdr.version} (${herdr.license})\n`;
+	process.stdout.write(`Clio Coder ${readClioVersionLabel()}\n${credit}`);
 	return 0;
 }

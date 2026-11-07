@@ -8,10 +8,10 @@
  * contract test pins that by making `net.connect` throw for the duration of the
  * call.
  *
- * Embedded hosting does not happen here. The workspace launcher
- * (src/cli/workspace-launch.ts) starts the pane host and runs Clio in one of
- * its panes, so the Clio that reaches this ladder under `embedded` is already
- * a guest of the host Clio started, and `embedded` detects exactly like `auto`.
+ * Hosting does not happen here. The workspace launcher
+ * (src/cli/workspace-launch.ts) starts Clio's private pane host and runs Clio
+ * in one of its panes, so the Clio that reaches this ladder is already a guest
+ * of that host, or of the operator's own herdr when the launcher stood down.
  */
 
 import { homedir } from "node:os";
@@ -22,7 +22,7 @@ import type { MuxLog, MuxMode, MuxSelfLocation, MuxServerInfo } from "./types.js
 /** Spec 4.2 gives the ping one second to answer before the rung is refused. */
 const PING_TIMEOUT_MS = 1_000;
 
-export type MuxEnablement = "auto" | "embedded" | "off";
+export type MuxEnablement = "auto" | "off";
 
 export interface MuxDetection {
 	mode: MuxMode;
@@ -60,7 +60,7 @@ export interface DetectMuxOptions {
  * and the spec's literal `~/.config/herdr` would miss every one of their
  * sockets.
  */
-export function herdrConfigDir(env: NodeJS.ProcessEnv): string {
+function herdrConfigDir(env: NodeJS.ProcessEnv): string {
 	const xdg = env.XDG_CONFIG_HOME;
 	if (typeof xdg === "string" && xdg.length > 0) return join(xdg, "herdr");
 	const home = typeof env.HOME === "string" && env.HOME.length > 0 ? env.HOME : homedir();
@@ -136,10 +136,6 @@ export async function detectMux(options: DetectMuxOptions = {}): Promise<MuxDete
 	if (enabled === "off") {
 		return { detection: none("panes are turned off"), client: null };
 	}
-	// `embedded` hosting is the launcher's job (src/cli/workspace-launch.ts): it
-	// puts Clio in a pane before this runs. What reaches here under `embedded`
-	// is therefore the same question as `auto`, asked from inside or outside a
-	// pane host, and takes the same ladder.
 	if (env.HERDR_ENV !== "1") {
 		return { detection: none("HERDR_ENV is not 1, so Clio is not running inside a pane host"), client: null };
 	}

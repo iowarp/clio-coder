@@ -1,5 +1,5 @@
 export type { ToolFetcher, ToolInstallOptions, ToolInstallResult } from "./install.js";
-export { installPinnedTool, installTool } from "./install.js";
+export { installPinnedTool, installTool, mirroredSource, toolchainMirror } from "./install.js";
 export { toolchainRoot, toolVersionDir, vendoredBinaryPath } from "./paths.js";
 export {
 	currentToolPlatform,
@@ -16,6 +16,7 @@ export {
 	installRemedy,
 	resolveEntryBinary,
 	resolveToolBinary,
+	resolveVendoredBinary,
 	toolStatus,
 	toolStatuses,
 } from "./resolve.js";

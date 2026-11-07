@@ -56,7 +56,6 @@ test("every existing settings control has exactly one home and canonical persist
 		["guardrails.workerToolCallCap", "fleet"],
 		["guardrails.internalDispatchTimeoutMs", "advanced"],
 		["panes.journal", "fleet"],
-		["panes.enabled", "interface"],
 		["terminal.smoothStreaming", "chat"],
 		["keybindings", "advanced"],
 		["attribution.gitCommits", "workspace"],

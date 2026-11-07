@@ -246,12 +246,6 @@ export interface WorkingSetSettings {
  *     because it buys latency for an operator watching a local server.
  */
 export interface PanesSettings {
-	/**
-	 * Capability rung the pane layer may reach. `auto` takes guest mode when a
-	 * pane host is detected; `embedded` asks Clio to own a private session, which
-	 * degrades to none until that ships; `off` skips detection entirely.
-	 */
-	enabled: "auto" | "embedded" | "off";
 	/** Which terminal run states raise a pane-host toast. */
 	notifications: "failures" | "all" | "off";
 	/**
@@ -868,7 +862,6 @@ export const DEFAULT_SETTINGS = {
 		desktopNotifications: false,
 		autoUpdate: true,
 		panes: {
-			enabled: "embedded",
 			notifications: "failures",
 			layout: "off",
 			workers: { ratio: 0.34 },
@@ -1100,7 +1093,6 @@ interface:
   # Native installs update themselves in the background; false keeps only the notice.
   autoUpdate: true
   panes:
-    enabled: embedded
     notifications: failures
     layout: off
     workers:

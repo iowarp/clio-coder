@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { type ArchiveEntry, readTarGzEntries, readZipEntries } from "./archive.js";
 import { ensureToolchainRoot } from "./paths.js";
@@ -11,8 +12,10 @@ import type { PinnedTool, PinnedToolDownload, ToolPlatform } from "./types.js";
 /**
  * Install a pinned tool into the vendor root.
  *
- * Three rules shape this file. Nothing downloads unless an operator asked for
- * this install by name, so no startup path can reach it. Nothing is written
+ * Three rules shape this file. Nothing downloads unless an operator or the
+ * installer asked for this tool by name; the one startup path that reaches it is
+ * the launcher re-provisioning herdr, which Clio requires to host its own panes
+ * (src/cli/workspace-launch.ts). Nothing is written
  * until the asset's checksum matches the pin, and a mismatch leaves the disk
  * exactly as it was. And the version directory appears atomically, built in a
  * sibling staging directory and renamed into place, so a killed install leaves
@@ -24,6 +27,13 @@ import type { PinnedTool, PinnedToolDownload, ToolPlatform } from "./types.js";
  * superseded directory is dead weight an operator would have to find and delete
  * by hand. Pruning runs on the already-installed path too, which is what
  * repairs a machine that bumped pins before this behavior existed.
+ *
+ * `CLIO_CODER_TOOLCHAIN_MIRROR` points every download at a mirror instead of
+ * upstream, for airgapped and proxied machines: a base URL or a local directory
+ * that holds the upstream assets under their upstream names (the last path
+ * segment of each pinned URL, e.g. `herdr-linux-x86_64`, `LICENSE`). The
+ * mirror is trusted for nothing: every byte it serves is checked against the
+ * same pinned sha256 as upstream's.
  */
 
 /** How a URL becomes bytes. Injectable so the contract tests never touch the network. */
@@ -37,6 +47,13 @@ export interface ToolInstallOptions {
 	/** Vendor root override. Defaults to the data root's `tools` directory. */
 	root?: string;
 	fetch?: ToolFetcher;
+	/**
+	 * Base URL or local directory serving the pinned assets under their upstream
+	 * basenames. Defaults to `CLIO_CODER_TOOLCHAIN_MIRROR`; null forces upstream.
+	 */
+	mirror?: string | null;
+	/** Per-asset download timeout. Defaults to five minutes. */
+	timeoutMs?: number;
 	onProgress?: (message: string) => void;
 }
 
@@ -103,11 +120,14 @@ export async function installPinnedTool(
 		};
 	}
 
-	const fetcher = options.fetch ?? fetchAsset;
+	const mirror = options.mirror === undefined ? toolchainMirror() : options.mirror;
+	const source = (url: string): string => (mirror ? mirroredSource(url, mirror) : url);
+	const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
+	const fetcher = options.fetch ?? ((url: string) => fetchAsset(url, timeoutMs));
 	let assetBytes: Buffer;
 	try {
-		progress(`downloading ${download.url}`);
-		assetBytes = await fetcher(download.url);
+		progress(`downloading ${source(download.url)}`);
+		assetBytes = await fetcher(source(download.url));
 	} catch (error) {
 		return failure(entry.id, entry.version, dir, `download failed: ${messageOf(error)}`);
 	}
@@ -118,7 +138,7 @@ export async function installPinnedTool(
 			entry.id,
 			entry.version,
 			dir,
-			`checksum mismatch for ${download.url}: expected ${download.sha256}, got ${actual}. Nothing was written.`,
+			`checksum mismatch for ${source(download.url)}: expected ${download.sha256}, got ${actual}. Nothing was written.`,
 		);
 	}
 	progress(`checksum verified (${actual})`);
@@ -127,8 +147,8 @@ export async function installPinnedTool(
 	for (const doc of entry.documents) {
 		let bytes: Buffer;
 		try {
-			progress(`downloading ${doc.url}`);
-			bytes = await fetcher(doc.url);
+			progress(`downloading ${source(doc.url)}`);
+			bytes = await fetcher(source(doc.url));
 		} catch (error) {
 			return failure(entry.id, entry.version, dir, `download failed for ${doc.name}: ${messageOf(error)}`);
 		}
@@ -138,7 +158,7 @@ export async function installPinnedTool(
 				entry.id,
 				entry.version,
 				dir,
-				`checksum mismatch for ${doc.url}: expected ${doc.sha256}, got ${docHash}. Nothing was written.`,
+				`checksum mismatch for ${source(doc.url)}: expected ${doc.sha256}, got ${docHash}. Nothing was written.`,
 			);
 		}
 		documentBytes.set(doc.name, bytes);
@@ -313,10 +333,31 @@ function unpack(bytes: Buffer, download: PinnedToolDownload): Map<string, Archiv
 	return readTarGzEntries(bytes);
 }
 
-async function fetchAsset(url: string): Promise<Buffer> {
+/** The configured mirror, or null for upstream. */
+export function toolchainMirror(env: NodeJS.ProcessEnv = process.env): string | null {
+	const value = env.CLIO_CODER_TOOLCHAIN_MIRROR?.trim();
+	return value ? value : null;
+}
+
+/**
+ * Where a pinned URL's asset lives on a mirror: the mirror joined with the
+ * URL's last path segment. A mirror that is a URL stays a URL; anything else
+ * is a local directory and becomes a file path.
+ */
+export function mirroredSource(url: string, mirror: string): string {
+	const name = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+	if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(mirror) && !mirror.startsWith("file:")) {
+		return `${mirror.replace(/\/+$/u, "")}/${encodeURIComponent(name)}`;
+	}
+	const dir = mirror.startsWith("file:") ? fileURLToPath(mirror) : mirror;
+	return join(dir, name);
+}
+
+async function fetchAsset(url: string, timeoutMs: number): Promise<Buffer> {
+	if (!/^https?:\/\//iu.test(url)) return readFileSync(url);
 	const response = await fetch(url, {
 		redirect: "follow",
-		signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+		signal: AbortSignal.timeout(timeoutMs),
 	});
 	if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
 	return Buffer.from(await response.arrayBuffer());

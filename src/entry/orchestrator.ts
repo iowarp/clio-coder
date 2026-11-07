@@ -13,7 +13,7 @@ import { readClioVersionLabel } from "../core/build-info.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
-import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
+import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS, type OutputStyle } from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
@@ -2212,14 +2212,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const acpInterviews = acpHandshake?.initialized === true && acpHandshake.interviewsEnabled;
 	const acpWorkerPermissions = acpHandshake?.initialized === true && acpHandshake.workerPermissionsEnabled;
 	const acpInterviewChannel = acpInterviews ? createAcpInterviewChannel() : undefined;
-	// The rung is settled before the config contract loads, off the settings the
-	// interactive entry point already read strictly (`src/cli/clio.ts:31`) and
-	// the `--with-panes` / `--no-panes` flag, which wins in both directions. This
-	// is why `panes.enabled` is a restart-scoped row: the decision runs once,
-	// here. An inactive rung loads nothing: the whole extension, mux domain
-	// included, lives behind the dynamic import below.
-	const muxEnablement = resolvePanesEnablement(options.panes, options.startupSettings?.interface.panes.enabled);
+	// The rung is settled once, before the config contract loads, off the
+	// `--with-panes` flag and whether this process runs in a pane host. An
+	// inactive rung loads nothing: the whole extension, mux domain included,
+	// lives behind the dynamic import below.
+	const muxEnablement = resolvePanesEnablement(options.panes);
 	const withPanes = muxInteractive && muxEnablement !== "off" ? await import("./with-panes.js") : null;
+	// Session-only output style toggles, reported to Clio's pane host so its chrome follows.
+	const outputStyleListeners = new Set<(style: OutputStyle) => void>();
 
 	// Assigned once the extension reload coordinator exists, after the domains
 	// load; a worker dispatched before that carries no extension hooks.
@@ -2285,6 +2285,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							log: (level, message) => {
 								if (level === "warning") bootStderr(`[mux] ${message}\n`);
 							},
+							onSessionOutputStyle: (listener) => outputStyleListeners.add(listener),
 						}),
 					]
 				: []),
@@ -4259,6 +4260,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			sessionOverrides.set(id, value);
 			bumpSessionState();
 			publishSessionSettingsChange(previous, source);
+			if (id === "interface.outputDetail") {
+				const style = getCurrentSettings().interface.outputDetail;
+				for (const listener of outputStyleListeners) listener(style);
+			}
 			return;
 		}
 		if (scope === "project") {

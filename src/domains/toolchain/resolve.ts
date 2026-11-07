@@ -91,6 +91,21 @@ export function resolveEntryBinary(entry: PinnedTool, binary: string): ToolResol
 	return { source: "none", binaryPath: null, version: null, entry, pathCandidate, vendoredPath: null };
 }
 
+/**
+ * The vendored pin of a registry tool and nothing else: no PATH lookup, no
+ * version probe. This is what Clio runs when the tool is part of Clio itself
+ * rather than something it borrows from the operator, which is the case for
+ * herdr hosting Clio's own private panes: an operator's herdr is their
+ * program, at their version, with their config, and hosting on it would break
+ * the isolation the private host exists for. Null when the pin is not installed.
+ */
+export function resolveVendoredBinary(id: string): { binaryPath: string; version: string } | null {
+	const entry = findPinnedTool(id);
+	if (entry === null) return null;
+	const path = vendoredBinaryPath(entry.id, entry.version, entry.primaryBinary);
+	return statOrNull(path)?.isFile() ? { binaryPath: path, version: entry.version } : null;
+}
+
 /** Per-entry state for the CLI and doctor. */
 export function toolStatus(entry: PinnedTool): ToolStatus {
 	const platform = currentToolPlatform();

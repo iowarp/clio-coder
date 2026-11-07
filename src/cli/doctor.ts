@@ -393,12 +393,9 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		name: "local worker capacity",
 		detail: describeHostCapacity(hostFacts, resolveLocalConcurrency("auto", hostFacts)),
 	};
-	let panesEnabled = false;
 	let filesEnabled = false;
 	try {
-		const panes = readSettings().interface.panes;
-		panesEnabled = panes.enabled !== "off";
-		filesEnabled = panesEnabled && panes.files.enabled;
+		filesEnabled = readSettings().interface.panes.files.enabled;
 	} catch {
 		// The settings finding already reports an unreadable document. Optional
 		// integrations stay inactive rather than adding secondary warnings.
@@ -427,10 +424,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
 	// The PDF row reads PATH only, so it runs on an untouched home too.
-	const toolChecks = [
-		...(untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled, fix })),
-		await pdfAttachmentFinding(),
-	];
+	const toolChecks = [...(untouched ? [] : toolchainFindings({ filesEnabled, fix })), await pdfAttachmentFinding()];
 	// Compilers, MPI, build systems, and the scheduler. Each probe resolves PATH
 	// and runs a bounded `--version` in a scratch directory, so it creates
 	// nothing and runs on an untouched home too.

@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -519,6 +519,44 @@ describe("contracts/files pane session transport", () => {
 			await result.session.close();
 			strictEqual(existsSync(stream), false);
 		} finally {
+			rmSync(cacheDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("contracts/files pane session close", () => {
+	it("survives a stream file it cannot delete while the pane lives, and removes it once the pane is closed", async () => {
+		const cacheDir = mkdtempSync(join(tmpdir(), "clio-coder-files-locked-"));
+		const sessions = join(cacheDir, "yazi", "sessions");
+		try {
+			const host = fakeMux();
+			const mux = {
+				...host.mux,
+				async closePane(paneId: string) {
+					// Windows keeps a file open by the pane's process undeletable until the pane goes.
+					chmodSync(sessions, 0o700);
+					return host.mux.closePane(paneId);
+				},
+			} as unknown as MuxContract;
+			const result = await createYaziSession({
+				mux,
+				mode: "companion",
+				profileMode: "user",
+				cwd: "/w",
+				cacheDir,
+				sessionId: "s1",
+				pollMs: 5,
+				onEvent: () => undefined,
+				onChooser: () => undefined,
+				resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: "/bin/ya", missingYaziDetail: "" }),
+			});
+			strictEqual(result.status, "opened");
+			if (result.status !== "opened") return;
+			chmodSync(sessions, 0o500);
+			await result.session.close();
+			strictEqual(existsSync(join(sessions, "s1.stream")), false);
+		} finally {
+			chmodSync(sessions, 0o700);
 			rmSync(cacheDir, { recursive: true, force: true });
 		}
 	});

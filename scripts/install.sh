@@ -92,10 +92,8 @@ Options:
                         Start Menu). Env: CLIO_CODER_INSTALL_GUI=1
   --no-gui              Skip the desktop app. Default: ask on a terminal, skip
                         otherwise. Env: CLIO_CODER_INSTALL_GUI=0
-  --no-workspace        Skip the workspace pane host (herdr). Default: use a herdr
-                        already on PATH, otherwise download Clio Coder's pinned
-                        copy, and download nothing after you declined the
-                        workspace or set panes off. Env: CLIO_CODER_INSTALL_WORKSPACE=0
+  --no-workspace        Deprecated and ignored: Clio Coder's pane host (herdr,
+                        Apache-2.0) is part of every install.
   --force               Replace a clio-coder launcher this installer did not write.
   --dry-run             Print the plan; download and change nothing.
   -h, --help            Show this help.
@@ -605,22 +603,16 @@ offer_gui() {
 	fi
 }
 
-# The workspace is what bare `clio-coder` opens: the session beside terminal panes, hosted by
-# a pinned herdr. A herdr already on PATH at a usable version is used as it is and nothing is
-# downloaded, and nothing is downloaded after the operator declined the workspace or set
-# interface.panes.enabled to off, so an update never reverses that answer. A failure here never fails the install: Clio asks again on first
-# launch, and runs in the plain terminal without it.
+# The pane host is what bare `clio-coder` opens: the session beside terminal panes, hosted by
+# Clio Coder's own pinned herdr in its data directory. A herdr of the operator's own on PATH is
+# never used for that and never touched. A failure here never fails the install: Clio installs
+# the pane host itself on first launch, and runs in the plain terminal until it can.
 provision_workspace() {
-	[ "$install_workspace" != 0 ] || return 0
-	case "$(uname -s 2>/dev/null)" in Linux | Darwin) ;; *) return 0 ;; esac
-	if "$node_bin" "$entry" panes install --if-missing </dev/null >"$work/workspace.out" 2>&1; then
-		if grep -q 'workspace not downloaded' "$work/workspace.out"; then
-			log "workspace skipped: you declined it or interface.panes.enabled is off; run: clio-coder panes workspace on"
-		else
-			ok "workspace ready: $(grep -E 'installed herdr|already resolves' "$work/workspace.out" | tail -n 1 | sed 's/^ok: //')"
-		fi
+	# Same command as install.ps1, so both installers provision the pane host identically.
+	if "$node_bin" "$entry" tools install herdr --json </dev/null >"$work/workspace.out" 2>"$work/workspace.err"; then
+		ok "pane host ready: $("$node_bin" -e 'try { process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).message || "herdr")); } catch { process.stdout.write("herdr"); }' "$work/workspace.out")"
 	else
-		warn "the workspace pane host was not installed; Clio Coder will offer it on first launch, or run: clio-coder panes install"
+		warn "the pane host (herdr) was not installed; Clio Coder retries on first launch, or run: clio-coder panes install"
 	fi
 }
 
@@ -772,7 +764,6 @@ main() {
 	rollback=0
 	post_install=1
 	install_gui="${CLIO_CODER_INSTALL_GUI:-ask}"
-	install_workspace="${CLIO_CODER_INSTALL_WORKSPACE:-1}"
 	refresh_runtime=0
 	force=0
 	dry_run=0
@@ -810,7 +801,7 @@ main() {
 			--no-post-install) post_install=0 ;;
 			--gui) install_gui=1 ;;
 			--no-gui) install_gui=0 ;;
-			--no-workspace) install_workspace=0 ;;
+			--no-workspace) warn "--no-workspace is deprecated and ignored: the pane host is part of every install" ;;
 			--refresh-runtime) refresh_runtime=1 ;;
 			--force | -f) force=1 ;;
 			--dry-run) dry_run=1 ;;

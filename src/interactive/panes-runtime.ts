@@ -51,6 +51,8 @@ import {
 	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import { deliverPeerPrompt, PEER_INBOX_TOKEN } from "../domains/mux/peer-inbox.js";
+import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
+import { win32FollowArgv } from "../domains/mux/workspace/platform-win32.js";
 import { resolveBinary } from "../tools/executables.js";
 import { type PaneWatchSource, paneWatchDecision } from "./pane-policy.js";
 
@@ -145,8 +147,12 @@ function inventory(records: ReadonlyArray<MuxPaneRecord>): ReadonlyArray<PanesIn
  * back. The next session does not adopt it either, so without this line the
  * pane simply sat there with nothing naming it. Computed before the mux
  * domain stops, because shutdown forgets its registry.
+ *
+ * Clio's own private host is the exception: nobody can reach it after quit, so
+ * the launcher closes the whole workspace and there is nothing to name.
  */
-export function describePanesLeftBehind(mux: Pick<MuxContract, "list" | "docks">): string | null {
+export function describePanesLeftBehind(mux: Pick<MuxContract, "list" | "docks" | "detection">): string | null {
+	if (isClioHostSocket(mux.detection().socketPath ?? undefined)) return null;
 	const dockIds = new Set(mux.docks().map((dock) => dock.paneId));
 	const left = mux.list().filter((record) => !dockIds.has(record.ref.paneId));
 	if (left.length === 0) return null;
@@ -206,12 +212,25 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		return newestFirst.find((run) => run.runId.toLowerCase().startsWith(needle)) ?? null;
 	};
 
+	/**
+	 * The program a preset probes for, or null when it needs none. Windows has
+	 * no `tail`, its PATH `bash` is the WSL launcher, and herdr's pane shell
+	 * there is already PowerShell, which is what the shell preset opens.
+	 */
+	const presetBinary = (presetId: string, binary: string): string | null => {
+		if (process.platform !== "win32") return binary;
+		if (presetId === "shell") return null;
+		if (presetId === "logs") return "powershell";
+		return binary;
+	};
+
 	/** argv for one preset, once its binary has been found. */
 	const presetArgv = (presetId: string, binaryPath: string): ReadonlyArray<string> | null => {
-		if (presetId === "shell") return [binaryPath, "-l"];
+		if (presetId === "shell") return process.platform === "win32" ? [] : [binaryPath, "-l"];
 		if (presetId === "logs") {
 			const runId = (deps.newestFeedRunId ?? (() => newestRunFeedRunId(stateDir())))();
 			if (runId === null) return null;
+			if (process.platform === "win32") return win32FollowArgv(binaryPath, runFeedPath(runId, stateDir()));
 			// `-F` rather than `-f`: the feed is recreated when its run's
 			// directory is pruned, and a viewer following an inode would silently
 			// stop at that point.
@@ -332,7 +351,6 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				socketPath: detection.socketPath,
 				server: detection.server,
 				settings: {
-					enabled: panes.enabled,
 					notifications: panes.notifications,
 					layout: panes.layout,
 					journal: settings.fleet.history.journal,
@@ -389,14 +407,16 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					await deps.mux.focusPane(live.ref.paneId);
 					return { status: "opened", label: preset.id, paneId: live.ref.paneId, existing: true };
 				}
-				const binaryPath = probe(preset.binary);
+				const binary = presetBinary(preset.id, preset.binary);
+				const binaryPath = binary === null ? "" : probe(binary);
 				if (binaryPath === null) {
+					const missing = binary ?? preset.binary;
 					return {
 						status: "missing-binary",
 						preset: preset.id,
-						binary: preset.binary,
+						binary: missing,
 						installHint: preset.installHint,
-						detail: `${preset.binary} was not found (install with \`${preset.installHint}\`)`,
+						detail: `${missing} was not found (install with \`${preset.installHint}\`)`,
 					};
 				}
 				const argv = presetArgv(preset.id, binaryPath);

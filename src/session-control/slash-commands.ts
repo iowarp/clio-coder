@@ -33,6 +33,7 @@ import type { MusicOperations, MusicResult } from "../domains/mux/music-operatio
 import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "../domains/mux/operations.js";
 import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } from "../domains/mux/operations.js";
+import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
 import { acceptsImageInput, resolveModelCapabilities, resolveModelReference } from "../domains/providers/index.js";
 import type {
@@ -1215,7 +1216,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 	// The settings and wire facts follow on one details line, in words.
 	const host = status.server ? `Herdr ${status.server.version}` : "the pane host";
 	const lead = status.available
-		? `Panes: ${host} is available. Clio opens panes beside this one, ${status.mode === "embedded" ? "in its own workspace" : "as a guest in this workspace"}.`
+		? `Panes: ${host} is available. Clio opens panes beside this one, ${status.mode === "embedded" || isClioHostSocket(status.socketPath ?? undefined) ? "in its own workspace" : "as a guest in this workspace"}.`
 		: `Panes: unavailable. ${status.reason}`;
 	const row = (label: string, value: string): string => `  ${label.padEnd(12)} ${value}`;
 	const files =
@@ -2848,7 +2849,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				// every `--with-panes` session, even one where no pane host answered.
 				ctx.notice(
 					"info",
-					"panes are inactive: this session started without them. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+					"panes are inactive: this session started without them. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
 				);
 				return;
 			}
@@ -2964,7 +2965,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (!panes) {
 				ctx.notice(
 					"info",
-					"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+					"the files pane is inactive: this session started without panes. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
 				);
 				return;
 			}

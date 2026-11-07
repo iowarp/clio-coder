@@ -712,7 +712,7 @@ installing executable components.
 | **System One** | Off until `systemOne.use` names a decision model. A route answers the `consult` tool, the judge screen and steering triage, so a hosted route receives web and MCP result text at judge time. A filter misses behavior inside a file body, and between a third and more than half of matches can be wrong, so treat filter as a way to narrow a list and read what it returns. Nothing yet measures whether agents reach for `consult` or whether it speeds anything up. |
 | **Steering triage** | `chat.steering.triage` is off by default; a bound System One route or a side model can classify queued messages, defer unrelated work, or interrupt for a confident stop request. |
 | **SSH worker nodes** | Explicitly configured nodes need a passing recorded project readiness test before dispatch. |
-| **Docks and music** | Off by default and require Herdr; music additionally requires cliamp and explicit integration settings. |
+| **Docks and music** | Bare `clio-coder` opens Clio's own private pane host on a pinned [herdr](https://github.com/herdrdev/herdr), installed with Clio and kept apart from any herdr of your own. Docks are off by default; music additionally requires cliamp and explicit integration settings. |
 
 Worker, file, and music docks use <kbd>Alt</kbd> + <kbd>W</kbd>, <kbd>Alt</kbd> +
 <kbd>E</kbd>, and <kbd>Alt</kbd> + <kbd>A</kbd>. They hide without stopping their
@@ -797,6 +797,8 @@ under collaborative awards
 
 Clio builds on the [Pi agent framework](https://github.com/earendil-works/pi),
 [ACP](https://agentclientprotocol.com), and [MCP](https://modelcontextprotocol.io).
+Its panes are powered by [herdr](https://github.com/herdrdev/herdr) (Apache-2.0),
+whose license ships beside the binary Clio installs.
 Dependency and component notices are in [NOTICE](NOTICE).
 
 CLIO means **Context Layer for Input/Output**. Related IOWarp projects include

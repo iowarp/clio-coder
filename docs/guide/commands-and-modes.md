@@ -27,7 +27,6 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder --api-key <key>` | Override the API key of the target the invocation runs on, for that invocation. The key binds after the route is resolved, so it follows `--target` and the route a resumed `--session` restores instead of the saved chat target. With no resolvable target the invocation exits 2. |
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
-| `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
 | `clio-coder --autonomy <level>` | Start this interactive session at `default` or `yolo` without modifying `settings.yaml`. A `yolo` start holds at `default` until the one-time acceptance card is accepted, and starts at `default` with a notice as root outside a container. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --allow-tools <names\|none>` / `--delegate-tools <names\|none>` | Limit the interactive session's own capabilities or its workers' capabilities with a comma-separated list. For `run` and `acp`, put these flags after the subcommand. The limits hold on every turn and propagate to workers. |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
@@ -64,7 +63,6 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder tools remove <id>\|--all [--json]` | Remove Clio Coder-vendored copies without touching a program found on `PATH`. |
 | `clio-coder panes install [--force] [--json]` | Alias for `clio-coder tools install herdr`. |
 | `clio-coder panes theme` | Print Clio Coder's theme tokens as a herdr `[theme.custom]` block to paste into herdr's `config.toml`; Clio never edits that file. See [Panes and the Files Pane](panes-and-files.md). |
-| `clio-coder panes workspace on\|off\|ask\|status` | Set or inspect the remembered choice for embedded workspaces. See [Turn panes on](panes-and-files.md#turn-panes-on). |
 | `clio-coder systemone status\|use <route>[,<route>...]\|off\|check <engine> --live` | Show whether System One is on and why not, name its routes at user or project scope, turn it off, or verify which build answers. A named route answers the `consult` tool, the judge screen and steering triage, so on a hosted route web and MCP result text leaves the machine at judge time. Experimental. See [System One](system-one.md). |
 | `clio-coder tasks [list\|add\|hand\|done\|drop]` | List, add, hand, finish, or drop project operator tasks. `add` takes `--expect <path>` and `--verify <checkId>[:timeoutMs]`; `hand`, `done` and `drop` take a `uN` id. |
 | `clio-coder verifiers discover\|inspect\|author\|validate\|add\|edit\|rename\|remove\|baseline\|dry-run` | Discover, inspect, author, validate, add, edit, rename, remove, baseline, or dry-run project checks. |
@@ -127,12 +125,13 @@ Without `--cwd`, ACP binds the first session's absolute workspace path before it
 
 ACP frontends can list, load, resume, and delete sessions through the stable session methods. Clio offers `default` and `yolo` as ACP modes. A frontend can change autonomy with `session/set_mode` or the `autonomy` configuration option (category `mode`). The `model` and `thinkingLevel` options (category `thought_level`) change only the hosted session; saved defaults stay as they were. Mode and option changes are refused with `prompt_active` while a prompt is running. Choosing `yolo` counts as the operator's yolo acceptance, and is refused with `yolo_refused` when Clio runs as root outside a container.
 
-The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` and `--no-panes` apply to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
+The startup flags `--api-key`, `--no-context-files` (`-nc`), `--no-skills` and `--skill` apply to the interactive session, `clio-coder run` and `clio-coder acp`. `--with-panes` applies to the interactive session alone. A startup flag given before any other subcommand is refused with exit 2 and a message naming the flag and the subcommand, because that command would ignore it.
 
 ### Pane launch flags
 
-`clio-coder run` does not read the startup flags `--with-panes` and `--no-panes`.
-Given before `run`, they are refused with exit 2.
+`clio-coder run` does not read the startup flag `--with-panes`. Given before
+`run`, it is refused with exit 2. The retired `--no-panes` is an unknown option
+and exits 2 everywhere.
 
 `--with-panes` is an explicit first-class launch mode, not permission to start a
 pane server. Clio confirms `HERDR_ENV=1`, connects to an existing socket, and
@@ -141,12 +140,12 @@ pings it before registering pane tools. The workers dock runs
 the session scope into that file, while the dashboard reads the ledger, run journals and
 run feeds itself, so dispatch remains independent of the pane host and a second
 terminal can use the same journal surface directly.
-`interface.panes.enabled` defaults to `embedded`. Bare `clio-coder` can offer to
-open a workspace in a pane host and remember the answer. Inside a host it joins
-that host. `auto` uses a detected host without starting one; `off` disables panes.
-`--with-panes` overrides any setting with `auto`, and `--no-panes`
-overrides any setting with `off`. Use `auto` or `--with-panes` only when Clio Coder is
-already inside a reachable herdr session. The pane contracts are in
+Bare `clio-coder` in an interactive terminal always opens Clio Coder's own
+private pane host on its pinned herdr, installing that herdr first when it is
+missing, and continues in the plain terminal when it cannot. Started from a
+pane of the operator's own herdr, it opens its host nested there with the
+prefix `ctrl+shift+b`. Use `--with-panes` only to join, as a guest, a herdr
+session Clio Coder is already inside. The pane contracts are in
 [Panes and the Files Pane](panes-and-files.md).
 
 ### Graphical application

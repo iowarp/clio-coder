@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { toolchainFindings } from "../../src/cli/doctor-toolchain.js";
 import { yaziProfileDir } from "../../src/domains/mux/index.js";
-import { ensureYaziProfile } from "../../src/domains/mux/yazi/profile.js";
+import { ensureYaziProfile, inspectYaziProfile } from "../../src/domains/mux/yazi/profile.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("doctor treats an unused Yazi profile as information and repairs missing and stale profiles", async () => {
@@ -77,6 +77,22 @@ it("review round 2 B: failure recording and cleanup tolerate a cache becoming un
 		strictEqual(ensureYaziProfile({ yaPath: "/missing/ya", yaziPath: yazi, profileDir: join(cache, "profile") }), null);
 	} finally {
 		chmodSync(cache, 0o700);
+		env.restore();
+	}
+});
+
+it("a profile written for an earlier keymap is stale, so a changed chord reaches Yazi without a version bump", async () => {
+	const env = await isolateClioEnv("yazi-keymap-stamp-");
+	try {
+		const yazi = join(env.dir, "yazi");
+		writeFileSync(yazi, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "yazi 99.0.0"; fi\n', { mode: 0o755 });
+		const profileDir = join(env.dir, "profile");
+		const before = '[[mgr.prepend_keymap]]\non = "<C-y>"\nrun = "shell -- before %s"\n';
+		const after = '[[mgr.prepend_keymap]]\non = "<C-y>"\nrun = "shell -- after %s"\n';
+		strictEqual(ensureYaziProfile({ yaPath: "/bin/ya", yaziPath: yazi, profileDir, keymapToml: before }) !== null, true);
+		strictEqual(inspectYaziProfile({ yaPath: "/bin/ya", profileDir, keymapToml: before }).state, "current");
+		strictEqual(inspectYaziProfile({ yaPath: "/bin/ya", profileDir, keymapToml: after }).state, "stale");
+	} finally {
 		env.restore();
 	}
 });

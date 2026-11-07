@@ -48,8 +48,8 @@ export interface BootOptions {
 	terminalLease?: TerminalLease;
 	/** Strict effective settings snapshot shared by preflight, Stage 0, and hydration. */
 	startupSettings?: Readonly<ClioSettings>;
-	/** `--with-panes` / `--no-panes`. The flag beats `panes.enabled` in both directions. */
-	panes?: "with" | "without";
+	/** `--with-panes`: join the current pane host as a guest. */
+	panes?: "with";
 	/** Global `--autonomy <level>`: a one-session override for the interactive app; settings.yaml is untouched. */
 	autonomy?: AutonomyLevel;
 	/**

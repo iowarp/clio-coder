@@ -62,11 +62,11 @@ clears the registry's minimum version.
 
 | Program | Role | Pinned | Minimum on `PATH` |
 | --- | --- | --- | --- |
-| herdr | Pane host. | 0.9.3 | 0.7.5 |
+| herdr | Pane host. Clio Coder hosts itself only on its own pinned copy; a herdr on `PATH` is never used for that. | 0.9.5 | not used for hosting |
 | yazi | Files pane engine; the install also provides its `ya` helper. | 26.8.15 | 26.8.15 |
 | cliamp | Music pane. See [Music](music.md). | 1.63.2 | 1.63.2 |
 
-The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 and for Windows on x64. The Windows asset is a zip holding `herdr.exe` and the ConPTY runtime it loads from `conpty/`, so `tools install herdr` installs and resolves it there, but the pane layer stays off on Windows because Clio Coder's pane client speaks Unix sockets only.
+The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 and for Windows on x64. The Windows asset is a zip holding `herdr.exe` and the ConPTY runtime it loads from `conpty/`. On Windows the pane client talks to herdr over its named pipe, and Clio's private host runs as a herdr `--session` named `clio-coder-<12 hex>`, so its socket and logs live under herdr's own config directory (`%APPDATA%\herdr\sessions\`, or `$XDG_CONFIG_HOME\herdr\sessions\` when that is set) while its managed config stays in Clio's state directory. Clio opened from PowerShell or Windows Terminal gets the same host, docks and keys as on Linux and macOS. New panes start herdr's PowerShell, and a shell, logs or files pane receives its command through the `CLIO_CODER_PANE_RUN` variable, so the line PowerShell records in its history is the same inert runner each time. In the files pane, Yazi runs its keymap commands through `cmd.exe`, and the managed profile writes the Ctrl+Y and Alt+E bindings in that form. Windows on ARM has no herdr asset, so Clio runs in the plain terminal there.
 
 The first `/files` invocation reports any missing dependency and names its
 install command. `doctor` reports the same dependencies. Downloads occur only
@@ -75,7 +75,7 @@ through the explicit install commands:
 ```bash
 npm install -g @iowarp/clio-coder
 clio-coder configure
-clio-coder tools install herdr     # or: clio-coder panes install [--force] [--json]
+clio-coder tools install herdr     # the installers and the first bare launch do this for you
 clio-coder tools install yazi
 ```
 
@@ -90,69 +90,79 @@ The vendored programs live under the data root (`clio-coder paths`), so
 
 ## Turn panes on
 
-`interface.panes.enabled` defaults to `embedded`. Bare `clio-coder` in an
-interactive terminal then opens a workspace: Clio starts herdr, runs the session
-in one of its panes and hands the terminal back when you quit. Each project gets
-its own workspace. The first launch asks once whether to open it, and when no
-usable herdr is on `PATH` or installed, the same question says it will download
-Clio Coder's pinned copy. Nothing is downloaded before you answer yes. The
-answer is remembered in Clio's state directory and never written to
-`settings.yaml`. `clio-coder panes workspace on|off|ask|status` changes or shows
-it, and `clio-coder panes install` installs herdr ahead of time.
+Panes are always on. Bare `clio-coder` in an interactive terminal opens Clio
+Coder's own private pane host: it starts its pinned herdr, runs the session in
+one of its panes and hands the terminal back when you quit. Each project gets
+its own host. There is no question to answer and no setting to change. When
+the pinned herdr is missing, the launch prints `Clio Coder: setting up terminal
+panes (one time)...` and downloads it, waiting at most 30 seconds. If that
+fails, it prints ``Clio Coder: terminal panes unavailable (<reason>). Continuing
+in this terminal; run `clio-coder panes install` to retry.`` and the session
+runs in the plain terminal. Later launches skip the download for a day, or until
+the pinned version changes, and stay quiet. On a platform with no pinned herdr
+build the session simply runs in the plain terminal. The installers
+(`install.sh`, `install.ps1`) provision the same copy, and `clio-coder panes
+install` installs it ahead of time; both always retry.
 
-| `interface.panes.enabled` | Meaning |
-| --- | --- |
-| `embedded` (default) | Bare `clio-coder` opens a workspace after the one question. Started inside a herdr pane, Clio joins that host as a guest. |
-| `auto` | Join a pane host only when started inside one. Clio never starts one and never asks, whatever answer is remembered. |
-| `off` | Never detect or open a pane. |
+The host is private. Its server, socket, config and state live under Clio
+Coder's own directories (see [Artifact placement](../architecture/artifact-placement.md)),
+so your own `herdr`, its sessions, its `~/.config/herdr` and its socket never
+see it, and quitting Clio removes it. Shells opened in its panes get your own
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` back. Clio writes the host's herdr
+config on every launch: its prefix is `ctrl+b`, herdr's own help, settings,
+workspace, picker and reload screens are unbound, sounds and update checks are
+off, and the pane chrome follows `interface.outputDetail`: compact drops pane
+gaps and scrollbars, detailed draws outer borders. Changing the output style in
+the session redraws the host's chrome live.
 
-A launch stays in the plain terminal, without asking, for `--no-panes`, `run`,
-`acp`, a non-terminal stdin or stdout, `TERM=dumb`, a session already inside
-herdr, tmux, zellij or screen, and Windows. A plain session loads no pane code.
+Started from a pane of your own herdr (`HERDR_ENV=1` with a socket that is not
+Clio Coder's), bare `clio-coder` opens its private host nested inside that pane,
+with the prefix `ctrl+shift+b` (or `ctrl+]`) so your outer `ctrl+b` keeps
+working. `clio-coder --with-panes` instead joins the herdr you are in as a guest.
+
+A launch stays in the plain terminal for `run`, `acp`, a non-terminal stdin or
+stdout, `TERM=dumb`, a session already inside tmux, zellij or screen, and a
+launch from a pane of Clio Coder's own host. A plain session loads no pane code.
 The files pane is a separate switch, off by default:
 
 ```yaml
 interface:
   panes:
-    enabled: embedded  # default; auto joins a host only, off disables panes
     files:
       enabled: true    # allow the files pane
 ```
 
-For one session, `clio-coder --with-panes` from a pane inside herdr overrides
-the setting with `auto`, and `--no-panes` turns panes off; the last of the two
-on a command line wins. Both flags apply only to the interactive session; given
-before a subcommand such as `run` they are refused with exit 2. The `/settings`
-picker offers Embedded, Automatic and Off. The setting is resolved once at boot,
-so a change to `interface.panes.enabled` takes effect at the next start.
+`--with-panes` applies only to the interactive session; given before a
+subcommand such as `run` it is refused with exit 2. The retired
+`interface.panes.enabled` key is ignored when present: `clio-coder doctor` names
+it and `doctor --fix` removes it. The retired `--no-panes` flag is an unknown
+option (exit 2), and `clio-coder panes workspace` is gone.
 
 Guest mode needs three things, checked in this order: `HERDR_ENV=1` in the
 environment (herdr sets it in every pane it opens), a herdr socket that
 connects, and a ping answered inside one second. The sockets tried, in order,
 are `HERDR_SOCKET_PATH`, `sessions/<HERDR_SESSION>/herdr.sock` and `herdr.sock`, the last two under herdr's config
-directory (`$XDG_CONFIG_HOME/herdr`, else `~/.config/herdr`).
+directory (`$XDG_CONFIG_HOME/herdr`, else `~/.config/herdr`). Inside Clio Coder's
+private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 ### A second terminal in the same folder attaches to the same session
 
-Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing Herdr workspace when embedded workspaces are enabled. The launcher shares one pane-host session per project directory, so both terminals see the same running Clio session. To start an independent plain-terminal session, use `clio-coder --no-panes`. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
+Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing private host. The launcher shares one host per project directory, so both terminals see the same running Clio session. To start an independent plain-terminal session, run it with a non-terminal stdin or with `TERM=dumb`. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
 ## What doctor says
 
 `clio-coder doctor` never fails an install for missing panes; the rows are
 warnings that name the next step. The tool rows come first, then the pane
-rows. For example, with panes and the files pane enabled in a plain
-terminal and an outdated files engine, the diagnostics include:
+rows. For example, run from a plain terminal with the files pane enabled and
+an outdated files engine, the diagnostics include:
 
 ```text
-OK   external tool herdr    PATH /home/you/.local/bin/herdr (0.9.3, pin 0.9.3)
+OK   external tool herdr    pane host 0.9.5 (Clio's pinned copy) at /home/you/.local/share/clio-coder/tools/herdr/0.9.5/herdr
 WARN external tool yazi     PATH copy /home/you/.local/bin/yazi is 26.1.22, below the 26.8.15 floor, and nothing is vendored (install with `clio-coder tools install yazi`)
 INFO external tool croc     not found (install with `clio-coder tools install croc`)
 INFO external tool cliamp   not found (install with `clio-coder tools install cliamp`)
 INFO files pane profile     /home/you/.cache/clio-coder/yazi/profile (missing); user config /home/you/.config/yazi is separate and untouched
-WARN panes mode             none (panes.enabled=auto); HERDR_ENV is not 1, so Clio is not running inside a pane host
-WARN panes socket           no socket answered; tried /home/you/.config/herdr/herdr.sock
-WARN panes protocol         unknown; Clio's optional methods need protocol 17 or newer
-OK   panes binary           PATH /home/you/.local/bin/herdr (0.9.3, pin 0.9.3)
+OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming panes           no legacy Clio Coder pane ownership tokens or watch titles found
 OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is writable
@@ -160,10 +170,11 @@ OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is 
 
 The plain report folds quiet `naming` rows into one summary row; `--verbose` and `--json` keep every row.
 
-A missing herdr or yazi is a WARN only while panes (and, for yazi, the files pane) are enabled. Otherwise
-the row reads `experimental integration disabled by settings`, and `files pane profile` reads `disabled by settings`.
-A missing croc or cliamp is always INFO. With `interface.panes.enabled: off`, doctor prints only `panes mode: off by choice` and the `panes layout`
-row, and does not advertise setup work. With `embedded` in a plain terminal, `panes mode` reads `workspace (panes.enabled=embedded); this command is not running inside one` and does not probe a socket. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
+A missing pinned herdr is a WARN that names `clio-coder panes install`, and the next bare launch installs it anyway;
+on a platform with no pinned herdr the row is INFO. A missing yazi is a WARN only while the files pane is enabled;
+otherwise `files pane profile` reads `disabled by settings`. A missing croc or cliamp is always INFO. Outside a pane host,
+doctor prints only `panes mode` and `panes layout` and does not probe a socket. Run inside a pane host, it adds
+`panes socket`, `panes protocol` and `panes binary`. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
 The `panes journal dir` row reads `has no run journal yet` when `<state>/telemetry/runs` does not exist and warns when it is not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
@@ -257,10 +268,14 @@ When Herdr declines a move, the notice names the reason (`the files pane did not
   not there.
 - `/panes close shell`, `/panes close logs`, `/panes close all` close the
   utility panes. `/panes close all` and `/panes close <label>` also close docks, hidden or not.
-- `/quit` closes the docks Clio manages, hidden ones included: the files pane, the workers
-  dock and the music pane. It preserves a shell or logs pane you opened. Utility panes
-  have their own lifetime and are not reclaimed by the next session, so
-  `/quit` prints what it left, one line after the terminal is restored:
+- `/quit` in Clio Coder's private pane host closes every pane in the host, shell and logs
+  panes included, then stops the host, so nothing outlives the session and the next launch
+  starts from a single Clio pane. The host never restores an earlier layout.
+- `/quit` as a guest in your own herdr (`clio-coder --with-panes`) closes the docks Clio
+  manages, hidden ones included: the files pane, the workers dock and the music pane. It
+  preserves a shell or logs pane you opened. Utility panes there have their own lifetime and
+  are not reclaimed by the next session, so `/quit` prints what it left, one line after the
+  terminal is restored:
 
   ```text
   Clio left 1 pane open in herdr: shell (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close <paneId>`.
@@ -286,7 +301,6 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 
 | Key | Default | What it controls |
 | --- | --- | --- |
-| `interface.panes.enabled` | `embedded` | `embedded` opens a workspace from bare `clio-coder` after one remembered question, and joins a pane host it is started inside; `auto` joins a detected herdr session and never starts one; `off` skips detection. `--with-panes` overrides it with `auto` for one session. Takes effect at the next start. |
 | `interface.panes.files.enabled` | `false` | Whether `/files`, its key, `/panes open files`, and the `panes` tool may open the files pane. Refused with the key's name otherwise. |
 | `interface.panes.files.mode` | `companion` | `companion` keeps the pane open across picks; `chooser` closes it after one selection. |
 | `interface.panes.files.profile` | `managed` | `managed` runs the engine on Clio Coder's generated, themed profile; `user` runs it on the operator's own configuration, in which case picks use the one-shot chooser. |
@@ -332,12 +346,12 @@ deletes it; the next open rebuilds it.
 
 **`panes are inactive: this session started without them`** on `/panes`, or
 **`the files pane is inactive: this session started without panes`** on `/files`: the session booted without the panes extension. Restart with
-`clio-coder --with-panes` from a herdr pane, or accept the workspace with
-`clio-coder panes workspace on` and start bare `clio-coder` in a plain terminal.
+`clio-coder` in a plain terminal to open its own pane host, or run
+`clio-coder --with-panes` inside herdr.
 
 **`the pane layer is not available in this session: HERDR_ENV is not 1 …`**
-on `/panes open logs` or `shell`: Clio Coder has panes enabled but is not running
-inside a herdr pane. Start herdr, open a pane, run Clio Coder there. `/files`
+on `/panes open logs` or `shell`: Clio Coder is not running inside a pane host.
+Quit and start bare `clio-coder` in a plain terminal. `/files`
 still works as a one-shot pick in this state.
 
 **`the files pane is disabled by interface.panes.files.enabled`**: set that

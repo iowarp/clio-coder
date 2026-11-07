@@ -4,6 +4,22 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Upgrade notes
+
+- Bare `clio-coder` in an interactive terminal always opens Clio Coder's own private pane host, on a pinned herdr 0.9.5 that the installers provision and the first launch installs when missing, with one status line. There is no consent question; if the install or the host fails, Clio prints one line and continues in the terminal, and a failed launch-time install is not retried for a day (`clio-coder panes install` always retries). A herdr on `PATH` is never used to host Clio.
+- The host is private per project: its socket sits in the runtime directory as `clio-coder-<hash>.sock`, its config and state under `<state>/mux/<hash>/`, and it is removed when it stops. Your own herdr, its sessions and `~/.config/herdr` never see it, and shells in its panes get your own `XDG_CONFIG_HOME` and `XDG_STATE_HOME` back.
+- Started from a pane of your own herdr, Clio opens its host nested with the prefix `ctrl+shift+b` (or `ctrl+]`). Its pane chrome follows `interface.outputDetail` and redraws live when the style changes.
+- Windows x64 gets the same host: `install.ps1` provisions the pinned herdr, and Clio runs it as a herdr `--session` named `clio-coder-<hash>` reached over its named pipe. Panes start herdr's PowerShell, and the files pane's Ctrl+Y and Alt+E work there. Windows on ARM has no herdr build and stays in the plain terminal.
+- `/quit` in the private host closes every pane in it, shell and logs panes included, and stops the host. Each launch starts from one Clio pane; herdr's saved layout is never restored. As a guest in your own herdr (`--with-panes`), `/quit` still leaves your utility panes open and names them.
+- `CLIO_CODER_TOOLCHAIN_MIRROR` points `clio-coder tools install` at a local directory, `file:` URL or HTTP(S) mirror; pinned checksums still apply.
+- `clio-coder --version` credits herdr on a second line.
+
+### Removed
+
+- The `interface.panes.enabled` setting. It is ignored when present; `clio-coder doctor` names it and `doctor --fix` removes it.
+- The `--no-panes` flag, now an unknown option (exit 2), and `clio-coder panes workspace`.
+- `install.sh --no-workspace` and `CLIO_CODER_INSTALL_WORKSPACE`. The flag is accepted with a warning and does nothing.
+
 ## 0.6.9 - 2026-11-06
 
 Clio Coder 0.6.9 makes the terminal tell the truth about what is happening and who it is waiting on. The status rail names the model, worker, server or person a turn waits on, with a clock and the key that stops it, and states a silence with its evidence instead of a spinner. Provider waits read as waits and are sat out in full, a model pick can move a request still waiting on its first output, and a worker's approval card can be held while you read it. Esc and Ctrl+C back out one layer at a time and never throw away typed text, and a stop holds queued messages instead of joining them (#447). Receipts, `/usage`, the exit summary and Fleet Runs count calls and tokens one way and say "not measured" instead of guessing. The line also moves to the Pi SDK 1.5.0, clears every open dependency advisory and closes two installer gaps.

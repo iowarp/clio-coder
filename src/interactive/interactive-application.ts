@@ -954,7 +954,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (!panes) {
 			notify(
 				"info",
-				"the files pane is inactive: this session started without panes. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+				"the files pane is inactive: this session started without panes. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
 				"files:info",
 			);
 			return;

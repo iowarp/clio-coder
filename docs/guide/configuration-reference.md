@@ -148,7 +148,6 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |
 | `interface.desktopNotifications` | `false` | Boolean. Content-free alerts when a turn ends, a detached batch settles or an approval parks. Interactive TTY sessions only. | next turn |
 | `interface.autoUpdate` | `true` | Boolean. A native-installer install fetches and activates a newer release in the background; running sessions keep their version until restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS updates after the session quits, once every session of that install has exited (the wait is bounded at 30 minutes). `false` keeps the update notice and leaves the install to `clio-coder upgrade`. Other layouts only show their upgrade command. | hot reload |
-| `interface.panes.enabled` | `"embedded"` | `auto`, `embedded` or `off`. `embedded` lets bare `clio-coder` open a workspace in a pane host after one remembered question, and joins a host it is started inside. `auto` uses a detected pane host and never starts one. `off` never detects or opens a pane. | restart required |
 | `interface.panes.notifications` | `"failures"` | `failures`, `all` or `off`. Which run states raise a pane-host toast. | hot reload |
 | `interface.panes.layout` | `"off"` | `off`, `workers` or `cockpit`. Panes composed at interactive boot. | restart required |
 | `interface.panes.workers.ratio` | `0.34` | Number from 0.05 to 0.5. Share of the width the workers dock takes. | hot reload |
@@ -375,6 +374,7 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `systemOne.sites` | There are no decision sites any more. `systemOne.use` binds one route to the `consult` tool, the judge screen and steering triage. An empty `{}` is accepted silently. |
 | `systemOne.engines.<name>.mode` | Every `llm` engine reads as one batch request. |
 | `systemOne.cuts` | No build-keyed cut acts any more. An empty `{}` is accepted silently. |
+| `interface.panes.enabled` | Bare `clio-coder` always opens its own private pane host when the terminal allows it; `--with-panes` joins an existing host instead. Ignored when present; `clio-coder doctor` names it and `doctor --fix` removes it. |
 | `systemOne.record`, `systemOne.retentionDays`, `systemOne.maxMiB` and `telemetry.research.systemOneDataset` | The decision dataset is gone. |
 
 Three enum spellings are retired and stay validation errors until `clio-coder doctor --fix` rewrites them, so loading never changes policy silently.

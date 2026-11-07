@@ -1625,7 +1625,6 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Smooth streaming", settings.interface.smoothStreaming],
 				["Terminal progress", onOff(settings.interface.terminalProgress)],
 				["Desktop notifications", onOff(settings.interface.desktopNotifications)],
-				["Panes capability", settings.interface.panes.enabled],
 				["Startup layout", settings.interface.panes.layout],
 			];
 		},
@@ -1659,18 +1658,6 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 						next = draft.interface.terminalProgress;
 					});
 					io.ok(`Terminal progress ${onOff(next)}`);
-				},
-			},
-			{
-				label: "Panes capability",
-				controlPath: "interface.panes.enabled",
-				hint: "off | auto (join an existing pane host)",
-				run: async (io) => {
-					await askChoice(io, "Panes capability", ["off", "auto"], readSettings().interface.panes.enabled, (value) => {
-						updateSettings((draft) => {
-							draft.interface.panes.enabled = value as PanesSettings["enabled"];
-						});
-					});
 				},
 			},
 			{
@@ -1835,7 +1822,6 @@ const GUIDED_CONTROL_PATHS = new Set([
 	"safety.review.enabled",
 	"interface.smoothStreaming",
 	"interface.terminalProgress",
-	"interface.panes.enabled",
 	"interface.panes.layout",
 	"interface.mode",
 	"interface.outputDetail",

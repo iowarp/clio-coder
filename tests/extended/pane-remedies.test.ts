@@ -8,8 +8,8 @@ import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/session-control/slash-commands.js";
 
 describe("contracts/pane refusal remedies", () => {
-	it("detects embedded like auto: no pane host outside one, and no refusal", async () => {
-		const outside = await detectMux({ enabled: "embedded", env: {} });
+	it("detects no pane host outside one, and no refusal", async () => {
+		const outside = await detectMux({ enabled: "auto", env: {} });
 		strictEqual(outside.detection.mode, "none");
 		strictEqual(outside.detection.refused, false);
 		strictEqual(outside.detection.reason, "HERDR_ENV is not 1, so Clio is not running inside a pane host");
@@ -35,7 +35,7 @@ describe("contracts/pane refusal remedies", () => {
 		});
 	});
 
-	it("names the canonical activation key when slash-command panes were not composed", () => {
+	it("names the ways to get panes when slash-command panes were not composed", () => {
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
 		if (!entry) throw new Error("missing panes slash command");
 		let notice = "";
@@ -46,7 +46,7 @@ describe("contracts/pane refusal remedies", () => {
 		} as SlashCommandContext);
 		strictEqual(
 			notice,
-			"panes are inactive: this session started without them. Restart with `clio-coder --with-panes`, or set interface.panes.enabled=auto",
+			"panes are inactive: this session started without them. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
 		);
 	});
 });

@@ -48,6 +48,7 @@ import {
 	type MuxPaneRef,
 	type MuxSelfReport,
 } from "./types.js";
+import { win32PaneLaunch } from "./workspace/platform-win32.js";
 
 /** Metadata source for everything Clio's pane layer writes. */
 const METADATA_SOURCE = "clio-coder:mux";
@@ -87,7 +88,8 @@ export interface MuxOpenUtilityPaneRequest {
 	env?: Readonly<Record<string, string>>;
 	/**
 	 * Absolute path the pane's stdout is redirected into. Full-screen programs
-	 * such as Yazi reopen `/dev/tty` for their interface when stdout is not a tty.
+	 * such as Yazi reopen `/dev/tty` (`CONOUT$` on Windows) for their interface
+	 * when stdout is not a tty.
 	 */
 	stdoutPath?: string;
 	/**
@@ -441,6 +443,10 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return await attempt(
 				"openUtilityPane",
 				async (live) => {
+					// herdr's pane shell on Windows is PowerShell, which has no `exec`;
+					// the command rides in the new pane's environment instead.
+					const win32Launch = process.platform === "win32" ? win32PaneLaunch(request.argv, request.stdoutPath) : null;
+					const env = win32Launch ? { ...request.env, ...win32Launch.env } : request.env;
 					let ref: MuxPaneRef;
 					if (request.dock && docks) {
 						const placed = await docks.open(request.dock.slot, {
@@ -448,7 +454,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 							...(request.dock.share === undefined ? {} : { share: request.dock.share }),
 							...(request.dock.hidden ? { hidden: true } : {}),
 							cwd: request.cwd,
-							...(request.env ? { env: request.env } : {}),
+							...(env ? { env } : {}),
 						});
 						// A refusal (anchor too small) is an answer, not a failure.
 						if (placed === null) return null;
@@ -460,7 +466,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 							targetPaneId: anchor,
 							cwd: request.cwd,
 							focus: false,
-							...(request.env ? { env: request.env } : {}),
+							...(env ? { env } : {}),
 						});
 						ref = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 					}
@@ -495,12 +501,18 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						},
 						titleSupported ? title : undefined,
 					);
-					if (request.argv.length > 0) {
+					if (win32Launch) {
+						// PowerShell submits a line on carriage return; a line feed only
+						// opens a continuation prompt.
+						await live.paneSendText(ref.paneId, `${win32Launch.line}\r`);
+					} else if (request.argv.length > 0) {
 						// herdr has no argv parameter on pane.split, so the command goes in
 						// through the pane's shell. `exec` replaces the shell so the pane
 						// exits with the program and emits pane.exited for reconciliation.
+						// The leading space keeps the line out of the operator's shell history
+						// under fish, and under bash and zsh with ignorespace.
 						const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
-						await live.paneSendText(ref.paneId, `exec ${shellQuote(request.argv)}${redirect}\n`);
+						await live.paneSendText(ref.paneId, ` exec ${shellQuote(request.argv)}${redirect}\n`);
 					}
 					return ref;
 				},

@@ -284,7 +284,6 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
 | `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install and the after-quit npm, pnpm, Bun or Volta update to `clio-coder upgrade` |
-| `interface.panes.enabled` | `embedded` | restart; bare Clio Coder can offer to open a pane host, while `auto` only joins one already running |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |
 | `interface.panes.workers.ratio` | `0.34` | immediately on the next workers dock open |
