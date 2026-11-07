@@ -1,8 +1,9 @@
 import { CLIO_APP_KEYBINDINGS } from "../../domains/config/keybindings.js";
 import { getKeybindings, visibleWidth } from "../../engine/tui.js";
 import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
+import { GLYPH } from "../theme/glyphs.js";
 
-const HINT_SEPARATOR = " · ";
+const HINT_SEPARATOR = ` ${GLYPH.dot} `;
 
 /**
  * Who answers the keyboard, and what Enter does with what the composer holds now.

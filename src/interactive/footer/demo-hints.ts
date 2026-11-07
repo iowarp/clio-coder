@@ -39,7 +39,11 @@ export function createDemoHints() {
 			["agents", input.agentActive, `${input.dashboardKey} ${GLYPH.next} Activity shows agents' current actions.`],
 			["context", input.contextBusy && !learned("/context"), "/context shows what occupies your context window."],
 			["tools", input.toolsUsed && !learned("/view"), "/view lets you inspect recorded tool calls and results."],
-			["welcome", !learned("/help"), `? lists keys · ${input.menuKey ?? "Ctrl+G"} opens every action · /help`],
+			[
+				"welcome",
+				!learned("/help"),
+				`? lists keys ${GLYPH.dot} ${input.menuKey ?? "Ctrl+G"} opens every action ${GLYPH.dot} /help`,
+			],
 		];
 		if (current && input.now < current.until) {
 			const active = choices.find(([id, eligible]) => id === current?.id && eligible);

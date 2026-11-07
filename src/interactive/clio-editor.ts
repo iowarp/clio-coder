@@ -613,7 +613,8 @@ export class ClioEditor extends Editor {
 				: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
 					? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
 					: "";
-		const join = (parts: readonly string[]): string => parts.filter(Boolean).join(theme.fg("separator", " · "));
+		const join = (parts: readonly string[]): string =>
+			parts.filter(Boolean).join(theme.fg("separator", ` ${GLYPH.dot} `));
 		const note = this.draftNote(width);
 		const position = hiddenLineCount > 0 ? theme.fg("positionCount", `${GLYPH.up}${hiddenLineCount}`) : "";
 		let suffix = join([position, draftLabel, note ? theme.fg("draftState", note) : ""]);
@@ -672,7 +673,7 @@ export class ClioEditor extends Editor {
 		const nameCap = Math.max(4, Math.min(24, Math.floor(width / 3)));
 		const labelRoom = statusRail || mode === "COMPACTING" ? statusRailLabelRoom(width) : this.railLabelRoom(width);
 		const netRoom = labelRoom - reserved;
-		const separator = theme.fg("separator", " · ");
+		const separator = theme.fg("separator", ` ${GLYPH.dot} `);
 		const facts = statusRail ? (status.detail?.split(" · ") ?? []).map((fact) => theme.fg("annotation", fact)) : [];
 		const quietState = status?.live === false && status.glyph === GLYPH.queued;
 		const phrased = (state: string): string => [state, ...facts].filter(Boolean).join(separator);
@@ -739,7 +740,7 @@ export class ClioEditor extends Editor {
 		const fitted = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
 		const right = [truncateToWidth(label, fitted, GLYPH.ellipsis, false), suffix]
 			.filter(Boolean)
-			.join(theme.fg("separator", " · "));
+			.join(theme.fg("separator", ` ${GLYPH.dot} `));
 		return renderEditorRail(theme, width, { left, leftRaw: true, right, rightRaw: true }, rail);
 	}
 
@@ -775,7 +776,7 @@ export class ClioEditor extends Editor {
 				: "";
 		// The bar alone is a shape to guess at; the word says what fills it.
 		const usage = usageBar ? `${theme.fg("annotation", usageLabel)}${usageBar}` : "";
-		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("separator", " · "));
+		const hint = [fittedRight, usage, thinking].filter(Boolean).join(theme.fg("separator", ` ${GLYPH.dot} `));
 		const loopRoom = Math.max(0, width - visibleWidth(hint) - (hint ? 7 : 4));
 		const loop = loopRoom > 0 ? this.chrome.getLoopRail?.(loopRoom) : null;
 		// The current task takes only what the rail's state left over, and an active loop outranks it.
@@ -838,7 +839,7 @@ export class ClioEditor extends Editor {
 						: "";
 		const right = [scroll ? theme.fg("positionCount", scroll) : "", theme.base("keyboardHint", hint)]
 			.filter(Boolean)
-			.join(theme.fg("separator", " · "));
+			.join(theme.fg("separator", ` ${GLYPH.dot} `));
 		this.renderedBottomRail = this.bottomRail(
 			width,
 			theme,
@@ -940,7 +941,7 @@ export class ClioEditor extends Editor {
 		const hint = entry.frame.dockHint(room - (down ? visibleWidth(down) + 3 : 0) + 4);
 		const keys = [down, hint?.trim().length ? theme.fg("decisionKey", hint) : ""]
 			.filter(Boolean)
-			.join(theme.fg("separator", " · "));
+			.join(theme.fg("separator", ` ${GLYPH.dot} `));
 		return {
 			card: [
 				this.topRail(width, theme, rail, label, up, room),

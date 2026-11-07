@@ -25,6 +25,8 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		import { renderEditorRail } from "./src/interactive/editor-rails.ts";
 		import { ClioOverlayFrame } from "./src/interactive/overlay-frame.ts";
 		import { cardHead, cardRows } from "./src/interactive/card.ts";
+		import { createDemoHints } from "./src/interactive/footer/demo-hints.ts";
+		import { idleReadinessPresentation } from "./src/interactive/footer/widgets.ts";
 		import { DEFAULT_SETTINGS } from "./src/core/defaults.ts";
 		import { createBootWelcome } from "./src/interactive/welcome-dashboard.ts";
 		const theme = clioTheme();
@@ -37,9 +39,11 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		const overlay = new ClioOverlayFrame({ render: () => ["target /work/example"], invalidate() {} }, "Approval", "[Enter] allow / [Esc] deny").render(40);
 		const card = [...cardHead(GLYPH.toolHeader + " read /work/example", " " + GLYPH.ok, 40), ...cardRows("target /work/example", 40, true)];
 		const welcome = createBootWelcome(settings).render(80);
+		const status = idleReadinessPresentation({ targetId: "local", available: true, reason: "ok", health: "healthy", lastStop: null }, 80);
+		const tip = createDemoHints()({ enabled: true, now: 0, quiet: false, agentActive: false, toolsUsed: false, contextBusy: false, dashboardKey: "Ctrl+U" });
 		delete process.env.CLIO_CODER_ASCII;
 		process.env.TERM = "xterm-256color";
-		console.log(JSON.stringify({ glyphs: GLYPH, lines, overlay, card, rail, welcome }));
+		console.log(JSON.stringify({ glyphs: GLYPH, lines, overlay, card, rail, welcome, status, tip }));
 	`;
 	for (const fallback of [{ CLIO_CODER_ASCII: "1", TERM: "xterm-256color" }, { TERM: "dumb" }, { TERM: "unknown" }]) {
 		const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
@@ -55,6 +59,8 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 			card: string[];
 			rail: string;
 			welcome: string[];
+			status: { label: string };
+			tip: string;
 		};
 		ok(Object.values(output.glyphs).every((glyph) => /^[\x20-\x7e]+$/u.test(glyph)));
 		strictEqual(new Set([output.glyphs.ok, output.glyphs.error, output.glyphs.cancelled]).size, 3);
@@ -69,6 +75,8 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		strictEqual(output.glyphs.rail, "|");
 		strictEqual(output.welcome.length, 1);
 		match(stripTerminalSequences(output.welcome[0] ?? ""), /test-model/u);
+		match(output.status.label, /is ready \. no request yet/u);
+		match(output.tip, /lists keys \. Ctrl\+G opens every action \. \/help/u);
 	}
 	const env = { TERM: "xterm-256color", CLIO_CODER_ASCII: "1", CLIO_CODER_NERD_FONT: "1" };
 	strictEqual(asciiOnly(env), true);

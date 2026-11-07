@@ -599,7 +599,7 @@ function fitRailFacts(facts: ReadonlyArray<RailFact>, room: number, subject?: Ra
 		used += cost(fact, taken);
 	}
 	if (subject !== undefined) subject.shown = chosen.has(named);
-	return [head, ...rest].flatMap((fact) => chosen.get(fact) ?? []).join(" · ");
+	return [head, ...rest].flatMap((fact) => chosen.get(fact) ?? []).join(` ${GLYPH.dot} `);
 }
 
 /** The hint row says `Esc stops the run`; the rail uses the same verb so the two never read as two different keys. */

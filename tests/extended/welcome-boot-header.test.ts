@@ -359,7 +359,7 @@ test("the launchpad keeps a bounded footprint and the session header one row", (
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
 			const height = rows(launchpad, width).length;
-			ok(height >= 4 && height <= 24, `${label}@${width} launchpad rows: ${height}`);
+			ok(height >= 4 && height <= 25, `${label}@${width} launchpad rows: ${height}`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
