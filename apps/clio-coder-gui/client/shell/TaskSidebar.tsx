@@ -80,7 +80,7 @@ export function TaskSidebar({
 	const system = useQuery({
 		queryKey: ["system"],
 		queryFn: () => client.call(routes.system, emptyInput),
-		enabled: connection === "Connected",
+		enabled: false,
 		staleTime: 60_000,
 	});
 	const status = systemStatus(connection, system.data?.findings, system.isError);
@@ -287,12 +287,11 @@ function ProjectGroup({
 	const [open, setOpen] = useState<boolean | null>(null);
 	const [limit, setLimit] = useState(TASKS_PER_PROJECT);
 	const expanded = open ?? current;
-	const hasLive = sessions.some((session) => session.workspaceId === workspace.id);
 	// A project the operator never opened still lists its saved tasks once it is expanded or searched.
 	const history = useQuery({
 		queryKey: ["session-history", workspace.id],
 		queryFn: () => client.call(routes.sessionHistory, { params: { id: workspace.id }, query: {}, body: {} }),
-		enabled: expanded || hasLive,
+		enabled: expanded,
 		retry: false,
 	});
 	const rows = useMemo(

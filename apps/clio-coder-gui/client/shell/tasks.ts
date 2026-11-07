@@ -52,7 +52,8 @@ export function useSessionOverview(client: Client, enabled = true) {
 	return useQuery({
 		queryKey: ["session-overview"],
 		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
-		refetchInterval: 30_000,
+		staleTime: Number.POSITIVE_INFINITY,
+		refetchOnWindowFocus: "always",
 		enabled,
 	});
 }

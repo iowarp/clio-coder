@@ -249,7 +249,7 @@ const router = createBrowserRouter([
 			{
 				path: "/workspaces/:workspaceId/sessions",
 				lazy: async () => {
-					const { Sessions } = await import("./pages/sessions.js");
+					const { Sessions } = await import("./pages/tasks.js");
 					return { element: <Sessions client={client} /> };
 				},
 			},

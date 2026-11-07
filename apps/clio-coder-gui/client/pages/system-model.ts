@@ -27,7 +27,8 @@ export function systemStatus(
 				: { tone: "fail", label: "Offline", detail: "The Clio runtime is not connected." };
 	}
 	if (failed) return { tone: "unverified", label: "Unverified", detail: "Installation diagnostics are unavailable." };
-	if (!findings) return { tone: "unverified", label: "Checking", detail: "Reading Clio installation diagnostics." };
+	if (!findings)
+		return { tone: "unverified", label: "Not checked", detail: "Open System to check Clio installation diagnostics." };
 	if (!findings.length) return { tone: "unverified", label: "Unverified", detail: "No installation findings reported." };
 	const errors = findings.filter((finding) => finding.level === "error").length;
 	const warnings = findings.filter((finding) => finding.level === "warn").length;

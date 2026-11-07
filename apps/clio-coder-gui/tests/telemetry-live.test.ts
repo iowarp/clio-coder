@@ -23,10 +23,11 @@ test("a telemetry_update names the reads to refresh and folds nothing (#434)", (
 });
 
 test("the browser subscribes to named telemetry updates and invalidates only their session", async (t) => {
-	let source: EventTarget | undefined;
+	let source: Source | undefined;
 	let stop = () => {};
 	t.after(() => stop());
 	class Source extends EventTarget {
+		onerror: (() => void) | null = null;
 		constructor() {
 			super();
 			source = this;
@@ -46,6 +47,8 @@ test("the browser subscribes to named telemetry updates and invalidates only the
 	}
 	const queries = new QueryClient();
 	t.after(() => queries.clear());
+	queries.setQueryData(["meta"], { epoch: "epoch-1" });
+	queries.setQueryData(["session-overview"], { sessions: [] });
 	for (const key of ["telemetry", "session-usage"]) {
 		queries.setQueryData([key, "session-1"], {});
 		queries.setQueryData([key, "session-2"], {});
@@ -86,6 +89,26 @@ test("the browser subscribes to named telemetry updates and invalidates only the
 		assert.equal(queries.getQueryState([key, "session-1"])?.isInvalidated, true, key);
 		assert.equal(queries.getQueryState([key, "session-2"])?.isInvalidated, false, key);
 	}
+	const previous = source;
+	previous.onerror?.();
+	for (let turn = 0; turn < 150 && source === previous; turn += 1) await setTimeout(10);
+	assert.notEqual(source, previous);
+	assert.ok(source);
+	source.dispatchEvent(
+		new MessageEvent("hello", {
+			data: JSON.stringify({ v: 1, epoch: "epoch-1", seq: 2, at: new Date().toISOString(), type: "hello", payload: {} }),
+		}),
+	);
+	assert.equal(
+		queries.getQueryState(["meta"])?.isInvalidated,
+		true,
+		"reconnect refreshes runtime metadata without polling",
+	);
+	assert.equal(
+		queries.getQueryState(["session-overview"])?.isInvalidated,
+		true,
+		"reconnect refreshes the live inventory",
+	);
 });
 
 test("the live usage DTO carries the parity fixture's session totals as the read model words them (#434 §13.2)", async (t) => {

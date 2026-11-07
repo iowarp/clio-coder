@@ -103,7 +103,8 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
-		refetchInterval: 15_000,
+		staleTime: Number.POSITIVE_INFINITY,
+		refetchOnWindowFocus: "always",
 		enabled: !!client.token,
 	});
 	// The launcher brought one window forward and named a page; only that window goes there.

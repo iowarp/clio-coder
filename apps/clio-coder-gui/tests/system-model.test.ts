@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
-import { findingAction, healthGroups } from "../client/pages/system-model.js";
+import { findingAction, healthGroups, systemStatus } from "../client/pages/system-model.js";
 import { SystemReport } from "../contracts/system.js";
 
 const report = {
@@ -37,7 +37,18 @@ test("a diagnostic offers supported inspection links without claiming a repair a
 		label: "Inspect settings sources",
 		path: "/settings/effective",
 	});
+
 	assert.equal(findingAction({ name: "credentials", level: "error" }), null);
 	assert.equal(findingAction({ name: "engine runtime", level: "error" }), null);
 	assert.equal(findingAction({ name: "settings.yaml", level: "ok" }), null);
+});
+
+test("an event connection never presents deferred diagnostics as running or healthy", () => {
+	assert.deepEqual(systemStatus("Connected", undefined, false), {
+		tone: "unverified",
+		label: "Not checked",
+		detail: "Open System to check Clio installation diagnostics.",
+	});
+	assert.equal(systemStatus("Connected", report.findings, false).label, "1 issue");
+	assert.equal(systemStatus("Reconnecting…", report.findings, false).label, "Reconnecting");
 });

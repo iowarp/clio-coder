@@ -190,6 +190,7 @@ export function subscribe(
 						void queries.invalidateQueries({ queryKey: ["session"] });
 						void queries.invalidateQueries({ queryKey: ["sessions"] });
 						void queries.invalidateQueries({ queryKey: ["session-interview"] });
+						void queries.invalidateQueries({ queryKey: ["meta"] });
 						refreshAutonomy();
 					}
 					disconnected = false;

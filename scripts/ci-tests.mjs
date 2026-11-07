@@ -103,6 +103,8 @@ export const guiTests = [
 	"library-http",
 	"file-preview",
 	"app-state",
+	"system-model",
+	"telemetry-live",
 	"ssh-model",
 	"machine-proxy",
 	"client-auth",
@@ -111,7 +113,7 @@ export const guiTests = [
 	"boundaries",
 ]
 	.map((name) => `tests/${name}.test.ts`)
-	.concat("tests/public-help.test.tsx");
+	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");
 
 export const packageTests = [
 	"tests/smoke/installed-package.test.ts",
