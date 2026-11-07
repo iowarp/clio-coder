@@ -44,9 +44,11 @@ import {
 	repoCostReport,
 	repoOwner,
 	runningSelectionsForTesting,
+	sessionOperatorMetrics,
 	sessionTelemetry,
 	timeline,
 	turnsSum,
+	usageReport,
 	whyStopped,
 } from "../../src/domains/telemetry/read-model.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
@@ -84,6 +86,109 @@ const dtos: Array<[string, TSchema, unknown]> = [
 ];
 
 const all = dtos.flatMap(([, , dto]) => quantitiesOf(dto));
+
+test("model and target rows split a worker's actual routes, including token fields and explained cache share", () => {
+	const runId = "mixed-routes";
+	const worker = [
+		...telemetryCall(source.sessionId, {
+			role: "worker",
+			targetId: "alpha",
+			model: "one",
+			usage: { input: 100, cacheRead: 300, output: 20 },
+			usd: 0.1,
+		}),
+		...telemetryCall(source.sessionId, {
+			role: "worker",
+			targetId: "beta",
+			model: "two",
+			usage: { input: 200, output: 30 },
+			usd: 0.2,
+		}),
+	].map((record) => ({ ...record, ctx: { ...record.ctx, runId } }) as TelemetryRecord);
+	const recorded: SessionSource = {
+		...source,
+		journal: { ...source.journal, records: [] },
+		runs: new Map([[runId, { ...source.journal, records: worker }]]),
+	};
+	for (const by of ["model", "target"] as const) {
+		const report = costReport(recorded, by, now);
+		strictEqual(report.groups.length, 2);
+		const alpha = report.groups.find((row) => row.key === (by === "model" ? "alpha/one" : "alpha"));
+		ok(alpha?.tokenFields && alpha.cacheShare);
+		strictEqual(alpha.tokens.display, "420");
+		strictEqual(alpha.tokenFields.input.display, "100");
+		strictEqual(alpha.cacheShare.display, "75.0%");
+		for (const quantity of quantitiesOf(report))
+			deepStrictEqual(explain(quantity.ref, { session: recorded }, now)?.value, quantity, quantity.ref);
+	}
+	const unpriced = telemetryCall("unknown-cache", { usage: { input: null, cacheRead: 100 }, usd: null });
+	const unknown = costReport(
+		{ ...source, sessionId: "unknown-cache", journal: { ...source.journal, records: unpriced } },
+		"model",
+		now,
+	).groups[0];
+	ok(unknown);
+	ok(/unknown/.test(unknown.cacheShare?.display ?? ""));
+	ok(/unknown|not measured/.test(unknown.usd.display));
+});
+
+test("operator metrics fold settlements once, keep blocked calls separate, and leave missing timings as gaps", () => {
+	const call = (at: string, firstToken: number | undefined) =>
+		telemetryCall("operator-metrics", { at }).map((record) => {
+			if (record.k !== "call.settled") return record;
+			const { firstToken: _old, ...stages } = record.data.stages;
+			return {
+				...record,
+				data: {
+					...record.data,
+					stages: {
+						...stages,
+						send: { start: 0, end: 0 },
+						settle: 100,
+						...(firstToken !== undefined ? { firstToken } : {}),
+					},
+				},
+			};
+		});
+	const calls = [
+		...call("2026-10-30T00:00:01.000Z", 10),
+		...call("2026-10-30T00:00:02.000Z", 30),
+		...call("2026-10-30T00:00:03.000Z", undefined),
+	];
+	const first = calls[0];
+	if (!first?.ctx.callId) throw new Error("fixture call missing");
+	const tools = (["ok", "error", "blocked"] as const).map((outcome, index) =>
+		makeTelemetryRecord("tool.settled", { tool: "bash", outcome, durationMs: [10, 50, 0][index] ?? 0 }, first.ctx, {
+			t: "2026-10-30T00:00:04.000Z",
+			mono: 0,
+		}),
+	);
+	const compact = makeTelemetryRecord(
+		"compaction.settled",
+		{ callIds: [first.ctx.callId], outcome: "committed", checkpointTurnId: "checkpoint" },
+		first.ctx,
+		{ t: "2026-10-30T00:00:05.000Z", mono: 0 },
+	);
+	const recorded: SessionSource = {
+		...source,
+		sessionId: "operator-metrics",
+		journal: { ...source.journal, records: [...calls, ...tools, ...tools.slice(0, 1), compact] },
+	};
+	const performance = sessionOperatorMetrics(recorded).performance;
+	strictEqual(performance.totals.toolCalls.display, "3");
+	strictEqual(performance.tools[0]?.success.display, "50.0%");
+	strictEqual(performance.tools[0]?.blocked.display, "1");
+	strictEqual(performance.tools[0]?.latency.p50.display, "30ms");
+	strictEqual(performance.compactionOutcomes.committed.display, "1");
+	strictEqual(performance.sessions[0]?.ttft.p50.display, "20ms");
+	strictEqual(performance.sessions[0]?.ttft.p95.display, "30ms");
+	strictEqual(performance.sessions[0]?.ttft.missing.display, "1");
+	deepStrictEqual(performance.sessions[0]?.trend, [10, 30, null]);
+	const repo: RepoSource = { owner: repoOwner(null, 30), sessions: [recorded], runs: new Map() };
+	const window = usageReport(repo, Date.parse("2026-10-01"), Date.parse("2026-10-31")).performance;
+	for (const quantity of quantitiesOf(window.sessions))
+		deepStrictEqual(explain(quantity.ref, { repo }, now)?.value, quantity, quantity.ref);
+});
 
 test("every DTO matches its published schema", () => {
 	for (const [name, schema, dto] of dtos)

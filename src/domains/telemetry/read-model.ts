@@ -843,6 +843,14 @@ function runModelKey(run: Run): string {
 	const target = run.fold.aggregate?.target ?? run.attempts[0]?.settled?.target ?? run.attempts[0]?.started.target;
 	return target ? modelKey(target) : "unknown/unknown";
 }
+function runTargetKey(run: Run): string {
+	return (
+		run.fold.aggregate?.target.targetId ??
+		run.attempts[0]?.settled?.target.targetId ??
+		run.attempts[0]?.started.target.targetId ??
+		"unknown"
+	);
+}
 /**
  * A cache break re-prefilled what the cache had served past the shared band: more than 1,024 tokens and a tenth of the
  * previous request's prefix, which is what this call read plus what it prefilled again. A server whose usage omits
@@ -877,6 +885,10 @@ function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string })
 			return attempt.agent.role === group.key;
 		case "model":
 			return modelKey(settled?.target ?? attempt.started.target) === group.key;
+		case "target":
+			return (settled?.target ?? attempt.started.target).targetId === group.key;
+		case "session":
+			return attempt.ctx?.sessionId === group.key;
 		case "turn":
 			return (attempt.ctx?.turnId ?? "-") === group.key;
 		case "cause":
@@ -897,6 +909,10 @@ function runInGroup(run: Run, group: { by: FactGroup; key: string }): boolean {
 			return group.key === "worker";
 		case "model":
 			return runModelKey(run) === group.key;
+		case "target":
+			return runTargetKey(run) === group.key;
+		case "session":
+			return run.sessionId === group.key;
 		case "turn":
 			return (run.turnId ?? "-") === group.key;
 		case "run":
@@ -922,6 +938,14 @@ interface Selection {
 type View = { session: SessionSource } | { run: Run } | { repo: RepoSource } | { process: Run };
 /** An absent run journal is already one unknown contribution; a damaged one adds its own. */
 const runGap = (run: Run) => (run.source.present ? run.gap : 0);
+
+function groupedRunParts(run: Run, group: { by: FactGroup; key: string } | undefined): Part[] {
+	if (group && (group.by === "model" || group.by === "target") && run.fold.source === "calls") {
+		const attempts = run.attempts.filter((attempt) => attemptInGroup(attempt, group));
+		return attempts.length || runGap(run) > 0 ? [{ attempts, gap: runGap(run) }] : [];
+	}
+	return !group || runInGroup(run, group) ? [{ run, gap: runGap(run) }] : [];
+}
 
 function select(view: View, ref: ParsedFactRef): Selection | null {
 	const group = ref.group;
@@ -989,8 +1013,7 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 		described.push(`${ref.scope === "lineage" ? "the lineage's" : "the session's own"} attempts`);
 	}
 	if (ref.scope !== "own") {
-		const runs = [...analysis.runs.values()].filter((run) => !group || runInGroup(run, group));
-		for (const run of runs) parts.push({ run, gap: runGap(run) });
+		for (const run of analysis.runs.values()) parts.push(...groupedRunParts(run, group));
 		described.push("each referenced run's journal fold");
 	}
 	return {
@@ -1008,12 +1031,23 @@ function selectRepo(
 	group: { by: FactGroup; key: string } | undefined,
 	scope: "repo" | "own" | "runs",
 ): Selection {
+	if (group?.by === "session") {
+		return selectRepo(
+			{
+				...repo,
+				sessions: repo.sessions.filter((session) => session.sessionId === group.key),
+				runs: new Map([...repo.runs].filter(([id, source]) => analyzeRun(id, source).sessionId === group.key)),
+			},
+			undefined,
+			scope,
+		);
+	}
 	const parts: Part[] = [];
 	const counted = new Set<string>();
 	const addRun = (run: Run) => {
 		if (scope === "own" || counted.has(run.runId)) return;
 		counted.add(run.runId);
-		if (!group || runInGroup(run, group)) parts.push({ run, gap: runGap(run) });
+		parts.push(...groupedRunParts(run, group));
 	};
 	for (const session of repo.sessions) {
 		const analysis = analyze(session);
@@ -1079,6 +1113,7 @@ const FAMILY: Record<FactMetric, Family> = {
 	toolErrors: "count",
 	harnessShare: "percent",
 	callShare: "percent",
+	cacheShare: "percent",
 	harnessTime: "duration",
 	networkTime: "duration",
 	toolTime: "duration",
@@ -1097,6 +1132,7 @@ const RULES: Record<FactMetric, string> = {
 	toolErrors: "sealed evidence tool errors",
 	harnessShare: "100 × harnessTime / (harnessTime + networkTime + modelTime + toolTime), main-loop calls only",
 	callShare: "100 × group calls / whole-scope calls; unknown when model groups overlap",
+	cacheShare: "100 × cache-read tokens / prompt tokens; unknown without complete measured token fields",
 	calls: "count(distinct callId); a run contributes its API calls",
 	attempts: "count(attempts)",
 	neverSent: "count(attempts where disposition=never_sent)",
@@ -1509,7 +1545,7 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		};
 	}
 
-	if (ref.metric === "harnessShare" || ref.metric === "callShare") {
+	if (ref.metric === "harnessShare" || ref.metric === "callShare" || ref.metric === "cacheShare") {
 		const base = ref.metric === "harnessShare" ? { ...ref, group: { by: "role" as const, key: "main" } } : ref;
 		const selection = select(view, base);
 		if (!selection) return null;
@@ -1530,13 +1566,17 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 				const total = values.reduce<number>((sum, part) => sum + (part ?? 0), 0);
 				if (total > 0) value = (100 * (values[0] ?? 0)) / total;
 			}
+		} else if (ref.metric === "cacheShare") {
+			const cached = exact(read("cacheRead"));
+			const prompt = exact(read("prompt"));
+			if (cached !== null && prompt !== null && prompt > 0 && cached <= prompt) value = (100 * cached) / prompt;
 		} else {
 			const numerator = exact(read("calls"));
 			const wholeRef = { ...ref, metric: "calls" as const };
 			delete wholeRef.group;
 			const denominator = exact(measure(view, wholeRef)?.quantity);
 			// A call can fail over between models; overlapping groups do not partition a pie (#434).
-			const groupParts = ref.group?.by === "model" ? selection.parts : [];
+			const groupParts = ref.group?.by === "model" || ref.group?.by === "target" ? selection.parts : [];
 			const selectedIds = new Set(
 				groupParts.flatMap((part) => part.attempts ?? part.run?.attempts ?? []).map((attempt) => attempt.started.callId),
 			);
@@ -2028,9 +2068,25 @@ function groupKeys(runs: readonly Run[], attempts: readonly Attempt[], by: Group
 				? attempt.agent.role
 				: by === "model"
 					? modelKey(attempt.settled?.target ?? attempt.started.target)
-					: (attempt.ctx?.turnId ?? "-"),
+					: by === "target"
+						? (attempt.settled?.target ?? attempt.started.target).targetId
+						: (attempt.ctx?.turnId ?? "-"),
 		);
-	for (const run of runs) keys.add(by === "role" ? "worker" : by === "model" ? runModelKey(run) : (run.turnId ?? "-"));
+	for (const run of runs) {
+		if ((by === "model" || by === "target") && run.fold.source === "calls") {
+			for (const key of groupKeys([], run.attempts, by)) keys.add(key);
+		} else {
+			keys.add(
+				by === "role"
+					? "worker"
+					: by === "model"
+						? runModelKey(run)
+						: by === "target"
+							? runTargetKey(run)
+							: (run.turnId ?? "-"),
+			);
+		}
+	}
 	return [...keys].sort();
 }
 
@@ -2054,6 +2110,8 @@ function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: reado
 			callShare: quantity(view, ref("callShare")),
 			calls: quantity(view, ref("calls")),
 			tokens: quantity(view, ref("total")),
+			tokenFields: tokenQuantities(view, { ...base, group: { by, key } }),
+			cacheShare: quantity(view, ref("cacheShare")),
 			usd: quantity(view, ref("usd")),
 			pricedBy: pricedByCounts(select(view, ref("usd"))?.parts ?? []),
 			audience: split ? { session: share("own"), worker: share("runs") } : null,
@@ -3464,7 +3522,7 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 			rate: { fact: rate, display: renderFact(rate, "percent") },
 		},
 		tokens: repoTokenQuantities(source),
-		cost: (["role", "model"] as const).map((groupBy) =>
+		cost: (["role", "model", "target"] as const).map((groupBy) =>
 			repoCostReport(
 				source,
 				{ repo: parseRepoOwner(source.owner)?.cwdHash ?? "all", days: parseRepoOwner(source.owner)?.days ?? 30 },
@@ -3472,6 +3530,154 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 			),
 		),
 		cache: source.sessions.map((session) => cacheReport(session)),
+		performance: operatorPerformance(source),
+	};
+}
+
+function measuredTiming(fact: Fact<number>): number | null {
+	return fact.kind === "measured" ? fact.value : null;
+}
+
+function latencyStats(values: readonly (number | null)[]) {
+	const sorted = values.filter((value): value is number => value !== null).sort((a, b) => a - b);
+	const duration = (value: number | undefined) => {
+		const fact = value === undefined ? unobserved : localClock(value);
+		return { fact, display: renderFact(fact, "duration") };
+	};
+	const middle = Math.floor(sorted.length / 2);
+	const median = sorted.length
+		? sorted.length % 2
+			? sorted[middle]
+			: ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+		: undefined;
+	return {
+		p50: duration(median),
+		p95: duration(sorted[Math.ceil(sorted.length * 0.95) - 1]),
+		measured: shownCount(sorted.length),
+		missing: shownCount(values.length - sorted.length),
+	};
+}
+
+/** Content-free operator measurements, rebuilt from the existing journals, never a second metrics store. */
+function operatorPerformance(source: RepoSource, windowed = true) {
+	const unique = new Map<string, JournalSource>();
+	for (const session of source.sessions) {
+		unique.set(`session:${session.sessionId}`, session.journal);
+		for (const [id, journal] of session.runs) unique.set(`run:${id}`, journal);
+	}
+	for (const [id, journal] of source.runs) unique.set(`run:${id}`, journal);
+	const journals = [...unique.values()];
+	const records = new Map<string, TelemetryRecord>();
+	for (const journal of journals)
+		for (const record of journal.records) if (!records.has(record.id)) records.set(record.id, record);
+	const ordered = [...records.values()].sort((a, b) => a.t.localeCompare(b.t) || a.id.localeCompare(b.id));
+	const tools = new Map<string, { ok: number; errors: number; blocked: number; durations: number[] }>();
+	for (const record of ordered) {
+		if (record.k !== "tool.settled") continue;
+		const row = tools.get(record.data.tool) ?? { ok: 0, errors: 0, blocked: 0, durations: [] };
+		if (record.data.outcome === "ok") row.ok++;
+		else if (record.data.outcome === "error") row.errors++;
+		else row.blocked++;
+		if (record.data.outcome !== "blocked") row.durations.push(record.data.durationMs);
+		tools.set(record.data.tool, row);
+	}
+	const compactions = ordered.filter((record) => record.k === "compaction.settled");
+	const outcomes = { committed: 0, discarded: 0, failed: 0, unresolved: 0 };
+	for (const record of compactions) outcomes[record.data.outcome]++;
+	const sessions = source.sessions
+		.filter((session) => session.processId === undefined)
+		.map((session) => {
+			const telemetry = sessionTelemetry(session);
+			const view: View = windowed ? { repo: source } : { session };
+			const base: Omit<ParsedFactRef, "metric"> = windowed
+				? { scope: "repo", owner: source.owner, group: { by: "session", key: session.sessionId } }
+				: { scope: "session", owner: session.sessionId };
+			const q = (metric: FactMetric) => quantity(view, { ...base, metric });
+			const calls = selectionOf(analyze(session), { by: "role", key: "main" }).members;
+			const ownRecords = new Map<string, TelemetryRecord>();
+			for (const journal of sessionJournals(session))
+				for (const record of journal.records) ownRecords.set(record.id, record);
+			const observed = [...ownRecords.values()];
+			const settledTools = observed.filter((record) => record.k === "tool.settled");
+			return {
+				sessionId: session.sessionId,
+				startedAt: telemetry.lifetime.firstRecordAt,
+				lastAt: telemetry.lifetime.lastRecordAt,
+				calls: q("calls"),
+				tokens: q("total"),
+				usd: q("usd"),
+				cacheShare: q("cacheShare"),
+				ttft: latencyStats(calls.map((call) => measuredTiming(attemptFact(call, "ttft")))),
+				modelTime: latencyStats(calls.map((call) => measuredTiming(attemptFact(call, "modelTime")))),
+				trend: calls.slice(-32).map((call) => measuredTiming(attemptFact(call, "ttft"))),
+				toolCalls: shownCount(settledTools.length),
+				toolErrors: shownCount(settledTools.filter((record) => record.data.outcome === "error").length),
+				compactions: shownCount(observed.filter((record) => record.k === "compaction.settled").length),
+				journal: telemetry.journal,
+			};
+		})
+		.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? "") || a.sessionId.localeCompare(b.sessionId));
+	return {
+		coverage: {
+			journals: journals.length,
+			unavailable: journals.filter((journal) => !journal.present).length,
+			gaps: [...unique.values()].reduce(
+				(sum, journal) =>
+					sum + journal.skipped + journal.damaged + journal.records.filter((record) => record.k === "journal.gap").length,
+				0,
+			),
+		},
+		totals: {
+			toolCalls: shownCount(ordered.filter((record) => record.k === "tool.settled").length),
+			toolErrors: shownCount(
+				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "error").length,
+			),
+			toolBlocked: shownCount(
+				ordered.filter((record) => record.k === "tool.settled" && record.data.outcome === "blocked").length,
+			),
+			compactions: shownCount(compactions.length),
+		},
+		tools: [...tools]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([tool, row]) => {
+				const attempts = row.ok + row.errors;
+				const success: Fact<number> = attempts ? localCount((100 * row.ok) / attempts) : unobserved;
+				return {
+					tool,
+					calls: shownCount(attempts + row.blocked),
+					ok: shownCount(row.ok),
+					errors: shownCount(row.errors),
+					blocked: shownCount(row.blocked),
+					success: { fact: success, display: renderFact(success, "percent") },
+					latency: latencyStats(row.durations),
+				};
+			}),
+		compactionOutcomes: {
+			committed: shownCount(outcomes.committed),
+			discarded: shownCount(outcomes.discarded),
+			failed: shownCount(outcomes.failed),
+			unresolved: shownCount(outcomes.unresolved),
+		},
+		compactions: compactions
+			.slice(-24)
+			.reverse()
+			.map((record) => ({
+				recordId: record.id,
+				at: record.t,
+				sessionId: record.ctx.sessionId ?? null,
+				runId: record.ctx.runId ?? null,
+				outcome: record.data.outcome,
+				checkpointTurnId: record.data.checkpointTurnId,
+			})),
+		sessions: sessions.slice(-80),
+		sessionCount: sessions.length,
+	};
+}
+
+export function sessionOperatorMetrics(source: SessionSource) {
+	return {
+		cost: (["model", "target"] as const).map((by) => costReport(source, by)),
+		performance: operatorPerformance({ owner: repoOwner(null, 30), sessions: [source], runs: new Map() }, false),
 	};
 }
 

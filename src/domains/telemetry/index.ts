@@ -65,9 +65,11 @@ export {
 	runRowTelemetry,
 	runTelemetry,
 	runTimeline,
+	sessionOperatorMetrics,
 	sessionTelemetry,
 	type TaskMemorySpendSummary,
 	timeline,
+	usageReport,
 	whyStopped,
 } from "./read-model.js";
 export type { JournaledContent } from "./research-content.js";
@@ -101,4 +103,4 @@ export {
 	readVerifiedRun,
 } from "./run-record.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";
-export { explainRepoRef, isRepoRef } from "./usage-window.js";
+export { emptyUsageDiagnostics, explainRepoRef, isRepoRef, usageWindow } from "./usage-window.js";

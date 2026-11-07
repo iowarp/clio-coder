@@ -129,6 +129,7 @@ export const FACT_METRICS = [
 	"roundTripTax",
 	"harnessShare",
 	"callShare",
+	"cacheShare",
 	"contextUsed",
 	"contextWindow",
 	"contextFree",
@@ -141,7 +142,19 @@ export const FACT_METRICS = [
 ] as const;
 export type FactMetric = (typeof FACT_METRICS)[number];
 /** `cause` selects a closed failure cause, `wait` an admission hold, `cold` an expected cold reason. */
-export const FACT_GROUPS = ["role", "model", "turn", "run", "cause", "wait", "cold", "category", "turns"] as const;
+export const FACT_GROUPS = [
+	"role",
+	"model",
+	"target",
+	"session",
+	"turn",
+	"run",
+	"cause",
+	"wait",
+	"cold",
+	"category",
+	"turns",
+] as const;
 export type FactGroup = (typeof FACT_GROUPS)[number];
 export const FACT_SCOPES = ["own", "runs", "session", "lineage", "run", "repo", "process", "context"] as const;
 export type FactScope = (typeof FACT_SCOPES)[number];
@@ -530,6 +543,8 @@ const costGroup = Type.Object(
 		key: text,
 		calls: QuantitySchema,
 		tokens: QuantitySchema,
+		tokenFields: Type.Optional(tokens),
+		cacheShare: Type.Optional(QuantitySchema),
 		usd: QuantitySchema,
 		pricedBy,
 		callShare: QuantitySchema,
@@ -550,7 +565,7 @@ export const CostReportSchema = Type.Object(
 			Type.Object({ runId: ExistingId }, closed),
 			Type.Object({ repo: text, days: Type.Integer({ minimum: 1 }) }, closed),
 		]),
-		groupBy: vocabulary(["role", "model", "turn"]),
+		groupBy: vocabulary(["role", "model", "target", "turn"]),
 		total: Type.Object({ calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema, pricedBy }, closed),
 		groups: Type.Array(costGroup),
 	},
