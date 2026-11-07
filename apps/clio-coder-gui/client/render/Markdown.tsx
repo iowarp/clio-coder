@@ -16,6 +16,7 @@ const {
 	useContext,
 	useDeferredValue,
 	useEffect,
+	useId,
 	useMemo,
 	useRef,
 	useState,
@@ -25,6 +26,10 @@ const {
 import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
 	codeLanguage,
+	type DiffLineKind,
+	diffLineKind,
+	type FootnoteRefToken,
+	type FootnoteToken,
 	HIGHLIGHT_MAX_CHARS,
 	IncrementalMarkdown,
 	lexMarkdown,
@@ -32,6 +37,7 @@ import {
 	type MathToken,
 	mermaidSourceProblem,
 	numericColumns,
+	pathReference,
 	safeHref,
 	tableText,
 	tokenText,
@@ -215,6 +221,35 @@ function HighlightedCode({ tokens }: { tokens: readonly HighlightToken[] }) {
 	);
 }
 
+const DIFF_LINE_LABEL: Readonly<Partial<Record<DiffLineKind, string>>> = { add: "added", remove: "removed" };
+
+/**
+ * A diff reads by line: each added or removed line carries a full-width tint, so the change shows before the
+ * signs are read. Lines are plain text, which also keeps a streaming diff cheap.
+ */
+function DiffLines({ code }: { code: string }) {
+	const lines = useMemo(() => code.split("\n"), [code]);
+	return (
+		<>
+			{lines.map((line, index) => {
+				const kind = diffLineKind(line);
+				const label = DIFF_LINE_LABEL[kind];
+				return (
+					<span
+						// biome-ignore lint/suspicious/noArrayIndexKey: A diff line is identified by its position; lines only append.
+						key={index}
+						className={`diff-line diff-line--${kind}`}
+						{...(label === undefined ? {} : { "data-change": label })}
+					>
+						{line}
+						{index < lines.length - 1 ? "\n" : null}
+					</span>
+				);
+			})}
+		</>
+	);
+}
+
 /**
  * Lines a code block shows before it scrolls, from the `pre`'s 520px cap at 12px/1.7 mono. A block
  * that fits says nothing about its length; a longer one names it, because its end is out of sight.
@@ -251,7 +286,7 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 		tokens: readonly HighlightToken[] | null;
 	} | null>(null);
 	const grammar = language.grammar;
-	const wantsHighlight = settled && near && grammar !== null && code.length <= HIGHLIGHT_MAX_CHARS;
+	const wantsHighlight = settled && near && grammar !== null && grammar !== "diff" && code.length <= HIGHLIGHT_MAX_CHARS;
 	useEffect(() => {
 		if (!wantsHighlight || grammar === null) return;
 		let cancelled = false;
@@ -292,7 +327,7 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 			</div>
 			<CodeViewport>
 				<code className={grammar === null ? undefined : `language-${grammar}`}>
-					{tokens === null ? code : <HighlightedCode tokens={tokens} />}
+					{grammar === "diff" ? <DiffLines code={code} /> : tokens === null ? code : <HighlightedCode tokens={tokens} />}
 					{settled ? null : <span className="code-block__cursor" aria-hidden="true" />}
 				</code>
 			</CodeViewport>
@@ -312,6 +347,64 @@ interface MermaidBlockProps {
  * to settle rather than landing between text frames.
  */
 const StreamingContext = createContext(false);
+/** Footnote anchors are scoped to one message, so two answers that both say `[^1]` do not share an id. */
+const FootnoteScope = createContext("md");
+
+function footnoteId(scope: string, label: string): string {
+	return `${scope}-fn-${label.replace(/[^\w-]/gu, "_")}`;
+}
+
+/** Moves to a note without touching the URL, which the app's router owns. */
+function jumpTo(id: string) {
+	const target = document.getElementById(id);
+	if (!target) return;
+	target.scrollIntoView({ block: "nearest" });
+	target.focus({ preventScroll: true });
+}
+
+function FootnoteRef({ label }: { label: string }) {
+	const id = footnoteId(useContext(FootnoteScope), label);
+	return (
+		<sup className="md-footnote-ref">
+			<a
+				href={`#${id}`}
+				aria-label={`Note ${label}`}
+				onClick={(event) => {
+					event.preventDefault();
+					jumpTo(id);
+				}}
+			>
+				{label}
+			</a>
+		</sup>
+	);
+}
+
+function Footnote({ token }: { token: FootnoteToken }) {
+	const id = footnoteId(useContext(FootnoteScope), token.label);
+	return (
+		<div className="md-footnote" id={id} tabIndex={-1}>
+			<span className="md-footnote__label">{token.label}</span>
+			<span className="md-footnote__text">
+				<Inline tokens={token.tokens} />
+			</span>
+		</div>
+	);
+}
+
+/** A code span naming a file, and a line when it has one, so it reads as a place rather than as code. */
+function CodeSpan({ text }: { text: string }) {
+	const reference = useMemo(() => pathReference(text), [text]);
+	if (reference === null) return <code>{text}</code>;
+	return (
+		<code
+			className="md-path"
+			title={reference.line === null ? reference.path : `${reference.path}, line ${reference.line}`}
+		>
+			{text}
+		</code>
+	);
+}
 
 export const MermaidBlock = memo(function MermaidBlock({ source, settled }: MermaidBlockProps) {
 	const container = useRef<HTMLElement>(null);
@@ -454,7 +547,9 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 				</del>
 			);
 		case "codespan":
-			return <code>{(token as Tokens.Codespan).text}</code>;
+			return <CodeSpan text={(token as Tokens.Codespan).text} />;
+		case "footnoteRef":
+			return <FootnoteRef label={(token as unknown as FootnoteRefToken).label} />;
 		case "br":
 			return <br />;
 		case "link": {
@@ -536,6 +631,8 @@ const Block = memo(function Block({ token, settled }: { token: MarkdownToken; se
 	switch (token.type) {
 		case "math":
 			return <MathTokenContent token={token as MathToken} />;
+		case "footnote":
+			return <Footnote token={token as unknown as FootnoteToken} />;
 		case "space":
 		case "def":
 			return null;
@@ -703,6 +800,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 	// Text entry stays urgent while the growing response is parsed in interruptible work.
 	// Completion follows the displayed source so a deferred tail is never parsed as a final answer.
 	const displayedSource = useDeferredValue(source);
+	const footnoteScope = useId().replace(/[^\w-]/gu, "");
 	const displayedComplete = complete && displayedSource === source;
 	const incremental = useRef<IncrementalMarkdown | null>(null);
 	const split = useMemo(() => {
@@ -724,10 +822,12 @@ export const MarkdownContent = memo(function MarkdownContent({
 	);
 	return (
 		<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
-			<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
-				{/* One child list keeps a growing block mounted when it joins the settled prefix. */}
-				<Blocks tokens={tokens} settled={displayedComplete} settledCount={split?.settled.length ?? 0} />
-			</div>
+			<FootnoteScope.Provider value={`md${footnoteScope}`}>
+				<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
+					{/* One child list keeps a growing block mounted when it joins the settled prefix. */}
+					<Blocks tokens={tokens} settled={displayedComplete} settledCount={split?.settled.length ?? 0} />
+				</div>
+			</FootnoteScope.Provider>
 		</StreamingContext.Provider>
 	);
 });

@@ -6,11 +6,13 @@ import { Blocks, CodeBlock, decodeEntities, MarkdownContent, MermaidBlock } from
 import type { MathToken } from "../client/render/markdown-model.js";
 import {
 	codeLanguage,
+	diffLineKind,
 	IncrementalMarkdown,
 	lexMarkdown,
 	MERMAID_MAX_LINES,
 	MERMAID_MAX_SOURCE_BYTES,
 	mermaidSourceProblem,
+	pathReference,
 	safeHref,
 	settledBoundary,
 	tokenText,
@@ -328,4 +330,57 @@ test("math caps oversized TeX dimensions", async () => {
 	const markup = await typesetMath("a\\kern 10000em b", false);
 	match(markup, /<mspace width="50em"/u);
 	doesNotMatch(markup, /width="10000em"/u);
+});
+
+test("footnotes link a reference to its note, scoped to one message, and a link definition still works", () => {
+	const html = renderMarkdown(
+		[
+			"Measured twice[^1] and [docs][d].",
+			"",
+			"[^1]: On the fixture,",
+			"  then on a real run.",
+			"",
+			"[d]: https://example.com",
+		].join("\n"),
+	);
+	const ref = /<sup class="md-footnote-ref"><a href="#([^"]+)"[^>]*>1<\/a><\/sup>/u.exec(html);
+	ok(ref, html);
+	match(html, new RegExp(`<div class="md-footnote" id="${ref[1]}" tabindex="-1">`, "u"));
+	match(html, /On the fixture, then on a real run\./u);
+	match(html, /<a [^>]*href="https:\/\/example.com\/"/u);
+	doesNotMatch(html, /\[\^1\]/u);
+	const twice = renderToStaticMarkup(
+		<>
+			<MarkdownContent source={"a[^1]\n\n[^1]: x"} complete />
+			<MarkdownContent source={"b[^1]\n\n[^1]: y"} complete />
+		</>,
+	);
+	const ids = [...twice.matchAll(/class="md-footnote" id="([^"]+)"/gu)].map((found) => found[1]);
+	equal(new Set(ids).size, 2);
+	// A streaming note renders as soon as its line arrives, before the message completes.
+	match(renderMarkdown("Text[^a]\n\n[^a]: still arriving", false), /class="md-footnote"/u);
+});
+
+test("a diff block tints added and removed lines but not its headers", () => {
+	deepEqual(
+		["--- a/x.ts", "+++ b/x.ts", "@@ -1 +1 @@", "-old", "+new", " same", "diff --git a/x b/x"].map(diffLineKind),
+		["meta", "meta", "hunk", "remove", "add", "context", "meta"],
+	);
+	const html = renderToStaticMarkup(<CodeBlock code={"@@ -1 +1 @@\n-old\n+new"} info="diff" settled />);
+	match(html, /<span class="diff-line diff-line--remove" data-change="removed">-old\n<\/span>/u);
+	match(html, /<span class="diff-line diff-line--add" data-change="added">\+new<\/span>/u);
+});
+
+test("a code span that names a file and line reads as a path; ordinary code does not", () => {
+	deepEqual(pathReference("src/core/a.ts:42"), { path: "src/core/a.ts", line: 42 });
+	deepEqual(pathReference("README.md#L7-L9"), { path: "README.md", line: 7 });
+	deepEqual(pathReference("./scripts/run.sh"), { path: "./scripts/run.sh", line: null });
+	deepEqual(pathReference("package.json"), { path: "package.json", line: null });
+	for (const code of ["npm", "x = 1", "1.2.3", "foo()", "a b/c", "e.g.", "process.env", "console.log", "and/or"])
+		equal(pathReference(code), null, code);
+	match(
+		renderMarkdown("See `src/a.ts:3` and `npm`."),
+		/<code class="md-path" title="src\/a.ts, line 3">src\/a.ts:3<\/code>/u,
+	);
+	match(renderMarkdown("See `npm`."), /<code>npm<\/code>/u);
 });

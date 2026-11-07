@@ -20,10 +20,56 @@ export interface MathToken {
 	displayMode: boolean;
 }
 
+/** `[^label]` in running text; it points at a definition, wherever in the message that sits. */
+export interface FootnoteRefToken {
+	type: "footnoteRef";
+	raw: string;
+	label: string;
+}
+
+/** `[^label]: text` as its own block. It renders where it was written, which is where readers expect notes. */
+export interface FootnoteToken {
+	type: "footnote";
+	raw: string;
+	label: string;
+	tokens: Token[];
+}
+
+const FOOTNOTE_LABEL = "[^\\]\\s]{1,40}";
+const FOOTNOTE_START = new RegExp(`^ {0,3}\\[\\^${FOOTNOTE_LABEL}\\]:`, "mu");
+const FOOTNOTE_BLOCK = new RegExp(
+	`^ {0,3}\\[\\^(${FOOTNOTE_LABEL})\\]:[^\\S\\n]*(\\S[^\\n]*(?:\\n(?: {2,}|\\t)[^\\n]*\\S[^\\n]*)*)(?:\\n|$)`,
+	"u",
+);
+const FOOTNOTE_REF = new RegExp(`^\\[\\^(${FOOTNOTE_LABEL})\\](?!:)`, "u");
+
 const lexer = new Marked(
 	{ gfm: true, breaks: false, pedantic: false, async: false },
 	{
 		extensions: [
+			{
+				name: "footnote",
+				level: "block",
+				start: (source) => FOOTNOTE_START.exec(source)?.index,
+				tokenizer(source): FootnoteToken | undefined {
+					const match = FOOTNOTE_BLOCK.exec(source);
+					if (!match?.[1] || match[2] === undefined) return undefined;
+					const text = match[2].replace(/\n[ \t]+/gu, " ");
+					return { type: "footnote", raw: match[0], label: match[1], tokens: this.lexer.inlineTokens(text) };
+				},
+			},
+			{
+				name: "footnoteRef",
+				level: "inline",
+				start: (source) => {
+					const index = source.indexOf("[^");
+					return index < 0 ? undefined : index;
+				},
+				tokenizer(source): FootnoteRefToken | undefined {
+					const match = FOOTNOTE_REF.exec(source);
+					if (match?.[1]) return { type: "footnoteRef", raw: match[0], label: match[1] };
+				},
+			},
 			{
 				name: "math",
 				level: "block",
@@ -46,6 +92,49 @@ const lexer = new Marked(
 		],
 	},
 );
+
+export type DiffLineKind = "add" | "remove" | "hunk" | "meta" | "context";
+
+/** How a line of a unified diff reads: file headers and hunk ranges are not changes, and `+++`/`---` are headers. */
+export function diffLineKind(line: string): DiffLineKind {
+	if (line.startsWith("@@")) return "hunk";
+	if (
+		/^(?:\+\+\+|---)(?: |$)|^(?:diff |index |new file mode|deleted file mode|similarity |rename (?:from|to) )/u.test(line)
+	)
+		return "meta";
+	if (line.startsWith("+")) return "add";
+	if (line.startsWith("-")) return "remove";
+	return "context";
+}
+
+/** Without a directory, `a.b` is as likely a member access (`process.env`) as a file, so only these extensions count. */
+const FILE_EXTENSIONS: ReadonlySet<string> = new Set(
+	(
+		"ts tsx mts cts js jsx mjs cjs json jsonc md mdx txt yml yaml toml ini cfg conf lock py pyi rb go rs java kt " +
+		"swift c h cc cpp hpp cs php sh bash zsh fish ps1 sql html htm css scss less vue svelte xml svg png jpg jpeg gif " +
+		"webp pdf csv tsv diff patch proto graphql gradle make cmake dockerfile tf lua r jl ex exs erl hs ml dart zig nix"
+	).split(" "),
+);
+
+/**
+ * A code span that names a workspace file, optionally at a line: `src/a.ts`, `src/a.ts:42`, `a.ts:42:7`, `a.ts#L42`.
+ * Only a path with a directory or a file extension counts, so a bare word in backticks stays code.
+ */
+export function pathReference(text: string): { path: string; line: number | null } | null {
+	if (text.length > 512) return null;
+	const match = /^((?:~|\.{1,2})?\/?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*)(?::(\d+)(?::\d+)?|#L(\d+)(?:-L?\d+)?)?$/u.exec(
+		text,
+	);
+	if (!match?.[1]) return null;
+	const path = match[1];
+	const extension = /\.([a-z][\w]{0,9})$/iu.exec(path)?.[1]?.toLowerCase();
+	const named = path.includes("/")
+		? extension !== undefined || /^[.~]/u.test(path)
+		: FILE_EXTENSIONS.has(extension ?? "");
+	if (!named || /^\d+(?:\.\d+)+$/u.test(path) || path.endsWith(".")) return null;
+	const line = match[2] ?? match[3];
+	return { path, line: line === undefined ? null : Number(line) };
+}
 
 export function lexMarkdown(source: string): readonly MarkdownToken[] {
 	return lexer.lexer(source);
