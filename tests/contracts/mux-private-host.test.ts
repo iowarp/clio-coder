@@ -40,6 +40,42 @@ describe("private pane host layout (POSIX)", () => {
 		]);
 	});
 
+	it("tries the operator's TMPDIR before the system temp root when XDG_RUNTIME_DIR is unusable", () => {
+		const systemRoot = posixRuntimeDirCandidates({}, SESSION, "linux", 7);
+		const longXdg = `/${"d".repeat(90)}`;
+		deepStrictEqual(posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: longXdg, TMPDIR: "/home/me/t" }, SESSION, "linux", 7), [
+			"/home/me/t/clio-coder-7",
+			...systemRoot,
+		]);
+		// A runtime dir that fits but cannot be made private falls through to TMPDIR, not straight to the system root.
+		deepStrictEqual(
+			posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: "/run/user/7", TMPDIR: "/home/me/t" }, SESSION, "linux", 7),
+			["/run/user/7/clio-coder", "/home/me/t/clio-coder-7", ...systemRoot],
+		);
+		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: `/${"t".repeat(60)}` }, SESSION, "linux", 7), systemRoot);
+		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: "relative" }, SESSION, "linux", 7), systemRoot);
+	});
+
+	it("lays the socket out in TMPDIR when the runtime dir is too long for one", (t) => {
+		// A short name, so the socket path fits under the harness tmp root.
+		const scratch = mkdtempSync(join(tmpdir(), "h"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
+		const tmp = scratch;
+		const candidates = posixRuntimeDirCandidates({ TMPDIR: tmp }, SESSION, "linux", process.getuid?.() ?? 0);
+		// The harness tmp root may itself be too long for a socket; then only the fallback case applies.
+		if (candidates[0] !== join(tmp, `clio-coder-${process.getuid?.() ?? 0}`)) {
+			t.skip("tmp root too long for a socket path");
+			return;
+		}
+		const layout = platform.hostLayout({
+			session: SESSION,
+			env: { XDG_RUNTIME_DIR: `/${"d".repeat(90)}`, TMPDIR: tmp },
+		});
+		equal(layout.socketPath, join(candidates[0], `${SESSION}.sock`));
+		equal(statSync(candidates[0]).mode & 0o777, 0o700);
+	});
+
 	it("lays out a private root, socket and shim, and hands the operator's XDG roots to the shim", (t) => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-private-host-"));
 		// A real runtime dir is short and exists; the test tmp root may be too long for a socket.

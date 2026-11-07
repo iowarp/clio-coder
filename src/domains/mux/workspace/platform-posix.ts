@@ -46,10 +46,11 @@ export interface PosixHostOptions {
 }
 
 /**
- * Runtime directories to try, most preferred first. Linux uses the session's
- * `XDG_RUNTIME_DIR`, macOS its per-user `TMPDIR`; both fall back to a
- * uid-named directory in /tmp, which is also taken when the preferred one
- * would make the socket path too long.
+ * Runtime directories to try, most preferred first; a candidate that would
+ * make the socket path too long is skipped, and one that cannot be made
+ * private is passed over when the host is laid out. Linux uses the session's
+ * `XDG_RUNTIME_DIR`, then a uid-named directory in the operator's `TMPDIR`;
+ * macOS uses its per-user `TMPDIR`. Both end at a uid-named directory in /tmp.
  */
 export function posixRuntimeDirCandidates(
 	env: NodeJS.ProcessEnv,
@@ -57,15 +58,17 @@ export function posixRuntimeDirCandidates(
 	platform: NodeJS.Platform,
 	uid: number,
 ): string[] {
-	const fallback = `/tmp/clio-coder-${uid}`;
-	const base = platform === "darwin" ? env.TMPDIR : env.XDG_RUNTIME_DIR;
-	const candidates: string[] = [];
-	if (base?.startsWith("/")) {
-		const preferred = join(base, "clio-coder");
-		if (Buffer.byteLength(join(preferred, `${session}-client.sock`)) <= SOCKET_PATH_BUDGET) candidates.push(preferred);
+	const fits = (dir: string): boolean => Buffer.byteLength(join(dir, `${session}-client.sock`)) <= SOCKET_PATH_BUDGET;
+	const preferred: string[] = [];
+	if (platform === "darwin") {
+		if (env.TMPDIR?.startsWith("/")) preferred.push(join(env.TMPDIR, "clio-coder"));
+	} else {
+		if (env.XDG_RUNTIME_DIR?.startsWith("/")) preferred.push(join(env.XDG_RUNTIME_DIR, "clio-coder"));
+		// TMPDIR may be shared between users, so the directory carries the uid.
+		if (env.TMPDIR?.startsWith("/")) preferred.push(join(env.TMPDIR, `clio-coder-${uid}`));
 	}
-	candidates.push(fallback);
-	return candidates;
+	const fallback = `/tmp/clio-coder-${uid}`;
+	return [...new Set([...preferred.filter(fits), fallback])];
 }
 
 /**
