@@ -315,16 +315,30 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 	const [wrap, setWrap] = useState(false);
 	// Offered once the block has settled, so the control does not appear and vanish while it streams.
 	const wrappable = useMemo(() => settled && hasLongLine(code), [settled, code]);
+	// A settled long block keeps the streaming height, so settling never moves the page, and can open to its full length.
+	const [expanded, setExpanded] = useState(false);
+	const foldable = settled && lineCount > CODE_VISIBLE_LINES;
+	const open = foldable && expanded;
+	const fold = () => {
+		setExpanded(false);
+		container.current?.scrollIntoView({ block: "nearest" });
+	};
 	return (
 		<div
 			className={`code-block${settled ? " is-settled" : " is-streaming"}`}
 			ref={container}
 			data-language={grammar ?? undefined}
 			data-wrap={wrap && wrappable ? "" : undefined}
+			data-folded={foldable && !open ? "" : undefined}
 		>
 			<div className="code-block__head">
 				<span className="code-block__lang">{language.label ?? "text"}</span>
 				{lineCount > CODE_VISIBLE_LINES ? <span className="code-block__lines">{lineCount} lines</span> : null}
+				{open ? (
+					<button type="button" className="code-block__copy" aria-expanded="true" onClick={fold}>
+						Collapse
+					</button>
+				) : null}
 				{wrappable ? (
 					<button
 						type="button"
@@ -344,6 +358,16 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 					{settled ? null : <span className="code-block__cursor" aria-hidden="true" />}
 				</code>
 			</CodeViewport>
+			{foldable ? (
+				<button
+					type="button"
+					className="code-block__fold"
+					aria-expanded={open}
+					onClick={open ? fold : () => setExpanded(true)}
+				>
+					{open ? "Collapse" : `Show all ${lineCount} lines`}
+				</button>
+			) : null}
 		</div>
 	);
 });

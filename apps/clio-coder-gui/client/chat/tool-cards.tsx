@@ -99,10 +99,28 @@ function spanClass(span: AnsiSpan): string | undefined {
 	return names.length > 0 ? names.join(" ") : undefined;
 }
 
+/** Lines the output well shows before it scrolls, from its 26em cap at the body leading. */
+const OUTPUT_VISIBLE_LINES = 16;
+
+function lineCountOf(text: string): number {
+	let count = 1;
+	for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count++;
+	return text.endsWith("\n") ? count - 1 : count;
+}
+
 function OutputBlock({ pane }: { pane: OutputPane }) {
 	const spans = useMemo(() => (pane.styled === null ? null : parseAnsi(pane.styled)), [pane.styled]);
+	const [expanded, setExpanded] = useState(false);
+	// Offered once the output is final, so a running command's well does not change height under it.
+	const lines = pane.source === "final" && pane.text ? lineCountOf(pane.text) : 0;
+	const foldable = lines > OUTPUT_VISIBLE_LINES;
 	return (
-		<div className="tool-card__output" data-source={pane.source} data-running={pane.running ? "yes" : "no"}>
+		<div
+			className="tool-card__output"
+			data-source={pane.source}
+			data-running={pane.running ? "yes" : "no"}
+			data-expanded={foldable && expanded ? "" : undefined}
+		>
 			<div className="tool-card__output-head">
 				<span className="tool-card__output-label" role="status">
 					{pane.source === "partial" ? "Output so far" : pane.running ? "Waiting for output" : "Output"}
@@ -128,6 +146,16 @@ function OutputBlock({ pane }: { pane: OutputPane }) {
 								);
 							})}
 			</pre>
+			{foldable ? (
+				<button
+					type="button"
+					className="tool-card__fold"
+					aria-expanded={expanded}
+					onClick={() => setExpanded((current) => !current)}
+				>
+					{expanded ? "Collapse" : `Show all ${lines} lines`}
+				</button>
+			) : null}
 		</div>
 	);
 }

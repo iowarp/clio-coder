@@ -253,6 +253,31 @@
 	font: var(--text-exact) / 1.7 var(--font-mono);
 	tab-size: 4;
 }
+/* An opened long block shows its whole length; the page scrolls instead of the well. */
+.code-block.is-settled:not([data-folded]) pre {
+	max-height: none;
+}
+.code-block[data-folded] pre {
+	mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent);
+}
+.code-block[data-folded] pre:is(:focus-visible, :hover) {
+	mask-image: none;
+}
+.code-block__fold {
+	display: block;
+	width: 100%;
+	min-height: 32px;
+	padding: var(--space-1) var(--space-4);
+	border: 0;
+	border-top: 1px solid var(--code-line);
+	background: var(--code-surface);
+	color: var(--code-ink-muted);
+	font: var(--text-meta) / 1.4 var(--font-ui);
+	text-align: left;
+}
+.code-block__fold:hover {
+	color: var(--code-ink);
+}
 .code-block[data-wrap] pre {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;

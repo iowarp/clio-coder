@@ -233,6 +233,23 @@
 	white-space: pre;
 	tab-size: 2;
 }
+.tool-card__output[data-expanded] .tool-card__pre {
+	max-height: none;
+}
+.tool-card__fold {
+	min-height: 28px;
+	margin-top: var(--space-1);
+	padding: 2px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font: var(--text-meta) / 1.4 var(--font-ui);
+}
+.tool-card__fold:hover {
+	color: var(--ink);
+	background: var(--surface-sunken);
+}
 .tool-card__output[data-source="none"] .tool-card__pre {
 	font-style: italic;
 }

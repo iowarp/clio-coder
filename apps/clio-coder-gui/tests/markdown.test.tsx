@@ -209,6 +209,14 @@ test("fenced code renders a label, a copy control, a line count once it scrolls,
 	ok(!known.includes("code-block__lines"), "a block that fits says nothing about its length");
 	const long = renderToStaticMarkup(<CodeBlock code={"x\n".repeat(40).trimEnd()} info="ts" settled />);
 	match(long, /<span class="code-block__lines">40 lines<\/span>/u);
+	match(long, /data-folded=""/u);
+	match(long, /<button type="button" class="code-block__fold" aria-expanded="false">Show all 40 lines<\/button>/u);
+	ok(!known.includes("code-block__fold"), "a block that fits has nothing to open");
+	const streaming = renderToStaticMarkup(<CodeBlock code={"x\n".repeat(40).trimEnd()} info="ts" settled={false} />);
+	ok(
+		!streaming.includes("data-folded") && !streaming.includes("code-block__fold"),
+		"the tail does not fold while it grows",
+	);
 	match(known, /<button type="button" class="code-block__copy is-idle"[^>]*>Copy<\/button>/u);
 	match(known, /<pre tabindex="0"><code class="language-typescript">const a = 1;\nconst b = 2;<\/code><\/pre>/u);
 
