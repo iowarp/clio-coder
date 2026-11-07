@@ -219,6 +219,11 @@ human are listed at the end.
    # A cloud API key the user already exports
    clio-coder configure --id work --runtime anthropic \
      --model <model> --api-key-env ANTHROPIC_API_KEY --set-orchestrator
+
+   # GitHub Copilot, once the user has signed in (see the end of this list)
+   clio-coder tools install copilot-sdk
+   clio-coder configure --id copilot --runtime copilot-sdk \
+     --model <model> --set-orchestrator
    ```
 
    `clio-coder models --target <id>` lists the model ids a target offers, and
@@ -242,8 +247,9 @@ human are listed at the end.
   `clio-coder auth login openai-codex` (ChatGPT),
   `clio-coder auth login anthropic-max` (Claude), or
   `clio-coder auth login alcf` (Argonne). For GitHub Copilot, the user signs in
-  with `copilot login` or `gh auth login`, then runs
-  `clio-coder auth login copilot-sdk` to finish setup.
+  with `copilot login` or `gh auth login`; then you can run the Copilot lines
+  in step 3. A headless run cannot see a login kept only in the system
+  keychain, and `clio-coder doctor` names the login it sees.
 - The interactive terminal (`clio-coder`), the setup wizard
   (`clio-coder configure` with no flags), and approving project trust.
 
