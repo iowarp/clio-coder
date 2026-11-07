@@ -21,6 +21,7 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../../core/state-file-lock.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import {
 	loadMcpServerConfig,
@@ -309,6 +310,10 @@ export type TrustMcpServerResult =
 
 /** Record trust for one project-declared server at its current digest. */
 export function trustMcpServer(options: TrustMcpServerOptions): TrustMcpServerResult {
+	return withStateFileLockSync(mcpTrustPath(options.configDir), () => trustMcpServerLocked(options));
+}
+
+function trustMcpServerLocked(options: TrustMcpServerOptions): TrustMcpServerResult {
 	const actionClass = options.actionClass ?? "unknown";
 	if (!isActionClass(actionClass)) {
 		return { ok: false, message: `actionClass must be one of ${MCP_TRUST_ACTION_CLASSES.join(", ")}` };
@@ -362,6 +367,10 @@ export type UntrustMcpServerResult = { ok: true; removed: boolean } | { ok: fals
 
 /** Remove the trust record for one server in this project, whether or not it is still declared. */
 export function untrustMcpServer(options: McpTrustOptions & { id: string }): UntrustMcpServerResult {
+	return withStateFileLockSync(mcpTrustPath(options.configDir), () => untrustMcpServerLocked(options));
+}
+
+function untrustMcpServerLocked(options: McpTrustOptions & { id: string }): UntrustMcpServerResult {
 	const trust = readMcpTrustState(options.configDir);
 	if (trust.diagnostics.length > 0) {
 		return { ok: false, message: `trust state is unusable; repair or remove it first: ${trust.diagnostics.join("; ")}` };

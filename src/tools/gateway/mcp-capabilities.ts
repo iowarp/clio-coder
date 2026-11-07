@@ -689,8 +689,30 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			const { createMcpConnection } = await import("../../domains/gateway/mcp/connection-lifecycle.js");
 			return createMcpConnection({
 				signal: controller.signal,
-				acquire: () =>
-					clientFactory(
+				acquire: () => {
+					// Rehash after the lazy import, immediately before acquisition.
+					// The snapshot remains the authority; a fresh trust decision cannot
+					// silently replace its digest, classes, or network grant.
+					if (declaration.scope !== "client") {
+						const current = resolveMcpServers({
+							cwd: options.cwd,
+							...(options.configDir ? { configDir: options.configDir } : {}),
+						}).servers.find((entry) => entry.id === declaration.id);
+						if (
+							current === undefined ||
+							current.scope !== declaration.scope ||
+							current.path !== declaration.path ||
+							current.digest !== declaration.digest ||
+							current.trust.status !== "trusted" ||
+							current.trust.actionClass !== declaration.trust.actionClass ||
+							current.trust.network !== (declaration.trust.status === "trusted" ? declaration.trust.network : undefined)
+						) {
+							throw new Error(
+								`MCP server '${declaration.id}' changed or is no longer trusted since this session admitted it; review its declaration and entry files, then start a new session`,
+							);
+						}
+					}
+					return clientFactory(
 						{
 							id: declaration.id,
 							command: declaration.command,
@@ -711,7 +733,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 									? { requestTimeoutMs: options.requestTimeoutMs }
 									: {}),
 						},
-					),
+					);
+				},
 				onAcquired: (client) => {
 					state.client = client;
 					installExitHook();

@@ -134,6 +134,12 @@ server, under its sandbox and at the task worktree root for a project server.
 Its `RunResult` permit records the attested MCP tools. CLI runtimes and ACP peers do not
 gain Clio Coder's MCP gateway through this mechanism.
 
+Before each initial or recovery launch, the gateway rechecks the current trust
+and bound entry files against the session's admitted declaration. Changed bytes,
+classes or grants require a new session; refresh does not silently adopt them.
+This closes stale session snapshots, not the filesystem race between hashing a
+file and executing it.
+
 Grant worker-server networking with `network: true` in an operator-owned user
 declaration, or `clio-coder mcp trust <id> --network` for a project or plugin
 server. The default is no per-server grant. A grant affects that server's

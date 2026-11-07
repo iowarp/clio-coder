@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { mcpToolActionClass } from "../../src/domains/gateway/mcp/action-classes.js";
 import {
 	loadMcpServerConfig,
@@ -361,6 +362,84 @@ describe("mcp server trust", () => {
 			resolveMcpServers({ cwd: project, configDir }).servers.find((server) => server.id === "files")?.trust.status,
 			"untrusted",
 		);
+	});
+
+	it("a snapshotted project entry cannot launch after its trusted bytes change", async () => {
+		for (const phase of ["before launch", "during import", "recovery", "retrusted"]) {
+			const { project, configDir } = scratch();
+			writeFileSync(join(project, "tools", "server.mjs"), "console.log('v1');\n");
+			writeProjectConfig(project, PROJECT_CONFIG);
+			ok(trustMcpServer({ cwd: project, configDir, id: "files", actionClass: "read" }).ok);
+			let launches = 0;
+			const source = createMcpCapabilitySource({
+				cwd: project,
+				configDir,
+				registry: createRegistry({ safety: createWorkerSafety({ cwd: project }), autonomy: () => "yolo" }),
+				clientFactory: () => {
+					launches++;
+					throw new Error("fixture acquisition failed");
+				},
+			});
+			try {
+				deepStrictEqual(source.declaredIds(), ["files"]);
+				if (phase === "recovery") {
+					await source.refresh("files");
+					strictEqual(launches, 1);
+				}
+				const pending = phase === "during import" ? source.refresh("files") : undefined;
+				writeFileSync(join(project, "tools", "server.mjs"), "console.log('v2');\n");
+				if (phase === "retrusted") ok(trustMcpServer({ cwd: project, configDir, id: "files", actionClass: "read" }).ok);
+				const result = await (pending ?? source.refresh("files"));
+				strictEqual(launches, phase === "recovery" ? 1 : 0, phase);
+				match(result.reason ?? "", /stale|changed/);
+			} finally {
+				await source.close();
+			}
+		}
+	});
+
+	it("revocation serializes with another trust-file transaction", async () => {
+		const { project, configDir } = scratch();
+		writeProjectConfig(project, PROJECT_CONFIG);
+		ok(trustMcpServer({ cwd: project, configDir, id: "files" }).ok);
+		let child: ReturnType<typeof spawn> | undefined;
+		let exit: Promise<number | null> | undefined;
+		try {
+			await withStateFileLock(mcpTrustPath(configDir), async () => {
+				child = spawn(
+					process.execPath,
+					[
+						"--import",
+						import.meta.resolve("tsx"),
+						"--input-type=module",
+						"-e",
+						`
+					import { untrustMcpServer } from ${JSON.stringify(resolve("src/domains/gateway/mcp/trust.ts"))};
+					process.stdout.write('attempt\\n');
+					const result = untrustMcpServer(${JSON.stringify({ cwd: project, configDir, id: "files" })});
+					if (!result.ok || !result.removed) process.exitCode = 1;
+				`,
+					],
+					{ stdio: ["ignore", "pipe", "pipe"] },
+				);
+				exit = new Promise((resolveExit, reject) => {
+					child?.once("error", reject);
+					child?.once("exit", resolveExit);
+				});
+				await new Promise<void>((ready) => child?.stdout?.once("data", () => ready()));
+				const settled = await Promise.race([
+					exit.then(() => true),
+					new Promise<boolean>((done) => setTimeout(() => done(false), 150)),
+				]);
+				strictEqual(settled, false, "revocation must not overwrite a transaction holding the shared lock");
+				strictEqual(readMcpTrustState(configDir).state.records.length, 1);
+			});
+			strictEqual(await exit, 0);
+			strictEqual(readMcpTrustState(configDir).state.records.length, 0);
+		} finally {
+			if (child?.exitCode === null) child.kill("SIGKILL");
+			await exit;
+		}
 	});
 
 	it("binds a project server's entry script so editing it makes the trust stale", () => {
