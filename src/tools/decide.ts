@@ -74,12 +74,16 @@ export function createDecideTool(deps: DecideToolDeps = {}): ToolSpec {
 			}),
 			value: Type.String({ description: `The option you chose (at most ${DECIDE_CAPS.valueBytes} bytes).` }),
 			alternatives: Type.Array(Type.String(), {
-				description: `Options you considered and rejected, 1 to ${DECIDE_CAPS.alternatives} entries.`,
+				description: `Options you considered and rejected, 1 to ${DECIDE_CAPS.alternatives} entries of at most ${DECIDE_CAPS.alternativeBytes} bytes each.`,
 			}),
 			rationale: Type.String({
 				description: `Why the chosen option won over the alternatives (at most ${DECIDE_CAPS.rationaleBytes} bytes).`,
 			}),
-			label: Type.Optional(Type.String({ description: "Short human-readable title for the decision." })),
+			label: Type.Optional(
+				Type.String({
+					description: `Short human-readable title for the decision (at most ${DECIDE_CAPS.labelBytes} bytes).`,
+				}),
+			),
 		}),
 		// Read class on purpose: the only effect is one session-ledger append,
 		// so it must stay available at every autonomy level without a prompt.

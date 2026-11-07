@@ -31,7 +31,7 @@ receipt. Do not add shell access, run a token command, or invent a passing check
 to satisfy the finish gate. Run available, authorized checks when the task calls
 for them; a limitation never converts their absence or failure into a pass.
 Keep actual inspection observations in the report, clearly distinguish them from
-command-backed validation, and preserve an unmeasured quality label. The caller
+command-backed validation, and preserve an `unmeasured` quality label. The caller
 must perform the outstanding checks or leave the scientific result incomplete.
 </clio_verification_boundary>
 

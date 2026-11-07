@@ -70,10 +70,11 @@ function parseComponentsArgs(args: ReadonlyArray<string>): ParsedComponentsArgs 
 		if (arg.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 		throw new Error(`unknown components argument: ${arg}`);
 	}
+	if (parsed.help) return parsed;
 	if (parsed.command !== "snapshot" && parsed.out !== undefined) throw new Error("--out is only valid with snapshot");
 	if (parsed.command !== "diff" && parsed.from !== undefined) throw new Error("--from is only valid with diff");
 	if (parsed.command !== "diff" && parsed.to !== undefined) throw new Error("--to is only valid with diff");
-	if (parsed.command === "snapshot" && parsed.json) throw new Error("--json is only valid with list");
+	if (parsed.command === "snapshot" && parsed.json) throw new Error("--json is only valid with list or diff");
 	if (parsed.command === "snapshot" && parsed.out === undefined) throw new Error("snapshot requires --out <path>");
 	if (parsed.command === "diff" && (parsed.from === undefined || parsed.to === undefined)) {
 		throw new Error("diff requires --from <path> and --to <path>");

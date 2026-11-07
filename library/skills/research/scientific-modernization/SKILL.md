@@ -8,7 +8,7 @@ triggers:
   - migrate the scientific build system
   - create a maintained fork
   - preserve scientific parity
-version: 0.4.3
+version: 0.4.4
 license: Apache-2.0
 allowed-tools:
   - read
@@ -43,10 +43,10 @@ has an explicit exit condition.
 There is no operator in a headless run: `ask_user` is not registered, so
 any call is refused as an unregistered tool rather than answered. Stage 1's "the user has seen them" exit condition means,
 headlessly: state the four bullets in your reply and proceed, never stall
-waiting for acknowledgment. Every other stage gate below works the same way
-— state the decision and its reasoning, then continue.
+waiting for acknowledgment. Every other stage gate below works the same way:
+state the decision and its reasoning, then continue.
 
-The six stages are the plan; do not open a task list for them — `tasks` sits
+The six stages are the plan; do not open a task list for them. `tasks` sits
 outside this skill's tool surface and any call to it is refused.
 
 Shell rules for every `bash` call: one command per call, plain and direct.
@@ -56,7 +56,7 @@ headless run.
 This is a long, multi-stage process on a small model or a time-boxed run. If
 you are approaching your tool-call or time budget before reaching Stage 6,
 stop at the current stage, state exactly which stage you reached and why you
-stopped, and report the work as an incomplete prototype — never fabricate
+stopped, and report the work as an incomplete prototype; never fabricate
 completion of stages you did not actually reach.
 
 ## Stage 1 — Decide whether this work should exist

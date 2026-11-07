@@ -44,7 +44,7 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 	ok(receipt.output);
 	match(lines.join("\n"), /quality=unmeasured/);
 	match(lines.join("\n"), /No validation receipt/);
-	match(lines.join("\n"), /factual accuracy is unmeasured/);
+	match(lines.join("\n"), /factual accuracy is not measured/);
 	strictEqual(lines.length, 4);
 	strictEqual(runHelperResult(finishedRun(receipt), { state: "failed", reason: "run seal failed" }), null);
 	for (const patch of [

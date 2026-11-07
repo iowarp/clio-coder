@@ -16,7 +16,7 @@ import type { UpgradeTransition } from "./state.js";
 const KEYBOARD_FACING_CHANGES: Readonly<Record<string, string>> = Object.freeze({
 	"0.3.1":
 		"/targets, /fleet, and /scoped-models now open inside /settings; " +
-		"the commit-crafting, create-pr, investigate-issue, and review-changes skills are retired in favour of file-ticket, fix-issue, and ship; " +
+		"the commit-crafting, create-pr, investigate-issue, and review-changes skills are retired in favor of file-ticket, fix-issue, and ship; " +
 		"artifact defaults write under .clio-coder/artifacts/.",
 	"0.6.5":
 		"In 0.6.4, fleet.permissions.mode moved from deny to judge; " +

@@ -52,7 +52,7 @@ function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 			continue;
 		}
 		if (parsed.command === "inspect" && parsed.runId === undefined) {
-			if (arg.startsWith("-")) throw new Error("inspect requires a run id");
+			if (arg.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 			parsed.runId = arg;
 			continue;
 		}

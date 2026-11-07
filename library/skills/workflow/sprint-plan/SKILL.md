@@ -7,7 +7,7 @@ triggers:
   - make this plan executable
   - turn this milestone into a sprint
   - write dependency-ordered vertical slices
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -32,7 +32,7 @@ clio-coder:
 
 Transform an existing plan into ordered execution slices that a coding agent
 can run one at a time, leaving the build green after every slice. The output
-is a `SPRINT.md` another agent can execute cold — no conversation context
+is a `SPRINT.md` another agent can execute cold, with no conversation context
 required.
 
 ## Arguments
@@ -41,7 +41,7 @@ required.
 /skill sprint-plan [<path to plan>]
 ```
 
-There is no flag syntax; the trigger is conversational — "plan a sprint", "slice
+There is no flag syntax; the trigger is conversational: "plan a sprint", "slice
 this plan", "turn this milestone into a sprint". A path the user names in
 the same request (a specific `PLAN.md`, `PRD.md`, or `milestones/*/prompt.md`)
 is the plan to slice; a path with no plan words near it, or a bare
@@ -51,7 +51,7 @@ writes to the repo-root default.
 
 This run has no back-and-forth. `ask_user` is not registered in a headless
 run, so any call is refused as an unregistered tool rather than answered.
-The happy path here rarely needs a question at all — Step 1's "stop and say
+The happy path here rarely needs a question at all. Step 1's "stop and say
 so" for a missing or vague plan is already headless-safe, and Step 3's output
 path defaults without asking. If several plans or milestones are plausible
 candidates and the choice matters, do not stop on an open question: pick the
@@ -64,7 +64,7 @@ The steps below are the plan; do not open a task list for them. This skill's
 tool surface is exactly `read`, `grep`, `ls`, `find`, `git`, `context`,
 `code_nav`, `write`, and `ask_user` (`context` and `ask_user` are always
 available regardless). `tasks` and `bash` both sit outside it and any call to
-either is refused — track progress by walking the steps below, not a task
+either is refused. Track progress by walking the steps below, not a task
 board; check for a build/test/lint setup (a `package.json`, a Makefile, a
 node/toolchain version) with `find`, `ls`, and `read`, not `bash node
 --version` or `bash find`. The read-only `git` tool (`status`, `log`) is
@@ -76,7 +76,7 @@ uncommitted changes.
 In priority order: a file the user names, a plan in the conversation,
 `PLAN.md` / `PRD.md` / `milestones/*/prompt.md` in the repo. **Never fabricate
 the plan.** If none exists, or what exists is too vague to slice honestly,
-stop and say so — recommend `plan-interview` to resolve intent first. Artificial
+stop and say so, and recommend `plan-interview` to resolve intent first. Artificial
 slicing of a vague plan hides gaps; flagging them is the deliverable.
 
 ## Step 2 — Apply the cutting rules
@@ -95,7 +95,7 @@ slicing of a vague plan hides gaps; flagging them is the deliverable.
 ## Step 3 — Write SPRINT.md
 
 Use the `write` tool. `SPRINT.md` is a plain file in the working tree, not a
-generated report — do not call a tool literally named `artifact` for this;
+generated report. Do not call a tool literally named `artifact` for this;
 that tool is not on this skill's surface and, in this harness, is a
 terminal call that ends the run the instant it is invoked, before you can
 report back. Default output path is `SPRINT.md` at the repo root; honor a
@@ -109,18 +109,18 @@ caller-supplied path from Arguments instead. Format:
 2. <slice 2 title>  (depends on: 1)
 ...
 
-## Slice 1 — <title>
+## Slice 1: <title>
 **Goal**: <the behavior this delivers>
 **Depends on**: <slice numbers or "nothing">
 **Files**: <paths touched>
 **Steps**:
 1. <concrete step with real paths/commands>
-**Done when**: <observable, testable criteria — the verification anchor>
+**Done when**: <observable, testable criteria: the verification anchor>
 **Out of scope**: <what this slice deliberately does not do>
 ```
 
 "Done when" is the contract, not decoration. If you cannot write a testable
-done-when for a slice, the slice is not ready to cut — go back to the plan.
+done-when for a slice, the slice is not ready to cut; go back to the plan.
 
 ## Step 4 — Report back
 
@@ -136,12 +136,12 @@ the caller gets that the write actually happened.
 - A slice that only compiles when a later slice lands.
 - Slicing a plan you had to invent on the spot.
 - Calling a tool literally named `artifact` because Step 3 talks about "the
-  artifact" — that word here means "the deliverable document," not the
+  artifact". That word here means "the deliverable document," not the
   `artifact` tool. That tool is off this skill's surface and, in this
   harness, terminates the run on the spot, writes to
   `.clio-coder/artifacts/` instead of `SPRINT.md`, and skips Step 4 entirely.
   Use `write`.
-- Ending the run right after the write with no final reply — Step 4 is not
+- Ending the run right after the write with no final reply. Step 4 is not
   optional.
 - Opening a `tasks` list for the steps above; `tasks` is refused.
 - Reaching for `bash` (`node --version`, `find`, `ls -la`, ...) to check the

@@ -70,11 +70,11 @@ Flags:
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        main-agent autonomy: default|yolo
   --systemone <engine|off>  System One for this run: jev, memory, main, an engine, a target, or off
-  --read-only              deny every write, command, and delegation; with --agent, the dispatch is read-only
-  --record                 save a bounded redacted display asciicast for --agent dispatch
+  --read-only               deny every write, command, and delegation; with --agent, the dispatch is read-only
+  --record                  save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
-  --no-delegate            forbid main-agent dispatch for this task and its continuations
+  --no-delegate             forbid main-agent dispatch for this task and its continuations
   --delegate-tools <names>  tools dispatched workers may hold, independent of --allow-tools; none gives workers no tools
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
   --top-p <N>               one-run nucleus sampling override (0..1)
@@ -85,22 +85,22 @@ Flags:
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL frames, one JSON object per line; the first is a "session" header
-                           carrying schemaVersion, and with --agent the last is {"type":"result",...}
+                            carrying schemaVersion, and with --agent the last is {"type":"result",...}
   --json-events <mode>      full: progress and final answer in turn_end.message.content
-                           terminal: accounting and final answer in turn_end.text
-                           implies --json; refused with --agent
+                            terminal: accounting and final answer in turn_end.text
+                            implies --json; refused with --agent
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
-                           admitted only while under it, and running workers are stopped when it is reached; exit 4
-                           when it stops the run. Spend can pass it by the model calls already in flight then: one per
-                           running worker plus the main agent's. Unpriced routes are not bounded; stderr names each
-                           configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
-                           roster members and every target at its default model. A model the main agent names for one
-                           dispatch is not checked
+                            admitted only while under it, and running workers are stopped when it is reached; exit 4
+                            when it stops the run. Spend can pass it by the model calls already in flight then: one per
+                            running worker plus the main agent's. Unpriced routes are not bounded; stderr names each
+                            configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
+                            roster members and every target at its default model. A model the main agent names for one
+                            dispatch is not checked
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -144,7 +144,7 @@ The flag applies to the main agent only.
 
 --timeout <seconds> bounds the whole run, boot included. On expiry the run
 starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a
-running bash tool's process group is signalled, and the run is recorded with
+running bash tool's process group is signaled, and the run is recorded with
 outcome "timed_out" before the process exits 124, the code timeout(1) uses. An
 external SIGTERM still seals "canceled" with exit 143. A timeout during boot,
 before the turn starts, exits 124 with no run recorded. Main agent only.

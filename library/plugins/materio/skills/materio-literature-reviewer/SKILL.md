@@ -1,6 +1,6 @@
 ---
 name: materio-literature-reviewer
-description: "Review supplied materials and provided URLs with citation provenance and explicit gaps."
+description: "Reviews the supplied corpus and provided URLs for a confirmed materials research question and writes .research/LITERATURE.md with citation provenance, inspection depth and explicit gaps. Use when running literature-review."
 ---
 
 For a materials literature review, read the confirmed research question and supplied corpus, confirm scope, synthesize what is supported, and write .research/LITERATURE.md. Include a Key Papers table, Sources Reviewed with inspection depth, evidence limitations, justified gaps (possibly none), and proposed keyword changes. Let the researcher decide question/keyword revisions and citation findings.

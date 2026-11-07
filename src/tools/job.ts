@@ -195,28 +195,39 @@ export function createJobTool(deps: JobToolDeps): {
 		name: ToolNames.Job,
 		placement: "gateway",
 		description:
-			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. Bare main jobs default to five starts. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
+			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. A job without count or for_ms defaults to five starts. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
 		parameters: Type.Object({
 			action: StringEnum(["create", "pause", "resume", "stop", "cancel"]),
 			job_id: Type.Optional(Type.String()),
 			runner: Type.Optional(StringEnum(["main", "command"])),
-			every_ms: Type.Optional(Type.Integer({ minimum: 1000 })),
-			count: Type.Optional(Type.Integer({ minimum: 1 })),
-			timeout_ms: Type.Optional(Type.Integer({ minimum: 1000 })),
-			for_ms: Type.Optional(Type.Integer({ minimum: 1000 })),
+			every_ms: Type.Optional(Type.Integer({ minimum: 1000, description: "Interval between starts in ms." })),
+			count: Type.Optional(
+				Type.Integer({ minimum: 1, description: "Total starts, at most 100000 (default 5 without for_ms)." }),
+			),
+			timeout_ms: Type.Optional(
+				Type.Integer({ minimum: 1000, description: "Per-occurrence limit (default 3600000 main, 60000 command)." }),
+			),
+			for_ms: Type.Optional(Type.Integer({ minimum: 1000, description: "Run until this many ms pass, up to 7 days." })),
 			prompt: Type.Optional(Type.String()),
 			allow: Type.Optional(Type.Array(Type.String({ pattern: "^[a-zA-Z0-9_.-]+$" }))),
 			argv: Type.Optional(Type.Array(Type.String())),
 			cwd: Type.Optional(Type.String()),
 			until: Type.Optional(
-				Type.Object({
-					path: Type.Array(Type.String()),
-					op: StringEnum(["eq", "ne", "lt", "lte", "gt", "gte", "exists"]),
-					value: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()])),
+				Type.Object(
+					{
+						path: Type.Array(Type.String()),
+						op: StringEnum(["eq", "ne", "lt", "lte", "gt", "gte", "exists"]),
+						value: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()])),
+					},
+					{ description: "command only: end the job when complete stdout JSON at path matches op and value." },
+				),
+			),
+			on_match: Type.Optional(
+				StringEnum(["notice", "main_turn"], {
+					description: "With until: notice (default) or main_turn, which starts a turn with follow_up.",
 				}),
 			),
-			on_match: Type.Optional(StringEnum(["notice", "main_turn"])),
-			follow_up: Type.Optional(Type.String()),
+			follow_up: Type.Optional(Type.String({ description: "main_turn prompt, at most 8192 characters." })),
 		}),
 		baseActionClass: "dispatch",
 		executionMode: "sequential",

@@ -7,7 +7,7 @@ triggers:
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.3.3
+version: 0.3.4
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:
@@ -36,7 +36,7 @@ clio-coder:
 
 A tech spec is a typed call-stack architecture handoff: contracts as
 TypeScript pseudocode plus end-to-end execution flows. Prose explains why;
-types and call stacks define what changes. Design only — never implement,
+types and call stacks define what changes. Design only: never implement,
 and save a file only when the user asks; otherwise return the spec inline.
 
 ## Arguments
@@ -47,14 +47,14 @@ and save a file only when the user asks; otherwise return the spec inline.
 
 - The text is the design problem: what's changing and why. A doc or file
   path named in the request (a PRD, an architecture decision, a module) is
-  context to read, not more arguments — see "Load local context" below.
+  context to read, not more arguments; see "Load local context" below.
 - Nothing is required beyond some text; a blank invocation falls straight
   to Path B's first question rather than inventing a change to spec.
 - **Output defaults to inline.** Write a file only when the request says
-  so explicitly — "save it", "write it to `<path>`", "put it in `docs/`".
+  so explicitly: "save it", "write it to `<path>`", "put it in `docs/`".
   Absent that, the finished spec is the reply itself: no file, in this run
   or a prior one in the same session, gets created for it. This holds
-  regardless of which path below runs or how long the spec is — length is
+  regardless of which path below runs or how long the spec is; length is
   never itself a reason to write a file.
 - Disabled for model self-invocation and requires the `tdd` skill be
   installed to reference in the TDD Test Plan section; both are frontmatter
@@ -67,23 +67,23 @@ question, your recommendation grounded in the codebase and any docs read
 (or the most defensible engineering default when nothing grounds it), and
 the reasoning; adopt the recommendation; mark it `assumed — confirm`; move
 to the next question. Run every question this way, end to end, not just
-the first — the interview is the plan to execute, not an outline to
+the first. The interview is the plan to execute, not an outline to
 abbreviate because no one answered the opening question. Never invent a
 fact or a codebase detail to back an assumption; anything genuinely
 unknown becomes an Open Question in the spec, not a plausible guess. This
-degrades the interview only — it never licenses writing a file that
+degrades the interview only; it never licenses writing a file that
 wasn't asked for.
 
 The steps below are the plan; do not open a task list for them. `tasks`
 sits outside this skill's tool surface and any call to it is refused.
-`bash` is also outside this skill's tool surface — verify what you wrote
+`bash` is also outside this skill's tool surface. Verify what you wrote
 with `grep`, `read`, and `find`, never `bash`.
 
 ## Choose the path
 
-- **Path A — convert context to spec**: the conversation, docs, or codebase
+- **Path A (convert context to spec)**: the conversation, docs, or codebase
   already describe the change.
-- **Path B — interview first**: not enough problem, constraints, or
+- **Path B (interview first)**: not enough problem, constraints, or
   acceptance criteria exist. Say so, then interview one question at a time
   with a recommended answer per question (the plan-interview posture); anything
   answerable by exploring the codebase is explored, not asked. When context
@@ -102,8 +102,8 @@ with `grep`, `read`, and `find`, never `bash`.
    risks. Unknowns become open questions, never plausible filler. Done when
    every claimed constraint traces to conversation, code, docs, or an open
    question.
-3. **Explore alternatives.** 2-3 designs differing materially — interface
-   shape, seam placement, ownership, call stack, module boundaries — not
+3. **Explore alternatives.** 2-3 designs differing materially in interface
+   shape, seam placement, ownership, call stack or module boundaries, not
    just names. Sketch each: domain types, interfaces, failure types, seams,
    entrypoint-to-effect call stack, test strategy, trade-offs. Compare on
    caller burden, module depth, locality of change, seam placement,
@@ -111,7 +111,7 @@ with `grep`, `read`, and `find`, never `bash`.
    recommendation is chosen after the comparison, not before.
 4. **Specify the contracts.** For the recommended design, every new,
    changed, or deleted type, signature, interface, error union, adapter,
-   DTO, and API gets a concrete sketch — or an explicit reason no new
+   DTO, and API gets a concrete sketch, or an explicit reason no new
    contract is needed. Name what each layer may know and what must not
    leak across each seam.
 5. **Specify call stacks.** Every affected behavior gets an entrypoint →
@@ -123,7 +123,7 @@ with `grep`, `read`, and `find`, never `bash`.
    migration files. Each maps to the contract or call-stack step it owns.
 7. **Write the TDD plan.** Vertical red-green slices per the `tdd` skill:
    one failing behavior test, minimal implementation, repeat. Cover happy
-   paths, failure paths, parser rejection, invariants, changed seams — or
+   paths, failure paths, parser rejection, invariants, changed seams, or
    state why a path is deliberately untested.
 
 ## Spec outline

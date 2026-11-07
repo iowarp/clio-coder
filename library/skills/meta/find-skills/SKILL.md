@@ -7,7 +7,7 @@ triggers:
   - install a skill
   - add an agent skill
   - search the skills marketplace
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -24,9 +24,9 @@ clio-coder:
 
 # Find Skills
 
-Find reusable skills through Clio-Coder's Library. Keep the package's origin,
+Find reusable skills through Clio Coder's Library. Keep the package's origin,
 format, installation scope and actual component availability distinct. Library
-management is operator authority in Clio-Coder; the agent discovers, inspects
+management is operator authority in Clio Coder; the agent discovers, inspects
 and recommends without trying to write protected active roots.
 
 ## Procedure
@@ -80,9 +80,9 @@ and recommends without trying to write protected active roots.
 
 ## Host boundaries
 
-For a Clio-Coder installation, keep management in its Library. External
+For a Clio Coder installation, keep management in its Library. External
 installers such as `npx skills add` target another host's roots and do not
 update Clio's package state. If the user explicitly wants a Claude Code or
 Codex installation instead, follow that host's documented marketplace or
-skill-installation route and name the destination clearly. The Clio-Coder
+skill-installation route and name the destination clearly. The Clio Coder
 library is portable; installing it for one host does not install it for all.

@@ -7,7 +7,7 @@ triggers:
   - prototype this state model
   - sanity-check this logic
   - what should this UI look like
-version: 0.4.1
+version: 0.4.2
 license: Apache-2.0
 allowed-tools:
   - read

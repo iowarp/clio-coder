@@ -128,7 +128,7 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 			? [
 					result.kind === "scout-report"
 						? "  Findings without path and line are ungrounded leads; do not present them as verified facts."
-						: "  Content is contract-valid; its factual accuracy is unmeasured.",
+						: "  Content is contract-valid; its factual accuracy is not measured.",
 				]
 			: []),
 		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,

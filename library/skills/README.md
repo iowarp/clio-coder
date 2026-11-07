@@ -7,7 +7,8 @@ Inside a detected Clio source checkout, the two self-development skills describe
 below are also available directly from their authoring directories.
 
 `library/skills/` is the canonical source for Clio Coder's curated skills. The npm
-package includes this tree, `library/plugins/`, and the `library/registry.yaml` index.
+package includes the whole `library/` tree, with this directory and the
+`library/registry.yaml` index.
 The index points to these bundled directories relative to its own location,
 so discovery and installation work from a source checkout or an installed
 package without fetching the library from GitHub. Skill source URLs point
@@ -84,10 +85,10 @@ installed the skill.
 | --- | --- |
 | `coding/` | Implementation, structural search, prototyping and tests |
 | `context/` | Repository orientation and task handoff |
-| `git/` | Tickets, patches, worktrees and review closeout |
-| `meta/` | Skill authoring, Clio development, credentials and external tools |
-| `planning/` | Product intent, architecture, requirements and backlog |
-| `research/` | Literature, experiments, scientific debugging and modernization |
+| `git/` | Tickets, issue fixes, merge conflicts, shipping, worktrees and branch closeout |
+| `meta/` | Skill and extension authoring, skill discovery, Clio development and credentials |
+| `planning/` | Product intent, architecture, requirements, technical specs, backlog and codebase maps |
+| `research/` | Literature, experiments, scientific debugging, modernization and Slurm jobs |
 | `workflow/` | Interviews, sprint planning, design review and workflow capture |
 
 Each complete package contains `plugin.json`, `SKILL.md`, and any supporting

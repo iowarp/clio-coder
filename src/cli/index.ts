@@ -46,6 +46,8 @@ Usage:
   clio-coder --version, -v        print the Clio Coder version
   clio-coder --api-key <key>      override the active target API key for this run
   clio-coder --no-context-files, -nc  skip main-session project context preload
+  clio-coder --skill <path>       make one explicit skill available for this session, repeatable
+  clio-coder --no-skills          disable skill discovery while still honoring --skill
   clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
   clio-coder --no-panes           keep panes off even when settings turn them on
   clio-coder --autonomy <level>   start this interactive session at default|yolo
@@ -63,6 +65,7 @@ Usage:
   clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
   clio-coder paths [--json]       print resolved config/data/cache directories
   clio-coder config inspect [--json]  inspect effective customization and provenance
+  clio-coder config trust <surface>  review or approve project safety, hooks, settings, extensions, or plugins
   clio-coder reset                recover or wipe Clio Coder state
   clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
   clio-coder context init [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
@@ -78,8 +81,8 @@ Usage:
   clio-coder agents               list discovered agent recipes
   clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings
   clio-coder playbook list|new|validate|graph|commands  list, author, validate, and graph playbooks
-  clio-coder fleet nodes|run|status|view|code-steps|verify|drain|resume  run playbooks on the fleet, status, code steps, verification, and admission control
-  clio-coder evidence             build, list, or inspect evidence artifacts
+  clio-coder fleet nodes|run|status|view|events|code-steps|decisions|verify|land|cancel|drain|resume  run playbooks on the fleet; inspect, verify, land, or cancel runs; admission control
+  clio-coder evidence list|inspect <runId>  list runs or inspect one run's sealed evidence
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder claims [show <id>]   list the project's recorded reproduce and numeric-compare claims
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)

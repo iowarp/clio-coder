@@ -7,7 +7,7 @@ triggers:
   - improve this skill
   - why isn't this skill firing
   - prune a skill body
-version: 0.4.0
+version: 0.4.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -51,7 +51,7 @@ Frontmatter contract (Agent Skills compatible):
   the folder; the runtime loader warns on a mismatch and uses the frontmatter
   name.
 - `description`: required, ≤1024 chars; its craft is the section below. Quote
-  it when it contains ` #` — an unquoted YAML scalar is truncated there.
+  it when it contains ` #`; an unquoted YAML scalar is truncated there.
 - `version` and `license`: required for catalog publication. Any change to a
   package's files bumps `version` in both `SKILL.md` and `plugin.json`: patch for
   wording or moved text, minor for changed steps, triggers or tool surface, major

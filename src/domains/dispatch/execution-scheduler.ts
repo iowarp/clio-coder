@@ -460,7 +460,7 @@ export async function executePlan(
 		const result = await runCode(step, handoffs, codeAbort.signal, results);
 		if (!codeAbort.signal.aborted) return result;
 		canceledSteps.add(step.id);
-		return { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan canceled this step" };
+		return { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan cancelled this step" };
 	};
 
 	/**
@@ -666,7 +666,7 @@ export async function executePlan(
 									// scheduler cancellation, not a fabricated worker receipt.
 									if (owned.canceled) canceledSteps.add(step.id);
 									const settled = owned.canceled
-										? { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan canceled this step" }
+										? { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan cancelled this step" }
 										: result;
 									onSettled(step, settled);
 									if (settled.succeeded) running.delete(step.id);

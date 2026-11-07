@@ -135,7 +135,7 @@ export type {
 
 const TRUNCATION_MARKER = "\n[agent output truncated]";
 /** The canceled tool call owns the dispatch; no operator command reached the run itself (#425). */
-const PARENT_CANCEL: AbortReason = { cause: "parent", detail: "parent tool call canceled" };
+const PARENT_CANCEL: AbortReason = { cause: "parent", detail: "parent tool call cancelled" };
 
 /**
  * One-shot latch an attached executor races against its runs. Firing it never

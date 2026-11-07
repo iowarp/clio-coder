@@ -1,6 +1,6 @@
 ---
 name: materio-workflow-planner
-description: "Build a resource-aware dependency plan with researcher assumptions and tagged defaults."
+description: "Customizes a research workflow with the researcher and writes .research/WORKFLOW.md: stable task IDs, dependency order, researcher assumptions and tagged defaults, checked against the virtual lab. Use when running define-research-tasks."
 ---
 
 Choose and customize one of the six research workflows with the researcher. Interview assumptions for each task type. Read .research/VIRTUAL-LAB.md and mark feasibility unchecked if absent. Write .research/WORKFLOW.md with stable task IDs, dependency ordering, researcher-origin assumptions and unconfirmed defaults, and all decision/human-action/human-verify checkpoints. Confirm defaults and alternatives before execution.

@@ -2,7 +2,7 @@ import { createExternalCliRuntime } from "./external-cli-descriptor.js";
 
 export const piCliRuntime = createExternalCliRuntime({
 	id: "pi-cli",
-	displayName: "Pi CLI — managed headless delegation",
+	displayName: "Pi CLI (managed headless)",
 	binaryName: "pi",
 	defaultModel: "pi-cli-default",
 	headlessCommand: "pi --print --mode json --no-session",
@@ -13,7 +13,7 @@ export const piCliRuntime = createExternalCliRuntime({
 
 export const opencodeCliRuntime = createExternalCliRuntime({
 	id: "opencode-cli",
-	displayName: "OpenCode CLI — managed headless delegation",
+	displayName: "OpenCode CLI (managed headless)",
 	binaryName: "opencode",
 	defaultModel: "opencode-cli-default",
 	headlessCommand: "opencode run --format json",

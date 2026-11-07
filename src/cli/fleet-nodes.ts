@@ -6,12 +6,14 @@ const HELP = `clio-coder fleet nodes <command>
   add <id> --host <SSH alias or address> [--user <name>] [--port <number>]
       [--identity-file <path>] [--entry <worker command>] [--version-command <command>]
       [--labels <comma-separated labels>] [--max-workers <number>] [--test] [--record]
-  discover [--json]             list Tailscale peers; select a name or address to add
-  install <id> [--yes]            preview a user-level install of this exact client; --yes executes
-  tools install <id> asciinema [--yes]  preview checksum-pinned user-level remote tool install; --yes executes
-  list [--json]                  show recorded readiness for this project and check age
-  remove <id>                    remove a node without deleting remote files
-  test <id> [--record] [--json]   probe without remote writes; --record updates local eligibility
+                                        register a node (--max-workers defaults to 1); --test
+                                        probes it after adding, --record also records the check
+  discover [--json]                     list Tailscale peers; select a name or address to add
+  install <id> [--yes]                  preview a user-level install of this exact client; --yes executes
+  tools install <id> asciinema [--yes]  preview a checksum-pinned user-level remote tool install; --yes executes
+  list [--json]                         show recorded readiness for this project and check age
+  remove <id>                           remove a node without deleting remote files
+  test <id> [--record] [--json]         probe without remote writes; --record updates local eligibility
 
 A registered node needs a passing recorded check before dispatch.
 Exact Clio versions and project paths must match. Independent checkouts must share clean Git history and commit; independent-checkout mutations require worktree: true and return commits through SSH into guarded application. Labels are operator declarations.

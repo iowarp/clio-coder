@@ -39,7 +39,7 @@ export const verifyToolSurface: ToolSurface = {
 		),
 		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: browser mode." })),
 		cwd: Type.Optional(Type.String({ description: "Package script working directory." })),
-		timeout_ms: Type.Optional(Type.Number({ description: "Package and frontend checks only: timeout in ms." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (not declared checks)." })),
 		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes." })),
 	}),
 	baseActionClass: "execute",

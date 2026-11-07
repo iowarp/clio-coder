@@ -1,6 +1,6 @@
 ---
 name: dataset-curation
-description: Guidelines and verification procedures for scientific dataset curation, schema compliance, and FAIR data standards.
+description: Inspects, curates and validates a scientific dataset's files and metadata against the curation guide and FAIR data standards. Use when preparing a dataset for sharing or reviewing its schema and metadata.
 version: 1.0.0
 license: Apache-2.0
 clio-coder:
