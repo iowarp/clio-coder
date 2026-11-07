@@ -63,6 +63,7 @@ export const coreTests = [
 	"compaction-exact-facts",
 	"stale-edit-guard",
 	"replay-unsent-call-usage",
+	"overflow-compaction-fit",
 	"packed-source-directory",
 	"code-nav",
 	"skill-frontmatter-cache",

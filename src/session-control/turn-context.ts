@@ -223,6 +223,7 @@ export interface TurnContextDeps {
 					| "providerFallbackReason"
 					| "providerReplayFallback"
 					| "keepRecentTokens"
+					| "requireFit"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
 					| "skillContextState"
@@ -2045,6 +2046,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "livePrefix"
 					| "providerFallbackReason"
 					| "keepRecentTokens"
+					| "requireFit"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
 					| "skillContextState"
@@ -2075,6 +2077,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			budget = {
 				...budget,
 				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget / 2))),
+				...(requiredFit ? { requireFit: true } : {}),
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};
 		}

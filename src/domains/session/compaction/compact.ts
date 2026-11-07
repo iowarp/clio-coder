@@ -189,6 +189,13 @@ export interface CompactInput extends SideCallAuth {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
+	/**
+	 * The pending request does not fit without a reduction, so it is refused
+	 * unless this pass shrinks the context. A retained suffix smaller than the
+	 * checkpoint-rewrite threshold then still justifies the rewrite; the no-gain
+	 * check discards one that would not reduce context.
+	 */
+	requireFit?: boolean;
 	/** Carry this user message verbatim if removed; defaults to the latest operator turn for manual compaction. */
 	preserveUserTurnId?: string;
 	/** A new operator request is pending admission and is not yet in `entries`. */
@@ -1310,7 +1317,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// before boundaryStart in the append-only ledger. Summarize that suffix
 	// with the canonical prior summary instead of declaring nothing to compact.
 	// Never use this path to cross a protected cut or to re-summarize a bare
-	// checkpoint with no retained work; the caller still enforces request fit.
+	// checkpoint with no retained work. An automatic pass rewrites only a suffix
+	// at least twice the checkpoint, so one small exchange is not worth a paid
+	// call; a pass the pending request needs to fit rewrites any retained work,
+	// because the alternative is refusing that request.
 	const priorSuffix = previousContextEntries.slice(1);
 	const summarizePriorSuffix =
 		pre.length === 0 &&
@@ -1318,8 +1328,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		firstKept !== null &&
 		cut.firstKeptEntryIndex >= boundaryStart &&
 		hasConversation(priorSuffix) &&
-		priorSuffix.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) >=
-			2 * (priorCheckpoint?.kind === "compactionSummary" ? estimateTokens(priorCheckpoint) : 0);
+		(input.requireFit === true ||
+			priorSuffix.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) >=
+				2 * (priorCheckpoint?.kind === "compactionSummary" ? estimateTokens(priorCheckpoint) : 0));
 
 	const emptyResult = (emptyReason: CompactEmptyReason): CompactResult => ({
 		summary: "",

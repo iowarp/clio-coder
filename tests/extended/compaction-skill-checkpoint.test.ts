@@ -203,7 +203,10 @@ function overflowFixture(activeTask = false) {
 	const budgets: Array<{
 		trigger: string | undefined;
 		budget:
-			| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState">
+			| Pick<
+					CompactInput,
+					"keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState" | "requireFit"
+			  >
 			| undefined;
 	}> = [];
 	const results: CompactResult[] = [];
@@ -357,7 +360,10 @@ describe("mandatory request-fit compaction", () => {
 			const entryCount = entries.length;
 			const order: string[] = [];
 			const budgets: Array<
-				| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState">
+				| Pick<
+						CompactInput,
+						"keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState" | "requireFit"
+				  >
 				| undefined
 			> = [];
 			const loop = createChatLoop({
@@ -419,10 +425,13 @@ describe("mandatory request-fit compaction", () => {
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "force", pending), false);
 		strictEqual(f.budgets[0]?.budget?.keepRecentTokens, undefined);
 		strictEqual(f.budgets[0]?.budget?.preserveUserTurnId, undefined);
+		strictEqual(f.budgets[0]?.budget?.requireFit, undefined);
 		strictEqual(f.results[0]?.messagesSummarized, 0);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
 		ok((f.budgets[1]?.budget?.keepRecentTokens ?? 20000) < 20000);
 		strictEqual(f.budgets[1]?.budget?.pendingOperatorTurn, true);
+		// Refused unless this pass shrinks the context, so a small retained suffix still gets rewritten.
+		strictEqual(f.budgets[1]?.budget?.requireFit, true);
 		strictEqual(f.results[1]?.userContext, undefined, "the completed request is not replayed as active before admission");
 		strictEqual(f.results[1]?.skillContext?.skills[0]?.content[0]?.text, f.body);
 		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 <= 32768);
@@ -489,6 +498,7 @@ describe("mandatory request-fit compaction", () => {
 			message: "context window exceeded",
 		} as Parameters<typeof recovery.runCompactAndRetry>[2]);
 		strictEqual(f.budgets[0]?.trigger, "overflow");
+		strictEqual(f.budgets[0]?.budget?.requireFit, true);
 		strictEqual(f.budgets[0]?.budget?.preserveUserTurnId, "task");
 		ok((f.budgets[0]?.budget?.keepRecentTokens ?? 20000) < 20000);
 		strictEqual(f.results[0]?.userContext?.text, task);
