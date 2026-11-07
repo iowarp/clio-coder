@@ -346,17 +346,6 @@ async function settledWithinTurns<T>(promise: Promise<T>, turns = 100_000): Prom
 	return outcome === null ? "pending" : (outcome as { value: T }).value;
 }
 
-/** Like settledWithinTurns, but bounded by real time, so a loaded host's slow I/O cannot exhaust the budget. */
-async function settledWithinMs<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
-	let outcome: { value: T } | null = null;
-	void promise.then((value) => {
-		outcome = { value };
-	});
-	const until = Date.now() + ms;
-	while (outcome === null && Date.now() < until) await new Promise((resolve) => setImmediate(resolve));
-	return outcome === null ? "pending" : (outcome as { value: T }).value;
-}
-
 const toolResult = (toolCallId: string, text: string) => ({
 	role: "toolResult" as const,
 	toolCallId,
@@ -896,9 +885,14 @@ test("the first step of a fresh conversation is measured from a boundary read be
 			mock.timers.tick(1);
 			first = await settledWithinTurns(pending, 5);
 		}
-		// Real I/O in the step can lag the event-loop turns above on a loaded host; keep the mocked clock
-		// where it is (far below the deadline) and give it real turns, so only the deadline can time it out.
-		if (first === "pending") first = await settledWithinMs(pending, 30_000);
+		// Real I/O in the step can lag the turns above on a loaded host, so the fake runtime's zero-delay start
+		// timer may only be scheduled now. Keep firing timers already due (tick(0) never moves the clock toward
+		// the deadline) and bound the wait by real time, so only the deadline can time the step out.
+		const until = Date.now() + 30_000;
+		while (first === "pending" && Date.now() < until) {
+			mock.timers.tick(0);
+			first = await settledWithinTurns(pending, 50);
+		}
 	} finally {
 		mock.timers.reset();
 	}
