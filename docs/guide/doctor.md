@@ -72,8 +72,9 @@ and reports the account it sees and whether that is a `copilot login` on disk or
 a GitHub CLI session. When it sees none and doctor runs in a terminal, a second
 runtime asks with the keychain open: a login found only there is a `WARN` that
 names the headless fix, because the TUI, ACP and the GUI can use it but `run` and
-workers cannot. Without a terminal the keychain is not checked, and the row says
-so. A missing login is an error when chat, memory or the fleet routes to a
+workers cannot. The `connection <id>` row of each Copilot target, whose passive
+check also runs with the keychain closed, is then the same warning instead of an
+error. Without a terminal the keychain is not checked, and the row says so. A missing login is an error when chat, memory or the fleet routes to a
 Copilot target and a warning otherwise. Clio reads no token; only the runtime
 answers.
 
