@@ -224,3 +224,20 @@ it("a queued entry refused for its task constraints returns to the head of the q
 		await loop.whenSettled();
 	}
 });
+
+it("names exactly what a clear would restore, in-flight entries included, without draining (A5)", () => {
+	const f = fixture();
+	f.queues.steer("handed");
+	f.queues.handOverAtFinishTurn(false);
+	assert.deepEqual(f.steered, ["handed"]);
+	f.queues.steer("waiting");
+	f.queues.queueFollowUp("peer", undefined, { origin: "a peer" });
+	assert.deepEqual(f.texts(), ["waiting", "peer"]);
+	const candidates = f.queues.restorableQueued().map((entry) => entry.text);
+	assert.deepEqual(candidates, ["handed", "waiting"]);
+	assert.deepEqual(f.texts(), ["waiting", "peer"], "the snapshot drains nothing");
+	assert.deepEqual(
+		f.queues.clearQueuedMirror().map((entry) => entry.text),
+		candidates,
+	);
+});

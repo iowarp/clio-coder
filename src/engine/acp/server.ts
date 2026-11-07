@@ -408,6 +408,8 @@ export interface AcpServerChat {
 	queuedMessages?(): { steer: ReadonlyArray<string>; followUp: ReadonlyArray<string> };
 	/** Drain both queues and hand back the texts so a client can restore them. */
 	clearQueuedFollowUps?(): string[];
+	/** What {@link clearQueuedFollowUps} would hand back now, in-flight entries included, read without draining. */
+	restorableQueuedTexts?(): string[];
 	/** The queued entries still in Clio's hands, in delivery order. */
 	queueEntries?(): ReadonlyArray<AcpQueuedEntry>;
 	/** Takes one entry out of the queue; null when it already left. `reason` is recorded, never acted on. */
@@ -3441,6 +3443,17 @@ function requireSteerText(value: unknown, name: string, maxBytes: number): strin
 /** Bounded read-back of one engine queue, in enqueue order. */
 function boundedQueueTexts(texts: ReadonlyArray<string>): string[] {
 	return texts.slice(0, ACP_MAX_QUEUED_MESSAGES).map((text) => boundString(text, ACP_MAX_STEER_TEXT_BYTES));
+}
+
+/** queue_clear restores both queues in one list, so its wire bound is twice one queue's. */
+const ACP_MAX_RESTORED_MESSAGES = 2 * ACP_MAX_QUEUED_MESSAGES;
+
+/** Whether a clear's whole restored list fits the wire, every text intact. */
+function restorableWhole(texts: ReadonlyArray<string>): boolean {
+	return (
+		texts.length <= ACP_MAX_RESTORED_MESSAGES &&
+		texts.every((text) => Buffer.byteLength(text, "utf8") <= ACP_MAX_STEER_TEXT_BYTES)
+	);
 }
 
 /** The queue navigator's per-entry keys: x, e, Shift+Up/Down, t and Enter. */
@@ -6648,8 +6661,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
 		// Both queues drain together, exactly as the queue navigator's a does in the terminal: the
-		// returned texts are what the client now owns and must re-send to deliver.
-		return { restored: boundedQueueTexts(options.chat.clearQueuedFollowUps()) };
+		// returned texts are what the client now owns and must re-send to deliver. A clear whose texts the
+		// response could not carry whole is refused before anything drains, so no queued text is lost.
+		const pending = options.chat.restorableQueuedTexts?.();
+		if (pending !== undefined && !restorableWhole(pending)) {
+			throw new AcpRequestError(
+				-32602,
+				`the queue holds more than ${ACP_MAX_RESTORED_MESSAGES} entries or ${ACP_MAX_STEER_TEXT_BYTES} bytes in one entry; remove entries one at a time`,
+				{ code: "queue_too_large" },
+			);
+		}
+		const restored = options.chat.clearQueuedFollowUps();
+		return {
+			restored: restored.slice(0, ACP_MAX_RESTORED_MESSAGES).map((text) => boundString(text, ACP_MAX_STEER_TEXT_BYTES)),
+		};
 	});
 
 	/** The chat loop's per-entry queue operations, bound, or a refusal when this build has none. */

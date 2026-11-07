@@ -216,6 +216,70 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(await served, 0);
 	});
 
+	it("refuses a queue_clear it could not hand back whole, before anything drains (A5)", async () => {
+		const peer = fakeTransport();
+		// A text Pi already took into the run sits in flight: the waiting queues do not show it, but a clear drains it.
+		const inFlight = ["x".repeat(16 * 1024 + 1)];
+		const loop = fakeChat();
+		const waiting = loop.chat.clearQueuedFollowUps;
+		let drains = 0;
+		loop.chat.restorableQueuedTexts = () => [...inFlight, ...(loop.chat.queuedMessages?.().steer ?? [])];
+		loop.chat.clearQueuedFollowUps = () => {
+			drains += 1;
+			return [...inFlight.splice(0), ...(waiting?.() ?? [])];
+		};
+		const served = serveClioAcpAgent({ transport: peer.transport, chat: loop.chat, cwd: process.cwd() });
+		const sessionId = await openSession(peer);
+		const { prompt } = await startPrompt(peer, sessionId);
+		await peer.call("_clio-coder/session/steer", { sessionId, text: "kept" });
+
+		await rejects(peer.call("_clio-coder/session/queue_clear", { sessionId }), (error: unknown) => {
+			ok(error instanceof AcpRequestError);
+			strictEqual(error.detail.code, "queue_too_large");
+			return true;
+		});
+		strictEqual(drains, 0);
+		strictEqual(inFlight.length, 1);
+		deepStrictEqual(await peer.call("_clio-coder/session/queue", { sessionId }), { steer: ["kept"], followUp: [] });
+
+		inFlight.length = 0;
+		for (let index = 0; index < 128; index += 1) {
+			await peer.call("_clio-coder/session/steer", { sessionId, text: `more ${index}` });
+		}
+		await rejects(peer.call("_clio-coder/session/queue_clear", { sessionId }), (error: unknown) => {
+			ok(error instanceof AcpRequestError);
+			strictEqual(error.detail.code, "queue_too_large");
+			return true;
+		});
+		strictEqual(drains, 0);
+
+		loop.finish();
+		await prompt;
+		peer.transport.close();
+		strictEqual(await served, 0);
+	});
+
+	it("hands back every entry of a queue deeper than one read-back page (A5)", async () => {
+		const peer = fakeTransport();
+		const loop = fakeChat();
+		loop.chat.restorableQueuedTexts = () => {
+			const queued = loop.chat.queuedMessages?.() ?? { steer: [], followUp: [] };
+			return [...queued.steer, ...queued.followUp];
+		};
+		const served = serveClioAcpAgent({ transport: peer.transport, chat: loop.chat, cwd: process.cwd() });
+		const sessionId = await openSession(peer);
+		const { prompt } = await startPrompt(peer, sessionId);
+		const sent = Array.from({ length: 100 }, (_, index) => `entry ${index}`);
+		for (const text of sent) await peer.call("_clio-coder/session/steer", { sessionId, text });
+
+		deepStrictEqual(await peer.call("_clio-coder/session/queue_clear", { sessionId }), { restored: sent });
+
+		loop.finish();
+		await prompt;
+		peer.transport.close();
+		strictEqual(await served, 0);
+	});
+
 	it("cancels on interrupt and lets the outstanding prompt return stopReason cancelled", async () => {
 		const peer = fakeTransport();
 		const loop = fakeChat();

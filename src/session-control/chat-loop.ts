@@ -716,6 +716,8 @@ export interface ChatLoop {
 	/** Skills whose tool surface is armed across turns right now; the footer shows them. */
 	activeSkillSurface(): ReadonlyArray<string>;
 	clearQueuedFollowUps(): string[];
+	/** The texts {@link clearQueuedFollowUps} would return now, read without draining. */
+	restorableQueuedTexts(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(options?: ChatCancelOptions): void;
 	onEvent(handler: (event: ChatLoopEvent) => void): () => void;
@@ -2656,6 +2658,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			deps.headless ? Promise.resolve(false) : eggs.discover(text, ask ?? deps.eggAsk),
 		refuseSkillRequests,
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
+		restorableQueuedTexts: () => queues.restorableQueued().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {

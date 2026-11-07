@@ -167,6 +167,11 @@ export interface TurnQueues {
 	 */
 	clearQueuedMirror(): QueuedChatMessage[];
 	/**
+	 * Copies of exactly the entries {@link clearQueuedMirror} would return right now, in-flight ones included, without
+	 * draining anything, so a caller can refuse a clear it could not hand back whole.
+	 */
+	restorableQueued(): QueuedChatMessage[];
+	/**
 	 * Hand next-slot entries to the engine after a tool batch, before Pi polls.
 	 * At the run's final turn with nothing left to steer, end-of-turn entries
 	 * go to the follow-up queue instead, so Pi carries the run on with them.
@@ -417,6 +422,9 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			removed(restored, "restored");
 			retire(drained.filter(fromMachine), "the queue was cleared");
 			return restored;
+		},
+		restorableQueued(): QueuedChatMessage[] {
+			return [...inFlight, ...queue].filter((entry) => !fromMachine(entry)).map((entry) => ({ ...entry }));
 		},
 		handOverAtFinishTurn(final) {
 			const agent = state.runtime?.agent;
