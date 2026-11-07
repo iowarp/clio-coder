@@ -584,8 +584,13 @@ async function attachWorkspace(
 	// The client owns the terminal, so Ctrl+C belongs to the pane it is typed in.
 	const ignore = (): void => undefined;
 	let termination: Promise<void> | null = null;
-	const terminate = (): void => {
-		signalExitCode = 143;
+	// A hangup is the operator's terminal closing. Without a handler Node dies on
+	// it and leaves the detached host and the Clio in its pane running unseen, so
+	// it ends this launch's Clio exactly as SIGTERM does, the way a Clio booted in
+	// the plain terminal ends on the same hangup.
+	const terminate = (signal: NodeJS.Signals): void => {
+		const code = signal === "SIGHUP" ? 129 : 143;
+		signalExitCode = code;
 		clearInterval(poll);
 		termination ??= (async () => {
 			// A reattached launcher owns its client, not the earlier launch's workspace.
@@ -600,7 +605,7 @@ async function attachWorkspace(
 									HERDR_SOCKET_PATH: host.socketPath,
 									HERDR_PANE_ID: clioPane.paneId,
 								},
-								143,
+								code,
 							);
 						}
 					}
@@ -613,6 +618,7 @@ async function attachWorkspace(
 	};
 	process.on("SIGINT", ignore);
 	process.on("SIGTERM", terminate);
+	process.on("SIGHUP", terminate);
 	const exit = await new Promise<{ code: number } | { spawnError: Error }>((resolve) => {
 		attach.once("error", (error) => resolve({ spawnError: error }));
 		attach.once("exit", (code) => resolve({ code: code ?? 0 }));
@@ -640,6 +646,7 @@ async function attachWorkspace(
 		}
 		await client.close();
 		process.off("SIGTERM", terminate);
+		process.off("SIGHUP", terminate);
 		return { status: "fallback", reason: `the pane host client did not start: ${exit.spawnError.message}` };
 	}
 	const exitCode = signalExitCode ?? exit.code;
@@ -676,6 +683,7 @@ async function attachWorkspace(
 	}
 	await client.close();
 	process.off("SIGTERM", terminate);
+	process.off("SIGHUP", terminate);
 	// A hangup the launcher sent is the clean way out, not a failure to report.
 	return {
 		status: "closed",

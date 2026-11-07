@@ -315,7 +315,13 @@ describe("private host startup cleanup", () => {
 });
 
 describe("private host attached-client shutdown", () => {
-	for (const scenario of ["last workspace", "another workspace", "reused workspace", "reattached launcher"] as const) {
+	for (const scenario of [
+		"last workspace",
+		"another workspace",
+		"reused workspace",
+		"reattached launcher",
+		"terminal hangup",
+	] as const) {
 		it(`handles launcher termination with a delayed co-attached client (${scenario})`, {
 			skip: process.platform === "win32",
 		}, async (t) => {
@@ -455,11 +461,14 @@ describe("private host attached-client shutdown", () => {
 				equal(attached.size, count, "fixture clients did not attach");
 			};
 			const before = new Set(process.listeners("SIGTERM"));
+			const beforeHangup = new Set(process.listeners("SIGHUP"));
 			const creator = launchWorkspace(host(0));
 			launches.push(creator);
 			await waitForClients(1);
 			const terminate = process.listeners("SIGTERM").find((handler) => !before.has(handler));
 			ok(terminate);
+			const hangup = process.listeners("SIGHUP").find((handler) => !beforeHangup.has(handler));
+			ok(hangup, "a closed terminal must end the launch, not orphan its host");
 			const beforeFollower = new Set(process.listeners("SIGTERM"));
 			const follower = launchWorkspace(host(1_200));
 			launches.push(follower);
@@ -468,10 +477,12 @@ describe("private host attached-client shutdown", () => {
 			const terminateFollower = process.listeners("SIGTERM").find((handler) => !beforeFollower.has(handler));
 			ok(terminateFollower);
 			const reattached = scenario === "reattached launcher";
-			(reattached ? terminateFollower : terminate)("SIGTERM");
+			const hungUp = scenario === "terminal hangup";
+			if (hungUp) hangup("SIGHUP");
+			else (reattached ? terminateFollower : terminate)("SIGTERM");
 			const first = await (reattached ? follower : creator);
 			equal(first.status, "closed");
-			if (first.status === "closed") equal(first.exitCode, 143);
+			if (first.status === "closed") equal(first.exitCode, hungUp ? 129 : 143);
 			if (scenario === "reused workspace" || reattached) {
 				equal(stopped, false);
 				equal(methods.includes("workspace.close"), false);

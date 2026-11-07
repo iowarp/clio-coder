@@ -151,7 +151,7 @@ private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing private host within the same Clio state root. The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate Clio roots get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Both attached terminals see the same running Clio session. To start an independent plain-terminal session outside herdr, use `--with-panes`; non-terminal stdin or `TERM=dumb` also skips hosting. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
-When the creator launcher receives SIGTERM, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running.
+When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. A closed terminal therefore ends that terminal's Clio and leaves no host behind, as it would for Clio in a plain terminal; leave Clio running by detaching from herdr instead.
 
 ## What doctor says
 
