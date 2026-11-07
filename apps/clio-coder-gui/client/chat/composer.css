@@ -1125,6 +1125,19 @@
 .composer__delivery-note[data-tone="warn"] strong {
 	color: var(--status-warn-fg);
 }
+.composer__delivery-note .composer__take-control {
+	margin-inline-start: auto;
+	flex: none;
+	align-self: center;
+}
+/* Only groups the controls so a viewing window can disable them at once; the form lays them out. */
+.composer__body {
+	display: contents;
+	margin: 0;
+	border: 0;
+	padding: 0;
+	min-width: 0;
+}
 .composer--conversation .composer__keyboard-hint {
 	margin: 0;
 	color: var(--ink-muted);

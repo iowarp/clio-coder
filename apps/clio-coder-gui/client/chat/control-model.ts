@@ -21,7 +21,8 @@ export function controlState(control: SessionControl | undefined): ControlState 
 export function viewerBanner(controller: ClientIdentity) {
 	return {
 		title: `${controller.label} controls this task.`,
-		detail: "You can follow it here. Take control to send messages, answer approvals or change it from this window.",
+		detail:
+			"You can follow it here. Take control from the message box to send messages, answer approvals or change it from this window.",
 	};
 }
 

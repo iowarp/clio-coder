@@ -355,7 +355,13 @@ export interface ComposerSituation {
 	readonly steeringUnavailable?: "checking" | "failed";
 	/** The agent announced the operator shell line, so a draft that opens with `!` runs instead of being sent. */
 	readonly shell?: boolean;
+	/** The label of the other window that controls this task; this one only views it until it takes control. */
+	readonly viewing?: string;
 }
+
+/** Why a viewing window's composer takes nothing: the server refuses every message from a window without control. */
+export const viewingReason = (controller: string) =>
+	`${controller} controls this task. Take control to send from this window.`;
 
 export interface ShellLine {
 	readonly command: string;
@@ -414,6 +420,7 @@ function tooLong(text: string, characters: number, bytes: number): string | null
 export function submitIntent(draft: Draft, situation: ComposerSituation): SubmitIntent {
 	if (situation.sending) return blocked("The previous send is still on the wire.");
 	if (situation.sessionControl) return blocked(controlMessage(situation.sessionControl));
+	if (situation.viewing !== undefined) return blocked(viewingReason(situation.viewing));
 	if (situation.sessionState !== "open")
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
@@ -1028,6 +1035,8 @@ export function composerDelivery(
 			detail: controlMessage(situation.sessionControl),
 			tone: situation.sessionControl === "unresolved" ? "warn" : "running",
 		};
+	if (situation.viewing !== undefined)
+		return { label: "Viewing", detail: `${situation.viewing} controls this task.`, tone: "warn" };
 	if (situation.sessionState !== "open")
 		return {
 			label: situation.sessionState === "parked" ? "Paused" : "Unavailable",

@@ -206,6 +206,23 @@ test("a send already on the wire blocks the next one", () => {
 	assert.deepEqual(intent, { kind: "blocked", reason: "The previous send is still on the wire." });
 });
 
+test("a window that only views the task offers no send, steer or shell line, and says who controls it", () => {
+	const viewing = situation({ viewing: "Firefox on laptop" });
+	for (const text of ["fix the build", "!ls"]) {
+		assert.deepEqual(submitIntent(draft({ text }), { ...viewing, shell: true }), {
+			kind: "blocked",
+			reason: "Firefox on laptop controls this task. Take control to send from this window.",
+		});
+	}
+	assert.equal(submitIntent(draft(), { ...viewing, turnRunning: true }).kind, "blocked");
+	assert.deepEqual(composerDelivery(viewing, DEFAULT_STEER_MODE, false, false), {
+		label: "Viewing",
+		detail: "Firefox on laptop controls this task.",
+		tone: "warn",
+	});
+	assert.equal(submitIntent(draft(), situation()).kind, "prompt");
+});
+
 test("every non-open session state names itself rather than failing silently", () => {
 	for (const state of ["starting", "unknown", "closed", "failed"] as const) {
 		const intent = submitIntent(draft(), situation({ sessionState: state }));
