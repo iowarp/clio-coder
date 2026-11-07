@@ -482,6 +482,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				deps.onSubmitPhase?.(submitSeq, "expansion-end");
 			} catch (err) {
 				if (!isAbortError(err)) throw err;
+				if (captured) throw err;
 				// The operator cancelled a slow attachment read. That is not a failed
 				// chat: nothing is sent and the line goes back to the editor.
 				draftSettled = true;
@@ -501,57 +502,62 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				return;
 			}
 			if (uninstalled) {
-				void deps
-					.openAskUser([
-						{
-							question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
-							options: [
-								{ label: "Install and run", description: "Install in the active user profile and run." },
-								{ label: "Install for this project and run", description: "Install in this workspace only and run." },
-								{ label: "Cancel", description: "Do not install." },
-							],
-						},
-					])
-					.then((res) => {
-						const answer = res.answers[0]?.answer;
-						if (res.cancelled || (answer !== "Install and run" && answer !== "Install for this project and run")) {
-							deps.io.stderr("Installation cancelled.\n");
-							return;
-						}
-						void (async () => {
-							try {
-								deps.io.stdout(`Installing skill "${uninstalled.name}"...\n`);
-								const installed = (deps.installSkill ?? installSkill)({
-									source: uninstalled.name,
-									cwd: cwd(),
-									scope: answer === "Install for this project and run" ? "project" : "user",
-								});
-								deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
-								await deps.resources?.reload();
-								if (installed.warnings.length > 0) {
-									for (const warning of installed.warnings) deps.io.stderr(`${warning}\n`);
-									return;
-								}
-								const postInstallSubmitted = typedSkillLine(await deps.expandSubmit(text), text);
-								if (postInstallSubmitted.pendingSkillRequests.some((request) => !request.installed)) {
-									throw new Error(
-										"Installed package is not available after reload; inspect it with clio-coder library inspect skill:" +
-											uninstalled.name,
-									);
-								}
-								await submitExpanded(postInstallSubmitted);
-							} catch (err) {
-								if (isAbortError(err)) return;
-								deps.io.stderr(
-									`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
-								);
-							}
-						})();
+				try {
+					const res = await deps.openAskUser(
+						[
+							{
+								question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
+								options: [
+									{ label: "Install and run", description: "Install in the active user profile and run." },
+									{ label: "Install for this project and run", description: "Install in this workspace only and run." },
+									{ label: "Cancel", description: "Do not install." },
+								],
+							},
+						],
+						signal ? { signal } : undefined,
+					);
+					signal?.throwIfAborted();
+					const answer = res.answers[0]?.answer;
+					if (res.cancelled || (answer !== "Install and run" && answer !== "Install for this project and run")) {
+						if (captured) throw new Error("queued boot skill installation cancelled; preserving it for recovery");
+						deps.io.stderr("Installation cancelled.\n");
+						return;
+					}
+					deps.io.stdout(`Installing skill "${uninstalled.name}"...\n`);
+					const installed = (deps.installSkill ?? installSkill)({
+						source: uninstalled.name,
+						cwd: cwd(),
+						scope: answer === "Install for this project and run" ? "project" : "user",
 					});
+					deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
+					await deps.resources?.reload();
+					signal?.throwIfAborted();
+					if (installed.warnings.length > 0) {
+						if (captured) throw new Error(installed.warnings.join("\n"));
+						for (const warning of installed.warnings) deps.io.stderr(`${warning}\n`);
+						return;
+					}
+					const postInstallSubmitted = typedSkillLine(await deps.expandSubmit(text), text);
+					signal?.throwIfAborted();
+					if (postInstallSubmitted.pendingSkillRequests.some((request) => !request.installed)) {
+						throw new Error(
+							"Installed package is not available after reload; inspect it with clio-coder library inspect skill:" +
+								uninstalled.name,
+						);
+					}
+					await submitExpanded(postInstallSubmitted, true, captured, captured ? undefined : text, submitSeq);
+				} catch (err) {
+					if (captured) throw err;
+					if (isAbortError(err)) return;
+					deps.io.stderr(
+						`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,
+					);
+				}
 				return;
 			}
 			await submitExpanded(submitted, true, captured, captured ? undefined : text, submitSeq);
 		} catch (err) {
+			if (captured) throw err;
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
 			deps.requestRender();

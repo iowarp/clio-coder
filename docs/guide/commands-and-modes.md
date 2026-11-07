@@ -728,6 +728,12 @@ the held submissions drain once, in the order you sent them, through the
 ordinary slash/bash/chat pipeline. A draft you have not submitted stays in the
 composer with its cursor.
 
+Before hydration, `Ctrl+C` also keeps the draft and uses the same three-second
+double-tap window; another key disarms shutdown. Captured skill invocations wait
+for any installation confirmation and reload before later submissions drain.
+If a captured attachment read or installation is cancelled, its submission
+remains available for recovery on exit rather than being acknowledged as sent.
+
 If startup fails or you interrupt it before hydration finishes, the terminal is
 restored and any pending submissions and draft text are printed to stderr rather
 than discarded. `CLIO_CODER_INSTANT_SHELL=0` opts out and waits for a fully

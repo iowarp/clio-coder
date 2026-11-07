@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +50,106 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
+
+function admissionRuntime(overrides: Partial<InteractiveSlashRuntimeDeps>) {
+	const submitted: Parameters<InteractiveSlashRuntimeDeps["chat"]["submit"]>[] = [];
+	const runtime = createInteractiveSlashRuntime({
+		io: { stdout() {}, stderr() {} },
+		chatPanel: { appendReplayBlock() {}, appendUser() {} },
+		requestRender() {},
+		refreshFooter() {},
+		recordSubmittedTurn() {},
+		chat: {
+			isStreaming: () => true,
+			submit: async (...args: Parameters<InteractiveSlashRuntimeDeps["chat"]["submit"]>) => {
+				submitted.push(args);
+				args[1]?.onAdmitted?.();
+			},
+		},
+		...overrides,
+	} as unknown as InteractiveSlashRuntimeDeps);
+	return { runtime, submitted };
+}
+
+it("does not acknowledge captured input when attachment expansion is cancelled", async () => {
+	const aborted = new DOMException("attachment cancelled", "AbortError");
+	const { runtime, submitted } = admissionRuntime({
+		expandSubmit: async () => {
+			throw aborted;
+		},
+	});
+	await rejects(runtime.admitCommand("read @slow.pdf"), (error) => error === aborted);
+	deepStrictEqual(submitted, []);
+	let restored = 0;
+	runtime.dispatchCommand("read @slow.pdf", {
+		claimed: false,
+		admitted: () => {
+			throw new Error("cancelled input was not admitted");
+		},
+		cancelled: () => {
+			restored++;
+		},
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	strictEqual(restored, 1, "ordinary editor input still restores its draft");
+});
+
+it("awaits a captured skill install before admission and preserves its FIFO queue mode", async () => {
+	type Answer = Awaited<ReturnType<InteractiveSlashRuntimeDeps["openAskUser"]>>;
+	let answer!: (value: Answer) => void;
+	const answered = new Promise<Answer>((resolve) => {
+		answer = resolve;
+	});
+	let finishReload!: () => void;
+	const reloaded = new Promise<void>((resolve) => {
+		finishReload = resolve;
+	});
+	let installed = false;
+	const { runtime, submitted } = admissionRuntime({
+		expandSubmit: async () => ({
+			text: "first task",
+			images: [],
+			workingContextPaths: [],
+			pendingSkillRequests: installed
+				? []
+				: [{ name: "interview", args: "", source: "marketplace", installed: false, marketplaceRef: "fixture" }],
+		}),
+		openAskUser: () => answered,
+		installSkill: () => {
+			installed = true;
+			return {
+				name: "interview",
+				scope: "user",
+				path: "SKILL.md",
+				sourceUrl: "fixture",
+				installedHash: "fixture",
+				warnings: [],
+			};
+		},
+		resources: { reload: () => reloaded } as NonNullable<InteractiveSlashRuntimeDeps["resources"]>,
+	});
+	let admitted = false;
+	const admission = runtime.admitCommand("/skill interview first task").then(() => {
+		admitted = true;
+	});
+	try {
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(admitted, false, "confirmation has not answered");
+		deepStrictEqual(submitted, []);
+		answer({ answers: [{ question: "Install?", answer: "Install and run" }] });
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(admitted, false, "resource reload has not settled");
+		deepStrictEqual(submitted, []);
+		finishReload();
+		await admission;
+		strictEqual(submitted.length, 1);
+		strictEqual(submitted[0]?.[1]?.steering, "end-of-turn");
+	} finally {
+		answer({ answers: [], cancelled: true });
+		finishReload();
+		await admission;
+	}
+});
 
 it("keeps Architect's admitted artifact available under sprint-plan without widening other tools", () => {
 	const catalog = loadSkills({
