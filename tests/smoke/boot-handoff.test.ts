@@ -5,12 +5,13 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 import { findPinnedTool } from "../../src/domains/toolchain/index.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+import { reapProcessesCarrying, type StrayProcess } from "../harness/stray-processes.js";
 
 // The Stage 0 shell must answer the terminal while Stage 1 hydrates. Boot turns
 // the event loop between its phases, so keystrokes, submits, Ctrl+C, resize and
@@ -52,6 +53,18 @@ after(() => {
 	server.close();
 });
 
+/** Pane hosts a test's launch started, reaped by release() and reported by the test that started them. */
+const strayHosts: StrayProcess[] = [];
+
+afterEach(() => {
+	const hosts = strayHosts.splice(0);
+	deepStrictEqual(
+		hosts.map((host) => `${host.pid} ${host.argv.join(" ")}`),
+		[],
+		"the launch opened a pane host; every test here boots Clio in this terminal",
+	);
+});
+
 interface Fixture {
 	readonly home: string;
 	readonly project: string;
@@ -80,6 +93,7 @@ chat:
 	);
 	// The launcher would install herdr into this empty home and host the session in it. A fresh
 	// launch-install failure for the pin keeps it in this terminal, silently, as these frames expect.
+	// The guard is indirect, so release() reaps any host that starts anyway and afterEach fails the test.
 	mkdirSync(join(home.dir, "state", "mux"), { recursive: true });
 	writeFileSync(
 		join(home.dir, "state", "mux", "herdr-install-failed.json"),
@@ -177,6 +191,23 @@ function launch(env: NodeJS.ProcessEnv, cwd: string, args: readonly string[] = [
 			if (exitCode === null) child.kill("SIGKILL");
 		},
 	};
+}
+
+/**
+ * End a test's CLI and remove its fixture. The CLI is killed outright, and
+ * once it is gone every process still carrying its home is killed too, before
+ * the home is deleted: a pane host it started is detached, survives the kill,
+ * and would otherwise run on in a deleted home for as long as the machine does.
+ */
+async function release(terminal: Terminal, scratch: Fixture): Promise<void> {
+	terminal.kill();
+	try {
+		await terminal.exited();
+	} finally {
+		const home = scratch.env.CLIO_CODER_HOME;
+		if (home) strayHosts.push(...reapProcessesCarrying("CLIO_CODER_HOME", home).filter((stray) => stray.herdrHost));
+		scratch.cleanup();
+	}
 }
 
 function occurrences(text: string, needle: string): number {
@@ -308,8 +339,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			await terminal.exited();
 			ok(bootTrace(terminal.raw(), "Stage 1 hydration"));
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -349,8 +379,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(output);
 			assertNoFailure(output);
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -378,8 +407,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(terminal.raw());
 			assertNoFailure(terminal.raw());
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -398,8 +426,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(output);
 			assertNoFailure(output);
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -427,8 +454,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(output);
 			assertNoFailure(output);
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -454,8 +480,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(output);
 			assertNoFailure(output);
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 
@@ -475,8 +500,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 				assertRestoredOnce(terminal.raw());
 				assertNoFailure(terminal.raw());
 			} finally {
-				terminal.kill();
-				scratch.cleanup();
+				await release(terminal, scratch);
 			}
 		});
 	}
@@ -496,8 +520,7 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			assertRestoredOnce(output);
 			assertNoFailure(output);
 		} finally {
-			terminal.kill();
-			scratch.cleanup();
+			await release(terminal, scratch);
 		}
 	});
 });
