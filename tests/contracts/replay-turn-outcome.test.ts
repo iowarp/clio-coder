@@ -222,7 +222,7 @@ test("the reasoning behind a final answer replays where it streamed, in every st
 			panel
 				.render(100)
 				.map(stripTerminalSequences)
-				.filter((row) => !/Done/u.test(row))
+				.filter((row) => !/Done|^✓ \d/u.test(row))
 				.join("\n");
 		assert.equal(plain(replayed), plain(live), style);
 		if (style === "standard") {

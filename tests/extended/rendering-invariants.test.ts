@@ -1772,6 +1772,23 @@ describe("transcript block grammar", () => {
 		}
 	});
 
+	it("ends a Minimal turn with one row: its outcome glyph and elapsed time, and no spend", () => {
+		const view = telemetryViewOf(
+			"brief",
+			telemetryCall("brief", { turnId: "brief", usage: { input: 10, output: 5 }, usd: null }),
+		);
+		const panel = createChatPanel({ getOutputStyle: () => "compact", getTelemetry: () => view });
+		panel.appendUser("Say hi");
+		panel.applyEvent({ type: "agent_start", turnId: "brief" } as never);
+		say(panel, "Hi.");
+		panel.applyEvent({ type: "agent_end", messages: [assistantMessage("Hi.")] } as never);
+		const rows = plainRender(panel, 100).split("\n");
+		const ends = rows.filter((row) => row.startsWith(`${GLYPH.ok} `));
+		strictEqual(ends.length, 1, rows.join("\n"));
+		ok(/^\S+ \d[\d.]*(ms|s|m)\b/u.test(ends[0] ?? "") && !/Done|in 10|out 5/u.test(ends[0] ?? ""), ends[0]);
+		ok(rows.indexOf(ends[0] ?? "") > rows.findIndex((row) => row.includes("Hi.")), rows.join("\n"));
+	});
+
 	it("closes a run split by a worker with exactly one receipt, after the last output", () => {
 		for (const style of ["standard", "detailed"] as const) {
 			const view = telemetryViewOf(

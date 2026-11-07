@@ -1655,7 +1655,12 @@ function renderTurnUsageLine(
 			return [
 				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools)]), room)}`,
 			];
-		return noAnswer.length === 0 ? [] : [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
+		if (noAnswer.length > 0) return [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
+		// Brief keeps no receipt, but a turn still has to end visibly: its outcome glyph and how long it took.
+		// Done is the glyph alone; the warn glyph covers several outcomes, so any other one keeps its word.
+		const took = receiptDuration(usage).replace(/^ · /u, "");
+		const end = outcome === "Done" && took !== "" ? took : `${outcome}${receiptDuration(usage)}`;
+		return [`${glyph}${dimLine(end, room)}`];
 	}
 	const spend = usage.spend;
 	// A wait the provider asked for spends no retry, so the receipt keeps it apart: a count of them approached no limit.

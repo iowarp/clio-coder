@@ -29,7 +29,7 @@ Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal
 | **Helper / Shadow Work** | 1 row (`↳ role · task ✓`) | 1 row (`↳ role · task ✓`) | Full worker card |
 | **Failures & Refusals** | Up to 4 rows actionable reason | Up to 4 rows actionable reason | Up to 12 rows with context |
 | **Notices & Retries** | Level mark + bounded message | Level mark + bounded message | Diagnostic detail |
-| **Turn Receipt** | None | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
+| **Turn Receipt** | One row: outcome glyph + duration | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
 | **Approval & Question Cards** | Every decision input | Every decision input | Every decision input |
 
 - **Preview Budgets**: Counted *after terminal wrapping*, including the `… N rows · /view` overflow hint. Short terminals scale a budget down to `max(2, floor((terminal rows - 8) / 2))` when that is smaller than the style's own limit (`previewBudget` in [preview.ts](../../src/interactive/renderers/preview.ts)).
