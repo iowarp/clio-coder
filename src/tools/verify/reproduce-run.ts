@@ -1,13 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { copyFile, mkdir, realpath, rm, stat } from "node:fs/promises";
+import { createReadStream, type Dirent } from "node:fs";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { release } from "node:os";
 import path from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
 import { extractNumericPayloadText, type NumericReferenceProvenance } from "./numeric.js";
 import {
 	type DeclaredReproduce,
@@ -31,7 +33,9 @@ import { readRegularFileText, resolveCleanRunArgv } from "./toolchain.js";
  * HEAD, or a directory holding only the declared inputs. Inputs are copied in
  * at their relative paths and hashed again there, so the bytes the command
  * reads are the bytes the catalog pinned, tracked or not. The environment is
- * removed when the run ends, on failure and abort included.
+ * removed when the run ends, on failure and abort included. One a crash or
+ * kill left behind is swept by the next reproduce run once its owner process
+ * is gone.
  *
  * `twice` uses two separate clean environments rather than one reused twice,
  * so a first run that leaves caches or intermediate files behind cannot make
@@ -44,6 +48,14 @@ import { readRegularFileText, resolveCleanRunArgv } from "./toolchain.js";
 const REPRODUCE_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 120_000;
 const PYTHON_VERSION_TIMEOUT_MS = 10_000;
+/** Names the process that owns a clean environment and the repository its worktree is registered in. */
+const ENVIRONMENT_OWNER_FILE = "owner.json";
+/**
+ * An environment with no readable owner is swept only once it is this old: one made before owners were recorded, or
+ * one whose owner file a crash kept from being written.
+ */
+const UNOWNED_ENVIRONMENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ENVIRONMENT_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 export type ReproduceRefusalReason =
 	| "interpreter-unavailable"
@@ -219,6 +231,70 @@ async function verifyInputs(
 	return { records };
 }
 
+interface EnvironmentOwner {
+	owner: ProcessLease;
+	/** Toplevel of the repository a `worktree` environment is registered in; null for `copy`. */
+	repository: string | null;
+}
+
+async function readEnvironmentOwner(base: string): Promise<EnvironmentOwner | null> {
+	try {
+		const value = JSON.parse(await readFile(path.join(base, ENVIRONMENT_OWNER_FILE), "utf8")) as Record<string, unknown>;
+		if (!validProcessLease(value.owner)) return null;
+		if (value.repository !== null && typeof value.repository !== "string") return null;
+		return { owner: value.owner, repository: value.repository };
+	} catch {
+		return null;
+	}
+}
+
+/** The main checkout of the repository an unowned environment's worktree is registered in, or null when it is none. */
+async function registeredRepository(tree: string): Promise<string | null> {
+	try {
+		// A linked worktree's `.git` is a file; without one, git would answer for whatever repository encloses the state dir.
+		if (!(await lstat(path.join(tree, ".git"))).isFile()) return null;
+		const listed = await git(tree, ["worktree", "list", "--porcelain"]);
+		const main = /^worktree (.+)$/mu.exec(listed)?.[1];
+		return main === undefined || main.length === 0 ? null : main;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Remove the clean environments a crashed or killed reproduce run left under `scratchRoot`: the checkout, and
+ * the worktree entry it registered in the operator's repository. Only an environment whose owner process is gone, or
+ * an unowned one past UNOWNED_ENVIRONMENT_MAX_AGE_MS, is touched; a live run's, or one owned on another host, is kept.
+ */
+async function sweepAbandonedEnvironments(scratchRoot: string): Promise<void> {
+	let entries: Dirent[];
+	try {
+		entries = await readdir(scratchRoot, { withFileTypes: true });
+	} catch {
+		return;
+	}
+	const now = Date.now();
+	for (const entry of entries) {
+		if (!entry.isDirectory() || !ENVIRONMENT_NAME.test(entry.name)) continue;
+		const base = path.join(scratchRoot, entry.name);
+		const tree = path.join(base, "tree");
+		const owner = await readEnvironmentOwner(base);
+		if (owner !== null) {
+			if (ownerIsAlive(owner.owner)) continue;
+		} else {
+			const modified = await stat(base).then(
+				(info) => info.mtimeMs,
+				() => now,
+			);
+			if (now - modified < UNOWNED_ENVIRONMENT_MAX_AGE_MS) continue;
+		}
+		const repository = owner !== null ? owner.repository : await registeredRepository(tree);
+		if (repository !== null) await git(repository, ["worktree", "remove", "--force", tree]).catch(() => undefined);
+		await rm(base, { recursive: true, force: true }).catch(() => undefined);
+		if (repository !== null) await git(repository, ["worktree", "prune"]).catch(() => undefined);
+	}
+}
+
 interface CleanEnvironment {
 	/** The clean equivalent of the workspace root. */
 	root: string;
@@ -248,6 +324,11 @@ async function createCleanEnvironment(input: {
 	};
 	try {
 		await mkdir(base, { recursive: true });
+		const owner: EnvironmentOwner = {
+			owner: currentProcessLease(),
+			repository: reproduceEnvironment(input.spec) === "worktree" ? (input.repository?.toplevel ?? null) : null,
+		};
+		await writeFile(path.join(base, ENVIRONMENT_OWNER_FILE), JSON.stringify(owner), { mode: 0o600 });
 		let root: string;
 		if (reproduceEnvironment(input.spec) === "worktree") {
 			if (input.repository === null) throw new Error("worktree environment needs a git repository with a commit");
@@ -416,6 +497,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 	};
 
 	const scratchRoot = input.scratchRoot ?? path.join(clioStateDir(), "scratch", "reproduce");
+	if (!readOnlyMode()) await sweepAbandonedEnvironments(scratchRoot);
 	const runCount = spec.compare.mode === "twice" ? 2 : 1;
 	const facts: ReproduceRunFacts[] = [];
 	const records: ReproduceRunRecord[] = [];
