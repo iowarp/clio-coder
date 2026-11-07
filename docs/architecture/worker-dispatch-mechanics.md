@@ -225,10 +225,11 @@ Dispatch suppresses automatic retry after an executed state-changing call,
 after an unfinished state-changing call, or when an opaque mutation-capable
 runtime cannot prove that the failed attempt left the workspace unchanged.
 External CLI peers run with their default writable permission mode unless the
-dispatch carries `readOnly: true`. Codex, Claude Code, Antigravity, and Pi then
-use their read-only tool modes; OpenCode refuses read-only admission. Read-only
-runs on the `claude-code` runtime keep retries because the peer cannot mutate
-the workspace. The `codex-cli`, `pi-cli`, `opencode-cli`, and `antigravity`
+dispatch carries `readOnly: true`. A read-only dispatch is admitted only on
+Codex, which runs under `--sandbox read-only`; Claude Code, Antigravity, Pi and
+OpenCode are refused it, because their read-only modes are a tool list or a mode
+the peer honors, not a guarantee (see
+[Read-only runs](safety-model.md#read-only-runs)). The `codex-cli`, `pi-cli`, `opencode-cli`, and `antigravity`
 runtimes declare a one-shot external agent loop and never retry automatically,
 even when read-only. Every other subprocess run and every ACP delegation run
 fails closed on retry, because Clio Coder cannot prove the failed attempt left the

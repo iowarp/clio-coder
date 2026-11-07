@@ -72,7 +72,7 @@ integrations:
         toolGovernance: clio-coder-policy
 ```
 
-Keep the rest of your settings when adding these entries. Every headless peer runtime (`claude-code`, `codex-cli`, `opencode-cli`, `antigravity-code`, `pi-cli`) runs its own tool loop, so Clio Coder cannot mediate its individual calls. Admission therefore refuses write-capable work on such a target unless the target sets `trustedUnmediated: true`, which is read only from the operator's own settings file; a project settings layer that sets it is ignored with a warning. Without it, `/run --target opencode-local` fails admission with `runtime 'opencode-cli' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work`, and OpenCode also refuses a read-only headless run, so the OpenCode target needs the opt-in for any headless work. If OpenCode's provider
+Keep the rest of your settings when adding these entries. Every headless peer runtime (`claude-code`, `codex-cli`, `opencode-cli`, `antigravity-code`, `pi-cli`) runs its own tool loop, so Clio Coder cannot mediate its individual calls. Admission therefore refuses write-capable work on such a target unless the target sets `trustedUnmediated: true`, which is read only from the operator's own settings file; a project settings layer that sets it is ignored with a warning. Without it, `/run --target opencode-local` fails admission with `runtime 'opencode-cli' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work`, and a read-only run is refused on every headless peer but Codex whatever `trustedUnmediated` says (see below), so the OpenCode target needs the opt-in for any headless work. If OpenCode's provider
 uses an environment credential such as `apiKey: "{env:LAB_GATEWAY_KEY}"` in its
 user `opencode.json` or `opencode.jsonc`, the headless connector passes that
 named variable to OpenCode when it is set. For ACP, add
@@ -93,24 +93,26 @@ works in the current checkout and edits may appear immediately. A task worktree
 separates Git changes but does not confine the peer's own filesystem, shell, or
 network tools. Clio can mediate ACP permission requests a peer reports, but a
 peer may write without requesting permission; run records mark this enforcement
-limit. OpenCode's headless path supports writable runs and refuses read-only
-dispatched runs. Use the existing Git workflow to inspect and merge a
+limit. Use the existing Git workflow to inspect and merge a
 preserved branch, and use `/share` when the main agent should read a managed
 result.
 
 Clio Coder-managed peer dispatches run at default permissions, even when the main
-session uses yolo. Use `/run --read-only` for a headless target or
-`/delegate --read-only` for an ACP peer to deny writes on that run. Headless
-Codex uses `--sandbox read-only` or `workspace-write`; Claude Code uses
-`--permission-mode plan` with a read-only `--tools` list, or `acceptEdits`;
-Antigravity uses `--mode plan --sandbox` or `--mode accept-edits`; Pi limits
-read-only runs to `--tools read,grep,find,ls`. OpenCode refuses a read-only
-headless run before launch. ACP policy mediation denies non-read
-permission requests and outside reads on a read-only delegation without
-waiting for an operator. A peer configured with
-`toolGovernance: agent-managed` is an explicit operator opt-in to peer-owned
-tools, needs `trustedUnmediated: true` in user settings, and cannot accept a
-read-only delegation. Delegation and pane handoff are also refused when the
+session uses yolo. A [read-only run](../architecture/safety-model.md#read-only-runs)
+must leave every file outside Clio's home unchanged, so it is admitted only on a
+peer whose own enforcement guarantees that, and `trustedUnmediated` does not
+change the answer. Headless Codex runs read-only work under
+`--sandbox read-only`, an OS-level sandbox that refuses every write, so
+`/run --read-only --target <codex target>` is admitted; writable work uses
+`workspace-write`. Claude Code (`--permission-mode plan` with a `--tools`
+list), Pi (`--tools read,grep,find,ls`), Antigravity (`--mode plan --sandbox`,
+whose sandbox restricts its terminal only) and OpenCode rely on a tool list or
+a mode the peer itself honors, so a read-only run on them is refused before
+launch. An ACP peer can write without asking, so `/delegate --read-only` is
+refused for every peer, and a delegation from a read-only session is refused
+too. A peer configured with `toolGovernance: agent-managed` is an explicit
+operator opt-in to peer-owned tools and needs `trustedUnmediated: true` in user
+settings. Delegation and pane handoff are also refused when the
 session carries context restricted by an information-flow rule, because the
 peer's own model requests are not admitted by Clio Coder; see
 [information flow](information-flow.md).
