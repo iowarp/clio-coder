@@ -176,7 +176,8 @@ for (const event of [
 	);
 	chmodSync(executable, 0o755);
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.targets = [{ id: "pi-test", runtime: "pi-cli", defaultModel: "pi-cli-default" }];
+	// Pi has no OS read-only sandbox, so it runs only write-capable work, and only trusted.
+	settings.targets = [{ id: "pi-test", runtime: "pi-cli", defaultModel: "pi-cli-default", trustedUnmediated: true }];
 	settings.fleet.default.target = "pi-test";
 	settings.fleet.default.model = "pi-cli-default";
 	settings.fleet.retry.maxRetries = 0;
@@ -195,7 +196,6 @@ for (const event of [
 			agentId: "coder",
 			target: "pi-test",
 			task: "Reply PONG",
-			readOnly: true,
 			executionRole: "researcher",
 			requestOrigin: "user",
 			cwd: root,

@@ -65,6 +65,39 @@ function input(overrides: Partial<WorkerPermitInput> = {}): WorkerPermitInput {
 }
 
 describe("worker permit", () => {
+	it("refuses read-only work on an unmediated runtime unless it confines itself in an OS read-only sandbox", () => {
+		const unmediated = {
+			perCallMediation: false,
+			toolNarrowing: "none" as const,
+			scopeEnforcement: false,
+			grantPauseResume: false,
+			cancellation: true,
+		};
+		const runtime = (id: string, extra: Partial<WorkerPermitInput["runtime"]> = {}): WorkerPermitInput["runtime"] => ({
+			id,
+			targetId: `${id}-target`,
+			enforcement: unmediated,
+			trustedUnmediated: false,
+			...extra,
+		});
+		for (const id of ["claude-code", "pi-cli", "opencode-cli"]) {
+			throws(
+				() => resolveWorkerPermit(input({ readOnly: true, runtime: runtime(id) })),
+				new RegExp(`runtime '${id}' cannot run read-only work`, "u"),
+			);
+			// Trust admits an unmediated runtime's writes, not a read-only claim it cannot keep.
+			throws(
+				() => resolveWorkerPermit(input({ readOnly: true, runtime: runtime(id, { trustedUnmediated: true }) })),
+				/trustedUnmediated does not change this/u,
+			);
+		}
+		const codex = resolveWorkerPermit(
+			input({ readOnly: true, runtime: runtime("codex-cli", { readOnlySandbox: true }) }),
+		);
+		strictEqual(codex.ceiling.readOnly, true);
+		strictEqual(resolveWorkerPermit(input({ readOnly: true })).ceiling.readOnly, true);
+	});
+
 	it("parses recipe permissions strictly, rejecting unknown keys, unknown values and a misplaced worktree allowance", () => {
 		deepStrictEqual(parse({ permissions: { git: "worktree", asks: "main" } }).permissions, {
 			git: "worktree",

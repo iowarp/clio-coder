@@ -479,3 +479,15 @@ test("a read-only worker's shell command passes only when its sandbox confines e
 	const unrecognized = admit("make bench", true);
 	strictEqual(unrecognized.kind === "deny" && unrecognized.code, "read_only");
 });
+
+test("a read-only run admits a dispatch, whose workers inherit read-only, and refuses steering", () => {
+	const cwd = workspace("clio-read-only-dispatch-");
+	const safety = createWorkerSafety({ cwd });
+	for (const principal of ["main", "worker"] as const) {
+		const admit = (tool: string, args: Record<string, unknown>) =>
+			evaluateAdmission({ principal, effects: [{ tool, args }], safety, constraints: { readOnly: true } });
+		strictEqual(admit(ToolNames.Dispatch, { agent: "scout", task: "map the repo" }).kind, "allow", principal);
+		const steer = admit(ToolNames.Steer, { run_id: "r1", message: "write it" });
+		strictEqual(steer.kind === "deny" && steer.code, "read_only", principal);
+	}
+});

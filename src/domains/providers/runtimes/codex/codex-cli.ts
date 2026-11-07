@@ -59,6 +59,8 @@ const codexCliRuntime = createExternalCliRuntime({
 	headlessCommand: "codex exec --json --ephemeral",
 	outputParser: "codex-exec-jsonl",
 	provider: "openai-codex",
+	// A read-only run starts with `--sandbox read-only`, which the OS enforces.
+	readOnlySandbox: "os",
 	probe(_target, ctx) {
 		return probeCodexCli(ctx);
 	},

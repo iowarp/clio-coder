@@ -236,6 +236,13 @@ export interface RuntimeDescriptor {
 	 * treated as unmediated (see runtime-enforcement.ts).
 	 */
 	enforcement?: RuntimeEnforcement;
+	/**
+	 * "os" when the runtime confines its own tools in an OS-level read-only
+	 * sandbox for a read-only run (codex-cli's `--sandbox read-only`), so a run
+	 * Clio cannot mediate per call still changes no user file. An unmediated
+	 * runtime without it is refused read-only work.
+	 */
+	readOnlySandbox?: "os";
 	externalAgentLoop?: {
 		tools: "externally-governed-unobserved";
 		network: "externally-governed-unobserved";

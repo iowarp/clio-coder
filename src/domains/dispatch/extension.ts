@@ -1855,7 +1855,7 @@ export function buildDynamicPromptMessages(
 	if (dynamicContext.readOnly === true) {
 		const body = [
 			"# Read-only run",
-			"This dispatch restricts this run to inspection inside the workspace. Do not call tools to write, execute, dispatch, or read outside the workspace. Forbidden calls are denied without asking. Describe needed changes as text for the dispatching agent.",
+			"This dispatch is read-only: the run must leave every user file unchanged, so it is limited to inspection inside the workspace. Do not write files or read outside the workspace. A shell command runs only where your sandbox confines its writes, and any worker you dispatch is read-only too. Forbidden calls are denied without asking. Describe needed changes as text for the dispatching agent.",
 		].join("\n\n");
 		messages.push({ id: "dispatch-read-only", body, contentHash: sha256(body) });
 	}
@@ -2312,6 +2312,7 @@ function resolveDispatchPermitOnce(
 			// Read from the effective settings, the operator's configuration, never
 			// from anything the request or the model carries.
 			trustedUnmediated: settings?.targets.find((entry) => entry.id === target.target.id)?.trustedUnmediated === true,
+			...(target.runtime.readOnlySandbox === "os" ? { readOnlySandbox: true } : {}),
 		},
 		...(mcp !== undefined ? { mcp } : {}),
 	});
@@ -5884,9 +5885,11 @@ export function createDispatchBundle(
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
 		const toolGovernance = configured.toolGovernance ?? "clio-coder-policy";
-		if (req.readOnly === true && toolGovernance === "agent-managed") {
+		// A peer asks only about the calls it chooses to, under every governance,
+		// so no ACP peer can keep a read-only run from changing user files.
+		if (req.readOnly === true) {
 			throw new Error(
-				`dispatch: ACP delegation agent '${agentId}' uses toolGovernance='agent-managed', which cannot enforce a read-only run; choose clio-coder-policy or deny-all governance`,
+				`dispatch: ACP delegation agent '${agentId}' cannot run read-only work: a peer's permission requests cover only the calls it chooses to ask about, so Clio cannot keep it from changing user files; choose a native, claude-sdk or codex-cli target`,
 			);
 		}
 		// Operator decision Q6: agent-managed governance approves every call the
@@ -5921,7 +5924,6 @@ export function createDispatchBundle(
 			cwd,
 			projectContextTier: tier,
 			autonomy,
-			...(req.readOnly === true ? { readOnly: true } : {}),
 			projectPrompt,
 			projectReadTools: null,
 			projectExternalReadTools: true,
@@ -9543,7 +9545,24 @@ export function createDispatchBundle(
 			req = { ...req, ownerSessionCwdHash: sessionOrigin.cwdHash };
 		const constraints = snapshotTurnConstraints(preparation?.turnConstraints ?? req.turnConstraints);
 		if (constraints) {
-			req = { ...req, turnConstraints: constraints, ...(constraints.skills === "disabled" ? { noSkills: true } : {}) };
+			req = {
+				...req,
+				turnConstraints: constraints,
+				...(constraints.skills === "disabled" ? { noSkills: true } : {}),
+				// A worker of a read-only run is read-only too, whatever its recipe.
+				...(constraints.readOnly === true ? { readOnly: true } : {}),
+			};
+			// A task worktree is a checkout and a .git/worktrees entry in the
+			// repository, and a host verification check runs a project command
+			// unconfined; neither leaves the user's files alone.
+			if (constraints.readOnly === true && req.worktree === true && req.taskWorktree === undefined)
+				throw new Error(
+					"dispatch: this run is read-only, so it cannot create a task worktree; dispatch without worktree: true",
+				);
+			if (constraints.readOnly === true && (req.resolvedVerification?.length ?? 0) > 0)
+				throw new Error(
+					"dispatch: this run is read-only, so it cannot run host verification checks; dispatch without intent.verification",
+				);
 			// Validate before creating worktrees or acquiring writer/capacity leases.
 			previewFixed(req);
 		}

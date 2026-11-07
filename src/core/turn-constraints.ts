@@ -237,7 +237,9 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 	if (constraints.delegation === "forbidden") lines.push("Work directly; do not delegate.");
 	if (constraints.skills === "disabled") lines.push("Skill activation and discovery are disabled for this turn.");
 	if (constraints.readOnly === true)
-		lines.push("This task is read-only: every write, command, or delegation is denied, and no approval clears it.");
+		lines.push(
+			"This task is read-only: no user file may change. Writes are denied, a shell command runs only in a read-only sandbox, a dispatched worker is read-only too, and no approval clears a denial.",
+		);
 	if (constraints.allowedTools) {
 		const names = [...new Set(constraints.allowedTools)].sort();
 		lines.push(

@@ -31,6 +31,8 @@ export interface CliRuntimeRecipe {
 	outputParser: string;
 	authNotice: string;
 	provider: string;
+	/** The CLI's read-only mode is an OS sandbox (see RuntimeDescriptor.readOnlySandbox). */
+	readOnlySandbox?: "os";
 	probe?: (target: TargetDescriptor, ctx: ProbeContext) => Promise<ProbeResult>;
 }
 
@@ -78,6 +80,7 @@ export function createExternalCliRuntime(recipe: CliRuntimeRecipe): RuntimeDescr
 		// Codex, Pi and OpenCode run their own tools; their sandbox or read-only
 		// modes are the CLI's authority, not Clio per-call mediation.
 		enforcement: UNMEDIATED_ENFORCEMENT,
+		...(recipe.readOnlySandbox !== undefined ? { readOnlySandbox: recipe.readOnlySandbox } : {}),
 		externalAgentLoop: {
 			tools: "externally-governed-unobserved",
 			network: "externally-governed-unobserved",

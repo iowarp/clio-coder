@@ -113,7 +113,7 @@ test("escalate is refused, never downgraded, where the runtime cannot park a cal
 	);
 });
 
-test("read-only admission denies mutation, dispatch, and outside reads without parking", async () => {
+test("read-only admission denies mutation, steering, and outside reads without parking, and admits a dispatch", async () => {
 	const env = await isolateClioEnv("clio-readonly-registry-");
 	try {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }), readOnly: true });
@@ -124,7 +124,7 @@ test("read-only admission denies mutation, dispatch, and outside reads without p
 		for (const [tool, args, action] of [
 			[ToolNames.Write, { path: "change.txt", content: "change" }, "write"],
 			[ToolNames.Bash, { command: "git status" }, "execute"],
-			[ToolNames.Dispatch, { agentId: "coder", task: "change" }, "dispatch"],
+			[ToolNames.Steer, { run_id: "r1", message: "change" }, "dispatch"],
 			[ToolNames.Read, { path: "/etc/hosts" }, "read"],
 		] as const) {
 			registry.register({
@@ -145,6 +145,18 @@ test("read-only admission denies mutation, dispatch, and outside reads without p
 			}
 		}
 		strictEqual(parked, false);
+		// The dispatched worker inherits read-only, so the dispatch itself passes.
+		registry.register({
+			name: ToolNames.Dispatch,
+			description: "contract dispatch",
+			parameters: Type.Object({}),
+			baseActionClass: "dispatch",
+			run: async () => ({ kind: "ok", output: "dispatched" }),
+		});
+		strictEqual(
+			(await registry.invoke({ tool: ToolNames.Dispatch, args: { agentId: "coder", task: "look" } })).kind,
+			"ok",
+		);
 		const read = await registry.invoke({ tool: ToolNames.Read, args: { path: "inside.txt" } });
 		strictEqual(read.kind, "ok");
 		registry.register({

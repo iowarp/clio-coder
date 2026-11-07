@@ -936,11 +936,11 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
-	it("rejects an unmediated ACP read-only dispatch before any worker starts", async () => {
+	it("rejects an ACP read-only dispatch before any worker starts, clio-coder-policy governance included", async () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.safety.autonomy = "yolo";
 		settings.integrations.externalAgents.entries = [
-			{ id: "external-reviewer", command: "mock-acp", args: [], toolGovernance: "agent-managed" },
+			{ id: "external-reviewer", command: "mock-acp", args: [], toolGovernance: "clio-coder-policy" },
 		];
 		let starts = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -965,7 +965,7 @@ describe("dispatch admission boundary", () => {
 				message?: string;
 			};
 			strictEqual(result.kind, "error");
-			match(result.message ?? "", /agent-managed.*cannot enforce a read-only run/u);
+			match(result.message ?? "", /external-reviewer' cannot run read-only work/u);
 			strictEqual(starts, 0);
 			strictEqual(bundle.contract.listRuns().length, 0);
 		} finally {

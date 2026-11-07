@@ -288,15 +288,17 @@ function toolInScope(allowed: ReadonlyArray<string> | ReadonlySet<string>, tool:
 }
 
 /**
- * What a read-only run admits: a read, or a shell command that runs where it
- * can change no user file. For the main session that is the read-only
- * sandbox its admission chose; for a worker, the OS sandbox its spawn
- * confines writes with.
+ * What a read-only run admits: a read, a shell command that runs where it
+ * can change no user file, or a dispatch, whose workers inherit the run's
+ * read-only constraint. For the main session the shell's place is the
+ * read-only sandbox its admission chose; for a worker, the OS sandbox its
+ * spawn confines writes with.
  */
 function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerConfined: boolean): boolean {
 	const actionClass = decision.classification.actionClass;
 	if (actionClass === "read") return true;
 	if (actionClass === "git_destructive") return false;
+	if (call.tool === ToolNames.Dispatch && actionClass === "dispatch") return true;
 	if (decision.policy?.shellSandbox?.readOnly === true) return true;
 	return (
 		workerConfined &&

@@ -43,13 +43,18 @@ let fixture: OpenAICompatFixture;
 let mainToolCall: OpenAICompatToolCallScript | null = null;
 /** The tool results the main agent sent back, newest last. */
 const toolResults: string[] = [];
+/** The tool call a dispatched worker's first turn makes, and the results it sent back. */
+let workerToolCall: OpenAICompatToolCallScript | null = null;
+const workerResults: string[] = [];
 
 before(async () => {
 	fixture = await startOpenAICompatFixture("done", {
 		toolCall: (request) => {
+			// Only a read-only worker's conversation carries the dispatch read-only section.
+			const worker = JSON.stringify(request.messages ?? []).includes("# Read-only run");
 			const result = lastToolResult(request);
-			if (result === null) return mainToolCall;
-			toolResults.push(result);
+			if (result === null) return worker ? workerToolCall : mainToolCall;
+			(worker ? workerResults : toolResults).push(result);
 			return null;
 		},
 	});
@@ -223,6 +228,36 @@ describe("--read-only leaves every user file unchanged", { timeout: 600_000 }, (
 		toolResults.length = 0;
 		await clio(["--no-context-files", "run", "--read-only", "Run the probe."]);
 		match(toolResults.join("\n"), /bash denied: this (?:run|task) is read-only/u);
+		deepEqual(userFiles(), baseline);
+	});
+
+	// The worker is a coder, a workspace-edit recipe, so only the inherited
+	// constraint makes it read-only.
+	const workerWrite = (): OpenAICompatToolCallScript => ({
+		name: "write",
+		arguments: { path: join(work, "notes.txt"), content: "changed by a worker\n" },
+	});
+
+	it("a dispatched worker inherits read-only and changes no user file", async () => {
+		writeSettings();
+		mainToolCall = { name: "dispatch", arguments: { agent: "coder", task: "Rewrite notes.txt." } };
+		workerToolCall = workerWrite();
+		toolResults.length = 0;
+		workerResults.length = 0;
+		await clio(["--no-context-files", "run", "--read-only", "Delegate the edit."]);
+		ok(toolResults.length > 0, "the main agent got the dispatch result");
+		ok(!/dispatch denied/u.test(toolResults.join("\n")), toolResults.join("\n"));
+		match(workerResults.join("\n"), /write denied: this (?:run|task) is read-only/u, workerResults.join("\n"));
+		deepEqual(userFiles(), baseline);
+	});
+
+	it("run --agent coder --read-only runs the worker read-only", async () => {
+		writeSettings();
+		mainToolCall = null;
+		workerToolCall = workerWrite();
+		workerResults.length = 0;
+		await clio(["--no-context-files", "run", "--agent", "coder", "--read-only", "Rewrite notes.txt."]);
+		match(workerResults.join("\n"), /write denied: this (?:run|task) is read-only/u, workerResults.join("\n"));
 		deepEqual(userFiles(), baseline);
 	});
 });

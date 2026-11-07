@@ -489,7 +489,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", ()
 }
 
 describe("worker channel facts", () => {
-	it("a read-only native child disables its startup compile cache", async () => {
+	it("a read-only native child keeps the compile cache, a cache Clio owns", async () => {
 		const env = await isolateClioEnv("clio-worker-cache-review-");
 		try {
 			const entry = join(env.dir, "cache-worker.cjs");
@@ -507,7 +507,8 @@ describe("worker channel facts", () => {
 				},
 			);
 			const result = await worker.promise;
-			match(result.stderrTail ?? "", /\[cache\] disabled/);
+			// Read-only leaves user files alone; the bytecode cache is Clio's own.
+			ok((result.stderrTail ?? "").includes(`[cache] ${cache}`), result.stderrTail);
 		} finally {
 			env.restore();
 		}
@@ -1079,6 +1080,14 @@ describe("worker extension hooks", () => {
 					apiFamily: "anthropic-messages",
 					auth: "api-key",
 					defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					// The real descriptor's: canUseTool mediates each call, so a read-only scout is admitted up to the hook check.
+					enforcement: {
+						perCallMediation: true,
+						toolNarrowing: "exact",
+						scopeEnforcement: true,
+						grantPauseResume: false,
+						cancellation: true,
+					},
 					synthesizeModel: () => ({ id: "claude-fixture", provider: "claude-sdk" }) as never,
 				},
 			}),
@@ -1151,6 +1160,8 @@ describe("worker extension hooks", () => {
 					apiFamily: "openai-responses",
 					auth: "none",
 					defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true },
+					// As the real descriptor: `--sandbox read-only` admits a read-only scout up to the hook check.
+					readOnlySandbox: "os",
 					synthesizeModel: () => ({ id: "codex-fixture", provider: "codex-cli" }) as never,
 				},
 			}),
