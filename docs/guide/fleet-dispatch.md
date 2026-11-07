@@ -603,6 +603,12 @@ mediated, non-read-only worker whose recipe and task do not declare `asks: deny`
 operator rules in an approved `.clio-coder/safety.yaml` and its dispatch scope refuse a call
 (see [safety-model.md](../architecture/safety-model.md#workers-at-each-level)).
 A `readOnly` dispatch restriction denies mutation and outside reads; reviewers and judges use it.
+Every worker of a [read-only run](../architecture/safety-model.md#read-only-runs) is read-only too,
+and its own dispatches inherit the restriction. Only native workers, `claude-sdk` and `codex-cli`
+(under `--sandbox read-only`) are admitted for read-only work; other CLI runtimes, non-HTTP plugin
+runtimes that declare neither per-call mediation nor an OS read-only sandbox, and every ACP peer
+are refused. A read-only run cannot create a
+task worktree (`worktree: true`) or run host verification checks (`intent.verification`).
 
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
@@ -1740,9 +1746,9 @@ hard block.
   ends with the execution outcome (`✓ execution ok`, `✗` with the outcome code,
   `○ ran no tools`, or canceled) and the duration. The block body renders the worker
   prose down a rail, a rail line with tokens processed, context and tool calls (hidden
-  in the Compact style), and a `quality` line that keeps validation quality separate
+  in Minimal output), and a `quality` line that keeps validation quality separate
   from execution status. A failure reason prints on the rail.
-- Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current Output style: Compact identity/outcome, Standard short summary, Detailed bounded activity and a larger summary. `Alt+O` cycles styles for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
+- Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail: Minimal identity/outcome, Default short summary, Detailed bounded activity and a larger summary, and a settled Detailed card keeps its answer and failure. A run waiting on an approval says so at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
 - Sharing: nothing an operator-started run (`/run`, `/delegate`) produced enters
   the main model's context unless `--share` was passed or the operator runs
   `/share [runId]`; runs the model started return through the dispatch tool result as
@@ -1779,7 +1785,7 @@ hard block.
   only then. It opens the dock or shows a parked one,
   and leaves the keyboard in Clio Coder. Moving the cursor retargets an existing dock to the
   selected live run and never opens one. `Enter` and `d` toggle the inline worker detail on
-  every run, with or without a pane host, and `Esc` folds an open detail before it closes the
+  every run, with or without a pane host, `PgUp` and `PgDn` page an open detail, and `Esc` folds an open detail before it closes the
   board ([overlay-key-routing.ts](../../src/interactive/overlay-key-routing.ts)). The detail shows the phase, the running call
   with a redacted action descriptor (`bash running npm test`), the bounded tail of the
   worker's own prose, and the full task, route and budget lines. The default list
@@ -1881,7 +1887,7 @@ Two small files carry everything between Clio Coder and the dashboard, one pair 
 
 | File | Direction | Content |
 | --- | --- | --- |
-| `<state>/watch-selection` | Clio Coder to dashboard | Replaced atomically. Line 1 is the run id a takeover is requested for (blank asks for the board), followed by `seq=`, `session=` and `since=` lines. `seq` changes on every request, so asking for the same run twice still takes the dock over. `session` and `since` scope the board to this session. |
+| `<state>/watch-selection` | Clio Coder to dashboard | Replaced atomically. Line 1 is the run id a takeover is requested for (blank asks for the board), followed by `seq=`, `session=`, `since=` and `outputDetail=` lines. `seq` changes on every request, so asking for the same run twice still takes the dock over. `session` and `since` scope the board to this session. `outputDetail` carries the session's output detail (`compact`, `standard` or `detailed`), and Clio rewrites the file when it changes. |
 | `<state>/watch-dock-taps` | Dashboard to Clio Coder | One word per appended line: `hide` for `q`, `key` for `Alt+W`. Clio empties it when a session starts. |
 
 Run by hand without `--dock-taps`, `q` quits the dashboard. Without a TTY, `fleet view --watch` prints the selected run's snapshot, or a note that no worker is selected, and exits 0.
@@ -1890,11 +1896,13 @@ Run by hand without `--dock-taps`, `q` quits the dashboard. Without a TTY, `flee
 
 The board has one card per worker of this Clio Coder session: runs stamped with the session's id, plus runs with no session stamp that started after this Clio Coder booted. Started by hand with no request, it lists every run in the inspection scope (this project, or all projects with `--all`). A failed attempt that a retry or failover attempt replaced gives way to the replacement's card, which carries `↻<n>`. Live runs (queued, running, stale) come first, newest start first. A `finished` group follows with up to 24 runs, newest end first.
 
-A card has three rows:
+The board's header counts running, done, cancelled and failed runs, with cancelled runs kept apart from failures. A board taller than the dock keeps the selected card whole and shows its position as `<first>-<last> / <total> rows`.
+
+A card follows the session's output detail: three rows in Detailed, rows 1 and 3 in Default, and in Minimal one row that joins row 1's glyph, agent and clock to row 3. The rows are:
 
 1. The state glyph (`●` running, `◌` queued, `!` stale, `✓` done, `⊘` canceled, `✗` failed, `◌` for a run that succeeded without calling a tool), the agent id, the elapsed clock and the task.
 2. The route (`target/model`), the tool-budget meter (`▰▰▱ tools 12/40`, or `tools 12` with no cap), tokens, and for a finished run its cost when something priced it.
-3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the run record`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ canceled` or `✗ <outcome code>`, then `contract pass|fail|not-reached|unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `run record unavailable`.
+3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the run record`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ cancelled` or `✗ <outcome>`, then `contract met`, `contract failed`, `contract not reached` or `contract unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `run record unavailable`.
 
 A narrow dock sheds the task first, then the model, then cost and route. The state glyph and the clock always stay. Every worker-adjacent string is redacted and stripped of control bytes where it is drawn.
 

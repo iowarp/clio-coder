@@ -567,7 +567,7 @@ The reader's selection and the `# Memory` section in the compiled prompt are sep
 
 ### Repository-scoped identity
 
-Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and `clio-coder run --agent` compute that identity from the active working directory; symlink aliases collapse to the same key. A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository's memory. Global records are unaffected.
+Repository memory is selected by an exact canonical absolute-path identity. The interactive orchestrator and `clio-coder run --agent` compute that identity from the active working directory; symlink aliases collapse to the same key. A dispatched worker's repository records follow the worker's checkout: a request whose `cwd` names another repository carries that repository's records and none of the host's (`buildDispatchMemorySection` in `src/domains/memory/dispatch-section.ts`). A repository move, a different Git worktree path, a subdirectory launch, a malformed identity, or a missing identity does not inherit another repository's memory. Global records are unaffected.
 
 Every `scope: "repo"` record must carry:
 
