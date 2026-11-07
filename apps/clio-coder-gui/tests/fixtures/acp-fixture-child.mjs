@@ -3,6 +3,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { SCIENCE_MARKDOWN, SCIENCE_TOOL_JSON, SCIENCE_TOOL_OUTPUT } from "./science-transcript.mjs";
 import { streamWorkload } from "./stream-workload.mjs";
 
 const scenario = process.env.CLIO_CODER_WEB_FIXTURE_SCENARIO ?? "text";
@@ -828,9 +829,11 @@ async function handle(frame) {
 									? "loop"
 									: scenario === "markdown" && promptText.includes("[workload")
 										? "workload"
-										: STEERING && promptText.includes("[fleet]")
-											? "held-worker"
-											: scenario;
+										: scenario === "markdown" && promptText.includes("[science]")
+											? "science"
+											: STEERING && promptText.includes("[fleet]")
+												? "held-worker"
+												: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (promptText.startsWith("/context recover ")) {
@@ -896,6 +899,32 @@ async function handle(frame) {
 					// `[workload 16384]` asks for an answer of at least that many bytes.
 					const bytes = Number(/\[workload (\d+)\]/.exec(promptText)?.[1] ?? 0);
 					await streamWorkload({ update, text, delay, cancelled: () => cancelled, bytes });
+				} else if (turnScenario === "science") {
+					for (const [id, title, input, output] of [
+						["sci-1", "bash", { command: "mpirun -n 4 ./cavity" }, SCIENCE_TOOL_OUTPUT],
+						["sci-2", "read", { path: "results/summary.json" }, SCIENCE_TOOL_JSON],
+					]) {
+						update({
+							sessionUpdate: "tool_call",
+							toolCallId: id,
+							title,
+							kind: title === "bash" ? "execute" : "read",
+							status: "in_progress",
+							rawInput: input,
+						});
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: id,
+							status: "completed",
+							rawOutput: { result: { kind: "ok", output }, isError: false },
+							content: [{ type: "content", content: { type: "text", text: output } }],
+						});
+					}
+					for (const chunk of SCIENCE_MARKDOWN) {
+						if (cancelled) break;
+						text(chunk);
+						await delay(20);
+					}
 				} else if (turnScenario === "loop") {
 					for (let i = 0; i < 1400 && !cancelled; i++) {
 						text(`${i} `);
