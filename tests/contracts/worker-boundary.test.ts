@@ -329,7 +329,7 @@ describe("worker boundary", () => {
 	});
 });
 
-const WORKER_ENTRY = fileURLToPath(new URL("../../src/worker/entry.ts", import.meta.url));
+const WORKER_ENTRY = fileURLToPath(new URL("../../dist/worker/entry.js", import.meta.url));
 
 async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
@@ -397,7 +397,7 @@ async function dispatchedWorkerSpec(url: string, cwd: string): Promise<WorkerSpe
 
 /** The real worker entry, driven by the test instead of the orchestrator's channel. */
 function startWorkerEntry(spec: WorkerSpec, cwd: string) {
-	const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], {
+	const child = spawn(process.execPath, [WORKER_ENTRY], {
 		cwd,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -425,7 +425,10 @@ function startWorkerEntry(spec: WorkerSpec, cwd: string) {
 	child.stdin.write(`${JSON.stringify(spec)}\n`);
 	const stop = async (): Promise<void> => {
 		child.stdin.end();
-		const exited = await Promise.race([exit.then(() => true), sleep(10_000).then(() => false)]);
+		const exited = await Promise.race([
+			exit.then(() => true),
+			sleep(10_000, undefined, { ref: false }).then(() => false),
+		]);
 		if (!exited) child.kill("SIGKILL");
 		await exit;
 	};
@@ -624,21 +627,16 @@ describe("bulk-lane backpressure", () => {
 				let exitedWhileStalled = false;
 				const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
 					spawnWorker: (spec, options) => {
-						const worker = spawnWorkerProcess(
-							process.execPath,
-							["--import", import.meta.resolve("tsx"), WORKER_ENTRY],
-							spec,
-							{
-								...options,
-								onAnnounce: (attestation) => {
-									options?.onAnnounce?.(attestation);
-									// The admit is written in this tick; the stall starts in the next.
-									setImmediate(() => {
-										exitedWhileStalled = stallUntilExited(worker.pid as number, 12_000);
-									});
-								},
+						const worker = spawnWorkerProcess(process.execPath, [WORKER_ENTRY], spec, {
+							...options,
+							onAnnounce: (attestation) => {
+								options?.onAnnounce?.(attestation);
+								// The admit is written in this tick; the stall starts in the next.
+								setImmediate(() => {
+									exitedWhileStalled = stallUntilExited(worker.pid as number, 12_000);
+								});
 							},
-						);
+						});
 						return worker;
 					},
 				});
@@ -701,8 +699,7 @@ describe("worker admission", () => {
 				settings.fleet.default.target = "fixture";
 				settings.fleet.default.model = "fixture";
 				const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
-					spawnWorker: (spec, options) =>
-						spawnWorkerProcess(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], spec, options),
+					spawnWorker: (spec, options) => spawnWorkerProcess(process.execPath, [WORKER_ENTRY], spec, options),
 				});
 				try {
 					await bundle.extension.start();
@@ -906,7 +903,7 @@ describe("worker extension hooks", () => {
 		const requests: WorkerHookRequest[] = [];
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
 			spawnWorker: (spec, opts) =>
-				spawnWorkerProcess(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], spec, {
+				spawnWorkerProcess(process.execPath, [WORKER_ENTRY], spec, {
 					...opts,
 					cwd: env.dir,
 				}),

@@ -32,7 +32,7 @@ test("closed stdout quietly ends fleet journals, followers, and trace JSON with 
 			["fleet", "events", rootId, "--json", "--follow"],
 			["fleet", "code-steps", rootId, "--json"],
 		]) {
-			const child = spawn(process.execPath, ["--import", "tsx", resolve("src/cli/index.ts"), ...args], {
+			const child = spawn(process.execPath, [resolve("dist/cli/index.js"), ...args], {
 				cwd: process.cwd(),
 				env: { ...process.env, HOME: env.dir },
 				stdio: ["ignore", "pipe", "pipe"],

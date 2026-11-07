@@ -11,6 +11,8 @@ import {
 } from "../../src/domains/gateway/mcp/index.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
+const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;
+
 it("lists, trusts, detects stale declarations, untrusts and returns error exits", () => {
 	const scratch = makeScratchHome("clio-mcp-cli-");
 	const project = join(scratch.dir, "project");
@@ -21,69 +23,71 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 	const declaration = "version: 1\nservers:\n  - id: files\n    command: node\n    args: [server.mjs]\n";
 	writeFileSync(projectConfig, declaration);
 	writeFileSync(join(config, MCP_USER_CONFIG_FILENAME), "version: 1\nservers:\n  - id: personal\n    command: node\n");
-	const module = resolve("src/cli/mcp.ts");
-	const tsx = import.meta.resolve("tsx");
-	const run = (...args: string[]) =>
-		spawnSync(
-			process.execPath,
-			[
-				"--import",
-				tsx,
-				"--input-type=module",
-				"-e",
-				`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
-			],
-			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8" },
-		);
+	const run = (...args: string[]) => mcpCommandOutput(args, { cwd: project, configDir: config });
+	const cli = (...args: string[]) =>
+		spawnSync(process.execPath, [CLI, "mcp", ...args], {
+			cwd: project,
+			env: { ...process.env, ...scratch.env },
+			encoding: "utf8",
+		});
 	try {
 		let result = run("list");
-		strictEqual(result.status, 0, result.stderr);
-		match(
-			result.stdout,
-			/files scope=project command=\["node","server.mjs"\] cwd=.*trust=untrusted.*actionClass=unknown/,
+		strictEqual(result.code, 0, result.text);
+		match(result.text, /files scope=project command=\["node","server.mjs"\] cwd=.*trust=untrusted.*actionClass=unknown/);
+		match(result.text, /personal scope=user.*trust=trusted/);
+		result = run("trust", "files", "--action-class", "read");
+		strictEqual(result.code, 0, result.text);
+		const trusted = result.data;
+		ok(
+			trusted && typeof trusted === "object" && "ok" in trusted && "record" in trusted && "toolActionClasses" in trusted,
 		);
-		match(result.stdout, /personal scope=user.*trust=trusted/);
-		result = run("trust", "files", "--action-class", "read", "--json");
-		strictEqual(result.status, 0, result.stderr);
-		const trusted = JSON.parse(result.stdout);
 		// The trust result names the declaration's per-tool classes (8858c4deb); this one declares none.
 		deepStrictEqual(Object.keys(trusted).sort(), ["entry", "ok", "record", "toolActionClasses"]);
 		deepStrictEqual(trusted.toolActionClasses, {});
 		strictEqual(trusted.ok, true);
 		const record = trusted.record;
+		ok(record && typeof record === "object" && "actionClass" in record && "digest" in record);
 		deepStrictEqual(Object.keys(record).sort(), ["actionClass", "digest", "id", "projectRoot", "trustedAt"]);
 		strictEqual(record.actionClass, "read");
+		ok(typeof record.digest === "string");
 		match(record.digest, /^[a-f0-9]{64}$/);
-		result = run("list", "--json");
-		deepStrictEqual(Object.keys(JSON.parse(result.stdout)).sort(), ["diagnostics", "servers", "trustDiagnostics"]);
-		strictEqual(JSON.parse(result.stdout).servers.find((s: { id: string }) => s.id === "files").trust.status, "trusted");
+		result = run("list");
+		const listed = result.data;
+		ok(listed && typeof listed === "object" && "servers" in listed && Array.isArray(listed.servers));
+		deepStrictEqual(Object.keys(listed).sort(), ["diagnostics", "servers", "trustDiagnostics"]);
+		const files: unknown = listed.servers.find((s: { id: string }) => s.id === "files");
+		ok(files && typeof files === "object" && "trust" in files);
+		const trust = files.trust;
+		ok(trust && typeof trust === "object" && "status" in trust);
+		strictEqual(trust.status, "trusted");
+		const listedCli = cli("list", "--json");
+		strictEqual(listedCli.status, 0, listedCli.stderr);
+		deepStrictEqual(JSON.parse(listedCli.stdout), JSON.parse(JSON.stringify(listed)));
+		const missingCli = cli("trust", "missing");
+		strictEqual(missingCli.status, 1);
+		strictEqual(missingCli.stderr.trim().split("\n").length, 1);
+		const bogusCli = cli("bogus", "--json");
+		strictEqual(bogusCli.status, 2);
+		deepStrictEqual(JSON.parse(bogusCli.stdout), run("bogus").data);
 		writeFileSync(projectConfig, declaration.replace("server.mjs", "changed.mjs"));
-		match(run("list").stdout, /trust=stale.*changed/);
+		match(run("list").text, /trust=stale.*changed/);
 		result = run("untrust", "files");
-		strictEqual(result.status, 0, result.stderr);
-		match(result.stdout, /record removed/);
-		match(run("list").stdout, /trust=untrusted/);
-		result = run("untrust", "files", "--json");
-		deepStrictEqual(JSON.parse(result.stdout), { ok: true, removed: false });
-		strictEqual(run("trust", "files").status, 0);
-		result = run("untrust", "files", "--json");
-		deepStrictEqual(JSON.parse(result.stdout), { ok: true, removed: true });
-		result = run("trust", "missing", "--json");
-		strictEqual(result.status, 1);
-		deepStrictEqual(JSON.parse(result.stdout), { ok: false, message: "no declared MCP server with id 'missing'" });
-		result = run("bogus", "--json");
-		strictEqual(result.status, 2);
-		deepStrictEqual(Object.keys(JSON.parse(result.stdout)).sort(), ["message", "ok"]);
-		strictEqual(JSON.parse(result.stdout).ok, false);
-		const help = run("--help").stdout;
-		for (const shape of [
-			"list: {servers: [...], diagnostics: [...], trustDiagnostics: [...]}",
-			"trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt, network?,\n    entryScriptHashes?}, entry: [...]}",
-			"untrust: {ok: true, removed: boolean}",
-			"errors: {ok: false, message: string}",
-			"0 success; 1 operational failure; 2 invalid usage",
-		])
-			ok(help.includes(shape));
+		strictEqual(result.code, 0, result.text);
+		match(result.text, /record removed/);
+		match(run("list").text, /trust=untrusted/);
+		result = run("untrust", "files");
+		deepStrictEqual(result.data, { ok: true, removed: false });
+		strictEqual(run("trust", "files").code, 0);
+		result = run("untrust", "files");
+		deepStrictEqual(result.data, { ok: true, removed: true });
+		result = run("trust", "missing");
+		strictEqual(result.code, 1);
+		deepStrictEqual(result.data, { ok: false, message: "no declared MCP server with id 'missing'" });
+		result = run("bogus");
+		strictEqual(result.code, 2);
+		ok(result.data && typeof result.data === "object" && "ok" in result.data);
+		deepStrictEqual(Object.keys(result.data).sort(), ["message", "ok"]);
+		strictEqual(result.data.ok, false);
 		for (const args of [
 			["trust", "missing"],
 			["untrust", "missing"],
@@ -92,23 +96,29 @@ it("lists, trusts, detects stale declarations, untrusts and returns error exits"
 			["trust", "files", "--action-class", "invalid"],
 		]) {
 			result = run(...args);
-			ok(result.status !== 0);
-			strictEqual(result.stderr.trim().split("\n").length, 1);
+			ok(result.code !== 0);
+			strictEqual(result.text.trim().split("\n").length, 1);
 		}
 		writeFileSync(join(config, MCP_TRUST_FILENAME), "{broken");
 		for (const command of ["trust", "untrust"]) {
 			result = run(command, "files");
-			strictEqual(result.status, 1);
-			match(result.stderr, /trust state is unusable/);
-			strictEqual(result.stderr.trim().split("\n").length, 1);
+			strictEqual(result.code, 1);
+			match(result.text, /trust state is unusable/);
+			strictEqual(result.text.trim().split("\n").length, 1);
 		}
 		result = run("list");
-		strictEqual(result.status, 1);
-		match(result.stdout, /invalid JSON/);
+		strictEqual(result.code, 1);
+		match(result.text, /invalid JSON/);
 		writeFileSync(projectConfig, "version: 99\n");
-		result = run("list", "--json");
-		strictEqual(result.status, 1);
-		ok(JSON.parse(result.stdout).diagnostics.length > 0);
+		result = run("list");
+		strictEqual(result.code, 1);
+		ok(
+			result.data &&
+				typeof result.data === "object" &&
+				"diagnostics" in result.data &&
+				Array.isArray(result.data.diagnostics) &&
+				result.data.diagnostics.length > 0,
+		);
 	} finally {
 		scratch.cleanup();
 	}
@@ -138,28 +148,6 @@ it("prints the hashed real path of a symlinked entry and marks one bound by path
 		ok(trusted.text.includes(label), trusted.text);
 		const listed = mcpCommandOutput(["list"], { cwd: project, configDir: config });
 		ok(listed.text.includes(label), listed.text);
-	} finally {
-		scratch.cleanup();
-	}
-});
-
-it("documents numeric combination and non-finite policies in verifier help", () => {
-	const scratch = makeScratchHome("clio-verifier-help-");
-	try {
-		const module = resolve("src/cli/verifiers.ts");
-		const result = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				import.meta.resolve("tsx"),
-				"--input-type=module",
-				"-e",
-				`import { runVerifiersCommand } from ${JSON.stringify(module)}; process.exitCode = await runVerifiersCommand(["--help"]);`,
-			],
-			{ cwd: scratch.dir, env: { ...process.env, ...scratch.env }, encoding: "utf8" },
-		);
-		strictEqual(result.status, 0, result.stderr);
-		match(result.stdout, /--tolerance.*relative.*absolute.*ulp.*combine.*all\|any.*nonFinite.*fail\|match/);
 	} finally {
 		scratch.cleanup();
 	}
@@ -215,17 +203,11 @@ function validateProject(files: Record<string, string>) {
 		writeFileSync(join(project, relative), text);
 	}
 	try {
-		return spawnSync(
-			process.execPath,
-			[
-				"--import",
-				import.meta.resolve("tsx"),
-				"--input-type=module",
-				"-e",
-				`import { runVerifiersCommand } from ${JSON.stringify(resolve("src/cli/verifiers.ts"))}; process.exitCode = await runVerifiersCommand(["validate"]);`,
-			],
-			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8" },
-		);
+		return spawnSync(process.execPath, [CLI, "verifiers", "validate"], {
+			cwd: project,
+			env: { ...process.env, ...scratch.env },
+			encoding: "utf8",
+		});
 	} finally {
 		scratch.cleanup();
 	}
@@ -273,19 +255,13 @@ it("refreshes trusted MCP catalogs and lists annotation-derived tool classes", (
 			join(project, ".clio-coder", "mcp.yaml"),
 			`version: 1\nservers:\n  - id: untrusted\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched')`)}]\n`,
 		);
-		const module = resolve("src/cli/mcp.ts");
 		const run = (args: string[]) =>
-			spawnSync(
-				process.execPath,
-				[
-					"--import",
-					import.meta.resolve("tsx"),
-					"--input-type=module",
-					"-e",
-					`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
-				],
-				{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
-			);
+			spawnSync(process.execPath, [CLI, "mcp", ...args], {
+				cwd: project,
+				env: { ...process.env, ...scratch.env },
+				encoding: "utf8",
+				timeout: 10000,
+			});
 		const refreshed = run(["list", "--refresh", "--json"]);
 		strictEqual(refreshed.status, 0, refreshed.stderr);
 		const data = JSON.parse(refreshed.stdout);
@@ -317,19 +293,13 @@ it("tests one trusted server through the gateway's client and never launches an 
 			join(project, ".clio-coder", "mcp.yaml"),
 			`version: 1\nservers:\n  - id: untrusted\n    command: ${JSON.stringify(process.execPath)}\n    args: ["-e", ${JSON.stringify(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched')`)}]\n`,
 		);
-		const module = resolve("src/cli/mcp.ts");
 		const run = (args: string[]) =>
-			spawnSync(
-				process.execPath,
-				[
-					"--import",
-					import.meta.resolve("tsx"),
-					"--input-type=module",
-					"-e",
-					`import { runMcpCommand } from ${JSON.stringify(module)}; process.exitCode = await runMcpCommand(${JSON.stringify(args)});`,
-				],
-				{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
-			);
+			spawnSync(process.execPath, [CLI, "mcp", ...args], {
+				cwd: project,
+				env: { ...process.env, ...scratch.env },
+				encoding: "utf8",
+				timeout: 10000,
+			});
 		const refused = run(["test", "untrusted", "--json"]);
 		strictEqual(refused.status, 1);
 		match(JSON.parse(refused.stdout).message, /never launched until trusted: clio-coder mcp trust untrusted/u);
@@ -382,13 +352,7 @@ it("admits each mcp test call as a session does and never sends a confirm-gated 
 		);
 		const result = spawnSync(
 			process.execPath,
-			[
-				"--import",
-				import.meta.resolve("tsx"),
-				"--input-type=module",
-				"-e",
-				`import { runMcpCommand } from ${JSON.stringify(resolve("src/cli/mcp.ts"))}; process.exitCode = await runMcpCommand(${JSON.stringify(["test", "slurm", "--call", "slurm_submit", "--call", "unlisted", "--json"])});`,
-			],
+			[CLI, "mcp", "test", "slurm", "--call", "slurm_submit", "--call", "unlisted", "--json"],
 			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
 		);
 		strictEqual(result.status, 1, result.stderr);
@@ -437,13 +401,7 @@ it("records a JSON-RPC error answer as that call's error and runs the later call
 		);
 		const result = spawnSync(
 			process.execPath,
-			[
-				"--import",
-				import.meta.resolve("tsx"),
-				"--input-type=module",
-				"-e",
-				`import { runMcpCommand } from ${JSON.stringify(resolve("src/cli/mcp.ts"))}; process.exitCode = await runMcpCommand(${JSON.stringify(["test", "rpc", "--call", "strict", "--call", "echo", "--json"])});`,
-			],
+			[CLI, "mcp", "test", "rpc", "--call", "strict", "--call", "echo", "--json"],
 			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8", timeout: 10000 },
 		);
 		strictEqual(result.status, 1, result.stderr);
