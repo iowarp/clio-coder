@@ -216,7 +216,7 @@ context:
 | `context.workingSet.rearmFraction` | `0.1` | number ≥ 0 and < 1 | Required projected growth as a fraction of the window before another automatic reduction. |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately. |
 
-Changes to any `context.*` key apply on the next turn (`src/domains/config/classify.ts`). The retired `compaction.excludeLastTurns` key is not accepted by settings v2. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
+Changes to any `context.*` key apply on the next turn (`src/domains/config/classify.ts`). The retired `context.compaction.excludeLastTurns` key (version 1: `compaction.excludeLastTurns`) is ignored when a file still carries it: `clio-coder doctor` names it and `doctor --fix` removes it. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 
 `CLIO_CODER_LEGACY_MASK=1` enables the legacy stale-observation stage for compatibility. That stage rewrites the ledger rather than projecting a working set.
 

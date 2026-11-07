@@ -10,7 +10,7 @@ Clio Coder is a coding harness for terminal and browser sessions, with provider 
 src/
 ├── cli/             # clio-coder subcommands, argument parsing, headless run modes
 ├── core/            # config/state paths, event bus, defaults, domain loader, shared primitives
-├── domains/         # 31 feature-domain directories, loaded through manifests or imported as libraries
+├── domains/         # 32 feature-domain directories, loaded through manifests or imported as libraries
 ├── engine/          # Pi (pi-ai, pi-agent-core, pi-tui) boundary, runtime adapters, ACP, worker runtime
 ├── entry/           # orchestrator bootstrap wiring (bootOrchestrator)
 ├── interactive/     # TUI panels, overlays, key routing, dashboard
@@ -28,13 +28,14 @@ tests/
 
 ## Domains
 
-`src/domains/` holds 31 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
+`src/domains/` holds 32 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
-System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
+System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are claims, components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
 | agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes, playbooks, and result contracts. |
+| claims | `src/domains/claims/**` | The project-scoped, append-only claims log: capture of judged `verify` verdicts and hypotheses, derived contradiction and supersede edges, memory regressions, and the claims reminders offered to the main agent. See [Artifact placement](artifact-placement.md#state-root-machine-produced-state). |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, effect-timing classification, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codemap indexer, working set, bootstrap, repository context. |
@@ -275,7 +276,7 @@ The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
 each overlapping helper and the Clio Coder deltas that must survive an SDK upgrade.
 
-Nine rules apply. Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
+Nine import rules apply. The same checker also runs rules 10 to 14, which hold telemetry accounting rather than imports and are described in [Telemetry](telemetry.md). Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
 
 ### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 

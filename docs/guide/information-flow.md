@@ -74,7 +74,7 @@ At `yolo`, the operator's skip-permissions mode, the main session and any worker
 
 Native HTTP workers carry the approved source rules and the restrictions their inherited context holds, and admit each model request, so they can read a source on an allowed target and refuse a later request to a disallowed one. Claude Code, Codex and other CLI or SDK runtimes cannot admit their own model requests through Clio Coder. Clio Coder refuses their launch whenever any source rule, approved or unapproved, does not allow their pinned target, even before the parent has read a source. Ordinary tool mediation in an SDK does not supply this model-request boundary.
 
-ACP agents and pane peers have no pinned model destination that Clio can approve for this purpose, so source rules refuse those delegations or content handoffs. A worker that hits this boundary ends with `information_flow_blocked`; dispatch never retries or fails over that outcome. See [exit codes and output](exit-codes-and-output.md).
+ACP agents and pane peers have no pinned model destination that Clio can approve for this purpose, so source rules refuse those delegations or content handoffs. Once the session carries any restriction, a `panes` handoff with a `brief` and a `panes` send with `text` are refused; a handoff with no brief and a send of only an interrupt key carry no session content and still run ([panes.ts](../../src/tools/panes.ts)). A worker that hits this boundary ends with `information_flow_blocked`; dispatch never retries or fails over that outcome. See [exit codes and output](exit-codes-and-output.md).
 
 ## Read a refusal and recover
 

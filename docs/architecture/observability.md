@@ -15,7 +15,7 @@
 | List | `Up` and `Down` select. `Left` and `Right` jump to the previous or next non-empty category, wrapping at the ends and honoring the active filter. Typing filters. `Ctrl+U` clears the filter. `Enter`, `Tab`, or `Shift+Tab` moves to the content pane. `Esc` closes the viewer. |
 | Content | `Up` and `Down` (or `k` and `j`) scroll by line. `PgUp` and `PgDn` scroll by page, `Ctrl+U` and `Ctrl+D` by half page, `g` and `G` jump to the top and bottom. `n` and `p` move to the next and previous artifact. `Left` and `Right` jump category. `i` toggles the details and provenance view. `v` verifies the selected run record. `o` shows the absolute backing path through the notice channel, or a warning notice when the artifact has no backing path. `Tab`, `Shift+Tab`, or `Esc` returns to the list. |
 
-The filter splits on whitespace and requires every token to match, case-insensitively, against the artifact id, `category:id`, category, title, description, run id, session id, correlation id, tool name, backing path, and search text. A `<category>:<value>` filter, such as `run:abc1234`, restricts the list to that category and selects the artifact whose id matches the value exactly when one does. A bare `transcript`, `task-ledger`, `workspace`, `protected-artifact`, `compaction`, `prompt-manifest`, or `audit` selects that whole category. `/view <id-or-filter>` opens the viewer with that filter applied.
+The filter splits on whitespace and requires every token to match, case-insensitively, against the artifact id, `category:id`, category, title, description, run id, session id, correlation id, tool name, backing path, and search text. A `<category>:<value>` filter, such as `run:abc1234`, restricts the list to that category and selects the artifact whose id matches the value exactly when one does. A bare `transcript`, `message-path`, `task-ledger`, `workspace`, `protected-artifact`, `compaction`, `prompt-manifest`, or `audit` selects that whole category. `/view <id-or-filter>` opens the viewer with that filter applied.
 
 ## Verifying a run
 
@@ -30,11 +30,12 @@ A run whose seal verifies but whose trust is compromised posts a warning; a run 
 
 ## Categories
 
-Directories resolve under platform XDG defaults (on Linux, `~/.config/clio-coder/`, `~/.local/share/clio-coder/` and `~/.local/state/clio-coder/`). `/view` lists twelve categories in this order (`VIEW_ARTIFACT_CATEGORIES`).
+Directories resolve under platform XDG defaults (on Linux, `~/.config/clio-coder/`, `~/.local/share/clio-coder/` and `~/.local/state/clio-coder/`). `/view` lists thirteen categories in this order (`VIEW_ARTIFACT_CATEGORIES`).
 
 | Category | Description | Backing path |
 | --- | --- | --- |
 | **Transcript details** | The live transcript's acts rendered unbounded and redacted: provider and terminal errors, thinking blocks, and tool executions with every argument. Held by the running session only. | None |
+| **What happened to your messages** | The newest 200 operator messages of the session, newest first, each with its state (such as delivered, queued, held, removed or failed), lane, length and the steps from submission to the call that carried it. The journal holds lengths and points, never message text. | `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` |
 | **Accountability** | First-pass success rate, unverified successes, ungrounded claims, and the top failure causes over the runs this view lists: the session's own runs plus runs recorded in the same project. | The listed runs' sealed run scopes |
 | **Evidence bundles** | Each settled run's assessment: trust status, findings, gate verdicts and totals. | `<stateDir>/telemetry/runs/<runId>/` |
 | **Run records** | One record per finished run whose run journal exists, from its `run.settled` record and seal verdict. `v` verifies it. | `<stateDir>/telemetry/runs/<runId>/journal.jsonl` |

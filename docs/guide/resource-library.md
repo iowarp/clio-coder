@@ -25,8 +25,8 @@ clio-coder library drift [kind:name|name] [--user|--project] [--json]
 clio-coder library reload [--json]
 clio-coder library skills [--all] [--json]
 clio-coder library inventory --json
-clio-coder library package <directory> [--force] [--dry-run] [--json]
-clio-coder library validate <package-path|SKILL.md> [--json]
+clio-coder library validate <package-path|skill-dir|SKILL.md> [--json]
+clio-coder library package <skill-dir> [--force] [--dry-run] [--json]
 clio-coder library sync
 clio-coder library push
 clio-coder library remote confirm <url>
@@ -59,6 +59,36 @@ clio-coder library install plugin:materio --project --json
 An existing local directory wins over a library name with the same spelling. A source that is neither a local directory nor a library package fails with ``<source> is not a library package or a local package directory; find the name with `clio-coder library search` ``. `kind:name` checks the package kind; bare names are accepted when unambiguous. Package names share one namespace within each scope. A replacement cannot change a package's kind; remove it explicitly first. A raw or unindexed GitHub URL cannot be installed; use `library import` for a reviewed import, or add a pinned index row.
 
 `inspect` reads a local package directory, an installed copy (the project copy first, with its copies, origin and diagnostics), or an indexed package staged without installing, and exits 1 when the manifest is invalid. `list` and `search` are package-oriented and answer with install targets. `--kind` and a query also match the components a plugin provides, returning the owning package, so a kind query finds the owning plugin before installation. Plain output has one line per package: `kind:name`, version, the state of each installed copy (`scope:state`) or `available`, origin, and description.
+
+## Science packs
+
+The bundled index carries four science plugins. Like every other package, none is installed automatically. Each pack's `README.md` under `library/plugins/<name>/` lists its setup, offline behavior, and the terms of the data sources it queries.
+
+| Pack | Skills | MCP servers it declares | Needs |
+| --- | --- | --- | --- |
+| `plugin:hpc` (0.2.0) | `hpc-sweep`, `hpc-modules`, `hpc-parallel-io`, `hpc-darshan`, `hpc-chronolog`; requires `skill:slurm-jobs` | none | `clio-kit` for the Slurm server, which the operator declares; the cluster's Slurm, Lmod or Spack, Darshan, parallel HDF5 and MPI builds; Python 3.10+ for the bundled scripts |
+| `plugin:science-data` (0.1.0) | `science-data` | `parquet`, `pandas` (clio-kit), each with per-tool action classes | `clio-kit` on `PATH`; Clio Coder 0.7.0 or later |
+| `plugin:literature` (0.2.0) | `citation-check`, `hypothesis-workflow`; requires `skill:arxiv-literature` | `cite-nexus` (`cite-nexus-mcp` 0.2.3 through `uvx`), every tool classed `read` | `uvx` on `PATH`; network for every lookup; Clio Coder 0.7.0 or later |
+| `plugin:life-science` (0.1.0) | `pdb-structures`, `uniprot-proteins`, `pubchem-compounds` | none; the skills use `web_fetch` against the public, key-free RCSB PDB, UniProt and PubChem REST APIs | network for every lookup |
+
+```bash
+clio-coder library install plugin:hpc --project --with-requirements
+clio-coder library install plugin:science-data --project
+clio-coder library install plugin:literature --project --with-requirements
+clio-coder library install plugin:life-science --project
+clio-coder mcp list                  # each declared server with its per-tool classes
+clio-coder mcp trust parquet         # likewise pandas and cite-nexus
+```
+
+`--with-requirements` also installs `skill:slurm-jobs` for the HPC pack and `skill:arxiv-literature` for the literature pack. Run `/library reload` in a running session afterwards. A plugin's MCP servers stay untrusted until `clio-coder mcp trust <id>` records the operator's review, and the trust record covers the per-tool class map; see [Per-tool action classes](authoring-plugins.md#per-tool-action-classes-in-mcpjson). The clio-kit and CiteNexus servers build their environment on first launch, which needs network once; later launches run from the warm cache offline.
+
+**HPC.** `slurm-jobs` submits a job or a job array through the clio-kit Slurm MCP server and reports each array task as `<array job id>_<task id>`. The pack does not declare that server: the operator declares it with the id `slurm` in the user `mcp.yaml`, as the [Slurm guide](slurm.md) shows. `hpc-sweep` plans a parameter sweep as a job array with the bundled `sweep.py`, shows a dry run, submits on the operator's word, judges each run with a declared `verify` check, and tabulates every run, failed and unverified ones included, from the claims Clio records. `hpc-modules` drives Lmod and Spack, `hpc-parallel-io` gives correctness and tuning rules for parallel HDF5 and MPI-IO, and `hpc-darshan` summarizes a Darshan log through the bundled `darshan_summary.py`. `hpc-chronolog` records run events in ChronoLog and reads them back through chrono-mcp, the MCP server of the released ChronoLog 3.x line; the operator declares it in the user `mcp.yaml`. Known limits: ChronoLog 4.0 is unreleased, so the guidance targets the released 3.x line and covers 4.0 only for source builds. The Slurm and Lmod parts of the pack were checked against stand-in binaries, not a live cluster, and the MPI-IO guidance is compile-checked only.
+
+**Science data.** The `science-data` skill answers with Clio's built-in `data` tool first and moves to the `parquet` and `pandas` servers only for analysis `data` does not do. Read tools run without asking; `pandas` `save_data` and `filter_data` are classed `destructive` and ask at `default`. The clio-kit `hdf5` server is an operator entry in the user `mcp.yaml`, not a pack declaration, because it writes index files under its working directory.
+
+**Literature.** `citation-check` extracts BibTeX entries, DOIs and arXiv IDs offline with the bundled `extract_citations.py`, verifies each through CiteNexus (key-free Crossref, DataCite, Europe PMC and arXiv), falls back to `web_fetch` when the server is absent or untrusted, and reports VERIFIED, MISMATCH, NOT_FOUND, UNAVAILABLE or UNVERIFIABLE. It never edits a bibliography. With CiteNexus installed, `arxiv-literature` also exports BibTeX, RIS or CSL-JSON and verifies arXiv IDs. Known limit: a citation check covers existence and metadata only (identifier, title, year). It does not check that a source supports the claim it is cited for.
+
+**Hypothesis workflow.** `hypothesis-workflow` turns a research question into ranked, testable hypotheses: intake through `ask_user`, literature grounding with every statement cited or marked unsourced, independent council proposals, a testability ranking, the smallest experiment for each top hypothesis, and a hazard checkpoint. The bundled `hypothesis_slate.py` checks the slate offline. The workflow never picks the question or the hypothesis: it asks that choice as an [`operator_only`](tool-usage.md#askuser-host-owned-operator-interviews) `ask_user` question, which nobody answers for an absent operator. A headless run has no `ask_user`, so it ends with the ranked options. When the slate is written, Clio records each hypothesis in the project's claims ledger as proposed and moves it to tested, supported or refuted when the check it names runs; `clio-coder claims` reports that status. The ledger is described in [Evidence and memory](../architecture/evidence-and-memory.md#claims-ledger).
 
 ## Install an extension
 

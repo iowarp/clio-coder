@@ -81,7 +81,7 @@ Use in the TUI:
 /bugfix src/parser.ts empty input crashes
 ```
 
-Arguments follow Pi 1.0 semantics: bash-style quoting splits the text after the command into positional arguments, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
+Arguments follow Pi 1.0 semantics with Pi 1.3's empty-argument fix: bash-style quoting splits the text after the command into positional arguments, a quoted empty argument (`""` or `''`) keeps its position, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:-default}`, `${ARGUMENTS:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
 
 Frontmatter fields are `description`, `argument-hint` (or `argumentHint`),
 `display-only` (or `displayOnly`), `allowed-tools` and `delegated-tools`.

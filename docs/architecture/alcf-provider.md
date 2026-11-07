@@ -74,7 +74,7 @@ ALCF reports no per-token price. A target's cost provenance is `unknown` until i
 The runtime uses these components:
 
 - [alcf-oauth.ts](../../src/engine/alcf-oauth.ts) implements the Globus PKCE paste-code OAuth flow.
-- [oauth.ts](../../src/engine/oauth.ts) registers the Clio Coder-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic, OpenAI Codex and GitHub Copilot flows.
+- [oauth.ts](../../src/engine/oauth.ts) registers the Clio Coder-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic and OpenAI Codex flows.
 - [alcf.ts](../../src/domains/providers/runtimes/cloud/alcf.ts) implements Sophia and Metis discovery and reuses the generic OpenAI-compatible chat synthesis.
 - `ProbeContext.authToken` carries a resolved stored, API or OAuth bearer into live probes.
 - Sophia serves gpt-oss through vLLM with server flags the operator does not control, so tool calls and reasoning can arrive as raw Harmony frames in the text. The gpt-oss ids resolve to Clio Coder's Harmony parser, which recovers text, thinking and tool calls from those frames, as the [provider adapter cookbook](provider-adapter-cookbook.md#31-stream-filters-and-sentinel-stripping) describes. Probe a Sophia target with `clio-coder targets --probe --tools` before relying on tool loops.

@@ -30,7 +30,11 @@ The id `slurm` is what the library skill expects, and it is also the id that
 switches on the per-tool classification and the allocation confirmation
 described below. A server entry takes `id`, `command`, `args`, `cwd`, `env`,
 `timeoutMs` (at most 900000, bounding one tool call), `actionClass`, and
-`toolActionClasses`. The first launch lets
+`toolActionClasses`. A user-scope `cwd` is absolute or relative to the Clio
+config directory, and a user server with no `cwd` runs from the config
+directory itself. A project-scope `cwd` must be repository-relative and stay
+inside the repository, symbolic links included; an absolute project `cwd` is
+refused. The first launch lets
 clio-kit prepare its private runtime for the server, which can take longer
 than the 15 second initialize bound on a cold cache; run
 `clio-kit mcp-server slurm` once in a terminal first and stop it with Ctrl-C.
@@ -50,9 +54,11 @@ The gateway lists them as `mcp_slurm__<tool>`. Find them with
 recorded catalog and launch nothing. Until one exists, `find` reports the server
 with `catalog: "missing"`; fill it once with
 `gateway(op="find", server="slurm", refresh=true)`, or just call a tool, which
-lists the server live and records the result as a side effect. A tool result
-is bounded to 16 KiB in the model's context, and the full text is offloaded to
-a file the model can read in windows.
+lists the server live and records the result as a side effect. The MCP client
+first bounds a tool result's text at 1 MiB, cutting anything longer and
+appending a `[mcp result text truncated at 1048576 bytes]` marker. The model
+then sees at most 16 KiB of that text in its context, and the rest of the
+bounded text is offloaded to a file the model can read in windows.
 
 | Capability | What it does |
 | --- | --- |
@@ -98,10 +104,14 @@ classifies tools by name before applying that default, unless
 | Any other tool name | the server's class | The `toolActionClasses` entry for the tool, else the declared or trusted class, or an advisory annotation for an implicit user class. |
 
 The confirmation is attached to the tool name and does not depend on the class.
-A `toolActionClasses` override or `clio-coder mcp trust slurm --action-class read`
-cannot make a submission or cancellation run unasked. A denied call never
-launches a job. In a headless `clio-coder run` the ask is denied, so a
-submission or cancellation never runs there. A read-only dispatched run denies
+At `default`, a `toolActionClasses` override or
+`clio-coder mcp trust slurm --action-class read` cannot make a submission or
+cancellation skip the confirmation; `yolo` skips it whatever the class. A
+denied call never launches a job. In a headless `clio-coder run` at `default`
+the safety judge still reviews the call: when it allows the call, the
+submission or cancellation runs, and when it refuses or gives no verdict the
+call is denied, because nobody is there to answer. A headless
+`clio-coder run --autonomy yolo` runs them without asking. A read-only dispatched run denies
 both allocation tools outright and still allows the read tools. In a server
 with a different id the Slurm name rules do not apply: tools use the normal
 MCP classifier described above.
@@ -124,6 +134,57 @@ fetches bounded output, and ends its answer with
 `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. It never
 falls back to `sbatch` through `bash`.
 
+## Parameter sweeps
+
+A parameter sweep runs as a Slurm job array that Clio Coder plans, checks and
+tabulates as one experiment. The `hpc-sweep` skill in the `hpc` plugin drives
+it on top of `slurm-jobs`:
+
+```bash
+clio-coder library install skill:slurm-jobs --project
+clio-coder library install plugin:hpc --project
+```
+
+Then run `/library reload` in the session and ask for the sweep, for example
+`/skill hpc-sweep dry run sweeps/decay.yaml`.
+
+The sweep file (YAML, or JSON when PyYAML is absent) names the sweep and lists
+its `parameters`, a `mode` of `grid` or `sample`, the run `template` script,
+the Slurm `resources`, a `concurrency` cap that becomes the array's `%N`, the
+verify `check` that judges one run and an optional `metrics` file. The plugin's
+`sweep.py` helper plans and tabulates under `sweeps/<name>/` in the project. It
+never submits, polls or cancels; those go through the five capabilities above.
+
+1. **Plan and dry run.** The default. The helper writes `manifest.tsv`, the
+   array script, `plan.json` and one `runs/<task>/params.json` per run, and the
+   skill shows the run table, the script and the exact
+   `mcp_slurm__slurm_submit` call. Without an explicit request to submit, the
+   skill stops here and asks with `Don't submit` as the recommended option.
+2. **Submit.** Only on the operator's word, exactly as `plan.json` names it,
+   with the `%N` concurrency suffix kept. The submission is an execute-class
+   call and follows [How autonomy treats them](#how-autonomy-treats-them).
+3. **Monitor.** Each array task is polled by `<array id>_<task>` until every
+   task is terminal.
+4. **Check each run.** For every task that completed with exit 0, the skill
+   calls `verify(check="<check>/<task>")`, one call per run. The check is a
+   `.clio-coder/verifiers.yaml` entry with `runs: <directory>`; verify appends
+   the run directory to its command and refuses a bare call or a run outside
+   that directory. See [Project verifier catalog](tool-usage.md#project-verifier-catalog).
+5. **Tabulate.** `clio-coder claims list --check <check> --json` feeds the
+   helper's `aggregate`, which writes `results.tsv` and `results.md`. Every
+   run gets a verdict: `agrees`, `disagrees`, `unverified`, `run failed`,
+   `not terminal`, `unknown` (a submitted job with no accounting state) or
+   `not submitted` (a task with no job). Failed and unverified runs stay in the table.
+6. **Refine.** A refinement is a new sweep with a new name and its own `runs`
+   check entry; a finished sweep's directory is never overwritten.
+
+The verdicts say whether each run agreed with its reference within the check's
+declared tolerance, not that the simulation is right.
+
+For this release, the Slurm path (the server, the skills and the doctor rows)
+was checked against fake Slurm client binaries only, not against a live
+cluster controller.
+
 ## Doctor rows
 
 `clio-coder doctor` runs `slurmMcpFindings` and never fails because of it: every
@@ -137,14 +198,18 @@ with a warning keeps its own line; `clio-coder doctor --verbose` prints all thre
 | --- | --- |
 | `slurm clio-kit` | The `clio-kit` binary on `PATH`, its version line (`clio-kit` has shipped without `--version`, in which case the row says so), and whether `clio-kit mcp-servers` lists a `slurm` server. Informational when `clio-kit` is not on `PATH`. |
 | `slurm mcp server` | Which `mcp.yaml` declares `clio-kit mcp-server slurm`, its scope, and its trust. OK when every matching declaration is trusted, informational otherwise, with the `clio-coder mcp trust <id>` remedy. |
-| `slurm scheduler` | `sbatch` and `squeue` on `PATH`. |
+| `slurm scheduler` | `sbatch` and `squeue` on `PATH`, and whether each one found answered `--version`. |
 
-The probes run in a scratch working directory with a 5 second timeout and a
-16 KiB output cap. Doctor checks the installed Slurm clients with bounded
-version probes before marking the scheduler row OK. A client that cannot
-discover its configuration or controller reports a warning with "host has no
-Slurm configuration or controller to reach"; installing client binaries alone
-does not establish a working scheduler.
+Every probe runs in a scratch working directory. The two `clio-kit` probes
+(`--version` and `mcp-servers`) each get a 5 second timeout and a 16 KiB
+output cap. The scheduler row reuses the HPC toolchain row's `sbatch --version`
+result, which has a 2 second timeout and a 4 KiB output cap, so each doctor
+run probes `sbatch` once. `squeue --version` gets a 5 second timeout and the
+same 4 KiB output cap.
 
-The scheduler row reuses the HPC toolchain row's `sbatch --version` result, so
-each doctor run probes that client once.
+An OK scheduler row means only that each client on `PATH` answered
+`--version` with exit status 0. It does not submit a job, query the queue or
+contact the controller, so it does not prove a working scheduler. A client
+whose `--version` times out or exits non-zero turns the row into a warning;
+when its output shows that it could not find its configuration or controller,
+the warning says "host has no Slurm configuration or controller to reach".

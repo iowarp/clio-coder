@@ -382,7 +382,8 @@ what" above.
 | `<data>/tools/<id>/<version>/` | Vendored programs with their license files and an install marker. |
 | `<cache>/yazi/profile/` | Clio Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
 | `<cache>/yazi/sessions/` | Per-pane transport files, removed when the pane closes; anything older than a day is swept on the next open. |
-| `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal, which the logs pane follows. |
+| `<state>/runs/<runId>/feed.jsonl` | The run's display feed, which the logs pane follows. |
+| `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal. |
 | `<state>/watch-selection`, `<state>/watch-dock-taps` | The request and tap files shared with the workers dashboard. See [Fleet Dispatch](fleet-dispatch.md). |
 | `<state>/cliamp/dock-taps` | Lines the music pane's `clio-dock` plugin appends when Alt+A is pressed inside cliamp. See [Music](music.md). |
 

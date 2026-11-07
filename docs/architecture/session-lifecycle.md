@@ -17,13 +17,11 @@ Sessions are persisted durably on disk under the platform state root (`clioState
   meta.json               # ClioSessionMeta JSON document
   current.jsonl           # Append-only structured session event ledger
   tree.json               # SessionTreeNode[] conversation tree graph
-  context-snapshots.jsonl # Per-turn token accounting records (best effort)
-  prompt-manifest.jsonl   # One record per compiled system prompt that changed
 ```
 
 - `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of the absolute resolved working-directory path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
 - `<sessionId>`: UUIDv7 generated at session initialization.
-- `context-snapshots.jsonl` is written by `appendContextSnapshot` ([context-accounting.ts](../../src/domains/session/context-accounting.ts)) and described in [Context Engine](context-engine.md#token-accounting--ledger-snapshots). `prompt-manifest.jsonl` is written by [prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts) and records prompt hashes, section token estimates, fragment versions and the thinking level, never prompt text.
+- Per-turn token accounting and prompt compiles are not session files. Each turn's context snapshot is a `context.snapshotted` record and each prompt compile a `prompt.compiled` record in the session's telemetry journal, `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` ([Telemetry](telemetry.md#journals), [Context Engine](context-engine.md#token-accounting--ledger-snapshots)). A prompt compile records prompt hashes, section token estimates, fragment content hashes and the thinking level ([prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts)), never prompt text.
 - Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted.
 
 `openSession` and `resumeSession` locate a session by id under any `<cwdHash>` bucket, after rejecting ids that could traverse out of the sessions root.
