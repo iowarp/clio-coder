@@ -48,7 +48,7 @@ function resolvePath(path: string, cwd: string): string {
 }
 
 /** Why this edit must wait for a fresh look at its file, or null when it may run. */
-export function staleEditBlockReason(
+function staleEditBlockReason(
 	entries: ReadonlyArray<SessionEntry>,
 	toolName: string,
 	toolArgs: unknown,
