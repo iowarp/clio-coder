@@ -124,6 +124,12 @@ export interface AdmissionInput {
 	 */
 	operatorDefault?: OperatorDefaultScope;
 	/**
+	 * A worker's shell commands run in an OS sandbox that confines its writes
+	 * (bubblewrap, no writable root under a read-only permit), so a read-only
+	 * run admits them. Host-owned; the main session uses `operatorDefault`.
+	 */
+	readOnlyShellConfined?: boolean;
+	/**
 	 * The operator's yolo, bound by the host permit for every action class
 	 * (#407) and independent of model fields. The permit field keeps its
 	 * historical name `executeAutonomy`. A worker under it is admitted the true
@@ -281,12 +287,45 @@ function toolInScope(allowed: ReadonlyArray<string> | ReadonlySet<string>, tool:
 	return turnAllowsTool({ allowedTools }, tool);
 }
 
+/**
+ * What a read-only run admits: a read, or a shell command that runs where it
+ * can change no user file. For the main session that is the read-only
+ * sandbox its admission chose; for a worker, the OS sandbox its spawn
+ * confines writes with.
+ */
+function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerConfined: boolean): boolean {
+	const actionClass = decision.classification.actionClass;
+	if (actionClass === "read") return true;
+	if (actionClass === "git_destructive") return false;
+	if (decision.policy?.shellSandbox?.readOnly === true) return true;
+	return (
+		workerConfined &&
+		(call.tool === ToolNames.Bash || call.tool === ToolNames.RunScript) &&
+		call.args?.unsandboxed !== true
+	);
+}
+
+function readOnlyRun(input: AdmissionInput): boolean {
+	return input.constraints?.readOnly === true || input.constraints?.turnConstraints?.readOnly === true;
+}
+
+/**
+ * Decide one call. Pure apart from the policy engine's own audit side effects.
+ * A read-only run asks nobody: what would ask is refused, since an approval
+ * cannot make a call leave every user file unchanged.
+ */
+export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
+	const disposition = admit(input);
+	if (disposition.kind !== "ask" || !readOnlyRun(input)) return disposition;
+	const tool = input.capability?.tool ?? input.effects[0]?.tool ?? "unknown";
+	return deny("read_only", `${tool} denied: this run is read-only (${disposition.reason})`, disposition.decision);
+}
+
 function activatesSkill(call: ClassifierCall): boolean {
 	return call.tool === ToolNames.Context && call.args?.scope === "skills" && typeof call.args?.name === "string";
 }
 
-/** Decide one call. Pure apart from the policy engine's own audit side effects. */
-export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
+function admit(input: AdmissionInput): AdmissionDisposition {
 	const principal = input.principal;
 	const level: AutonomyLevel =
 		principal === "main"
@@ -295,23 +334,34 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 				? "yolo"
 				: DEFAULT_AUTONOMY_LEVEL;
 	const issuer = input.authorization?.issuer;
+	// A read-only main session runs its contained calls in the read-only
+	// sandbox at either level, and its yolo relaxes nothing.
+	const readOnlyScope =
+		principal === "main" && issuer !== "main" && input.operatorDefault?.readOnly === true
+			? input.operatorDefault
+			: undefined;
 	const posture =
 		issuer === "operator"
 			? CONFIRMED_POSTURE
 			: issuer === "main"
 				? MAIN_GRANT_POSTURE
-				: level === "yolo"
+				: level === "yolo" && readOnlyScope === undefined
 					? "yolo"
 					: undefined;
 	const normalize = input.normalize ?? ((decision: SafetyDecision) => decision);
 	// True yolo (#407): the operator's session at yolo, or a worker whose permit
 	// inherited it. Nothing parks under it, so no authorization ever arrives.
 	const operatorYolo =
-		level !== "yolo" || issuer !== undefined ? undefined : principal === "main" ? input.operatorYolo : WORKER_YOLO_SCOPE;
+		level !== "yolo" || issuer !== undefined || readOnlyScope !== undefined
+			? undefined
+			: principal === "main"
+				? input.operatorYolo
+				: WORKER_YOLO_SCOPE;
 	// The operator's default holds through an operator's own approval, so an
 	// approved contained call still runs contained.
 	const operatorDefault =
-		level === "default" && principal === "main" && issuer !== "main" ? input.operatorDefault : undefined;
+		readOnlyScope ??
+		(level === "default" && principal === "main" && issuer !== "main" ? input.operatorDefault : undefined);
 	const evaluate = (call: ClassifierCall): SafetyDecision =>
 		normalize(input.safety.evaluate(withCwd(call, input.cwd), posture, operatorYolo ?? operatorDefault));
 	if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
@@ -345,8 +395,10 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	// Step 2: hard permit limits. None of them parks and no approval clears them.
 	const constraints = input.constraints ?? {};
 	if (
-		(constraints.readOnly === true || constraints.turnConstraints?.readOnly === true) &&
-		(effectDecisions.some((d) => d.classification.actionClass !== "read") ||
+		readOnlyRun(input) &&
+		(effectDecisions.some(
+			(d, at) => !readOnlyEffect(input.effects[at] ?? call, d, input.readOnlyShellConfined === true),
+		) ||
 			input.confirmationRuleId !== undefined ||
 			readOutside ||
 			netAsk !== undefined ||

@@ -106,6 +106,12 @@ export interface MainSandboxPolicy {
 	env: SandboxEnvPolicy;
 	/** Whether a contained command may create Unix-domain sockets (unix-sockets.ts). */
 	unixSockets: UnixSocketMode;
+	/**
+	 * The read-only sandbox of a read-only session: the one writable root is
+	 * the session's scratch directory, created at spawn, and the command gets
+	 * a private /tmp. Only bubblewrap runs it.
+	 */
+	readOnly?: true;
 }
 
 /**
@@ -503,6 +509,39 @@ export function mainSandboxPolicy(roots: {
 	});
 }
 
+/** The one directory a read-only session's contained commands may write, under Clio's state root. */
+export function readOnlyScratchDir(sessionId: string | undefined, stateDir: string = clioStatePath()): string {
+	const id = sessionId !== undefined && /^[A-Za-z0-9._-]+$/u.test(sessionId) ? sessionId : `pid-${process.pid}`;
+	return path.join(stateDir, "scratch", "read-only", id);
+}
+
+/**
+ * Pure: the read-only sandbox. The whole filesystem is read-only except the
+ * session's scratch directory; the workspace, its git dirs, the scratch
+ * roots, the package caches, the host /tmp and Clio's other directories
+ * included. Secret files in the workspace and scratch roots stay masked.
+ */
+export function readOnlyMainSandboxPolicy(roots: {
+	workspace: string;
+	scratchRoots: ReadonlyArray<string>;
+	scratchDir: string;
+	env?: SandboxEnvPolicy;
+	unixSockets?: UnixSocketMode;
+}): MainSandboxPolicy {
+	return {
+		writableRoots: [roots.scratchDir],
+		readOnlyPaths: [],
+		absentGitHooks: [],
+		absentGitFiles: [],
+		clioDirs: [],
+		network: true,
+		secretRoots: { workspace: roots.workspace, scratchRoots: roots.scratchRoots },
+		env: roots.env ?? DEFAULT_SANDBOX_ENV_POLICY,
+		unixSockets: roots.unixSockets ?? "block",
+		readOnly: true,
+	};
+}
+
 /**
  * Pure: the backend-neutral spec for one script command. Credentials and
  * runtime sockets are masked with the worker sandbox's own list, and the
@@ -522,7 +561,13 @@ export function mainSandboxInvocationSpec(
 		network: policy.network,
 		maskedPaths,
 		unsetEnv: ["SSH_AUTH_SOCK"],
-		privateTmp: false,
+		...(policy.readOnly === true
+			? {
+					privateTmp: true,
+					readableRoots: [policy.secretRoots.workspace],
+					setEnv: { TMPDIR: "/tmp", TMP: "/tmp", TEMP: "/tmp" },
+				}
+			: { privateTmp: false }),
 	};
 }
 
@@ -556,10 +601,17 @@ export function planMainSandboxSpawn(
 			message: `sandbox: the main-session sandbox is unavailable (${availability.reason ?? "no backend"}); the command was not run`,
 		};
 	}
+	if (policy.readOnly === true && availability.backend !== "bwrap") {
+		return {
+			kind: "refused",
+			message: `sandbox: a read-only run's commands need the bubblewrap sandbox, and this host has ${availability.backend}; the command was not run`,
+		};
+	}
 	// A read-only bind needs its path to exist, and naming the policy created none.
 	// No existence shortcut: a recursive mkdir passes only a directory, so a
 	// dangling link or a regular file in a root's place refuses the command.
-	for (const dir of policy.clioDirs) {
+	// A read-only run's scratch directory is created the same way.
+	for (const dir of [...policy.clioDirs, ...(policy.readOnly === true ? policy.writableRoots : [])]) {
 		try {
 			mkdirSync(dir, { recursive: true });
 		} catch (error) {
@@ -582,12 +634,17 @@ export function planMainSandboxSpawn(
 		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
 		baseMasks,
 	).masks;
-	// The command sees the host's /tmp and network namespace, where a
-	// multiplexer, display or daemon socket runs code outside the sandbox.
+	// The command sees the host's network namespace, and outside a read-only
+	// run its /tmp, where a multiplexer, display or daemon socket runs code
+	// outside the sandbox.
 	const sockets = unixSocketLaunch(
 		policy.unixSockets,
 		availability,
-		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots, privateTmp: false },
+		{
+			workspaceRoots: [policy.secretRoots.workspace],
+			scratchRoots: policy.secretRoots.scratchRoots,
+			privateTmp: policy.readOnly === true,
+		},
 		[...baseMasks, ...secretMasks],
 	);
 	const spec = {
@@ -669,6 +726,9 @@ function displayWritableRoots(roots: ReadonlyArray<string>): string {
 /** One line for a failed contained command whose output shows a refused write, else null. */
 export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy): string | null {
 	if (!WRITE_REFUSED.test(output)) return null;
+	if (policy.readOnly === true) {
+		return `sandbox: this run is read-only, so this command could write only to its scratch directory ${displayWritableRoots(policy.writableRoots)} and a private /tmp; the workspace and every other file outside Clio's home stay unchanged, and a read-only run has no unsandboxed commands.`;
+	}
 	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 

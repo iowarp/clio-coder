@@ -16,6 +16,8 @@ import {
 import {
 	type MainSandboxPolicy,
 	mainSandboxPolicy,
+	readOnlyMainSandboxPolicy,
+	readOnlyScratchDir,
 	type YoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
 import type { SandboxEnvPolicy, UnixSocketMode } from "../core/sandbox/types.js";
@@ -363,9 +365,13 @@ export interface RegistryDeps {
 	 * sandbox (`safety.sandbox` not off and a backend present), and whether a
 	 * workspace snapshot precedes a destructive call (a git work tree and
 	 * `safety.snapshots` on). Only the main session's registry wires it, beside
-	 * `scratchRoots`; without it default keeps today's rails.
+	 * `scratchRoots`; without it default keeps today's rails. `readOnlySandbox`
+	 * says the read-only sandbox runs here (bubblewrap, `safety.sandbox` not
+	 * off); a read-only session's shell calls run in it at either level.
 	 */
-	containment?: () => { sandbox: boolean; snapshots: boolean };
+	containment?: () => { sandbox: boolean; snapshots: boolean; readOnlySandbox?: boolean };
+	/** The main session's id, which names a read-only run's scratch directory. */
+	currentSessionId?: () => string | undefined;
 	/**
 	 * How a contained call's inherited environment is scrubbed: the operator's
 	 * `safety.sandboxPassEnv` and the variables Clio's targets read keys from,
@@ -382,6 +388,12 @@ export interface RegistryDeps {
 	mutationEpoch?: (turnId: string) => number;
 	/** Dispatch-owned restriction, fixed for the lifetime of this run. */
 	readOnly?: boolean;
+	/**
+	 * A worker's shell commands run in an OS sandbox that confines every write
+	 * (bubblewrap, no writable root under a read-only permit), so a read-only
+	 * run may still run them. Read only when `principal` is worker.
+	 */
+	readOnlyShellConfined?: () => boolean;
 	/** Who can make a turn's host scope read-only here, named by its denial; absent means `clio-coder run --read-only`. */
 	hostReadOnlySource?: HostReadOnlySource;
 	/**
@@ -928,13 +940,48 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		deps.containment !== undefined
 			? { level: "default", scratchRoots: deps.scratchRoots(), ...deps.containment() }
 			: undefined;
+	// A read-only main session at either level: its shell calls run in the
+	// read-only sandbox where one exists, and never under the operator's yolo.
+	const operatorReadOnlyScope = (): OperatorDefaultScope | undefined => {
+		if ((deps.principal ?? "main") !== "main" || deps.scratchRoots === undefined || deps.containment === undefined)
+			return undefined;
+		return {
+			level: "default",
+			scratchRoots: deps.scratchRoots(),
+			sandbox: deps.containment().readOnlySandbox === true,
+			snapshots: false,
+			readOnly: true,
+		};
+	};
 	const withOperatorScope = (
 		level: AutonomyLevel,
+		readOnly = false,
 	): { operatorYolo?: OperatorYoloScope; operatorDefault?: OperatorDefaultScope } => {
+		if (readOnly) {
+			const operatorDefault = operatorReadOnlyScope();
+			return operatorDefault === undefined ? {} : { operatorDefault };
+		}
 		const yolo = operatorYoloScope(level);
 		if (yolo !== undefined) return { operatorYolo: yolo };
 		const operatorDefault = operatorDefaultScope(level);
 		return operatorDefault === undefined ? {} : { operatorDefault };
+	};
+	const shellSandboxPolicy = (
+		roots: { workspace: string; scratchRoots: ReadonlyArray<string>; readOnly?: true },
+		sessionId: string | undefined,
+	): MainSandboxPolicy => {
+		const env = deps.sandboxEnv !== undefined ? { env: deps.sandboxEnv() } : {};
+		const unixSockets = deps.sandboxUnixSockets !== undefined ? { unixSockets: deps.sandboxUnixSockets() } : {};
+		if (roots.readOnly === true) {
+			return readOnlyMainSandboxPolicy({
+				workspace: roots.workspace,
+				scratchRoots: roots.scratchRoots,
+				scratchDir: readOnlyScratchDir(sessionId ?? deps.currentSessionId?.()),
+				...env,
+				...unixSockets,
+			});
+		}
+		return mainSandboxPolicy({ workspace: roots.workspace, scratchRoots: roots.scratchRoots, ...env, ...unixSockets });
 	};
 	/**
 	 * True yolo for this registry's calls (#407): the operator's session at
@@ -1208,17 +1255,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
 					...(deps.principal === "worker" && deps.git !== undefined ? { gitContext: deps.git } : {}),
-					...(operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined
+					...(operatorYoloScope(deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL) !== undefined &&
+					deps.readOnly !== true &&
+					options?.turnConstraints?.readOnly !== true
 						? { operatorYolo: true as const }
 						: {}),
 					...(decision.policy?.shellSandbox !== undefined
-						? {
-								shellSandbox: mainSandboxPolicy({
-									...decision.policy.shellSandbox,
-									...(deps.sandboxEnv !== undefined ? { env: deps.sandboxEnv() } : {}),
-									...(deps.sandboxUnixSockets !== undefined ? { unixSockets: deps.sandboxUnixSockets() } : {}),
-								}),
-							}
+						? { shellSandbox: shellSandboxPolicy(decision.policy.shellSandbox, options?.sessionId) }
 						: {}),
 					...(landing !== undefined && landing !== null ? { hookLanding: landing } : {}),
 					...(deps.flow !== undefined && !trueYolo()
@@ -1590,8 +1633,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(projectedCall !== undefined ? { capability: call, effects: [projectedCall] } : { effects: [call] }),
 			safety: deps.safety,
 			autonomy: level,
-			...withOperatorScope(level),
+			...withOperatorScope(level, deps.readOnly === true || options?.turnConstraints?.readOnly === true),
 			...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
+			...(deps.principal === "worker" && deps.readOnlyShellConfined?.() === true ? { readOnlyShellConfined: true } : {}),
 			constraints: {
 				...(deps.readOnly === true ? { readOnly: true } : {}),
 				...(options?.turnConstraints !== undefined ? { turnConstraints: options.turnConstraints } : {}),

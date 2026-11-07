@@ -3379,11 +3379,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		scriptSandbox: () => yoloScriptSandboxState(getCurrentSettings().safety.sandbox, sandboxAvailability()),
 		containment: () => {
 			const safety = getCurrentSettings().safety;
+			const availability = sandboxAvailability();
+			const sandbox = mainShellContained(safety.sandbox, availability);
 			return {
-				sandbox: mainShellContained(safety.sandbox, sandboxAvailability()),
+				sandbox,
 				snapshots: safety.snapshots !== "off" && workspaceSnapshotRepositoryPresent(process.cwd()),
+				readOnlySandbox: sandbox && availability.backend === "bwrap",
 			};
 		},
+		currentSessionId: () => session?.current()?.id,
 		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
 		sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),

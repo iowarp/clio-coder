@@ -93,6 +93,15 @@ export function workerSandboxConfinesWrites(): boolean {
 	return availability.available && availability.backend === "bwrap";
 }
 
+/**
+ * True when every command this worker spawns runs under bubblewrap with no
+ * writable root but its private /tmp, as a read-only permit's spec has: the
+ * command can change no file outside the sandbox.
+ */
+export function workerSandboxWritesNothing(): boolean {
+	return workerSandboxConfinesWrites() && active !== null && active.writableRoots.length === 0;
+}
+
 /** True when this process is a worker whose children, MCP servers included, start under an OS sandbox. */
 export function workerSandboxApplies(): boolean {
 	return active !== null && sandboxAvailability().available;

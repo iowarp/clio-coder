@@ -8,7 +8,7 @@ import type { WorkerRecall } from "../domains/context/worker/recall.js";
  * its registry factory, and the tool signature a worker attests.
  */
 
-import { workerReadOnlyTargetViolation } from "../core/sandbox/worker-process.js";
+import { workerReadOnlyTargetViolation, workerSandboxWritesNothing } from "../core/sandbox/worker-process.js";
 import type { ToolName } from "../core/tool-names.js";
 import {
 	createMiddlewareContractFromSnapshot,
@@ -213,7 +213,7 @@ export function createWorkerToolRegistry(
 		principal: "worker",
 		autonomy: () => DEFAULT_AUTONOMY_LEVEL,
 		...(executeAutonomy !== undefined ? { workerExecuteAutonomy: executeAutonomy } : {}),
-		...(readOnly === true ? { readOnly: true } : {}),
+		...(readOnly === true ? { readOnly: true, readOnlyShellConfined: workerSandboxWritesNothing } : {}),
 		...(onMiddlewareEffects ? { onMiddlewareEffects } : {}),
 		...(git !== undefined ? { git } : {}),
 		...(flow !== undefined ? { flow } : {}),

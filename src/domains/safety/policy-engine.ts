@@ -193,9 +193,11 @@ export interface SafetyPolicyDecision {
 	 * workspace, these scratch roots, the package caches and the repository's
 	 * git dirs: a contained bash or run_script call of the operator's session
 	 * at default, or a script under the operator's yolo with
-	 * `safety.sandbox: required` (#419).
+	 * `safety.sandbox: required` (#419). `readOnly` marks a call of a read-only
+	 * main session, which runs in the read-only sandbox instead and writes
+	 * nothing the operator owns.
 	 */
-	shellSandbox?: { workspace: string; scratchRoots: ReadonlyArray<string> };
+	shellSandbox?: { workspace: string; scratchRoots: ReadonlyArray<string>; readOnly?: true };
 	/**
 	 * Set when the operator's default admits a destructive call because the
 	 * workspace snapshot taken right before it can undo it: a worktree discard,
@@ -267,6 +269,11 @@ export interface OperatorDefaultScope {
 	sandbox: boolean;
 	/** True when a workspace snapshot is taken before a destructive call runs (a git work tree, `safety.snapshots` on). */
 	snapshots: boolean;
+	/**
+	 * A read-only main session at either level: a contained call runs in the
+	 * read-only sandbox, which `sandbox` then says is available on this host.
+	 */
+	readOnly?: true;
 }
 
 /** The scope the operator's own session hands the engine at its autonomy level. */
@@ -331,6 +338,8 @@ interface DefaultResort {
 	contained: boolean;
 	/** A workspace snapshot precedes a destructive call. */
 	snapshots: boolean;
+	/** The contained call runs in the read-only sandbox. */
+	readOnly?: true;
 }
 
 /** A former hard block the operator's default turns into an ask, kept until the other rails have spoken. */
@@ -1166,7 +1175,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			out = { ...out, reasons: [...out.reasons, ...deferred.reasons] };
 		}
 		if (resort.contained) {
-			out = { ...out, shellSandbox: { workspace: canonicalizePath(cwd) ?? cwd, scratchRoots: resort.scratchRoots } };
+			out = {
+				...out,
+				shellSandbox: {
+					workspace: canonicalizePath(cwd) ?? cwd,
+					scratchRoots: resort.scratchRoots,
+					...(resort.readOnly === true ? { readOnly: true as const } : {}),
+				},
+			};
 		}
 		if (recoverable && resort.snapshots) out = { ...out, recoverable: true };
 		return out;
@@ -1673,6 +1689,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
 			contained: scope.sandbox && containedShellCall(call, classification),
 			snapshots: scope.snapshots,
+			...(scope.readOnly === true ? { readOnly: true as const } : {}),
 		});
 	};
 

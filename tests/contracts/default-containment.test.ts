@@ -402,3 +402,80 @@ test("under bwrap the core.hooksPath directory is read-only for a contained comm
 	strictEqual(existsSync(join(cwd, "a.txt")), true);
 	strictEqual(existsSync(join(cwd, ".husky", "pre-commit")), false);
 });
+
+/** A read-only main session's registry, recording the sandbox each bash call was given. */
+function readOnlySession(cwd: string, readOnlySandbox: boolean, level: "default" | "yolo") {
+	const reviewed: SafetyJudgeSubject[] = [];
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd }),
+		autonomy: () => level,
+		readOnly: true,
+		scratchRoots: () => [],
+		containment: () => ({ sandbox: true, snapshots: true, readOnlySandbox }),
+		currentSessionId: () => "s1",
+		safetyJudge: {
+			review: (subject) => {
+				reviewed.push(subject);
+				return { kind: "skip" };
+			},
+			operatorApproved: () => {},
+		},
+	});
+	const ran: Array<{ command: string; readOnly: boolean; writableRoots: ReadonlyArray<string> }> = [];
+	registry.register({
+		...bashTool,
+		run: async (args, options) => {
+			ran.push({
+				command: String(args.command),
+				readOnly: options?.shellSandbox?.readOnly === true,
+				writableRoots: options?.shellSandbox?.writableRoots ?? [],
+			});
+			return { kind: "ok", output: "" };
+		},
+	});
+	return { registry, ran, reviewed };
+}
+
+for (const level of ["default", "yolo"] as const) {
+	test(`a read-only session runs a contained command at ${level} in the read-only sandbox, and asks nobody`, async () => {
+		const cwd = workspace("clio-read-only-shell-");
+		const session = readOnlySession(cwd, true, level);
+		strictEqual((await session.registry.invoke(bash("make bench"))).kind, "ok");
+		strictEqual(session.ran.length, 1);
+		strictEqual(session.ran[0]?.readOnly, true);
+		strictEqual(session.ran[0]?.writableRoots.length, 1);
+		match(session.ran[0]?.writableRoots[0] ?? "", /\/scratch\/read-only\/s1$/u);
+		for (const call of [bash("make bench", { unsandboxed: true }), bash("git push origin main")]) {
+			const verdict = await session.registry.invoke(call);
+			strictEqual(verdict.kind, "blocked", JSON.stringify(call.args));
+			if (verdict.kind === "blocked") match(verdict.reason, /read-only/u);
+		}
+		strictEqual(session.ran.length, 1);
+		deepStrictEqual(session.reviewed, []);
+	});
+}
+
+test("a read-only session refuses shell commands where the read-only sandbox does not run", async () => {
+	const session = readOnlySession(workspace("clio-read-only-shell-none-"), false, "default");
+	strictEqual((await session.registry.invoke(bash("make bench"))).kind, "blocked");
+	deepStrictEqual(session.ran, []);
+	deepStrictEqual(session.reviewed, []);
+});
+
+test("a read-only worker's shell command passes only when its sandbox confines every write, and never asks", () => {
+	const cwd = workspace("clio-read-only-worker-shell-");
+	const safety = createWorkerSafety({ cwd });
+	const admit = (command: string, confined: boolean, extra: Record<string, unknown> = {}) =>
+		evaluateAdmission({
+			principal: "worker",
+			effects: [bash(command, extra)],
+			safety,
+			constraints: { readOnly: true },
+			...(confined ? { readOnlyShellConfined: true } : {}),
+		});
+	strictEqual(admit("ls -la", true).kind, "allow");
+	strictEqual(admit("ls -la", false).kind, "deny");
+	strictEqual(admit("ls -la", true, { unsandboxed: true }).kind, "deny");
+	const unrecognized = admit("make bench", true);
+	strictEqual(unrecognized.kind === "deny" && unrecognized.code, "read_only");
+});

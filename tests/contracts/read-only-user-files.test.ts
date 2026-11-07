@@ -15,7 +15,9 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import {
 	closeServer,
 	type OpenAICompatFixture,
@@ -39,10 +41,17 @@ const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
 let fixture: OpenAICompatFixture;
 /** The tool call the fixture answers a main-agent turn with; null replies with text. */
 let mainToolCall: OpenAICompatToolCallScript | null = null;
+/** The tool results the main agent sent back, newest last. */
+const toolResults: string[] = [];
 
 before(async () => {
 	fixture = await startOpenAICompatFixture("done", {
-		toolCall: (request) => (hasToolResult(request) ? null : mainToolCall),
+		toolCall: (request) => {
+			const result = lastToolResult(request);
+			if (result === null) return mainToolCall;
+			toolResults.push(result);
+			return null;
+		},
 	});
 	mkdirSync(join(home, "config"), { recursive: true });
 	mkdirSync(work);
@@ -58,9 +67,28 @@ after(async () => {
 	rmSync(root, { recursive: true, force: true });
 });
 
-function hasToolResult(request: Record<string, unknown>): boolean {
+function lastToolResult(request: Record<string, unknown>): string | null {
 	const messages = request.messages;
-	return Array.isArray(messages) && messages.some((message) => (message as { role?: unknown }).role === "tool");
+	if (!Array.isArray(messages)) return null;
+	const tool = messages.filter((message) => (message as { role?: unknown }).role === "tool").at(-1) as
+		| { content?: unknown }
+		| undefined;
+	if (tool === undefined) return null;
+	return typeof tool.content === "string" ? tool.content : JSON.stringify(tool.content);
+}
+
+const bwrap = (() => {
+	const availability = sandboxAvailability();
+	return availability.available && availability.backend === "bwrap";
+})();
+
+function writeSettings(change: (settings: Record<string, Record<string, unknown>>) => void = () => {}): void {
+	const file = join(home, "config", "settings.yaml");
+	writeFileSync(file, DEFAULT_SETTINGS_YAML);
+	seedOpenAICompatToolOrchestrator(join(home, "config"), fixture.url);
+	const settings = parseYaml(readFileSync(file, "utf8")) as Record<string, Record<string, unknown>>;
+	change(settings);
+	writeFileSync(file, stringifyYaml(settings));
 }
 
 interface Result {
@@ -151,6 +179,50 @@ describe("--read-only leaves every user file unchanged", { timeout: 600_000 }, (
 		ok(recorded.length > before.length, "the read-only run recorded its session");
 		const resumed = await clio(["--no-context-files", "run", "--read-only", "--continue", "Say done again."]);
 		equal(resumed.code, 0, resumed.stderr);
+		deepEqual(userFiles(), baseline);
+	});
+
+	// One command tries the workspace, the sentinel and Clio's state root,
+	// then writes its private /tmp, which is where TMPDIR points. The state
+	// path is assembled at run time, so the sandbox, not the floor's reading
+	// of the command text, is what keeps it out.
+	const shellCommand = (): string =>
+		[
+			`echo changed > ${join(work, "notes.txt")}`,
+			`echo changed > ${join(sentinel, "keep.txt")}`,
+			`touch ${join(work, "planted.txt")} ${join(sentinel, "planted.txt")}`,
+			`s=sta; touch "${home}/$\{s}te/planted"`,
+			`echo scratch > "$TMPDIR/probe" && echo "tmp-ok $TMPDIR"`,
+			`touch ${join(work, "planted.txt")}`,
+		].join("; ");
+
+	for (const autonomy of ["default", "yolo"] as const) {
+		it(`a contained shell command runs at ${autonomy} and changes no user file`, { skip: !bwrap }, async () => {
+			writeSettings();
+			mainToolCall = { name: "bash", arguments: { command: shellCommand() } };
+			toolResults.length = 0;
+			await clio(["--no-context-files", "run", "--read-only", "--autonomy", autonomy, "Run the probe."]);
+			const output = toolResults.join("\n");
+			match(output, /tmp-ok \/tmp\b/u, output);
+			match(output, /this run is read-only, so this command could write only to its scratch directory/u, output);
+			equal(existsSync(join(home, "state", "planted")), false, "Clio's state root stays read-only to the command");
+			deepEqual(userFiles(), baseline);
+		});
+	}
+
+	it("an unsandboxed or uncontained shell command is refused", async () => {
+		writeSettings((settings) => {
+			settings.safety = { ...settings.safety, sandbox: "off" };
+		});
+		mainToolCall = { name: "bash", arguments: { command: shellCommand() } };
+		toolResults.length = 0;
+		await clio(["--no-context-files", "run", "--read-only", "Run the probe."]);
+		match(toolResults.join("\n"), /bash denied: this (?:run|task) is read-only/u);
+		writeSettings();
+		mainToolCall = { name: "bash", arguments: { command: shellCommand(), unsandboxed: true } };
+		toolResults.length = 0;
+		await clio(["--no-context-files", "run", "--read-only", "Run the probe."]);
+		match(toolResults.join("\n"), /bash denied: this (?:run|task) is read-only/u);
 		deepEqual(userFiles(), baseline);
 	});
 });
