@@ -1,6 +1,6 @@
 /**
  * CLI flags that used to be parsed and then dropped. Each case runs the real
- * entry (`src/cli/index.ts`) in a scratch home, so the contract is what an
+ * entry (`dist/cli/index.js`) in a scratch home, so the contract is what an
  * operator typing the command sees: a flag the command cannot honor is refused
  * with exit 2 and a message naming it, and a dry run writes nothing.
  */
@@ -28,12 +28,12 @@ import {
 } from "../harness/openai-compat-fixture.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
-const ENTRY = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+const ENTRY = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 const home = makeScratchHome("clio-coder-cli-flags-");
 after(() => home.cleanup());
 
 function cli(args: ReadonlyArray<string>): { status: number | null; stdout: string; stderr: string } {
-	const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), ENTRY, ...args], {
+	const result = spawnSync(process.execPath, [ENTRY, ...args], {
 		cwd: home.dir,
 		env: { ...process.env, ...home.env, NO_COLOR: "1" },
 		encoding: "utf8",

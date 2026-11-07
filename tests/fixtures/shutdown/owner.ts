@@ -1,21 +1,18 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { withWikiDispatchLifecycle } from "../../../src/cli/wiki-generate.js";
-import { runBashCommand } from "../../../src/core/bash-exec.js";
-import { loadDomains } from "../../../src/core/domain-loader.js";
 import { getTerminationCoordinator } from "../../../src/core/termination.js";
-import { spawnWorkerProcess, type WorkerSpec } from "../../../src/domains/dispatch/worker-spawn.js";
-import {
-	createEditorSubmitController,
-	EDITOR_BASH_SHUTDOWN_MS,
-	type EditorSubmitDeps,
-} from "../../../src/interactive/editor-submit.js";
+import type { WorkerSpec } from "../../../src/domains/dispatch/worker-spawn.js";
+import type { EditorSubmitDeps } from "../../../src/interactive/editor-submit.js";
 
 const [mode, root, command] = process.argv.slice(2);
 if (!root || !command) throw new Error("missing shutdown fixture arguments");
 const noop = () => {};
 
 if (mode === "editor") {
+	const { runBashCommand } = await import("../../../src/core/bash-exec.js");
+	const { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } = await import(
+		"../../../src/interactive/editor-submit.js"
+	);
 	const controller = createEditorSubmitController({
 		editor: { getText: () => "", getTextForSubmit: () => "", setText: noop, addToHistory: noop },
 		ui: { start: noop, stop: noop, requestRender: noop },
@@ -52,6 +49,8 @@ if (mode === "editor") {
 	termination.onPersist(() => writeFileSync(join(root, "persisted"), "yes"));
 	controller.runEditorBash(`!${command}`);
 } else if (mode === "wiki") {
+	const { withWikiDispatchLifecycle } = await import("../../../src/cli/wiki-generate.js");
+	const { spawnWorkerProcess } = await import("../../../src/domains/dispatch/worker-spawn.js");
 	let forcedKills = 0;
 	const worker = spawnWorkerProcess(
 		"/bin/bash",
@@ -91,6 +90,7 @@ if (mode === "editor") {
 		},
 	);
 } else if (mode === "domains") {
+	const { loadDomains } = await import("../../../src/core/domain-loader.js");
 	const loaded = await loadDomains(
 		["persist", "slow"].map((name) => ({
 			manifest: { name, dependsOn: name === "slow" ? ["persist"] : [] },

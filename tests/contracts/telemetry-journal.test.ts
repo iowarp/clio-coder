@@ -343,18 +343,11 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		strictEqual(unresolved[0]?.runSpend?.apiCalls.kind, "unknown");
 		await mkdir(sessionDirectory, { recursive: true });
 		await writeFile(join(sessionDirectory, "current.jsonl"), "");
-		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
-		const cliReport = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				"--input-type=module",
-				"-e",
-				`import {runUsageCommand} from ${JSON.stringify(cli)}; await runUsageCommand(['report','--json']);`,
-			],
-			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
-		);
+		const cli = new URL("../../dist/cli/index.js", import.meta.url).pathname;
+		const cliReport = spawnSync(process.execPath, [cli, "usage", "report", "--json"], {
+			encoding: "utf8",
+			env: { ...process.env, ...scratchClioEnvVars(scratch) },
+		});
 		strictEqual(cliReport.status, 0, cliReport.stderr);
 		const reportDto = JSON.parse(cliReport.stdout) as ReturnType<
 			typeof import("../../src/domains/telemetry/read-model.js").usageReport
@@ -1560,53 +1553,32 @@ test("usage report discovers a standalone run journal that has no session and no
 		// Appends never bump the run directory; a run created before the window still settled inside it.
 		const created = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
 		await utimes(telemetryRunDirectory(stateDir, owner.runId), created, created);
-		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
-		const report = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				"--input-type=module",
-				"-e",
-				`import {runUsageCommand} from ${JSON.stringify(cli)}; await runUsageCommand(['report','--json']);`,
-			],
-			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
-		);
+		const cli = new URL("../../dist/cli/index.js", import.meta.url).pathname;
+		const report = spawnSync(process.execPath, [cli, "usage", "report", "--json"], {
+			encoding: "utf8",
+			env: { ...process.env, ...scratchClioEnvVars(scratch) },
+		});
 		strictEqual(report.status, 0, report.stderr);
 		const reportDto = JSON.parse(report.stdout) as ReturnType<
 			typeof import("../../src/domains/telemetry/read-model.js").usageReport
 		>;
 		const cost = reportDto.cost.find((row) => row.groupBy === "role");
-		strictEqual(cost?.total.tokens.display, "21");
+		ok(cost);
+		strictEqual(cost.total.tokens.display, "21");
 		// `telemetry explain` rebuilds the report's repo window from the reference alone (#434 §11.4).
-		const read = new URL("../../src/cli/telemetry-read.ts", import.meta.url).href;
-		const explained = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				"--input-type=module",
-				"-e",
-				`import {runTelemetryReadCommand} from ${JSON.stringify(read)}; process.exitCode = await runTelemetryReadCommand(['explain',${JSON.stringify(cost?.total.tokens.ref)},'--json']);`,
-			],
-			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
-		);
+		const explained = spawnSync(process.execPath, [cli, "telemetry", "explain", cost.total.tokens.ref, "--json"], {
+			encoding: "utf8",
+			env: { ...process.env, ...scratchClioEnvVars(scratch) },
+		});
 		strictEqual(explained.status, 0, explained.stderr);
 		const explanation = JSON.parse(explained.stdout) as ExplanationV1;
 		strictEqual(explanation.value.display, "21");
 		deepStrictEqual(explanation.from.runIds, [owner.runId]);
 		// `telemetry cost --days` folds the same window under the same reference (#434 §11.3).
-		const windowed = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				"--input-type=module",
-				"-e",
-				`import {runTelemetryReadCommand} from ${JSON.stringify(read)}; process.exitCode = await runTelemetryReadCommand(['cost','--days','30','--json']);`,
-			],
-			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
-		);
+		const windowed = spawnSync(process.execPath, [cli, "telemetry", "cost", "--days", "30", "--json"], {
+			encoding: "utf8",
+			env: { ...process.env, ...scratchClioEnvVars(scratch) },
+		});
 		strictEqual(windowed.status, 0, windowed.stderr);
 		const windowCost = JSON.parse(windowed.stdout) as CostReportV1;
 		deepStrictEqual(windowCost.scope, { repo: "all", days: 30 });
@@ -1643,18 +1615,11 @@ test("fleet status reads unknown journal facts even when the ledger holds token 
 				row("other"),
 			]),
 		);
-		const cli = new URL("../../src/cli/fleet.ts", import.meta.url).href;
-		const status = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				"tsx",
-				"--input-type=module",
-				"-e",
-				`import {runFleetCommand} from ${JSON.stringify(cli)}; process.exitCode = await runFleetCommand(['status','--all','--json']);`,
-			],
-			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
-		);
+		const cli = new URL("../../dist/cli/index.js", import.meta.url).pathname;
+		const status = spawnSync(process.execPath, [cli, "fleet", "status", "--all", "--json"], {
+			encoding: "utf8",
+			env: { ...process.env, ...scratchClioEnvVars(scratch) },
+		});
 		strictEqual(status.status, 0, status.stderr);
 		const { totals } = JSON.parse(status.stdout) as {
 			totals: ReturnType<typeof import("../../src/domains/telemetry/read-model.js").fleetTotals>;

@@ -13,7 +13,7 @@ import type { TargetDescriptor } from "../../src/domains/providers/types/target-
 import { closeServer } from "../harness/openai-compat-fixture.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
-const CLI = join(ROOT, "src", "cli", "index.ts");
+const CLI = join(ROOT, "dist", "cli", "index.js");
 const execFileAsync = promisify(execFile);
 
 const servers: ReturnType<typeof createServer>[] = [];
@@ -202,7 +202,7 @@ async function probeTable(
 		}),
 	);
 	const run = async (args: string[]): Promise<string> => {
-		const { stdout } = await execFileAsync(process.execPath, ["--import", "tsx", CLI, "targets", ...args], {
+		const { stdout } = await execFileAsync(process.execPath, [CLI, "targets", ...args], {
 			cwd: ROOT,
 			env,
 		});

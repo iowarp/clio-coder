@@ -21,7 +21,7 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
-const CLI = join(ROOT, "src", "cli", "index.ts");
+const CLI = join(ROOT, "dist", "cli", "index.js");
 const execFileAsync = promisify(execFile);
 const MODEL = "mock-model";
 
@@ -176,7 +176,7 @@ describe("targets --probe --tools", () => {
 		};
 		mkdirSync(join(root, "config"), { recursive: true });
 		writeFileSync(join(root, "config", "settings.yaml"), JSON.stringify({ targets: [target] }));
-		const { stdout } = await execFileAsync(process.execPath, ["--import", "tsx", CLI, "targets", ...args], {
+		const { stdout } = await execFileAsync(process.execPath, [CLI, "targets", ...args], {
 			cwd: ROOT,
 			env,
 		});

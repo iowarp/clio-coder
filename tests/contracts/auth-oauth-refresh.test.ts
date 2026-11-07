@@ -458,7 +458,7 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(storage.damageReason(), null);
 		deepStrictEqual(
 			storage.getOAuthProviders().map((p) => p.id),
-			["alcf", "anthropic-max", "github-copilot", "openai-codex"],
+			["alcf", "anthropic-max", "openai-codex"],
 		);
 	});
 

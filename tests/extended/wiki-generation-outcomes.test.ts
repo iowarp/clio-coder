@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+	cpSync,
 	existsSync,
 	mkdirSync,
 	readdirSync,
@@ -12,7 +13,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { WikiModelRoute } from "../../src/cli/wiki-generate.js";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
@@ -23,7 +24,7 @@ import { readWikiPlanFile, sanitizeWikiPlan, writeWikiPlanFile } from "../../src
 import { wikiCompleteness, wikiStaleness } from "../../src/domains/context/wiki/staleness.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { JobSpec } from "../../src/domains/dispatch/validation.js";
-import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import { type IsolatedClioEnv, isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 
 const page = (name: string): WikiPlanPage => ({
 	path: `${name}.md`,
@@ -76,9 +77,15 @@ function generator(
 describe("wiki generation outcomes", () => {
 	let isolated: IsolatedClioEnv;
 	let cwd: string;
+	let seed: ReturnType<typeof makeScratchHome> | undefined;
+	after(() => seed?.cleanup());
 	beforeEach(async () => {
 		isolated = await isolateClioEnv("clio-coder-wiki-outcomes-");
 		cwd = join(isolated.dir, "repo");
+		if (seed) {
+			cpSync(join(seed.dir, "repo"), cwd, { recursive: true });
+			return;
+		}
 		mkdirSync(join(cwd, "src"), { recursive: true });
 		writeFileSync(join(cwd, ".gitignore"), ".clio-coder/\n");
 		writeFileSync(join(cwd, "package.json"), "{}\n");
@@ -86,6 +93,8 @@ describe("wiki generation outcomes", () => {
 		git("init", "-q");
 		git("add", ".");
 		git("-c", "user.name=Fixture", "-c", "user.email=fixture@local", "commit", "-qm", "initial");
+		seed = makeScratchHome("wiki-outcomes-seed-");
+		cpSync(cwd, join(seed.dir, "repo"), { recursive: true });
 	});
 	afterEach(() => isolated.restore());
 	function git(...args: string[]) {

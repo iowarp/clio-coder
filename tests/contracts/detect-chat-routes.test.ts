@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { buildDescriptor, DEFAULT_PORTS } from "../../src/cli/configure-target.js";
 import { classifyDefaultTarget } from "../../src/cli/default-target.js";
 import { detectChatRoutes, useDetectedChatRoute } from "../../src/cli/detect-chat-routes.js";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
 import { initializeClioHome } from "../../src/core/init.js";
+import { COPILOT_SDK_PACKAGE, COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
@@ -14,6 +16,28 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 test("discovery orders settings, descriptor env keys, Clio logins, then bounded loopback models", async (t) => {
 	const home = await isolateClioEnv("clio-route-detect-");
 	t.after(() => home.restore());
+	const sdk = join(
+		home.dir,
+		"data",
+		"components",
+		"copilot-sdk",
+		COPILOT_SDK_VERSION,
+		"node_modules",
+		COPILOT_SDK_PACKAGE,
+	);
+	mkdirSync(sdk, { recursive: true });
+	writeFileSync(join(sdk, "package.json"), JSON.stringify({ type: "module", main: "./index.js" }));
+	writeFileSync(
+		join(sdk, "index.js"),
+		`import { EventEmitter } from "node:events";
+export class CopilotClient {
+	cliProcess = new EventEmitter();
+	cliStartTimeout = null;
+	state = "connected";
+	async start() {}
+	async getAuthStatus() { return { isAuthenticated: false }; }
+}`,
+	);
 	initializeClioHome();
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);

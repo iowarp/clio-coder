@@ -12,10 +12,7 @@ import { TOOL_PROBE_TOOL_NAME } from "../../src/domains/providers/probe/tool-cal
 import { closeServer, readRequestBody, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
-const CLI = join(ROOT, "src", "cli", "index.ts");
-// The CLI runs from a workspace outside the repository, so tsx is named by
-// its resolved loader rather than by a bare specifier that cwd would resolve.
-const TSX = import.meta.resolve("tsx");
+const CLI = join(ROOT, "dist", "cli", "index.js");
 const execFileAsync = promisify(execFile);
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -136,7 +133,7 @@ async function runDoctor(target: Record<string, unknown>, args: string[], cwd: s
 	writeFileSync(join(root, "config", "settings.yaml"), JSON.stringify({ targets: [target] }));
 	// Doctor exits 1 on this minimal home (it was never initialized with
 	// --fix); the report on stdout is what these tests read.
-	const result = await execFileAsync(process.execPath, ["--import", TSX, CLI, "doctor", ...args], { cwd, env }).catch(
+	const result = await execFileAsync(process.execPath, [CLI, "doctor", ...args], { cwd, env }).catch(
 		(error: { stdout?: string }) => ({ stdout: error.stdout ?? "" }),
 	);
 	return JSON.parse(result.stdout) as DoctorJson;
@@ -251,7 +248,7 @@ describe("doctor --deep", () => {
 			false,
 		);
 		const home = scratch("clio-doctor-deep-usage-");
-		const usage = await execFileAsync(process.execPath, ["--import", TSX, CLI, "doctor", "--tools-timeout", "5"], {
+		const usage = await execFileAsync(process.execPath, [CLI, "doctor", "--tools-timeout", "5"], {
 			cwd: ROOT,
 			env: { ...process.env, CLIO_CODER_HOME: home, CLIO_CODER_REQUIRE_HOME_PREFIX: "1" },
 		}).catch((error: { code?: number; stderr?: string }) => error);

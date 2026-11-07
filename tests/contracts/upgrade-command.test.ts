@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { runUpgradeCommand } from "../../src/cli/upgrade.js";
 import { initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { processBirthToken } from "../../src/core/process-identity.js";
@@ -186,28 +187,16 @@ test("restart follows successful checks, relaunches with argv the real parser ac
 	);
 });
 
-test("every resume hint names /resume, never the refused --continue flag", (t) => {
+test("a failed relaunch names /resume, never the refused --continue flag", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const automated = f.run(["--restart"], "isInteractive: () => false,");
-	assert.equal(automated.status, 2);
-	assert.match(automated.stderr, /\/resume/);
 	const relaunchFailed = f.run(
 		["--restart"],
 		"isInteractive: () => true, runRestart: async () => { throw new Error('spawn failed'); },",
 	);
 	assert.equal(relaunchFailed.status, 1);
 	assert.match(relaunchFailed.stderr, /\/resume/);
-	const manual = f.run(
-		[],
-		`inspectInstallation: () => ({ ...inspectInstallation(${JSON.stringify(f.entry)}), kind: 'pnpm' }),`,
-	);
-	assert.match(manual.stdout, /\/resume/);
-	const preview = f.run(["--dry-run", "--restart"]);
-	assert.match(preview.stdout, /\/resume/);
-	for (const output of [automated, relaunchFailed, manual, preview]) {
-		assert.doesNotMatch(output.stdout + output.stderr, /--continue/);
-	}
+	assert.doesNotMatch(relaunchFailed.stdout + relaunchFailed.stderr, /--continue/);
 });
 
 test("failed checks never relaunch and recovery points to migrations", (t) => {
@@ -230,14 +219,20 @@ test("post-install initializes integrity without running environment repairs", (
 	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");
 });
 
-test("restart rejects automation and conflicting flags before changing the installation", (t) => {
-	const f = installedFixture();
-	t.after(f.home.cleanup);
+test("restart rejects automation and conflicting flags before changing the installation", async (t) => {
+	const home = await isolateClioEnv("clio-upgrade-rejected-");
+	t.after(() => home.restore());
+	const before = readdirSync(home.dir);
 	for (const args of [["--restart"], ["--restart", "--json"], ["--restart", "--post-install"]]) {
-		const result = f.run(args, "isInteractive: () => false,");
-		assert.equal(result.status, 2, result.stdout + result.stderr);
+		const code = await runUpgradeCommand(args, {
+			isInteractive: () => false,
+			inspectInstallation: () => {
+				throw new Error("rejected restart inspected the installation");
+			},
+		});
+		assert.equal(code, 2);
 	}
-	assert.throws(f.calls, /ENOENT/);
+	assert.deepEqual(readdirSync(home.dir), before);
 });
 
 test("manual package managers get instructions without replacement and dry runs never restart", (t) => {

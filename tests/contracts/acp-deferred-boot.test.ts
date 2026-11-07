@@ -41,6 +41,14 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 		bus: true,
 	});
 	const seen: string[] = [];
+	let markStarted!: () => void;
+	let release!: () => void;
+	const started = new Promise<void>((resolve) => {
+		markStarted = resolve;
+	});
+	const released = new Promise<void>((resolve) => {
+		release = resolve;
+	});
 	const done = serveDeferredAcp({
 		transport,
 		handshake,
@@ -48,7 +56,8 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 		boot: async (cwd, ready) => {
 			seen.push(cwd);
 			strictEqual(process.cwd(), realpathSync(root));
-			await new Promise((resolve) => setTimeout(resolve, 25));
+			markStarted();
+			await released;
 			transport.onRequest("session/new", () => ({ sessionId: "bound" }));
 			transport.onRequest("session/list", () => ({ sessions: [] }));
 			ready();
@@ -76,6 +85,10 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 		deepStrictEqual(seen, []);
 		send(2, "session/new", { cwd: root, mcpServers: [] });
 		send(3, "session/list", {});
+		await started;
+		ok(!responses.has(2));
+		ok(!responses.has(3));
+		release();
 		strictEqual((await response(2)).result && ((await response(2)).result as { sessionId: string }).sessionId, "bound");
 		deepStrictEqual((await response(3)).result, { sessions: [] });
 		deepStrictEqual(seen, [realpathSync(root)]);
@@ -84,6 +97,7 @@ test("ACP binds the first session cwd before boot and refuses a different later 
 		strictEqual((mismatch.error as { code: number }).code, -32602);
 		strictEqual((mismatch.error as { message: string }).message.includes(realpathSync(root)), true);
 	} finally {
+		release();
 		transport.close();
 		await done;
 		process.chdir(launch);
@@ -103,19 +117,15 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 300_00
 	const project = join(scratch.dir, "project");
 	mkdirSync(launch);
 	mkdirSync(project);
-	const cli = join(new URL("../..", import.meta.url).pathname, "src", "cli", "index.ts");
-	const child = createStdioTransport(
-		process.execPath,
-		["--import", import.meta.resolve("tsx"), cli, "--no-context-files", "--no-skills", "acp"],
-		{
-			cwd: launch,
-			env: Object.fromEntries(
-				Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" }).filter(
-					(entry): entry is [string, string] => entry[1] !== undefined,
-				),
+	const cli = join(new URL("../..", import.meta.url).pathname, "dist", "cli", "index.js");
+	const child = createStdioTransport(process.execPath, [cli, "--no-context-files", "--no-skills", "acp"], {
+		cwd: launch,
+		env: Object.fromEntries(
+			Object.entries({ ...process.env, ...scratch.env, NODE_ENV: "test" }).filter(
+				(entry): entry is [string, string] => entry[1] !== undefined,
 			),
-		},
-	);
+		),
+	});
 	t.signal.addEventListener("abort", () => void child.forceTerminate(), { once: true });
 	try {
 		const init = await child.request<{ protocolVersion: number; agentCapabilities: Record<string, unknown> }>(
@@ -125,7 +135,7 @@ test("ACP CLI boots the workspace named by its first session", { timeout: 300_00
 		strictEqual(init.protocolVersion, 1);
 		const eager = createStdioTransport(
 			process.execPath,
-			["--import", import.meta.resolve("tsx"), cli, "--no-context-files", "--no-skills", "acp", "--cwd", project],
+			[cli, "--no-context-files", "--no-skills", "acp", "--cwd", project],
 			{
 				cwd: launch,
 				env: Object.fromEntries(

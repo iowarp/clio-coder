@@ -9,6 +9,7 @@ import { after, before, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { readVerifiedRun, telemetryRunsDirectory } from "../../src/domains/telemetry/index.js";
 import { formatUserTaskHandoff } from "../../src/domains/user-tasks/handoff.js";
+import { initializeScratchHome } from "../harness/headless-run.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -392,8 +393,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 	it("runs one JSON headless turn through a local provider and seals its run scope", async () => {
 		const scratch = home();
 		try {
-			const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
-			strictEqual(fixed.code, 0, fixed.stderr);
+			initializeScratchHome(scratch.root);
 			const configured = await runCli(
 				[
 					"configure",

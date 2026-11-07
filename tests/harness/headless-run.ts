@@ -63,6 +63,20 @@ export function headlessScratch(prefix: string): HeadlessScratch {
 		...homeEnv,
 		CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
 	};
+	initializeScratchHome(root);
+	return {
+		root,
+		configDir: join(root, "config"),
+		stateDir: join(root, "state"),
+		env,
+		cleanup() {
+			rmSync(root, { recursive: true, force: true });
+		},
+	};
+}
+
+export function initializeScratchHome(root: string): void {
+	const homeEnv = scratchClioEnvVars(root, { requireHomePrefix: true });
 	const previous = new Map(Object.keys(homeEnv).map((key) => [key, process.env[key]]));
 	try {
 		// No await: the temporary environment cannot overlap another test's turn.
@@ -76,15 +90,6 @@ export function headlessScratch(prefix: string): HeadlessScratch {
 		}
 		resetXdgCache();
 	}
-	return {
-		root,
-		configDir: join(root, "config"),
-		stateDir: join(root, "state"),
-		env,
-		cleanup() {
-			rmSync(root, { recursive: true, force: true });
-		},
-	};
 }
 
 export interface CliResult {

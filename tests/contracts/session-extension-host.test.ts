@@ -195,9 +195,8 @@ test("an ACP client that closes stdin leaves no runtime child and the process ex
 };
 `,
 	);
-	const loader = new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
-	const cli = new URL("../../src/cli/index.ts", import.meta.url).pathname;
-	const acp = spawn(process.execPath, ["--import", loader, cli, "acp"], { cwd, env: process.env });
+	const cli = new URL("../../dist/cli/index.js", import.meta.url).pathname;
+	const acp = spawn(process.execPath, [cli, "acp"], { cwd, env: process.env });
 	let exitCode: number | null | undefined;
 	acp.once("exit", (code) => {
 		exitCode = code;

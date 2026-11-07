@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../../src/domains/agents/result-contract.js";
+import { initializeScratchHome } from "../harness/headless-run.js";
 import {
 	closeServer,
 	seedOpenAICompatToolOrchestrator,
@@ -141,8 +142,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			};
 			mkdirSync(join(workspace, "findiff"));
 			for (const [path, content] of Object.entries(fixture.files)) writeFileSync(join(workspace, path), content);
-			const doctor = await run(["doctor", "--fix"], workspace, env);
-			strictEqual(doctor.code, 0, doctor.stderr);
+			initializeScratchHome(scratch.dir);
 			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), server.url, "yolo");
 			const settingsPath = join(scratch.dir, "config", "settings.yaml");
 			const settings = parse(readFileSync(settingsPath, "utf8"));

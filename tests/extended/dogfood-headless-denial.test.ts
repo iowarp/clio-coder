@@ -99,73 +99,71 @@ test("interactive denials remain terminal, while actual hard blocks retain hard-
 	strictEqual(readFileSync("sentinel.txt", "utf8"), "blocked is harmless fixture text\n");
 });
 
-for (const check of ["correlation", "receipt"] as const)
-	test(`headless production ${check} preserves authoritative outcomes rather than classifying text`, async () => {
-		const eventsPath = join(env.dir, "events.json");
-		const child = spawnSync(
-			process.execPath,
-			[
-				"--import",
-				import.meta.resolve("tsx"),
-				fileURLToPath(new URL("../fixtures/headless-denial-driver.ts", import.meta.url)),
-				eventsPath,
-			],
-			{ cwd: env.dir, env: process.env, encoding: "utf8", timeout: 30_000 },
-		);
-		strictEqual(child.error, undefined);
-		strictEqual(child.status, 1, `the unresolved hard block fails the run: ${child.stderr}`);
-		const output = child.stdout;
-		const events = JSON.parse(readFileSync(eventsPath, "utf8")) as ChatLoopEvent[];
-		const { safety } = tools();
-		const ends = events.filter((event) => event.type === "tool_execution_end") as Array<
-			Extract<ChatLoopEvent, { type: "tool_execution_end" }> & {
-				outcome?: string;
-				ruleId?: string;
-				reasonCode?: string;
-				policySource?: string;
-			}
-		>;
-		deepStrictEqual(
-			ends.slice(0, 2).map((event) => event.toolCallId),
-			["error-second", "ask-first"],
-		);
-		strictEqual(readFileSync("sentinel.txt", "utf8"), "blocked is harmless fixture text\n");
-		if (check === "correlation") {
-			for (const [id, command, outcome] of [
-				["ask-first", inline, "blocked"],
-				["error-second", "ls missing-blocked.txt", "error"],
-				["success", "ls sentinel.txt", "ok"],
-				["hard", 'rm -f "$PWD/sentinel.txt"', "blocked"],
-			] as const) {
-				const event = ends.find((entry) => entry.toolCallId === id);
-				ok(event);
-				const policy = safety.evaluate({ tool: "bash", args: { command } }).policy;
-				ok(policy);
-				deepStrictEqual(
-					{ outcome: event.outcome, ruleId: event.ruleId, reasonCode: event.reasonCode, policySource: event.policySource },
-					{ outcome, ruleId: policy.ruleId, reasonCode: policy.reasonCode, policySource: policy.policySource },
-					id,
-				);
-				const wire = output
-					.split("\n")
-					.filter(Boolean)
-					.map((line) => JSON.parse(line))
-					.find((entry) => entry.type === "tool_execution_end" && entry.toolCallId === id);
-				strictEqual(wire.ruleId, policy.ruleId);
-			}
-			for (const legacy of ends.filter((event) => event.toolName === "legacy")) {
-				strictEqual(legacy.outcome, undefined);
-				strictEqual(legacy.ruleId, undefined);
-			}
-		} else {
-			const journal = readRunJournal(join(env.dir, "state"));
-			ok(journal);
-			strictEqual(journal.envelopes.size, 1);
-			const envelope = [...journal.envelopes.values()][0];
-			ok(envelope);
-			strictEqual(envelope.outcome, "failed");
+test("headless production correlation and receipt preserve authoritative outcomes rather than classifying text", async () => {
+	const eventsPath = join(env.dir, "events.json");
+	const child = spawnSync(
+		process.execPath,
+		[
+			"--import",
+			import.meta.resolve("tsx"),
+			fileURLToPath(new URL("../fixtures/headless-denial-driver.ts", import.meta.url)),
+			eventsPath,
+		],
+		{ cwd: env.dir, env: process.env, encoding: "utf8", timeout: 30_000 },
+	);
+	strictEqual(child.error, undefined);
+	strictEqual(child.status, 1, `the unresolved hard block fails the run: ${child.stderr}`);
+	const output = child.stdout;
+	const events = JSON.parse(readFileSync(eventsPath, "utf8")) as ChatLoopEvent[];
+	const { safety } = tools();
+	const ends = events.filter((event) => event.type === "tool_execution_end") as Array<
+		Extract<ChatLoopEvent, { type: "tool_execution_end" }> & {
+			outcome?: string;
+			ruleId?: string;
+			reasonCode?: string;
+			policySource?: string;
 		}
-	});
+	>;
+	deepStrictEqual(
+		ends.slice(0, 2).map((event) => event.toolCallId),
+		["error-second", "ask-first"],
+	);
+	strictEqual(readFileSync("sentinel.txt", "utf8"), "blocked is harmless fixture text\n");
+	for (const [id, command, outcome] of [
+		["ask-first", inline, "blocked"],
+		["error-second", "ls missing-blocked.txt", "error"],
+		["success", "ls sentinel.txt", "ok"],
+		["hard", 'rm -f "$PWD/sentinel.txt"', "blocked"],
+	] as const) {
+		const event = ends.find((entry) => entry.toolCallId === id);
+		ok(event);
+		const policy = safety.evaluate({ tool: "bash", args: { command } }).policy;
+		ok(policy);
+		deepStrictEqual(
+			{ outcome: event.outcome, ruleId: event.ruleId, reasonCode: event.reasonCode, policySource: event.policySource },
+			{ outcome, ruleId: policy.ruleId, reasonCode: policy.reasonCode, policySource: policy.policySource },
+			id,
+		);
+		const wire = output
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line))
+			.find((entry) => entry.type === "tool_execution_end" && entry.toolCallId === id);
+		strictEqual(wire.ruleId, policy.ruleId);
+	}
+	for (const legacy of ends.filter((event) => event.toolName === "legacy")) {
+		strictEqual(legacy.outcome, undefined);
+		strictEqual(legacy.ruleId, undefined);
+	}
+	{
+		const journal = readRunJournal(join(env.dir, "state"));
+		ok(journal);
+		strictEqual(journal.envelopes.size, 1);
+		const envelope = [...journal.envelopes.values()][0];
+		ok(envelope);
+		strictEqual(envelope.outcome, "failed");
+	}
+});
 
 test("the headless blockedAttempts list is bounded and counts what it leaves out", () => {
 	const stats = { blockedAttempts: [] as SafetyBlockedAttempt[], blockedAttemptsTruncated: 0 };

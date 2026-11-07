@@ -467,7 +467,10 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		match(events.headers.get("content-type") ?? "", /text\/event-stream/u);
 		ok(events.body, "event stream has a body");
 		const reader = events.body.getReader();
-		const first = await Promise.race([reader.read(), delay(10_000).then(() => "timeout" as const)]);
+		const first = await Promise.race([
+			reader.read(),
+			delay(10_000, undefined, { ref: false }).then(() => "timeout" as const),
+		]);
 		ok(first !== "timeout", "the stream sends a hello event promptly");
 		match(new TextDecoder().decode(first.value), /^event: hello$/mu);
 		abort.abort();
