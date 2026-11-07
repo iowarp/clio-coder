@@ -34,6 +34,7 @@ export const coreTests = [
 	"search-completeness",
 	"tool-boundaries",
 	"engine-utilities",
+	"assistant-text-tool-order",
 	"test-runner-vocabulary",
 	"bootstrap-schema-retry-identity",
 	"installed-package-ci",

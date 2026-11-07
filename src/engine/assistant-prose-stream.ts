@@ -38,6 +38,18 @@ export function filterAssistantProseStream(
 		try {
 			for await (const event of source) {
 				if ("partial" in event) lastPartial = event.partial;
+				// Some adapters keep a text block open while a tool call or reasoning
+				// starts and close it only at the end of the message. The grapheme the
+				// filter holds then landed after the tool rows as a stray bubble
+				// ("project firs", tool rows, "t."), so it is released first.
+				if ((event.type === "toolcall_start" || event.type === "thinking_start") && filters.size > 0) {
+					for (const [index, filter] of filters) {
+						const tail = filter.flush();
+						if (!tail) continue;
+						text.set(index, (text.get(index) ?? "") + tail);
+						output.push({ type: "text_delta", contentIndex: index, delta: tail, partial: partial(event.partial) });
+					}
+				}
 				if (event.type === "text_start") {
 					filters.set(event.contentIndex, createAssistantProseFilter());
 					text.set(event.contentIndex, "");

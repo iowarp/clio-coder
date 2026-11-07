@@ -909,6 +909,18 @@ function stripSentinelsFromStream(source: AssistantMessageEventStream, model: Mo
 			const sanitizeChunk = (idx: number, chunk: string): string => ensureStripper(idx).push(chunk);
 			const flushChunk = (idx: number): string => ensureStripper(idx).flush();
 			for await (const event of source) {
+				// A text block left open while a tool call or reasoning starts would
+				// release its held tail only at the message's end, after the tool rows.
+				if ((event.type === "toolcall_start" || event.type === "thinking_start") && strippers.size > 0) {
+					for (const idx of strippers.keys()) {
+						const tail = flushChunk(idx);
+						if (tail.length === 0) continue;
+						const accumulated = (safeText.get(idx) ?? "") + tail;
+						safeText.set(idx, accumulated);
+						rewritePartialText(event, idx, accumulated);
+						sanitized.push({ type: "text_delta", contentIndex: idx, delta: tail, partial: event.partial });
+					}
+				}
 				if (event.type === "text_delta") {
 					const safeChunk = sanitizeChunk(event.contentIndex, event.delta);
 					const accumulated = (safeText.get(event.contentIndex) ?? "") + safeChunk;
