@@ -520,7 +520,8 @@ try {
 		await page.waitForURL(/\/sessions\/[^/]+$/);
 		await page.getByLabel("Message Clio Coder", { exact: true }).waitFor();
 		const noticeSessionUrl = page.url();
-		await page.locator(".conversation .wb-bar .wb-menu summary").click();
+		// The bar also holds the transcript detail picker, so the task's menu is found by its name.
+		await page.locator('.conversation .wb-bar .wb-menu:has(> summary[aria-label="Task actions"]) summary').click();
 		await page.getByRole("menuitem", { name: /^All tasks in / }).click();
 		await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
 		await page.locator("main button.primary", { hasText: "New task" }).waitFor();
@@ -1002,17 +1003,18 @@ try {
 		const tokenGroup = usage.locator(".turn-details__group", {
 			has: page.getByRole("heading", { name: "Usage", exact: true }),
 		});
-		assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning"]);
+		// Prompt is the whole prompt the provider read: input plus cache read and write.
+		assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning", "Prompt"]);
 		// An explained figure carries its explanation beside it; the figure is that disclosure's summary.
 		const figures = (group: Locator) =>
 			group.locator("dd").evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
-		assert.deepEqual(await figures(tokenGroup), ["11", "12", "15"]);
+		assert.deepEqual(await figures(tokenGroup), ["11", "12", "15", "38"]);
 		const cacheGroup = usage.locator(".turn-details__group", {
 			has: page.getByRole("heading", { name: "Cache", exact: true }),
 		});
-		// Cache reads and writes are reported as the provider's fields; overlapping token fields establish no hit rate.
-		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Cache read", "Cache write"]);
-		assert.deepEqual(await figures(cacheGroup), ["13", "14"]);
+		// Cache reads and writes are the provider's fields; the hit share is the read part of the whole prompt.
+		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Hit share", "Written"]);
+		assert.deepEqual(await figures(cacheGroup), ["13", "34%", "14"]);
 		await check("conversation-usage");
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
@@ -1245,7 +1247,7 @@ try {
 		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
 		// The task's own actions sit in one Task actions menu in the top bar; working freedom is the
 		// composer's pill. The menu closes on Escape and hands focus back to its button.
-		const taskMenu = page.locator(".conversation .wb-bar .wb-menu");
+		const taskMenu = page.locator('.conversation .wb-bar .wb-menu:has(> summary[aria-label="Task actions"])');
 		await taskMenu.locator("summary").click();
 		await taskMenu.getByRole("menuitem", { name: "Rename task", exact: true }).waitFor();
 		await taskMenu.getByRole("menuitem", { name: "Close task", exact: true }).waitFor();
@@ -1520,6 +1522,8 @@ try {
 		await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
 		await check("composer-queue");
 		if (width === 1600) await page.screenshot({ path: join(output, "composer-queue.png"), fullPage: true });
+		// From rest, as a pointer user arrives: the press itself focuses the composer, and the control must not move under it.
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 		await page.getByRole("button", { name: "Take them back", exact: true }).click();
 		await page.waitForFunction(
 			() => (document.querySelector(".composer__field") as HTMLTextAreaElement | null)?.value === "Then summarise it.",
@@ -1856,10 +1860,11 @@ try {
 		// test-token is shorter than a bare token may be, so it is pasted as the link the server prints.
 		await page.getByLabel("Launch link or token", { exact: true }).fill(`[clio-coder:gui] ${origin}/#token=test-token`);
 		await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
-		// The connected rail reports installation health once its diagnostics settle.
+		// The connected rail reports installation health once its diagnostics settle; it defers the doctor until System
+		// is opened, so "Not checked" is a settled connected state too.
 		await page
 			.locator(".wb-sidebar .wb-status__label")
-			.filter({ hasText: /^(Ready|Unverified|\d+ issues?|\d+ warnings?)$/ })
+			.filter({ hasText: /^(Ready|Unverified|Not checked|\d+ issues?|\d+ warnings?)$/ })
 			.waitFor({ state: "attached" });
 		await page
 			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
@@ -1881,6 +1886,10 @@ try {
 			401,
 			"a forgotten window's credential still opens the API",
 		);
+		// The dialog promises a new launch link: a reload of the forgotten tab inherits nothing that reconnects it.
+		await page.reload();
+		await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
+		assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a forgotten tab reconnected on reload");
 		await context.close();
 		if (zoom === 2) zoomContext = null;
 	}
