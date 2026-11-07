@@ -61,7 +61,7 @@ export function describeVerdict(verdict: DefaultTargetVerdict): string {
 		case "ineligible-runtime": {
 			const replacement = retiredRuntimeReplacement(verdict.runtime);
 			if (replacement !== null)
-				return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which was removed in 0.7.0; set \`runtime: ${replacement}\` on it in settings.yaml.`;
+				return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which was removed in 0.5.6; set \`runtime: ${replacement}\` on it in settings.yaml.`;
 			return `Target '${verdict.targetId}' runs on '${verdict.runtime}', which cannot drive the main agent.`;
 		}
 		case "no-model":
