@@ -319,7 +319,13 @@ function runLifecycleStep(
 			else {
 				// A refusal already names its fix; the generic next step is the TUI review's wording.
 				const next = outcome.error?.code === "refused" ? "" : (outcome.error?.next ?? "");
-				printError(`${operation} ${where} failed: ${outcome.error?.message ?? "unknown"}${next ? `; ${next}` : ""}`);
+				// The planner's "plan with requirements" is surface-neutral; on the CLI that plan is one flag away.
+				const missing = operation === "install" && !parsed.withRequirements ? (step?.dependencies.missing ?? []) : [];
+				const message = (outcome.error?.message ?? "unknown").replace(
+					/; plan with requirements$/,
+					missing.length ? `; rerun with --with-requirements to install ${missing.join(", ")} too` : "$&",
+				);
+				printError(`${operation} ${where} failed: ${message}${next ? `; ${next}` : ""}`);
 			}
 		}
 	}
