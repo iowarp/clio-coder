@@ -724,6 +724,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		getChatTarget: () => deps.getSettings?.().chat.target,
 		getChatModel: () => deps.getSettings?.().chat.model,
 		getFleetAgentProfiles: () => deps.getSettings?.().fleet.agentProfiles ?? {},
+		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		applyModelRef: (ref) => {
 			// A mid-conversation swap used to rewrite the orchestrator role in
 			// settings.yaml with no prompt, so the next launch could come up on a

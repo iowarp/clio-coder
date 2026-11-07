@@ -5322,6 +5322,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								getChatTarget: () => getCurrentSettings().chat.target,
 								getChatModel: () => getCurrentSettings().chat.model,
 								getFleetAgentProfiles: () => getCurrentSettings().fleet.agentProfiles,
+								getAutonomy: resolveEffectiveAutonomy,
 								...(session
 									? {
 											oracleBriefing: () => {
