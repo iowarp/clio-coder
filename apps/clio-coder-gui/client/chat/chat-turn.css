@@ -698,3 +698,6 @@
 .chat-transcript[data-detail="detailed"] .turn-outcome__nerd {
 	display: flex;
 }
+.chat-transcript[data-detail="detailed"] .tool-card__took {
+	display: inline;
+}

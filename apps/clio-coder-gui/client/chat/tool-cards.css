@@ -92,6 +92,10 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+/* The engine's span for a settled call. A Detailed transcript shows it; see chat-turn.css. */
+.tool-card__took {
+	display: none;
+}
 .tool-card__digest[data-tone="fail"] {
 	color: var(--status-fail-fg);
 }

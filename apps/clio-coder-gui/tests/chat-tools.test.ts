@@ -748,3 +748,10 @@ test("settings rows name the proposed or saved path without echoing value or str
 	assert.equal(applied.verb, "Configure");
 	assert.equal(applied.headline, "setting fleet.profiles");
 });
+
+test("a settled call carries the span the engine measured, and only once it settles", () => {
+	assert.equal(presentTool(toolItem({ status: "completed", durationMs: 1234 })).took, "1.2s");
+	assert.equal(presentTool(toolItem({ status: "failed", durationMs: 40 })).took, "40ms");
+	assert.equal(presentTool(toolItem({ status: "in_progress", durationMs: 1234 })).took, null);
+	assert.equal(presentTool(toolItem({ status: "completed" })).took, null, "an unreported span is not invented");
+});

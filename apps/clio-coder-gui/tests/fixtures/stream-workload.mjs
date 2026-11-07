@@ -203,15 +203,22 @@ export async function streamWorkload({ update, text, delay, cancelled, bytes = 0
 		await delay(WORKLOAD_PACE_MS);
 		const failed = ordinal === 7;
 		const body = failed ? "exit status 1" : kind === "execute" ? "analysis/convergence-notes.md" : "mesh convergence";
-		update({
-			sessionUpdate: "tool_call_update",
-			toolCallId,
-			title,
-			kind,
-			status: failed ? "failed" : "completed",
-			content: [{ type: "content", content: { type: "text", text: body } }],
-			rawOutput: { result: { content: [{ type: "text", text: body }] }, isError: failed },
-		});
+		update(
+			{
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				title,
+				kind,
+				status: failed ? "failed" : "completed",
+				content: [{ type: "content", content: { type: "text", text: body } }],
+				rawOutput: { result: { content: [{ type: "text", text: body }] }, isError: failed },
+			},
+			// The engine's span for the call, as the runtime reports it on every terminal update.
+			{
+				"clio-coder/agent": [{ version: 1, role: "orchestrator", agentId: "orchestrator" }],
+				"clio-coder/toolTiming": { durationMs: 120 * ordinal },
+			},
+		);
 	};
 	const thought = (value) => update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: value } });
 	thought("Planning the audit: read the notes, run the checks, then summarize. ");

@@ -13,6 +13,7 @@
  */
 
 import type { TimelineItem } from "../../contracts/sessions.js";
+import { formatDuration as formatSpan } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 import { hasStyle, stripAnsi } from "../render/ansi.js";
 import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
@@ -110,6 +111,8 @@ export interface ToolPresentation {
 	readonly tone: StatusTone;
 	readonly statusLabel: string;
 	readonly settled: boolean;
+	/** The time the engine measured for a settled call, or null before it settles or when unreported. */
+	readonly took: string | null;
 	readonly failed: boolean;
 	/**
 	 * The call ended without breaking: it was not approved, or it delegated a run that was stopped.
@@ -920,6 +923,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 					? "Failed"
 					: (STATUS_LABEL[item.status] ?? item.status),
 		settled,
+		took: settled && item.durationMs !== undefined ? formatSpan(item.durationMs) : null,
 		failed,
 		ended: refused || stopped,
 		facts,

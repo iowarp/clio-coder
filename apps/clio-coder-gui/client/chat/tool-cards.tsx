@@ -277,6 +277,8 @@ export interface ToolCardProps {
 	readonly elapsed?: string | null;
 }
 
+const TOOK_TITLE = "Time the engine spent on this call";
+
 export const ToolCard = memo(function ToolCard({ item, options, agent = null, elapsed = null }: ToolCardProps) {
 	const card = presentTool(item, options ?? {});
 	const [open, setOpen] = useState(() => toolOpensAtMount(card));
@@ -304,6 +306,11 @@ export const ToolCard = memo(function ToolCard({ item, options, agent = null, el
 					{card.digest === null ? null : (
 						<span className="tool-card__digest" data-tone={card.digestTone ?? undefined}>
 							{card.digest}
+						</span>
+					)}
+					{card.took === null ? null : (
+						<span className="tool-card__took" title={TOOK_TITLE}>
+							{card.took}
 						</span>
 					)}
 					{elapsed === null ? null : (
