@@ -22,6 +22,7 @@ import {
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import { cancelledAskUserResult, recommendedOptionIndex, unavailableAskUserResult } from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
+import { CARD_CALLOUT_MAX_WIDTH } from "../card.js";
 import { dockGrowthRows } from "../dock.js";
 import { backOutOneLayer, type EscapeLayers, escapeHintEntry, innermostEscapeLayer } from "../escape-layers.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
@@ -843,7 +844,8 @@ class AskUserOverlayView implements Component {
 	render(width: number): string[] {
 		const wide = width >= 120 && this.maxInnerRows() >= 24 && this.phase === "asking" && this.questions.length > 1;
 		const menuWidth = 28;
-		const bodyWidth = Math.min(104, Math.max(1, width - (wide ? menuWidth + 5 : 0)));
+		// The question reads as a callout: on a wide terminal it stops at the card width, not the dock's.
+		const bodyWidth = Math.min(CARD_CALLOUT_MAX_WIDTH, Math.max(1, width - (wide ? menuWidth + 5 : 0)));
 		const body = this.renderBody(bodyWidth, wide);
 		if (!wide) return body;
 		const theme = clioTheme();

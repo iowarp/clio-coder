@@ -323,7 +323,7 @@ $ ran `npm test` · exit 1 ✗ · 4.1s       head: hanging wrap, status tail nev
 
 - **Head**: Wraps with a hanging indent in the content column. The status tail (glyph, duration) joins the last row when it fits and otherwise takes a row of its own, whole (`cardHead`).
 - **Body**: Rows sit behind a `│` rail in `gutter`, or in `error` on a failed card so the whole block reads as the failure (`cardRail`, `cardRows`).
-- **Callouts**: A framed notice is indented by the gutter and stops growing at 88 columns.
+- **Callouts**: A framed notice is indented by the gutter and stops growing at 88 columns. Docked approval and question cards follow the same limit, so their sentences do not stretch across a wide dock; the approval's inspection keeps the dock's full width, because the column a character sits in is what it shows.
 - **Foreground cards**: Approval and question cards wait on the operator. They show every decision input at every output style: the target, the reason, the effect, the mutation, the safety judge's advisory, the timer and the choices. Output style budgets apply to background cards only.
 - **Nothing twice**: While an approval card is docked, its call's transcript row keeps only its head (`⏸ awaiting approval`). The reason and target return to the row if the card leaves unanswered or cannot mount. A single question has no `Question 1 of 1` row. A shell row names the model that asked for it only when the turn had more than one model, because `Reply from` already names it. A failed command that printed nothing shows `exit N ✗` with no body and no size.
 - **Inspection**: `/view` and the inspect toggle show a card in full without changing the output style.

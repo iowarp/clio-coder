@@ -9,6 +9,7 @@ import {
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ApprovalRequestView } from "../session-control/approval-request-view.js";
+import { CARD_CALLOUT_MAX_WIDTH, CARD_GUTTER } from "./card.js";
 import { planFacts, planHeadline, readDispatchPlan } from "./dispatch-plan-summary.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
@@ -61,9 +62,8 @@ export {
 	permissionHintEntries,
 } from "./permission-hint.js";
 
-const PERMISSION_OVERLAY_CONTENT_WIDTH = 78;
-
-export const PERMISSION_OVERLAY_WIDTH = PERMISSION_OVERLAY_CONTENT_WIDTH + 4;
+/** A boxed frame for the card: the card's own columns plus the frame's borders and padding. */
+export const PERMISSION_OVERLAY_WIDTH = CARD_CALLOUT_MAX_WIDTH + 4;
 
 /**
  * A late-arriving advisory line for the card, read once per frame.
@@ -514,7 +514,9 @@ function joinChoiceUnits(theme: ClioTheme, units: ReadonlyArray<string>, width: 
 function hangingWrap(text: string, width: number): string[] {
 	const rows = wrapTextWithAnsi(text, width);
 	if (rows.length <= 1 || width < 12) return rows;
-	return wrapTextWithAnsi(text, width - 2).map((row, index) => (index === 0 ? row : `  ${row}`));
+	return wrapTextWithAnsi(text, width - CARD_GUTTER.length).map((row, index) =>
+		index === 0 ? row : `${CARD_GUTTER}${row}`,
+	);
 }
 
 /** A target row whose next row is out of view, marked so it cannot be read as the end of the command. */
@@ -1130,11 +1132,14 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, keys: ["↑↓ scroll"] }, content)]),
 			];
 		}
-		if (this.preview === null && this.terms) return this.renderTerms(width, countdownMs);
+		// The card reads as a callout: on a wide terminal its sentences stop at the card width, not the dock's.
+		// The inspection above keeps every column, because where a character sits is what it shows.
+		const card = Math.min(width, CARD_CALLOUT_MAX_WIDTH);
+		if (this.preview === null && this.terms) return this.renderTerms(card, countdownMs);
 		if (this.preview === null) {
 			const sections = permissionCardSections(
 				this.view,
-				width,
+				card,
 				advisory,
 				countdownMs,
 				hasDraft,
@@ -1143,7 +1148,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				this.canInspect(),
 			);
 			this.readingFolded = sections.readingFolded;
-			return this.windowCard(sections, width);
+			return this.windowCard(sections, card);
 		}
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll, this.bodyRows);
 		this.lastLineCount = rendered.wrappedLineCount;

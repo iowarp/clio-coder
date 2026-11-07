@@ -11,6 +11,7 @@ import { CALL_TARGET_MAX_CHARS, describeCallTarget } from "../../src/domains/saf
 import { UNATTENDED_ALLOWED_BY } from "../../src/domains/safety/unattended.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { CARD_CALLOUT_MAX_WIDTH } from "../../src/interactive/card.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { type OverlayState, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import {
@@ -68,7 +69,7 @@ function plain(lines: ReadonlyArray<string>): string[] {
 	return lines.map((line) => stripTerminalSequences(line));
 }
 
-/** The content width the frame hands the card at a terminal width: the fixed box, clamped, minus borders and pads. */
+/** The content width a boxed frame hands the card at a terminal width: the box, clamped, minus borders and pads. */
 function contentWidth(columns: number): number {
 	return Math.min(PERMISSION_OVERLAY_WIDTH, columns) - 4;
 }
@@ -126,6 +127,40 @@ for (const columns of [80, 120, 160]) {
 		strictEqual(body.isShowingTerms(), false);
 	});
 }
+
+test("in a wide dock the card stops at the callout width with every fact, and its inspection keeps the dock's columns", () => {
+	const dock = 196;
+	const advisory =
+		"Clio's safety judge gave no verdict because its answer could not be read, so this call needs your decision.";
+	const command = `node scripts/release.mjs --channel nightly --notes ${"x".repeat(150)}`;
+	const { mutation: _write, ...call } = WRITE_VIEW;
+	const body = createPermissionOverlayBody(
+		{ ...call, tool: "bash", actionClass: "execute", target: command },
+		undefined,
+		() => ({ command }),
+		() => advisory,
+	);
+	const card = plain(body.render(dock));
+	for (const line of card) ok(visibleWidth(line) <= CARD_CALLOUT_MAX_WIDTH, `${visibleWidth(line)}: ${line}`);
+	const joined = card.join(" ").replace(/\s+/gu, " ");
+	ok(joined.includes("so this call needs your decision."), joined);
+	ok(
+		card
+			.join("")
+			.replace(/[\s▌│]/gu, "")
+			.includes("x".repeat(150)),
+		"the whole target survives the narrower card",
+	);
+	match(joined, /\[Enter\] allow\s+runs this one call/u);
+	body.toggleTerms();
+	for (const line of plain(body.render(dock))) ok(visibleWidth(line) <= CARD_CALLOUT_MAX_WIDTH, line);
+	body.toggleTerms();
+	body.toggleInspect();
+	ok(
+		plain(body.render(dock)).some((line) => visibleWidth(line) > CARD_CALLOUT_MAX_WIDTH),
+		"the inspection lays the call out across the dock",
+	);
+});
 
 test("worker terms say an approval covers one call and a denial holds within the run", () => {
 	const body = createPermissionOverlayBody({
