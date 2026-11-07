@@ -1,5 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { it } from "node:test";
+import { existsSync } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+import { it, mock } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
@@ -9,7 +14,8 @@ import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
-import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { openCallJournalHealth, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { grantTelemetryConsent } from "../../src/domains/telemetry/consent.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
@@ -184,6 +190,72 @@ it("a session created after boot binds the live read model, which folds its call
 		strictEqual(live.sessionId, origin.id);
 		strictEqual(contract.sessionSpend().usd, 0.25);
 	} finally {
+		await extension.stop?.();
+		env.restore();
+	}
+});
+
+it("shutdown waits for a research trace still preparing its writer", async () => {
+	const env = await isolateClioEnv("clio-coder-trace-shutdown-");
+	const origin = { id: "pending-trace", cwdHash: "trace-workspace" };
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.telemetry.mode = "research";
+	settings.telemetry.research.content = true;
+	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
+	const { contract, extension } = createTelemetryBundle({
+		bus: createTelemetryHub(),
+		getContract: (name: string) => (name === "config" ? config : undefined),
+	} as DomainContext);
+	const store = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
+	await fsPromises.mkdir(store, { recursive: true });
+	await fsPromises.writeFile(join(store, "meta.json"), JSON.stringify({ cwd: env.dir }));
+	grantTelemetryConsent(clioStateDir(), env.dir);
+	let markEntered!: () => void;
+	const entered = new Promise<void>((resolve) => {
+		markEntered = resolve;
+	});
+	let release!: () => void;
+	const blockedPreparation = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const original = fsPromises.readFile;
+	const blocked = mock.method(fsPromises, "readFile", async (...args: Parameters<typeof original>) => {
+		if (String(args[0]) === join(store, "meta.json")) {
+			markEntered();
+			await blockedPreparation;
+		}
+		return original(...args);
+	});
+	syncBuiltinESMExports();
+	try {
+		await extension.start();
+		contract.recordResearchTrace?.(
+			origin,
+			{ role: "memory", id: origin.id },
+			"memory.observed",
+			{ event: "prepared" },
+			{ event: "prepared", facts: { note: "shutdown fixture" } },
+		);
+		await entered;
+		let finished = false;
+		const stopped = Promise.resolve(extension.stop?.()).then(() => {
+			finished = true;
+		});
+		await setImmediate();
+		strictEqual(finished, false, "an admitted trace must keep shutdown pending while consent preparation waits");
+		release();
+		await stopped;
+		const directory = telemetrySessionDirectory(clioStateDir(), origin.id);
+		ok((await readCallJournal(directory)).records.some(({ record }) => record.k === "memory.observed"));
+		strictEqual(existsSync(join(directory, "journal.jsonl.lock")), false);
+		ok(openCallJournalHealth().every(({ owner }) => owner !== `session:${origin.id}`));
+	} finally {
+		release();
+		blocked.mock.restore();
+		syncBuiltinESMExports();
+		// Also drain the intentionally reproduced pre-fix late writer before restoring the environment.
+		const lease = await contract.acquireTelemetrySession?.(origin, { role: "memory", id: origin.id });
+		await lease?.release();
 		await extension.stop?.();
 		env.restore();
 	}

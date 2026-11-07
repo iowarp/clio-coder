@@ -110,8 +110,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, agent: mainAgent(sessionId) });
 	const settingsUnavailable = () =>
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
-	// Records still on their way to a writer: lifecycle, settings changes and reopened ambient facts. Shutdown waits for
-	// them before closing writers (#434).
+	// Records still on their way to a writer: lifecycle, settings, research and reopened ambient facts. Shutdown
+	// waits for them before closing writers (#434).
 	const pendingRecords = new Set<Promise<void>>();
 	/**
 	 * A session's lifecycle as journal records: opened, resumed and closed. A writer opens for each, so a session
@@ -414,6 +414,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			exitStatus = code;
 		},
 		recordResearchTrace(origin, agent, kind, data, preimage) {
+			if (stopping) return;
 			// Facts can point at live runtime state; the journal keeps what the event saw (#434).
 			let owned: { data: typeof data; preimage: unknown };
 			try {
@@ -422,7 +423,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				// A fact that cannot be cloned is not journaled; the step it describes is unaffected (#434).
 				return;
 			}
-			void journals
+			const write = journals
 				.acquire(origin, agent)
 				.then(async (lease) => {
 					try {
@@ -433,7 +434,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				})
 				.catch(() => {
 					// The journal reports its own unavailability; a trace never fails the work it describes (#434).
-				});
+				})
+				.finally(() => pendingRecords.delete(write));
+			pendingRecords.add(write);
 		},
 		sessionSpend: () => spendOf(telemetry.live()),
 		async settledSessionSpend() {
