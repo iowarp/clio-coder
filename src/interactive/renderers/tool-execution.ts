@@ -322,12 +322,15 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 		if (line.length === 0) continue;
 		const match = COMMAND_STATUS_LINE.exec(line);
 		if (match?.groups === undefined) return null;
+		const exit = match.groups.exit ?? match.groups.code ?? null;
+		const message = match.groups.message ?? null;
 		return {
 			index,
-			exit: match.groups.exit ?? match.groups.code ?? null,
+			exit,
 			timedOut: match.groups.timeout !== undefined,
 			aborted: match.groups.aborted !== undefined,
-			message: match.groups.message ?? null,
+			// `command exited with code 3` after `(exit 3)` restates the row's own fact, so it is no diagnosis.
+			message: message !== null && message.trim().toLowerCase() === `command exited with code ${exit}` ? null : message,
 			cause: match.groups.cause ?? null,
 		};
 	}
@@ -682,9 +685,9 @@ function abortedFact(cause: string | null, details: Record<string, unknown> | nu
 }
 
 function sizeFacts(finished: ToolExecutionFinished): string[] {
-	// An aborted command's result text is mostly the status the model reads; its size is the command's own output.
+	// An aborted or silent command's result text is the status the model reads; its size is the command's own output.
 	const details = detailsOf(finished.result);
-	if (details?.aborted === true && typeof details.outputBytes === "number") {
+	if ((details?.aborted === true || details?.outputBytes === 0) && typeof details.outputBytes === "number") {
 		return details.outputBytes > 0 ? [formatSize(details.outputBytes)] : [];
 	}
 	const bytes = shownBytesOf(finished);

@@ -2357,6 +2357,20 @@ describe("tool classes", () => {
 		);
 		match(missing[0] ?? "", /· exit 127 ✗/u);
 		deepStrictEqual(missing.slice(1), ["  │ pnpm: not found"]);
+		// A silent command's status says only the exit again, and its size is the status text's, not output's.
+		const silent = rows(
+			settled(
+				"bash",
+				{ command: "node -e 'process.exit(3)'" },
+				text("bash: command failed (exit 3): command exited with code 3", {
+					exitCode: 3,
+					outputBytes: 0,
+					resultSize: { bytes: 57, shownBytes: 57 },
+				}),
+				{ isError: true, durationMs: 73 },
+			),
+		);
+		deepStrictEqual(silent, [`${GLYPH.classExecute} ran \`node -e 'process.exit(3)'\` · exit 3 ✗ · 73ms`]);
 	});
 
 	it("states an exit code only when the result carries one", () => {
