@@ -285,31 +285,8 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 		]) {
 			if (obj?.[key] !== undefined) message[key] = obj[key];
 		}
-		// The ledger stores `usage: null` for a call Clio wrote and never sent
-		// (#434), but pi-ai's context estimator dereferences `usage` on every
-		// assistant message not marked aborted or error. Rebuild the zero usage
-		// the message carried in memory, so a resumed session sizes its context
-		// on the last real call instead of throwing on `totalTokens`.
-		if (!isUsageRecord(message.usage)) message.usage = unsentCallUsage();
 	}
 	return message as unknown as AgentMessage;
-}
-
-function isUsageRecord(value: unknown): boolean {
-	if (!value || typeof value !== "object") return false;
-	const usage = value as Record<string, unknown>;
-	return typeof usage.input === "number" && typeof usage.output === "number";
-}
-
-function unsentCallUsage(): Record<string, unknown> {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
 }
 
 function toolCallIdsFromMessage(message: AgentMessage): string[] {

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Usage } from "@earendil-works/pi-ai";
 import {
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
@@ -360,6 +360,8 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	const convertToLlm = agent.convertToLlm.bind(agent);
 	agent.convertToLlm = async (messages) => {
 		const converted = (await convertToLlm(messages)).map((message) => {
+			if (message.role === "assistant" && message.stopReason !== "aborted" && !isUsageRecord(message.usage))
+				return { ...message, usage: unsentCallUsage() };
 			if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
 			const partial = message.content
 				.filter((block) => block.type === "text")
@@ -382,6 +384,32 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		agent,
 		state: () => agent.state,
 		requestCorrelationId: (message) => correlations.get(message),
+	};
+}
+
+function isUsageRecord(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const usage = value as Record<string, unknown>;
+	return typeof usage.input === "number" && typeof usage.output === "number";
+}
+
+/**
+ * The ledger keeps `usage: null` for a call Clio wrote and never sent (#434),
+ * so a resumed session replays the loop guard's synthesis re-prompt and a
+ * result-contract repair without usage. pi-ai sizes every request with
+ * `estimateContextTokens`, which dereferences `usage` on each assistant message
+ * not marked aborted or error, and threw on `totalTokens` (afterF-1). The
+ * provider-bound copy carries the zero usage the message had in memory, so the
+ * estimate anchors on the last real call; the record itself stays null.
+ */
+function unsentCallUsage(): Usage {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 }
 
