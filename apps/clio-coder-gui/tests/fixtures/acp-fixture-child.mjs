@@ -203,7 +203,7 @@ const event = (kind, payload, terminal = false) =>
 // steer/queue/interrupt controls and the fleet strip's Guide/Stop are exercised in a browser.
 // Every other scenario stays a v1 peer, which is what keeps the 409 degradation tested.
 const STEERING =
-	scenario === "markdown" || scenario === "steer" || scenario === "telemetry"
+	scenario === "markdown" || scenario === "steer" || scenario === "telemetry" || scenario === "queue-push"
 		? {
 				version: 1,
 				main: true,
@@ -455,6 +455,32 @@ let libraryGeneration = 1;
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
 const queues = { steer: [], followUp: [] };
+let queueReadFails = false;
+const queueChanged = () => {
+	if (scenario !== "queue-push") return;
+	send({
+		method: "_clio-coder/session/queue_changed",
+		params: {
+			sessionId,
+			entries: [
+				...queues.steer.map((text, index) => ({
+					id: `steer-${index}`,
+					kind: "steer",
+					text,
+					enqueuedAt: 1,
+					pinned: false,
+				})),
+				...queues.followUp.map((text, index) => ({
+					id: `follow-${index}`,
+					kind: "follow-up",
+					text,
+					enqueuedAt: 1,
+					pinned: false,
+				})),
+			],
+		},
+	});
+};
 /** runId -> resolve. A held worker settles when it is stopped or the turn is cancelled. */
 const liveRuns = new Map();
 let liveRunCount = 0;
@@ -606,6 +632,16 @@ async function handle(frame) {
 							? {
 									_meta: {
 										"clio-coder/steering": STEERING,
+										...(scenario === "queue-push"
+											? {
+													"clio-coder/queue": {
+														version: 1,
+														edit: "_clio-coder/session/queue_edit",
+														changed: "_clio-coder/session/queue_changed",
+														ops: ["remove", "restore"],
+													},
+												}
+											: {}),
 										...(scenario === "telemetry"
 											? {
 													"clio-coder/telemetry": {
@@ -724,18 +760,21 @@ async function handle(frame) {
 			case "session/prompt": {
 				pendingHandoff = null;
 				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
+				if (STEERING && promptText.includes("[unreadable-queue]")) queueReadFails = true;
 				const turnScenario =
-					scenario === "markdown" && promptText.includes("[approval]")
-						? "permission"
-						: scenario === "markdown" && promptText.includes("[plan]")
-							? "plan-permission"
-							: scenario === "markdown" && promptText.includes("[stream]")
-								? "loop"
-								: scenario === "markdown" && promptText.includes("[workload")
-									? "workload"
-									: STEERING && promptText.includes("[fleet]")
-										? "held-worker"
-										: scenario;
+					STEERING && promptText.includes("[hold]")
+						? "slow"
+						: scenario === "markdown" && promptText.includes("[approval]")
+							? "permission"
+							: scenario === "markdown" && promptText.includes("[plan]")
+								? "plan-permission"
+								: scenario === "markdown" && promptText.includes("[stream]")
+									? "loop"
+									: scenario === "markdown" && promptText.includes("[workload")
+										? "workload"
+										: STEERING && promptText.includes("[fleet]")
+											? "held-worker"
+											: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (promptText.startsWith("/context recover ")) {
@@ -1256,14 +1295,17 @@ async function handle(frame) {
 			case "_clio-coder/session/steer": {
 				const followUp = frame.params.mode === "end-of-turn";
 				(followUp ? queues.followUp : queues.steer).push(frame.params.text);
+				queueChanged();
 				result = { accepted: true, queue: followUp ? "follow-up" : "steer" };
 				break;
 			}
 			case "_clio-coder/session/queue":
+				if (queueReadFails) throw Error("queue_unavailable");
 				result = queues;
 				break;
 			case "_clio-coder/session/queue_clear":
 				result = { restored: [...queues.steer.splice(0), ...queues.followUp.splice(0)] };
+				queueChanged();
 				break;
 			case "_clio-coder/session/interrupt":
 				result = { cancelled: false, refusal: "A dispatched worker is attached; stop the turn instead." };

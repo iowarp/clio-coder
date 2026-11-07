@@ -46,6 +46,40 @@ async function waitUntil(check: () => boolean) {
 	throw new Error("Timed out waiting for a turn.");
 }
 
+for (const scenario of ["steer", "queue-push"]) {
+	test(`idle parking preserves held operator messages with ${scenario} updates`, { timeout: 20000 }, async (t) => {
+		const h = await harness({}, { scenario, parkAfterMs: 100 });
+		t.after(h.close);
+		const workspace = await h.workspaces.open(h.home.path);
+		const held = await h.supervisor.open(workspace.id);
+		const turn = h.supervisor.startTurn(held.id, "[hold] Wait for the operator");
+		await h.supervisor.steer(held.id, { text: "unsent operator work", mode: "end-of-turn" });
+		await h.supervisor.cancel(held.id, turn.turnId);
+		await waitUntil(() => h.supervisor.get(held.id).turns.at(-1)?.status === "cancelled");
+		const empty = await h.supervisor.open(workspace.id);
+		h.supervisor.startTurn(empty.id, "Nothing waits after this");
+		await waitUntil(() => h.supervisor.get(empty.id).state === "parked");
+		assert.equal(h.supervisor.get(held.id).state, "open");
+		assert.deepEqual((await h.supervisor.queue(held.id)).followUp, ["unsent operator work"]);
+		await h.supervisor.clearQueue(held.id);
+		await waitUntil(() => h.supervisor.get(held.id).state === "parked");
+	});
+}
+
+test("idle parking keeps a child whose queue ownership cannot be read", { timeout: 20000 }, async (t) => {
+	const h = await harness({}, { scenario: "steer", parkAfterMs: 100 });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const held = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(held.id, "[unreadable-queue]");
+	await waitUntil(() => h.supervisor.get(held.id).turns.at(-1)?.status === "succeeded");
+	const empty = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(empty.id, "No waiting messages");
+	await waitUntil(() => h.supervisor.get(empty.id).state === "parked");
+	assert.equal(h.supervisor.get(held.id).state, "open");
+	await assert.rejects(h.supervisor.queue(held.id));
+});
+
 test("workspace and session routes stream one complete turn with recorded usage and cost and command idempotency", {
 	timeout: 20000,
 }, async (t) => {

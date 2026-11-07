@@ -181,6 +181,9 @@ type Entry = {
 	queued?: { admit(): void; drop(): void };
 	/** When a request, a turn or a window last touched this child, on the monotonic clock. */
 	activeAt: number;
+	/** Unknown ownership is not safe to park; reads must not replace a newer queue push. */
+	queueEmpty: boolean | null;
+	queueVersion: number;
 	/** A resume loads a transcript the kept snapshot already holds, so its replay is not projected again. */
 	resuming?: boolean;
 	/** Retired for idleness: the snapshot stays and reads `parked` once the child is gone. */
@@ -265,6 +268,7 @@ export class Supervisor {
 			!this.snapshot(entry.id).contextWork?.active &&
 			!entry.rebase &&
 			!entry.drafting &&
+			entry.queueEmpty === true &&
 			entry.client.pending === 0 &&
 			!this.liveJobs(entry.id) &&
 			!entry.workers?.hasWork &&
@@ -502,6 +506,8 @@ export class Supervisor {
 				bound: false,
 				eventSequence: 0,
 				activeAt: performance.now(),
+				queueEmpty: null,
+				queueVersion: 0,
 				...(resume ? { resuming: true } : {}),
 			};
 			// A session loaded again starts above every revision this server has published, so a window
@@ -537,9 +543,14 @@ export class Supervisor {
 				if (withdrawn.sessionId === owned.id) owned.permissions?.withdraw(withdrawn.requestId);
 			});
 			transport.onNotification(ACP_QUEUE_CHANGED_NOTIFICATION, (params) => {
+				if (record(params).sessionId !== owned.id) return;
+				owned.queueEmpty = null;
+				owned.queueVersion++;
 				const changed = Value.Clean(QueueChanged, structuredClone(params));
-				if (Value.Check(QueueChanged, changed) && changed.sessionId === owned.id)
+				if (Value.Check(QueueChanged, changed) && changed.sessionId === owned.id) {
+					owned.queueEmpty = changed.entries.length === 0;
 					this.hub.publish({ type: "queue.changed", payload: { resource: owned.id, entries: changed.entries } });
+				}
 			});
 			// The agent coalesces telemetry_update to at most 10 Hz; the host forwards it as an invalidation for the
 			// session it names and reads nothing itself (#434). A health or quota notice has no session and stays here.
@@ -639,6 +650,8 @@ export class Supervisor {
 			}
 			entry.activeAt = performance.now();
 			this.state(boundId, "open");
+			if (this.hasQueue(entry)) await this.queue(boundId).catch(() => {});
+			else entry.queueEmpty = true;
 			if (entry.client.capabilities.context?.status === ACP_CONTEXT_STATUS_METHOD) await this.contextStatus(boundId);
 			await this.seedJobs(boundId);
 			return this.get(boundId);
@@ -735,6 +748,10 @@ export class Supervisor {
 			...(queued ? { queued: true as const } : {}),
 		};
 		entry.turnId = id;
+		if (origin === "live" && this.hasQueue(entry)) {
+			entry.queueEmpty = null;
+			entry.queueVersion++;
+		}
 		this.publish({ type: "turn.started", payload: { resource: entry.id, revision: this.revision(entry.id), turn } });
 		return id;
 	}
@@ -772,6 +789,7 @@ export class Supervisor {
 			if (index >= 0) this.waiting.splice(index, 1);
 			queued.drop();
 		}
+		if (entry.bound && !entry.closing && this.hasQueue(entry)) void this.queue(entry.id).catch(() => {});
 		// Whatever ended this turn freed its slot.
 		this.admit();
 	}
@@ -1175,24 +1193,44 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This turn is waiting for a slot. It can take a message once it starts.");
 		return entry;
 	}
-	steer(id: string, body: Static<typeof SteerRequest>) {
-		this.steering(id);
-		return this.projected(id, ACP_SESSION_STEER_METHOD, { sessionId: id, ...body }, SteerResult);
+	private hasQueue(entry: Entry) {
+		return entry.client.capabilities.steering?.main === true || entry.client.capabilities.queue !== undefined;
 	}
-	queue(id: string) {
-		this.steering(id);
-		return this.projected(id, ACP_SESSION_QUEUE_METHOD, { sessionId: id }, QueueSnapshot);
+	async steer(id: string, body: Static<typeof SteerRequest>) {
+		const entry = this.steering(id);
+		const previous = entry.queueEmpty;
+		const version = ++entry.queueVersion;
+		entry.queueEmpty = null;
+		const result = await this.projected(id, ACP_SESSION_STEER_METHOD, { sessionId: id, ...body }, SteerResult);
+		if (version === entry.queueVersion) entry.queueEmpty = result.accepted ? false : previous;
+		return result;
 	}
-	clearQueue(id: string) {
-		this.steering(id);
-		return this.projected(id, ACP_SESSION_QUEUE_CLEAR_METHOD, { sessionId: id }, QueueCleared);
+	async queue(id: string) {
+		const entry = this.steering(id);
+		const version = ++entry.queueVersion;
+		entry.queueEmpty = null;
+		const result = await this.projected(id, ACP_SESSION_QUEUE_METHOD, { sessionId: id }, QueueSnapshot);
+		if (version === entry.queueVersion) entry.queueEmpty = result.steer.length + result.followUp.length === 0;
+		return result;
 	}
-	editQueue(id: string, body: Static<typeof QueueEditRequest>) {
+	async clearQueue(id: string) {
+		const entry = this.steering(id);
+		const version = ++entry.queueVersion;
+		entry.queueEmpty = null;
+		const result = await this.projected(id, ACP_SESSION_QUEUE_CLEAR_METHOD, { sessionId: id }, QueueCleared);
+		if (version === entry.queueVersion) entry.queueEmpty = true;
+		return result;
+	}
+	async editQueue(id: string, body: Static<typeof QueueEditRequest>) {
 		const entry = this.steering(id);
 		const queue = entry.client.capabilities.queue;
 		if (!queue?.ops.includes(body.op))
 			throw new AppProblem("conflict", "This Clio Coder build cannot change one waiting message.");
-		return this.projected(id, queue.edit, { sessionId: id, ...body }, QueueEditResult);
+		const version = ++entry.queueVersion;
+		entry.queueEmpty = null;
+		const result = await this.projected(id, queue.edit, { sessionId: id, ...body }, QueueEditResult);
+		if (version === entry.queueVersion) entry.queueEmpty = result.entries.length === 0;
+		return result;
 	}
 	/**
 	 * The terminal's `!` line. The agent sends its tool frames outside any prompt, and a frame without

@@ -35,6 +35,7 @@ export async function harness(
 		env?: NodeJS.ProcessEnv;
 		snapshotHold?: () => Promise<void>;
 		permissionTimers?: PermissionTimers;
+		parkAfterMs?: number;
 		origin?: () => string;
 		clientDir?: string;
 		pwa?: boolean;
@@ -60,6 +61,8 @@ export async function harness(
 		},
 		4,
 		options.permissionTimers,
+		undefined,
+		options.parkAfterMs,
 	);
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces);
