@@ -146,7 +146,7 @@ interface Owned {
 	skipped: number;
 	damaged: number;
 	seeding: boolean;
-	/** Each batch that arrived while seeding, whole: the cold read holds a batch entirely or not at all. */
+	/** Batches published while seeding; the cold read may already hold a complete-line prefix of one. */
 	batches: Array<readonly TelemetryRecord[]>;
 	/**
 	 * Record ids of the merged cold read while a published batch may still be one the read already held: bytes are
@@ -232,29 +232,30 @@ function append(entry: Owned, event: Extract<PersistedTelemetry, { kind: "append
 	const read: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 	appendPersistedTelemetry(read, event);
 	const batch = journalSourceFromRead(read, true, entry.runId);
+	let records = batch.records;
 	entry.present = true;
 	if (batch.writer) entry.writer = batch.writer;
 	if (entry.seeding) {
 		entry.batches.push(batch.records);
 		entry.appendedWhileSeeding = true;
 	} else if (entry.overlap) {
-		const first = batch.records[0];
-		// A batch with no record of this owner's adds only a segment mode, which the read already counted.
-		if (first === undefined || entry.overlap.has(first.id)) return [];
+		const overlap = entry.overlap;
+		records = records.filter((record) => !overlap.has(record.id));
+		if (records.length === 0) return [];
 		entry.overlap = null;
 	}
-	for (const record of batch.records) entry.records.push(record);
+	for (const record of records) entry.records.push(record);
 	entry.modes.push(...batch.modes);
 	entry.skipped += batch.skipped;
 	entry.damaged += batch.damaged;
 	entry.version += 1;
-	return batch.records;
+	return records;
 }
 
-/** The cold read is a prefix of the append stream, so a buffered batch is either inside it or entirely after it. */
+/** The cold read may end inside a published batch, including between a rotation's closing record and its payload. */
 function merge(entry: Owned, cold: JournalSource): void {
 	const ids = new Set(cold.records.map((record) => record.id));
-	const after = entry.batches.filter((batch) => batch[0] !== undefined && !ids.has(batch[0].id)).flat();
+	const after = entry.batches.flatMap((batch) => batch.filter((record) => !ids.has(record.id)));
 	entry.records = [...cold.records, ...after];
 	entry.modes = [...cold.modes, ...entry.modes];
 	entry.skipped += cold.skipped;

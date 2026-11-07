@@ -228,6 +228,75 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 	}
 });
 
+for (const buffered of [true, false]) {
+	test(`live seed keeps the unseen tail of a partially observed batch (${buffered ? "buffered" : "after seed"})`, async () => {
+		const sessionId = `overlap-${buffered}`;
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-overlap-"));
+		const records = telemetryCall(sessionId, { usd: 0.25 });
+		const cold: SessionSource = {
+			sessionId,
+			journal: { present: true, records: records.slice(0, 1), modes: ["standard"], skipped: 0, damaged: 0 },
+			runs: new Map(),
+			parent: null,
+		};
+		let resolveSeed!: (source: SessionSource) => void;
+		const seed = new Promise<SessionSource>((resolve) => {
+			resolveSeed = resolve;
+		});
+		let markReading!: () => void;
+		const reading = new Promise<void>((resolve) => {
+			markReading = resolve;
+		});
+		const model = createLiveTelemetryModel({
+			stateDir: () => stateDir,
+			loader: async () => ({
+				loadSessionTelemetrySourceAsync: () => {
+					markReading();
+					return seed;
+				},
+				loadRunTelemetrySourceAsync: async () => cold.journal,
+			}),
+		});
+		const writer = await openCallJournal({
+			directory: telemetrySessionDirectory(stateDir, sessionId),
+			context: { sessionId, agent: { role: "main", id: sessionId } },
+			writer: { clioCoderVersion: "test", piVersion: "test" },
+		});
+		try {
+			model.bind(sessionId);
+			const settled = model.settled();
+			await reading;
+			if (!buffered) {
+				resolveSeed(cold);
+				await settled;
+			}
+			// A cold read may see a complete-line prefix before the writer publishes the whole fsync'd batch.
+			for (const record of records)
+				ok(
+					writer.enqueue({
+						kind: record.k,
+						data: record.data,
+						ctx: record.ctx,
+						wallMs: Date.parse(record.t),
+						mono: record.mono,
+						recordId: record.id,
+					} as PendingTelemetry),
+				);
+			await writer.flush();
+			resolveSeed(cold);
+			await settled;
+			const live = model.live();
+			ok(live);
+			strictEqual(live.session().journal.records, records.length);
+			deepStrictEqual(live.cost().total, costReport({ ...cold, journal: { ...cold.journal, records } }).total);
+		} finally {
+			resolveSeed(cold);
+			model.stop();
+			await writer.close();
+		}
+	});
+}
+
 test("a long session keeps a bounded set of running turn selections, and a turn read again folds to its cold sums (#434 §11)", () => {
 	const sessionId = "many-turns";
 	const sourceOf = (records: readonly TelemetryRecord[]): SessionSource => ({
