@@ -13,6 +13,7 @@ import { staticClient } from "../server/http/static.js";
 import { fixtureOptions } from "./fixtures/toolchain.js";
 import { pinnedFetcher } from "./harness/adapter.js";
 import { harness, json, terminal } from "./harness/app.js";
+import { exchangeLaunchToken } from "./harness/exchange.js";
 
 test("pin allowlist rejects arbitrary URLs before the injected fetcher is called", async () => {
 	let calls = 0;
@@ -103,7 +104,9 @@ test("checkout launcher binds loopback, serves authenticated meta, and exits on 
 		});
 	assert.equal((await get({})).status, 401);
 	assert.equal((await get({ Host: "example.com" })).status, 421);
-	assert.equal((await get({ Authorization: `Bearer ${token}` })).status, 200);
+	// The launch token opens only the exchange; the credential it buys reads meta.
+	assert.equal((await get({ Authorization: `Bearer ${token}` })).status, 401);
+	assert.equal((await get({ Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` })).status, 200);
 	child.kill("SIGTERM");
 	assert.equal(await exited, 0);
 });

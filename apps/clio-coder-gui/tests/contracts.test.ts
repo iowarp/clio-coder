@@ -7,6 +7,7 @@ import { Empty, Id } from "../contracts/common.js";
 import { defineRoute, routes } from "../contracts/routes.js";
 import { register } from "../server/http/validate.js";
 import { EventHub } from "../server/services/event-hub.js";
+import { credentialFetch } from "./harness/browser-fetch.js";
 
 test("table adapter parses path, numeric and boolean queries; typed client uses its verb/path/body", async () => {
 	const route = defineRoute({
@@ -26,16 +27,20 @@ test("table adapter parses path, numeric and boolean queries; typed client uses 
 		limit: 200,
 		enabled: true,
 	});
-	const client = createClient("token", async (url, options) => {
-		assert.equal(url, "/api/toolchain/tools/herdr/install");
-		assert.equal(options?.method, "POST");
-		assert.equal(options.body, '{"force":true}');
-		return new Response('{"operationId":"test-op"}', { status: 202 });
-	});
+	const client = createClient(
+		"token",
+		credentialFetch(async (url, options) => {
+			assert.equal(url, "/api/toolchain/tools/herdr/install");
+			assert.equal(options?.method, "POST");
+			assert.equal(options.body, '{"force":true}');
+			return new Response('{"operationId":"test-op"}', { status: 202 });
+		}),
+	);
 	assert.deepEqual(
 		await client.call(routes.install, { params: { toolId: "herdr" }, query: {}, body: { force: true } }),
 		{ operationId: "test-op" },
 	);
+	client.credentials.dispose();
 	function compileTimeChecks() {
 		// @ts-expect-error The route's body does not accept a string force flag.
 		void client.call(routes.install, { params: { toolId: "herdr" }, query: {}, body: { force: "yes" } });

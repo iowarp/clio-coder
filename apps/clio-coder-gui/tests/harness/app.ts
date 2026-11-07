@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { Static, TSchema } from "typebox";
+import type { ClientCredential } from "../../contracts/auth.js";
 import type { Operation } from "../../contracts/operations.js";
 import type { PermissionTimers } from "../../server/acp/permissions.js";
 import { Supervisor } from "../../server/acp/supervisor.js";
@@ -93,17 +94,47 @@ export async function harness(
 		pwa: options.pwa ?? false,
 		...(options.clientDir ? { clientDir: options.clientDir } : {}),
 	});
-	const request = (path: string, init: RequestInit = {}) =>
-		app.request(`http://127.0.0.1:4317${path}`, {
-			...init,
-			headers: { Authorization: "Bearer test-token", ...init.headers },
-		});
-	const post = (path: string, body: unknown = {}, key: string = crypto.randomUUID()) =>
-		request(path, {
+	const base = "http://127.0.0.1:4317";
+	/** Exchange the launch token as a browser window does; null when the listener refuses the exchange. */
+	const exchange = async (label = "Test client", resume?: string): Promise<ClientCredential | null> => {
+		const response = await app.request(`${base}/api/auth/clients`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-			body: JSON.stringify(body),
+			headers: {
+				Authorization: "Bearer test-token",
+				"Content-Type": "application/json",
+				"Idempotency-Key": crypto.randomUUID(),
+			},
+			body: JSON.stringify({ label, ...(resume ? { resume } : {}) }),
 		});
+		return response.status === 200 ? ((await response.json()) as ClientCredential) : null;
+	};
+	/** Requests as one client. `credential` resolves lazily so a harness that never calls the API never exchanges. */
+	const as = (credential: () => Promise<string>) => {
+		const request = async (path: string, init: RequestInit = {}) =>
+			app.request(`${base}${path}`, {
+				...init,
+				headers: { Authorization: `Bearer ${await credential()}`, ...init.headers },
+			});
+		const post = (path: string, body: unknown = {}, key: string = crypto.randomUUID()) =>
+			request(path, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+				body: JSON.stringify(body),
+			});
+		return { request, post };
+	};
+	let primary: Promise<ClientCredential | null> | undefined;
+	// A listener that refuses the exchange (a wrong origin, say) still answers each request with its refusal.
+	const { request, post } = as(async () => {
+		primary ??= exchange();
+		return (await primary)?.credential ?? "unissued";
+	});
+	/** A second window: its own client id and credential against the same server. */
+	const client = async (label?: string, resume?: string) => {
+		const issued = await exchange(label, resume);
+		if (!issued) throw new Error("The test server refused the launch token exchange.");
+		return { ...issued, ...as(async () => issued.credential) };
+	};
 	return {
 		home,
 		files,
@@ -118,6 +149,8 @@ export async function harness(
 		app,
 		request,
 		post,
+		exchange,
+		client,
 		close: async () => {
 			await Promise.all([supervisor.shutdown(), cli.close(), setup.close()]);
 			await Promise.all([reads.close(), ops.close()]);

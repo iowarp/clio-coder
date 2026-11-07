@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { request } from "node:http";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import { exchangeLaunchToken } from "./exchange.js";
 
 export async function serverProcess(t: TestContext, args: string[] = [], env: NodeJS.ProcessEnv = {}) {
 	const child = spawn(
@@ -39,7 +40,7 @@ export async function serverProcess(t: TestContext, args: string[] = [], env: No
 		child.once("exit", () => reject(new Error(`Server exited before printing URL: ${stderr}`)));
 	});
 	const token = new URLSearchParams(launch.hash.slice(1)).get("token");
-	const headers = { Authorization: `Bearer ${token}` };
+	const headers = { Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` };
 	return {
 		child,
 		exited,

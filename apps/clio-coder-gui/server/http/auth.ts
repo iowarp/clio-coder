@@ -1,9 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { machinePrefix } from "../../contracts/pages.js";
 import { routes } from "../../contracts/routes.js";
+import type { ClientRecord, ClientRegistry } from "../services/clients.js";
 import { AppProblem } from "../services/problem.js";
 import { SECURITY_HEADERS } from "./security-headers.js";
+
+declare module "hono" {
+	interface ContextVariableMap {
+		/** The client this request is attributed to; set for every authenticated API request. */
+		clioClient: ClientRecord;
+	}
+}
 
 const streams = Object.values(routes)
 	.filter((route) => route.stream)
@@ -15,7 +23,25 @@ function apiPath(path: string): string | null {
 	return rest === "/api" || rest.startsWith("/api/") ? rest : null;
 }
 
-export function auth(token: string, origin: () => string): MiddlewareHandler {
+function same(expected: string, supplied: string) {
+	const a = Buffer.from(expected),
+		b = Buffer.from(supplied);
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** The client an authenticated API request came from. */
+export function requestClient(context: Context): ClientRecord {
+	const client = context.get("clioClient");
+	if (!client) throw new AppProblem("unauthorized", "This request carries no client credential.");
+	return client;
+}
+
+/**
+ * The launch token opens exactly one request: POST /api/auth/clients on this server, which issues the
+ * caller its own credential. Every other API request names its client with that credential, and the
+ * event stream, which a browser cannot give a header, with a single-use ticket.
+ */
+export function auth(token: string, origin: () => string, clients: ClientRegistry): MiddlewareHandler {
 	return async (context, next) => {
 		const expected = new URL(origin());
 		const host = context.req.header("host") ?? new URL(context.req.url).host;
@@ -28,16 +54,26 @@ export function auth(token: string, origin: () => string): MiddlewareHandler {
 		for (const [name, value] of Object.entries(SECURITY_HEADERS)) context.header(name, value);
 		const api = apiPath(context.req.path);
 		if (api !== null) {
-			const authorization = context.req.header("authorization");
-			const supplied =
-				(authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined) ??
-				(streams.some((pattern) => pattern.test(api)) ? context.req.query("token") : undefined) ??
-				"";
-			const a = Buffer.from(token),
-				b = Buffer.from(supplied);
-			if (a.length !== b.length || !timingSafeEqual(a, b))
-				throw new AppProblem("unauthorized", "A valid launch token is required.");
 			context.header("Cache-Control", "no-store");
+			const authorization = context.req.header("authorization");
+			const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
+			if (context.req.path === routes.authClients.path && context.req.method === "POST") {
+				if (!same(token, bearer)) throw new AppProblem("unauthorized", "A valid launch token is required.");
+			} else {
+				const ticket = streams.some((pattern) => pattern.test(api)) ? context.req.query("ticket") : undefined;
+				const client = bearer ? clients.authenticate(bearer) : ticket ? clients.redeem(ticket) : null;
+				if (!client)
+					throw new AppProblem(
+						"unauthorized",
+						bearer && same(token, bearer)
+							? "The launch token only opens a client at POST /api/auth/clients; send that client's credential instead."
+							: ticket
+								? "The event stream ticket is unknown, used or expired."
+								: "A valid client credential is required.",
+					);
+				context.set("clioClient", client);
+				context.header("X-Clio-Client", client.clientId);
+			}
 		}
 		await next();
 		// Re-asserted on the settled response so no downstream handler can weaken the

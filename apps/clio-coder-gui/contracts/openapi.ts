@@ -43,7 +43,11 @@ export function openapi() {
 		paths[path][route.method.toLowerCase()] = {
 			operationId: id,
 			summary: route.summary,
-			security: route.stream ? [{ bearer: [] }, { eventToken: [] }] : [{ bearer: [] }],
+			security: route.stream
+				? [{ bearer: [] }, { eventTicket: [] }]
+				: route === routes.authClients
+					? [{ launchToken: [] }]
+					: [{ bearer: [] }],
 			parameters: [
 				...parameters(route.params, "path"),
 				...parameters(route.query, "query"),
@@ -94,8 +98,22 @@ export function openapi() {
 		paths,
 		components: {
 			securitySchemes: {
-				bearer: { type: "http", scheme: "bearer" },
-				eventToken: { type: "apiKey", in: "query", name: "token" },
+				bearer: {
+					type: "http",
+					scheme: "bearer",
+					description: "This client's credential from POST /api/auth/clients.",
+				},
+				launchToken: {
+					type: "http",
+					scheme: "bearer",
+					description: "The launch token. Accepted only by POST /api/auth/clients.",
+				},
+				eventTicket: {
+					type: "apiKey",
+					in: "query",
+					name: "ticket",
+					description: "A single-use ticket from POST /api/events/ticket.",
+				},
 			},
 			schemas: components,
 		},

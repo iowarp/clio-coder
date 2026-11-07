@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { ArtifactList, ArtifactPage, ArtifactRead } from "./artifacts.js";
 import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
+import { ClientBootstrap, ClientCredential, EventTicket } from "./auth.js";
 import { Autonomy } from "./autonomy.js";
 import {
 	DecisionSuperseded,
@@ -1068,11 +1069,37 @@ export const routes = {
 		response: Type.Record(Type.String(), Type.Unknown()),
 		summary: "OpenAPI contract",
 	}),
+	authClients: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/auth/clients",
+		body: ClientBootstrap,
+		response: ClientCredential,
+		summary:
+			"Exchange the launch token for this client's own short-lived credential; the launch token opens nothing else",
+	}),
+	authRotate: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/auth/rotate",
+		response: ClientCredential,
+		summary: "Replace this client's credential before it expires; the old one is honoured for a short grace",
+	}),
+	eventTicket: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/events/ticket",
+		response: EventTicket,
+		summary: "A single-use ticket that opens one event stream for this client",
+	}),
 	events: defineRoute({
 		...get,
 		path: "/api/events",
 		query: Type.Object(
-			{ after: Type.Optional(EventCursor), token: Type.Optional(Type.String({ maxLength: 256 })) },
+			{ after: Type.Optional(EventCursor), ticket: Type.Optional(Type.String({ maxLength: 64 })) },
 			{ additionalProperties: false },
 		),
 		response: Type.String(),

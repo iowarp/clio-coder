@@ -12,6 +12,7 @@ import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
 import { sessionUpdateTelemetry } from "../server/acp/telemetry.js";
 import { harness, json } from "./harness/app.js";
+import { credentialFetch } from "./harness/browser-fetch.js";
 import { coldParityDtos, parityUsageFrame, seedParitySession } from "./harness/telemetry-fixture.js";
 
 test("a telemetry_update names the reads to refresh and folds nothing (#434)", () => {
@@ -21,7 +22,7 @@ test("a telemetry_update names the reads to refresh and folds nothing (#434)", (
 	assert.deepEqual(telemetryInvalidations({ topics: [] }), []);
 });
 
-test("the browser subscribes to named telemetry updates and invalidates only their session", (t) => {
+test("the browser subscribes to named telemetry updates and invalidates only their session", async (t) => {
 	let source: EventTarget | undefined;
 	let stop = () => {};
 	t.after(() => stop());
@@ -49,8 +50,19 @@ test("the browser subscribes to named telemetry updates and invalidates only the
 		queries.setQueryData([key, "session-1"], {});
 		queries.setQueryData([key, "session-2"], {});
 	}
-	stop = subscribe(createClient("token"), queries, () => {});
+	let url = "";
+	const client = createClient("token", credentialFetch());
+	t.after(() => client.credentials.dispose());
+	const eventsUrl = client.eventsUrl;
+	client.eventsUrl = async (after) => {
+		url = await eventsUrl(after);
+		return url;
+	};
+	stop = subscribe(client, queries, () => {});
+	for (let turn = 0; turn < 50 && !source; turn += 1) await setTimeout(1);
 	assert.ok(source);
+	// The stream opens on a single-use ticket; neither the launch token nor the credential is in the URL.
+	assert.equal(url, `/api/events?ticket=${"t".repeat(43)}`);
 	const event: Event = {
 		v: 1,
 		epoch: "epoch-1",

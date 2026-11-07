@@ -41,14 +41,29 @@ test("installable assets are public and credential-free only in background mode;
 test("background readiness authenticates the exact loopback endpoint and rejects redirects, transient apps and oversized replies", async (t) => {
 	let mode = "ready";
 	const token = "a".repeat(43);
+	const credential = "c".repeat(43);
+	const legacyToken = "b".repeat(43);
+	const launchTokenPaths: string[] = [];
 	const server = createServer((req, res) => {
+		if (req.headers.authorization === `Bearer ${token}`) launchTokenPaths.push(`${req.method} ${req.url}`);
+		if (req.url === "/api/auth/clients") {
+			assert.equal(req.method, "POST");
+			if (mode === "legacy") {
+				res.writeHead(404);
+				res.end("{}");
+				return;
+			}
+			assert.equal(req.headers.authorization, `Bearer ${token}`);
+			res.end(JSON.stringify({ clientId: "launcher-1", credential, rotateIn: 450, expiresIn: 900 }));
+			return;
+		}
 		assert.equal(req.url, "/api/meta");
-		assert.equal(req.headers.authorization, `Bearer ${token}`);
+		assert.equal(req.headers.authorization, `Bearer ${mode === "legacy" ? legacyToken : credential}`);
 		if (mode === "redirect") {
 			res.writeHead(302, { Location: "https://example.invalid" });
 			res.end();
 		} else if (mode === "oversized") res.end("x".repeat(9000));
-		else res.end(JSON.stringify({ apiVersion: 1, pwa: mode === "ready" }));
+		else res.end(JSON.stringify({ apiVersion: 1, pwa: mode === "ready" || mode === "legacy" }));
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	t.after(() => {
@@ -58,7 +73,12 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	const address = server.address();
 	assert.ok(address && typeof address !== "string");
 	assert.equal(await localServerReady(address.port, token), true);
+	// The launch token went to the exchange alone; the probe read meta on the credential it bought.
+	assert.deepEqual(launchTokenPaths, ["POST /api/auth/clients"]);
 	for (mode of ["redirect", "transient", "oversized"]) assert.equal(await localServerReady(address.port, token), false);
 	await assert.rejects(localServerReady(0, token));
 	await assert.rejects(localServerReady(address.port, "bad\r\nheader"));
+	// An app from before per-client credentials has no exchange; the version gate still reads it.
+	mode = "legacy";
+	assert.equal(await localServerReady(address.port, legacyToken), true);
 });

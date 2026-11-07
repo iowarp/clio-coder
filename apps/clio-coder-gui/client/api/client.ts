@@ -1,40 +1,50 @@
 import type { Problem } from "../../contracts/common.js";
 import { machinePrefix } from "../../contracts/pages.js";
-import type { Input, Output, Route } from "../../contracts/routes.js";
-import { markTokenRejected, tokenRejected } from "./auth-state.js";
+import { type Input, type Output, type Route, routes } from "../../contracts/routes.js";
+import { tokenRejected } from "./auth-state.js";
 import { clock } from "./clock.js";
-import { dropStoredToken } from "./token.js";
+import { CredentialProblem, type Credentials, createCredentials, unauthorizedProblem } from "./credentials.js";
 
 export class ApiProblem extends Error {
 	constructor(readonly problem: Problem) {
 		super(problem.detail);
 	}
 }
-function unauthorized() {
-	return new ApiProblem({
-		type: "urn:clio-coder:problem:unauthorized",
-		title: "unauthorized",
-		status: 401,
-		code: "unauthorized",
-		detail: "A valid launch token is required.",
-		instance: "browser",
-	});
-}
 /**
  * `prefix` is `/m/<id>` while this client drives a registered node's own GUI through the app on this
- * machine, which proxies every call there; empty for this machine's own app.
+ * machine, which proxies every call there; empty for this machine's own app. `credentials` is the
+ * document's one holder, shared with the unprefixed client, because this app issues every credential
+ * and ticket the browser holds, whichever server the call reaches.
  */
-export function createClient(token: string, fetcher: typeof fetch = fetch, prefix = "") {
+export function createClient(
+	token: string,
+	fetcher: typeof fetch = fetch,
+	prefix = "",
+	credentials: Credentials = createCredentials(token, fetcher),
+) {
 	let epoch: string | undefined;
 	return {
 		token,
 		prefix,
+		credentials,
 		/** The registered node this client addresses, or null for this machine. */
 		machine: machinePrefix(prefix)?.id ?? null,
 		currentEpoch: () => epoch ?? null,
 		/** The event stream establishes which server may answer reads in this document (GUI-03). */
 		adoptEpoch(value: string) {
 			epoch = value;
+		},
+		/** The event stream's address: a ticket from this app opens it, never a bearer in the URL. */
+		async eventsUrl(after?: string) {
+			let ticket: string;
+			try {
+				ticket = await credentials.ticket();
+			} catch (error) {
+				throw error instanceof CredentialProblem ? new ApiProblem(error.problem) : error;
+			}
+			const query = new URLSearchParams({ ticket });
+			if (after !== undefined) query.set("after", after);
+			return `${prefix}${routes.events.path}?${query}`;
 		},
 		/** `signal` cancels the request itself; a cancelled call rejects with the abort, never as "server unavailable". */
 		async call<R extends Route>(
@@ -45,7 +55,7 @@ export function createClient(token: string, fetcher: typeof fetch = fetch, prefi
 			expectedEpoch?: string,
 		): Promise<Output<R>> {
 			// A refused token only recovers through a reload, so nothing else is read in this document.
-			if (tokenRejected()) throw unauthorized();
+			if (tokenRejected()) throw new ApiProblem(unauthorizedProblem());
 			// Retained requests pin their original preflight epoch. The server checks it before
 			// admitting a write, including a restart that raced the preflight response.
 			const commandEpoch = expectedEpoch ?? epoch;
@@ -53,40 +63,49 @@ export function createClient(token: string, fetcher: typeof fetch = fetch, prefi
 				encodeURIComponent(String((input.params as Record<string, unknown>)[name])),
 			);
 			const query = new URLSearchParams();
+			const idempotency = crypto.randomUUID();
 			for (const [name, value] of Object.entries(input.query as Record<string, unknown>)) {
 				if (value !== undefined) query.set(name, String(value));
 			}
-			let response: Response;
-			try {
-				response = await fetcher(`${prefix}${path}${query.size ? `?${query}` : ""}`, {
-					method: route.method,
-					headers: {
-						Authorization: `Bearer ${token}`,
-						...(route.method !== "GET"
-							? { "Content-Type": "application/json", "Idempotency-Key": key ?? crypto.randomUUID() }
-							: {}),
-						...(route.method !== "GET" && commandEpoch !== undefined ? { "X-Clio-Epoch": commandEpoch } : {}),
-					},
-					...(route.method !== "GET" ? { body: JSON.stringify(input.body) } : {}),
-					...(signal ? { signal } : {}),
-				});
-			} catch (error) {
-				if (signal?.aborted) throw signal.reason ?? error;
-				throw new ApiProblem({
-					type: "urn:clio-coder:problem:unavailable",
-					title: "Server unavailable",
-					status: 503,
-					code: "unavailable",
-					detail: "Cannot reach Clio Coder. Check that the server is running.",
-					instance: "browser",
-				});
+			let response: Response | undefined;
+			// A 401 means the server refused the credential before handling the request, so a retry with a
+			// fresh one cannot run it twice. A second refusal, or the exchange's own, settles it.
+			for (let attempt = 0; attempt < 2; attempt += 1) {
+				let bearer: string;
+				try {
+					bearer = await credentials.bearer();
+				} catch (error) {
+					throw error instanceof CredentialProblem ? new ApiProblem(error.problem) : error;
+				}
+				try {
+					response = await fetcher(`${prefix}${path}${query.size ? `?${query}` : ""}`, {
+						method: route.method,
+						headers: {
+							Authorization: `Bearer ${bearer}`,
+							...(route.method !== "GET" ? { "Content-Type": "application/json", "Idempotency-Key": key ?? idempotency } : {}),
+							...(route.method !== "GET" && commandEpoch !== undefined ? { "X-Clio-Epoch": commandEpoch } : {}),
+						},
+						...(route.method !== "GET" ? { body: JSON.stringify(input.body) } : {}),
+						...(signal ? { signal } : {}),
+					});
+				} catch (error) {
+					if (signal?.aborted) throw signal.reason ?? error;
+					throw new ApiProblem({
+						type: "urn:clio-coder:problem:unavailable",
+						title: "Server unavailable",
+						status: 503,
+						code: "unavailable",
+						detail: "Cannot reach Clio Coder. Check that the server is running.",
+						instance: "browser",
+					});
+				}
+				clock.adopt(response.headers.get("date"));
+				// 421 (wrong host) is also "unauthorized" but says nothing about the credential.
+				if (response.status !== 401) break;
+				credentials.refused(bearer);
+				if (attempt === 0) await response.body?.cancel().catch(() => {});
 			}
-			clock.adopt(response.headers.get("date"));
-			if (response.status === 401) {
-				// 421 (wrong host) is also "unauthorized" but says nothing about the token.
-				dropStoredToken();
-				markTokenRejected();
-			}
+			if (!response) throw new ApiProblem(unauthorizedProblem());
 			if (!response.ok) throw new ApiProblem((await response.json()) as Problem);
 			const value = (await response.json()) as Output<R>;
 			if (signal?.aborted) throw signal.reason;

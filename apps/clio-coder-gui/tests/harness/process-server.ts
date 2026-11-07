@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
+import { exchangeLaunchToken } from "./exchange.js";
 export async function processServer(env: NodeJS.ProcessEnv) {
 	const child = spawn(
 		process.execPath,
@@ -44,6 +45,7 @@ export async function processServer(env: NodeJS.ProcessEnv) {
 		});
 	});
 	const token = new URLSearchParams(launch.hash.slice(1)).get("token");
+	const credential = await exchangeLaunchToken(launch, token ?? "");
 	const request = (path: string, method = "GET", body?: unknown) =>
 		new Promise<Response>((resolve, reject) => {
 			const call = httpRequest(
@@ -51,7 +53,7 @@ export async function processServer(env: NodeJS.ProcessEnv) {
 				{
 					method,
 					headers: {
-						Authorization: `Bearer ${token}`,
+						Authorization: `Bearer ${credential}`,
 						...(body === undefined
 							? {}
 							: {

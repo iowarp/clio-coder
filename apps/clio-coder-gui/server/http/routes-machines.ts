@@ -1,10 +1,12 @@
+import { hostname } from "node:os";
 import type { Hono } from "hono";
 import type { MachineAttachment, MachineAttachmentState } from "../../contracts/machines.js";
 import { routes } from "../../contracts/routes.js";
-import { proxyRequest } from "../local-server.js";
+import { clientCredential, dropClientCredential, proxyRequest } from "../local-server.js";
 import type { EventHub } from "../services/event-hub.js";
 import type { MachinesService } from "../services/machines.js";
 import { AppProblem } from "../services/problem.js";
+import { requestClient } from "./auth.js";
 import { idempotencyKey, register } from "./validate.js";
 
 /** Where a node's GUI answers, once it does: the forward's local port, and the port the node listens on. */
@@ -37,7 +39,14 @@ const UNFORWARDED_REQUEST_HEADERS = new Set([
 	"transfer-encoding",
 	"upgrade",
 ]);
-const UNFORWARDED_RESPONSE_HEADERS = new Set(["connection", "keep-alive", "transfer-encoding", "set-cookie"]);
+// The node names its own client for this hop; the browser is told the id this app knows it by.
+const UNFORWARDED_RESPONSE_HEADERS = new Set([
+	"connection",
+	"keep-alive",
+	"transfer-encoding",
+	"set-cookie",
+	"x-clio-client",
+]);
 const MACHINE_ID = /^(?!local$)[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export function machinesRoutes(
@@ -61,7 +70,9 @@ export function machinesRoutes(
 	register(app, hub, routes.machineAttachments, async () => ({ attachments: await attached().list() }));
 	register(app, hub, routes.machineAttach, ({ params }) => attached().attach(params.id));
 	// The node's own API, through its forward. The local auth middleware has already checked this app's
-	// token and origin; only machines that are registered and ready are reachable.
+	// origin and the browser client's credential; only machines that are registered and ready are
+	// reachable. Each local client is its own client on the node too, so the node attributes and
+	// arbitrates its sessions per window exactly as it would for its own windows.
 	app.all("/m/:id/api/*", async (context) => {
 		const id = context.req.param("id");
 		const route = MACHINE_ID.test(id) ? attached().route(id) : null;
@@ -72,15 +83,38 @@ export function machinesRoutes(
 				`Machine ${id} is ${route.state.replace("-", " ")}; its GUI is not reachable yet.`,
 			);
 		const url = new URL(context.req.url);
+		const path = url.pathname.slice(`/m/${id}`.length);
+		// A browser's credentials and tickets belong to this app; the node issues its own.
+		if (path === routes.authClients.path || path === routes.authRotate.path || path === routes.eventTicket.path)
+			throw new AppProblem("not_found", "Credentials and stream tickets are issued by this app, not through it.");
+		const client = requestClient(context);
+		const refused = () =>
+			new AppProblem("unavailable", `Machine ${id}'s GUI refused this app's credentials. Open it again.`, 502);
+		let credential: string | null;
+		try {
+			credential = await clientCredential(
+				route.port,
+				route.remotePort,
+				route.token,
+				`${client.label} via ${hostname()}`.slice(0, 80),
+				client.clientId,
+			);
+		} catch {
+			credential = null;
+		}
+		if (credential === null) throw refused();
+		// The browser's ticket was spent here. This hop can carry a header, so even a stream travels on
+		// this app's bearer at the node.
 		url.searchParams.delete("token");
+		url.searchParams.delete("ticket");
 		const headers: Record<string, string> = {};
 		for (const [name, value] of context.req.raw.headers)
 			if (!UNFORWARDED_REQUEST_HEADERS.has(name)) headers[name] = value;
 		let upstream: Awaited<ReturnType<typeof proxyRequest>>;
 		try {
-			upstream = await proxyRequest(route.port, route.remotePort, route.token, {
+			upstream = await proxyRequest(route.port, route.remotePort, credential, {
 				method: context.req.method,
-				path: `${url.pathname.slice(`/m/${id}`.length)}${url.search}`,
+				path: `${path}${url.search}`,
 				headers,
 				body: context.req.raw.body,
 				signal: context.req.raw.signal,
@@ -91,7 +125,9 @@ export function machinesRoutes(
 		// A remote refusal must not read as this app refusing the browser's token, which the client would drop.
 		if (upstream.status === 401 || upstream.status === 421) {
 			await upstream.body.cancel().catch(() => {});
-			throw new AppProblem("unavailable", `Machine ${id}'s GUI refused this app's credentials. Open it again.`, 502);
+			// The next request exchanges the node's launch token again rather than repeating the refusal.
+			dropClientCredential(route.port, route.remotePort, route.token, client.clientId);
+			throw refused();
 		}
 		// Headers go in at construction: a response built without a content type takes the adaptor's
 		// text/plain default, and one appended afterwards would only join it.

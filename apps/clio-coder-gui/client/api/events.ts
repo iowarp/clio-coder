@@ -1,12 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
-import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
 import { telemetryInvalidations } from "../telemetry/live-model.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
-import { type Client, emptyInput } from "./client.js";
+import type { Client } from "./client.js";
 import { clock } from "./clock.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { advanceSessionReadScope, resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
@@ -298,11 +297,30 @@ export function subscribe(
 		if (launched !== null) launch(launched);
 	});
 
-	const connect = () => {
+	const retry = () => {
+		connection(tokenRejected() ? "Not connected" : "Reconnecting…");
+		if (tokenRejected()) return;
+		retryTimer = setTimeout(() => {
+			retryTimer = null;
+			void connect();
+		}, retryMs);
+		retryMs = Math.min(retryMs * 2, 30_000);
+	};
+	let attempt = 0;
+	const connect = async () => {
 		if (disposed || tokenRejected()) return;
-		const query = new URLSearchParams({ token: client.token });
-		if (cursor !== undefined) query.set("after", cursor);
-		const source = new EventSource(`${client.prefix}${routes.events.path}?${query}`);
+		const current = ++attempt;
+		let url: string;
+		try {
+			// A single-use ticket from this app; the launch token and the credential stay out of the URL.
+			url = await client.eventsUrl(cursor);
+		} catch {
+			// A refused launch token is learned by the exchange itself; anything else retries.
+			if (!disposed && current === attempt) retry();
+			return;
+		}
+		if (disposed || current !== attempt || tokenRejected()) return;
+		const source = new EventSource(url);
 		stream = source;
 		const receive = (message: MessageEvent<string>) => {
 			if (disposed || stream !== source) return;
@@ -330,28 +348,15 @@ export function subscribe(
 			disconnected = true;
 			// Paint every received event before reporting a connection loss.
 			buffer.flush();
-			if (tokenRejected()) {
-				source.close();
-				stream = null;
-				connection("Not connected");
-				return;
-			}
-			connection("Reconnecting…");
-			// EventSource retries while CONNECTING, but a CLOSED source never retries.
-			if (source.readyState !== EventSource.CLOSED) return;
+			// The browser's own retry would present the same ticket, which the server has already
+			// spent, so every loss reconnects here with a fresh one. Minting it is an ordinary request,
+			// whose 401 handling also learns of a refused launch token.
 			source.close();
 			stream = null;
-			// The stream hides its HTTP status. A normal authenticated read distinguishes a refused
-			// launch token from a recoverable SSE failure through the client's existing 401 handling.
-			void client.call(routes.meta, emptyInput).catch(() => {});
-			retryTimer = setTimeout(() => {
-				retryTimer = null;
-				connect();
-			}, retryMs);
-			retryMs = Math.min(retryMs * 2, 30_000);
+			retry();
 		};
 	};
-	connect();
+	void connect();
 	// The refusal can also be learned after the last stream error, from an ordinary request.
 	const stopWatching = onTokenRejected(() => {
 		if (retryTimer !== null) clearTimeout(retryTimer);

@@ -7,8 +7,9 @@ import { openapi } from "../contracts/openapi.js";
 import { isPagePath } from "../contracts/pages.js";
 import { routes } from "../contracts/routes.js";
 import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot, runningBuildId } from "./clio/http-shims.js";
-import { auth } from "./http/auth.js";
+import { auth, requestClient } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
+import { authRoutes } from "./http/routes-auth.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
@@ -24,6 +25,7 @@ import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
 import { ArtifactWindow } from "./services/artifact-window.js";
+import { ClientRegistry } from "./services/clients.js";
 import { Commands } from "./services/commands.js";
 import type { EventHub } from "./services/event-hub.js";
 import type { EvidenceService } from "./services/evidence.js";
@@ -44,7 +46,10 @@ import type { TraceService } from "./services/traces.js";
 import type { RuntimeInfo } from "./worker/protocol.js";
 
 export function createApp(options: {
+	/** The launch token, which only exchanges for a client credential. */
 	token: string;
+	/** Process-local, so a restart or a stop revokes every credential it issued. */
+	clients?: ClientRegistry;
 	origin: () => string;
 	hub: EventHub;
 	operations: OperationRegistry;
@@ -76,8 +81,9 @@ export function createApp(options: {
 	const app = new Hono();
 	const { hub, operations, toolchain } = options;
 	const artifacts = options.artifacts ?? new ArtifactWindow();
+	const clients = options.clients ?? new ClientRegistry();
 	app.onError(problemResponse);
-	app.use("*", auth(options.token, options.origin));
+	app.use("*", auth(options.token, options.origin, clients));
 	if (process.env.NODE_ENV === "test" && options.runtime) {
 		const inspect = options.runtime;
 		app.get("/api/_diagnostics/runtime", async (context) => context.json(await inspect()));
@@ -109,7 +115,11 @@ export function createApp(options: {
 		build: runningBuildId,
 	}));
 	register(app, hub, routes.openapi, () => openapi());
-	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));
+	authRoutes(app, hub, clients);
+	register(app, hub, routes.events, ({ query }, context) => {
+		const client = requestClient(context);
+		return events(context, hub, query.after, () => clients.stream(client));
+	});
 	// The launcher focuses the open window and stops, so a launch that named a page sends it here and
 	// every window hears it. The one that has the focus goes there.
 	register(app, hub, routes.launch, ({ body }) => {

@@ -17318,6 +17318,324 @@
 				}
 			}
 		},
+		"/api/auth/clients": {
+			"post": {
+				"operationId": "authClients",
+				"summary": "Exchange the launch token for this client's own short-lived credential; the launch token opens nothing else",
+				"security": [
+					{
+						"launchToken": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"label": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 80
+									},
+									"resume": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9_-]{8,64}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["clientId", "label", "credential", "expiresAt", "expiresIn", "rotateIn"],
+									"properties": {
+										"clientId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{8,64}$"
+										},
+										"label": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 80
+										},
+										"credential": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{43}$"
+										},
+										"expiresAt": {
+											"type": "string"
+										},
+										"expiresIn": {
+											"type": "integer",
+											"minimum": 1
+										},
+										"rotateIn": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/auth/rotate": {
+			"post": {
+				"operationId": "authRotate",
+				"summary": "Replace this client's credential before it expires; the old one is honoured for a short grace",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["clientId", "label", "credential", "expiresAt", "expiresIn", "rotateIn"],
+									"properties": {
+										"clientId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{8,64}$"
+										},
+										"label": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 80
+										},
+										"credential": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{43}$"
+										},
+										"expiresAt": {
+											"type": "string"
+										},
+										"expiresIn": {
+											"type": "integer",
+											"minimum": 1
+										},
+										"rotateIn": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/events/ticket": {
+			"post": {
+				"operationId": "eventTicket",
+				"summary": "A single-use ticket that opens one event stream for this client",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["ticket", "expiresIn"],
+									"properties": {
+										"ticket": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{43}$"
+										},
+										"expiresIn": {
+											"type": "integer",
+											"minimum": 1
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/events": {
 			"get": {
 				"operationId": "events",
@@ -17327,7 +17645,7 @@
 						"bearer": []
 					},
 					{
-						"eventToken": []
+						"eventTicket": []
 					}
 				],
 				"parameters": [
@@ -17342,12 +17660,12 @@
 						}
 					},
 					{
-						"name": "token",
+						"name": "ticket",
 						"in": "query",
 						"required": false,
 						"schema": {
 							"type": "string",
-							"maxLength": 256
+							"maxLength": 64
 						}
 					},
 					{
@@ -17921,12 +18239,19 @@
 		"securitySchemes": {
 			"bearer": {
 				"type": "http",
-				"scheme": "bearer"
+				"scheme": "bearer",
+				"description": "This client's credential from POST /api/auth/clients."
 			},
-			"eventToken": {
+			"launchToken": {
+				"type": "http",
+				"scheme": "bearer",
+				"description": "The launch token. Accepted only by POST /api/auth/clients."
+			},
+			"eventTicket": {
 				"type": "apiKey",
 				"in": "query",
-				"name": "token"
+				"name": "ticket",
+				"description": "A single-use ticket from POST /api/events/ticket."
 			}
 		},
 		"schemas": {

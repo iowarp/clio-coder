@@ -4,10 +4,12 @@ import { type Event, EventCursor } from "../../contracts/events.js";
 import type { EventHub } from "../services/event-hub.js";
 import { parse } from "./validate.js";
 
-export function events(context: Context, hub: EventHub, after?: string) {
+/** `present` marks the client present while the stream is open and returns the call that ends it. */
+export function events(context: Context, hub: EventHub, after?: string, present?: () => () => void) {
 	const cursor = context.req.header("Last-Event-ID") ?? after;
 	if (cursor !== undefined) parse(EventCursor, cursor);
 	return streamSSE(context, async (stream) => {
+		const release = present?.();
 		let queuedBytes = 0;
 		let pending = Promise.resolve();
 		let finish: () => void = () => {};
@@ -53,6 +55,7 @@ export function events(context: Context, hub: EventHub, after?: string) {
 		} finally {
 			clearInterval(heartbeat);
 			unsubscribe();
+			release?.();
 		}
 	});
 }

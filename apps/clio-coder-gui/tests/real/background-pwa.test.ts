@@ -54,7 +54,17 @@ async function connected(page: Page) {
 	assert.equal(new URL(page.url()).hash, "");
 	const meta = await page.evaluate(async () => {
 		const token = localStorage.getItem("clio-coder-pwa-token");
-		return (await fetch("/api/meta", { headers: { Authorization: `Bearer ${token}` } })).json();
+		const opened = await fetch("/api/auth/clients", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				"Idempotency-Key": crypto.randomUUID(),
+			},
+			body: JSON.stringify({ label: "PWA check" }),
+		});
+		const { credential } = await opened.json();
+		return (await fetch("/api/meta", { headers: { Authorization: `Bearer ${credential}` } })).json();
 	});
 	assert.equal(meta.pwa, true);
 	return meta.epoch as string;
