@@ -109,7 +109,11 @@ Other rows appear when they apply: `validation contract` (valid, absent, Markdow
 Doctor reports one `external tool <id>` row for each pinned external program:
 `asciinema` (recording playback), `herdr` (the pane host), `yazi` (the files pane),
 `croc` (relay file transfer between machines) and `cliamp` (the terminal music
-player behind `/music`). The detail says
+player behind `/music`). The `herdr` row describes only Clio's own pinned copy, because
+Clio never hosts on a `herdr` from `PATH`: ``pane host <pin> (Clio's pinned copy) at <path>``
+is `OK`, ``pane host <pin> is not installed; the next `clio-coder` installs it, or run `clio-coder panes install` ``
+is a `WARN`, and `no pinned pane host for this platform; Clio runs without panes` is `INFO`.
+For every other tool the detail says
 where the tool resolves, with a `PATH` copy winning when it meets the pin's minimum version:
 
 | Detail | Meaning |
@@ -120,10 +124,10 @@ where the tool resolves, with a `PATH` copy winning when it meets the pin's mini
 | `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | A `PATH` copy is too old and there is no vendored copy. |
 | ``not found (install with `clio-coder tools install <id>`)`` | Nothing resolves. |
 | `not installed and no pinned asset for this platform (<platform>)` | The pin has no download for this machine. |
-| `experimental integration disabled by settings` | `herdr` while panes are off, or `yazi` while the files pane or panes are off. |
+| `experimental integration disabled by settings` | `yazi` while the files pane is off. |
 
-An external tool row is never an error. A missing `herdr` or `yazi`, which includes
-one whose only vendored copy is superseded, is a `WARN` while its integration is
+An external tool row is never an error. A missing `yazi`, which includes
+one whose only vendored copy is superseded, is a `WARN` while the files pane is
 enabled, and the row is `OK` with the disabled detail while it is off; a missing
 `croc` or `cliamp` is `INFO`. The `files pane profile` row reports the managed Yazi profile
 (`OK` when current, `INFO` when not yet generated, `WARN` when stale or when
