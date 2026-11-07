@@ -35,7 +35,7 @@ test("startup names the replacement when the chat route sits on a retired runtim
 		"version: 2\ntargets:\n  - { id: box, runtime: ollama-native, defaultModel: llama3 }\nchat:\n  target: box\n  model: llama3\n",
 	);
 
-	match(describeVerdict(classifyDefaultTarget(readSettings())), /'ollama-native'.*removed in 0\.7\.0.*runtime: ollama/u);
+	match(describeVerdict(classifyDefaultTarget(readSettings())), /'ollama-native'.*removed in 0\.5\.6.*runtime: ollama/u);
 });
 
 // `targets --json` serializes this reason, so it carries the same advice as the table.
@@ -49,7 +49,7 @@ test("a target on a retired runtime carries the replacement in its provider stat
 	t.after(() => bundle.extension.stop?.());
 	const status = bundle.contract.list().find((entry) => entry.target.id === "blade");
 	strictEqual(status?.available, false);
-	match(status?.reason ?? "", /'lmstudio-native' was removed in 0\.7\.0.*runtime: lmstudio`/u);
+	match(status?.reason ?? "", /'lmstudio-native' was removed in 0\.5\.6.*runtime: lmstudio`/u);
 });
 
 test("run --agent with an API key names the replacement for a target on a retired runtime", async (t) => {
@@ -75,7 +75,7 @@ test("run --agent with an API key names the replacement for a target on a retire
 				noContextFiles: true,
 			});
 		strictEqual(await run("box"), 1);
-		match(stderr, /cannot use target 'box': runtime 'ollama-native' was removed in 0\.7\.0.*runtime: ollama`/u);
+		match(stderr, /cannot use target 'box': runtime 'ollama-native' was removed in 0\.5\.6.*runtime: ollama`/u);
 		stderr = "";
 		strictEqual(await run("nosuch"), 2);
 		match(stderr, /target 'nosuch' not found/u);

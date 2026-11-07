@@ -194,6 +194,6 @@ test("fleet routing to a connection on a retired runtime names the replacement a
 		},
 		"fleet",
 	);
-	assert.match(warning, /'ollama-native' was removed in 0\.7\.0.*runtime: ollama`/u);
+	assert.match(warning, /'ollama-native' was removed in 0\.5\.6.*runtime: ollama`/u);
 	assert.equal(readFileSync(file, "utf8"), before);
 });
