@@ -505,15 +505,3 @@ export function runEvidenceOf(
 		evidence,
 	};
 }
-
-/** A run's evidence read from its run scope, with the review gates decided about it. */
-export function readRunEvidence(runId: string, stateDir = clioStateDir(), options: { now?: Date } = {}): RunEvidenceV1 {
-	let record: RunTelemetryV1 | null = null;
-	try {
-		record = readRunRecord(stateDir, runId);
-	} catch {
-		// An unreadable run scope reads as a missing record.
-		record = null;
-	}
-	return runEvidenceOf(runId, record, { ...options, gates: readRunGateIndex(stateDir)(runId) });
-}
