@@ -265,6 +265,21 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					: {}),
 			};
 		});
+		if (deps.overlay.getState() === "permission-confirm") {
+			return [
+				...builtins,
+				{ key: "x", label: "Stop turn", run: deps.overlay.stopTurnFromPermission },
+				{
+					key: "t",
+					label: deps.overlay.isShowingPermissionTerms?.() ? "Hide terms" : "Show terms",
+					...(deps.overlay.isInspectingMutation() ? { disabledReason: "Close details first" } : {}),
+					run: deps.overlay.togglePermissionTerms,
+				},
+				...(deps.overlay.canInspectMutation()
+					? [{ key: "v", label: "Inspect details", run: deps.overlay.toggleMutationInspection }]
+					: []),
+			];
+		}
 		if (search() || deps.overlay.getState() !== "closed") return builtins;
 		// Host entries join only while the composer has the keyboard; a built-in suffix always wins.
 		const taken = new Set(builtins.map((entry) => entry.key).filter(Boolean));

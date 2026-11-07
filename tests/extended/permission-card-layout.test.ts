@@ -3,13 +3,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { PermissionResolvedPayload } from "../../src/core/telemetry/live-events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { CALL_TARGET_MAX_CHARS, describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { UNATTENDED_ALLOWED_BY } from "../../src/domains/safety/unattended.js";
-import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { type OverlayState, routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import {
 	createOverlayPermissionLifecycle,
@@ -70,6 +72,27 @@ function plain(lines: ReadonlyArray<string>): string[] {
 function contentWidth(columns: number): number {
 	return Math.min(PERMISSION_OVERLAY_WIDTH, columns) - 4;
 }
+
+test("a permission card refreshes portable hints when the menu key changes", () => {
+	const previous = getKeybindings();
+	const terminal = process.env.TERM_PROGRAM;
+	process.env.TERM_PROGRAM = "Apple_Terminal";
+	const manager = createKeybindingManager(DEFAULT_SETTINGS, {});
+	try {
+		const body = createPermissionOverlayBody(WRITE_VIEW);
+		const text = () => plain(body.render(contentWidth(120))).join(" ");
+		match(text(), /\[Ctrl\+G X\] stop/u);
+		manager.reload({ "clio-coder.leader": "ctrl+b" });
+		match(text(), /\[Ctrl\+B X\] stop/u);
+		doesNotMatch(text(), /Ctrl\+G/u);
+		manager.reload({ "clio-coder.leader": [] });
+		match(text(), /\[Alt\+X\] stop/u);
+	} finally {
+		setKeybindings(previous);
+		if (terminal === undefined) delete process.env.TERM_PROGRAM;
+		else process.env.TERM_PROGRAM = terminal;
+	}
+});
 
 for (const columns of [80, 120, 160]) {
 	test(`${columns} columns: the folded card leads with the call and keeps the whole target`, () => {

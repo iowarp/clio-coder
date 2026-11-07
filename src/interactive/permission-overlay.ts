@@ -25,6 +25,7 @@ import {
 	type PermissionInspectionHint,
 	type PermissionTermsHint,
 	permissionHintEntries,
+	permissionKeyLabel,
 } from "./permission-hint.js";
 import { renderToolArguments } from "./renderers/tool-execution.js";
 import type { Choice, ClioTheme, ClioToken, Fact, HarnessFunction, Tone } from "./theme/index.js";
@@ -307,8 +308,10 @@ export function permissionOverlayHint(
 	// screen (open terms scrolled past them, the mutation open) every answer
 	// key is back on the rail.
 	const onCard = new Set<string>([
-		...(choicesShown ? ["Enter", "Esc", PERMISSION_STOP_KEY] : []),
-		...(choicesShown && readingKeysShown ? [PERMISSION_TERMS_KEY, MUTATION_PREVIEW_KEY] : []),
+		...(choicesShown ? ["Enter", "Esc", permissionKeyLabel(PERMISSION_STOP_KEY)] : []),
+		...(choicesShown && readingKeysShown
+			? [permissionKeyLabel(PERMISSION_TERMS_KEY), permissionKeyLabel(MUTATION_PREVIEW_KEY)]
+			: []),
 	]);
 	const shown = entries.filter((entry) => !onCard.has(entry.key));
 	return fitHintEntries(shown.length > 0 ? shown : entries, innerWidth - 3);
@@ -351,7 +354,7 @@ function permissionChoices(
 			},
 			{ key: "Esc", verb: "deny", consequence: "skips it; an identical call in this run is refused without asking" },
 			{
-				key: PERMISSION_STOP_KEY,
+				key: permissionKeyLabel(PERMISSION_STOP_KEY),
 				verb: "stop",
 				// A worker asks while the main agent is often idle, and a key cannot end a turn that is not running.
 				consequence: endsWithTurn
@@ -373,20 +376,20 @@ function permissionChoices(
 				consequence: `runs it, and later test runners this session${draftNote}`,
 			},
 			{ key: "Esc", verb: "deny", consequence: "skips it; the next test runner asks again" },
-			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
+			{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 		];
 	}
 	if (view.artifact !== undefined) {
 		return [
 			{ key: "Enter", verb: "allow", consequence: `starts every worker in the plan${draftNote}` },
 			{ key: "Esc", verb: "deny", consequence: "skips it; no worker starts" },
-			{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
+			{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 		];
 	}
 	return [
 		{ key: "Enter", verb: "allow", consequence: `runs this one call${draftNote}` },
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
-		{ key: PERMISSION_STOP_KEY, verb: "stop", consequence: stopWords, tone: "error" },
+		{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 	];
 }
 
@@ -426,8 +429,8 @@ interface ReadingKey {
  */
 function readingKeys(inspectable: boolean): ReadingKey[] {
 	return [
-		{ key: PERMISSION_TERMS_KEY, verb: "terms" },
-		...(inspectable ? [{ key: MUTATION_PREVIEW_KEY, verb: "inspect" }] : []),
+		{ key: permissionKeyLabel(PERMISSION_TERMS_KEY), verb: "terms" },
+		...(inspectable ? [{ key: permissionKeyLabel(MUTATION_PREVIEW_KEY), verb: "inspect" }] : []),
 	];
 }
 
@@ -646,7 +649,7 @@ function permissionFacts(
 	if (view.mutation !== undefined) {
 		facts.push({
 			label: "mutation",
-			value: `${mutationFactsLine(view.mutation)} · ${keyName(MUTATION_PREVIEW_KEY)} reads it before you decide`,
+			value: `${mutationFactsLine(view.mutation)} · ${permissionKeyLabel(MUTATION_PREVIEW_KEY)} reads it before you decide`,
 		});
 	} else if (view.origin.kind === "worker" && isFileMutationTool(view.tool)) {
 		facts.push({
@@ -796,7 +799,7 @@ function permissionCardSections(
 			...(plan === null
 				? [sectionRule(theme, content, "Resolved dispatch plan"), ...planTextRows(view.artifact.text, content)]
 				: [
-						sectionRule(theme, content, "Plan", { meta: `${keyName(MUTATION_PREVIEW_KEY)} shows every field` }),
+						sectionRule(theme, content, "Plan", { meta: `${permissionKeyLabel(MUTATION_PREVIEW_KEY)} shows every field` }),
 						...factRows(theme, planFacts(plan), content, CARD_FACT_ROWS),
 					]),
 		);
@@ -887,7 +890,7 @@ function permissionInspectionLines(
 			CARD_FACT_ROWS,
 		),
 		sectionRule(theme, content, previewLabel(preview.heading), {
-			meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} hides`,
+			meta: `Esc or ${permissionKeyLabel(MUTATION_PREVIEW_KEY)} hides`,
 		}),
 		...previewReason(theme, preview.heading, content),
 	];
@@ -901,7 +904,7 @@ function permissionInspectionLines(
 				...identity.rows.slice(0, 1),
 				...target.slice(0, 1),
 				sectionRule(theme, content, previewLabel(preview.heading), {
-					meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} hides`,
+					meta: `Esc or ${permissionKeyLabel(MUTATION_PREVIEW_KEY)} hides`,
 				}),
 			]
 		: fullHead;
@@ -1071,6 +1074,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 					: (countdownMs ?? ""),
 			hasDraft,
 			mainTurn,
+			permissionKeyLabel(PERMISSION_STOP_KEY),
 			skinEpoch(),
 		].join("|");
 		if (this.memo?.key === key) return this.memo.lines;
@@ -1114,7 +1118,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content, CARD_FACT_ROWS)),
 				sectionRule(theme, content, artifact !== undefined ? "Details" : "Exact invocation", {
-					meta: `Esc or ${keyName(MUTATION_PREVIEW_KEY)} hides`,
+					meta: `Esc or ${permissionKeyLabel(MUTATION_PREVIEW_KEY)} hides`,
 				}),
 			];
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
@@ -1289,7 +1293,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const head = [
 			...identity.rows,
 			...targetRows,
-			sectionRule(theme, content, "Terms", { meta: `Esc or ${keyName(PERMISSION_TERMS_KEY)} hides` }),
+			sectionRule(theme, content, "Terms", { meta: `Esc or ${permissionKeyLabel(PERMISSION_TERMS_KEY)} hides` }),
 		];
 		const rows = permissionTermsRows(theme, this.view, content);
 		const clause = compactCountdownClause(this.view, countdown);

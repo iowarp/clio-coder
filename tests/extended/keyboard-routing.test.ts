@@ -82,7 +82,7 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		overlays.push({ component, handle });
 		return handle;
 	};
-	const active = { streaming: true, queued: false, parked: false };
+	const active = { streaming: true, queued: false, parked: false, inspectable: false, inspecting: false, terms: false };
 	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });
 	let state: OverlayState = "closed";
 	let handle: ReturnType<typeof tui.showOverlay> | null = null;
@@ -149,11 +149,16 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 			stopTurnFromPermission: () => {
 				counts.stop++;
 			},
-			canInspectMutation: () => false,
-			isInspectingMutation: () => false,
-			toggleMutationInspection: noop,
+			canInspectMutation: () => active.inspectable,
+			isInspectingMutation: () => active.inspecting,
+			toggleMutationInspection: () => {
+				active.inspecting = !active.inspecting;
+			},
 			scrollMutationInspection: noop,
-			togglePermissionTerms: noop,
+			togglePermissionTerms: () => {
+				active.terms = !active.terms;
+			},
+			isShowingPermissionTerms: () => active.terms,
 			scrollPermissionCard: () => false,
 			cancelAskUser: close,
 			toggleFooterDashboardState: () => {
@@ -312,6 +317,31 @@ it("permission deletion bypasses submit overrides and leaves nonempty Enter iner
 	assert.equal(f.counts.allow, 0);
 	f.terminal.input("\n");
 	assert.equal(f.counts.allow, 1);
+});
+it("offers permission-local stop, inspection and terms through the portable menu", () => {
+	const f = fixture();
+	f.active.inspectable = true;
+	f.open("permission-confirm");
+	const menu = (key: string) => {
+		f.terminal.input("\x07");
+		f.terminal.input(key);
+	};
+	menu("t");
+	assert.equal(f.active.terms, true);
+	menu("v");
+	assert.equal(f.active.inspecting, true);
+	menu("t");
+	assert.equal(f.active.terms, true, "terms stay inert while inspecting");
+	f.terminal.input("\x07");
+	menu("v");
+	assert.equal(f.active.inspecting, false);
+	menu("x");
+	assert.equal(f.counts.stop, 1);
+	assert.equal(f.counts.dismiss, 0);
+	assert.equal(f.counts.allow, 0);
+	assert.equal(f.counts.submit, 0);
+	f.terminal.input("xvt");
+	assert.equal(f.editor.getText(), "xvt", "unprefixed letters still edit the composer");
 });
 it("leader toggles its owner, survives delay/unknown suffix, and Ctrl+C cancels immediately", async () => {
 	const f = fixture();

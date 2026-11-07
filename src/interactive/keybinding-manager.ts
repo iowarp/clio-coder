@@ -652,6 +652,16 @@ export function actionKeyLabel(
 	return preferredSpelling(bindings.getKeys(actionId), menu, detectTerminalKeySupport(env));
 }
 
+/** A modal owner's fixed Alt key has the same portable menu suffix. */
+export function localActionKeyLabel(
+	key: KeyId,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+	const leader = getKeybindings().getKeys("clio-coder.leader")[0];
+	const menu = leader ? `${formatKeyLabel(leader)} ${formatKeyLabel(key.slice(-1))}` : null;
+	return preferredSpelling([key], menu, detectTerminalKeySupport(env)) ?? formatKeyLabel(key);
+}
+
 /** The canonical spelling of a KeyId for chrome hints, preserving each caller's fallback. */
 export function formatKeyLabel(keyId: string | undefined, fallback = "unbound"): string {
 	if (!keyId || keyId.length === 0) return fallback;

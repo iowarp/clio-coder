@@ -1,5 +1,6 @@
 import type { EscapeLayers } from "./escape-layers.js";
 import { escapeHintEntry } from "./escape-layers.js";
+import { localActionKeyLabel } from "./keybinding-manager.js";
 import type { HintEntry } from "./overlay-frame.js";
 
 /**
@@ -21,6 +22,11 @@ export const PERMISSION_TERMS_KEY = "alt+t";
 
 /** Alt+S belongs to send-now; this chord is free in the default keybinding registry. */
 export const PERMISSION_STOP_KEY = "alt+x";
+
+export const permissionKeyLabel = (
+	key: typeof MUTATION_PREVIEW_KEY | typeof PERMISSION_TERMS_KEY | typeof PERMISSION_STOP_KEY,
+	env?: Readonly<Record<string, string | undefined>>,
+): string => localActionKeyLabel(key, env);
 
 /** Whether the terms are open. The composer rail never shows this key, so it defaults closed there. */
 export type PermissionTermsHint = "closed" | "open";
@@ -72,7 +78,7 @@ export function permissionHintEntries(
 		// Open, the terms close on Esc as well, and the Esc entry below already says so.
 		...(terms === undefined || terms === "open" || inspection === "open"
 			? []
-			: [{ key: PERMISSION_TERMS_KEY, verb: "terms", short: "terms", critical: false }]),
+			: [{ key: permissionKeyLabel(PERMISSION_TERMS_KEY), verb: "terms", short: "terms", critical: false }]),
 		// A card taller than its rows scrolls (BT-005). The open mutation names the
 		// same keys itself below.
 		...(scrollable && inspection !== "open" ? [{ key: "↑↓", verb: "scroll", critical: false }] : []),
@@ -80,8 +86,8 @@ export function permissionHintEntries(
 			? []
 			: inspection === "open"
 				? [{ key: "↑↓", verb: "scroll", critical: false }]
-				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
-		{ key: PERMISSION_STOP_KEY, verb: stopVerb, short: "stop", critical: true },
+				: [{ key: permissionKeyLabel(MUTATION_PREVIEW_KEY), verb: "inspect details", short: "inspect", critical: false }]),
+		{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: stopVerb, short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
 		// outranks the narrowing that would otherwise drop it first. With a view
 		// open, Esc closes it and the rail says so; deny is one more Esc.

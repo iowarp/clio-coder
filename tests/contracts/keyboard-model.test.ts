@@ -9,6 +9,12 @@ import {
 } from "../../src/domains/config/keybindings.js";
 import { getKeybindings, setKeybindings } from "../../src/engine/tui.js";
 import { actionKeyLabel, createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
+import {
+	MUTATION_PREVIEW_KEY,
+	PERMISSION_STOP_KEY,
+	PERMISSION_TERMS_KEY,
+	permissionKeyLabel,
+} from "../../src/interactive/permission-hint.js";
 import { WORKSPACE_FOCUS_KEY, WORKSPACE_LEAVE_KEY } from "../../src/interactive/surfaces/registry.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../src/session-control/slash-commands.js";
 
@@ -82,6 +88,28 @@ test("the documented key table is the registry", () => {
 				const key = actionKeyLabel(id, {});
 				return { key: key?.startsWith("Ctrl+G") ? "—" : key, letter: leader, command };
 			});
+
+		test("permission hints follow the portable leader, including rebinding and disabling it", () => {
+			const previous = getKeybindings();
+			const manager = createKeybindingManager(DEFAULT_SETTINGS, {});
+			const apple = { TERM_PROGRAM: "Apple_Terminal" };
+			try {
+				for (const [key, letter] of [
+					[PERMISSION_STOP_KEY, "X"],
+					[MUTATION_PREVIEW_KEY, "V"],
+					[PERMISSION_TERMS_KEY, "T"],
+				] as const) {
+					strictEqual(permissionKeyLabel(key, {}), `Alt+${letter}`);
+					strictEqual(permissionKeyLabel(key, apple), `Ctrl+G ${letter}`);
+				}
+				manager.reload({ "clio-coder.leader": "ctrl+x" });
+				strictEqual(permissionKeyLabel(PERMISSION_STOP_KEY, apple), "Ctrl+X X");
+				manager.reload({ "clio-coder.leader": [] });
+				strictEqual(permissionKeyLabel(PERMISSION_STOP_KEY, apple), "Alt+X");
+			} finally {
+				setKeybindings(previous);
+			}
+		});
 		deepStrictEqual(rows, expected);
 	} finally {
 		setKeybindings(previous);
