@@ -6,6 +6,7 @@ import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
 import { readClioVersion } from "../core/package-root.js";
+import { enterPrivateHomeIfNeverSetUp } from "../core/read-only-home.js";
 import { enterReadOnlyMode } from "../core/read-only-mode.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
@@ -457,7 +458,14 @@ async function executeRunCommand(
 			if (parsed.readOnly && parsed.agentId === undefined) parsed.constraints = { ...parsed.constraints, readOnly: true };
 			// Either way this process loads skills and probes targets before any
 			// model call, and must leave the caches and priors those feed as it found them.
-			if (parsed.readOnly) enterReadOnlyMode();
+			if (parsed.readOnly) {
+				enterReadOnlyMode();
+				if (enterPrivateHomeIfNeverSetUp() !== null) {
+					process.stderr.write(
+						"clio-coder run: --read-only on a home Clio has not set up; this run keeps nothing, not even its session\n",
+					);
+				}
+			}
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				writeRunDiagnostic(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",

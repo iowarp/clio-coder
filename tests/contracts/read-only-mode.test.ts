@@ -1,10 +1,24 @@
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+	closeServer,
+	seedOpenAICompatOrchestrator,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // Doctor, `run --read-only` and read-only workers probe targets like any run, and
@@ -26,10 +40,14 @@ const { endpointSlotsPath, readDiscoveredEndpointSlots, recordDiscoveredEndpoint
 const { withStateFileLock } = await import("../../src/core/state-file-lock.js");
 const { enableClioCompileCache } = await import("../../src/core/compile-cache.js");
 const { initializeClioHome } = await import("../../src/core/init.js");
+const { DEFAULT_SETTINGS_YAML } = await import("../../src/core/defaults.js");
 const cliHome = mkdtempSync(join(tmpdir(), "clio-coder-read-only-cli-"));
+const freshRoot = mkdtempSync(join(tmpdir(), "clio-coder-read-only-fresh-"));
+const freshHome = join(freshRoot, "home");
 after(() => {
 	rmSync(home, { recursive: true, force: true });
 	rmSync(cliHome, { recursive: true, force: true });
+	rmSync(freshRoot, { recursive: true, force: true });
 });
 
 const target = { id: "local", runtime: "openai-compat", url: "http://127.0.0.1:9/v1" };
@@ -104,4 +122,76 @@ describe("read-only mode", () => {
 		equal(run(["run", "--json"]), 2);
 		deepEqual(readdirSync(join(cliHome, "cache")), ["v8-compile-cache"]);
 	});
+
+	it("`run --read-only` on a home never set up answers from its settings and writes nothing anywhere in it", {
+		timeout: 120_000,
+	}, async (t) => {
+		const fixture = await startOpenAICompatFixture("done");
+		t.after(() => closeServer(fixture.server));
+		const configDir = join(freshHome, "config");
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(configDir, "settings.yaml"), DEFAULT_SETTINGS_YAML);
+		seedOpenAICompatOrchestrator(configDir, fixture.url);
+		const runTmp = join(freshRoot, "tmp");
+		mkdirSync(runTmp);
+		const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			...scratchClioEnvVars(freshHome),
+			HOME: freshHome,
+			TMPDIR: runTmp,
+			CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+		};
+		const run = (args: string[]) =>
+			new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+				const child = spawn(
+					process.execPath,
+					["--import", import.meta.resolve("tsx"), entry, "--no-context-files", "run", ...args],
+					{ cwd: freshHome, env, stdio: ["ignore", "pipe", "pipe"] },
+				);
+				let stdout = "";
+				let stderr = "";
+				child.stdout.on("data", (chunk) => {
+					stdout += String(chunk);
+				});
+				child.stderr.on("data", (chunk) => {
+					stderr += String(chunk);
+				});
+				child.on("close", (code) => resolve({ code, stdout, stderr }));
+			});
+		const before = inventory(freshHome);
+		const readOnly = await run(["--read-only", "Say done."]);
+		equal(readOnly.code, 0, readOnly.stderr);
+		ok(readOnly.stdout.includes("done"), readOnly.stdout);
+		ok(fixture.requests.length > 0, "the run reached the model");
+		deepEqual(inventory(freshHome), before, "no config, credentials, data, state or cache entry was made or changed");
+		deepEqual(
+			readdirSync(runTmp).filter((name) => name.startsWith("clio-coder-read-only-")),
+			[],
+			"the private home the run used is gone at exit",
+		);
+		// The same home is a working one: a plain run sets it up.
+		const plain = await run(["Say done."]);
+		equal(plain.code, 0, plain.stderr);
+		ok(existsSync(join(freshHome, "state", "home.json")));
+	});
 });
+
+/** Every entry under `root` with its kind, size and mtime, so any write shows. */
+function inventory(root: string): string[] {
+	const rows: string[] = [];
+	const walk = (dir: string): void => {
+		const stat = statSync(dir);
+		rows.push(`${dir}\td\t${stat.mtimeMs}`);
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) walk(path);
+			else {
+				const file = statSync(path);
+				rows.push(`${path}\tf\t${file.size}\t${file.mtimeMs}`);
+			}
+		}
+	};
+	walk(root);
+	return rows.sort();
+}
