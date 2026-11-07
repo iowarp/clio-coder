@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "node:test";
+import { panesModeFinding } from "../../src/cli/doctor-panes.js";
 import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
 import {
 	renderWorkspaceConfig,
@@ -265,6 +266,24 @@ describe("launcher eligibility", () => {
 		equal(workspaceEligibility({ ...base, env: { TERM: "dumb" } }).kind, "plain");
 		equal(workspaceEligibility({ ...base, env: { TMUX: "/tmp/tmux" } }).kind, "plain");
 		equal(workspaceEligibility({ ...base, options: { panes: "with" } }).kind, "plain");
+	});
+	it("doctor reports what a bare launch does, nested inside the operator's herdr", () => {
+		const operatorHerdr = { HERDR_ENV: "1", HERDR_SOCKET_PATH: "/home/me/.config/herdr/herdr.sock" };
+		const guest = { mode: "guest", reason: "guest mode on /home/me/.config/herdr/herdr.sock" };
+		const nested = panesModeFinding(operatorHerdr, guest);
+		equal(nested.level, "ok");
+		match(nested.detail, /^nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane/);
+		match(nested.detail, /`clio-coder --with-panes` joins this herdr as a guest/);
+		// An unreachable outside herdr does not stop the nested host, so it is not a warning.
+		equal(panesModeFinding(operatorHerdr, { mode: "none", reason: "no socket answered" }).level, "ok");
+		const own = panesModeFinding({ HERDR_ENV: "1", HERDR_SOCKET_PATH: `/run/u/clio-coder/${SESSION}.sock` }, guest);
+		match(own.detail, /^guest; bare `clio-coder` stays in this pane \(already inside Clio's pane host\)/);
+		const outside = panesModeFinding({ TERM: "xterm-256color" }, null);
+		match(outside.detail, /^Clio's private pane host opens with bare `clio-coder`/);
+		match(
+			panesModeFinding({ TMUX: "/x/tmux" }, null).detail,
+			/^plain; bare `clio-coder` stays in this terminal \(already inside a terminal multiplexer \(TMUX\)\)/,
+		);
 	});
 });
 

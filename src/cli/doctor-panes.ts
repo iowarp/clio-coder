@@ -3,8 +3,10 @@ import { readSettings } from "../core/config.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { detectMux, MUX_METHOD_MIN_PROTOCOL, resolveSocketCandidates } from "../domains/mux/index.js";
+import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
 import { telemetryRunsDirectory } from "../domains/telemetry/index.js";
 import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolchain/index.js";
+import { workspaceEligibility } from "./workspace-launch.js";
 
 /**
  * The panes section of `clio-coder doctor`.
@@ -43,6 +45,56 @@ function journalWritabilityFinding(root = telemetryRunsDirectory(resolveClioDirs
 	}
 }
 
+/**
+ * The `panes mode` row: what a bare `clio-coder` started from this
+ * environment would do. It asks the launcher's own eligibility rule
+ * (workspace-launch.ts) rather than guest detection, because inside the
+ * operator's own herdr a bare launch opens Clio's private host nested in the
+ * pane and only `--with-panes` joins that herdr as a guest. Doctor may itself
+ * be piped (`--json`), so the rule is asked about a launch from a terminal.
+ * `guest` is the detection the boot would get when it stays in a herdr pane,
+ * and is null outside one.
+ */
+export function panesModeFinding(
+	env: NodeJS.ProcessEnv,
+	guest: { mode: string; reason: string } | null,
+): DoctorFinding {
+	const name = "panes mode";
+	const eligibility = workspaceEligibility({
+		options: {},
+		env,
+		stdinIsTTY: true,
+		stdoutIsTTY: true,
+		insideClioHost: isClioHostSocket(env.HERDR_SOCKET_PATH),
+	});
+	if (eligibility.kind === "open" && !eligibility.nested) {
+		return {
+			ok: true,
+			name,
+			detail: "Clio's private pane host opens with bare `clio-coder`; this command is not running inside one",
+		};
+	}
+	if (eligibility.kind === "open") {
+		const join = guest === null ? "" : ` (${guest.mode}; ${guest.reason})`;
+		return {
+			ok: true,
+			level: "ok",
+			name,
+			detail: `nested; bare \`clio-coder\` opens Clio's private pane host inside this herdr pane with the prefix ctrl+shift+b; \`clio-coder --with-panes\` joins this herdr as a guest instead${join}`,
+		};
+	}
+	if (guest === null) {
+		return { ok: true, name, detail: `plain; bare \`clio-coder\` stays in this terminal (${eligibility.reason})` };
+	}
+	// A boot that stays in a herdr pane detects that host and joins it as a guest.
+	return {
+		ok: true,
+		level: guest.mode === "none" ? "warn" : "ok",
+		name,
+		detail: `${guest.mode}; bare \`clio-coder\` stays in this pane (${eligibility.reason}) and joins its host: ${guest.reason}`,
+	};
+}
+
 export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promise<DoctorFinding[]> {
 	let layoutRow: DoctorFinding = {
 		ok: true,
@@ -68,16 +120,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	// one, run from a plain terminal, is simply not in it. There is no socket to
 	// expect, so probing for one and warning about its absence would put three
 	// warnings on every healthy install.
-	if (env.HERDR_ENV !== "1") {
-		return [
-			{
-				ok: true,
-				name: "panes mode",
-				detail: "Clio's private pane host opens with bare `clio-coder`; this command is not running inside one",
-			},
-			layoutRow,
-		];
-	}
+	if (env.HERDR_ENV !== "1") return [panesModeFinding(env, null), layoutRow];
 
 	// Detection is the same ladder the interactive boot runs, so this row is the
 	// answer that boot would get. It opens a socket and nothing else: no file is
@@ -88,12 +131,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 
 	const candidates = detection.candidates.length > 0 ? detection.candidates : resolveSocketCandidates(env);
 	const findings: DoctorFinding[] = [
-		{
-			ok: true,
-			level: detection.mode === "none" ? "warn" : "ok",
-			name: "panes mode",
-			detail: `${detection.mode}; ${detection.reason}`,
-		},
+		panesModeFinding(env, detection),
 		{
 			ok: true,
 			level: detection.socketPath === null ? "warn" : "ok",

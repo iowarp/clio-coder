@@ -176,7 +176,11 @@ A missing pinned herdr is a WARN that names `clio-coder panes install`, and the 
 on a platform with no pinned herdr the row is INFO. A missing yazi is a WARN only while the files pane is enabled;
 otherwise `files pane profile` reads `disabled by settings`. A missing croc or cliamp is always INFO. Outside a pane host,
 doctor prints only `panes mode` and `panes layout` and does not probe a socket. Run inside a pane host, it adds
-`panes socket`, `panes protocol` and `panes binary`. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
+`panes socket`, `panes protocol` and `panes binary`.
+The `panes mode` row reports what a bare `clio-coder` would do from where doctor runs, by the same rule the launcher uses.
+From a pane of your own herdr it reads ``nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane ...``
+and names `clio-coder --with-panes` as the way to join that herdr as a guest; this row is OK even when your herdr does not answer.
+Inside Clio Coder's own host, or under tmux, zellij, screen or `TERM=dumb`, it says the launch stays in the terminal and why. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
 The `panes journal dir` row reads `has no run journal yet` when `<state>/telemetry/runs` does not exist and warns when it is not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
