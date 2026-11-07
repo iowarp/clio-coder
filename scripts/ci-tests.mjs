@@ -88,6 +88,7 @@ export const coreTests = [
 	"mux-platform-win32",
 	"keyboard-model",
 	"background-surfaces",
+	"completed-worker-presentation",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

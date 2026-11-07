@@ -4,6 +4,7 @@ import { parseCouncilReport } from "../../domains/agents/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
+import { cardRail, cardRows } from "../card.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
@@ -30,7 +31,7 @@ import { fleetNodeTaskBrief } from "../../domains/dispatch/fleet-node-prompt.js"
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
 import {
 	type WorkerEntryState as StreamWorkerEntryState,
 	type WorkerRunResultSummary,
@@ -44,7 +45,6 @@ import {
 	functionText,
 	GLYPH,
 	joinFacts,
-	releaseSpaces,
 	type SemanticRole,
 	toolFunction,
 } from "../theme/index.js";
@@ -129,8 +129,7 @@ function fitDisplayText(text: string, width: number): string {
 
 // The worker card follows the transcript's gutter grammar: the origin glyph
 // sits in the gutter and the card's body nests under it in the content column.
-const RAIL = "  │ ";
-const RAIL_WIDTH = 4;
+const RAIL_WIDTH = visibleWidth(cardRail());
 const ATTEMPT = "↻ ";
 const SEPARATOR = " · ";
 
@@ -298,6 +297,7 @@ function needsInputUnit(): string {
  * progress line says what the run is doing; `/view` spells the state out.
  */
 function pendingUnit(entry: WorkerEntryState): string {
+	if (entry.progress?.awaitingApproval === true) return theme.fg("warning", GLYPH.phaseBlocked);
 	// A worker gone quiet as a process is not live work: its mark says so in the dock's own glyph.
 	if (entry.progress?.quietSinceMs !== undefined) return theme.fg("warning", GLYPH.warn);
 	return theme.fg("activity", GLYPH.running);
@@ -315,10 +315,7 @@ function isPending(entry: WorkerEntryState): boolean {
 
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
 function railLines(text: string, token: SemanticRole, width: number): string[] {
-	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	return wrapTextWithAnsi(text, contentWidth).map(
-		(row) => `${theme.fg("gutter", RAIL)}${theme.base(token, releaseSpaces(row))}`,
-	);
+	return cardRows(text, width, token === "error", token);
 }
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
@@ -405,7 +402,7 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 function toolLine(entry: WorkerEntryState, width: number): string | null {
 	if (entry.tools.length === 0) return null;
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	return `${theme.fg("gutter", RAIL)}${theme.fg(
+	return `${cardRail()}${theme.fg(
 		"body",
 		fitUnits(
 			theme,
@@ -681,7 +678,14 @@ function alignedHeader(
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
-	const word = width >= HEADER_WORD_MIN_WIDTH && !pending ? headerWord(entry) : null;
+	const word =
+		width >= HEADER_WORD_MIN_WIDTH
+			? entry.progress?.awaitingApproval === true && pending
+				? "approval"
+				: pending
+					? null
+					: headerWord(entry)
+			: null;
 	// The column fits the widest word among the siblings, so a rare long one still lines the cards up.
 	const wordWidth = Math.max(
 		HEADER_WORD_WIDTH,
@@ -768,7 +772,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
 	if (model && modelRoom > 0) facts.splice(target ? 1 : 0, 0, truncateToWidth(model, modelRoom, GLYPH.ellipsis, false));
 	return truncateToWidth(
-		`${theme.fg("gutter", RAIL)}${theme.fg("metadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false))}`,
+		`${cardRail()}${theme.fg("metadata", truncateToWidth(facts.join(SEPARATOR), room, GLYPH.ellipsis, false))}`,
 		width,
 		GLYPH.ellipsis,
 		false,
@@ -863,19 +867,9 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 		const wanted = countsDown ? activity.length : Math.min(24, activity.length);
 		if (activityRoom < 1 || (kept > (countsDown ? 0 : 1) && activityRoom < wanted)) continue;
 		const shown = fitDisplayText(activity, activityRoom);
-		return truncateToWidth(
-			`${theme.fg("gutter", RAIL)}${styledActivity(shown)}${meta(tail)}`,
-			width,
-			GLYPH.ellipsis,
-			false,
-		);
+		return truncateToWidth(`${cardRail()}${styledActivity(shown)}${meta(tail)}`, width, GLYPH.ellipsis, false);
 	}
-	return truncateToWidth(
-		`${theme.fg("gutter", RAIL)}${styledActivity(fitDisplayText(activity, room))}`,
-		width,
-		GLYPH.ellipsis,
-		false,
-	);
+	return truncateToWidth(`${cardRail()}${styledActivity(fitDisplayText(activity, room))}`, width, GLYPH.ellipsis, false);
 }
 
 /**
@@ -901,7 +895,7 @@ function helperRow(
 			previewBudget(detail.errorRows, terminalRows),
 			width,
 			false,
-			meta(RAIL),
+			cardRail(),
 			RAIL_WIDTH,
 		),
 		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", width) : []),
@@ -963,12 +957,7 @@ export function renderWorkerEntryLines(
 			? [dispatchHeader(options.siblings ?? [], safeWidth)]
 			: [];
 	const nowMs = options.nowMs ?? Date.now();
-	if (
-		!inspect &&
-		detail.style === "detailed" &&
-		(isPending(entry) || entry.helper || options.siblings !== undefined) &&
-		!workerNeedsInput(entry)
-	) {
+	if (!inspect && detail.style === "detailed" && isPending(entry) && !workerNeedsInput(entry)) {
 		return [
 			...council,
 			...group,
@@ -1037,7 +1026,7 @@ export function renderWorkerEntryLines(
 		budget(detail.errorRows),
 		safeWidth,
 		false,
-		meta(RAIL),
+		cardRail(true),
 		RAIL_WIDTH,
 	);
 	const presented = presentedContractAnswer(entry)?.footer;
@@ -1059,17 +1048,17 @@ export function renderWorkerEntryLines(
 					budget(detail.invocationRows),
 					safeWidth,
 					false,
-					meta(RAIL),
+					cardRail(),
 					RAIL_WIDTH,
 				)
 			: []),
 		...(detail.workerRows > 0 || needsInput
-			? previewRows(summary, summaryRows, safeWidth, entry.pending, meta(RAIL), RAIL_WIDTH)
+			? previewRows(summary, summaryRows, safeWidth, entry.pending, cardRail(), RAIL_WIDTH)
 			: []),
-		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, meta(RAIL), RAIL_WIDTH),
+		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, cardRail(), RAIL_WIDTH),
 		...(tools ? [tools] : []),
 		...(detail.workerActivity
-			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, meta(RAIL), RAIL_WIDTH)
+			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, cardRail(), RAIL_WIDTH)
 			: []),
 		...failure,
 		...(inspect ? [] : cancelLines(entry, safeWidth)),

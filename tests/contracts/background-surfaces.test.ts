@@ -14,6 +14,8 @@ import { dockTop } from "../../src/interactive/dock.js";
 import { createFleetDock } from "../../src/interactive/fleet-dock.js";
 import type { FleetPlanRunView } from "../../src/interactive/fleet-plan-runs.js";
 import { renderDoctorReport } from "../../src/interactive/renderers/doctor-report.js";
+import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { footerState } from "../harness/footer-fixture.js";
 
@@ -67,6 +69,29 @@ test("fleet dock follows live tiers, prioritizes approval waits, and does not re
 	style = "compact";
 	const minimal = plain(dock.render(120));
 	match(minimal, /waiting-worker.*approval/);
+	ok(waiting.progress);
+	match(
+		plain(
+			renderWorkerEntryLines(
+				{
+					runId: "approval",
+					assignmentId: "approval",
+					origin: "user",
+					agentId: "waiting-worker",
+					runtime: { kind: "clio" },
+					text: "",
+					droppedLines: 0,
+					pending: true,
+					tools: [],
+					attempts: [],
+					progress: waiting.progress,
+				},
+				120,
+				{ detail: transcriptDetail("compact") },
+			),
+		),
+		/waiting-worker.*approval/,
+	);
 	// A strip has no use for usage details; computing them on every paint was wasted work.
 	Object.defineProperty(waiting, "usage", {
 		get() {

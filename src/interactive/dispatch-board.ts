@@ -27,6 +27,7 @@ import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
+import { cardRail, cardRows } from "./card.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { DOCK_BODY_ROWS_MAX } from "./dock.js";
@@ -870,7 +871,7 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number, style
 	const theme = clioTheme();
 	const passed = plan.state === "passed";
 	const cancelled = plan.state === "cancelled";
-	const rail = theme.fg("gutter", "  │ ");
+	const rail = cardRail();
 	// A plan whose steps all ran but one carries a warning reads as its warned steps do, never as a clean pass.
 	const warned = passed && planWarnedStepCount(plan) > 0;
 	const tone = warned ? "warning" : passed ? "success" : cancelled ? "toolMetadata" : "error";
@@ -889,9 +890,7 @@ export function renderFleetPlanCard(plan: FleetPlanRunView, width: number, style
 	const hidden = steps.length - shown.length;
 	return [
 		truncateToWidth(head, width, GLYPH.ellipsis, false),
-		...(why === null
-			? []
-			: wrapTextWithAnsi(theme.fg("error", `${GLYPH.error} ${why}`), room).map((line) => `${rail}${line}`)),
+		...(why === null ? [] : cardRows(`${GLYPH.error} ${why}`, width, true, "error")),
 		...shown.map((line) => `${rail}${line}`),
 		`${rail}${theme.fg("annotation", truncateToWidth(`${hidden > 0 ? `${hidden} more steps · ` : ""}/fleet for detail${style === "compact" ? "" : ` · ${plan.costText === null ? "no model calls" : `cost ${plan.costText}`}`}`, room, GLYPH.ellipsis, false))}`,
 	];

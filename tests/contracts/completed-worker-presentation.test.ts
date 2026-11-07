@@ -179,6 +179,26 @@ test("checkpoint questions and execution failures stay visible", () => {
 	assert.match(plain(board(failed, 80)), /failed/);
 });
 
+test("settled sibling and helper failures survive Detailed's live-card shortcut", () => {
+	const entry = worker("Decoded parser input safely.");
+	for (const width of [40, 80, 120, 200]) {
+		const detailed = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("detailed"), siblings: [entry] });
+		assert.match(plain(detailed), /Decoded parser input safely/);
+		assert.ok(detailed.every((line) => visibleWidth(line) <= width));
+	}
+	assert.ok(entry.result);
+	entry.result.outcome = "failed";
+	entry.result.failureMessage = "Parser check could not start";
+	for (const helper of [false, true]) {
+		if (helper) entry.helper = true;
+		else delete entry.helper;
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const rows = renderWorkerEntryLines(entry, 80, { detail: transcriptDetail(style), siblings: [entry] });
+			assert.match(plain(rows), /Parser check could not start/);
+		}
+	}
+});
+
 test("scout numeric line tokens that cannot survive parsing remain source text", () => {
 	const entry = worker(
 		'{"findings":[{"claim":"Check here","path":"file.ts","line":1.00000000000000001}],"needsSplit":false}',
