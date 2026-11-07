@@ -1,5 +1,5 @@
-import { strictEqual } from "node:assert/strict";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { match, strictEqual } from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,6 +11,7 @@ import {
 } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import { invokesSettingsMutation } from "../../src/domains/safety/settings-authority.js";
+import { runOperatorShellLine } from "../../src/domains/session/operator-shell.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const OPERATOR_DEFAULT: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: true, snapshots: false };
@@ -74,4 +75,25 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		OPERATOR_DEFAULT,
 	);
 	strictEqual(read.reasonCode.endsWith("settings-authority"), false);
+});
+
+// The floor binds model tool calls only: the operator's own `!` line is theirs to run.
+test("the operator's shell line runs Clio's settings CLI unblocked", async (t) => {
+	const home = await isolateClioEnv("clio-settings-authority-operator-");
+	const bin = join(home.dir, "bin");
+	mkdirSync(bin, { recursive: true });
+	writeFileSync(join(bin, "clio-coder"), '#!/bin/sh\necho "operator ran: $*"\n');
+	chmodSync(join(bin, "clio-coder"), 0o755);
+	t.after(() => home.restore());
+	const command = `${join(bin, "clio-coder")} configure --id gw --runtime litellm --set-fleet-default`;
+	strictEqual(invokesSettingsMutation(command), true);
+	const run = await runOperatorShellLine({
+		command,
+		cwd: home.dir,
+		excludeFromContext: true,
+		parentTurnId: null,
+		signal: new AbortController().signal,
+	});
+	strictEqual(run.result.exitCode, 0);
+	match(run.entry.output, /operator ran: configure --id gw --runtime litellm --set-fleet-default/);
 });
