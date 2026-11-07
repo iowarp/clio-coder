@@ -43,8 +43,8 @@ export const CONFIGURE_CATEGORY_CHOICES: readonly CategoryChoice[] = [
 	{
 		category: "subscription",
 		label: "An AI subscription",
-		summary: "ChatGPT Plus/Pro, Claude Pro/Max, or an installed Claude tool",
-		aliases: ["chatgpt", "codex", "subscription"],
+		summary: "ChatGPT Plus/Pro, Claude Pro/Max, GitHub Copilot, or an installed Claude tool",
+		aliases: ["chatgpt", "codex", "copilot", "subscription"],
 	},
 	{
 		category: "cloud-api",
