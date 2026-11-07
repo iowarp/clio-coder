@@ -24,6 +24,7 @@ import {
 	type ToolResultDisposition,
 } from "./result-disposition.js";
 import { writeToolOffload } from "./result-shaping.js";
+import { shellExitSpeaksForCommand } from "./shell-exit-scope.js";
 import { DEFAULT_MAX_LINES, truncateTailAtToken } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
@@ -136,10 +137,13 @@ function bashResultDetails(
 	rawOutput: string,
 	outcome: "success" | "nonzero" | "timeout" | "abort" | "output-cap",
 	elapsedMs?: number,
+	command?: string,
 ): ToolResultDetails {
 	return {
 		outcome,
 		...(elapsedMs === undefined ? {} : { elapsedMs }),
+		// The model read a chained command's trailing `echo` status as the suite's; say whose status this is.
+		...(command === undefined || shellExitSpeaksForCommand(command) ? {} : { exitScope: "last-command" }),
 		// `message` trims the output, and a killed process's last line releases only if whitespace finished it (#446).
 		outputEndsOpen: /\S$/u.test(rawOutput),
 		exitCode: result.exitCode,
@@ -432,13 +436,17 @@ export const bashTool: ToolSpec = {
 					options?.shellSandbox === undefined ? null : mainSandboxWriteHint(rawOutput, options.shellSandbox);
 				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
 				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
-				return { kind: "error", message, details: bashResultDetails(result, rawOutput, "nonzero", elapsedMs) };
+				return {
+					kind: "error",
+					message,
+					details: bashResultDetails(result, rawOutput, "nonzero", elapsedMs, args.command),
+				};
 			}
 			const body = rawOutput.length > 0 ? rawOutput : "(no output)";
 			return {
 				kind: "ok",
 				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}`,
-				details: bashResultDetails(result, rawOutput, "success", elapsedMs),
+				details: bashResultDetails(result, rawOutput, "success", elapsedMs, args.command),
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

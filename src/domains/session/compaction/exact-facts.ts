@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { expandPath } from "../../../tools/path-utils.js";
+import { shellExitSpeaksForCommand } from "../../../tools/shell-exit-scope.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import type { SessionEntry } from "../entries.js";
 
@@ -160,16 +161,6 @@ function subjectOf(toolName: string, args: Record<string, unknown> | undefined):
 	return parts.length > 0 ? `${toolName} ${parts.join(" ")}` : toolName;
 }
 
-/**
- * Whether a shell command's exit status speaks for the whole command. After `;`, `|`, `||` or `&` it is the last
- * stage's: a live run carried `exit=0` for `node check.mjs; echo "exit=$?"` and the model took it as the suite's.
- */
-function exitSpeaksForCommand(command: string | undefined): boolean {
-	if (command === undefined) return true;
-	const bare = command.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "").replace(/&&|\d?>&\d|&>/g, "");
-	return !/[;|&\n]/.test(bare.trim());
-}
-
 /** The exact numbers one tool result returned, or null when it returned none worth carrying. */
 function numericResult(payload: Record<string, unknown>, call: CallFacts | undefined): string | null {
 	if (payload.outcome === "blocked") return null;
@@ -181,7 +172,7 @@ function numericResult(payload: Record<string, unknown>, call: CallFacts | undef
 	const details = isRecord(result?.details) ? result.details : undefined;
 	const facts: string[] = [];
 	const command = call?.args?.command ?? call?.args?.cmd;
-	if (typeof details?.exitCode === "number" && exitSpeaksForCommand(typeof command === "string" ? command : undefined))
+	if (typeof details?.exitCode === "number" && (typeof command !== "string" || shellExitSpeaksForCommand(command)))
 		facts.push(`exit=${details.exitCode}`);
 	if (details?.timedOut === true) facts.push("timed-out");
 	const observation = isRecord(details?.observation) ? details.observation : undefined;

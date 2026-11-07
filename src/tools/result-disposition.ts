@@ -136,6 +136,7 @@ const ESSENTIAL_DETAIL_KEYS = new Set([
 	"errors",
 	"evidence",
 	"exitCode",
+	"exitScope",
 	"exitStatus",
 	"outputBytes",
 	"outputCapped",

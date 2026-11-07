@@ -48,6 +48,26 @@ it("preserves pipeline failure in Bash receipts unless the caller explicitly dis
 	}
 });
 
+it("marks an exit status that belongs only to a chained command's last command", async () => {
+	// afterG-3: `node check.mjs; echo "exit=$?"` returned exitCode 0 and the model reported the failing suite as exit 0.
+	for (const [command, exitCode, lastOnly] of [
+		['(exit 1); echo "exit=$?"', 0, true],
+		["(exit 1) || true", 0, true],
+		["(exit 1)\necho done", 0, true],
+		["set +o pipefail; (exit 7) | cat", 0, true],
+		["(exit 1) && echo 'a; b || c'", 1, false],
+		["(exit 3) 2>&1 | tail -1", 3, false],
+		["printf 'ok\\n' >&2", 0, false],
+	] as const) {
+		const result = await bashTool.run({ command, timeout_ms: 2000 });
+		strictEqual(result.details?.exitCode, exitCode, command);
+		strictEqual(result.details?.exitScope, lastOnly ? "last-command" : undefined, command);
+		const shaped = shapeToolResult(bashTool, result, { sessionId: "exit-scope" }, BASH_DEFAULT_RESULT_DISPOSITION);
+		const context = shaped.kind === "ok" ? (shaped.modelContext ?? "") : shaped.message;
+		strictEqual(context.includes('"exitScope":"last-command"'), lastOnly, command);
+	}
+});
+
 it("keeps both bash output ends in a 16 KiB model context including multibyte text", async () => {
 	const env = await isolateClioEnv("clio-bash-context-");
 	try {
