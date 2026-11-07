@@ -25,6 +25,7 @@ const GROUP_BY_BINDING = {
 	newWindow: "workspace",
 	focusComposer: "conversation",
 	send: "conversation",
+	historySearch: "conversation",
 	cancelTurn: "conversation",
 	sessionPanel: "conversation",
 	agents: "conversation",

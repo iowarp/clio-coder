@@ -37,6 +37,14 @@ export const KEYBINDINGS = {
 		action: "Send message",
 		where: "Composer focused",
 	},
+	historySearch: {
+		id: "historySearch",
+		key: "r",
+		modifiers: ["primary"],
+		scope: "composer",
+		action: "Search sent messages",
+		where: "Composer focused",
+	},
 	allowOnce: {
 		id: "allowOnce",
 		key: "a",

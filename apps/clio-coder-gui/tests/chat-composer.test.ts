@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { historyExcerpt, searchHistory, stepHistory } from "../client/chat/composer-history.js";
 import {
 	capabilityRefusal,
 	composerDelivery,
@@ -627,4 +628,34 @@ test("a draft's size is a labelled estimate that names what it leaves out", () =
 	assert.match(attached?.title ?? "", /typed text and attached files/u);
 	assert.match(attached?.title ?? "", /Not counted: @ files, read when sent and the images\./u);
 	assert.doesNotMatch(draftEstimate("mail me at a@b.c", none)?.title ?? "", /Not counted/u);
+});
+
+test("Ctrl+R finds sent messages by what they said, newest first, each once", () => {
+	const sent = ["fix the mesh test", "explain\nthe Mesh solver", "deploy", "fix the mesh test"];
+	assert.deepEqual(
+		searchHistory(sent, "MESH").map((match) => [match.text, match.index, match.at]),
+		[
+			["fix the mesh test", 3, 8],
+			["explain\nthe Mesh solver", 1, 12],
+		],
+	);
+	assert.deepEqual(
+		searchHistory(sent, "  ").map((match) => match.index),
+		[3, 2, 1],
+		"an empty query lists every message",
+	);
+	assert.deepEqual(searchHistory(sent, "nothing like it"), []);
+	assert.equal(searchHistory(sent, "", 2).length, 2);
+	// The excerpt is the line the query hit, with the rest of the message counted rather than shown.
+	const [, multiline] = searchHistory(sent, "mesh");
+	assert.ok(multiline);
+	assert.deepEqual(historyExcerpt(multiline), { before: "the ", hit: "Mesh", after: " solver", hiddenLines: 1 });
+	const long = searchHistory([`${"a".repeat(60)} needle tail`], "needle")[0];
+	assert.ok(long);
+	assert.equal(historyExcerpt(long, 4).before, "…aaa ");
+	// A taken match continues on ↓ to the newer messages and then the draft it replaced.
+	const taken = searchHistory(sent, "explain")[0];
+	assert.ok(taken);
+	assert.deepEqual(stepHistory(sent, { index: taken.index, stash: "my draft" }, "newer", taken.text)?.text, "deploy");
+	assert.deepEqual(stepHistory(sent, { index: 3, stash: "my draft" }, "newer", "x"), { browse: null, text: "my draft" });
 });

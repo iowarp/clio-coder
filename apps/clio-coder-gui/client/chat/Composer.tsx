@@ -21,6 +21,7 @@ import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
@@ -70,6 +71,7 @@ import { contextBaseline, invokeContextCommand } from "./context-command.js";
 import type { ContextOperationRef } from "./context-command-model.js";
 import { commandPresentation, contextCommandKind, startedByCommand } from "./context-command-model.js";
 import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
+import { HistorySearch } from "./HistorySearch.js";
 import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
 import {
 	applyMention,
@@ -323,6 +325,8 @@ export const Composer = memo(function Composer({
 	}, [stopArmed]);
 	// What ↑ and ↓ recalled, so the next press continues from it instead of moving the caret.
 	const browse = useRef<(HistoryBrowse & { readonly text: string }) | null>(null);
+	// Ctrl+R: the sent messages read when the search opened, or null while it is closed.
+	const [historySearch, setHistorySearch] = useState<readonly string[] | null>(null);
 	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
 	const queuePolicy = queueAccess(steering, sessionState, running);
@@ -759,7 +763,22 @@ export const Composer = memo(function Composer({
 				<label className="composer__label sr-only" htmlFor={fieldId}>
 					Message Clio Coder
 				</label>
-				{paletteOpen ? (
+				{historySearch !== null ? (
+					<HistorySearch
+						entries={historySearch}
+						onAccept={(match) => {
+							setHistorySearch(null);
+							store.write(match.text);
+							// From the taken message ↓ steps on to newer ones and back to the draft it replaced.
+							browse.current = { index: match.index, stash: draft.text, text: match.text };
+							placeCaretAtEnd();
+						}}
+						onCancel={(refocus) => {
+							setHistorySearch(null);
+							if (refocus) placeCaretAtEnd();
+						}}
+					/>
+				) : paletteOpen ? (
 					<SlashPalette listId={listId} entries={matches} activeIndex={active} onActivate={setActiveIndex} onPick={pick} />
 				) : mentionOpen ? (
 					<SuggestionPalette
@@ -1040,6 +1059,11 @@ export const Composer = memo(function Composer({
 						requestAnimationFrame(() => field.setSelectionRange(plan.caret, plan.caret));
 					}}
 					onKeyDown={(event) => {
+						if (!event.nativeEvent.isComposing && matchesKeybinding(KEYBINDINGS.historySearch, event)) {
+							event.preventDefault();
+							setHistorySearch(readHistory());
+							return;
+						}
 						if (paletteOpen && !event.nativeEvent.isComposing) {
 							const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 							const count = matches.length;
@@ -1165,7 +1189,7 @@ export const Composer = memo(function Composer({
 						</span>
 					) : null}
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
-					recalls earlier messages
+					recalls earlier messages, Ctrl/⌘+R searches them
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 				</p>
 				<div className="composer__actions">
@@ -1263,7 +1287,7 @@ export const Composer = memo(function Composer({
 								</label>
 								<p className="composer__options-note">
 									{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @ adds a file or folder. ↑
-									recalls earlier messages.
+									recalls earlier messages and Ctrl/⌘+R searches them.
 								</p>
 							</div>
 						</details>

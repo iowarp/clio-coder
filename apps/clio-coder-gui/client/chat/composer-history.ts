@@ -1,5 +1,6 @@
 /**
- * Earlier messages, recalled into the composer with the arrow keys the way a shell recalls commands.
+ * Earlier messages, recalled into the composer with the arrow keys the way a shell recalls commands,
+ * or found by what they said with Ctrl+R.
  *
  * The list belongs to this browser, not to a session: a prompt written in one task is often the
  * start of the next. It holds what was sent and nothing else, so recalling never invents text, and
@@ -53,6 +54,61 @@ export function stepHistory(
 	const text = entries[browse.index + 1];
 	if (text === undefined) return { browse: null, text: browse.stash };
 	return { browse: { index: browse.index + 1, stash: browse.stash }, text };
+}
+
+export interface HistoryMatch {
+	readonly text: string;
+	/** Index into the entries of this text's newest send, so ↓ can step on from it. */
+	readonly index: number;
+	/** Where the query first occurs in `text`; -1 for an empty query. */
+	readonly at: number;
+	readonly length: number;
+}
+
+/**
+ * Ctrl+R: sent messages containing `query`, ignoring case, newest first. A message sent more than
+ * once is listed once, at its newest send, and an empty query lists everything.
+ */
+export function searchHistory(entries: readonly string[], query: string, limit = HISTORY_MAX_ENTRIES): HistoryMatch[] {
+	const needle = query.trim().toLowerCase();
+	const seen = new Set<string>();
+	const matches: HistoryMatch[] = [];
+	for (let index = entries.length - 1; index >= 0 && matches.length < limit; index--) {
+		const text = entries[index];
+		if (text === undefined || seen.has(text)) continue;
+		seen.add(text);
+		const at = needle === "" ? -1 : text.toLowerCase().indexOf(needle);
+		if (needle !== "" && at < 0) continue;
+		matches.push({ text, index, at, length: needle.length });
+	}
+	return matches;
+}
+
+export interface HistoryExcerpt {
+	readonly before: string;
+	readonly hit: string;
+	readonly after: string;
+	/** Lines of the message the excerpt does not show. */
+	readonly hiddenLines: number;
+}
+
+/** The one line of a match worth showing: the line the query hit, opened a little before the hit. */
+export function historyExcerpt(match: HistoryMatch, lead = 24): HistoryExcerpt {
+	const lines = match.text.split("\n");
+	const hiddenLines = lines.length - 1;
+	if (match.at < 0) return { before: lines[0] ?? "", hit: "", after: "", hiddenLines };
+	const lineStart = match.text.lastIndexOf("\n", match.at - 1) + 1;
+	const lineEnd = match.text.indexOf("\n", match.at);
+	const line = match.text.slice(lineStart, lineEnd < 0 ? undefined : lineEnd);
+	const at = match.at - lineStart;
+	const end = Math.min(line.length, at + match.length);
+	const from = at > lead ? at - lead : 0;
+	return {
+		before: `${from > 0 ? "…" : ""}${line.slice(from, at)}`,
+		hit: line.slice(at, end),
+		after: line.slice(end),
+		hiddenLines,
+	};
 }
 
 export function readHistory(): readonly string[] {
