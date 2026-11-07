@@ -309,6 +309,13 @@ function webRequest(origin: string, token: string | undefined, path: string, bod
 	});
 }
 
+/** A window's first request: the launch token buys a per-client credential that every other request carries. */
+async function exchangeLaunchToken(origin: string, token: string): Promise<string> {
+	const response = await webRequest(origin, token, "/api/auth/clients", { label: "Installed package smoke" });
+	strictEqual(response.status, 200, "the launch token exchanges for a client credential");
+	return ((await response.json()) as { credential: string }).credential;
+}
+
 /** Files the CLI evaluated for one invocation, from a fresh V8 coverage directory. */
 function filesLoadedBy(
 	bin: string,
@@ -395,9 +402,9 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const { origin } = server;
 		match(server.stdout(), new RegExp(`/#token=${GUI_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
-		const request = (path: string, body?: unknown) => webRequest(origin, GUI_TEST_TOKEN, path, body);
-
-		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires the launch token");
+		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires a credential");
+		const credential = await exchangeLaunchToken(origin, GUI_TEST_TOKEN);
+		const request = (path: string, body?: unknown) => webRequest(origin, credential, path, body);
 		const meta = (await (await request("/api/meta")).json()) as {
 			clio: string;
 			apiVersion: number;
@@ -460,7 +467,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 
 		const abort = new AbortController();
 		const events = await fetch(`${origin}/api/events`, {
-			headers: { Authorization: `Bearer ${GUI_TEST_TOKEN}` },
+			headers: { Authorization: `Bearer ${credential}` },
 			signal: abort.signal,
 		});
 		strictEqual(events.status, 200);
@@ -551,7 +558,8 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const { origin } = service;
 		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
-		const request = (path: string) => webRequest(origin, GUI_TEST_TOKEN, path);
+		const credential = await exchangeLaunchToken(origin, GUI_TEST_TOKEN);
+		const request = (path: string) => webRequest(origin, credential, path);
 		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
 		strictEqual(meta.pwa, true, "service configuration enables the installable app");
 		const index = await request("/");
