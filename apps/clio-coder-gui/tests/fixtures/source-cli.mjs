@@ -7,4 +7,4 @@
 import { register } from "tsx/esm/api";
 
 register();
-await import(new URL("../../../../src/cli/index.ts", import.meta.url).href);
+await import("../../../../src/cli/index.ts");
