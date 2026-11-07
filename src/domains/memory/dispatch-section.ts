@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { buildMemoryPromptSection } from "./prompt-section.js";
@@ -38,10 +39,16 @@ export function dispatchMemoryRuntimeId(
  * The durable memory section a dispatched worker carries, shared by headless
  * `run` and attended sessions so both gate records the same way. Throws when
  * the store cannot be read; callers decide how to report that.
+ *
+ * Repository records follow the worker, not the host: a request whose `cwd`
+ * names another checkout carries that checkout's lessons and none of the
+ * host's, the same way the worker resolves its own `cwd` against the host's.
  */
 export function buildDispatchMemorySection(input: {
 	dataDir: string;
 	cwd: string;
+	/** The request's own `cwd`, when it names one. */
+	workerCwd?: string;
 	settings: Pick<ClioSettings, "targets" | "fleet" | "context">;
 	route: DispatchMemoryRoute;
 }): string {
@@ -50,7 +57,9 @@ export function buildDispatchMemorySection(input: {
 	const runtimeId = dispatchMemoryRuntimeId(input.settings, input.route);
 	return buildMemoryPromptSection(records, {
 		scopes: DISPATCH_MEMORY_SCOPES,
-		activeRepository: canonicalMemoryRepositoryIdentity(input.cwd),
+		activeRepository: canonicalMemoryRepositoryIdentity(
+			input.workerCwd === undefined ? input.cwd : resolve(input.cwd, input.workerCwd),
+		),
 		activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
 		activeAgent: { kind: "agent", key: input.route.agentId },
 	}).section;

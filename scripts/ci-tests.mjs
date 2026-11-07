@@ -14,6 +14,7 @@ export const coreTests = [
 	"memory-off-marker",
 	"memory-recall-hygiene",
 	"memory-observation-envelope",
+	"dispatch-memory-scope",
 	"mux-private-host",
 	"memory-route-redaction",
 	"prior-session-hint",
