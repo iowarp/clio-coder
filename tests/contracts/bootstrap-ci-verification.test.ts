@@ -45,7 +45,7 @@ beforeEach(async () => {
 
 afterEach(() => isolated.restore());
 
-it("writes the commands CI runs, the derived test runner and the bash fallback into the verification section", async () => {
+it("writes the commands each workflow runs, the derived test runner and the bash fallback into the verification section", async () => {
 	await runBootstrap({
 		cwd,
 		generate: async (input) => {
@@ -56,15 +56,74 @@ it("writes the commands CI runs, the derived test runner and the bash fallback i
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	const section = handbook.slice(handbook.indexOf("## Verification"));
 	ok(handbook.includes("## Verification"), handbook);
-	ok(section.includes("`scripts/gate.sh`"), section);
+	ok(section.includes("`.github/workflows/gate.yml` runs `scripts/gate.sh`."), section);
+	ok(!/\bCI\b/.test(section), section);
 	ok(!section.includes("`uv sync`"), section);
 	ok(section.includes("`uv run python -m unittest discover -s tests`"), section);
 	ok(/bash/.test(section), section);
 });
 
-it("asks the bootstrap model where a regression test must live so CI runs it", () => {
-	ok(/regression test/i.test(BOOTSTRAP_PROMPT));
-	ok(/test directories? CI (?:actually )?runs/i.test(BOOTSTRAP_PROMPT), "prompt must ask which test paths CI executes");
+// The prompt asked the model to trace which tests CI runs, and grounding then deleted every sentence naming CI.
+it("asks the bootstrap model where a regression test must live without asking it to trace CI", () => {
+	ok(/regression test must live for that script to run it/i.test(BOOTSTRAP_PROMPT));
+	ok(
+		!/test directories CI|CI-reached|CI command actually reaches/i.test(BOOTSTRAP_PROMPT),
+		"prompt must not ask which test paths CI executes",
+	);
+});
+
+// A tag-triggered publish was listed as "CI runs `npm publish --provenance`. These are CI checks".
+it("names each workflow's steps with their triggers and leaves out a tag- or release-only workflow", async () => {
+	write(".github/workflows/gate.yml", "");
+	write(
+		".github/workflows/release.yml",
+		"on: { push: { tags: ['v*'] } }\njobs:\n  publish:\n    steps:\n      - run: npm publish --provenance\n",
+	);
+	write(
+		".github/workflows/pages.yml",
+		[
+			"on:",
+			"  release:",
+			"    types: [published]",
+			"  workflow_dispatch:",
+			"jobs:",
+			"  pages:",
+			"    steps:",
+			"      - run: scripts/deploy-pages.sh",
+			"",
+		].join("\n"),
+	);
+	write(
+		".github/workflows/ci.yml",
+		[
+			"on:",
+			"  push:",
+			"    branches: [main]",
+			"    tags: ['v*']",
+			"  pull_request:",
+			"jobs:",
+			"  test:",
+			"    steps:",
+			"      - run: scripts/gate.sh",
+			"",
+		].join("\n"),
+	);
+	await runBootstrap({
+		cwd,
+		generate: async () => ({
+			projectName: "harbor",
+			identity: "A harbor.",
+			invariants: [],
+			conventions: [],
+			sections: [],
+		}),
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const section = handbook.slice(handbook.indexOf("## Verification"));
+	ok(section.includes("`.github/workflows/ci.yml` runs `scripts/gate.sh` on `push`, `pull_request`."), section);
+	ok(!section.includes("npm publish"), section);
+	ok(!section.includes("deploy-pages"), section);
+	ok(!/\bCI\b/.test(section), section);
 });
 
 it("omits an oversized rule whole rather than losing its final exception", () => {

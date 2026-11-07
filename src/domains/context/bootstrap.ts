@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, posix, relative, resolve } from "node:path";
-import { readCiRunCommands } from "../../core/ci-commands.js";
+import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
@@ -603,19 +603,30 @@ const CI_SETUP_RE =
 const MAX_CI_GATE_COMMANDS = 8;
 
 /**
- * The commands CI runs to judge a change, named exactly. A repository whose
- * gate is a script (`scripts/gate.sh`) or a make target declares nothing a
- * manifest reader sees, so without this line its handbook named no command
- * and agents recorded that they could not run the tests.
+ * The commands each pipeline file runs, named exactly with the events that
+ * start it. A repository whose gate is a script (`scripts/gate.sh`) or a make
+ * target declares nothing a manifest reader sees, so without this line its
+ * handbook named no command and agents recorded that they could not run the
+ * tests. The line states what a file runs, never that CI gates a change, and a
+ * workflow that runs only on a tag or a release is left out.
  */
 function ciGateLines(cwd: string): string[] {
-	const gates = readCiRunCommands(cwd)
-		.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("$") && !command.includes("`"))
-		.slice(0, MAX_CI_GATE_COMMANDS);
-	if (gates.length === 0) return [];
-	return [
-		`CI runs ${gates.map((command) => `\`${command}\``).join(", ")}. These are CI checks, not authorization to expand the current task.`,
-	];
+	const named = new Set<string>();
+	const lines: string[] = [];
+	for (const { file, commands, triggers } of readCiFileRuns(cwd)) {
+		if (isReleaseOnlyWorkflow(triggers)) continue;
+		const steps = commands
+			.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("$") && !command.includes("`"))
+			.filter((command) => !named.has(command))
+			.slice(0, MAX_CI_GATE_COMMANDS - named.size);
+		if (steps.length === 0) continue;
+		for (const command of steps) named.add(command);
+		const events = triggers ? ` on ${triggers.map((entry) => `\`${entry.event}\``).join(", ")}` : "";
+		lines.push(`\`${file}\` runs ${steps.map((command) => `\`${command}\``).join(", ")}${events}.`);
+		if (named.size >= MAX_CI_GATE_COMMANDS) break;
+	}
+	if (lines.length === 0) return [];
+	return [...lines, "These are workflow steps, not authorization to expand the current task."];
 }
 
 function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSection | null {
@@ -652,7 +663,7 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 		// Oversized or Markdown-active commands remain available at their source path.
 		if (selection && selection.length <= 1200 && !/[`\r\n]/.test(selection)) {
 			lines.push(
-				`Exact package.json#scripts.test: \`${selection}\`. Other test scripts have separate selection; follow CI calls before claiming coverage.`,
+				`Exact package.json#scripts.test: \`${selection}\`. Other test scripts have separate selection; check which command runs a test before claiming coverage.`,
 			);
 		}
 	}
@@ -1110,7 +1121,52 @@ function withoutSentences(line: string, drops: (sentence: string) => boolean): s
  * "CI will reject" through. The line drops when no sentence remains.
  */
 function withoutCiStatements(line: string): string {
-	return withoutSentences(line, (sentence) => CI_PROSE_RE.test(sentence.replace(/`[^`\n]*`/g, "")));
+	return withoutSentences(line, namesCi);
+}
+
+function namesCi(text: string): boolean {
+	return CI_PROSE_RE.test(text.replace(/`[^`\n]*`/g, ""));
+}
+
+/** Where a clause ends inside a sentence: a colon, a semicolon, or a comma before `so`, `and` or `but`. */
+const CLAUSE_END_RE = /(?:[:;]|,(?=\s+(?:so|and|but)\s))(?=\s)/g;
+
+/**
+ * Cut the clauses of a line that speak for CI and keep the rest of each
+ * sentence. A carried hard invariant states its rule before a colon and its
+ * reason after it, as in "Keep X: `scripts/check.js` fails CI otherwise", so
+ * cutting the whole sentence would drop the rule with the claim. A kept
+ * clause loses the conjunction that tied it to a cut one. A sentence with no
+ * clause left drops whole, and the line is empty when none remains.
+ */
+function withoutCiClauses(line: string): string {
+	if (!namesCi(line)) return line;
+	const { prefix, sentences } = proseSentences(line);
+	const kept = sentences.flatMap((sentence) => {
+		if (!namesCi(sentence)) return [sentence];
+		const masked = sentence.replace(/`[^`\n]*`/g, (span) => `\`${"x".repeat(span.length - 2)}\``);
+		const clauses: string[] = [];
+		let from = 0;
+		for (const match of masked.matchAll(CLAUSE_END_RE)) {
+			const at = (match.index ?? 0) + 1;
+			clauses.push(sentence.slice(from, at));
+			from = at;
+		}
+		clauses.push(sentence.slice(from));
+		const remaining = clauses.flatMap((clause, index) => {
+			if (namesCi(clause)) return [];
+			const previous = clauses[index - 1];
+			return [previous !== undefined && namesCi(previous) ? clause.replace(/^(\s*)(?:so|and|but)\s+/, "$1") : clause];
+		});
+		if (remaining.length === 0) return [];
+		const body = remaining.join("").replace(/[\s:;,]+$/, "");
+		const opened = namesCi(clauses[0] ?? "")
+			? body.replace(/^(\s*)(\p{Ll})/u, (_, space: string, letter: string) => `${space}${letter.toUpperCase()}`)
+			: body;
+		return [/[.!?]$/.test(opened) ? opened : `${opened}.`];
+	});
+	const body = kept.join(" ").replace(/\s+/g, " ").trim();
+	return body ? `${prefix}${body}` : "";
 }
 
 /**
@@ -1211,11 +1267,6 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
 	});
 }
 
-interface GroundingOptions {
-	/** Keep sentences that name CI: a carried hard invariant stays verbatim, and only model text is cut. */
-	keepCiStatements?: boolean;
-}
-
 /**
  * Keep a Scout line only when it cites the repository and every citation is real.
  *
@@ -1234,7 +1285,7 @@ interface GroundingOptions {
  * `npm publish` in a repository with no publish script is dropped even though the
  * rest of the sentence is unremarkable, which was the real failure mode.
  */
-function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options: GroundingOptions = {}): string {
+function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string {
 	const maxChars = MODEL_SECTION_MAX_CHARS;
 	const kept: string[] = [];
 	let inFence = false;
@@ -1257,9 +1308,7 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options
 		);
 		const marked = withUnsupportedReviewRequirementsMarked(cited, evidence);
 		const line = withoutWorkflowCitations(
-			inFence
-				? cited
-				: withUnsupportedPreloadsMarked(options.keepCiStatements ? marked : withoutCiStatements(marked), evidence),
+			inFence ? cited : withUnsupportedPreloadsMarked(withoutCiStatements(marked), evidence),
 		);
 		if (!line) continue;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
@@ -1306,15 +1355,11 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options
 const MODEL_SECTION_MAX_CHARS = HANDBOOK_TARGETS.sectionChars;
 
 /** One model-written rule line, kept only when it passes the citation rule whole. */
-function groundedModelLine(
-	line: string,
-	evidence: ModelGroundingCorpus | null,
-	options: GroundingOptions = {},
-): string | null {
+function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null): string | null {
 	const trimmed = line.replace(/\s+/g, " ").trim();
 	if (trimmed.length === 0) return null;
 	if (!evidence) return trimmed;
-	return groundedModelBody(trimmed, evidence, options) || null;
+	return groundedModelBody(trimmed, evidence) || null;
 }
 
 /** Root handbooks are authored policy. A small model may summarize away a
@@ -1582,17 +1627,26 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
  * models left check-enforced rules (case-colliding paths, retired HTML docs,
  * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
  * invariants, and reworded the published-tag rule only `CONTRIBUTING.md`
- * states. A rule whose citations no longer ground is not carried; a carried
- * rule keeps every word, including a sentence that names CI, but not one that
- * cites a workflow file.
+ * states. A rule whose citations no longer ground is not carried. A carried
+ * rule keeps every word except a clause that names CI, which model text loses
+ * too: a claim an older handbook made about CI otherwise survived every
+ * rewrite. A sentence that cites a workflow file is cut whole.
  */
-function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): string[] {
-	const carried: string[] = [];
+function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): CarriedInvariant[] {
+	const carried: CarriedInvariant[] = [];
 	for (const invariant of input.previousInvariants ?? []) {
-		const rule = withoutWorkflowCitations(invariant.replace(/\s+/g, " ").trim());
-		if (rule && groundedModelLine(rule, corpus, { keepCiStatements: true }) !== null) pushUnique(carried, rule);
+		const source = withoutWorkflowCitations(invariant.replace(/\s+/g, " ").trim());
+		const rule = withoutCiClauses(source);
+		if (!rule || carried.some((entry) => entry.rule === rule) || groundedModelLine(rule, corpus) === null) continue;
+		carried.push({ rule, modelCopy: withoutCiStatements(source) });
 	}
 	return carried;
+}
+
+interface CarriedInvariant {
+	rule: string;
+	/** What grounding leaves of a model copy of the previous rule: its sentences that name CI are cut whole. */
+	modelCopy: string;
 }
 
 /**
@@ -1776,15 +1830,19 @@ function stabilizeGeneratedOutput(
 		(input.previousInvariants?.length ?? 0) > 0 || (input.previousSections?.length ?? 0) > 0
 			? (groundingCorpus ?? createModelGroundingCorpus(input))
 			: null;
-	const carried = carryCorpus
-		? groundedPreviousInvariants(input, carryCorpus).filter((rule) => !restatesArchitecture(rule))
+	const carriedInvariants = carryCorpus
+		? groundedPreviousInvariants(input, carryCorpus).filter((entry) => !restatesArchitecture(entry.rule))
 		: [];
+	const carried = carriedInvariants.map((entry) => entry.rule);
 	const carriedBlocks = carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : [];
 	// A model rule gives way to carried content only when it states it word for word. One that resembles a
 	// carried rule may add a clause, flip a prohibition or change its scope, so both stay. A model copy of a
 	// carried invariant loses its CI sentences, so what remains of it counts as the carried rule too.
 	const carriedKeys = new Set(
-		[...carried, ...carried.map(withoutCiStatements), ...carriedBlocks.flatMap((section) => handbookBlocks(section.body))]
+		[
+			...carriedInvariants.flatMap((entry) => [entry.rule, entry.modelCopy]),
+			...carriedBlocks.flatMap((section) => handbookBlocks(section.body)),
+		]
 			.filter((rule) => rule.length > 0)
 			.map(normalizeHandbookRule),
 	);

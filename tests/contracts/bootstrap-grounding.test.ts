@@ -161,7 +161,7 @@ it("keeps a reviewer requirement its cited policy states, marks one its file doe
 	strictEqual(handbook.includes(".github/workflows"), false, handbook);
 });
 
-it("cuts every sentence of a model line that names CI, but keeps a carried invariant verbatim", async () => {
+it("cuts every sentence of a model line that names CI, and only the CI clauses of a carried invariant", async () => {
 	const carried =
 		"Never commit a path `.gitignore` excludes: the tracked-ignored check in `scripts/check.js` fails CI. Run `npm run check` before pushing.";
 	mkdirSync(join(cwd, "scripts"));
@@ -197,11 +197,11 @@ it("cuts every sentence of a model line that names CI, but keeps a carried invar
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	ok(handbook.includes(`1. ${carried}\n`), handbook);
+	ok(handbook.includes("1. Never commit a path `.gitignore` excludes. Run `npm run check` before pushing.\n"), handbook);
 	strictEqual(handbook.split("Run `npm run check` before pushing.").length, 2, handbook);
 	ok(handbook.includes("2. Keep `src/index.ts` exporting `renderWidget()`.\n"), handbook);
 	ok(handbook.includes("- Editing `src/widgets/render.ts`: rerun `npm run check`.\n"), handbook);
-	const generated = handbook.replace(carried, "").split("## Verification")[0] ?? "";
+	const generated = handbook.split("## Verification")[0] ?? "";
 	strictEqual(/\bCI\b|continuous integration/i.test(generated), false, handbook);
 	strictEqual(/scripts\/check\.js` on every push|breaks `scripts\/check\.js`/.test(handbook), false, handbook);
 });
@@ -326,7 +326,7 @@ it("lists a checker rule a kept rule shares citations with but does not state", 
 	);
 });
 
-it("carries every previous hard invariant verbatim while its citations still exist", async () => {
+it("carries every previous hard invariant, less its CI clauses, while its citations still exist", async () => {
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(
 		join(cwd, "package.json"),
@@ -381,7 +381,11 @@ it("carries every previous hard invariant verbatim while its citations still exi
 	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
 	deepStrictEqual(
 		[...hard.matchAll(/^\d+\. (.+)$/gm)].map((match) => match[1]),
-		[...kept, "Widgets render only through `renderWidget` in `src/widgets/render.ts`."],
+		[
+			"Do not add paths that differ only by case: they collide on case-insensitive filesystems; the case-portable-paths check in `scripts/check.js` is the only guard.",
+			...kept.slice(1),
+			"Widgets render only through `renderWidget` in `src/widgets/render.ts`.",
+		],
 		handbook,
 	);
 });
