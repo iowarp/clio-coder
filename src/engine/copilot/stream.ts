@@ -310,16 +310,10 @@ class Conversation {
 		this.unsubscribe?.();
 		this.unsubscribe = null;
 		const sessionId = this.session.sessionId;
-		try {
-			await this.session.abort();
-		} catch {
-			// An idle or already-closed session has nothing to abort.
-		}
-		try {
-			await this.session.disconnect();
-		} catch {
-			// A runtime that already exited took the session with it.
-		}
+		// An idle or closed session has nothing to abort, and an exited runtime took it with it. A runtime that is alive
+		// but never answers must not keep the hold, or a one-shot command would never exit.
+		await settledWithin(this.session.abort(), DISPOSE_RPC_TIMEOUT_MS);
+		await settledWithin(this.session.disconnect(), DISPOSE_RPC_TIMEOUT_MS);
 		// The runtime wrote this session's records only through Clio's sessionFs, so removing them is the delete;
 		// the SDK's deleteSession looks in COPILOT_HOME and finds nothing there.
 		try {
@@ -329,6 +323,24 @@ class Conversation {
 		}
 		release();
 	}
+}
+
+/** How long dispose waits on each session RPC before it releases the runtime anyway. */
+const DISPOSE_RPC_TIMEOUT_MS = 3_000;
+
+function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
+	let timer: NodeJS.Timeout | undefined;
+	const expired = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, ms);
+		timer.unref();
+	});
+	return Promise.race([
+		work.then(
+			() => undefined,
+			() => undefined,
+		),
+		expired,
+	]).finally(() => clearTimeout(timer));
 }
 
 const conversations: Conversation[] = [];

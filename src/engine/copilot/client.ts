@@ -125,7 +125,7 @@ function setRuntimeReferenced(client: CopilotClient, referenced: boolean): void 
 export function holdCopilotClient(): () => void {
 	holds += 1;
 	if (holds === 1 && shared)
-		void shared.started.then(() => shared && holds > 0 && setRuntimeReferenced(shared.client, true));
+		void shared.started.then(() => shared && holds > 0 && setRuntimeReferenced(shared.client, true)).catch(() => {});
 	let released = false;
 	return () => {
 		if (released) return;

@@ -575,6 +575,18 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	ok(fake().disconnected.includes(session.sessionId));
 });
 
+test("a runtime that never answers abort still releases the session's hold", async () => {
+	const parked = await step({ tools: [readTool], messages: [user("park forever")] }, "hung-session");
+	strictEqual(parked.stopReason, "toolUse");
+	const session = fake().sessions.at(-1) as FakeSession & { abort: () => Promise<void> };
+	ok(session);
+	session.abort = () => new Promise<void>(() => undefined);
+	disposeCopilotConversations("hung-session");
+	await new Promise((resolve) => setTimeout(resolve, 3_500));
+	ok(fake().disconnected.includes(session.sessionId), "dispose moves on to disconnect");
+	strictEqual(fake().referenced, false, "no hold outlives the unanswered abort");
+});
+
 test("sessionFs keeps session state in Clio's cache and serves the workspace read-only at its real paths", async () => {
 	const config = fake().clients[0]?.sessionFs as { initialCwd: string; sessionStatePath: string };
 	strictEqual(config.initialCwd, process.cwd());
