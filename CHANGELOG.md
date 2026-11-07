@@ -68,6 +68,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - The `literature` pack 0.2.0 adds `citation-check` through the CiteNexus MCP server (cite-nexus-mcp 0.2.3) and `hypothesis-workflow`, and `arxiv-literature` 0.6.0 exports BibTeX.
 - The `life-science` pack 0.1.0 adds `pdb-structures`, `uniprot-proteins` and `pubchem-compounds`, which look up PDB, UniProt and PubChem through `web_fetch`.
 - A pack's clio-kit or CiteNexus MCP server needs one online launch to build its uv environment, and starts offline after that. CiteNexus lookups still need the network: offline, each citation is reported unavailable, never not found.
+- Pack READMEs list every skill they ship, and skill descriptions say what each skill does and when to use it.
 
 ### MCP
 
@@ -81,6 +82,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - A Copilot target needs consent recorded per account during setup, and a model call without it is refused with a message naming `clio-coder auth login copilot-sdk`. Copilot's built-in tools are disabled and Clio's prompt replaces Copilot's. Each call records premium requests and AI credits, as unknown rather than zero when the runtime gives no answer, and settles as `pricedBy: none`. A target admits one request at a time unless `maxConcurrentRequests` says otherwise, and a Copilot refusal is shown as is and never retried or moved to another target. The runtime sees the workspace read-only and keeps its session records under `<cache>/copilot-sdk/sessions/`.
 - A Nemotron 3.5 Bolt 74B-A9B profile bounds output at 16,384 tokens and turns its thinking on.
 - A Claude SDK worker's refused execute calls count toward the worker refusal limit, and each model gets the thinking form its catalog row declares.
+- Managed CLI runtimes name their mode in parentheses, such as `Codex CLI (managed headless)` and `Antigravity CLI (experimental)`.
 
 ### Compaction and prompt cache
 
@@ -105,6 +107,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 ### Terminal
 
 - A list right after a paragraph or heading keeps every bullet. A cancelled run is spelled one way, a reasoning excerpt is labeled `Thinking`, and a worker card names a tool guard, not a safety rule, when one stops a call.
+- Notifications, the exit summary, `/oracle` and `/loop` show a run's outcome as a plain word such as `cancelled` instead of the stored value. Settings help for the memory fallback, retries and the per-turn tool output pool matches what each does.
 - The footer updates when a workspace Git probe lands and shows `detached at <sha>` on a detached HEAD instead of `no Git branch`.
 - A `/model` switch that throws says the model did not change. `/quit` help names the music pane among the docks it closes, and a shell card is sized by its masked output.
 - A streaming answer renders its settled blocks once and re-lexes only the open tail, strips OSC 133 markers only from rows that start with one, and leaves unchanged rows alone each frame (#428).
@@ -116,7 +119,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - One keyboard model: Ctrl edits, Alt+letter runs a Clio action, and Ctrl+G then the same letter runs it in any terminal. Send now is `Ctrl+G s` (was `i`), the queue is `Alt+Q`/`Ctrl+G q` (was `Alt+K`/`n`), background is `Ctrl+G d` (was `s`), and the external editor gains `Alt+G`.
 - `Alt+Q` no longer restores the queue from the composer; in the queue navigator `a` puts every message back in the draft. `clio-coder.message.dequeue` keeps its ID with no default key.
 - Hints, the `?` card, the welcome and the footer spell each action one way: its direct key, or `Ctrl+G` and the letter. In Terminal.app, where Option types text, they spell the `Ctrl+G` route. `/help` still lists every route, and its keyboard topic states the three rules.
-- With demo guidance on, the idle footer offers `? Keys`, and running a slash command that has a key shows one tip naming the key until you press it.
+- With demo guidance on, the idle footer offers `? Keys`, and running a slash command that has a key shows a tip naming that key once, for up to 10 seconds, ending early once you use the key.
 
 ### Context handbook
 
@@ -127,6 +130,8 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 ### CLI and dispatch
 
 - `--help` on a telemetry leaf command, `session list`, `session terminate`, `interop inspect` and `interop adopt` prints its usage. `telemetry share` names an unknown or repeated flag.
+- Top-level `--help` lists `--skill`, `--no-skills` and `config trust`, each usage line matches the flags its command accepts, and `components snapshot --help` exits 0. Errors read `unknown flag: X`, `unexpected argument: X` or `unknown subcommand: X`, with any usage printed to stderr.
+- Tool descriptions state each tool's real limits, defaults and parameters, and `code_nav` answers faster on an unchanged workspace because it checks the code map's freshness without copying the map into its build worker.
 - A worker run whose route decision weighed a wide catalog now settles.
 - The run ledger leaves `runs.json` alone when a persist would rewrite it unchanged, validates a long ledger with compiled checks and selects rows before copying them for recovery and headless settlement. Telemetry reads back the journal lines its own process accepted without validating them again, holding at most 1M characters of them, and seeds the host's quota history only when a quota reader asks.
 - Scouts and the coordinator trace every path that changes the compared state before calling two implementations equivalent or reporting no defect, and keep untested hypotheses out of evidence. The coordinator states a suspicion in a task or briefing as a question to test.
@@ -135,6 +140,8 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 - `dist` is minified with every function and class name kept, so stack traces name the same symbols. The Node bundles shrink from 17.22 MB to 13.97 MB.
 - Source pack members compress concurrently, and the extension type declarations ship bundled.
+- The guides and architecture pages were checked against the code and match 0.7.0 behavior.
+- The CI gate runs more safety, boundary, library, Help, doctor and GUI API contracts, and tests use isolated temporary and Git fixtures and wait on settlement rather than fixed timings.
 
 ## 0.6.9 - 2026-11-06
 
