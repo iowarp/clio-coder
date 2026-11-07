@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
 import { InspectionError } from "../design/run-inspection.js";
@@ -10,9 +10,9 @@ import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { Explained } from "../telemetry/Explained.js";
-import { UsageInsights } from "./usage-insights.js";
+import { OperatorMetrics } from "./operator-metrics.js";
 import { usageCacheEvidence } from "./usage-insights-model.js";
-import { filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
+import { costReportOf, filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "./usage.css";
 
@@ -28,6 +28,10 @@ export function UsagePage({ client }: { client: Client }) {
 	const view = query.data ? usageView(query.data) : null;
 	const facts = query.data ? filterUsageFacts(query.data.facts, factQuery) : [];
 	const cache = query.data ? usageCacheEvidence(query.data) : null;
+	const cost = (["model", "target"] as const).flatMap((by) => {
+		const report = query.data ? costReportOf(query.data, by) : null;
+		return report ? [report] : [];
+	});
 	return (
 		<section className="usage-page">
 			<PanelHeading
@@ -53,7 +57,6 @@ export function UsagePage({ client }: { client: Client }) {
 					{query.isFetching ? "Refreshing usage…" : "Refresh usage"}
 				</button>
 			</div>
-			<p className="usage-introduction">A research ledger for your models, calls, and computational spend.</p>
 			{!selection.id && <PanelEmpty>{emptyState.unread("usage ledger for this workspace")}</PanelEmpty>}
 			{selection.id && query.isPending && <p role="status">Reading usage records…</p>}
 			{query.error && (
@@ -88,7 +91,11 @@ export function UsagePage({ client }: { client: Client }) {
 							{view.knownSubtotals}
 						</p>
 					)}
-					<UsageInsights key={selection.id} client={client} report={query.data} />
+					{query.data.performance ? (
+						<OperatorMetrics client={client} performance={query.data.performance} cost={cost} />
+					) : (
+						<p className="operator-note">Recorded operator metrics are not exposed by this Clio build.</p>
+					)}
 					<div className="usage-secondary">
 						<section aria-labelledby="usage-token-fields">
 							<p className="usage-kicker">03 / Token accounting</p>

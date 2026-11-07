@@ -30,6 +30,7 @@ export const PAGE_PATHS = [
 	"/evidence",
 	"/evidence/:id",
 	"/usage",
+	"/metrics",
 	"/library",
 	"/skills",
 	"/setup",

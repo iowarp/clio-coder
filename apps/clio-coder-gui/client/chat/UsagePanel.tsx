@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
+import { SessionDiagnostics } from "../pages/operator-metrics.js";
 import { Explained } from "../telemetry/Explained.js";
 import { useTelemetrySession } from "./session-telemetry.js";
 import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
@@ -106,6 +107,7 @@ export const UsagePanel = memo(function UsagePanel({
 					<Explained client={client} label="Harness overhead" value={overhead.display} factRef={overhead.ref} />
 				</section>
 			) : null}
+			<SessionDiagnostics client={client} sessionId={sessionId} />
 			{summary.details && usage.data ? (
 				<>
 					{usage.data.telemetry.cost.groups.length > 0 ? (

@@ -105,7 +105,7 @@ const CLAIMED = new Set([
  * The report's spend for one group-by: the read model's cost report over the window, every figure carrying the
  * canonical renderer's display. The server checked its shape (#434 §11.3).
  */
-export function costReportOf(report: UsageReport, groupBy: "role" | "model"): CostReportV1 | null {
+export function costReportOf(report: UsageReport, groupBy: "role" | "model" | "target"): CostReportV1 | null {
 	const fact = report.facts.find((item) => item.name === "telemetry-cost" && item.values.groupBy === groupBy);
 	const value = fact?.values.report as CostReportV1 | undefined;
 	return value?.kind === "cost" ? value : null;

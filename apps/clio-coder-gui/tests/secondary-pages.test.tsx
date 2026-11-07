@@ -6,6 +6,7 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Client } from "../client/api/client.js";
+import { sparkline } from "../client/pages/operator-metrics-model.js";
 import { settingsControlSelection } from "../client/pages/settings-control-model.js";
 import type { SessionSummary } from "../contracts/sessions.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
@@ -26,6 +27,8 @@ const { Sessions, TaskHistoryActions } = await import("../client/pages/tasks.js"
 const { MissionControl } = await import("../client/pages/mission-control.js");
 const { SessionControlsProvider } = await import("../client/shell/SessionControls.js");
 const { useWorkspaceSelection, WorkspacePicker } = await import("../client/pages/workspace-selection.js");
+const { OperatorMetrics } = await import("../client/pages/operator-metrics.js");
+const { sessionOperatorMetrics, goldenTelemetryRecords } = await import("./harness/telemetry-fixture.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 function render(cache: QueryClient, path: string, node: ReactNode) {
@@ -56,6 +59,39 @@ const controls: SettingsControls = {
 		},
 	],
 };
+
+test("operator tables expose recorded model, target, latency, tool and compaction measures without expanding prose", () => {
+	const metrics = sessionOperatorMetrics({
+		sessionId: "operator-render",
+		journal: {
+			present: true,
+			records: goldenTelemetryRecords("operator-render"),
+			modes: ["standard"],
+			skipped: 0,
+			damaged: 0,
+		},
+		runs: new Map(),
+		parent: null,
+	});
+	const html = render(queries(), "/metrics", <OperatorMetrics client={client} {...metrics} />);
+	for (const label of [
+		"Per model",
+		"Per target",
+		"Cache read",
+		"Cache / prompt",
+		"Main TTFT p50 / p95",
+		"Tool reliability",
+		"Compactions",
+	])
+		assert.ok(html.includes(label), label);
+	assert.ok(html.includes("operator-render"));
+	assert.deepEqual(
+		sparkline([10, null, 20]).map((segment) => segment.length),
+		[1, 1],
+	);
+	assert.deepEqual(sparkline([null, null]), []);
+	assert.equal(sparkline([0])[0]?.[0]?.y, 15, "a recorded zero is a real point");
+});
 
 test("settings model catalogs follow the displayed scope, search and compact selection", () => {
 	const base = controls.controls[0];

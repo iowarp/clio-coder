@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useDeferredValue, useMemo, useRef } from "react";
 import { Link, useOutletContext, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import type { UsagePerformance } from "../../contracts/reports.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
@@ -18,6 +19,7 @@ import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import { useSessionIntent } from "../shell/use-session-intent.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
+import { OperatorMetrics, SessionMetricFigures, useOperatorMetrics } from "./operator-metrics.js";
 import type { SessionControls } from "./session-control-actions.js";
 import "./mission-control.css";
 
@@ -53,6 +55,7 @@ export function MissionControl({ client }: { client: Client }) {
 			{ replace: true },
 		);
 	const overview = useSessionOverview(client);
+	const metrics = useOperatorMetrics(client, project);
 	const { controls } = useSessionCommands();
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const items = overview.data?.sessions;
@@ -191,6 +194,16 @@ export function MissionControl({ client }: { client: Client }) {
 							</button>
 						))}
 					</nav>
+					{metrics.data ? <OperatorMetrics client={client} {...metrics.data} compact /> : null}
+					{metrics.isPending ? <p role="status">Reading recorded session metrics…</p> : null}
+					{metrics.error ? (
+						<p role="alert">
+							Recorded metrics unavailable: {metrics.error.message}{" "}
+							<button type="button" disabled={metrics.isFetching} onClick={() => void metrics.refetch()}>
+								Retry metrics
+							</button>
+						</p>
+					) : null}
 					{overview.error ? (
 						<p role="alert">
 							Sessions could not be refreshed. {overview.error.message}
@@ -210,6 +223,7 @@ export function MissionControl({ client }: { client: Client }) {
 								item={item}
 								projectName={projects?.find((workspace) => workspace.id === item.workspaceId)?.name ?? "Unavailable project"}
 								connected={connected}
+								metric={metrics.data?.performance.sessions.find((row) => row.sessionId === item.id)}
 							/>
 						))}
 					</div>
@@ -253,12 +267,14 @@ const SessionCard = memo(function SessionCard({
 	item,
 	projectName,
 	connected,
+	metric,
 }: {
 	client: Client;
 	controls: SessionControls;
 	item: SessionOverviewItem;
 	projectName: string;
 	connected: boolean;
+	metric: UsagePerformance["sessions"][number] | undefined;
 }) {
 	const { requestClose } = useSessionCommands();
 	const intent = useSessionIntent(client, item.id, connected);
@@ -293,6 +309,11 @@ const SessionCard = memo(function SessionCard({
 					<span>No request yet</span>
 				)}
 			</div>
+			{metric ? (
+				<SessionMetricFigures row={metric} />
+			) : (
+				<p className="operator-note">No metrics in the retained 30-day sample.</p>
+			)}
 			{item.pendingApprovals || item.pendingQuestions ? (
 				<p className="mission-card__attention">
 					{item.pendingApprovals

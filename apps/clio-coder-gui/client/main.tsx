@@ -85,6 +85,13 @@ const router = createBrowserRouter([
 		),
 		children: [
 			{
+				path: "/metrics",
+				lazy: async () => {
+					const { MetricsPage } = await import("./pages/metrics.js");
+					return { element: <MetricsPage client={client} /> };
+				},
+			},
+			{
 				path: "/evidence",
 				lazy: async () => {
 					const { EvidencePage } = await import("./pages/evidence.js");
