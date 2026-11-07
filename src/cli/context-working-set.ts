@@ -249,7 +249,7 @@ function parseReplayArgs(args: ReadonlyArray<string>): ReplayArgs {
 			else parsed.markdownPath = value;
 			continue;
 		}
-		throw new CliUsageError(`unknown flag ${arg}`);
+		throw new CliUsageError(`unknown flag: ${arg}`);
 	}
 	if (parsed.sessions.length === 0 && parsed.synthetic.length === 0) {
 		throw new CliUsageError("--sessions or --synthetic is required");
@@ -529,7 +529,7 @@ export async function runContextWorkingSetCommand(args: string[]): Promise<numbe
 			index += 1;
 			continue;
 		}
-		process.stderr.write(`clio-coder context working-set: unknown flag ${arg}\n${WORKING_SET_HELP}`);
+		process.stderr.write(`clio-coder context working-set: unknown flag: ${arg}\n${WORKING_SET_HELP}`);
 		return 2;
 	}
 	if (session === undefined) {

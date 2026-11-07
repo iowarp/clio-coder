@@ -41,8 +41,8 @@ export async function runContextClearCommand(args: string[]): Promise<number> {
 	}
 	for (const arg of args) {
 		if (arg !== "--all" && arg !== "--yes" && arg !== "-y") {
-			process.stderr.write(`clio-coder context reset: unknown flag ${arg}\n`);
-			process.stdout.write(HELP);
+			process.stderr.write(`clio-coder context reset: unknown flag: ${arg}\n`);
+			process.stderr.write(HELP);
 			return 2;
 		}
 	}

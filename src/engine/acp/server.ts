@@ -6534,7 +6534,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (options.chat.clearQueuedFollowUps === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
 		}
-		// Both queues drain together, exactly as Alt+Q does in the terminal: the
+		// Both queues drain together, exactly as the queue navigator's a does in the terminal: the
 		// returned texts are what the client now owns and must re-send to deliver.
 		return { restored: boundedQueueTexts(options.chat.clearQueuedFollowUps()) };
 	});
@@ -6950,7 +6950,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		) {
 			return deferred("The scheduled turn's session or workspace is not the one this client is bound to.");
 		}
-		if (request.signal.aborted) return deferred("The occurrence was canceled before its turn could be shown.");
+		if (request.signal.aborted) return deferred("The occurrence was cancelled before its turn could be shown.");
 		if (
 			machineLease !== null ||
 			session.activePrompt !== null ||

@@ -79,7 +79,7 @@ import { createProcessInteractiveShell, getActiveRenderTrace } from "./interacti
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
-import { formatKeyLabel } from "./keybinding-manager.js";
+import { actionKeyLabel, formatKeyLabel } from "./keybinding-manager.js";
 import { returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
@@ -417,6 +417,8 @@ const ACTION_FEATURES: Partial<Record<ClioKeybinding, string>> = {
 export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	const feature = ACTION_FEATURES[id];
 	if (feature !== undefined) deps.recordFeature?.(feature);
+	// A key the operator pressed retires the demo tip that would teach it.
+	deps.recordFeature?.(`key:${id}`);
 	switch (id) {
 		case "clio-coder.suspend":
 			if (!deps.suspendProcess) return false;
@@ -802,7 +804,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				},
 			})
 		: undefined;
+	let lastSlashCommand: string | null = null;
 	const presentation = createInteractivePresentation({
+		getLastCommand: () => lastSlashCommand,
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		getParkedCallCount: () => deps.toolRegistry?.parkedCount() ?? 0,
 		workersDockAvailable: () =>
@@ -1078,7 +1082,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	if (memorySweepNotice !== null) notify("warning", memorySweepNotice, "memory:flow-sweep");
 	const eventProjection = createInteractiveEventProjection({
 		heldQueueNotice: (count) =>
-			`${count === 1 ? "1 queued message is" : `${count} queued messages are`} held and nothing was sent. ${keybindings.actionLabel("clio-coder.message.interrupt")} sends the queue in order, ${keybindings.actionLabel("clio-coder.message.dequeue")} restores it to the composer, and a new prompt takes it at its first slot.`,
+			`${count === 1 ? "1 queued message is" : `${count} queued messages are`} held and nothing was sent. ${keybindings.actionLabel("clio-coder.message.interrupt")} sends the queue in order, ${keybindings.actionLabel("clio-coder.queue.open")} then a restores it to the composer, and a new prompt takes it at its first slot.`,
 		restoreDroppedQueue: (texts) => {
 			const current = editor.getExpandedText();
 			editor.setLiteralText([texts.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
@@ -1173,6 +1177,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	// any `@` or slash submit: it held the acknowledging frame 10 to 20 ms. The frame
 	// goes out on the next tick, ahead of this immediate.
 	const recordFeature = (feature: string): void => {
+		if (feature.startsWith("/")) lastSlashCommand = feature;
+		else if (feature.startsWith("key:")) lastSlashCommand = null;
 		if (deps.getSettings?.().interface.demo === true) setImmediate(() => recordHarnessFeature(feature));
 	};
 	// Every submit expansion in flight owns its controller, so a second submit
@@ -1723,7 +1729,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		);
 	};
 	/**
-	 * Ctrl+G s / /background. The dispatch tool owns the conversion and answers with
+	 * Ctrl+G d / /background. The dispatch tool owns the conversion and answers with
 	 * the line to show, so the refusal a review-gated or compete call returns is
 	 * rendered verbatim rather than restated here.
 	 */
@@ -1928,8 +1934,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 	});
 
-	const firstKeyLabel = (id: ClioKeybinding, fallback: string): string =>
-		formatKeyLabel(keybindings.getKeys(id)[0], fallback);
+	const keyLabel = (id: ClioKeybinding, fallback: string): string => actionKeyLabel(id) ?? fallback;
 	/** Answers a refused exit with what is in the way and the key that deals with each thing. */
 	const explainProtectedExit = (pressed = "Ctrl+D"): void => {
 		const running = deps.dispatch.snapshot().running;
@@ -1942,12 +1947,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				running.length === 1 ? `${running[0]?.agentId ?? "a worker"} is running` : `${running.length} workers are running`,
 			);
 			actions.push(
-				`${firstKeyLabel("clio-coder.dispatchBoard.toggle", "/fleet")} shows ${running.length === 1 ? "it" : "them"}`,
+				`${keyLabel("clio-coder.dispatchBoard.toggle", "/fleet")} shows ${running.length === 1 ? "it" : "them"}`,
 			);
 		}
 		if (queued > 0) {
 			reasons.push(`${queued} message${queued === 1 ? " is" : "s are"} queued`);
-			actions.push(`${firstKeyLabel("clio-coder.message.dequeue", "/queue")} restores ${queued === 1 ? "it" : "them"}`);
+			actions.push(`${keyLabel("clio-coder.queue.open", "the queue")} then a restores ${queued === 1 ? "it" : "them"}`);
 		}
 		if (editorSubmit.hasActiveEditorBash()) {
 			reasons.push("a shell command is running");

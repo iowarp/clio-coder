@@ -7,17 +7,19 @@ beside a Clio Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
 says at each stage, and how to resolve a missing dependency or unavailable pane host.
 
-Panes are optional. A session without them behaves exactly as before. The
-first bare `clio-coder` in an interactive terminal asks once whether to open a
-workspace, and nothing is downloaded or opened before you answer yes. A session
-started outside herdr probes no socket. Only the interactive session activates
-panes. `clio-coder run`, `clio-coder acp` and dispatched workers never load the
-pane layer.
+Panes come with the install. Bare `clio-coder` in an interactive terminal opens
+Clio Coder's own private pane host, on the pinned herdr the installer
+provisioned, with no setup question. When the host cannot start, Clio prints
+one line and runs in the plain terminal, as it does for headless, non-terminal
+and `TERM=dumb` runs and inside tmux, Zellij or screen. Only the interactive
+session activates panes. `clio-coder run`, `clio-coder acp` and dispatched
+workers never load the pane layer.
 
 ## What you get
 
-Inside a herdr session, Clio Coder can open panes beside the session pane. On exit,
-Clio closes its docks and leaves utility panes open:
+Inside its pane host, Clio Coder can open panes beside the session pane. On
+`/quit` in its own host, Clio closes every pane; as a guest in your herdr, it
+closes its docks and leaves utility panes open:
 
 - **The files pane.** A file view docked below the session. `/files` or
   `Alt+E` shows it and moves the keyboard into it. The same key from Clio Coder focus, or `Alt+E` inside the pane, hides it again with Yazi still
@@ -396,7 +398,8 @@ what" above.
 | `<data>/tools/<id>/<version>/` | Vendored programs with their license files and an install marker. |
 | `<cache>/yazi/profile/` | Clio Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
 | `<cache>/yazi/sessions/` | Per-pane transport files, removed when the pane closes; anything older than a day is swept on the next open. |
-| `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal, which the logs pane follows. |
+| `<state>/runs/<runId>/feed.jsonl` | The run's display feed, which the logs pane follows. |
+| `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal. |
 | `<state>/watch-selection`, `<state>/watch-dock-taps` | The request and tap files shared with the workers dashboard. See [Fleet Dispatch](fleet-dispatch.md). |
 | `<state>/cliamp/dock-taps` | Lines the music pane's `clio-dock` plugin appends when Alt+A is pressed inside cliamp. See [Music](music.md). |
 

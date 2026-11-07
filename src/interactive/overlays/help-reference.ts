@@ -105,7 +105,7 @@ export function openHelpOverlay(
 	const keyItems = (): ListOverlayItem[] => {
 		const conflicts = manager.getConflicts();
 		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
-			const formattedKeys = formatKey(manager.actionLabel(row.id));
+			const formattedKeys = formatKey(manager.fullActionLabel(row.id));
 			// A rebound key says so, and a key two actions share carries the warning
 			// glyph, so the conflict is visible before the row is opened.
 			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
@@ -163,16 +163,16 @@ export function openHelpOverlay(
 	// and with the live footer hints on the surface it documents.
 	const topics: ListOverlayItem[] = [
 		{
-			id: "topic-keyboard-migration",
-			label: "keyboard migration  Defaults, action menu, editing and explicit overrides",
-			cells: { lead: "keyboard migration", text: "Defaults, action menu, editing and explicit overrides" },
+			id: "topic-keyboard-model",
+			label: "keyboard model  Alt for actions, Ctrl+G for any terminal, Ctrl for editing",
+			cells: { lead: "keyboard model", text: "Alt for actions, Ctrl+G for any terminal, Ctrl for editing" },
 			group: "Topics",
 			detail: () => [
-				"# Keyboard migration",
-				"Default keys: Alt+L Library, Alt+M model, Shift+Tab effort, Alt+S send now, Alt+K queue navigator, Alt+Q recovery. Ctrl+Q no longer queues for the end of the turn; the navigator's t key does. Alt+B/D and Home/End now edit the composer.",
-				`The persistent action menu is ${manager.actionLabel("clio-coder.leader")}. Fixed suffixes work independently of direct key overrides; arrows and Enter reach every available entry.`,
-				"Existing configured action IDs are preserved. Explicit [] disables an action's direct and menu routes. This help lists your effective keys; settings are never rewritten.",
-				"Pasted slash and bang text remains literal until a deliberate submit. Ctrl+R searches the fullscreen transcript; Ctrl+C closes focused search or a dialog before cancelling other work.",
+				"# Keyboard model",
+				"Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: Alt+M model, Alt+L library, Alt+O output, Alt+U dashboard, Alt+W workers, Alt+E files, Alt+A music, Alt+S send now, Alt+Q queue, Alt+G external editor; Shift+Tab cycles thinking effort.",
+				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: d background worker, x dismiss notice, y autonomy. Shift+Tab is t there. Arrows and Enter reach every entry.`,
+				"On an empty composer: ? shows the key card, / commands, ! shell, @ a file, left arrow the workers, down arrow the tasks. Esc stops a run; Ctrl+C twice or Ctrl+D exits.",
+				"Rebinding a direct key never moves its menu letter. An explicit [] disables both. This help lists your effective keys; settings are never rewritten.",
 			],
 		},
 		{
@@ -203,7 +203,7 @@ export function openHelpOverlay(
 				"**Where it works**: Clio's own pane host, which bare `clio-coder` opens, or any herdr pane Clio was started in. Outside herdr `/files` still works as a full-screen pick that returns to the composer; `/panes open logs|shell` do not.",
 				`**Files pane**: /files or ${manager.actionLabel("clio-coder.files.toggle")} shows Yazi and moves the keyboard into it. Yazi and the host own keys until Ctrl+Y returns selected paths and focus. The same key from Clio focus, or inside Yazi, hides the pane and hands the keyboard back: Yazi keeps running and keeps its directory, and the key brings it back. Tap it twice within 0.4 s to close the pane and end Yazi. /files hide, /files close and /files pick are the explicit forms.`,
 				`**Music pane**: ${manager.actionLabel("clio-coder.music.toggle")} or /music shows or hides the focus-radio pane without taking the keyboard, and twice within 0.4 s stops it and closes it. Pressed inside the player, it hides the pane and hands the keyboard back. With integrations.music.enabled on, the pane starts hidden and silent after the first frame, so the first press only reveals it. /music on plays, /music pause silences it and keeps the pane, /music off stops and closes it, /music next skips a station, /music status says what is playing.`,
-				"**Hidden panes**: a hidden pane waits in a tab labelled `clio parked` in your herdr workspace and returns to its slot at the share you last gave it. The tab goes away when the last pane leaves it, and `/quit` closes whatever is still parked.",
+				"**Hidden panes**: a hidden pane waits in a tab labeled `clio parked` in your herdr workspace and returns to its slot at the share you last gave it. The tab goes away when the last pane leaves it, and `/quit` closes whatever is still parked.",
 				"**Picking**: navigate, select with Space for several, then Ctrl+Y (or Enter in pick mode). The paths land in the composer as `@file` mentions and the keyboard returns to the composer.",
 				"**Logs and shell**: `/panes open logs` follows the newest dispatched run's journal; `/panes open shell` opens a shell in the workspace. A second open focuses the pane that is already there. `/panes close <name|all>` closes them; `/quit` closes the docks it manages (files, workers, and the music pane, which ends its playback, hidden or not), leaves a shell or logs pane you opened, and prints which panes it left and how to close them.",
 				"**Engine**: the files pane runs a vendored file manager installed with `clio-coder tools install yazi`; `clio-coder doctor` and `/panes` say whether it resolved.",
@@ -222,7 +222,7 @@ export function openHelpOverlay(
 				`**Send now** (${manager.actionLabel("clio-coder.message.interrupt")} or /interrupt <text>): settle active work and deliver the draft as a fresh prompt; with an empty draft it flushes the queue. Queued messages stay queued for the new run. While a tool is running you are asked whether to stop it or wait for it.`,
 				`**Queue navigator** (${manager.actionLabel("clio-coder.queue.open")}): reorder, edit, remove, change the slot of, or send now any queued message.`,
 				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no sealed run record; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
-				`**Recover queues**: ${manager.actionLabel("clio-coder.message.dequeue")}. Workers accept next-slot steering through @<agent>.`,
+				`**Recover queues**: ${manager.actionLabel("clio-coder.queue.open")}, then a puts every queued message back in the composer. Workers accept next-slot steering through @<agent>.`,
 			],
 		},
 		{

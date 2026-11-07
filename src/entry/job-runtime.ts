@@ -143,7 +143,7 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 	const check = (context: JobAdmissionContext, starting = false): JobAdmission => {
 		const { job, phase, signal } = context;
 		const command = job.spec.runner.kind === "command" && phase !== "delivery";
-		if (signal.aborted) return { status: "denied", reason: "This occurrence was canceled before admission." };
+		if (signal.aborted) return { status: "denied", reason: "This occurrence was cancelled before admission." };
 		if (
 			phase !== "create" &&
 			phase !== "resume" &&

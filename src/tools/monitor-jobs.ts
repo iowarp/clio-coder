@@ -109,7 +109,7 @@ export async function runJobMonitor(
 	const last = job.history.at(-1)?.evidence;
 	return {
 		kind: "ok",
-		output: `${jobLine(job)}\nsession=${job.owner.sessionId}; cwd=${job.owner.cwd}${mode === "wait" ? `\nwait: ${canceled ? "observation canceled" : timedOut ? "timed out" : "settled"}` : ""}${last ? `\nlast occurrence: ${last.outcome}; displayTruncated=${last.truncated}; jsonComplete=${last.jsonComplete}\n${last.summary}` : ""}`,
+		output: `${jobLine(job)}\nsession=${job.owner.sessionId}; cwd=${job.owner.cwd}${mode === "wait" ? `\nwait: ${canceled ? "observation cancelled" : timedOut ? "timed out" : "settled"}` : ""}${last ? `\nlast occurrence: ${last.outcome}; displayTruncated=${last.truncated}; jsonComplete=${last.jsonComplete}\n${last.summary}` : ""}`,
 		details: { job, complete: jobIsComplete(job), timedOut, canceled },
 	};
 }

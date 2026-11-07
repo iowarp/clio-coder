@@ -45,15 +45,14 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 
 ## A few keys to remember
 
-**Ctrl+G** opens the action menu. Choose an entry with arrows and Enter, or its displayed suffix; Esc closes it. This is useful when your terminal intercepts an Alt shortcut. `/help` shows any custom bindings.
+Alt+letter runs a Clio action, and **Ctrl+G** then the same letter runs it in any terminal, including ones that intercept Alt. The menu also lists a few actions with no Alt key; arrows and Enter work too, and Esc closes it. On an empty composer, `?` shows the keys; `/help` shows every binding, custom ones included.
 
 | Default key | Action |
 | --- | --- |
 | Enter | Send; while running, queue the message for the next pause between tool calls |
 | Ctrl+J | Insert a newline |
 | Alt+S | Send now: interrupt the run and submit the draft |
-| Alt+K | Open the queue to reorder, edit, or remove waiting messages |
-| Alt+Q | Recover queued messages into the draft |
+| Alt+Q | Open the queue to reorder, edit, or remove waiting messages; `a` puts them all back in the draft |
 | Alt+M | Open the model picker |
 | Alt+L | Open the Library |
 | Alt+O | Cycle the output detail level |
@@ -61,6 +60,6 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 
 Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
 
-For a course correction, type it in the composer and press **Alt+S**, **Ctrl+G i** (Interrupt with draft), or use `/interrupt <text>`. Work already completed remains in the session record. Ctrl+Q no longer queues a follow-up; in the queue, `t` moves a message to the end of the turn.
+For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**), or use `/interrupt <text>`. Work already completed remains in the session record. Ctrl+Q no longer queues a follow-up; in the queue, `t` moves a message to the end of the turn.
 
 A clean exit prints a summary of the session and the `/resume <id>` line that reopens it. Sessions are resumed from inside the app, not with a command-line flag.

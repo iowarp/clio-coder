@@ -131,7 +131,7 @@ answered by typing a number, b for back, or q to quit.
 Non-interactive flags:
   --id <targetId>                  target id to register (required when non-interactive)
   --runtime <runtimeId>            runtime to use when registering non-interactively
-  --url <host>                     target base URL (http(s):// or ws://)
+  --url <url>                      target base URL (http(s):// or ws://)
   --model <wireModelId>            default model id for this target
   --orchestrator-model <id>        model to use when setting chat default
   --background-model <id>          model to use for proactive task memory
@@ -146,7 +146,7 @@ Non-interactive flags:
                                    target does not advertise, without refusing
   --gateway                        mark the target as a gateway
   --lifecycle <user-managed|clio-coder-managed>
-                                  resident model lifecycle policy
+                                   resident model lifecycle policy
   --set-orchestrator               use this target for chat
   --set-background                 use this target for proactive task memory
   --set-fleet-default              use this target for the fleet default
@@ -2178,7 +2178,7 @@ export async function runConfigureCommand(
 		args = parseSetupArgs(argv);
 	} catch (err) {
 		printError(err instanceof Error ? err.message : String(err));
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (args.help) {

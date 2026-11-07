@@ -737,7 +737,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 			abort.abort();
 			const canceled = await runtime.admit({ job, phase: "run", signal: abort.signal });
 			strictEqual(canceled.status, "denied");
-			match(canceled.reason, /canceled before admission/);
+			match(canceled.reason, /cancelled before admission/);
 		}
 	});
 	it("rejects unbounded or malformed timing and preserves explicit scope", async () => {

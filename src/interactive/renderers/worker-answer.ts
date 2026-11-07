@@ -145,7 +145,7 @@ function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | 
 		if (claim === null) return null;
 		const path = reportString(finding.path);
 		const line = typeof finding.line === "number" && Number.isSafeInteger(finding.line) ? finding.line : null;
-		lines.push(path !== null && line !== null ? `- ${claim} — ${path}:${line}` : `- ${claim} (ungrounded lead)`);
+		lines.push(path !== null && line !== null ? `- ${claim} (${path}:${line})` : `- ${claim} (ungrounded lead)`);
 	}
 	if (value.needsSplit) {
 		if (!Array.isArray(value.proposedSubtasks)) return null;

@@ -7,7 +7,7 @@ triggers:
   - stress-test this design
   - poke holes in this idea
   - clarify this plan one question at a time
-version: 0.5.4
+version: 0.5.5
 license: Apache-2.0
 allowed-tools:
   - read
@@ -81,7 +81,7 @@ Read what the user already gave you. If the task references files, plans, code,
 tests, or project conventions, inspect them before asking. Prefer
 `context(scope="workspace")`, `grep`, `read`, `code_nav` (symbol and call-graph
 lookups), and codewiki tools over guessing. Use the `git` tool (`status`,
-`log`, not shell `git`) when the plan references repo state — recent
+`log`, not shell `git`) when the plan references repo state: recent
 history, uncommitted changes, what "decided" actually means for this repo
 right now.
 

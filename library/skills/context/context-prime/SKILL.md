@@ -7,7 +7,7 @@ triggers:
   - where were we
   - get up to speed
   - resume repository work after a break
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -32,7 +32,7 @@ before taking any non-trivial action. A fresh agent has the code but not the
 *intent*; this rebuilds the intent.
 
 This is the read-side bookend of `context-handoff`. It consumes what `context-handoff` wrote.
-It is not `/resume` — that restores an engine session's transcript; this
+It is not `/resume`, which restores an engine session's transcript; this
 reconstructs orientation a transcript alone doesn't carry.
 
 ## When to use
@@ -50,7 +50,7 @@ Skip it for a one-line question in a repo you already have full context on.
 ```
 
 - With a focus hint: treat it as a candidate for the orientation's `Next`
-  line, not as ground truth — confirm or contradict it against the handoff
+  line, not as ground truth. Confirm or contradict it against the handoff
   and git state, the same as any other suggested focus.
 - Without one: orient from the handoff, constitution, and git state alone.
 
@@ -63,7 +63,7 @@ Work top to bottom; stop early once you have enough to state where things stand.
 
 1. **Constitution.** Read exactly one: the first of `CLIO-CODER.md`,
    `AGENTS.md`, `CLAUDE.md`, `README.md` that exists, in that order. Note
-   hard invariants and workflow rules, then stop — do not also open the
+   hard invariants and workflow rules, then stop. Do not also open the
    others "for completeness"; a fallback file is read only when every
    name ahead of it is absent.
 
@@ -74,10 +74,10 @@ Work top to bottom; stop early once you have enough to state where things stand.
 3. **Git state.** `context(scope="workspace")` already carries a git
    snapshot; read it first. Fill any gap with the `git` tool directly:
    `op="status"` for branch and dirty files, `op="log"` (`limit: 10`) for
-   recent commits. `bash` is not in this skill's tool surface — there is no
-   shell fallback, "run `git status` yourself" is never the move here.
+   recent commits. `bash` is not in this skill's tool surface. There is no
+   shell fallback; "run `git status` yourself" is never the move here.
    Reconcile against the handoff's "work in progress": flag anything that
-   drifted — work committed since the handoff, work reverted, a WIP item
+   drifted: work committed since the handoff, work reverted, a WIP item
    that is now finished, or a "completed" claim the code plainly doesn't
    back up.
 
@@ -97,7 +97,7 @@ Work top to bottom; stop early once you have enough to state where things stand.
    no operator: `ask_user` is not registered, so any call is refused as an
    unregistered tool rather than answered.** If it is not among your available tools, do not
    attempt it and do not keep re-reading files hoping for more certainty
-   first — state the focus as the orientation's `Next` line, in plain
+   first. State the focus as the orientation's `Next` line, in plain
    text, and stop; that written statement is the confirmation for this
    run. If the handoff and git state disagree, surface the conflict rather
    than picking silently.
@@ -118,7 +118,7 @@ Work top to bottom; stop early once you have enough to state where things stand.
 ## Boundaries
 
 - Bounded by design: summarize and reference by path; do not dump file trees or
-  copy long documents into context. Read only what the steps above name — the
+  copy long documents into context. Read only what the steps above name: the
   one constitution file that wins the fallback order, the newest handoff, git
   and context state, `.clio-coder/state.json`/codewiki freshness. A source
   file, script, or doc none of those steps named stays unread; curiosity

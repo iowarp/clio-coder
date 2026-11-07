@@ -45,7 +45,7 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 	}
 
 	before(async () => {
-		scratch = headlessScratch("clio-resume-route-", CLI);
+		scratch = headlessScratch("clio-resume-route-");
 		chat = await startOpenAICompatFixture("Noted.", {
 			models: [
 				{ id: "mock-model", object: "model" },

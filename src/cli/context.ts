@@ -9,15 +9,15 @@ import { createContextCliOperation, createContextCliProgress } from "./context-p
 
 const HELP = `Usage:
   clio-coder context
-  clio-coder context init [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
-                         [--depth quick|standard|deep]
+  clio-coder context init [--preview] [--heuristic] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
+                    [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
   clio-coder context refresh [--wiki]
   clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed] [--pages <path,path>]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]
   clio-coder context reset [--all] [--yes]
   clio-coder context index [--json]
   clio-coder context map [--out <path>] [--json]
-  clio-coder context replay --sessions <path>... [options]
+  clio-coder context replay (--sessions <path>... | --synthetic <corpus>...) [options]
   clio-coder context working-set --session <id|path>
 
 Project context commands:
@@ -156,8 +156,8 @@ async function runRefreshCommand(args: string[]): Promise<number> {
 			updateWiki = true;
 			continue;
 		}
-		process.stderr.write(`clio-coder context refresh: unknown flag ${arg}\n`);
-		process.stdout.write(HELP);
+		process.stderr.write(`clio-coder context refresh: unknown flag: ${arg}\n`);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	const progress = createContextCliProgress("refresh");
@@ -330,8 +330,8 @@ async function runWikiCommand(args: string[]): Promise<number> {
 			depth = value;
 			continue;
 		}
-		process.stderr.write(`clio-coder context wiki: unknown flag ${arg}\n`);
-		process.stdout.write(HELP);
+		process.stderr.write(`clio-coder context wiki: unknown flag: ${arg}\n`);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (status) return runWikiStatusCommand();
@@ -403,8 +403,8 @@ export async function runContextCommand(args: string[]): Promise<number> {
 		case "working-set":
 			return (await import("./context-working-set.js")).runContextWorkingSetCommand(rest);
 		default:
-			process.stderr.write(`clio-coder context: unknown subcommand ${verb}\n`);
-			process.stdout.write(HELP);
+			process.stderr.write(`clio-coder context: unknown subcommand: ${verb}\n`);
+			process.stderr.write(HELP);
 			return 2;
 	}
 }

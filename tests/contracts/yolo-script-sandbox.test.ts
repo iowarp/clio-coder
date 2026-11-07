@@ -222,7 +222,7 @@ test("under bwrap git commits from a yolo script while hooks, config, commondir 
 	const module = join(common, "modules", "sub");
 	mkdirSync(join(common, "modules"));
 	git(scratch, "init", "-q", `--separate-git-dir=${module}`, join(workspace, "sub"));
-	git(module, "config", "core.worktree", "../../../sub");
+	git(join(workspace, "sub"), "config", "core.worktree", "../../../sub");
 	rmSync(join(module, "hooks"), { recursive: true, force: true });
 	const layout = mainSandboxGitLayout(workspace);
 	const policy = resolveMainSandboxPolicy({

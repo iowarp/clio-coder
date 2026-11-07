@@ -143,8 +143,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"orchestrator.target": "Connection that answers in chat.",
 	"orchestrator.model": "Chat model override; unset uses the connection default.",
 	"background.target": "Connection for task memory. With no memory connection or model set, memory uses the chat route.",
-	"background.model":
-		"Dedicated task-memory model. With no memory route set, memory uses chat because no memory model is set.",
+	"background.model": "Dedicated task-memory model. With no memory connection or model set, memory uses the chat route.",
 	"memory.intervention.enabled": "Allow Clio to update task memory as work progresses.",
 	"memory.intervention.everyNTools": "Maximum number of tool uses between memory updates.",
 	"memory.intervention.windowSteps": "How many recent steps Clio considers when updating memory.",
@@ -199,7 +198,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"context.workingSet.minEvictableTokens":
 		"Results below this token estimate stay; the marker would cost more than it saves.",
 	"context.workingSet.rearmFraction": "Wait for context use to grow by this much before clearing old output again.",
-	"retry.enabled": "Retry transient provider errors on the next submit.",
+	"retry.enabled": "Automatically retry a chat turn after a transient provider error.",
 	"retry.maxRetries": "Retry attempts after the initial failure.",
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
@@ -241,7 +240,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
-		"At least 4 KB. Clio can read up to 192 KB of tool output across a whole turn, even if this per-result limit is higher.",
+		"At least 4 KB. The Tool output per turn limit still caps the whole turn, even if this per-result limit is higher.",
 	"compaction.threshold":
 		"Choose how full the model's context may get. A higher percentage keeps more history but leaves less room for the next answer.",
 	"context.compaction.maxTokens":

@@ -124,8 +124,8 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 			continue;
 		}
 		const value = argv[index + 1];
-		if (!arg.startsWith("--")) return `unexpected argument ${arg}`;
-		if (arg !== "--session" && arg !== "--run" && !SINGLE_VALUE_FLAGS.has(arg)) return `unknown flag ${arg}`;
+		if (!arg.startsWith("--")) return `unexpected argument: ${arg}`;
+		if (arg !== "--session" && arg !== "--run" && !SINGLE_VALUE_FLAGS.has(arg)) return `unknown flag: ${arg}`;
 		if (value === undefined || value.startsWith("--")) return `${arg} needs a value`;
 		index += 1;
 		if (arg === "--session") sessions.push(value);

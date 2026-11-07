@@ -102,7 +102,7 @@ problem.
 | `gate-decisions/<id>.json` | Review and compete gate decisions; undecided ones sit in `gate-decisions/pending/` |
 | `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step output logs, write-boundary records and run recordings |
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
-| `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project: each judged reproduce or numeric-compare verdict with its conditions, read by `clio-coder claims`. The project root is the realpath of the repository root, so every subdirectory shares one log. |
+| `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
 | `interviews/` | Interview transcripts |
@@ -116,7 +116,7 @@ problem.
 | `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json`, `copilot-sdk-consent.json` | Small per-machine stores; the last records which GitHub accounts consented to the copilot-sdk route (no token) |
-| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
+| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v4/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 
 The clean-exit session summary is built from an in-memory snapshot and is not
 persisted. Route history is a fold over `run.settled` records in the run journals
@@ -132,6 +132,9 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `system-one/julia-1-<revision>/tokenizer.json` | The Julia-1 tokenizer, downloaded when a `julia-1` engine is bound |
+| `grammars/<package>@<version>/` | The Ruby and C# tree-sitter grammars for the code index, downloaded on first use and pinned by SHA-256. A failed download is recorded beside the cache path, and no process retries it for 10 minutes while that record exists; an unwritable cache directory lets the next process try again ([fetched-grammars.ts](../../src/domains/context/codewiki/fetched-grammars.ts)). |
+| `data-readers/<package>@<version>/` | The HDF5, NetCDF and Parquet readers of the `data` tool, fetched as pinned npm tarballs on first use, with the same 10-minute retry window after a failure ([reader-assets.ts](../../src/tools/data/reader-assets.ts)) |
+| `skill-frontmatter.json` | Parsed `SKILL.md` frontmatter keyed by file path, mtime and size; dropped whole when the Clio version changes ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)) |
 | `update-<fingerprint>.json` | Update-check state |
 | `fleet-install-*` | Temporary directories while a fleet node installs Clio Coder |
 

@@ -19,7 +19,11 @@ import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import { STALLED_RUN_HEADLINE, workerFailureHeadline } from "../domains/dispatch/failure-headline.js";
+import {
+	plainOutcomeLabel,
+	STALLED_RUN_HEADLINE,
+	workerFailureHeadline,
+} from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -656,7 +660,10 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		const receipt = await handle.finalPromise;
 		const parsed = parseOracleResult(receipt.output?.text ?? null);
 		if (parsed === null) {
-			ctx.notice("error", `/oracle run ${receipt.runId} returned no usable answer (${receipt.outcome})`);
+			ctx.notice(
+				"error",
+				`/oracle run ${receipt.runId} returned no usable answer (${plainOutcomeLabel(receipt.outcome)})`,
+			);
 			return;
 		}
 		const note = formatWorkerShareNote({
@@ -2437,7 +2444,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					if (ctx.runContextRefresh) {
 						ctx.runContextRefresh();
 					} else {
-						ctx.notice("error", "context refresh is not wired; pass onContextRefresh to startInteractive");
+						ctx.notice("error", "context refresh is not wired in this session");
 					}
 					return;
 				default:

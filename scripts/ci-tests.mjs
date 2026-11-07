@@ -19,7 +19,22 @@ export const coreTests = [
 	"bash-exec-settlement",
 	"bash-output-cap",
 	"damage-control-shell-segments",
+	"damage-control-git-words",
+	"internal-git-hooks",
+	"safety-gates",
+	"default-containment",
+	"contained-secrets",
+	"true-yolo",
+	"yolo-script-sandbox",
+	"search-completeness",
+	"tool-boundaries",
+	"engine-utilities",
+	"test-runner-vocabulary",
+	"bootstrap-schema-retry-identity",
+	"installed-package-ci",
+	"release-boundary",
 	"dispatch-session-ownership",
+	"monitor-steer-tools",
 	"gateway-authority",
 	"mutation-atomicity",
 	"physical-dotdot",
@@ -40,9 +55,11 @@ export const coreTests = [
 	"url-credential-surfaces",
 	"in-prefix-summary",
 	"packed-source-directory",
+	"code-nav",
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
+	"footer-snapshot",
 	"copilot-sdk-route",
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
@@ -50,6 +67,7 @@ export const coreTests = [
 	"claims-ledger",
 	"cli-leaf-help",
 	"mux-platform-win32",
+	"keyboard-model",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [
@@ -59,12 +77,22 @@ export const guiTests = [
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",
+	"library-http",
 	"app-state",
 	"ssh-model",
 	"machine-proxy",
-].map((name) => `tests/${name}.test.ts`);
+	"openapi",
+	"boundaries",
+]
+	.map((name) => `tests/${name}.test.ts`)
+	.concat("tests/public-help.test.tsx");
 
-export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
+export const packageTests = [
+	"tests/smoke/installed-package.test.ts",
+	"tests/smoke/native-call-timing.test.ts",
+	"tests/contracts/instant-shell-import-graph.test.ts",
+	"tests/extended/dogfood-doctor-readonly.test.ts",
+];
 
 // Qualification runs the core, GUI and package tiers at once. Core at four
 // (da71294f7) was measured alone on 24 CPUs; on a 4-vCPU hosted runner the

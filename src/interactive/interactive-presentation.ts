@@ -80,7 +80,7 @@ import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
-import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
+import { actionKeyLabel, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
 import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
@@ -131,6 +131,8 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	/** The last slash command the operator ran, so a demo tip can name its key. */
+	getLastCommand?: () => string | null;
 	/** How many of the main turn's own calls are parked on the operator. */
 	getParkedCallCount?: () => number;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
@@ -436,10 +438,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return null;
 		},
 		getSubmitKeyLabel: () => effectiveSubmitKeyLabel(),
-		getKeyLabel: (action) => {
-			const key = keybindings.isDisabled(action) ? undefined : keybindings.getKeys(action)[0];
-			return key ? formatKeyLabel(key, "") : null;
-		},
+		getKeyLabel: (action) => (keybindings.isDisabled(action) ? null : actionKeyLabel(action)),
 		onFactsRefreshed: requestRender,
 		// Subscription usage is read lazily off the render path and cached, so the
 		// banner reads a string and never awaits a provider.
@@ -478,9 +477,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
-		getDequeueKey: () => {
-			return keybindings.actionLabel("clio-coder.message.dequeue");
-		},
 		getNavigateKey: () => keybindings.actionLabel("clio-coder.queue.open"),
 		getSendNowKey: () => keybindings.actionLabel("clio-coder.message.interrupt"),
 		...(deps.getOverlayState ? { getOverlayState: deps.getOverlayState } : {}),
@@ -605,6 +601,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let lastCompactionStop: "cancelled" | "failed" | null = null;
 	const footerDeps: FooterDashboardDeps = {
 		getWelcomeVisible: () => banner.isLaunchpadVisible?.() === true,
+		...(deps.getLastCommand ? { getLastCommand: deps.getLastCommand } : {}),
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.getConnections ? { getConnections: deps.getConnections } : {}),

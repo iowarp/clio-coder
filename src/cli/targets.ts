@@ -41,7 +41,8 @@ type ProviderOutputTier = RuntimeTier | "unknown";
 const HELP = `clio-coder targets
 
 List and manage configured model targets.
---reasoning and --tools opt into generating qualification and can load models.
+--probe checks targets live. --reasoning and --tools add qualification probes
+that send generation requests and can load models.
 
 Usage:
   clio-coder targets [--json] [--probe [--reasoning] [--tools [--tools-timeout <seconds>]]] [--target <id>]

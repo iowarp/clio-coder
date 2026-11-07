@@ -27,7 +27,7 @@
 				"functional core imperative shell"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/coding-standards",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -42,7 +42,7 @@
 				"what should this UI look like"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/prototype",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"audit": "pass",
 			"category": "coding"
 		},
@@ -72,7 +72,7 @@
 				"write a continuation brief"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/context/context-handoff",
-			"version": "0.5.5",
+			"version": "0.5.6",
 			"audit": "pass",
 			"category": "context"
 		},
@@ -87,7 +87,7 @@
 				"resume repository work after a break"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/context/context-prime",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"audit": "pass",
 			"category": "context"
 		},
@@ -263,7 +263,7 @@
 				"search the skills marketplace"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/find-skills",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -278,7 +278,7 @@
 				"prune a skill body"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-authoring",
-			"version": "0.4.0",
+			"version": "0.4.1",
 			"audit": "pass",
 			"category": "meta"
 		},
@@ -293,7 +293,7 @@
 				"compare architecture options"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/architecture",
-			"version": "0.4.3",
+			"version": "0.4.4",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -308,7 +308,7 @@
 				"create GitHub issues from this architecture"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/backlog",
-			"version": "0.4.3",
+			"version": "0.4.4",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -332,7 +332,7 @@
 				"create milestone prompts"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/prd",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -347,7 +347,7 @@
 				"greenfield product intent"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/product-intent",
-			"version": "0.4.3",
+			"version": "0.4.4",
 			"audit": "pass",
 			"category": "planning"
 		},
@@ -362,13 +362,13 @@
 				"specify execution flows"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/tech-spec",
-			"version": "0.3.3",
+			"version": "0.3.4",
 			"audit": "pass",
 			"category": "planning"
 		},
 		{
 			"name": "arxiv-literature",
-			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
+			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Fetches arXiv directly by default and dispatches the researcher shadow agent only when the user asks for a deep or broad survey.",
 			"triggers": [
 				"search arXiv",
 				"summarize an arXiv paper",
@@ -394,7 +394,7 @@
 				"compare solver accuracy"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/experiment-protocol",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -410,7 +410,7 @@
 				"scientific root cause"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-debugging",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -426,7 +426,7 @@
 				"preserve scientific parity"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/scientific-modernization",
-			"version": "0.4.3",
+			"version": "0.4.4",
 			"audit": "pass",
 			"category": "research"
 		},
@@ -458,7 +458,7 @@
 				"what would experts say"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/design-council",
-			"version": "0.6.3",
+			"version": "0.6.4",
 			"audit": "pass",
 			"category": "workflow"
 		},
@@ -473,7 +473,7 @@
 				"clarify this plan one question at a time"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/plan-interview",
-			"version": "0.5.4",
+			"version": "0.5.5",
 			"audit": "pass",
 			"category": "workflow"
 		},
@@ -488,7 +488,7 @@
 				"write dependency-ordered vertical slices"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/sprint-plan",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"audit": "pass",
 			"category": "workflow"
 		},
@@ -503,7 +503,7 @@
 				"create a skill from this session"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-capture",
-			"version": "0.4.5",
+			"version": "0.4.6",
 			"audit": "pass",
 			"category": "workflow"
 		}

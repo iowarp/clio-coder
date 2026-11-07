@@ -353,7 +353,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			} else if (event.disposition === "lockout") {
 				deps.appendTranscriptNotice(
 					"warn",
-					`[loop-guard] ${event.tool} looped ${event.repeatCount}x; tools disabled for the rest of this turn — the model is answering from what it gathered.`,
+					`[loop-guard] ${event.tool} looped ${event.repeatCount}x; tools disabled for the rest of this turn, so the model answers from what it gathered.`,
 				);
 			} else {
 				deps.appendTranscriptNotice(

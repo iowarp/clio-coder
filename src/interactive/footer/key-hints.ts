@@ -1,6 +1,6 @@
 import { CLIO_APP_KEYBINDINGS } from "../../domains/config/keybindings.js";
 import { getKeybindings, visibleWidth } from "../../engine/tui.js";
-import { formatKeyLabel } from "../keybinding-manager.js";
+import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
 
 const HINT_SEPARATOR = " · ";
 
@@ -77,14 +77,8 @@ function runLearning(context: ComposerKeyContext, facts: KeyHintFacts): Array<ke
 	];
 }
 
-/** The name before its aside: `Send now: interrupt the run…` reads `Send now`. Help keeps the sentence. */
-function shortDescription(description: string): string {
-	return description.split(/:\s| \(| with /u)[0] ?? description;
-}
-
-function boundKeys(id: string): string {
-	const keys = getKeybindings().getKeys(id as keyof typeof CLIO_APP_KEYBINDINGS);
-	return keys.map((key) => formatKeyLabel(key)).join("/");
+function boundKeys(id: keyof typeof CLIO_APP_KEYBINDINGS): string {
+	return actionKeyLabel(id) ?? "";
 }
 
 function firstKey(id: "tui.input.submit" | "tui.input.newLine" | "tui.select.cancel"): string | null {
@@ -95,7 +89,7 @@ function firstKey(id: "tui.input.submit" | "tui.input.newLine" | "tui.select.can
 
 function catalogEntry(id: keyof typeof CLIO_APP_KEYBINDINGS): string | null {
 	const keys = boundKeys(id);
-	return keys ? `${keys} ${shortDescription(CLIO_APP_KEYBINDINGS[id].description)}` : null;
+	return keys ? `${keys} ${CLIO_APP_KEYBINDINGS[id].label}` : null;
 }
 
 function catalogEntries(ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>, facts: KeyHintFacts = {}): string[] {
@@ -157,7 +151,7 @@ function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): stri
 	if (facts.learning === false) return [];
 	if (context === "idle") {
 		const newline = firstKey("tui.input.newLine");
-		return [...(newline ? [`${newline} newline`] : []), ...catalogEntries(idleLearning(facts))];
+		return ["? Keys", ...(newline ? [`${newline} newline`] : []), ...catalogEntries(idleLearning(facts))];
 	}
 	if (context === "steer" || context === "steer-empty") return catalogEntries(runLearning(context, facts), facts);
 	return [];

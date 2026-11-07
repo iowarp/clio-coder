@@ -76,6 +76,7 @@ test("a catalog package installs and removes through one reviewed plan, and a pl
 		const before = await json(await h.request(base), LibraryInventory);
 		const offer = before.packages.find((row) => row.kind === "skill" && row.catalogOrigin === "catalog");
 		assert.ok(offer, "the bundled catalog offers a skill");
+		assert.ok(offer.version, "the offered skill names its catalog version");
 		assert.deepEqual(offer.copies, []);
 
 		const plan = await json(await h.post(`${base}/plans`, { operation: "install", ref: offer.ref }), LibraryPlan);
@@ -98,8 +99,10 @@ test("a catalog package installs and removes through one reviewed plan, and a pl
 		assert.equal(outcome?.verification?.record, "recorded");
 		assert.equal(applied.refresh.status, "not-applicable");
 		assert.deepEqual(
-			(await json(await h.request(base), LibraryInventory)).packages.find((row) => row.ref === offer.ref)?.copies,
-			[{ scope: "user", state: "loadable" }],
+			(await json(await h.request(base), LibraryInventory)).packages
+				.find((row) => row.ref === offer.ref)
+				?.copies.map(({ scope, state, version }) => ({ scope, state, version })),
+			[{ scope: "user", state: "loadable", version: offer.version }],
 		);
 		assert.equal((await h.post(`${base}/plans/${plan.id}/apply`)).status, 404);
 

@@ -31,7 +31,7 @@ export async function runPanesCommand(argv: ReadonlyArray<string> = []): Promise
 	}
 	const [subcommand, ...rest] = argv;
 	if (subcommand === undefined) {
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	if (subcommand === "theme") {

@@ -184,7 +184,7 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 			if (disposed) return;
 			try {
 				await deps.mux.notify({
-					title: `${identity.agentId} ${outcome}`,
+					title: `${identity.agentId} ${plainOutcomeLabel(outcome)}`,
 					...(detail ? { body: detail } : {}),
 					// A failure interrupts; a long success announces. A short success
 					// in `all` mode gets the toast without the chime.

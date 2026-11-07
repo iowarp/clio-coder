@@ -9,6 +9,7 @@ import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--allow-tools NAMES] [--delegate-tools NAMES]
+clio-coder acp [--cwd PATH] auth login
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
 

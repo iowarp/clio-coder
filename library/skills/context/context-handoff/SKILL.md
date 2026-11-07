@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.5
+version: 0.5.6
 license: Apache-2.0
 allowed-tools:
   - read
@@ -86,7 +86,7 @@ approved in a headless run.
 
 1. **Focus.** If the user passed arguments, treat them as the next session's
    focus and slug (see Arguments above). Otherwise summarize all active
-   threads and state which one you picked as the focus — do not ask.
+   threads and state which one you picked as the focus. Do not ask.
 
 2. **Gather state.** Capture git state and recent commits with
    `context(scope="workspace")` and `git` (op=status) when available, else
@@ -136,7 +136,7 @@ approved in a headless run.
 - Writing to `/tmp`, the repo root, or anywhere but the path
   `scripts/new-handoff.sh` printed: a stray file is not a durable handoff.
 - Pasting a whole ADR, diff, or task-memory analysis instead of pointing at
-  it by path — reference, don't duplicate.
+  it by path. Reference, don't duplicate.
 - A secret or personal email surviving into the handoff unredacted.
 - Calling `ask_user` to confirm the focus or a redaction call: it is not
   registered in a headless run; state your reading and proceed instead.

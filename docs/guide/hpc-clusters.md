@@ -96,6 +96,12 @@ npm waits on its retries and then fails.
 The script itself fails closed on a bad signature or checksum, so a mirror that
 serves a modified file is refused rather than installed.
 
+After install, a few optional assets download on first use: the Ruby and C#
+code map grammars and the HDF5, NetCDF-4 and Parquet readers of the `data` tool.
+Without network the code map falls back to line patterns for Ruby and C#, and
+the `data` tool names the file to pre-seed; see
+[First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
+
 ## Choosing versions
 
 | Option | Effect |
@@ -138,3 +144,34 @@ launchers, build systems, `python3` and `sbatch` it finds on `PATH`, so a login
 node can be inspected before a workspace validation contract names any of them
 ([Doctor](doctor.md)). Slurm access through the clio-kit MCP server is covered in
 [Slurm](slurm.md).
+
+## The HPC skill pack
+
+The `hpc` plugin in the Library collects skills for cluster work. It is content
+only: installing it starts nothing and declares no MCP server.
+
+```bash
+clio-coder library install skill:slurm-jobs --project
+clio-coder library install plugin:hpc --project
+```
+
+Run `/library reload` in a running session afterward.
+
+| Skill | What it covers |
+| --- | --- |
+| `hpc-sweep` | Parameter sweeps as Slurm job arrays; see [Parameter sweeps](slurm.md#parameter-sweeps) |
+| `hpc-modules` | Finding and loading Lmod modules and Spack installs through `bash`, keeping each load in the shell that uses it |
+| `hpc-parallel-io` | Correctness rules and tuning for parallel HDF5 and MPI-IO, checked by readback and Darshan counters |
+| `hpc-darshan` | Summarizing a Darshan log and naming the counters behind each I/O finding |
+| `hpc-chronolog` | Recording run events in ChronoLog and reading them back |
+
+Known limits for this release: the Slurm and Lmod paths were checked against
+fake Slurm and Lmod binaries only, not on a live cluster, and the MPI-IO
+guidance in `hpc-parallel-io` is compile-checked only.
+
+On an air-gapped login node the pack needs no network of its own, but the
+clio-kit Slurm server downloads its environment on its first launch; launch it
+once while online or copy a warm `clio-kit` cache from a connected node. Clio
+Coder's own first-use downloads (the Ruby and C# code map grammars and the HDF5,
+NetCDF-4 and Parquet readers) are listed with their pre-seeding paths in
+[First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).

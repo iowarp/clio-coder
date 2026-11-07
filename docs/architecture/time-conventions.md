@@ -71,9 +71,8 @@ A `mono` value has meaning only under its clock origin. Each journal segment's
 `segment.open` header names that origin: `host`, `pid`, the process `birthToken`,
 and `monoEpochWallMs` (`performance.timeOrigin`). A local record uses the origin
 of the segment that holds it. A record a worker forwarded keeps its own `origin`
-field, because the worker's monotonic clock is not the parent's.
-`monotonicSpan` returns a span only when both ends share the same origin and the
-end is not earlier than the start, and null otherwise. See [Telemetry](telemetry.md#journals).
+field, because the worker's monotonic clock is not the parent's. A span taken
+from two `mono` values is meaningful only when both share that origin. See [Telemetry](telemetry.md#journals).
 
 ### Cross-host and restart boundaries
 

@@ -7,7 +7,7 @@ import type {
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
 } from "./build-worker-protocol.js";
-import { buildCodewiki, type CodewikiBuildOptions, codewikiPathsNeedUpdate, syncCodewiki } from "./indexer.js";
+import type { CodewikiBuildOptions } from "./indexer.js";
 import type { Codewiki } from "./schema.js";
 
 function isArtifactRef(value: Codewiki | CodewikiArtifactRef | null): value is CodewikiArtifactRef {
@@ -24,6 +24,14 @@ export async function executeCodewikiBuildOutcome(
 	request: CodewikiBuildWorkerRequest,
 	options: CodewikiBuildOptions = {},
 ): Promise<CodewikiBuildWorkerOutcome> {
+	if (request.kind === "check") {
+		const fingerprint = computeFingerprint(request.cwd, null, { artifactLoc: request.current.loc });
+		return {
+			codewiki: null,
+			fingerprint,
+			changed: request.current.needsBackfill || request.previous === null || isStale(request.previous, fingerprint),
+		};
+	}
 	const handed = request.kind === "build" ? null : request.current;
 	// Resolved lazily: the unchanged-ensure path below never needs the artifact's
 	// contents, and parsing it there would put the cost back that the reference
@@ -68,6 +76,7 @@ export async function executeCodewikiBuildOutcome(
 			}
 		}
 	}
+	const { buildCodewiki, codewikiPathsNeedUpdate, syncCodewiki } = await import("./indexer.js");
 	let current: Codewiki | null = handed === null ? null : resolveCurrent();
 	if (request.kind === "incremental") {
 		const base = requireCurrent();

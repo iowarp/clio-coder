@@ -78,6 +78,7 @@ async function runPrune(argv: ReadonlyArray<string>): Promise<number> {
 			set(value);
 			index += 1;
 		} else {
+			printError(set ? `telemetry prune: ${arg} needs a positive number` : `telemetry prune: unexpected argument: ${arg}`);
 			process.stderr.write(HELP);
 			return 2;
 		}
@@ -123,11 +124,17 @@ function runConsent(argv: ReadonlyArray<string>): number {
 			workspaceArg = argv[index + 1];
 			index += 1;
 		} else {
+			printError(
+				arg === "--workspace"
+					? "telemetry consent: --workspace needs one directory"
+					: `telemetry consent: unexpected argument: ${arg}`,
+			);
 			process.stderr.write(HELP);
 			return 2;
 		}
 	}
 	if (list && (revoke || workspaceArg !== undefined)) {
+		printError("telemetry consent: --list cannot be combined with --revoke or --workspace");
 		process.stderr.write(HELP);
 		return 2;
 	}
@@ -196,9 +203,7 @@ async function leafHelp(command: string): Promise<string | null> {
 
 export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<number> {
 	if (argv[0] === "--help" || argv[0] === "-h") {
-		process.stdout.write(
-			`${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}`,
-		);
+		process.stdout.write(await fullHelp());
 		return 0;
 	}
 	if (argv[0] !== undefined && (argv.includes("--help") || argv.includes("-h"))) {
@@ -218,6 +223,10 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "doctor") return (await import("./telemetry-doctor.js")).runTelemetryDoctor(argv.slice(1));
 	if (argv[0] === "insights") return (await import("./telemetry-insights.js")).runTelemetryInsights(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
-	process.stderr.write(HELP);
+	process.stderr.write(await fullHelp());
 	return 2;
+}
+
+async function fullHelp(): Promise<string> {
+	return `${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}`;
 }

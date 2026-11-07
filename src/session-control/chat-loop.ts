@@ -2323,7 +2323,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					coordinator: noOutcomeUsage(),
 					workers: workerOutcomeUsage(collected.harness.runIds, deps.outcomeDispatch),
 				},
-				failure: classifyCallFailure("Canceled before admission", { invoked: false, aborted: true, retryAttempts: 0 }),
+				failure: classifyCallFailure("Cancelled before admission", { invoked: false, aborted: true, retryAttempts: 0 }),
 				stopReason: "aborted",
 				durationMs: Math.max(0, performance.now() - input.submittedAt),
 			});

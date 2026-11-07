@@ -198,13 +198,15 @@ claude plugin marketplace add ./path/to/clio-coder
 claude plugin marketplace add "$(npm root -g)/@iowarp/clio-coder"
 ```
 
-The marketplace publishes 35 entries: the 34 curated skill packages and the
-`materio` plugin. What each entry becomes on the Claude Code side:
+The marketplace publishes 39 entries: the 34 curated skill packages and five
+plugins, `materio` and the four science packs (`hpc`, `science-data`,
+`literature`, `life-science`). What each entry becomes on the Claude Code side:
 
 | Source layout | What Claude Code loads |
 | --- | --- |
 | `library/skills/<category>/<name>/` with a root `SKILL.md` | One skill, named by the `SKILL.md` frontmatter, with its `references/` companions |
 | `library/plugins/materio/` with a `skills/` directory | Materio's six portable skills and nothing else |
+| `library/plugins/<pack>/` for a science pack | The pack's skills from its `skills/` directory. A pack's `mcp.json` is the Agent Plugins file Clio reads, not the `.mcp.json` Claude Code scans, so Claude Code starts none of its servers. |
 
 Nothing is converted and no component body is duplicated. The packages carry their
 portable Agent Plugins `plugin.json`, which Claude Code does not read; the

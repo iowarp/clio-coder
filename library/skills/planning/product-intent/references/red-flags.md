@@ -1,6 +1,6 @@
 # Product Intent Red Flags
 
-- A stack, library, database, or framework name anywhere in the document —
+- A stack, library, database, or framework name anywhere in the document.
   "React + Postgres" appearing at all is an instant fail; that decision
   belongs to `architecture`, not here.
 - A hypothesis with a RIGHT condition and no WRONG condition, or a WRONG
@@ -12,5 +12,5 @@
   the decline treatment for every step from there on.
 - Opening a task list for the interview clusters; `tasks` is refused.
 - Claims in the document that trace to neither the seeded evidence nor a
-  marked assumption — an invented fact reads as confident and is the
+  marked assumption. An invented fact reads as confident and is the
   hardest failure to catch after the fact.

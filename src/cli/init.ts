@@ -82,7 +82,7 @@ function parseContextInitArgs(args: ReadonlyArray<string>): {
 		}
 		const row = CONTEXT_INIT_FLAG_TABLE.find((candidate) => candidate.flag === arg || candidate.aliases?.includes(arg));
 		if (!row) {
-			return { options, json, error: arg.startsWith("-") ? `unknown flag ${arg}` : `unexpected argument ${arg}` };
+			return { options, json, error: arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}` };
 		}
 		options[row.field] = true;
 	}
@@ -112,13 +112,13 @@ export async function runInitCommand(args: string[]): Promise<number> {
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
 		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	const validationError = validateInitOptions(parsed.options);
 	if (validationError) {
 		process.stderr.write(`${validationError}\n`);
-		process.stdout.write(HELP);
+		process.stderr.write(HELP);
 		return 2;
 	}
 	const bootstrapOptions = bootstrapInputFromInitOptions(parsed.options);

@@ -1,5 +1,6 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
@@ -226,29 +227,51 @@ describe("monitor tool", () => {
 		}
 	});
 
-	it("blocks collect until its runs finish or its timeout elapses (D3)", async () => {
+	it("blocks collect until its runs finish or its timeout elapses (D3)", async (t) => {
 		const f = await fixture(scratch);
+		let now = 0;
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		t.mock.method(performance, "now", () => now);
 		try {
 			const finishing = await f.contract.dispatch(f.request);
-			const timer = setTimeout(() => f.workers[0]?.finish(), 1500);
-			try {
-				const complete = okResult(
-					await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [finishing.runId], timeout_ms: 10_000 }),
-				);
-				strictEqual(complete.details?.complete, true);
-				strictEqual(complete.details?.timedOut, false);
-			} finally {
-				clearTimeout(timer);
-			}
+			let completed = false;
+			const collecting = f
+				.call(ToolNames.Monitor, { mode: "collect", run_ids: [finishing.runId], timeout_ms: 10_000 })
+				.then((result) => {
+					completed = true;
+					return result;
+				});
+			await setImmediate();
+			strictEqual(completed, false, "collect must remain pending before the controlled worker finishes");
+			f.workers[0]?.finish();
+			const complete = okResult(await collecting);
+			strictEqual(complete.details?.complete, true);
+			strictEqual(complete.details?.timedOut, false);
 
 			const running = await f.contract.dispatch(f.request);
-			const timedOut = okResult(
-				await f.call(ToolNames.Monitor, { mode: "collect", run_ids: [running.runId], timeout_ms: 1200 }),
-			);
+			let returned = false;
+			const waiting = f
+				.call(ToolNames.Monitor, { mode: "collect", run_ids: [running.runId], timeout_ms: 1200 })
+				.then((result) => {
+					returned = true;
+					return result;
+				});
+			await setImmediate();
+			strictEqual(returned, false);
+			now = 1199;
+			t.mock.timers.tick(1199);
+			await setImmediate();
+			strictEqual(returned, false, "collect must not return before its virtual deadline");
+			now = 1200;
+			t.mock.timers.tick(1);
+			const timedOut = okResult(await waiting);
 			strictEqual(timedOut.details?.timedOut, true);
 			strictEqual(timedOut.details?.complete, false);
-			ok((timedOut.details?.waitedMs as number) >= 1200, `waitedMs ${String(timedOut.details?.waitedMs)}`);
+			strictEqual(timedOut.details?.waitedMs, 1200);
+			strictEqual(f.workers[1]?.aborts(), 0, "a monitor timeout must not cancel the worker");
 		} finally {
+			t.mock.timers.reset();
+			t.mock.restoreAll();
 			await f.stop();
 		}
 	});

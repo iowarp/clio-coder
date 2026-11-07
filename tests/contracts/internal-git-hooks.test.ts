@@ -3,13 +3,25 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { installInternalGitPolicy } from "../../src/core/internal-git.js";
 import { createGitHooksFingerprinter } from "../../src/core/sandbox/git-hooks-fingerprint.js";
 import { createGitHookDriftGuard } from "../../src/domains/safety/hook-drift.js";
 import { createInternalGitPolicy, type InternalGitDriftRecord } from "../../src/domains/safety/internal-git-policy.js";
 import { probeGit } from "../../src/domains/session/workspace/git-probe.js";
 import { createTaskWorktree, snapshotTaskWorktree } from "../../src/tools/task-worktree.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+let env: IsolatedClioEnv;
+beforeEach(async () => {
+	env = await isolateClioEnv("internal-git-hooks-");
+	// Inherited command-scope config must not shadow the fixture's live hooks.
+	delete process.env.GIT_CONFIG_PARAMETERS;
+	process.env.GIT_CONFIG_COUNT = "0";
+	process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+	process.env.GIT_CONFIG_NOSYSTEM = "1";
+});
+afterEach(() => env.restore());
 
 function git(cwd: string, ...args: string[]): string {
 	return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

@@ -1,6 +1,6 @@
 # Red flags
 
-- Tickets created before the Step 3 confirmation — including a headless
+- Tickets created before the Step 3 confirmation, including a headless
   run that treats an unanswered `ask_user` there as a yes and proceeds to
   Step 4 anyway; that gate stops, it does not assume.
 - A final report whose ticket table doesn't say, in words, whether creation

@@ -34,9 +34,11 @@ current source for implementation decisions.
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
 | Understand what Clio Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
+| Upgrade from 0.6: removed runtime ids, retired settings keys, the `evals` manifest key and the retired `github-copilot` login | [Upgrading to 0.7.0](guide/installation-and-lifecycle.md#upgrading-to-070-removed-compatibility) |
 | Run the read-only install check: core install, targets, HPC toolchain, task worktrees, Slurm MCP and System One rows, and the deep checks | [Doctor](guide/doctor.md) |
 | Bring a decision model in one setting: the `consult` tool, the judge screen, steering triage and their limits | [System One](guide/system-one.md) |
 | Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
+| Run a parameter sweep as Slurm experiments and judge each run | [Slurm parameter sweeps](guide/slurm.md#parameter-sweeps) |
 
 A minimal first run needs a model to talk to: a local app such as Ollama or LM
 Studio, a lab gateway, an AI subscription, or a cloud API. Guided setup starts
@@ -77,9 +79,11 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |
+| The project claims ledger: judged reproduce and numeric-compare verdicts, hypotheses and their status, and contradiction edges | [Claims Ledger](architecture/evidence-and-memory.md#claims-ledger) |
 | Skills as library packages: operator ownership of installed skills, library keys, matching and authoring, and publishing | [Skills Marketplace](guide/skills-marketplace.md) |
 | Resource roots and precedence, prompt templates, skill loading, and share archives | [Prompts, Skills, and Share Archives](guide/extensions-and-sharing.md) |
 | The `library` command family for packages of every kind: browse, install, update, pin and drift, extension review, lifecycle receipts, scope and workspace state, index format, registering and publishing, and the shared component inventory | [Resource Library](guide/resource-library.md) |
+| The HPC, science-data, literature and life-science packs, the hypothesis workflow, and their stated limits | [Science Packs](guide/resource-library.md#science-packs) |
 | Package kinds, how plugins differ from extensions and how the two pair, and where each library contract lives | [Plugins](guide/plugins.md) |
 | Package manifests and component references | [Authoring Plugins](guide/authoring-plugins.md) |
 | Extensions: Clio code in its own process, capability envelope, sandbox, hooks, runtime tools, commands, workspaces, and lifecycle | [Extensions](guide/harness-extensions.md) |
@@ -125,6 +129,7 @@ reference data, and review define the acceptance criteria for a change.
 | Which fragments each prompt tier carries, how they are selected, substitutions, and the dynamic sections | [Prompt Compilation](architecture/prompt-compilation.md) |
 | Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
 | Built-in tool contracts, operating boundaries, and core workflows | [Tool Usage](guide/tool-usage.md) |
+| Read-only HDF5, NetCDF and Parquet inspection through the `data` tool | [Data Tool](guide/tool-usage.md#data-inspect-structured-files-through-the-gateway) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
 | Delegate to installed coding agents through their supported ACP, headless CLI, or pane modes; inspect and adopt their resources | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |

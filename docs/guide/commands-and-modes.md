@@ -8,7 +8,9 @@ Demo presentation and guidance are on by default before 1.0. The full welcome sh
 
 After a turn, Clio Coder may show one fading footer line beginning `tip: ...` that fits what the turn did: a question about Clio Coder's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most one tip appears per session, and a tip retires once you use its feature yourself or it has been shown twice.
 
-Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio Coder features you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
+While the composer is idle, the footer teaches one key at a time, rotating through the lessons that fit its width (such as `?` for the key card), and a slash command that has a key (such as `/model`) earns one tip naming that key (`Alt+M`) until you press it; see [Keybindings](#keybindings).
+
+Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio Coder features and keys you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
 
 Turn it off under Settings → Appearance → Demo presentation and guidance (`interface.demo`), or for one invocation with `--no-demo`. Off means no tips, no idle footer tips or rotating key hints, no demo prompt line, and no profile reads or writes. Guidance adds hints only; it does not grant tool authority. Headless runs, ACP sessions and workers do not receive it.
 
@@ -150,7 +152,7 @@ session Clio Coder is already inside. The pane contracts are in
 
 ### Graphical application
 
-`clio-coder gui` opens the local browser application. It reuses this installation's owned background application when one is installed and otherwise starts a private foreground server that stops with Ctrl+C. A browser opens by itself only from an interactive terminal on a desktop; `--open` always opens one and `--no-open` never does. `--foreground` selects a private server explicitly, as do `--port`, `--idle-exit <milliseconds>`, `--token` and `--log-file`. `--path </app/path>` opens a particular page; under WSL, when `gui` reuses the background application and its window is already open, `gui` brings that window to the front and `--path` shows the page in it, while a bare `gui` leaves the window on the page it shows. `--reuse-background` fails instead of starting a private server when the background application cannot be used.
+`clio-coder gui` opens the local browser application. It reuses this installation's owned background application when one is installed and otherwise starts a private foreground server that stops with Ctrl+C. A browser opens by itself only from an interactive terminal on a desktop; `--open` always opens one and `--no-open` never does. `--foreground` selects a private server explicitly, as do `--port`, `--idle-exit <milliseconds>`, `--token`, `--token-stdin` and `--log-file`. `--path </app/path>` opens a particular page; under WSL, when `gui` reuses the background application and its window is already open, `gui` brings that window to the front and `--path` shows the page in it, while a bare `gui` leaves the window on the page it shows. `--reuse-background` fails instead of starting a private server when the background application cannot be used.
 
 | Subcommand | Effect |
 | --- | --- |
@@ -451,7 +453,7 @@ The registry table below lists every interactive slash command. On a bare `/`, c
 | `/music` | `/music [on\|off\|pause\|next\|status\|station <name or url>]` | Bare `/music` does what `Alt+A` does: it opens the focus-radio pane and plays, shows a hidden pane, or hides a visible one. `on` plays, `pause` silences and keeps the pane, and `off` stops and closes it. The pane drives cliamp in a Herdr dock. It needs the pane layer and `integrations.music.enabled`, which is off by default. See [Music](music.md) |
 | `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
-| `/config` | `/config` | Run the configure flow inside the TUI and apply the routing it saves to this session. Takes no arguments. See [Running setup with /config](#running-setup-with-config) |
+| `/config` | `/config` | Run the configure flow on the plain terminal, without leaving the session, and apply the routing it saves to this session. Takes no arguments. See [Running setup with /config](#running-setup-with-config) |
 | `/settings` | `/settings [area]` | Open the settings center, optionally at an area: `recent`, `targets`, `models`, `chat`, `agents`, `fleet`, `context`, `workspace`, `safety`, `interface`, `integrations`, `advanced`, or an alias such as `connections`, `appearance` or `panes`. `/settings chat model-picker` and `/settings models model-picker` open Models & Inference at its scope row; any other second word is accepted and ignored. An unknown area is a usage error |
 | `/resume` | `/resume [id\|prefix\|name]` | Resume a past session on the route it last ran on. Exact ids take precedence, then id prefixes, then exact names. A unique match resumes directly; duplicate names or ambiguous prefixes open the picker with the text as its filter. Saved names lead picker rows and are searchable. The picker hides sessions with no model turn and shows status, age, turn count, folder and route; replay restores recorded turn durations. See [Resuming sessions](#resuming-sessions) |
 | `/rename` | `/rename [name]` | Save a name for the current session without changing its id, conversation or route. Bare `/rename` proposes a short name locally from the conversation and saves only after confirmation, with no model call. Empty or whitespace-only names are refused. The name appears in the footer, session picker and exit summary. |
@@ -601,38 +603,40 @@ The command line has no resume flag. `clio-coder --resume`, `--continue`, `-r` a
 
 ## Keybindings
 
-Clio Coder has twelve direct application defaults and the `Ctrl+G` leader. `/help` shows the effective keys,
-fixed leader entries, scopes and user overrides. `Ctrl+G` opens a visible action
-menu with no timeout: use a suffix or Up/Down and Enter. Unknown suffixes leave
-the menu open and preserve the draft; Ctrl+G or Esc closes it. Ctrl+C immediately
-cancels the underlying owner. The menu does not search as you type.
+Three rules cover every key:
 
-| Direct default | Action | Fixed leader suffix |
-| --- | --- | --- |
-| `Alt+L` | Toggle top-level Library | `l` |
-| `Alt+M` | Toggle model picker | `m` |
-| `Alt+O` | Cycle Compact, Standard, Detailed output | `o` |
-| `Alt+U` | Cycle dashboard: Activity → Context → Status → closed | `u` |
-| `Alt+W` | Workers dock in a `--with-panes` session (first tap opens or shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `w` |
-| `Alt+E` | Show or hide the files pane (first tap), close it (second tap within 400 ms); bound inside Yazi too | `e` |
-| `Alt+A` | Show or hide the music pane (first tap), close it (second tap within 400 ms); bound inside cliamp too | `a` |
-| `Shift+Tab` | Cycle supported thinking effort for this session only | `t` |
-| `Alt+S` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | `i` |
-| `Alt+K` | Open the queue navigator over the queued messages | `n` |
-| `Alt+Q` | Restore both queue kinds before the current draft, once | `q` |
-| `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |
-| `Ctrl+Z` | Suspend Clio Coder; run `fg` in the shell to resume (unavailable on Windows). It also works from an open overlay and from transcript search | — |
-| `Ctrl+G` | Open or close the contextual action menu | — |
+1. **Ctrl edits text and talks to the terminal.** The editing keys are pi's readline-style defaults with a few portable overrides (table below).
+2. **Alt+letter runs a Clio action.** `Alt+M` model, `Alt+L` library, and so on.
+3. **`Ctrl+G` then the same letter runs the same action anywhere**, including terminals that never deliver Alt (stock macOS Terminal.app, some SSH and multiplexer setups). Actions too rare for a direct key live only in this menu, under their own letter.
+
+`Shift+Tab` (thinking effort) is the one direct action key that is not Alt+letter; it is kept from pi, and its menu letter is `t`. On an empty composer `?` shows a card of these keys, and `/help` lists every effective binding with its scope, source and conflicts.
+
+`Ctrl+G` opens a visible action menu with no timeout: press a letter, or use Up/Down and Enter. Unknown letters leave the menu open and keep the draft; `Ctrl+G` or `Esc` closes it, and `Ctrl+C` cancels the underlying owner. Hints across Clio spell each action one way: its direct key, or `Ctrl+G` and the letter when it has none. In a terminal that composes Option-letter as text, hints spell the `Ctrl+G` route instead while the action menu stays bound, so a hint names a key that can arrive. With `clio-coder.leader` disabled there is no menu route, and hints fall back to the Alt key.
+
+<!-- keyboard-model:start -->
+| Alt key | Menu letter | Action | Command |
+| --- | --- | --- | --- |
+| `Alt+M` | `m` | Model picker | `/model` |
+| `Shift+Tab` | `t` | Cycle supported thinking effort for this session | `/thinking` |
+| `Alt+O` | `o` | Cycle output detail: Compact, Standard, Detailed | |
+| `Alt+L` | `l` | Toggle the top-level Library | `/library` |
+| `Alt+U` | `u` | Cycle the dashboard: Activity, Context, Status, closed | |
+| `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
+| `Alt+E` | `e` | Show or hide the files pane (first tap), close it (second tap within 400 ms); bound inside Yazi too | `/files` |
+| `Alt+A` | `a` | Show or hide the music pane (first tap), close it (second tap within 400 ms); bound inside cliamp too | `/music` |
+| `Alt+S` | `s` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | `/interrupt` |
+| `Alt+Q` | `q` | Open the queue navigator over the queued messages | |
+| `Alt+G` | `g` | Edit the expanded draft in `$VISUAL`/`$EDITOR` | |
+| — | `d` | Move the newest attached dispatch to the background | `/background` |
+| — | `x` | Dismiss one notification | |
+| — | `y` | Toggle default and yolo autonomy for this session (the first switch to yolo shows its acceptance card) | |
+<!-- keyboard-model:end -->
 
 `Alt+E` and `Alt+A` drive Herdr docks that hide instead of close; [Panes and the Files Pane](panes-and-files.md#showing-hiding-and-closing-docks) specifies the shared tap model. `Alt+W` is the workers dock key in a pane-host session and is covered in [Fleet Dispatch](fleet-dispatch.md).
 
-Additional menu entries: `y` toggles default and yolo autonomy for this session (the first switch to yolo shows its acceptance card), `i` interrupts with the draft, `s` backgrounds the newest
-eligible attached dispatch, `g` edits the expanded draft externally, `x` dismisses
-one notification, `z` undoes the focused editable field, `r` toggles transcript
-search, `p` pages the transcript up and Home/End jump to its bounds (the page-down entry also lists `n`, but the queue navigator claims that suffix first, so pick page down with Up/Down and Enter). Previous/next
-prompt entries are available through arrows and Enter. `/tasks`, `/decisions`
-and `/tree` retain their boards; scoped model cycling retains configurable action
-IDs and has no default direct key.
+The menu also carries the transcript entries: `z` undoes the focused editable field, `r` toggles transcript search, `p`/`n` page the transcript up and down, and Home/End jump to its bounds; previous/next prompt are reachable with arrows and Enter. Letters `b` and `j` are reserved for an active extension workspace.
+
+On an empty composer: `?` key card, `/` commands, `!` shell command, `@` file mention, Left arrow the workers or Fleet Runs board, Down arrow the task board. `Esc` stops a run; `Ctrl+C` twice or `Ctrl+D` on an empty idle composer exits; `Ctrl+Z` suspends (run `fg` to resume; unavailable on Windows, and it also works from an open overlay and from transcript search). `/tasks`, `/decisions` and `/tree` keep their boards behind slash commands; scoped model cycling keeps configurable action IDs and has no default key.
 
 | Editing or contextual key | Behavior |
 | --- | --- |
@@ -672,26 +676,24 @@ Legacy streams cannot distinguish every held-key repeat.
 
 **Overrides.** Keep overrides in `interface.keybindings`; a top-level `keybindings`
 map is a retired settings-v1 path that `clio-coder upgrade` moves. An explicit `[]` disables both direct access
-and the action's default leader entry. A default-unbound action may still have a
-leader entry. Rebinding a direct key does not change its fixed suffix, and
+and the action's menu letter. Rebinding a direct key never moves its menu letter, and
 `leader: []` disables the menu. Unknown action IDs and effective conflicts produce
 a diagnostic; shipped fullscreen viewport keys that intentionally shadow unchanged
 editor defaults carry no conflict tag, while user rebindings can still conflict.
 Edits reload routing, components and hints together and cancel a pending menu, and
-no preferences are rewritten. Send now has the direct key Alt+S, the queue
-navigator Alt+K, and queue recovery Alt+Q; Alt+B and Alt+D edit. The action
-`clio-coder.message.followUp` (Ctrl+Q) does not exist: a keybindings file that names
-it gets a diagnostic that points to the navigator's `t` toggle, which sets the
-end-of-turn slot. Infrequent boards use their slash commands, and background,
-external editor and dismiss use the menu or command bridges.
+no preferences are rewritten. Inside the queue navigator `a` restores every queued
+message to the composer; `clio-coder.message.dequeue` has no default and can be bound
+to do that from the composer. The action `clio-coder.message.followUp` (Ctrl+Q) does
+not exist: a keybindings file that names it gets a diagnostic that points to the
+navigator's `t` toggle, which sets the end-of-turn slot.
 
 **Terminal delivery.** On stock macOS Terminal.app, Option may compose text;
-the Ctrl+G menu works without changing that setting. A temporary profile with
+`Ctrl+G` and the same letter work without changing that setting, and Clio's hints spell that route there unless the action menu is disabled. A temporary profile with
 Use Option as Meta enabled permits direct Alt keys. Windows Terminal/WSL2 can
 retain native Alt+Enter, Alt+arrow, clipboard, Find and zoom controls. Ctrl+J
 is the portable newline. Node raw mode normally disables flow control and
-signal generation; an SSH/mux or terminal UI can still intercept keys, so menu
-`i` is available if Alt+S does not arrive. In the fullscreen interface, copying a selection tries the platform's clipboard tools in order (the native clipboard on macOS and Windows, then `wl-copy`, `xclip` or `xsel` on Linux, `clip.exe` or `powershell.exe` on Windows and WSL, `pbcopy` on macOS) and flashes a confirmation only when one of them reports success. When none does, it still sends OSC 52 and the flash reads `Copy unconfirmed: <reasons>; OSC 52 sent`, because no terminal acknowledges OSC 52. Over SSH the local tools are skipped, because they would write the remote machine's clipboard, unless X11 is forwarded, which allows `xclip` and `xsel`. Native terminal window
+signal generation; an SSH/mux or terminal UI can still intercept keys, so
+`Ctrl+G s` is available if Alt+S does not arrive. In the fullscreen interface, copying a selection tries the platform's clipboard tools in order (the native clipboard on macOS and Windows, then `wl-copy`, `xclip` or `xsel` on Linux, `clip.exe` or `powershell.exe` on Windows and WSL, `pbcopy` on macOS) and flashes a confirmation only when one of them reports success. When none does, it still sends OSC 52 and the flash reads `Copy unconfirmed: <reasons>; OSC 52 sent`, because no terminal acknowledges OSC 52. Over SSH the local tools are skipped, because they would write the remote machine's clipboard, unless X11 is forwarded, which allows `xclip` and `xsel`. Native terminal window
 controls remain upstream. Clio does not own keys while Yazi, an external editor
 or the host mux holds focus. Physical Windows/macOS acceptance is separate from
 Linux PTY and protocol tests; no terminal profile is installed automatically.
@@ -707,7 +709,7 @@ first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](.
 | A permission card | Backs out one layer, as `Esc` does: it first closes open details, then open terms, and only then denies the parked call. It does not cancel the running turn and does not exit. |
 | A `!` shell command running from the composer | Cancels that command. It does not arm shutdown. |
 | Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. The press does not arm shutdown. |
-| Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
+| Idle with messages queued | Protects the queue and says how to recover it: the queue key (`Alt+Q`), then `a`. |
 | Idle, nothing queued | Arms shutdown and leaves any draft in the composer. The footer counts down `Ctrl+C again to quit`, preceded by `draft kept, printed on quit` when the composer holds text. A second `Ctrl+C` within 3,000 ms (`APPLICATION_DOUBLE_TAP_MS`) exits, and the kept draft is printed to stderr after the terminal is restored, under `Unsent draft, not delivered to Clio:`. |
 
 In a permission card, `Esc` first closes open details and then open terms, and from the card itself denies the one parked call. `Alt+X` stops the turn, because denying one call does not stop the model from asking again. Letters typed while a card is open go to the composer, never to the card. Denying a permission card is a decision, not a dismissal:
@@ -772,7 +774,7 @@ is next slot.
 | --- | --- | --- |
 | Next slot | `Enter` | Between tool batches, mid-run. The agent keeps going and reads every queued message before its next model call. A message typed during the run's final model call is handed over at the end of that call, so the run carries on with it instead of ending. |
 | End of turn | `t` on the entry in the queue navigator, or ACP mode `end-of-turn` | When the whole run settles and Clio would hand control back. A turn is the whole run, not one model round. |
-| Send now | `Alt+S`, `Ctrl+G` `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the draft as a fresh prompt. Anything already queued stays queued and lands at the new run's first slot. With an empty draft, Alt+S flushes the queue, running or held: the first entry is the prompt and the rest land with its first model call. While a tool call is running, Alt+S asks whether to stop it or to send after it finishes; waiting queues the message ahead of everything else. |
+| Send now | `Alt+S`, `Ctrl+G` `s` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the draft as a fresh prompt. Anything already queued stays queued and lands at the new run's first slot. With an empty draft, Alt+S flushes the queue, running or held: the first entry is the prompt and the rest land with its first model call. While a tool call is running, Alt+S asks whether to stop it or to send after it finishes; waiting queues the message ahead of everything else. |
 
 ### Queued messages after a stop
 
@@ -781,7 +783,7 @@ At a permission card, `Esc` denies only the one parked call, so the run and its 
 After an operator stop, queued messages stay in the panel as separate entries, in order, and a notice
 says how many wait and which keys act on them. `Alt+S` with an empty composer
 sends them in order, each as its own user message. A new prompt takes them at
-its first slot. `Alt+Q` restores them to the composer. A peer's or other
+its first slot. `Alt+Q` then `a` restores them to the composer. A peer's or other
 machine-origin entry is dropped with a notice instead of being held.
 
 A message you submit after the stop, while a slow tool is still dying, is the
@@ -797,11 +799,11 @@ keeps the queue. Changing session returns it to the composer with a notice.
 
 ### The queue navigator
 
-`Alt+K` opens the queued messages as a list. `Up`/`Down` select, `Shift+Up`/
+`Alt+Q` opens the queued messages as a list. `Up`/`Down` select, `Shift+Up`/
 `Shift+Down` move an entry, `e` takes it back to the editor, `x` removes it,
 `t` flips it between the next slot and the end of the turn, `Enter` sends the
-selected entry now and keeps the rest queued, and the restore key (`Alt+Q`)
-puts everything back in the editor. The panel shows each entry's slot word,
+selected entry now and keeps the rest queued, and `a` puts everything back
+in the editor. The panel shows each entry's slot word,
 how long it has waited, and advisory marks: `!` when a reading found it urgent,
 `·t` when steering triage relabeled it. Steering triage is experimental and
 off by default (`chat.steering.triage`): when on, a bound System One route or
@@ -863,7 +865,7 @@ Clio Coder has two autonomy levels. **default** contains shell work in an OS san
 | Level | Choose it for | What happens |
 | --- | --- | --- |
 | `default` | Everyday work, attended or left running. | Workspace edits, and file edits inside the scratch roots, run. With a sandbox backend, `bash` and `run_script` run inside the main-session sandbox without asking: the workspace, the scratch roots and the package caches are writable, credentials, credential variables, secret files such as `.env` and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. In a Git work tree, destructive workspace operations such as `git reset --hard` or `rm -rf build` run after a workspace snapshot. A call that leaves the sandbox, publishes, writes a git hook or config file, or trips a damage-control rule goes to the safety judge, which runs it or refuses it against your own messages. You are asked only when the judge has no verdict, after it has blocked repeatedly, or for decisions only you make: project settings, fleet routing, library installs, plan-scale dispatch and `ask_user` questions. |
-| `yolo` | Long unattended jobs in a container or another disposable environment. | Nothing asks and `ask_user` answers itself with each question's recommended option. Commands run unsandboxed as you, with your credentials; `safety.sandbox: required` sandboxes only scripts. The floor still blocks deleting or overwriting `/`, your home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into Clio's own config, state and trust records, and reads of Clio's credential store. The first interactive switch shows a one-time acceptance card, recorded as `safety.yoloAccepted`, and yolo is refused as root outside a container. |
+| `yolo` | Long unattended jobs in a container or another disposable environment. | Nothing asks and `ask_user` answers itself with each question's recommended option, except an `operator_only` question, which closes unanswered and ends the turn: the round is kept with no answer, and no operator decision is recorded. Commands run unsandboxed as you, with your credentials; `safety.sandbox: required` sandboxes only scripts. The floor still blocks deleting or overwriting `/`, your home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into Clio's own config, state and trust records, and reads of Clio's credential store. The first interactive switch shows a one-time acceptance card, recorded as `safety.yoloAccepted`, and yolo is refused as root outside a container. |
 
 Workers you dispatch inherit the level inside their own sandbox. At `default` the ordinary asks of native local workers go to the same safety judge (`fleet.permissions.mode: judge`); at `yolo` workers run the yolo way inside their dispatch scope. The exact rules are in the [safety model](../architecture/safety-model.md#what-runs-what-is-judged-what-blocks).
 
@@ -895,7 +897,7 @@ safety:
 
 ### Running long jobs unattended
 
-- **Attended `default`, then walk away.** `safety.unattendedAfterSeconds` (default `300`) bounds how long an approval card or `ask_user` question waits in the TUI. An unanswered card is denied and the turn continues on another route; an unanswered question takes its recommended option, and an outward one is answered no. Pressing any key while the countdown runs stops it. When you come back, `/decisions` shows what Clio chose for you, and the exit summary's `Unattended` line counts it. `0` waits forever.
+- **Attended `default`, then walk away.** `safety.unattendedAfterSeconds` (default `300`) bounds how long an approval card or `ask_user` question waits in the TUI. An unanswered card is denied and the turn continues on another route; an unanswered question takes its recommended option, and an outward one is answered no. An `operator_only` question, a choice only you can make, shows no recommended pick: when its window passes, Clio chooses nothing and ends the turn: the round is kept with no answer, no operator decision is recorded, and the choice stays open. Pressing any key while the countdown runs stops it. When you come back, `/decisions` shows what Clio chose for you, and the exit summary's `Unattended` line counts it. `0` waits forever.
 - **Headless `clio-coder run` at `default`.** Containment, snapshots and the judge apply, and every ask the judge does not allow is denied at once. The judge reads only your prompt, so name the actions the job needs, such as "push the branch when tests pass".
 - **Plan for what the sandbox refuses.** A contained command starts without credential variables and cannot open secret files or create local Unix sockets, so tools such as a local database client, Docker, the `tsx` CLI, X11 or D-Bus clients, and Python multiprocessing with the `forkserver` start method (the Linux default from Python 3.14) fail with `Operation not permitted`. Clio reruns such a command with `unsandboxed: true`, which the safety judge reviews, so name the tools the job needs in your request. A variable the job must keep inside the sandbox, such as a registry token a build reads, goes in `safety.sandboxPassEnv` in your user settings; `safety.sandboxUnixSockets: allow` turns the socket refusal off. A git command that would run a hook changed during the session always asks you; a headless run, or an unanswered card after the timeout, denies it.
 - **`clio-coder run --autonomy yolo` in a container.** Nothing stops the run for approval. These still stop it or its calls: the yolo floor, your `safety.yaml` rules, the session cost ceiling and `--max-cost-usd`, `--timeout`, the loop guard, and the per-turn tool budget (`safety.limits.chatToolCallsPerTurn`, 60 by default), which blocks further calls and ends the turn 15 calls past that. At yolo a turn that reached the budget then continues with a fresh one, and this repeats until the cost ceiling or the loop guard ends it. A turn stopped by a loop guard lock, exhausted retries or a failed compaction gets up to 3 continuations per operator prompt, and the last two causes wait 1, 5, then 15 minutes first, or the provider's Retry-After if that is longer. Run it where an unattended command cannot damage the host. As root outside a detected container it exits 2; set `CLIO_CODER_SANDBOXED=1` when the process already runs in a sandbox the detection does not recognize.

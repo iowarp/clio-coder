@@ -37,6 +37,31 @@ The root schema permits exactly these keys, and any other key is a validation er
 
 A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning. Its stdio servers become plugin-scope declarations after installation and enablement; none launches until the operator runs `clio-coder mcp trust <id>`. See [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session).
 
+### Per-tool action classes in mcp.json
+
+`mcp.json` has the Agent Plugins shape `{"mcpServers": {"<id>": {...}}}`. A server entry accepts `type` (only `stdio`), `command`, `args`, `cwd`, `env`, `timeoutMs`, `network` and Clio's `toolActionClasses`; any other field fails the whole file closed. `network` in a plugin file is ignored with a warning, because only the operator grants network with `clio-coder mcp trust <id> --network`. `toolActionClasses` maps up to 128 tool names to `read`, `execute`, `destructive` or `unknown`, so a pack can let its read tools run while its file-writing tools ask:
+
+```json
+{
+  "mcpServers": {
+    "pandas": {
+      "type": "stdio",
+      "command": "clio-kit",
+      "args": ["mcp-server", "pandas"],
+      "timeoutMs": 120000,
+      "toolActionClasses": {
+        "statistical_summary": "read",
+        "save_data": "destructive"
+      }
+    }
+  }
+}
+```
+
+`clio-coder mcp list` and `clio-coder mcp trust` print the map, and the declaration digest that the trust record pins covers it, so editing a class in an installed package makes the server's trust stale. The map applies only once the server is trusted. A listed tool takes its declared class; a tool the map does not list takes the class in the trust record, which stays `unknown` (asks) unless the operator passes `--action-class` to `mcp trust`. The bundled `science-data` and `literature` packs classify every tool they ship this way; see [Science packs](resource-library.md#science-packs). Source: `src/domains/gateway/mcp/config.ts`, `src/domains/gateway/mcp/action-classes.ts`.
+
+A skill in the package can confine itself to those server tools: its `allowed-tools` may name a full MCP capability (`mcp_<id>__<tool>`) or extension capability (`extension_<id>__<tool>`), which is kept as written. See the skill frontmatter fields in [extensions-and-sharing.md](extensions-and-sharing.md).
+
 ## The Clio namespace
 
 `extensions["ai.iowarp.clio"]`, called the Clio namespace, holds optional Clio Coder metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form, and `clio-coder library package <directory>` generates it for an existing bare skill while preserving its scripts and references. Clio Coder prompts, strict agents, playbooks and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.

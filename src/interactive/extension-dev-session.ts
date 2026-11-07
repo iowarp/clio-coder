@@ -247,7 +247,7 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 				return;
 			}
 			if (!id) {
-				deps.notify("error", `Usage: /extensions ${action} <id>`);
+				deps.notify("error", `usage: /extensions ${action} <id>`);
 				return;
 			}
 			if (action === "mute") {
