@@ -76,6 +76,17 @@ export function runConfigCommand(args: ReadonlyArray<string> = []): number {
 		process.stderr.write(HELP);
 		return 2;
 	}
+	let sawInspect = false;
+	for (const arg of args) {
+		if (arg === "--json") continue;
+		if (arg === "inspect" && !sawInspect) {
+			sawInspect = true;
+			continue;
+		}
+		printError(arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}`);
+		process.stderr.write(HELP);
+		return 2;
+	}
 	const json = args.includes("--json");
 	const cwd = process.cwd();
 	if (json) {

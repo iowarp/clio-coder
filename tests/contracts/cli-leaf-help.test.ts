@@ -50,6 +50,7 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	{ args: ["interop", "inspect", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["interop", "adopt", "claude-code", "--yes", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["verifiers", "inspect", "--help"], usage: /clio-coder verifiers inspect --json/ },
+	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs\]/ },
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {
@@ -71,6 +72,21 @@ describe("telemetry share names the flag it refuses", { concurrency: 2 }, () => 
 		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {
 			const result = await cli(args);
 			equal(result.status, 2, result.stderr);
+			match(result.stderr, refusal);
+		});
+	}
+});
+
+describe("config and version refuse what they do not take", { concurrency: 2 }, () => {
+	for (const [args, refusal] of [
+		[["config", "--jsn"], /error: unknown flag: --jsn\n/],
+		[["config", "inspect", "extra"], /error: unexpected argument: extra\n/],
+		[["version", "--bogus"], /error: unknown flag: --bogus\n/],
+	] as const) {
+		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {
+			const result = await cli(args);
+			equal(result.status, 2, result.stdout);
+			equal(result.stdout, "");
 			match(result.stderr, refusal);
 		});
 	}
