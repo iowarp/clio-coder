@@ -11,9 +11,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { stateWritesWithheld } from "./home-write-guard.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { clioStateDir } from "./xdg.js";
+import { clioStateDir, stateRootRemoved } from "./xdg.js";
 
 function recentModelsPath(): string {
 	return join(clioStateDir(), "recent-models.json");
@@ -75,8 +74,8 @@ export function rememberRecentModel(ref: string, limit: number): string[] {
 	cachePath = path;
 	// An Alt+M model pick in a session outliving `clio-coder uninstall` must not
 	// rebuild the state root around recent-models.json. The in-memory list still
-	// updates so the picker behaves for the rest of the run; see stateWritesWithheld().
-	if (stateWritesWithheld()) return next;
+	// updates so the picker behaves for the rest of the run; see stateRootRemoved().
+	if (stateRootRemoved()) return next;
 	try {
 		writeToDisk(path, next);
 	} catch {

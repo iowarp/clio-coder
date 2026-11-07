@@ -1,7 +1,6 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
-import { readOnlyProcess } from "../../core/read-only-mode.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
@@ -992,12 +991,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const sessionId = chat.getSessionId();
 		if (sessionId === null) return;
 		textSessionIdWritten = true;
-		// A read-only process keeps its session in memory, so no later run can name it.
-		process.stderr.write(
-			readOnlyProcess()
-				? `clio-coder run: session ${sessionId} (read-only, not kept)\n`
-				: `clio-coder run: session ${sessionId}\n`,
-		);
+		process.stderr.write(`clio-coder run: session ${sessionId}\n`);
 	};
 	const jsonProjector = createHeadlessJsonProjector();
 	const unsubscribe = chat.onEvent((event) => {

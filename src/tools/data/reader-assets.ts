@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadPinnedAsset, type PinnedAsset } from "../../core/pinned-asset.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { extractPackageTarball } from "./tar-extract.js";
 
@@ -96,19 +95,15 @@ function expectedMarker(reader: ScientificReader): string {
 
 /** Raised when a reader is neither cached nor fetchable; the message is the whole operator-facing story. */
 export class ReaderUnavailableError extends Error {
-	constructor(message: string) {
-		super(message);
+	constructor(reader: ScientificReader, pkg: ReaderPackage, reason: string) {
+		const asset = tarballAsset(reader, pkg);
+		super(
+			`Clio reads ${reader.formats} with ${pkg.name} ${pkg.version}, which it downloads once on first use and caches, and that download is not available: ${reason}. ` +
+				`No process on this host retries it for ${Math.round(READER_FETCH_RETRY_MS / 60_000)} minutes after a failure. ` +
+				`On an offline host, copy ${asset.url} (sha256 ${pkg.sha256}) to ${asset.path}, or use ${reader.fallback}.`,
+		);
 		this.name = "ReaderUnavailableError";
 	}
-}
-
-function downloadUnavailable(reader: ScientificReader, pkg: ReaderPackage, reason: string): ReaderUnavailableError {
-	const asset = tarballAsset(reader, pkg);
-	return new ReaderUnavailableError(
-		`Clio reads ${reader.formats} with ${pkg.name} ${pkg.version}, which it downloads once on first use and caches, and that download is not available: ${reason}. ` +
-			`No process on this host retries it for ${Math.round(READER_FETCH_RETRY_MS / 60_000)} minutes after a failure. ` +
-			`On an offline host, copy ${asset.url} (sha256 ${pkg.sha256}) to ${asset.path}, or use ${reader.fallback}.`,
-	);
 }
 
 /**
@@ -131,15 +126,6 @@ export async function ensureScientificReader(reader: ScientificReader): Promise<
 		}
 	};
 	if (current()) return entry;
-	// Unpacking is a cache write, and the reader runs only from the unpacked tree.
-	const refuseInReadOnlyMode = (): void => {
-		if (!readOnlyMode()) return;
-		throw new ReaderUnavailableError(
-			`Clio reads ${reader.formats} with ${reader.main.name} ${reader.main.version}, which it unpacks into its cache on first use, and read-only mode leaves that cache as it found it. ` +
-				`Run one read of this format outside read-only mode to install it, or use ${reader.fallback}.`,
-		);
-	};
-	refuseInReadOnlyMode();
 	const tarballs: Array<[ReaderPackage, Buffer]> = [];
 	for (const pkg of [reader.main, ...reader.deps]) {
 		try {
@@ -151,11 +137,9 @@ export async function ensureScientificReader(reader: ScientificReader): Promise<
 				}),
 			]);
 		} catch (error) {
-			throw downloadUnavailable(reader, pkg, error instanceof Error ? error.message : String(error));
+			throw new ReaderUnavailableError(reader, pkg, error instanceof Error ? error.message : String(error));
 		}
 	}
-	// The mode may have begun while the downloads were pending; from here to the rename nothing awaits.
-	refuseInReadOnlyMode();
 	const staging = join(dir, `node_modules.tmp-${process.pid}-${Date.now().toString(36)}`);
 	try {
 		for (const [pkg, bytes] of tarballs) extractPackageTarball(bytes, join(staging, pkg.name));

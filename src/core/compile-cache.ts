@@ -13,11 +13,7 @@
  * no-filesystem-write contract). Enablement is further gated on Clio's cache
  * root already existing, because read-only commands (`paths`, bare `doctor`)
  * promise to write nothing to a home Clio never set up; a pristine home pays
- * one uncached boot and every initialized install caches from then on. A
- * process in read-only mode for good (`run` or `acp --read-only`) never enables it:
- * the CLI reads `--read-only` from argv before its enable, and the handle
- * itself settles disabled once the mode is entered, which also keeps the
- * injection below out of the workers such a run dispatches. In
+ * one uncached boot and every initialized install caches from then on. In
  * spawned native workers, the entry's whole
  * static graph resolves before any application code runs, so the only lever
  * that reaches them in time is the NODE_COMPILE_CACHE environment variable;
@@ -42,7 +38,6 @@
 import { existsSync } from "node:fs";
 import { enableCompileCache, flushCompileCache } from "node:module";
 import { join } from "node:path";
-import { readOnlyProcess } from "./read-only-mode.js";
 import { resolveClioDirs } from "./xdg.js";
 
 /**
@@ -78,11 +73,9 @@ function createCompileCache(
 	return {
 		enable(env = process.env) {
 			if (settled !== undefined) return settled;
-			// The bytecode cache is a cache like any other, and a read-only process
-			// refreshes none. Settling null here also keeps it out of the workers
-			// such a process dispatches, since the spawn path injects only what
-			// this returns.
-			if (readOnlyProcess() || env.NODE_DISABLE_COMPILE_CACHE !== undefined) {
+			// Settling null here also keeps the cache out of the workers this
+			// process dispatches, since the spawn path injects only what this returns.
+			if (env.NODE_DISABLE_COMPILE_CACHE !== undefined) {
 				settled = null;
 				return settled;
 			}

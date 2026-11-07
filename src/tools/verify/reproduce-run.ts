@@ -6,7 +6,6 @@ import { release } from "node:os";
 import path from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { readClioVersion } from "../../core/package-root.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
@@ -497,7 +496,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 	};
 
 	const scratchRoot = input.scratchRoot ?? path.join(clioStateDir(), "scratch", "reproduce");
-	if (!readOnlyMode()) await sweepAbandonedEnvironments(scratchRoot);
+	await sweepAbandonedEnvironments(scratchRoot);
 	const runCount = spec.compare.mode === "twice" ? 2 : 1;
 	const facts: ReproduceRunFacts[] = [];
 	const records: ReproduceRunRecord[] = [];

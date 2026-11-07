@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { clioHomeWriteRefused } from "../../core/home-write-guard.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { EvidenceFindingsObjectSchema, ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
@@ -17,14 +16,6 @@ import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import { telemetryObjectsDirectory } from "./paths.js";
 
 const maximumBytes = 16 * 1024 * 1024;
-/**
- * Objects a read-only process stored, by scope directory and id, held in memory instead of `objects/`. Past the
- * byte bound a store fails, which its caller already handles as an unstored preimage.
- */
-const withheldObjects = new Map<string, string>();
-const WITHHELD_OBJECT_BYTES = 64 * 1024 * 1024;
-let withheldObjectBytes = 0;
-const withheldKey = (scopeDirectory: string, id: string): string => `${resolve(scopeDirectory)}\0${id}`;
 type StoredSubject =
 	| "prompt-structure"
 	| "tool-schemas"
@@ -334,15 +325,6 @@ export async function storeTelemetryObject(
 	value: unknown,
 ): Promise<ObjectRef> {
 	const { ref, bytes } = storedPreimage(subject, value);
-	if (clioHomeWriteRefused(scopeDirectory)) {
-		const key = withheldKey(scopeDirectory, ref.id);
-		if (withheldObjects.has(key)) return ref;
-		const size = Buffer.byteLength(bytes);
-		if (withheldObjectBytes + size > WITHHELD_OBJECT_BYTES) throw new Error("telemetry object memory is full");
-		withheldObjects.set(key, bytes);
-		withheldObjectBytes += size;
-		return ref;
-	}
 	const directory = await objectDirectory(scopeDirectory, true);
 	if (directory === null) throw new Error("telemetry object directory unavailable");
 	const path = join(directory, `${ref.id}.json`);
@@ -359,9 +341,7 @@ export async function readTelemetryObject(scopeDirectory: string, ref: ObjectRef
 	if (!Value.Check(ObjectRefSchema, ref)) throw new Error("invalid telemetry object reference");
 	if (ref.label === "commitment") return { kind: "commitment" };
 	const directory = await objectDirectory(scopeDirectory, false);
-	const bytes =
-		withheldObjects.get(withheldKey(scopeDirectory, ref.id)) ??
-		(directory ? await readObjectBytes(join(directory, `${ref.id}.json`)) : null);
+	const bytes = directory ? await readObjectBytes(join(directory, `${ref.id}.json`)) : null;
 	if (bytes === null) return { kind: "missing" };
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
 	const value: unknown = JSON.parse(bytes);
@@ -375,24 +355,21 @@ export function readTelemetryObjectSync(scopeDirectory: string, ref: ObjectRef):
 	if (ref.label === "commitment") return { kind: "commitment" };
 	const directory = telemetryObjectsDirectory(scopeDirectory);
 	let bytes: string;
-	const withheld = withheldObjects.get(withheldKey(scopeDirectory, ref.id));
-	if (withheld !== undefined) bytes = withheld;
-	else
+	try {
+		const stat = lstatSync(directory);
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("telemetry objects directory is not a directory");
+		const fd = openSync(join(directory, `${ref.id}.json`), constants.O_RDONLY | constants.O_NOFOLLOW);
 		try {
-			const stat = lstatSync(directory);
-			if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("telemetry objects directory is not a directory");
-			const fd = openSync(join(directory, `${ref.id}.json`), constants.O_RDONLY | constants.O_NOFOLLOW);
-			try {
-				const file = fstatSync(fd);
-				if (!file.isFile() || file.size > maximumBytes) throw new Error("invalid telemetry object size or type");
-				bytes = readFileSync(fd, "utf8");
-			} finally {
-				closeSync(fd);
-			}
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" };
-			throw error;
+			const file = fstatSync(fd);
+			if (!file.isFile() || file.size > maximumBytes) throw new Error("invalid telemetry object size or type");
+			bytes = readFileSync(fd, "utf8");
+		} finally {
+			closeSync(fd);
 		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" };
+		throw error;
+	}
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
 	const value: unknown = JSON.parse(bytes);
 	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");

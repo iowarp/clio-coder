@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { readOnlyMode } from "./read-only-mode.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 /**
@@ -61,8 +60,7 @@ export function pinnedAssetPresent(asset: PinnedAsset): boolean {
 /**
  * The asset's verified bytes: the cached copy when its hash matches, otherwise
  * one download bounded by `timeoutMs`, verified, then written to the cache.
- * In read-only mode the cache and its failure record are read but never
- * changed: a download serves this process only. Throws an Error whose message
+ * Throws an Error whose message
  * says why in words an operator can act on.
  */
 export async function loadPinnedAsset(asset: PinnedAsset, options: PinnedAssetLoadOptions): Promise<Buffer> {
@@ -76,13 +74,12 @@ export async function loadPinnedAsset(asset: PinnedAsset, options: PinnedAssetLo
 	}
 	try {
 		const bytes = await download(asset, options.timeoutMs);
-		if (readOnlyMode()) return bytes;
 		safeResourceWrite(asset.path, bytes);
 		if (options.retryAfterMs !== undefined) rmSync(failurePath(asset), { force: true });
 		return bytes;
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
-		if (options.retryAfterMs !== undefined && !readOnlyMode()) {
+		if (options.retryAfterMs !== undefined) {
 			try {
 				safeResourceWrite(failurePath(asset), `${JSON.stringify({ failedAt: Date.now(), reason })}\n`);
 			} catch {

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { SemanticLimits, SemanticProfile, SemanticRecord } from "./types.js";
 
@@ -120,12 +119,6 @@ export interface Checkpoint {
 	spent: number;
 }
 
-/** Every mutation of a shared index goes through here; read-only mode only searches what is there. */
-export function assertSemanticWritable(): void {
-	if (readOnlyMode())
-		throw new Error("Semantic refresh is unavailable in read-only mode, which leaves the index as it found it");
-}
-
 /** The TUI reopens the index for every search; reparsing and rehashing a 20 MiB generation took about 180 ms. */
 let lastLoaded: { key: string; data: Generation } | undefined;
 
@@ -148,7 +141,6 @@ export class SemanticStorage {
 	}
 
 	write(name: string, value: unknown): void {
-		assertSemanticWritable();
 		const text = JSON.stringify(value);
 		if (Buffer.byteLength(text) > this.maxBytes) throw new Error("Semantic storage byte limit exceeded");
 		safeResourceWrite(join(this.directory, name), text, { mode: 0o600 });
@@ -203,7 +195,6 @@ export class SemanticStorage {
 	}
 
 	pruneGenerations(keep: string | null): void {
-		assertSemanticWritable();
 		if (!existsSync(this.directory)) return;
 		for (const name of readdirSync(this.directory)) {
 			if (/^generation-[a-f0-9-]+\.json$/.test(name) && name !== `generation-${keep}.json`)
@@ -212,7 +203,6 @@ export class SemanticStorage {
 	}
 
 	commit(data: Generation): void {
-		assertSemanticWritable();
 		const text = JSON.stringify({ ...data, records: data.records.map(compactRecord) });
 		if (Buffer.byteLength(text) > this.maxBytes) throw new Error("Semantic storage byte limit exceeded");
 		safeResourceWrite(join(this.directory, `generation-${data.generation}.json`), text, { mode: 0o600 });

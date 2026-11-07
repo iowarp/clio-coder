@@ -7,7 +7,6 @@ import {
 	cwdHash,
 	readSessionFileEntries,
 	sessionPaths,
-	writeSessionFile,
 } from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionMeta } from "./contract.js";
@@ -460,5 +459,5 @@ function readMtimeIso(path: string): string | null {
 export function enrichForkMeta(meta: SessionMeta, parentSessionId: string, parentTurnId: string): void {
 	Object.assign(meta, { parentSessionId, parentTurnId });
 	const paths = sessionPaths(meta);
-	writeSessionFile(paths.meta, JSON.stringify(meta, null, 2));
+	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));
 }

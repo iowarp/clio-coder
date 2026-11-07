@@ -1,4 +1,4 @@
-import { stateWritesWithheld } from "../../core/home-write-guard.js";
+import { stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite, sessionPaths } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
 import type { SessionManagerState } from "./manager.js";
@@ -25,7 +25,7 @@ import type { SessionManagerState } from "./manager.js";
  */
 export async function performCheckpoint(state: SessionManagerState, reason?: string): Promise<void> {
 	await state.writer.persistTree();
-	if (stateWritesWithheld() || state.writer.fenced) return;
+	if (stateRootRemoved() || state.writer.fenced) return;
 	const paths = sessionPaths(state.meta);
 	const at = new Date().toISOString();
 	const enriched: SessionMeta = {

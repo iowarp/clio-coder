@@ -208,55 +208,13 @@ export function resolveClioDirs(): ClioDirs {
 	};
 }
 
-const CLIO_DIR_ENV: Readonly<Record<ClioDirRole, string>> = {
-	config: "CLIO_CODER_CONFIG_DIR",
-	data: "CLIO_CODER_DATA_DIR",
-	state: "CLIO_CODER_STATE_DIR",
-	cache: "CLIO_CODER_CACHE_DIR",
-};
-
-let processRelocation: { to: ClioDirs; from: ClioDirs } | null = null;
-
-function sameDirs(left: ClioDirs, right: ClioDirs): boolean {
-	return CLIO_DIR_ROLES.every((role) => resolve(left[role]) === resolve(right[role]));
-}
-
-/**
- * Point this process, and the local workers that inherit its environment, at
- * `root/{config,data,state,cache}` in place of the roots resolved so far.
- * Credential isolation still judges the home the operator resolved, so the move
- * alone does not read as a relocated install.
- */
-export function relocateClioHomeForProcess(root: string): void {
-	const from = resolveClioDirs();
-	const to: ClioDirs = {
-		config: join(root, "config"),
-		data: join(root, "data"),
-		state: join(root, "state"),
-		cache: join(root, "cache"),
-	};
-	process.env.CLIO_CODER_HOME = root;
-	for (const role of CLIO_DIR_ROLES) process.env[CLIO_DIR_ENV[role]] = to[role];
-	processRelocation = { to, from };
-	resetXdgCache();
-}
-
 /** Credential isolation must compare resolved roots without creating directories or reading credentials. */
 export function isClioHomeRelocated(): boolean {
 	const defaults = platformDefaults();
-	const dirs = operatorClioDirs();
+	const dirs = resolveClioDirs();
 	return (Object.keys(defaults) as Array<keyof ClioDirs>).some(
 		(role) => resolve(dirs[role]) !== resolve(defaults[role]),
 	);
-}
-
-/**
- * The roots the operator's environment names, before any move this process
- * made: where to tell the operator a file lives once the process's own copy is gone.
- */
-export function operatorClioDirs(): ClioDirs {
-	const resolved = resolveClioDirs();
-	return processRelocation && sameDirs(resolved, processRelocation.to) ? processRelocation.from : resolved;
 }
 
 /**

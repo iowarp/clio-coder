@@ -171,29 +171,6 @@ describe("contracts/state-file-lock", () => {
 		ok(existsSync(lockPath), "and must not release a lock they never held");
 	});
 
-	it("a refused write never runs the section, not even under run-unlocked", async () => {
-		holdLock(process.pid);
-		let refuse = false;
-		let ran = false;
-		const waiting = withStateFileLock(
-			target,
-			async () => {
-				ran = true;
-			},
-			{
-				timeoutMs: 20_000,
-				onAcquireFailure: "run-unlocked",
-				assertWritable: () => {
-					if (refuse) throw new Error("refused while waiting");
-				},
-			},
-		);
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		refuse = true;
-		await rejects(waiting, /refused while waiting/);
-		strictEqual(ran, false);
-	});
-
 	it("fails closed by default when the lock cannot be taken", async () => {
 		holdLock(process.pid);
 		await rejects(

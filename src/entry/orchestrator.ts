@@ -31,7 +31,6 @@ import type { CatalogRanker } from "../core/precomputed-rank.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
 import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
 import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
-import { enterReadOnlyMode, readOnlyProcess } from "../core/read-only-mode.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
@@ -258,7 +257,6 @@ import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
-	enableFrontmatterCacheWrites,
 	installedSkillNames,
 	installSkill,
 	modelVisibleSkills,
@@ -2030,11 +2028,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const { registerRunningBuild } = await import("../core/running-build.js");
 	const bootSurface = options.acp ? "acp" : options.headless ? "run" : "tui";
 	registerRunningBuild(bootSurface);
-	// A read-only run reads Clio's caches and priors but refreshes none of them.
-	if (bootSurface === "run" && options.headless?.constraints?.readOnly === true) enterReadOnlyMode();
-	// Opened before the first skill load so a cold boot's parses persist. ACP stays
-	// a reader: its read-only ceilings are per session and per prompt in one process.
-	if (bootSurface !== "acp") enableFrontmatterCacheWrites();
 	// Every session this boot opens names its surface in the live record (#439).
 	(await import("../domains/session/heartbeat.js")).configureSessionHeartbeat({
 		surface: bootSurface,
@@ -2141,15 +2134,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		}
 	}
-	// A read-only run leaves earlier sessions' offloads and worktrees for a writer to sweep.
-	const sweepsShared = !readOnlyProcess();
-	if (sweepsShared) sweepExpiredToolOffloads();
+	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
 	// A hard-killed coordinator cannot run domain drains. Reconcile its compete
 	// process leases before dispatch startup scans the ledger, so abandoned rows
 	// observe dead workers and no stale worktree can be reused by this boot.
-	if (sweepsShared && isGitRepository(process.cwd())) {
+	if (isGitRepository(process.cwd())) {
 		try {
 			const pendingGate = readPendingGateDecisions();
 			const pendingCompeteGroups = new Set<string>();

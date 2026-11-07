@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { clioHomeWriteRefused } from "../core/home-write-guard.js";
 import { INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
@@ -195,8 +194,6 @@ export function writeToolOffload(
 		const sessionId = safePathSegment(context?.sessionId ?? "no-session");
 		const dir = join(clioStateDir(), "scratch", sessionId);
 		const path = join(dir, `${digest}.txt`);
-		// Read-only work keeps no overflow copy in the Clio home; the notice then names none.
-		if (clioHomeWriteRefused(path)) return null;
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(path, offloadBody(text, bytes, maxBytes), "utf8");
 		return path;

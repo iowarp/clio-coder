@@ -3,7 +3,6 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -303,8 +302,7 @@ export function createContextBundle(
 			// next session, and a never-indexed cwd stays that way; indexing an
 			// arbitrary directory because a process exited in it is not a favor.
 			await Promise.all([incrementalQueue, drainCodewikiWrites(lastCwd)]);
-			// The session timestamp is a write to the project, which read-only mode leaves as it found it.
-			if (readOnlyMode() || !readClioState(lastCwd)) return;
+			if (!readClioState(lastCwd)) return;
 			await coordinateCodewikiExclusive(lastCwd, (workspace) => {
 				// Read under the same lease as index publication: a late session
 				// timestamp cannot overwrite another process's newer source snapshot.

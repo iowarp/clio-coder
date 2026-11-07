@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { readClioVersion } from "../../src/core/package-root.js";
-import { withReadOnlyMode } from "../../src/core/read-only-mode.js";
 import { shellQuote } from "../../src/core/shell-quote.js";
 import {
 	addFleetNode,
@@ -91,7 +90,7 @@ describe("fleet node management", () => {
 		const originalPath = process.env.PATH;
 		try {
 			process.env.PATH = `${scratch}:${originalPath}`;
-			await withReadOnlyMode(() => verifyFleetProject({ id: "fake", host: "fake.invalid" }, project, true));
+			await verifyFleetProject({ id: "fake", host: "fake.invalid" }, project, true, true);
 			strictEqual(readFileSync(observed, "utf8"), "");
 		} finally {
 			process.env.PATH = originalPath;

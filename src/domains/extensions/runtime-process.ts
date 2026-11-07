@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import { resolveExtensionEntrypoint } from "./command-schema.js";
 import { parseExtensionManifest } from "./discovery.js";
@@ -90,10 +89,7 @@ export class ExtensionRuntimeProcess {
 		// The parent never forwards child stdout/stderr to a terminal or protocol stream.
 		this.child = fork(path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child.mjs"), [], {
 			cwd: snapshot.workspace,
-			// An api 1 runtime declares no file access, so it normally runs with the
-			// operator's. Read-only work leaves every file as it found it: the runtime
-			// may read but not write, and may start no program that could.
-			execArgv: readOnlyMode() ? ["--permission", "--allow-fs-read=*"] : [],
+			execArgv: [],
 			env: buildSafeToolEnv(),
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe", "ipc"],

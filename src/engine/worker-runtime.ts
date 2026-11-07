@@ -11,7 +11,6 @@ import { getToolStateChanges } from "@earendil-works/pi-ai";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
-import { enterReadOnlyMode } from "../core/read-only-mode.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
@@ -93,7 +92,6 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import { enableFrontmatterCacheWrites } from "../domains/resources/index.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
@@ -618,15 +616,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.helperResult === true && (helperSchema === null || input.runtime.kind !== "http")) {
 		throw new Error("helperResult requires a supported internal JSON contract and native HTTP worker");
 	}
-	// A worker process serves one run, so a read-only ceiling makes the whole
-	// process a reader of Clio's caches and priors, external runtimes included.
-	if (input.readOnly === true) enterReadOnlyMode();
 	if (input.runtime.id === "claude-sdk") {
 		return observeExternalWorkerRun(input, emit, (observedEmit) => startClaudeSdkWorkerRun(input, observedEmit));
 	}
 	if (input.runtime.kind === "subprocess") return startExternalCliWorkerRun(input, emit);
-	// Skill loads may persist frontmatter parses unless the run is read-only.
-	enableFrontmatterCacheWrites();
 
 	// pi-ai is process-local. The orchestrator registers Clio API providers in
 	// providers/extension.ts, but the worker subprocess starts a fresh process,

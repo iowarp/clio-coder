@@ -1,7 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { semanticUsable } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 
 /**
  * Session-scoped optional refresh. A failed or interrupted job keeps its last complete generation.
@@ -16,8 +15,6 @@ export function createSemanticBackgroundRefresh(getSettings: () => Readonly<Clio
 	let pendingRoot: string | null = null;
 
 	const enabledSettings = (): Readonly<ClioSettings> | undefined => {
-		// A refresh rewrites the shared index; read-only mode searches what is there.
-		if (readOnlyMode()) return undefined;
 		const settings = getSettings();
 		return settings && semanticUsable(settings.context.semantic) && settings.context.semantic.background
 			? settings

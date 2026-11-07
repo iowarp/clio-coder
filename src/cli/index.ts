@@ -303,20 +303,6 @@ async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Prom
 }
 
 /**
- * `run --read-only` and `acp --read-only` refresh none of Clio's caches, the
- * bytecode cache included, but the command only enters read-only mode after its
- * module graph loaded, which is too late for this process's enable. Both parsers
- * take a `--read-only` token as the flag, so the token itself is the decision,
- * read before anything is enabled. Leaving
- * the cache unsettled is enough: once the run enters read-only mode, a later
- * enable, such as the worker spawn path's, settles it disabled.
- */
-async function enableReadOnlyAwareCompileCache(subArgs: ReadonlyArray<string>): Promise<void> {
-	if (subArgs.includes("--read-only")) return;
-	await enableBootCompileCache(subArgs);
-}
-
-/**
  * The dispatcher is also the command-recognition source used by top-level
  * value flags. Every dynamic import stays a literal so tsup can split command
  * graphs, while adding a command in one place cannot leave --api-key/--skill
@@ -329,7 +315,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"acp",
 		async (subArgs, bootOptions) => {
-			await enableReadOnlyAwareCompileCache(subArgs);
+			await enableBootCompileCache(subArgs);
 			return (await import("./acp.js")).runAcpCommand(subArgs, bootOptions);
 		},
 	],
@@ -392,7 +378,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"run",
 		async (subArgs, bootOptions) => {
-			await enableReadOnlyAwareCompileCache(subArgs);
+			await enableBootCompileCache(subArgs);
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		},
 	],

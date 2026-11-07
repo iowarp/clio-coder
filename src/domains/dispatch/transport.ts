@@ -22,7 +22,6 @@
  */
 
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
-import { readOnlyProcess } from "../../core/read-only-mode.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
@@ -100,18 +99,14 @@ const DEFAULT_REMOTE_CLIO_ENTRY = "clio-coder worker";
  * localhost-served model plane is per-node by construction) and any
  * orchestrator-supplied credential.
  */
-function remoteEnvAssignments(node: SshNodeEndpoint, readOnly: boolean): string {
+function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	// `$$` is the login shell's pid, and it leads the process group the remote
 	// command runs in. `exec` replaces that shell in place, so the worker
 	// inherits both the pid and the group leadership, and the value it announces
 	// is the group an abort must signal.
 	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
 	const labelAssignment = labels.length > 0 ? ` CLIO_CODER_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
-	// A read-only process writes nothing to Clio's home, and neither do its
-	// workers. The remote entry enables its bytecode cache before the spec on
-	// stdin can say the run is read-only, so Node's own switch says it first.
-	const compileCacheAssignment = readOnly || readOnlyProcess() ? " NODE_DISABLE_COMPILE_CACHE=1" : "";
-	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}${compileCacheAssignment}`;
+	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
 }
 
 type TargetLifecycle = NonNullable<WorkerSpec["target"]["lifecycle"]>;
@@ -136,12 +131,12 @@ function workerSpecForSshNode(node: SshNodeEndpoint, spec: WorkerSpec): WorkerSp
 	};
 }
 
-function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string, readOnly: boolean): string {
+function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
 	const entry =
 		node.clioCoderEntry !== undefined && node.clioCoderEntry.trim().length > 0
 			? node.clioCoderEntry.trim()
 			: DEFAULT_REMOTE_CLIO_ENTRY;
-	return `cd ${shellQuote(cwd)} && exec env ${remoteEnvAssignments(node, readOnly)} ${entry}`;
+	return `cd ${shellQuote(cwd)} && exec env ${remoteEnvAssignments(node)} ${entry}`;
 }
 
 export function buildSshArgs(node: SshNodeEndpoint, remoteCommand: string): string[] {
@@ -211,7 +206,7 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 			const { cwd: _consumedCwd, onAnnounce, onForcedKill, onChannelFailure, ...forwarded } = spawnOpts ?? {};
 			const worker = spawnWorkerProcess(
 				sshBinary,
-				buildSshArgs(node, buildRemoteWorkerCommand(node, cwd, spec.readOnly === true)),
+				buildSshArgs(node, buildRemoteWorkerCommand(node, cwd)),
 				workerSpecForSshNode(node, spec),
 				{
 					...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),

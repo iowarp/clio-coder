@@ -2,6 +2,7 @@ import { v7 as uuidv7 } from "uuid";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { stateRootRemoved } from "../../core/xdg.js";
 import {
+	atomicWrite,
 	type ClioSessionMeta,
 	type ClioSessionWriter,
 	type ClioTurnRecord,
@@ -11,7 +12,6 @@ import {
 	readSessionMeta,
 	type SessionTreeNode,
 	sessionPaths,
-	writeSessionFile,
 } from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
@@ -84,7 +84,7 @@ export function persistSessionMeta(state: SessionManagerState): void {
 	// the shutdown checkpoint did. See core/xdg.ts stateRootRemoved().
 	// A fenced writer lost the session to a forced release (#439); its meta is no longer ours to write.
 	if (stateRootRemoved() || state.writer.fenced) return;
-	writeSessionFile(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
+	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
 }
 
 export function resumeSessionState(sessionId: string): {

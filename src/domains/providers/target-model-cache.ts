@@ -6,15 +6,12 @@
  * ids. Cache files keep that snapshot available to a new process without
  * turning the hand-edited settings file into a probe transcript.
  *
- * Reading never creates the cache root, and read-only mode
- * (core/read-only-mode.ts) records nothing: doctor and `run --read-only` probe
- * targets too, and must leave this cache as they found it.
+ * Reading never creates the cache root.
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
@@ -135,7 +132,6 @@ export function recordTargetModelSnapshot(
 	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt"> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
-	if (readOnlyMode()) return false;
 	const snapshot: TargetModelSnapshot = {
 		version: TARGET_MODEL_CACHE_VERSION,
 		targetId: target.id,

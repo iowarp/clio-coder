@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -140,28 +140,6 @@ test("an empty or missing store finishes with nothing rejected", async () => {
 		deepStrictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), []);
 		strictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), null);
 		strictEqual(existsSync(memoryStorePath(h.dataDir)), false, "the sweep creates no store");
-	} finally {
-		rmSync(h.root, { recursive: true, force: true });
-	}
-});
-
-// Last in the file: entering read-only mode for good is one-way per process.
-test("a read-only process withholds the restricted lessons from itself and writes neither store nor marker", async () => {
-	const h = home([record("after-label", { source: "labeled" }), record("clean-source", { source: "clean" })]);
-	try {
-		const { enterReadOnlyMode } = await import("../../src/core/read-only-mode.js");
-		const { readMemoryStoreSnapshot } = await import("../../src/domains/memory/store.js");
-		const onDisk = readFileSync(memoryStorePath(h.dataDir), "utf8");
-		enterReadOnlyMode();
-		deepStrictEqual(await sweepRestrictedMemory(h.dataDir, h.stateDir, ports), []);
-		strictEqual(readFileSync(memoryStorePath(h.dataDir), "utf8"), onDisk, "the store is not rewritten");
-		strictEqual(existsSync(join(h.stateDir, "memory")), false, "no marker, so a writable boot still records the sweep");
-		for (const records of [loadMemoryRecordsSync(h.dataDir), readMemoryStoreSnapshot(h.dataDir).records]) {
-			const seen = new Map(records.map((item) => [names.get(item.id), item]));
-			strictEqual(seen.get("after-label")?.approved, false);
-			ok(seen.get("after-label")?.rejectedAt);
-			strictEqual(seen.get("clean-source")?.approved, true);
-		}
 	} finally {
 		rmSync(h.root, { recursive: true, force: true });
 	}

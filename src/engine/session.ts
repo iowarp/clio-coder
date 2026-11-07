@@ -46,7 +46,6 @@ import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { cwdHash } from "../core/cwd-hash.js";
-import { clioHomeWriteRefused } from "../core/home-write-guard.js";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
 import { readClioVersion } from "../core/package-root.js";
 import { processBirthToken } from "../core/process-identity.js";
@@ -191,43 +190,9 @@ export interface ClioSessionReader {
 
 export { cwdHash };
 
-/**
- * Session files a read-only process keeps instead of writing them, by path
- * (`src/core/home-write-guard.ts`). Every session reader here consults them
- * before the disk, so the process reads its own session back, including a
- * resumed one's new turns, while the Clio home stays byte for byte unchanged.
- */
-const withheldFiles = new Map<string, Buffer>();
-/** Directories of sessions that exist only in `withheldFiles`, by session id. */
-const withheldSessionDirs = new Map<string, string>();
-
-function withholdSessionFile(path: string, contents: string | Uint8Array): void {
-	withheldFiles.set(path, Buffer.from(contents));
-}
-
-/** The bytes a withheld append extends: what this process holds, else the file it read. */
-function withheldBase(path: string): Buffer {
-	const held = withheldFiles.get(path);
-	if (held !== undefined) return held;
-	try {
-		return readFileSync(path);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return Buffer.alloc(0);
-		throw error;
-	}
-}
-
-function withheldAppend(path: string, serialized: string): void {
-	const base = withheldBase(path);
-	const torn = base.length > 0 && base[base.length - 1] !== 0x0a;
-	withheldFiles.set(path, Buffer.concat([base, Buffer.from(`${torn ? "\n" : ""}${serialized}\n`, "utf8")]));
-}
-
 export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 	const dir = join(clioStateDir(), "sessions", meta.cwdHash, meta.id);
-	if (clioHomeWriteRefused(dir)) {
-		if (!existsSync(dir)) withheldSessionDirs.set(meta.id, dir);
-	} else mkdirSync(dir, { recursive: true });
+	mkdirSync(dir, { recursive: true });
 	return {
 		current: join(dir, "current.jsonl"),
 		tree: join(dir, "tree.json"),
@@ -240,12 +205,6 @@ export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 // safe here (unlike current.jsonl, which promotes a deterministic `.tmp`).
 export function atomicWrite(targetPath: string, contents: string | Uint8Array): void {
 	safeResourceWrite(targetPath, contents);
-}
-
-/** `atomicWrite` for a session's own meta.json and tree.json; read-only mode keeps the bytes in memory. */
-export function writeSessionFile(targetPath: string, contents: string | Uint8Array): void {
-	if (clioHomeWriteRefused(targetPath)) withholdSessionFile(targetPath, contents);
-	else atomicWrite(targetPath, contents);
 }
 
 export interface SessionJsonlWarning {
@@ -331,13 +290,9 @@ function writeJsonlFileAtomic(
 	entries: ReadonlyArray<unknown>,
 	options: SessionJsonlWriteOptions = {},
 ): void {
-	const body = serializeJsonl(entries);
-	if (clioHomeWriteRefused(targetPath)) {
-		withholdSessionFile(targetPath, body);
-		return;
-	}
 	const dir = dirname(targetPath);
 	mkdirSync(dir, { recursive: true });
+	const body = serializeJsonl(entries);
 	const tmp = `${targetPath}.tmp`;
 	const fd = openSync(tmp, "w");
 	try {
@@ -365,8 +320,6 @@ function writeJsonlFileAtomic(
 function recoverJsonlTargetIfMissing(targetPath: string): string | null {
 	if (existsSync(targetPath)) return targetPath;
 	const tmp = `${targetPath}.tmp`;
-	// A read-only reader reads the leftover temp where it is instead of promoting it.
-	if (clioHomeWriteRefused(targetPath)) return existsSync(tmp) ? tmp : null;
 	try {
 		if (!statSync(tmp).isFile()) return null;
 		renameSync(tmp, targetPath);
@@ -411,8 +364,6 @@ export function readSessionFileEntriesRange(
 	lineNumber = 0,
 	options: SessionJsonlReadOptions & { retainBytes?: boolean } = {},
 ): SessionJsonlRange {
-	const held = withheldFiles.get(path);
-	if (held !== undefined) return withheldEntriesRange(path, held, offset, lineNumber, options);
 	const readPath = recoverJsonlTargetIfMissing(path);
 	if (readPath === null)
 		return { entries: [], completeEntries: 0, nextOffset: 0, nextLineNumber: 0, stat: null, bytes: Buffer.alloc(0) };
@@ -452,39 +403,6 @@ export function readSessionFileEntriesRange(
 	} finally {
 		closeSync(fd);
 	}
-}
-
-/**
- * `readSessionFileEntriesRange` over withheld bytes. It reports no stat, so an
- * index over a withheld ledger rereads it whole on every read.
- */
-function withheldEntriesRange(
-	path: string,
-	held: Buffer,
-	offset: number,
-	lineNumber: number,
-	options: SessionJsonlReadOptions & { retainBytes?: boolean },
-): SessionJsonlRange {
-	const warn = options.onWarning ?? defaultSessionJsonlWarning;
-	const bytes = held.subarray(Math.min(offset, held.length));
-	const lastNewline = bytes.lastIndexOf(0x0a);
-	const lines = bytes.toString("utf8").split("\n");
-	const tail = lines.pop() ?? "";
-	const entries: unknown[] = [];
-	for (const line of lines) {
-		lineNumber += 1;
-		parseSessionJsonlLine(line, lineNumber, path, entries, warn);
-	}
-	const completeEntries = entries.length;
-	if (tail.length > 0) parseSessionJsonlLine(tail, lineNumber + 1, path, entries, warn);
-	return {
-		entries,
-		completeEntries,
-		nextOffset: offset + lastNewline + 1,
-		nextLineNumber: lineNumber,
-		stat: null,
-		bytes: options.retainBytes === false ? Buffer.alloc(0) : Buffer.from(bytes),
-	};
 }
 
 export function readSessionFileEntries(path: string, options: SessionJsonlReadOptions = {}): unknown[] {
@@ -527,12 +445,6 @@ function readSessionFileTailEntries(
 	maxEntries: number,
 	options: SessionJsonlReadOptions & { chunkBytes?: number } = {},
 ): SessionTailReadResult {
-	if (withheldFiles.has(path)) {
-		const all = readSessionFileEntriesRange(path, 0, 0, { ...options, retainBytes: false }).entries;
-		const bound = Number.isFinite(maxEntries) && maxEntries > 0 ? Math.floor(maxEntries) : 1;
-		const entries = all.slice(Math.max(0, all.length - bound));
-		return { entries, linesParsed: entries.length, reachedStart: entries.length === all.length };
-	}
 	const readPath = recoverJsonlTargetIfMissing(path);
 	if (readPath === null) return { entries: [], linesParsed: 0, reachedStart: true };
 	const warn = options.onWarning ?? defaultSessionJsonlWarning;
@@ -680,7 +592,7 @@ function buildMeta(input: { cwd: string; model?: string | null; target?: string 
 }
 
 function readMetaFile(path: string): ClioSessionMeta {
-	const raw = withheldFiles.get(path)?.toString("utf8") ?? readFileSync(path, "utf8");
+	const raw = readFileSync(path, "utf8");
 	const parsed = JSON.parse(raw) as Record<string, unknown>;
 	const clioCoderVersion = parsed.clioCoderVersion ?? parsed.clioVersion;
 	if (typeof clioCoderVersion !== "string" || clioCoderVersion.length === 0) {
@@ -716,10 +628,9 @@ function isSessionTreeNode(value: unknown): value is SessionTreeNode {
 }
 
 function readTreeFile(path: string): SessionTreeNode[] {
-	const held = withheldFiles.get(path);
-	if (held === undefined && !existsSync(path)) return [];
+	if (!existsSync(path)) return [];
 	try {
-		const raw = held?.toString("utf8") ?? readFileSync(path, "utf8");
+		const raw = readFileSync(path, "utf8");
 		if (raw.trim().length === 0) return [];
 		const parsed = JSON.parse(raw) as unknown;
 		if (!Array.isArray(parsed)) return [];
@@ -783,8 +694,6 @@ function findSessionDir(id: string): string {
 	// filesystem read so it can never resolve a directory outside the sessions
 	// root (`join(sessionsRoot, entry, id)` would otherwise escape).
 	assertSafeId(id, "session");
-	const withheldDir = withheldSessionDirs.get(id);
-	if (withheldDir !== undefined) return withheldDir;
 	const sessionsRoot = join(clioStateDir(), "sessions");
 	if (!existsSync(sessionsRoot)) {
 		throw new Error(`session not found: ${id}`);
@@ -840,16 +749,10 @@ function endsWithNewline(path: string): boolean {
  * fsynced before returning.
  */
 export function appendSessionFileEntry(targetPath: string, entry: unknown): void {
-	const serialized = JSON.stringify(entry);
-	if (serialized === undefined) throw new Error("session JSONL entry is not serializable");
-	if (clioHomeWriteRefused(targetPath)) {
-		if (!withheldFiles.has(targetPath) && recoverJsonlTargetIfMissing(targetPath) === null)
-			throw new Error(`session JSONL file not found: ${targetPath}`);
-		withheldAppend(targetPath, serialized);
-		return;
-	}
 	const appendPath = recoverJsonlTargetIfMissing(targetPath);
 	if (appendPath === null) throw new Error(`session JSONL file not found: ${targetPath}`);
+	const serialized = JSON.stringify(entry);
+	if (serialized === undefined) throw new Error("session JSONL entry is not serializable");
 	const line = Buffer.from(`${endsWithNewline(appendPath) ? "" : "\n"}${serialized}\n`, "utf8");
 	const fd = openSync(appendPath, fsConstants.O_WRONLY | fsConstants.O_APPEND);
 	try {
@@ -867,8 +770,6 @@ function createWriter(
 	headerOptions: { parentSession?: string; parentTurnId?: string } = {},
 ): ClioSessionWriter {
 	const paths = sessionPaths(meta);
-	// Decided once: a read-only process keeps this session in memory for the writer's life.
-	const withheld = clioHomeWriteRefused(paths.current);
 	const tree: SessionTreeNode[] = initialTree.map((node) => ({ ...node }));
 	const normalizedEntries = ensureSessionHeader(meta, initialFileEntries, headerOptions);
 	// replaceEntries needs only the header; retaining every appended payload
@@ -927,11 +828,6 @@ function createWriter(
 	}
 
 	function persistPendingTree(): void {
-		if (withheld) {
-			if (treeDirty) withholdSessionFile(paths.tree, JSON.stringify(tree, null, 2));
-			treeDirty = false;
-			return;
-		}
 		if (!treeDirty && treeStat !== null) {
 			try {
 				if (sameFileSnapshot(treeStat, statSync(paths.tree, { bigint: true }))) return;
@@ -1025,14 +921,10 @@ function createWriter(
 		closeSync(fd);
 	}
 
-	function appendLine(entry: unknown): SessionAppendObservation | null {
+	function appendLine(entry: unknown): SessionAppendObservation {
 		const serialized = JSON.stringify(entry);
 		if (serialized === undefined) {
 			throw new Error("session JSONL entry is not serializable");
-		}
-		if (withheld) {
-			withheldAppend(paths.current, serialized);
-			return null;
 		}
 		let observation: SessionAppendObservation;
 		try {
@@ -1081,7 +973,7 @@ function createWriter(
 				tree.push({ ...opts.treeNode });
 				treeDirty = true;
 			}
-			if (observation !== null) opts?.onAppend?.(observation);
+			opts?.onAppend?.(observation);
 		},
 		replaceEntries(entries: ReadonlyArray<unknown>): void {
 			if (closed) throw new Error("session writer closed");
@@ -1124,7 +1016,7 @@ function createWriter(
 			if (fencedAtClose || stateRootRemoved()) return;
 			persistPendingTree();
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
-			writeSessionFile(paths.meta, JSON.stringify(ended, null, 2));
+			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
 			meta.endedAt = ended.endedAt;
 		},
 		fence(): void {
@@ -1153,14 +1045,14 @@ export function createSession(input: {
 } {
 	const meta = buildMeta(input);
 	const paths = sessionPaths(meta);
-	writeSessionFile(paths.meta, JSON.stringify(meta, null, 2));
+	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));
 	const headerOptions: { parentSession?: string; parentTurnId?: string } = {};
 	if (input.parentSession !== undefined) headerOptions.parentSession = input.parentSession;
 	if (input.parentTurnId !== undefined) headerOptions.parentTurnId = input.parentTurnId;
 	const initialEntries = ensureSessionHeader(meta, input.initialEntries ?? [], headerOptions);
 	const initialTree = [...(input.initialTree ?? [])];
 	writeJsonlFileAtomic(paths.current, initialEntries);
-	writeSessionFile(paths.tree, JSON.stringify(initialTree, null, 2));
+	atomicWrite(paths.tree, JSON.stringify(initialTree, null, 2));
 	const writer = createWriter(meta, initialTree, initialEntries, headerOptions);
 	return { meta, writer };
 }
@@ -1217,7 +1109,7 @@ export function resumeSession(
 	const restamped = restamp !== undefined && meta.sessionFormatVersion !== restamp;
 	const owner = currentOwner();
 	const reopened = { ...meta, endedAt: null, owner, ...(restamped ? { sessionFormatVersion: restamp } : {}) };
-	writeSessionFile(metaPath, JSON.stringify(reopened, null, 2));
+	atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
 	meta.endedAt = null;
 	meta.owner = owner;
 	if (restamped) meta.sessionFormatVersion = restamp;

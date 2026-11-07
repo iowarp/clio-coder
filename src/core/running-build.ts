@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import { hostname, userInfo } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { runningBuildId } from "./build-info.js";
-import { clioHomeWriteRefused } from "./home-write-guard.js";
 import { resolvePackageRoot } from "./package-root.js";
 import { processAlive, processBirthToken, processStartedAtMs } from "./process-identity.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
@@ -75,13 +74,11 @@ interface RunningBuild {
 }
 
 /**
- * Only long-lived Clio processes register; read-only CLI commands never create state. A read-only process
- * does not register in the Clio home either; one in a private home registers there and is removed with it.
+ * Only long-lived Clio processes register; read-only CLI commands never create state.
  */
 export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): void {
 	if (!runningBuildId) return;
 	const directory = join(resolveClioDirs().state, "running-builds");
-	if (clioHomeWriteRefused(directory)) return;
 	const file = join(directory, `${process.pid}.json`);
 	try {
 		mkdirSync(directory, { recursive: true, mode: 0o700 });

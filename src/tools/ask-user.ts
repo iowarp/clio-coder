@@ -3,7 +3,6 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { TSchema } from "typebox";
 import { Type } from "typebox";
-import { clioHomeWriteRefused } from "../core/home-write-guard.js";
 import { isPlanCloseQuestion } from "../core/plan-request.js";
 import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
 import { stripSkillInstallOfferTag } from "../core/skill-activation.js";
@@ -700,8 +699,6 @@ async function persistAskUserTranscript(
 ): Promise<string | undefined> {
 	hydratePolicy(policy, options);
 	const dir = path.join(clioStateDir(), "interviews");
-	// Read-only work keeps the interview in the session only.
-	if (clioHomeWriteRefused(dir)) return policy.transcriptPath;
 	try {
 		await mkdir(dir, { recursive: true });
 		if (!policy.transcriptPath) policy.transcriptPath = path.join(dir, transcriptFileName(policy));

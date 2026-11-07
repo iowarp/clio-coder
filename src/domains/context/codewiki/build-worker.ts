@@ -1,12 +1,10 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { enterReadOnlyMode } from "../../../core/read-only-mode.js";
 import { executeCodewikiBuildOutcome } from "./build-operation.js";
 import type { CodewikiBuildWorkerData, CodewikiBuildWorkerMessage } from "./build-worker-protocol.js";
 
 const port = parentPort;
 if (!port) throw new Error("codewiki build worker requires a worker_threads parent");
 const data = workerData as CodewikiBuildWorkerData;
-if (data.readOnly) enterReadOnlyMode();
 
 let lastProgressAt = 0;
 let lastStage = "";

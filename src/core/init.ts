@@ -13,20 +13,10 @@ import {
 } from "../domains/lifecycle/migrations/registry-ids.js";
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
-import { clioHomeWriteRefused } from "./home-write-guard.js";
 import { readClioVersion } from "./package-root.js";
-import { readOnlyProcess } from "./read-only-mode.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
-import {
-	assertClioDirLayout,
-	clioCacheDir,
-	clioCachePath,
-	clioConfigDir,
-	clioDataDir,
-	clioStateDir,
-	resolveClioDirs,
-} from "./xdg.js";
+import { assertClioDirLayout, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "./xdg.js";
 
 export interface InitReport {
 	configDir: string;
@@ -86,32 +76,14 @@ export function initializeClioHome(): InitReport {
 	const preexistingHome = existsSync(resolved.state) || existsSync(resolved.config) || existsSync(resolved.data);
 	const settingsExisted = existsSync(join(resolved.config, "settings.yaml"));
 
-	// Read-only work writes nothing to the operator's home, so it neither creates
-	// a missing root or subdir nor scaffolds a missing file there. Only a private
-	// home a read-only run set up for itself is scaffolded below.
-	if (clioHomeWriteRefused(resolved.state)) {
-		return {
-			configDir: resolved.config,
-			dataDir: resolved.data,
-			stateDir: resolved.state,
-			cacheDir: resolved.cache,
-			createdPaths: [],
-			touchedSettings: false,
-		};
-	}
-
 	const configDir = clioConfigDir();
 	const dataDir = clioDataDir();
 	const stateDir = clioStateDir();
-	// Only disposable caches live under the cache root, and their writers create it
-	// on their first write. A read-only process writes none of them, so it leaves a
-	// home without one as it found it.
-	const readOnly = readOnlyProcess();
-	const cacheDir = readOnly ? clioCachePath() : clioCacheDir();
+	const cacheDir = clioCacheDir();
 
 	const created: string[] = [];
 
-	for (const dir of readOnly ? [configDir, dataDir, stateDir] : [configDir, dataDir, stateDir, cacheDir]) {
+	for (const dir of [configDir, dataDir, stateDir, cacheDir]) {
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 			created.push(dir);
@@ -189,10 +161,6 @@ export function initializeClioHome(): InitReport {
 	// process's noticedVersion after an upgrade.
 	const installPath = join(stateDir, "home.json");
 	const runningVersion = readClioVersion();
-	// A read-only process on a set-up home reads this record and never stamps,
-	// renames, locks or re-modes it; only a home it set up for itself is written.
-	if (readOnly && existsSync(installPath))
-		return { configDir, dataDir, stateDir, cacheDir, createdPaths: created, touchedSettings: touched };
 	withStateFileLockSync(installPath, () => {
 		// Before 0.6.8 this record was install.json, one of three files with that name.
 		const legacyPath = join(stateDir, "install.json");

@@ -15,13 +15,13 @@ import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
  */
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { assistantOutputChars } from "../core/assistant-output.js";
 import {
 	type BackendCacheVerdict,
 	type BackendCompletionTimings,
 	uncachedPrefillTokens,
 } from "../core/cache-telemetry.js";
+import { settingsPath } from "../core/config.js";
 import {
 	addResponseModelIdObservationCount,
 	emptyResponseModelIdObservationCounts,
@@ -33,7 +33,6 @@ import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPoli
 import { proseAnnouncesCall, readTrailingWrittenCalls, stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
-import { operatorClioDirs } from "../core/xdg.js";
 import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
@@ -65,8 +64,7 @@ export function notConfiguredNotice(chat: { target?: string | null; model?: stri
 	return [
 		"[Clio Coder] No model target is configured; run `clio-coder configure` to choose one.",
 		"Without a terminal: clio-coder configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator",
-		// A read-only run on a home never set up reads a private copy that is gone at exit.
-		`(chat.target and chat.model live in ${join(operatorClioDirs().config, "settings.yaml")})`,
+		`(chat.target and chat.model live in ${settingsPath()})`,
 	].join("\n");
 }
 

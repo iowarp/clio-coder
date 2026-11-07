@@ -41,7 +41,6 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { assertClioHomeWritable } from "../../core/home-write-guard.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { canonicalJson } from "../prompts/hash.js";
 
@@ -163,7 +162,6 @@ export function createFleetEventJournal(
 					...body,
 				} as Omit<FleetEventLine, "digest">;
 				line = { ...unsigned, digest: lineDigest(unsigned) } as FleetEventLine;
-				assertClioHomeWritable(path);
 				mkdirSync(dirname(path), { recursive: true });
 				appendFileSync(path, `${JSON.stringify(line)}\n`, "utf8");
 			} catch (error) {

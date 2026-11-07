@@ -16,10 +16,6 @@
  *   root is resolved once with realpath, every directory below it must be a real directory (a symlinked
  *   component is refused, missing ones are created one level at a time), and the final entry is never a
  *   symlink, so no state read, write, rename or cleanup follows a link out of the session directory.
- * - In read-only mode the session's own state is held in memory instead (session-fs-memory.ts), so a
- *   read-only process leaves Clio's cache as it found it; the namespace and workspace rules are the same.
- *   A disk provider made before the mode began refuses every mutation from then on: the mode is checked
- *   immediately before each syscall that would change the disk, after the awaits that led to it.
  * - Everything else is the user's real filesystem, served read-only. Copilot's built-in tools are disabled
  *   and every change to the workspace goes through Clio's own tools and permission policy, so a write,
  *   mkdir, rename or rm there is refused.
@@ -35,30 +31,17 @@
  * inside this OS user's own cache directory and race each operation; O_NOFOLLOW still guards the final entry.
  */
 
-import {
-	closeSync,
-	constants,
-	existsSync,
-	lstatSync,
-	openSync,
-	realpathSync,
-	rmSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink } from "node:fs/promises";
+import { constants, lstatSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { SessionFsConfig, SessionFsProvider } from "@github/copilot-sdk";
-import { readOnlyMode } from "../../core/read-only-mode.js";
-import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
-import { createMemorySessionFs, dropMemorySessionFs, type SessionFsLocated } from "./session-fs-memory.js";
+import { clioCacheDir } from "../../core/xdg.js";
 
 /** Directories below the trusted cache root that lead to every session directory. */
 const SESSIONS_PATH = ["copilot-sdk", "sessions"] as const;
 
-/** Named, not created: configuring the client and cleaning up must not create the cache root. */
 function copilotSdkCacheDir(): string {
-	return join(clioCachePath(), "copilot-sdk");
+	return join(clioCacheDir(), "copilot-sdk");
 }
 
 /** Where each session's state appears in the runtime's namespace; mapped per session, never written as is. */
@@ -90,15 +73,6 @@ function missing(error: unknown): boolean {
 	return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
-/** Called with no await between it and the disk mutation it guards: the mode may have begun at any earlier await. */
-function refuseInReadOnlyMode(path: string): void {
-	if (!readOnlyMode()) return;
-	throw Object.assign(
-		new Error(`Copilot session state refused at ${path}: read-only mode leaves Clio's cache as it found it`),
-		{ code: "EROFS" },
-	);
-}
-
 /**
  * Walk `parts` below `root`, each a real directory. With `create`, a missing level is made (one level, not
  * recursive, so mkdir never walks through a link someone planted). Returns null for a missing level when not
@@ -121,7 +95,6 @@ async function walkDirectories(
 			if (!create) return null;
 			// Inside a session directory every implicit mkdir first re-verifies that directory's identity.
 			await beforeCreate?.();
-			refuseInReadOnlyMode(next);
 			await mkdir(next).catch((error: unknown) => {
 				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			});
@@ -155,7 +128,7 @@ const closedSessions = new Set<string>();
  * the directory at it is no longer the same one (a swapped or replaced root).
  */
 async function trustedRoot(): Promise<string> {
-	const configured = clioCachePath();
+	const configured = clioCacheDir();
 	const anchor = rootAnchors.get(configured);
 	if (!anchor) {
 		const path = await realpath(configured);
@@ -170,16 +143,9 @@ async function trustedRoot(): Promise<string> {
 }
 
 function trustedRootSync(): string | null {
-	const configured = clioCachePath();
+	const configured = clioCacheDir();
 	const anchor = rootAnchors.get(configured);
-	if (!anchor) {
-		try {
-			return realpathSync(configured);
-		} catch {
-			// No cache root, so no records to remove.
-			return null;
-		}
-	}
+	if (!anchor) return realpathSync(configured);
 	const info = lstatSync(anchor.path, { throwIfNoEntry: false });
 	if (!info || info.isSymbolicLink() || !info.isDirectory() || !sameIdentity(info, anchor.identity)) return null;
 	return anchor.path;
@@ -214,8 +180,6 @@ function sessionParts(sessionId: string): string[] {
  * directory was never Clio's, so only the link itself is removed. `rm` does not follow links inside the tree.
  */
 export async function removeCopilotSessionRecords(sessionId: string): Promise<void> {
-	// A read-only process kept its sessions in memory and leaves the disk as it found it.
-	if (dropMemorySessionFs(sessionId) || readOnlyMode()) return;
 	const root = await trustedRoot().catch(() => null);
 	if (root === null) return;
 	const parts = sessionParts(sessionId);
@@ -225,8 +189,6 @@ export async function removeCopilotSessionRecords(sessionId: string): Promise<vo
 	const info = await lstat(target).catch(() => null);
 	if (info === null) return;
 	if (info.isSymbolicLink() || !info.isDirectory()) {
-		// The mode may have begun at any await above.
-		if (readOnlyMode()) return;
 		await unlink(target);
 		return;
 	}
@@ -235,7 +197,6 @@ export async function removeCopilotSessionRecords(sessionId: string): Promise<vo
 	if (identity && !sameIdentity(info, identity))
 		throw new SessionFsEscape(target, "the session directory is no longer the one first resolved");
 	if (identity) await verifySession(root, target);
-	if (readOnlyMode()) return;
 	await rm(target, { recursive: true, force: true });
 	sessionIdentities.delete(target);
 	closedSessions.add(target);
@@ -243,7 +204,6 @@ export async function removeCopilotSessionRecords(sessionId: string): Promise<vo
 
 /** At process exit only synchronous work runs; the same rules as removeCopilotSessionRecords. */
 export function removeCopilotSessionRecordsSync(sessionId: string): void {
-	if (dropMemorySessionFs(sessionId) || readOnlyMode()) return;
 	const root = trustedRootSync();
 	if (root === null) return;
 	let current = root;
@@ -279,27 +239,21 @@ const NO_FOLLOW = (constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
 export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 	const base = sessionStateBase();
 	const parts = sessionParts(sessionId);
+	type Located = { state: false; real: string } | { state: true; inside: string[] };
 	/** Whether a runtime path is this session's own state, by its place in the runtime's namespace. */
-	const locate = (path: string): SessionFsLocated => {
+	const locate = (path: string): Located => {
 		const absolute = resolvePath(path);
 		const inside = relative(base, absolute);
 		if (inside === "") return { state: true, inside: [] };
 		if (!inside.startsWith("..") && !isAbsolute(inside)) return { state: true, inside: inside.split(sep) };
 		return { state: false, real: absolute };
 	};
-	// The mode is read where the session's state store is chosen: every write below goes to that store.
-	if (readOnlyMode()) return createMemorySessionFs(sessionId, locate, refuseWorkspaceWrite);
 	/**
 	 * The one resolve-and-anchor policy for this session's directory. A directory anchored before must still be
 	 * that directory: one that went missing or was replaced is refused and never recreated, and neither is one
 	 * Clio already closed. Only a session never resolved is walked (created when `create`) and then anchored.
 	 */
 	const resolveSession = async (create: boolean): Promise<{ root: string; session: string } | null> => {
-		// Creating state creates a missing cache root first, through the accessor that checks the home's layout.
-		if (create) {
-			if (!existsSync(clioCachePath())) refuseInReadOnlyMode(clioCachePath());
-			clioCacheDir();
-		}
 		const root = await trustedRoot();
 		const expected = join(root, ...parts);
 		if (closedSessions.has(expected)) throw new SessionFsEscape(expected, "the session directory was closed");
@@ -352,19 +306,15 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		if (!located.state) return refuseWorkspaceWrite(path);
 		return (await statePath(located.inside, true)) as string;
 	};
-	/**
-	 * Write through a descriptor opened without following a final link (the lstat above covers other OSes).
-	 * Synchronous after the gate, so the mode cannot begin between the open and the write.
-	 */
+	/** Write through a descriptor opened without following a final link (the lstat above covers other OSes). */
 	const writeEntry = async (path: string, content: string, flags: number, mode: number | undefined) => {
 		const target = await writable(path);
 		await beforeMutation();
-		refuseInReadOnlyMode(target);
-		const descriptor = openSync(target, flags | NO_FOLLOW, mode);
+		const handle = await open(target, flags | NO_FOLLOW, mode);
 		try {
-			writeFileSync(descriptor, content, "utf8");
+			await handle.writeFile(content, "utf8");
 		} finally {
-			closeSync(descriptor);
+			await handle.close();
 		}
 	};
 	return {
@@ -410,7 +360,6 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 			const name = located.inside[located.inside.length - 1];
 			if (name === undefined) return;
 			await verify();
-			refuseInReadOnlyMode(join(parent, name));
 			await mkdir(join(parent, name), mode !== undefined ? { mode } : {});
 		},
 		readdir: async (path) => readdir(await readable(path)),
@@ -432,7 +381,6 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 				return;
 			}
 			await beforeMutation();
-			refuseInReadOnlyMode(target);
 			// A link inside the session directory is removed as a link; rm never follows links inside a tree.
 			if (info.isSymbolicLink()) await unlink(target);
 			else await rm(target, { recursive, force });
@@ -442,7 +390,6 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 			const from = await writable(src);
 			const to = await writable(dest);
 			await beforeMutation();
-			refuseInReadOnlyMode(from);
 			await rename(from, to);
 		},
 	};

@@ -7,8 +7,8 @@ import { after, describe, it } from "node:test";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // Describing the main-session sandbox names Clio's roots read-only without
-// creating them, so doctor leaves a home that has only its config as it found
-// it (DOG-001). A spawn creates an absent root before binding it: bubblewrap's
+// creating them, so doctor creates no data or state root on a home that has
+// only its config (DOG-001); like any run it may refresh Clio's caches. A spawn creates an absent root before binding it: bubblewrap's
 // -try binds skip a missing path, and a script could then create Clio's cache
 // root under the writable XDG cache root and plant contents Clio later trusts.
 const home = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-sandbox-roots-")));
@@ -45,12 +45,14 @@ function run(file: string, args: string[]): Promise<{ code: number | null; outpu
 }
 
 describe("main-session sandbox Clio roots", () => {
-	it("the policy and doctor name Clio's roots read-only and create none of them", async () => {
+	it("the policy names Clio's roots read-only and creates none of them; doctor creates no data or state root", async () => {
 		const policy = mainSandboxPolicy({ workspace, scratchRoots: [] });
 		deepEqual(policy.clioDirs, [join(home, "config"), ...later]);
 		for (const dir of policy.clioDirs) ok(policy.readOnlyPaths.includes(dir), dir);
-		await collectDoctorFindings({ deep: false, workspaceRoot: workspace });
 		for (const dir of later) ok(!existsSync(dir), `${dir} is not created`);
+		await collectDoctorFindings({ deep: false, workspaceRoot: workspace });
+		for (const dir of later.slice(0, 2)) ok(!existsSync(dir), `${dir} is not created`);
+		rmSync(clioCache, { recursive: true, force: true });
 	});
 
 	it("a Clio root the spawn cannot create refuses the command", () => {

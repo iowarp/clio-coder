@@ -5,7 +5,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { readSettings, semanticUsable } from "../../core/config.js";
-import { clioCachePath, clioDataDir, clioStateDir } from "../../core/xdg.js";
+import { clioCacheDir, clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { readRunRecording } from "../dispatch/index.js";
 import { inspectRunEvidence, type RunEvidence } from "../evidence/index.js";
 import type { ExtensionEmbeddingRequest } from "../extensions/public-api-v2.js";
@@ -339,7 +339,7 @@ export async function reembedSemanticFrom(
 		throw new Error("Old semantic profile identity must be a SHA-256 recipe key");
 	const app = await openSemanticApp(options);
 	if (oldProfileIdentity === app.profileIdentity) return reembedSemantic(options, signal);
-	const oldDirectory = join(clioCachePath(), "semantic", sourceHash(app.projectId), oldProfileIdentity);
+	const oldDirectory = join(clioCacheDir(), "semantic", sourceHash(app.projectId), oldProfileIdentity);
 	const oldStorage = new SemanticStorage(oldDirectory, Math.floor(app.index.limits.maxBytes / 3));
 	const generation = oldStorage.load(app.projectId, oldProfileIdentity);
 	if (!generation) throw new Error("No complete generation exists for the old profile in this project");

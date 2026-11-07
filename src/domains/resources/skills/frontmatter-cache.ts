@@ -10,21 +10,14 @@
  * version that wrote it and is dropped whole on a version change, because the
  * YAML parser ships with Clio. Only JSON-exact values are cached; a
  * frontmatter whose YAML yields anything JSON cannot carry is parsed every time.
- *
- * Writing is gated, because many callers load skills on paths that promise to
- * change nothing (doctor, `run --read-only`, read-only dispatch, listings).
- * Every process reads an existing cache file. Only a process that opened the
- * gate with `enableFrontmatterCacheWrites` persists parses, prunes entries or
- * creates the cache root, and never in read-only mode (core/read-only-mode.ts).
  */
 
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readClioVersion } from "../../../core/package-root.js";
-import { readOnlyMode, readOnlyProcess } from "../../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
-import { clioCacheDir, clioCachePath } from "../../../core/xdg.js";
+import { clioCacheDir } from "../../../core/xdg.js";
 
 const CACHE_FILE = "skill-frontmatter.json";
 const CACHE_FORMAT = 1;
@@ -55,30 +48,12 @@ interface LoadedCache {
 }
 
 let loaded: LoadedCache | null = null;
-let writesOpen = false;
-
-/**
- * Let this process persist parses. Called once by the surfaces that already
- * write the operator's state: the terminal, a main-agent `run` and a native
- * dispatched worker. Read-only mode still keeps a `run --read-only` or a
- * worker under a read-only ceiling a reader. ACP never opens it, since its
- * read-only ceilings arrive per session and per prompt inside one shared
- * process.
- */
-export function enableFrontmatterCacheWrites(): void {
-	writesOpen = true;
-}
-
-function writable(): boolean {
-	return writesOpen && !readOnlyMode();
-}
 
 function cacheFilePath(): string | null {
 	try {
-		// Resolved without creating the root: a reader leaves a home without one as it found it.
-		return path.join(clioCachePath(), CACHE_FILE);
+		return path.join(clioCacheDir(), CACHE_FILE);
 	} catch {
-		// No resolvable cache root: parsing uncached is still correct.
+		// No usable cache root (unwritable XDG dir): parsing uncached is still correct.
 		return null;
 	}
 }
@@ -145,9 +120,8 @@ function openCache(): void {
 }
 
 /**
- * Run one catalog load against the cache: reopen it if its file changed, then,
- * where writes are open, persist new parses and drop entries for skill files
- * that no longer exist.
+ * Run one catalog load against the cache: reopen it if its file changed, then
+ * persist new parses and drop entries for skill files that no longer exist.
  */
 export function withFrontmatterCache<T>(load: () => T): T {
 	openCache();
@@ -195,26 +169,20 @@ export function cachedFrontmatterParser(
 ): (text: string) => unknown {
 	return (text) => {
 		const cache = currentCache();
-		// Read-only work inside a process that may still write leaves the entries as it
-		// found them, so a later writable load cannot persist what it parsed. Any other
-		// load keeps its parses in memory, including in a process that never flushes.
-		const mutable = readOnlyProcess() || !readOnlyMode();
 		let hit = cache?.entries.get(filePath);
 		if (cache && hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size && hit.text === text) {
 			const decoded = decodeEntry(hit);
 			if (decoded) {
-				if (mutable) cache.touched.add(filePath);
+				cache.touched.add(filePath);
 				return decoded.value;
 			}
 			// A damaged entry is evicted and the source parsed below, which replaces it when the parse is cacheable.
-			if (mutable) {
-				cache.entries.delete(filePath);
-				cache.dirty = true;
-			}
+			cache.entries.delete(filePath);
+			cache.dirty = true;
 			hit = undefined;
 		}
 		const value = parseYaml(text) as unknown;
-		if (cache && mutable && isJsonExact(value) && (hit !== undefined || cache.entries.size < MAX_ENTRIES)) {
+		if (cache && isJsonExact(value) && (hit !== undefined || cache.entries.size < MAX_ENTRIES)) {
 			cache.entries.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, text, json: JSON.stringify(value) });
 			cache.touched.add(filePath);
 			cache.dirty = true;
@@ -237,7 +205,7 @@ function pruneMissing(cache: LoadedCache): void {
 
 function flushFrontmatterCache(): void {
 	const cache = loaded;
-	if (!cache || !writable()) return;
+	if (!cache) return;
 	// A pass touches every skill it loaded, so this stats only entries from other roots.
 	pruneMissing(cache);
 	if (!cache.dirty) return;
@@ -247,8 +215,6 @@ function flushFrontmatterCache(): void {
 		entries: Object.fromEntries(cache.entries),
 	};
 	try {
-		// The writer's root check, and the only place the cache root is created.
-		clioCacheDir();
 		safeResourceWrite(cache.file, `${JSON.stringify(body)}\n`);
 		cache.dirty = false;
 		cache.signature = fileSignature(cache.file);

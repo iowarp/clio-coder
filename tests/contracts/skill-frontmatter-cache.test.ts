@@ -13,8 +13,6 @@ const { resetXdgCache, clioCacheDir, clioConfigDir } = await import("../../src/c
 resetXdgCache();
 const { readClioVersion } = await import("../../src/core/package-root.js");
 const { loadSkills } = await import("../../src/domains/resources/skills/loader.js");
-// This file tests what a writable process persists; the gate has its own test.
-(await import("../../src/domains/resources/skills/frontmatter-cache.js")).enableFrontmatterCacheWrites();
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const skillFile = join(clioConfigDir(), "skills", "probe", "SKILL.md");

@@ -20,8 +20,7 @@ import {
 } from "./commit-attribution.js";
 import { writeDiagnostic } from "./diagnostics.js";
 import { internalGitArgv } from "./internal-git.js";
-import { readOnlyMode } from "./read-only-mode.js";
-import { clioStateDir, clioStatePath } from "./xdg.js";
+import { clioStateDir } from "./xdg.js";
 
 /** Effective `attribution.gitCommits` for child-process seams. Internal state, not an operator override. */
 export const CLIO_GIT_COMMITS_ENABLED_ENV = "CLIO_CODER_GIT_COMMITS_ENABLED";
@@ -327,16 +326,8 @@ function managedHooksDirectoryIsIntact(directory: string): boolean {
 	}
 }
 
-/**
- * The installed hooks directory, or null in read-only mode when it is not
- * installed: a read-only process uses hooks already there and installs none,
- * since it leaves Clio's home as it found it and makes no commits to attribute.
- */
+/** The installed hooks directory, installed on first use. */
 function managedHooksDirectory(): string | null {
-	if (readOnlyMode()) {
-		const existing = join(clioStatePath(), "git-hooks", `v${MANAGED_HOOK_VERSION}`);
-		return managedHooksDirectoryIsIntact(existing) ? existing : null;
-	}
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}`);
 	if (installedHooksDirectory === directory && managedHooksDirectoryIsIntact(directory)) return directory;
 	mkdirSync(directory, { recursive: true, mode: 0o700 });

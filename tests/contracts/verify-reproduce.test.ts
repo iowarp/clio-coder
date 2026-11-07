@@ -14,7 +14,6 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { withReadOnlyMode } from "../../src/core/read-only-mode.js";
 import { currentProcessLease } from "../../src/tools/process-lease.js";
 import {
 	type DeclaredReproduce,
@@ -177,8 +176,6 @@ describe("reproduce runner", () => {
 				.split("\n")
 				.filter((line) => line.startsWith("worktree "))
 				.map((line) => realpathSync(line.slice("worktree ".length)));
-		// Read-only work leaves Clio's state as it found it, abandoned environments included.
-		strictEqual((await withReadOnlyMode(run)).kind, "judged");
 		ok(existsSync(dead) && existsSync(oldUnowned));
 		strictEqual((await run()).kind, "judged");
 		deepStrictEqual(readdirSync(envs).sort(), [live, freshUnowned].map((base) => base.slice(envs.length + 1)).sort());

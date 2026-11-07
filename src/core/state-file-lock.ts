@@ -14,7 +14,6 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
-import { clioHomeWriteRefused } from "./home-write-guard.js";
 import { processAlive, processBirthToken } from "./process-identity.js";
 
 /**
@@ -33,11 +32,6 @@ import { processAlive, processBirthToken } from "./process-identity.js";
  * they work, so even the backstop does not fire under a live holder. The sync
  * path blocks the event loop by construction and cannot run that timer; pid
  * liveness is what protects it.
- *
- * In read-only mode a lock over a path in the Clio home creates no lock file:
- * the section runs unheld, as a reader of files that writers replace by atomic
- * rename, and any write it attempts is refused by the write helpers
- * (`src/core/home-write-guard.ts`).
  */
 
 /** Consulted only when the owner cannot be identified. */
@@ -67,13 +61,6 @@ export interface StateFileLockOptions {
 	note?: string;
 	/** An asynchronous wait found another holder, or the holder changed; null when its record cannot be read. */
 	onContended?: (holder: StateFileLockHolder | null) => void;
-	/**
-	 * Throws when the caller may no longer change the files this lock guards, such as in read-only mode. An
-	 * asynchronous acquisition calls it before it creates the lock's directory and before every attempt, after
-	 * each wait, so a caller whose permission ended while it waited creates no lock file and reclaims none; the
-	 * error is the acquisition's failure. Locks over a run's own records pass none; a read-only run keeps those in memory.
-	 */
-	assertWritable?: () => void;
 }
 
 interface LockOwner {
@@ -255,7 +242,6 @@ function startRefresh(lockPath: string): () => void {
 export function withStateFileLockSync<T>(targetPath: string, fn: () => T, options: StateFileLockOptions = {}): T {
 	const lockPath = `${targetPath}.lock`;
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
-	if (clioHomeWriteRefused(lockPath)) return fn();
 	let held = false;
 	try {
 		options.signal?.throwIfAborted();
@@ -291,7 +277,6 @@ export function tryWithStateFileLockSync<T>(
 	fn: () => T,
 ): { held: true; value: T } | { held: false } {
 	const lockPath = `${targetPath}.lock`;
-	if (clioHomeWriteRefused(lockPath)) return { held: true, value: fn() };
 	mkdirSync(dirname(lockPath), { recursive: true });
 	if (!tryAcquire(lockPath)) return { held: false };
 	try {
@@ -299,24 +284,6 @@ export function tryWithStateFileLockSync<T>(
 	} finally {
 		release(lockPath);
 	}
-}
-
-/**
- * Read-only sections over one lock path still run one at a time in this
- * process, as the lock file would have ordered them; no file is created.
- */
-const unheldSections = new Map<string, Promise<unknown>>();
-function enterUnheld<T>(lockPath: string, enter: () => T | Promise<T>): Promise<T> {
-	const run = (unheldSections.get(lockPath) ?? Promise.resolve()).then(enter);
-	const settled = run.then(
-		() => undefined,
-		() => undefined,
-	);
-	unheldSections.set(lockPath, settled);
-	void settled.then(() => {
-		if (unheldSections.get(lockPath) === settled) unheldSections.delete(lockPath);
-	});
-	return run;
 }
 
 /**
@@ -331,29 +298,12 @@ async function acquireAsync<T>(
 ): Promise<T> {
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
 	let held = false;
-	let refused = false;
-	// Nothing awaits between this check and the syscalls it guards.
-	const assertWritable = (): void => {
-		refused = true;
-		options.assertWritable?.();
-		refused = false;
-	};
-	if (clioHomeWriteRefused(lockPath)) {
-		options.signal?.throwIfAborted();
-		options.assertWritable?.();
-		return enterUnheld(lockPath, () => enter(false));
-	}
-	const attemptAcquire = (): boolean => {
-		assertWritable();
-		return tryAcquire(lockPath, options.note);
-	};
 	try {
 		options.signal?.throwIfAborted();
-		assertWritable();
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = performance.now() + timeoutMs;
 		let reported: number | null | undefined;
-		for (let attempt = 1; !attemptAcquire(); attempt += 1) {
+		for (let attempt = 1; !tryAcquire(lockPath, options.note); attempt += 1) {
 			options.signal?.throwIfAborted();
 			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			if (options.onContended) {
@@ -379,8 +329,7 @@ async function acquireAsync<T>(
 			held = false;
 		}
 		options.signal?.throwIfAborted();
-		// A refusal never runs the section unlocked: the caller may not write at all.
-		if (refused || options.onAcquireFailure !== "run-unlocked") throw err;
+		if (options.onAcquireFailure !== "run-unlocked") throw err;
 	}
 	return enter(held);
 }

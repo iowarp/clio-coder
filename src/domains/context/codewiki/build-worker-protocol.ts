@@ -43,11 +43,9 @@ export type CodewikiBuildWorkerRequest =
 			previous?: Fingerprint | null;
 	  };
 
-/** What a build worker starts with. A worker thread has its own module state, so the mode travels with it. */
+/** What a build worker starts with. */
 export interface CodewikiBuildWorkerData {
 	request: CodewikiBuildWorkerRequest;
-	/** The spawner's `readOnlyMode()`: a read-only reconcile may fetch a grammar but never caches it. */
-	readOnly: boolean;
 }
 
 export interface CodewikiBuildWorkerResult {

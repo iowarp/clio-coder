@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { readOnlyProcess } from "../../core/read-only-mode.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { MigrationReport } from "./migrations/index.js";
@@ -50,26 +49,6 @@ export function takePendingMigrationNotices(): string[] {
 	}
 }
 
-/**
- * The registered migrations this home has not recorded, read without a lock, a
- * move or a write. Null when the manifest cannot be read, which a writer would
- * refuse by name. A home with no manifest at all has none pending.
- */
-export function pendingMigrationIds(stateDir = clioStateDir()): string[] | null {
-	const manifest = migrationManifestPath();
-	const legacy = legacyMigrationManifestPath(stateDir);
-	const path = existsSync(manifest) ? manifest : existsSync(legacy) ? legacy : null;
-	if (path === null) return [];
-	try {
-		const parsed = JSON.parse(readFileSync(path, "utf8")) as { applied?: unknown };
-		if (!Array.isArray(parsed.applied)) return null;
-		const applied = parsed.applied as unknown[];
-		return REGISTERED_MIGRATION_IDS.filter((id) => !applied.includes(id));
-	} catch {
-		return null;
-	}
-}
-
 export async function applyPendingMigrationsAtBoot(
 	interactive = process.env.CLIO_CODER_INTERACTIVE === "1",
 ): Promise<void> {
@@ -88,8 +67,6 @@ export async function applyPendingMigrationsAtBoot(
 		}
 		// A manifest still in the state root also goes to the runner, even with nothing pending, to be moved.
 	} else if (!existsSync(legacyMigrationManifestPath(stateDir))) return;
-	// A read-only run refuses pending migrations before boot; what is left here is a manifest only a writer moves.
-	if (readOnlyProcess()) return;
 	try {
 		const { runPending } = await import("./migrations/index.js");
 		const result = await runPending(stateDir);

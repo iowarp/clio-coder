@@ -1,5 +1,4 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
-
 /**
  * Run event journal: the sink a run's display feed is written through.
  *
@@ -21,9 +20,8 @@ import type { ToolRoundRecord } from "../../engine/types.js";
  * Nothing here ever throws into a dispatch.
  */
 
-import { stateWritesWithheld } from "../../core/home-write-guard.js";
 import type { CallUsage } from "../../core/token-split.js";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { telemetryRunsDirectory } from "../telemetry/index.js";
 import { appendRunFeed } from "./run-feed.js";
@@ -146,7 +144,7 @@ function isSafeRunId(runId: string): boolean {
  */
 function createRunEventJournal(): RunEventJournalSink {
 	const forward = (runId: string, body: RunEventJournalBody, at?: string): void => {
-		if (!isSafeRunId(runId) || !runEventJournalEnabled() || stateWritesWithheld()) return;
+		if (!isSafeRunId(runId) || !runEventJournalEnabled() || stateRootRemoved()) return;
 		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES);
 		appendRunFeed(runId, body, at);
 	};

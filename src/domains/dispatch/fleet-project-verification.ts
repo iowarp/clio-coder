@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { INTERNAL_GIT_BASE_OPTIONS, internalGitArgv } from "../../core/internal-git.js";
-import { readOnlyMode } from "../../core/read-only-mode.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { shellQuote } from "../../core/shell-quote.js";
@@ -31,7 +30,7 @@ export async function verifyFleetProject(
 	node: SshNodeEndpoint,
 	root: string,
 	sharedProbe = false,
-	readOnly = readOnlyMode(),
+	readOnly = false,
 ): Promise<FleetProjectVerification> {
 	const local = await runCommandVector("git", internalGitArgv(["-C", root, "rev-parse", "HEAD"]), { timeoutMs: 5000 });
 	const head = local.exitCode === 0 ? local.stdout.trim() : null;
@@ -56,7 +55,7 @@ export async function verifyFleetProject(
 	const marker = join(root, `.clio-coder-fleet-probe-${token}`);
 	let markerWritten = false;
 	try {
-		if (sharedProbe && !readOnly && !readOnlyMode()) {
+		if (sharedProbe && !readOnly) {
 			try {
 				safeResourceWrite(marker, token, { mode: 0o600 });
 				markerWritten = true;
