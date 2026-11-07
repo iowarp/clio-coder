@@ -98,6 +98,7 @@ export interface TurnPersistence {
 			outcome?: string;
 			blockReason?: string;
 			actionClass?: string;
+			autoApproved?: "yolo";
 		},
 	): void;
 	/** Synthesized terminal row for a turn ended by a terminating tool result. */
@@ -364,6 +365,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// Admission's action class, so a resumed session classifies an unknown
 			// dynamic tool by the same rule the live row used.
 			if (event.actionClass !== undefined) payload.actionClass = event.actionClass;
+			if (event.autoApproved !== undefined) payload.autoApproved = event.autoApproved;
 			const turn = appendTurn(deps.session, {
 				kind: "tool_result",
 				payload,

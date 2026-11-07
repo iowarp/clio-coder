@@ -2337,7 +2337,7 @@ const YOLO_SCRIPT_SANDBOX_REFUSED =
 const YOLO_SANDBOX_REQUIRED_RULE_ID = "yolo-sandbox-required";
 
 /** Reason code prefix of a call yolo admitted past a rail that would have asked or blocked (#407). */
-const YOLO_ADMITTED_REASON_PREFIX = "yolo-admitted:";
+export const YOLO_ADMITTED_REASON_PREFIX = "yolo-admitted:";
 
 /**
  * Net blocks that hold at yolo besides the floor and operator rules: the

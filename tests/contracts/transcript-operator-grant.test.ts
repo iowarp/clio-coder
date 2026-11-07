@@ -2,6 +2,7 @@ import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import type { ApprovalRequestView } from "../../src/interactive/permission-overlay.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 
@@ -62,6 +63,77 @@ test("a call that never asked has no grant row", () => {
 	const rendered = panel.render(100).map(stripTerminalSequences).join("\n");
 	match(rendered, /git restore \./u);
 	doesNotMatch(rendered, /allowed by you/u);
+});
+
+for (const style of ["compact", "standard", "detailed"] as const) {
+	test(`${style}: risky YOLO calls retain one receipt and never fold away their targets`, () => {
+		const panel = createChatPanel({ getOutputStyle: () => style });
+		for (const id of ["write-a", "write-b"]) {
+			panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: "write", args: { path: `${id}.txt` } });
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: id,
+				toolName: "write",
+				result: RESULT,
+				isError: false,
+				autoApproved: "yolo",
+			} as ChatLoopEvent);
+		}
+		const output = panel.render(80).map(stripTerminalSequences).join("\n");
+		match(output, /write-a\.txt/);
+		match(output, /write-b\.txt/);
+		strictEqual((output.match(/YOLO auto-approved · no prompt/g) ?? []).length, 2);
+		doesNotMatch(output, /allowed by you/);
+	});
+}
+
+test("a YOLO receipt survives session replay without reinterpreting the current mode", () => {
+	const panel = createChatPanel({ getOutputStyle: () => "compact" });
+	rehydrateChatPanelFromTurns(panel, [
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "call",
+			parentTurnId: null,
+			timestamp: "2026-11-06T00:00:00Z",
+			payload: { toolCallId: "bash-1", toolName: "bash", args: ARGS },
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "result",
+			parentTurnId: "call",
+			timestamp: "2026-11-06T00:00:01Z",
+			payload: { toolCallId: "bash-1", toolName: "bash", result: RESULT, isError: false, autoApproved: "yolo" },
+		},
+	]);
+	match(panel.render(80).map(stripTerminalSequences).join("\n"), /YOLO auto-approved · no prompt/);
+});
+
+test("Minimal names the actions a YOLO chain ran, not just its step count", () => {
+	const panel = createChatPanel({ getOutputStyle: () => "compact" });
+	const steps = [
+		{ id: "a", capability: "write", args: { path: "trace-a.txt" }, result: RESULT },
+		{ id: "b", capability: "write", args: { path: "trace-b.txt" }, result: RESULT },
+	];
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "chain",
+		toolName: "gateway",
+		args: { op: "chain", steps },
+	});
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "chain",
+		toolName: "gateway",
+		isError: false,
+		result: { details: { op: "chain", chainResults: steps } },
+		autoApproved: "yolo",
+	} as ChatLoopEvent);
+	const output = panel.render(80).map(stripTerminalSequences).join("\n");
+	match(output, /YOLO auto-approved · no prompt/);
+	match(output, /write trace-a\.txt/);
+	match(output, /write trace-b\.txt/);
 });
 
 test("compact never folds an allowed call into its neighbors", () => {

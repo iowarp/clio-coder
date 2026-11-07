@@ -368,6 +368,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "ruleId"
 			| "reasonCode"
 			| "policySource"
+			| "autoApproved"
 			| "denial"
 			| "unresolved"
 		>
@@ -386,6 +387,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
+				...(event.autoApproved === undefined ? {} : { autoApproved: event.autoApproved }),
 				...(event.denial === undefined ? {} : { denial: event.denial }),
 				...(event.unresolved === true ? { unresolved: true as const } : {}),
 			});
@@ -1652,6 +1654,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								...(admission.ruleId === undefined ? {} : { ruleId: admission.ruleId }),
 								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),
+								...(admission.autoApproved === undefined ? {} : { autoApproved: admission.autoApproved }),
 								...(admission.reason === undefined ? {} : { blockReason: admission.reason }),
 								...(admission.denial === undefined ? {} : { denial: admission.denial }),
 								// A verify call naming a check that does not exist ran nothing; a headless receipt must not seal it as a failed check.

@@ -553,6 +553,7 @@ export interface ReplayToolResult {
 	blockReason?: string;
 	/** Admission's action class; an unknown dynamic tool is classified by it, live and on replay. */
 	actionClass?: string;
+	autoApproved?: "yolo";
 }
 
 export function extractToolResult(entry: MessageEntry): ReplayToolResult {
@@ -586,6 +587,7 @@ export function extractToolResult(entry: MessageEntry): ReplayToolResult {
 		...(outcome !== undefined ? { outcome } : {}),
 		...(blockReason !== undefined ? { blockReason } : {}),
 		...(actionClass !== undefined ? { actionClass } : {}),
+		...(obj?.autoApproved === "yolo" ? { autoApproved: "yolo" as const } : {}),
 	};
 }
 

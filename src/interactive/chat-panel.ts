@@ -390,6 +390,7 @@ type ToolSegment = {
 	approvalDocked?: true | undefined;
 	/** The axis an operator grant answered, kept past settlement (BT-003). Live only, like `approvalView`. */
 	operatorGrant?: string | undefined;
+	autoApproved?: "yolo" | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
 	/**
 	 * Settled without a result before execution started, or while it still
@@ -1801,6 +1802,7 @@ function renderToolSegmentLines(
 		evictedReason: seg.evictedReason,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
+		autoApproved: seg.autoApproved,
 		...shellActor(seg, nameRequester),
 	};
 	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
@@ -1867,6 +1869,7 @@ function finishedCall(seg: ToolSegment, nameRequester = true): ToolExecutionFini
 		cardAttached: seg.cardAttached,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
+		autoApproved: seg.autoApproved,
 		...shellActor(seg, nameRequester),
 	};
 }
@@ -3818,10 +3821,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						blockReason?: unknown;
 						evictedReason?: unknown;
 						actionClass?: unknown;
+						autoApproved?: unknown;
 					};
 					if (typeof enriched.actionClass === "string" && enriched.actionClass.length > 0) {
 						tool.actionClass = enriched.actionClass;
 					}
+					tool.autoApproved = enriched.autoApproved === "yolo" ? "yolo" : undefined;
 					// Replay-only: the rehydrator reads the working-set fold and tags
 					// the rows whose bodies the projection has replaced for the model.
 					tool.evictedReason =

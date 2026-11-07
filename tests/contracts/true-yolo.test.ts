@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -30,12 +30,95 @@ import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
 import { createYoloActivation, YOLO_ACCEPT_LABEL, YOLO_DECLINE_LABEL } from "../../src/interactive/yolo-activation.js";
+import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRunScriptTool, runScriptSafetyProjection } from "../../src/tools/run-script.js";
+import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const OPERATOR_YOLO: OperatorYoloScope = { scratchRoots: [] };
+
+test("execution telemetry distinguishes risky YOLO auto-approval from Default and includes failed executions", async (t) => {
+	const home = await isolateClioEnv("clio-yolo-receipt-");
+	t.after(() => home.restore());
+	const root = workspace("clio-yolo-receipt-workspace-");
+	const previousCwd = process.cwd();
+	process.chdir(root);
+	t.after(() => process.chdir(previousCwd));
+	for (const autonomy of ["default", "yolo"] as const) {
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: root }),
+			autonomy: () => autonomy,
+			scratchRoots: () => [],
+		});
+		registry.register(writeTool);
+		const events: ToolFinishEvent[] = [];
+		await invokeRegisteredTool(
+			registry,
+			ToolNames.Write,
+			{ path: join(root, `${autonomy}.txt`), content: autonomy },
+			{
+				telemetry: { onFinish: (event) => events.push(event) },
+			},
+		);
+		strictEqual(readFileSync(join(root, `${autonomy}.txt`), "utf8"), autonomy);
+		strictEqual(events[0]?.autoApproved, autonomy === "yolo" ? "yolo" : undefined);
+		strictEqual(events[0]?.decision, "allowed");
+	}
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd: root }),
+		autonomy: () => "yolo",
+		scratchRoots: () => [],
+	});
+	registry.register({ ...writeTool, run: async () => ({ kind: "error", message: "execution failed" }) });
+	const events: ToolFinishEvent[] = [];
+	await rejects(
+		invokeRegisteredTool(
+			registry,
+			ToolNames.Write,
+			{ path: join(root, "failed.txt"), content: "x" },
+			{
+				telemetry: { onFinish: (event) => events.push(event) },
+			},
+		),
+		/execution failed/,
+	);
+	strictEqual(events[0]?.outcome, "error");
+	strictEqual(events[0]?.autoApproved, "yolo");
+	const safety = createWorkerSafety({ cwd: root });
+	const preparationFailure = createRegistry({
+		safety: {
+			...safety,
+			evaluate: (call, posture, scope) => {
+				const decision = safety.evaluate(call, posture, scope);
+				return decision.policy === undefined
+					? decision
+					: { ...decision, policy: { ...decision.policy, shellSandbox: { workspace: root, scratchRoots: [] } } };
+			},
+		},
+		autonomy: () => "yolo",
+		scratchRoots: () => [],
+		sandboxEnv: () => {
+			throw new Error("preparation failed");
+		},
+	});
+	preparationFailure.register(writeTool);
+	events.length = 0;
+	await rejects(
+		invokeRegisteredTool(
+			preparationFailure,
+			ToolNames.Write,
+			{ path: join(root, "not-started.txt"), content: "x" },
+			{
+				telemetry: { onFinish: (event) => events.push(event) },
+			},
+		),
+		/preparation failed/,
+	);
+	strictEqual(existsSync(join(root, "not-started.txt")), false);
+	strictEqual(events[0]?.autoApproved, undefined);
+});
 
 function workspace(prefix: string): string {
 	return realpathSync(mkdtempSync(join(tmpdir(), prefix)));

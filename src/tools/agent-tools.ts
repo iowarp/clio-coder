@@ -37,6 +37,7 @@ import {
 } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { denialLines, type ToolDenial } from "../domains/safety/denial.js";
+import { YOLO_ADMITTED_REASON_PREFIX } from "../domains/safety/policy-engine.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { formatModelRejection } from "../domains/safety/rejection-feedback.js";
 import { validateEngineToolArguments } from "../engine/ai.js";
@@ -187,6 +188,8 @@ export interface ToolFinishEvent {
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
+	/** A risky call actually ran under YOLO, rather than an operator's one-shot grant. */
+	autoApproved?: "yolo";
 	/** Who refused a blocked call and what would allow it; see `src/domains/safety/denial.ts`. */
 	denial?: ToolDenial;
 	skillActivation?: SkillActivation;
@@ -318,6 +321,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			...(verdict.kind === "blocked" && verdict.deniedPark === true ? { deniedPark: true } : {}),
 			...(verdict.kind === "blocked" && verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
 			...(verdict.kind === "blocked" && verdict.denial !== undefined ? { denial: verdict.denial } : {}),
+			...(verdict.kind === "blocked" && verdict.executionStarted === true ? { executionStarted: true as const } : {}),
 		});
 		// The model sees only this thrown message. The short verdict reason
 		// starves the next turn of the policy's why and how-to-recover, so
@@ -331,7 +335,11 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		);
 	}
 	const resultFacts = toolCallFacts(spec.name, args, verdict.result);
-	const withResultFacts = { ...withCallId, ...(resultFacts ? { callFacts: resultFacts } : {}) };
+	const withResultFacts = {
+		...withCallId,
+		...(resultFacts ? { callFacts: resultFacts } : {}),
+		...(verdict.executionStarted === true ? { executionStarted: true as const } : {}),
+	};
 	if (verdict.result.kind === "error") {
 		finish(
 			"error",
@@ -489,6 +497,7 @@ function emitFinish(
 		denial?: ToolDenial;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
+		executionStarted?: true;
 	},
 ): void {
 	if (!telemetry?.onFinish) return;
@@ -522,6 +531,15 @@ function emitFinish(
 		if (extra.decision.policy?.ruleId !== undefined) event.ruleId = extra.decision.policy.ruleId;
 		if (extra.decision.policy?.reasonCode !== undefined) event.reasonCode = extra.decision.policy.reasonCode;
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
+		if (
+			extra.executionStarted === true &&
+			extra.decision.policy?.posture === "yolo" &&
+			(extra.decision.classification.actionClass !== "read" ||
+				extra.decision.classification.exposure === "outward" ||
+				isMcpToolName(tool) ||
+				extra.decision.policy.reasonCode.startsWith(YOLO_ADMITTED_REASON_PREFIX))
+		)
+			event.autoApproved = "yolo";
 	} else if (outcome === "blocked") {
 		// A blocked verdict that carries no admission decision (not_visible) is
 		// still a safety block. Receipts count safety.decisions from this field,

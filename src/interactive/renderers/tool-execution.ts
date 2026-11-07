@@ -178,6 +178,7 @@ export interface ToolExecutionFinished {
 	 * approval event, which never reaches the session ledger.
 	 */
 	operatorGrant?: string | undefined;
+	autoApproved?: "yolo" | undefined;
 	/**
 	 * A worker card sits under this dispatch call and states the run's outcome,
 	 * so the row does not repeat it.
@@ -530,7 +531,7 @@ function refusalFact(refusal: SkillLoadRefusal): string {
 /** The nested row a load states its tool surface on: `narrows tools to read, edit, bash`. */
 function skillSurfaceLine(skill: SkillLoadFacts): string | null {
 	if (skill.allowListAdvisory && skill.allowedTools.length > 0)
-		return `recommends ${skill.allowedTools.join(", ")} in yolo${skill.disallowedTools.length > 0 ? `; blocks ${skill.disallowedTools.join(", ")}` : ""}`;
+		return `recommends ${skill.allowedTools.join(", ")}${skill.disallowedTools.length > 0 ? `; blocks ${skill.disallowedTools.join(", ")}` : ""}`;
 	if (skill.allowedTools.length > 0) return `narrows tools to ${skill.allowedTools.join(", ")}`;
 	if (skill.disallowedTools.length > 0) return `narrows tools to all but ${skill.disallowedTools.join(", ")}`;
 	return null;
@@ -884,13 +885,16 @@ export function approvalAxisText(view: Pick<ApprovalRequestView, "axis">): strin
  * card and the settled row read exactly like a call that never asked, so an
  * operator scrolling back could not tell which calls they had approved.
  */
-function operatorGrantRows(
+function approvalReceiptRows(
 	call: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
 	failure: boolean,
 ): string[] {
 	const axis = "result" in call ? call.operatorGrant : undefined;
-	if (axis === undefined) return [];
+	if (axis === undefined)
+		return "result" in call && call.autoApproved === "yolo"
+			? cardRows(`${yellow("YOLO")} ${toolMeta(`auto-approved ${GLYPH.dot} no prompt`)}`, width, failure)
+			: [];
 	// The operator's own mark: `?` is the class of a call that asks, and read as a question still open under a call
 	// that had already been allowed.
 	return cardRows(`${yellow(GLYPH.user)} ${toolMeta(`allowed by you · ${axis}`)}`, width, failure);
@@ -1937,7 +1941,7 @@ export function renderToolExecution(
 	const row = resolveRow(finished);
 	const out: string[] = [];
 	out.push(...cardHead(headerLine(finished, status, statusMeta, width), "", width));
-	out.push(...operatorGrantRows(finished, width, finished.isError));
+	out.push(...approvalReceiptRows(finished, width, finished.isError));
 
 	// A mutation produces one bounded numbered diff on result.details. It is the
 	// authority because canonical edit args can contain multiple replacements
@@ -2000,6 +2004,7 @@ export function renderToolResultOnly(
 	};
 	const out: string[] = [];
 	out.push(...cardHead(headerLine({ ...finished, args: undefined }, status, statusMeta, width), "", width));
+	out.push(...approvalReceiptRows(finished, width, finished.isError));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -2408,8 +2413,8 @@ export function renderToolPreview(
 		!options.operator &&
 		(finished === undefined || (!failure && row.spec.class !== "interaction" && finished.operatorGrant === undefined))
 	)
-		return rows;
-	rows.push(...operatorGrantRows(call, width, failure));
+		return [...rows, ...approvalReceiptRows(call, width, failure)];
+	rows.push(...approvalReceiptRows(call, width, failure));
 	const args = previewArguments(call, width, detail.style === "detailed" && finished === undefined);
 	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(
@@ -2733,8 +2738,12 @@ function renderChainPreview(
 	const rail = failure ? RAIL_ERROR() : RAIL_NORMAL();
 	const rows = previewActionRows(call, width);
 	if (detail.style === "compact" && (finished === undefined || (!failure && finished.operatorGrant === undefined)))
-		return rows;
-	rows.push(...operatorGrantRows(call, width, failure));
+		return [
+			...rows,
+			...approvalReceiptRows(call, width, failure),
+			...(finished?.autoApproved === "yolo" ? chainStepRows(call, width, failure) : []),
+		];
+	rows.push(...approvalReceiptRows(call, width, failure));
 	rows.push(
 		...previewRows(
 			chainStepRows(call, width, failure),
@@ -2772,7 +2781,7 @@ function renderChainExecution(finished: ToolExecutionFinished, width: number, op
 		blockReason: finished.blockReason,
 	};
 	const out = [...cardHead(headerLine(finished, status, statusMeta, width), "", width)];
-	out.push(...operatorGrantRows(finished, width, finished.isError));
+	out.push(...approvalReceiptRows(finished, width, finished.isError));
 	out.push(...chainStepRows(finished, width, finished.isError));
 	const steps = settledChainSteps(finished);
 	if (steps.length === 0) {
@@ -2815,7 +2824,8 @@ export type ToolFoldFamily = "explore" | "knowledge" | "mutate";
  */
 export function toolFoldFamily(wire: ToolExecutionFinished): ToolFoldFamily | null {
 	const call = presentedCall(wire);
-	if (call.isError || call.outcome !== undefined || call.evictedReason !== undefined) return null;
+	if (call.isError || call.outcome !== undefined || call.evictedReason !== undefined || call.autoApproved !== undefined)
+		return null;
 	if (isTruncatedResult(call) || offloadPathOf(call) !== null || skillLoadFacts(call) !== null) return null;
 	const toolClass = resolveRow(call).spec.class;
 	if (toolClass === "observe" || toolClass === "search") return "explore";

@@ -880,11 +880,13 @@ export interface ParkCancelOptions {
 }
 
 export type RegistryVerdict =
-	| { kind: "ok"; result: ToolResult; decision: SafetyDecision }
+	| { kind: "ok"; result: ToolResult; decision: SafetyDecision; executionStarted?: true }
 	| {
 			kind: "blocked";
 			reason: string;
 			decision: SafetyDecision;
+			/** A post-execution result guard withheld output; admission refusals never carry this. */
+			executionStarted?: true;
 			/**
 			 * The call parked for approval and the park was answered without one:
 			 * denied (by an operator, or by a headless run that has none) or
@@ -1252,8 +1254,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const ruleRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
 				if (landing === undefined && deps.middleware?.hasAwaitedHook?.("after_tool", spec.name))
 					landing = hookLanding(spec, call);
-				bodyStartedAt = performance.now();
-				const result = await spec.run(preparedArgs, {
+				const executionOptions: ToolInvokeOptions = {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 					...(writeTargetViolation ? { writeTargetViolation } : {}),
@@ -1270,7 +1271,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(deps.flow !== undefined && !trueYolo()
 						? { flowAdmitsUrl: (url: string) => outboundFlowViolation(spec, { tool: spec.name, args: { url } }) }
 						: {}),
-				});
+				};
+				bodyStartedAt = performance.now();
+				const result = await spec.run(preparedArgs, executionOptions);
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back
 				// whole, and this call settles as that same blocked verdict: the
@@ -1301,7 +1304,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					if (unlabeled !== null) {
 						const reason = `${spec.name} result withheld: ${unlabeled}`;
 						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
-						return flowBlockedVerdict(decision, call.tool, reason);
+						return { ...flowBlockedVerdict(decision, call.tool, reason), executionStarted: true };
 					}
 				}
 				// A refusal settles only after its label is absorbed: an MCP server's
@@ -1339,7 +1342,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					options,
 					resultDisposition,
 				);
-				return { kind: "ok", result: finalResult, decision };
+				return { kind: "ok", result: finalResult, decision, executionStarted: true };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				// A body that threw may have read the source before failing, so
@@ -1355,7 +1358,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (unlabeled !== null) {
 					const reason = `${spec.name} error withheld: ${unlabeled}`;
 					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
-					return flowBlockedVerdict(decision, call.tool, reason);
+					return {
+						...flowBlockedVerdict(decision, call.tool, reason),
+						...(bodyStartedAt !== undefined ? { executionStarted: true as const } : {}),
+					};
 				}
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
@@ -1386,6 +1392,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						resultDisposition,
 					),
 					decision,
+					...(bodyStartedAt !== undefined ? { executionStarted: true as const } : {}),
 				};
 			}
 		} finally {

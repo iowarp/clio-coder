@@ -987,6 +987,7 @@ function replayEntries(
 							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
 							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 							...(result.actionClass !== undefined ? { actionClass: result.actionClass } : {}),
+							...(result.autoApproved !== undefined ? { autoApproved: result.autoApproved } : {}),
 							...(evictedReason !== undefined ? { evictedReason } : {}),
 						} as ChatLoopEvent);
 					} else {
@@ -1002,6 +1003,7 @@ function replayEntries(
 									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
 									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
 									...(result.actionClass !== undefined ? { actionClass: result.actionClass } : {}),
+									...(result.autoApproved !== undefined ? { autoApproved: result.autoApproved } : {}),
 									...(evictedReason !== undefined ? { evictedReason } : {}),
 								},
 								width,
