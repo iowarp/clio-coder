@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
 import { validationClause } from "../../src/domains/evidence/trust-projection.js";
@@ -54,6 +55,27 @@ test("a screen another overlay holds delays the card instead of settling it", as
 	const outcome = await askMergeCard({ ask, retryMs: 1 }, INPUT);
 	strictEqual(outcome.choice, "merge");
 	strictEqual(asked.length, 2);
+});
+
+test("elapsed screen retries release their abort listeners", async () => {
+	let attempts = 0;
+	const keepAlive = setInterval(() => {}, 1000);
+	try {
+		const outcome = await askMergeCard(
+			{
+				retryMs: 1,
+				ask: async (_questions, options) => {
+					strictEqual(getEventListeners(options?.signal as AbortSignal, "abort").length, 0);
+					return ++attempts < 15 ? { answers: [], unavailable: true } : pick("Keep branch");
+				},
+			},
+			INPUT,
+		);
+		strictEqual(outcome.choice, "keep");
+		strictEqual(attempts, 15);
+	} finally {
+		clearInterval(keepAlive);
+	}
 });
 
 test("a branch that changes protected paths is not offered a Merge, and the card says why", async () => {

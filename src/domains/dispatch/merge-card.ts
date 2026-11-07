@@ -195,16 +195,15 @@ export async function askMergeCard(deps: MergeCardDeps, input: MergeCardInput): 
 	const stopped = (): MergeCardOutcome => keep("aborted");
 	const waitForScreen = (): Promise<void> =>
 		new Promise((resolve) => {
-			const wake = setTimeout(resolve, deps.retryMs ?? DEFAULT_RETRY_MS);
+			const settle = (): void => {
+				clearTimeout(wake);
+				controller.signal.removeEventListener("abort", settle);
+				resolve();
+			};
+			const wake = setTimeout(settle, deps.retryMs ?? DEFAULT_RETRY_MS);
 			wake.unref?.();
-			controller.signal.addEventListener(
-				"abort",
-				() => {
-					clearTimeout(wake);
-					resolve();
-				},
-				{ once: true },
-			);
+			controller.signal.addEventListener("abort", settle, { once: true });
+			if (controller.signal.aborted) settle();
 		});
 	// A round another overlay refused is retried until the card's own window
 	// closes, so a permission prompt on screen delays the card rather than
