@@ -170,7 +170,20 @@ if (inherited !== null) {
 	writeFileSync(join(root, ".owner.json"), JSON.stringify({ pid: process.pid }));
 	process.env[ROOT_ENV] = root;
 	process.env.TMPDIR = root;
+	// Same worker constraint as the git guard below; a worker never creates a root anyway.
+	const strays = isMainThread ? await import("./stray-processes.js") : null;
 	process.on("exit", () => {
+		// Every test child has exited by now, so anything still carrying this root
+		// was started by a test and abandoned: a pane host a killed test never got
+		// to stop, running on in a directory about to be deleted.
+		const left = strays?.reapProcessesCarrying(ROOT_ENV, root) ?? [];
+		if (left.length > 0) {
+			process.stderr.write(
+				`tests/harness/tmp-root.ts: killed ${left.length} process(es) the run left behind: ${left
+					.map((stray) => `${stray.pid} ${stray.argv.join(" ")}`)
+					.join("; ")}\n`,
+			);
+		}
 		if (!isRemovableRoot(root)) return;
 		try {
 			rmSync(root, { recursive: true, force: true });
