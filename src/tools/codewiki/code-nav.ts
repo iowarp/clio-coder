@@ -880,11 +880,9 @@ export const codeNavTool: ToolSpec = {
 		// search spans every language in the index, an outline only its file's.
 		if (source === "workspace" && (mode === "symbol" || mode === "outline")) {
 			const outlined = mode === "outline" ? resolveFile(index, query) : null;
-			const langs =
-				outlined === null
-					? new Set<string>(loaded.loaded.codewiki.files.map((file) => file.lang))
-					: new Set<string>("error" in outlined ? [] : [outlined.lang]);
-			grammarNote = missingGrammarNote(langs);
+			grammarNote = missingGrammarNote(
+				outlined === null ? loaded.loaded.codewiki.files : "error" in outlined ? [] : [outlined],
+			);
 		}
 		const sourcePrefix = source === "clio" ? "source=clio " : "";
 		if (mode === "symbol") {

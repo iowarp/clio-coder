@@ -53,11 +53,6 @@ export function sha256Hex(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** True when a file sits at the cache path; the hash is checked only on load. */
-export function pinnedAssetPresent(asset: PinnedAsset): boolean {
-	return existsSync(asset.path);
-}
-
 /**
  * The asset's verified bytes: the cached copy when its hash matches, otherwise
  * one download bounded by `timeoutMs`, verified, then written to the cache.
