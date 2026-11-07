@@ -104,8 +104,10 @@ export function createArtifactTool(deps: ArtifactToolDeps = {}): ToolSpec {
 		parameters: Type.Object({
 			kind: StringEnum(ARTIFACT_KINDS, { description: "Artifact kind." }),
 			content: Type.String({ description: "Full Markdown body." }),
-			title: Type.Optional(Type.String({ description: "Document title." })),
-			path: Type.Optional(Type.String({ description: "Override the default artifact path." })),
+			title: Type.Optional(Type.String({ description: "Heading added when content does not start with #." })),
+			path: Type.Optional(
+				Type.String({ description: "Override the default artifact path; must stay inside the workspace." }),
+			),
 		}),
 		baseActionClass: "write",
 		executionMode: "sequential",

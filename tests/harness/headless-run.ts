@@ -5,13 +5,16 @@
  * time, and a reader that returns the one sealed receipt with its ledger row.
  */
 import { ok, strictEqual } from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { copyFileSync, cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { initializeClioHome } from "../../src/core/init.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { readRunJournal } from "./run-journal.js";
+import { scratchClioEnvVars } from "./scratch-env.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -49,22 +52,30 @@ export interface HeadlessScratch {
 	cleanup(): void;
 }
 
-/** A throwaway home initialized by `doctor --fix`, ready for a seeded target. */
-export function headlessScratch(prefix: string, cli = CLI): HeadlessScratch {
+/** A throwaway home initialized directly, ready for a seeded target. */
+export function headlessScratch(prefix: string): HeadlessScratch {
 	const root = mkdtempSync(join(tmpdir(), prefix));
+	const homeEnv = scratchClioEnvVars(root, { requireHomePrefix: true });
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		NODE_ENV: "test",
 		NO_COLOR: "1",
-		CLIO_CODER_HOME: root,
-		CLIO_CODER_CONFIG_DIR: join(root, "config"),
-		CLIO_CODER_DATA_DIR: join(root, "data"),
-		CLIO_CODER_STATE_DIR: join(root, "state"),
-		CLIO_CODER_CACHE_DIR: join(root, "cache"),
-		CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
+		...homeEnv,
 		CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
 	};
-	execFileSync(process.execPath, [cli, "doctor", "--fix"], { cwd: root, env, stdio: "pipe" });
+	const previous = new Map(Object.keys(homeEnv).map((key) => [key, process.env[key]]));
+	try {
+		// No await: the temporary environment cannot overlap another test's turn.
+		Object.assign(process.env, homeEnv);
+		resetXdgCache();
+		initializeClioHome();
+	} finally {
+		for (const [key, value] of previous) {
+			if (value === undefined) Reflect.deleteProperty(process.env, key);
+			else process.env[key] = value;
+		}
+		resetXdgCache();
+	}
 	return {
 		root,
 		configDir: join(root, "config"),

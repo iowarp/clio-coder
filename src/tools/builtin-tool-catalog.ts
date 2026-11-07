@@ -127,7 +127,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Find files importing a module", args: { mode: "dependents", query: "src/index.ts" } },
 		],
 		promptHint:
-			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki (workspace only).",
+			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki, project (wiki and project are workspace only).",
 	},
 	[ToolNames.SelfCompact]: {
 		objective: "Save an exact assistant handoff and reduce native session context.",
@@ -258,7 +258,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_slow",
 	},
 	[ToolNames.Git]: {
-		objective: "Read-only git inspection: status, diff, log, or show.",
+		objective: "Git through fixed argv: inspect with status, diff, log, or show; stage and record with add or commit.",
 		uiLabel: "Git",
 		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
@@ -385,7 +385,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Job]: {
 		objective: "Create and control bounded interval jobs owned by this conversation.",
 		discoveryHint:
-			"Repeat an explicit main prompt or poll literal command argv. Bare finite main repetition defaults to five starts. Each occurrence rechecks current authority; command predicates match complete stdout JSON only. Use monitor with job_id or scope=jobs for status and settlement. Workers, cron and event triggers are unavailable.",
+			"Repeat an explicit main prompt or poll literal command argv. A job without count or for_ms defaults to five starts. Each occurrence rechecks current authority; command predicates match complete stdout JSON only. Use monitor with job_id or scope=jobs for status and settlement. Workers, cron and event triggers are unavailable.",
 		examples: [
 			{
 				goal: "Repeat a bounded check in this conversation",

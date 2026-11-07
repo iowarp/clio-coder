@@ -90,8 +90,9 @@ Run repo-owned playbooks on the fleet, and inspect the dispatch status surface.
 Author and check playbooks with clio-coder playbook.
 
 Subcommands:
-  nodes add|list|remove|test     manage SSH worker nodes and project verification
-  land [<run>] [--squash] [--yes]  list, preview or land task branches finished runs kept
+  nodes add|discover|install|tools|list|remove|test
+                                manage SSH worker nodes and project verification
+  land [<run>] [options]        list, preview or land task branches finished runs kept
   run <playbook> [--var k=v ...]  preflight and execute a playbook
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step results as JSON
@@ -105,6 +106,7 @@ Subcommands:
                                 print a fleet run's live event journal of hash-chained, unsigned
                                 lines; each settled step names the manifest bytes written at that
                                 moment, and --follow exits after fleet_sealed
+  verify <runId> --json         re-verify one run's sealed scope now and emit its trust state
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
   cancel <runId> [--json] [--reason <text>]

@@ -2,7 +2,7 @@
 
 - Perspectives named "optimist" and "pessimist" (role menu, not topic).
 - Composing four or five perspectives, or running a Responses/Convergence
-  round, in a headless run — the enforced default is exactly three and
+  round, in a headless run. The enforced default is exactly three and
   exactly one, not a ceiling to raise because the topic looks deep.
 - Splitting a round into several single-task `dispatch` calls issued one at a
   time instead of one batched `tasks` call (retried as `mode="sequential"`

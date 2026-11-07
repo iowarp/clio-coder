@@ -20,6 +20,13 @@ export interface CodewikiArtifactRef {
 export type CodewikiBuildWorkerRequest =
 	| { kind: "build"; cwd: string; language: Codewiki["language"] }
 	| {
+			/** Check a private snapshot's freshness without cloning its contents into the worker. */
+			kind: "check";
+			cwd: string;
+			current: Pick<CodewikiArtifactRef, "needsBackfill" | "loc">;
+			previous: Fingerprint | null;
+	  }
+	| {
 			kind: "ensure";
 			cwd: string;
 			/** Optional when neither state nor an existing artifact identifies the project. */
@@ -46,6 +53,8 @@ export interface CodewikiBuildWorkerResult {
  * What the worker posts back. An unchanged reconciliation of an artifact it
  * was handed by reference leaves `codewiki` null: the caller still holds the
  * object, and returning it would clone the whole artifact a second time.
+ * A check returns no artifact and uses `changed` to report whether a full
+ * reconciliation is required.
  */
 export interface CodewikiBuildWorkerOutcome {
 	codewiki: Codewiki | null;

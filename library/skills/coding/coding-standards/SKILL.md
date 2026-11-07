@@ -7,7 +7,7 @@ triggers:
   - parse don't validate
   - illegal states unrepresentable
   - functional core imperative shell
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -101,7 +101,7 @@ union, so it never narrows the tools the task in flight needs.
   inner code; inner code never re-checks what a parser proved.
 - `parseX(input): Result<X, ParseXError>` for untrusted input; `makeX` for
   smart construction from typed pieces; `isX` for predicates. A function
-  returning a refined value is a parser — do not name it `validateX`.
+  returning a refined value is a parser; do not name it `validateX`.
 - Schema libraries are boundary parsers, not validators sprinkled through
   core logic; use the repo's established one. Never pass a schema-inferred
   transport shape through the application.

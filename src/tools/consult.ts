@@ -165,7 +165,9 @@ export const consultParameters: TSchema = Type.Object({
 				kind: StringEnum(KINDS, {
 					description: "yesNo: probability a statement holds. pick: mass over named options. rate: position on a ladder.",
 				}),
-				question: Type.String({ description: "The question, answerable from state alone." }),
+				question: Type.String({
+					description: `The question, answerable from state alone. Up to ${CONSULT_LIMITS.questionChars} characters.`,
+				}),
 				whenTrue: Type.Optional(
 					Type.String({ description: "yesNo, required: what a true answer looks like in the evidence." }),
 				),

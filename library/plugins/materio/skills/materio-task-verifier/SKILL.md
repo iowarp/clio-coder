@@ -1,6 +1,6 @@
 ---
 name: materio-task-verifier
-description: "Independently inspect research task outputs against their approved assumptions, artifacts, and evidence."
+description: "Independently inspects one executed Materio task's outputs against its approved specification, assumptions and evidence, without changing files, and reports findings with a complete, blocked or needs_input verdict. Use after execute-task produces artifacts."
 ---
 
 Independently read one approved task specification, its actual output inventory, and summary. Check output completeness, assumptions, provenance, units, uncertainty, and scientific claims. Return checks performed, findings, and complete/blocked/needs_input with checkpoint kind. Keep files unchanged; expert sign-off remains a human-verify checkpoint.

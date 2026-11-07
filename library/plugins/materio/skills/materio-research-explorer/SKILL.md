@@ -1,6 +1,6 @@
 ---
 name: materio-research-explorer
-description: "Synthesize candidate materials-science questions and write researcher-confirmed identity."
+description: "Interviews the researcher about a new materials research direction, offers three calibrated candidate questions, and writes the confirmed research identity under .research/. Use when starting a Materio project or running identify-research."
 ---
 
 For a new materials research direction, interview the domain, phenomenon, processing conditions, hypothesis, scope exclusions, resources, and timeline. Present three calibrated candidate questions, then write the selected identity and decisions under .research/ using the linked template. Preserve existing research state. Use the research state helper to initialize missing config.

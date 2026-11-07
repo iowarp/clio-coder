@@ -19,7 +19,7 @@ without model calls or a separate renderer. Builds or refreshes the index.
 
 Options:
   --out <path>    HTML destination (default: ${CLIO_ARTIFACT_DIR}/maps/<repo>.html)
-  --json         print an artifact receipt
+  --json          print an artifact receipt
 `;
 
 /** Where the map lands when the operator names no path: a human-transient map artifact. */
@@ -144,7 +144,7 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 			index += 1;
 			continue;
 		}
-		process.stderr.write(`clio-coder context map: unknown flag ${arg}\n`);
+		process.stderr.write(`clio-coder context map: unknown flag: ${arg}\n`);
 		return 2;
 	}
 	const cwd = process.cwd();

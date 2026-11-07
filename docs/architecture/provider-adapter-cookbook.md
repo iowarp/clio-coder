@@ -21,7 +21,7 @@ Source of truth:
 
 Every model runtime (e.g., Local Native, Cloud HTTP, Subprocess) implements the `RuntimeDescriptor` interface defined in [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts). The registry rejects a descriptor that lacks a non-empty `id` and `displayName`, a `kind` of `http`, `sdk` or `subprocess`, an `apiFamily`, an `auth` from the list below, a `defaultCapabilities` object or a `synthesizeModel` function, and rejects a `probe`, `probeModels`, `complete`, `infill`, `embed` or `rerank` that is present but not a function. An `id` or alias that is already registered is a conflict.
 
-Three descriptor fields carry behavior beyond the template. `tier` contributes a pricing fallback: after explicit target pricing, a `local-native` runtime is priced `free` (`pricedBy: free`); a `protocol` runtime does not receive that fallback, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
+Three descriptor fields carry behavior beyond the template. `tier` contributes a pricing fallback: after explicit target pricing, a `local-native` runtime is priced `free` (`pricedBy: free` with `freeRule: local-native`, shown as `$0.00 local`); a `protocol` runtime does not receive that fallback, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes. `enforcement` declares what Clio Coder can guarantee for a worker on a runtime that is not `http`; a non-HTTP runtime that declares nothing is treated as unmediated and refused write-capable work unless the operator sets `trustedUnmediated`. `gatewayUrl` marks a remote gateway whose URL the operator must supply, so configure offers no localhost default.
 
 Endpoint capacity counts streams per endpoint key ([endpoint-capacity.ts](../../src/domains/providers/endpoint-capacity.ts)). The `litellm` and `openrouter` runtimes are model-routed gateways ([model-routed-gateway.ts](../../src/domains/providers/model-routed-gateway.ts)): each model runs on its own backend deployment, so `modelEndpointKey` keys a stream as `<url>#model=<id>` and also counts it under the plain gateway URL. Dispatch admission and the settings endpoint rows read the gateway key and see unchanged totals, while background memory on a gateway with no declared or discovered capacity admits against its own model's key, so a turn on another model no longer marks it busy. Every other runtime, `openai-compat` included, keeps the plain URL as its key, because a generic protocol endpoint is often one local server that answers any model name.
 
@@ -103,7 +103,9 @@ Other optional descriptor members are `probeModels`, `probeServingWindows` (per-
 
 The built-in `lmstudio` adapter is an example of one canonical descriptor. It declares no aliases,
 so registry lookup, listing and persisted configuration all use `lmstudio`; `lmstudio-native`
-is not a registered runtime id. The probe first requires the exact `/lmstudio-greeting` body for
+is not a registered runtime id. A target that still names it, or `ollama-native`, stays
+unregistered, and the refusal names the replacement runtime
+([retired-runtimes.ts](../../src/domains/providers/retired-runtimes.ts)). The probe first requires the exact `/lmstudio-greeting` body for
 a directly configured target. It lists keys, loaded instance ids, capabilities, and echoed load
 configuration through `GET /api/v1/models` (<https://lmstudio.ai/docs/developer/rest/list>), falls
 back to `/api/v0/models` for older servers, and uses `/v1/models` only when neither native model
@@ -216,7 +218,7 @@ Clio Coder supports diverse thinking mechanisms. If your model family uses a cus
 | `on-off` | The runtime exposes a binary thinking switch rather than graduated effort. |
 | `always-on` | The model cannot disable reasoning; Clio reports the effective level as forced and allows extra completion headroom where required. |
 
-Wire formats such as `anthropic-extended`, `qwen-chat-template`, and `deepseek-r1` are values of the `thinkingFormat` capability flag, which a profile declares under `claims.capabilities`. Runtime API families such as `openai-completions` and `ollama-native` are separate descriptor fields; neither set is a valid value for `behavior.thinking.mechanism`. Per-mode sampling presets are the one family fact that still lives in the sampling catalog under `quirks.sampling`; a catalog entry's `capabilities` and `quirks.thinking` are not read.
+Wire formats such as `anthropic-extended`, `qwen-chat-template`, and `deepseek-r1` are values of the `thinkingFormat` capability flag, which a profile declares under `claims.capabilities`. Runtime API families such as `openai-completions` and `ollama-native` (the `ollama` runtime's `apiFamily`, not a runtime id) are separate descriptor fields; neither set is a valid value for `behavior.thinking.mechanism`. Per-mode sampling presets are the one family fact that still lives in the sampling catalog under `quirks.sampling`; a catalog entry's `capabilities` and `quirks.thinking` are not read.
 
 ---
 

@@ -519,7 +519,7 @@ async function runWait(
 			if (elapsed >= timeoutMs) {
 				return {
 					kind: "ok",
-					output: `wait timed out after ${timeoutMs}ms: ${assignment ? "assignment" : "run"} ${runId} is still ${assignment?.status ?? run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed — cancelling discards its work.`,
+					output: `wait timed out after ${timeoutMs}ms: ${assignment ? "assignment" : "run"} ${runId} is still ${assignment?.status ?? run.status} and keeps running normally. Wait again or collect later. Only steer(action="cancel") if the result is no longer needed: cancelling discards its work.`,
 					details: {
 						mode: "wait",
 						runId,

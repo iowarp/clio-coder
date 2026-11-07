@@ -97,7 +97,7 @@ function lineCount(text: string): number {
 function observationMarker(toolName: string, text: string): string {
 	const preview = text.trim().replace(/\s+/g, " ").slice(0, 160);
 	const suffix = preview.length > 0 ? ` Preview: ${preview}` : "";
-	return `[Observation masked: ${toolName} output was ${lineCount(text)} lines, ${text.length} chars - contents masked to save context. Re-run the tool for current content.]${suffix}`;
+	return `[Observation masked: ${toolName} output was ${lineCount(text)} lines, ${text.length} chars; contents masked to save context. Re-run the tool for current content.]${suffix}`;
 }
 
 function maskedToolResult(original: unknown, marker: string): Record<string, unknown> {

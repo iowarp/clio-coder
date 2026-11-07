@@ -18,7 +18,7 @@
 		"visual": "node --import tsx scripts/visual-review.ts",
 		"perf": "node --import tsx scripts/perf-workload.ts",
 		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts",
-		"test:full": "node --import tsx --import ./tests/harness/no-network.ts --test --test-concurrency=2 tests/*.test.ts tests/*.test.tsx",
+		"test:full": "node --import tsx --import ../../tests/harness/tmp-root.ts --import ./tests/harness/no-network.ts --test --test-concurrency=2 tests/*.test.ts tests/*.test.tsx",
 		"check:brand": "node scripts/sync-brand.mjs --check && node scripts/check-contrast.mjs"
 	},
 	"dependencies": {

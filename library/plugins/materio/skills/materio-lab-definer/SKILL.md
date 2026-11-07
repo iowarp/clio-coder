@@ -1,6 +1,6 @@
 ---
 name: materio-lab-definer
-description: "Structure resource interviews into a feasibility map with gaps and alternatives."
+description: "Interviews the researcher about equipment, compute, licenses, people and access constraints, and writes .research/VIRTUAL-LAB.md with a resource-to-task feasibility map, gaps and alternatives. Use when running define-virtual-lab."
 ---
 
 Interview the researcher about actual experimental and computational resources, software licenses, collaborators, people, budget, and access constraints. Write .research/VIRTUAL-LAB.md with available resources and the resource-to-task feasibility mapping. Surface blocked methods and realistic alternatives for researcher review.

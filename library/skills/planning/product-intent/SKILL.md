@@ -7,7 +7,7 @@ triggers:
   - problem-first PRD
   - define a falsifiable product hypothesis
   - greenfield product intent
-version: 0.4.3
+version: 0.4.4
 license: Apache-2.0
 allowed-tools:
   - read
@@ -52,8 +52,8 @@ any call is refused as an unregistered tool rather than answered, every
 time; calling it again will not produce a different result. Treat the
 first refusal exactly like the user saying "just write it" (see "If
 the user declines the interview" below), and apply that treatment from
-wherever it happened onward — Step 0's evidence check included, not just
-the five clusters: state the question, your best evidence-grounded answer
+wherever it happened onward (Step 0's evidence check included, not just
+the five clusters): state the question, your best evidence-grounded answer
 (or, absent evidence, the most defensible product default) and the
 reasoning, mark it `assumed — confirm`, and move to the next step. Never
 invent evidence to back an assumption; one with nothing behind it stays an
@@ -122,7 +122,7 @@ and under-argue value.
 ## Generate
 
 Write to `docs/<kebab-slug>.prd.md` (slug from the core idea; repo root if
-no `docs/`; a user-supplied path always wins). Never hardcode `PRD.md` — a
+no `docs/`; a user-supplied path always wins). Never hardcode `PRD.md`; a
 second PRD must not overwrite the first. Sections, scannable, product only:
 when you write the document, read references/prd-sections.md for the list.
 
@@ -137,7 +137,7 @@ outcome-shaped metrics · explicit non-goals · zero engineering decisions.
 
 ## Red flags
 
-- Reaching Generate without ever attempting Step 0 or the first cluster —
+- Reaching Generate without ever attempting Step 0 or the first cluster;
   the decline/headless treatment is a fallback for a gate that ran and came
   back empty, not a license to skip the loop from the start.
 - Reaching for `bash` to grep or count-check the written PRD: `bash` is not

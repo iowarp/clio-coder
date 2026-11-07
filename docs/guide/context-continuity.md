@@ -83,7 +83,9 @@ Sentences in which you asked Clio Coder to remember something (starting `remembe
 
 With `context.memory.observations.enabled`, the summarizer request can carry prepared observation notes in place of the history they cover, but only when the substituted request fits and is smaller than the ordinary one; see [Prepare observation notes for compaction](proactive-memory.md#prepare-observation-notes-for-compaction).
 
-The summarizer runs on the chat route unless `context.compaction.model` names a `target/model` reference that matches exactly one configured model. It always runs with thinking off, passes the session's information-flow admission, and waits for paid-request admission when its route is priced by target rates or the catalog. The summary and its usage stay attributed to the executing target and model.
+The summarizer runs on the chat route unless `context.compaction.model` names a `target/model` reference that matches exactly one configured model. The portable summary request runs with thinking off, passes the session's information-flow admission, and waits for paid-request admission when its route is priced by target rates or the catalog. The summary and its usage stay attributed to the executing target and model.
+
+When the summary model is the chat model and the provider still holds the conversation in its prompt cache, Clio can ask for the summary inside that cached prefix instead. The live call resends the next turn's request unchanged plus one instruction, and keeps the turn's own thinking level so the prefix does not move. Clio takes it only when its estimated cost is below the portable request's input and it fits the window, and falls back to the portable request when it fails or returns no usable checkpoint. [Context engine](../architecture/context-engine.md#3-llm-summary-handoff-last-resort) lists the conditions.
 
 ## Route sources survive compaction
 

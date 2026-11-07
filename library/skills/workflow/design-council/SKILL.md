@@ -7,7 +7,7 @@ triggers:
   - get multiple expert perspectives
   - weigh the architecture options
   - what would experts say
-version: 0.6.3
+version: 0.6.4
 license: Apache-2.0
 allowed-tools:
   - dispatch
@@ -40,7 +40,7 @@ a ritual: if experts would agree, do not convene it.
 **Headless is the enforced default, not a suggestion.** `ask_user` is not
 registered in a headless run, so the single question Step 1 asks is refused as
 an unregistered tool rather than answered. Treat that refusal (or skip the
-call and reason from this paragraph directly — one is not more valid than the
+call and reason from this paragraph directly; one is not more valid than the
 other) as the fixed answer **quick mode: exactly three perspectives, exactly
 one round (Positions) plus synthesis.** Do not compose four or five
 perspectives headlessly and do not run a Responses or Convergence round
@@ -53,7 +53,7 @@ to raise if the topic seems to deserve more.
 one `dispatch` call with all of them in `tasks` and `mode="parallel"`. If
 that call comes back admission-denied for endpoint or target capacity, retry
 the identical `tasks` batch in one dispatch call with `mode="sequential"`
-instead — the tool runs them one after another itself. Never split a round
+instead; the tool runs them one after another itself. Never split a round
 into several separate one-task `dispatch` calls made one at a time waiting on
 each result before deciding the next. Do not call `dispatch(list:true)` to
 probe capacity first.
@@ -65,13 +65,13 @@ An absolute path token in briefing/task text with no declared `intent` is
 rejected as `legacy_scope_path_absolute`.
 
 A dispatch call's own synchronous result already carries every worker's
-output — do not follow it with a `bash`/`read` pass over the receipt file on
+output. Do not follow it with a `bash`/`read` pass over the receipt file on
 disk to re-read what you already have. The steps below are the plan; do not
 open a `tasks` list for them. This skill's tool surface is exactly
 `dispatch`, `read`, `grep`, `find`, `ls`, `context`, `code_nav`, and
 `ask_user` (`context` and `ask_user` are always available regardless).
-`tasks` and `bash` both sit outside it and any call to either is refused —
-locate files with `find`/`ls`, not `bash find`/`bash ls`; inspect a receipt
+`tasks` and `bash` both sit outside it and any call to either is refused.
+Locate files with `find`/`ls`, not `bash find`/`bash ls`; inspect a receipt
 with `read`, not `bash cat`. This skill never writes: `write` and `artifact`
 are not on its surface, so the synthesis in Step 4 is chat output, never a
 file.
@@ -80,7 +80,7 @@ file.
 
 Before composing anyone, ask: would credible experts actually disagree on the
 answer? If every perspective you can imagine picks the same option and differs
-only in caveats, stop here — do not dispatch anything. Say the council is not
+only in caveats, stop here and do not dispatch anything. Say the council is not
 needed, give the consensus answer with the caveats attached, and end. Do not
 dispatch a round "just to confirm" a consensus call you already reached.
 

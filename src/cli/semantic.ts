@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import type { ClioSettings, updateSettings } from "../core/config.js";
 
 const SEMANTIC_HELP = `clio-coder semantic configure --target <id> --model <id> --asset-identity <identity>
-                            [--projector-identity <identity>] [--modality text|image|audio|mixed ...] [--qualify] [--background]
+                            [--projector-identity <identity>] [--profile <id>] [--modality text|image|audio|mixed ...]
+                            [--qualify] [--background]
 clio-coder semantic inbox add <root> --id <id> [--scope project|user]
 clio-coder semantic inbox list
 clio-coder semantic inbox remove <id>
@@ -22,7 +23,7 @@ Reembed is an explicit offline job; changing profiles never migrates live data.
 Search returns attributed candidates; inspect original sources before making claims.
 
 Search filters:
-  --kind <kind>       source kind; repeat to include multiple kinds
+  --kind <kind>       code, wiki, memory, evidence, inbox or recording; repeatable
   --project <id>      authorized project identity
   --run <id>          parent run identity
   --since <ISO date>  earliest source date (inclusive)

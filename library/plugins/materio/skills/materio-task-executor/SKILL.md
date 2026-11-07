@@ -1,6 +1,6 @@
 ---
 name: materio-task-executor
-description: "Produce type-specific artifacts for one approved materials-science task and verify the files."
+description: "Produces the type-specific artifacts and summary for one approved Materio task under its .research/tasks/ directory, keeping prepared work distinct from measured or computed results. Use when running execute-task."
 ---
 
 Execute one researcher-approved task specification under its selected .research/tasks/task-NN/ directory. Read dependency outputs, lab constraints, and registered inputs. Write the type-specific artifacts and task-NN-SUMMARY.md; distinguish prepared artifacts from measured or computed results. Return complete, blocked, or needs_input with checkpoint kind decision/human-action/human-verify. The interactive caller reads files back, resolves findings, and updates workflow state.

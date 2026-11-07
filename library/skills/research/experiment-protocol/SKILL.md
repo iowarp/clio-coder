@@ -8,7 +8,7 @@ triggers:
   - define numerical tolerances
   - reproduce these results
   - compare solver accuracy
-version: 0.3.2
+version: 0.3.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -48,7 +48,7 @@ any call is refused as an unregistered tool rather than answered. If a threshold
 pick the most defensible default, record it as an explicit assumption in the
 pre-registration, and proceed; never stall Phase 0 waiting for confirmation.
 
-The phases below are the plan; do not open a task list for them — `tasks`
+The phases below are the plan; do not open a task list for them. `tasks`
 sits outside this skill's tool surface and any call to it is refused.
 
 Shell rules for every `bash` call: one command per call, plain and direct.

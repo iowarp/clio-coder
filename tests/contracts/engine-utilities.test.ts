@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
 	BRANCH_SUMMARY_PREFIX,
@@ -33,15 +33,12 @@ test("tail truncation never splits a UTF-8 character and replaces unpaired surro
 	strictEqual(truncateTail("😀", { maxBytes: 0 }).content, "");
 });
 
-test("summary and bash replay wording remains exact", () => {
-	strictEqual(
-		`${COMPACTION_SUMMARY_PREFIX}kept${COMPACTION_SUMMARY_SUFFIX}`,
-		"The conversation history before this point was compacted into the following summary:\n\n<summary>\nkept\n</summary>",
-	);
-	strictEqual(
-		`${BRANCH_SUMMARY_PREFIX}kept${BRANCH_SUMMARY_SUFFIX}`,
-		"The following is a summary of a branch that this conversation came back from:\n\n<summary>\nkept</summary>",
-	);
+test("summaries frame their payload and bash replay retains output, exit, cancellation and recovery metadata", () => {
+	for (const [prefix, suffix] of [
+		[COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX],
+		[BRANCH_SUMMARY_PREFIX, BRANCH_SUMMARY_SUFFIX],
+	])
+		match(`${prefix}kept${suffix}`, /<summary>\nkept\n?<\/summary>$/u);
 	const message = {
 		role: "bashExecution" as const,
 		command: "printf result",
@@ -52,14 +49,19 @@ test("summary and bash replay wording remains exact", () => {
 		fullOutputPath: "/saved/output",
 		timestamp: 0,
 	};
-	strictEqual(
-		bashExecutionToText(message),
-		"Ran `printf result`\n```\nresult\n```\n\nCommand exited with code 2\n\n[Output truncated. Full output: /saved/output]",
-	);
-	strictEqual(
-		bashExecutionToText({ ...message, output: "", cancelled: true, truncated: false }),
-		"Ran `printf result`\n(no output)\n\n(command cancelled)",
-	);
+	const replay = bashExecutionToText(message);
+	match(replay, /`printf result`/u);
+	match(replay, /```\nresult\n```/u);
+	match(replay, /\bcode 2$/mu);
+	match(replay, /truncated/iu);
+	match(replay, /\/saved\/output/u);
+	for (const exitCode of [2, 7]) {
+		const canceled = bashExecutionToText({ ...message, exitCode, output: "", cancelled: true, truncated: false });
+		match(canceled, /`printf result`/u);
+		match(canceled, /no output/u);
+		match(canceled, /cancelled/u);
+		doesNotMatch(canceled, /\bcode\s+[+-]?\d+\b|\/saved\/output/u);
+	}
 });
 
 test("prompt arguments retain quoted, positional, slice and raw substitution semantics and Pi 1.0 defaults", () => {

@@ -4998,7 +4998,7 @@ export function createDispatchBundle(
 	}
 
 	function requireLedger(): Ledger {
-		if (!ledger) throw new Error("dispatch: ledger not initialised");
+		if (!ledger) throw new Error("dispatch: ledger not initialized");
 		return ledger;
 	}
 
@@ -10463,7 +10463,7 @@ export function createDispatchBundle(
 					// #425: detached permission requests belong to their assignments, beyond a foreground cancel.
 					for (const grant of grantBroker.list({ sessionId, state: "pending" })) {
 						if (!detachedAssignments.has(grant.rootRunId) && active.get(grant.runId)?.detached !== true) {
-							grantBroker.revokeRun(grant.runId, "the owning main turn was canceled");
+							grantBroker.revokeRun(grant.runId, "the owning main turn was cancelled");
 						}
 					}
 				}),
@@ -11180,7 +11180,7 @@ export function createDispatchBundle(
 						runId: finishedRunId,
 						startedAt: null,
 						elapsedMs: null,
-						reason: `scheduled retry ${retry.attempt} canceled by operator`,
+						reason: `scheduled retry ${retry.attempt} cancelled by the operator`,
 					},
 					runContext(finishedRunId),
 				);
@@ -11194,7 +11194,7 @@ export function createDispatchBundle(
 			if (!run) return;
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;
-			grantBroker.revokeRun(run.runId, "the run was canceled");
+			grantBroker.revokeRun(run.runId, "the run was cancelled");
 			// A timeout kill rides the abort path but must not launder into an
 			// operator abort: record the cause so the receipt names the timeout.
 			if (reason) {

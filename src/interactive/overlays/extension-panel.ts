@@ -146,7 +146,7 @@ export function openExtensionPanel(
 			width: 88,
 			markerId: "extension-panel",
 			title: extensionOwnerLabel(owner),
-			footerHint: buildHint([{ key: "Up/Down", verb: "scroll" }]),
+			footerHint: buildHint([{ key: "↑↓", verb: "scroll" }]),
 		},
 	);
 	return handle;

@@ -1,6 +1,6 @@
 ---
 name: citation-check
-description: Verify citation keys, DOIs, and bibliography entries against source files in research software. Load when checking academic references, bibtex formatting, or paper citations.
+description: Verify citation keys, DOIs, and bibliography entries against source files in research software. Load when checking academic references, BibTeX formatting, or paper citations.
 version: 1.0.0
 license: Apache-2.0
 clio-coder:

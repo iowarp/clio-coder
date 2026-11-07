@@ -192,7 +192,7 @@ export const askUserParameters: TSchema = Type.Object({
 				value: Type.String({ description: "Decision value." }),
 				label: Type.Optional(Type.String({ description: "Human-readable label." })),
 			}),
-			{ description: "For action=complete: compact decisions." },
+			{ description: `For action=complete: compact decisions, at most ${MAX_DECISIONS}.` },
 		),
 	),
 	summary: Type.Optional(Type.String({ description: "Short closeout summary for action=complete." })),

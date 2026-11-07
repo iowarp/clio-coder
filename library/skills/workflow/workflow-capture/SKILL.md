@@ -7,7 +7,7 @@ triggers:
   - turn this into a reusable workflow
   - distill this repeated process
   - create a skill from this session
-version: 0.4.5
+version: 0.4.6
 license: Apache-2.0
 allowed-tools:
   - read
@@ -47,7 +47,7 @@ whichever workflow just ran in this session. Everything else in the request
 not more arguments.
 
 A live operator can answer Phase 2's interview and Phase 4's design gate for
-real - treat a real, answered `ask_user` reply as proof an operator is
+real. Treat a real, answered `ask_user` reply as proof an operator is
 present and continue asking one question per round. There is no operator in
 a headless run: `ask_user` is not registered, so any call is refused as an
 unregistered tool rather than answered. When that
@@ -57,13 +57,13 @@ assumed-confirm monologue (state the question, give your best-grounded
 answer or design choice, mark it `assumed - confirm`) and proceed straight
 through to Phase 5, the same way as a live "looks fine, write it." A skill
 file is a plain, reversible artifact under version control, not an
-irreversible external action - write it and say so in the final reply,
+irreversible external action. Write it and say so in the final reply,
 rather than stopping at the gate with nothing produced.
 
 `tasks` sits outside this skill's tool surface (`read`, `grep`, `find`,
 `ls`, `context`, `write`, `ask_user`) and any call is refused; the six
 phases above are the plan, not a task list. This skill never has `bash` or
-`git`, so it never commits or pushes the file it writes - say so in the
+`git`, so it never commits or pushes the file it writes; say so in the
 final reply and let the user commit it.
 
 ## Phase 1 - Reconstruct From Evidence
@@ -104,15 +104,15 @@ No skill file is written before the user approves. "Looks fine, but change X"
 means revise and re-present. In a headless run with no operator (see
 Arguments), treat the design as approved once it is internally consistent
 with Phase 2's decisions, mark it `assumed - confirm` in your final reply,
-and proceed to Phase 5 - do not stop the run with a presented-but-unwritten
+and proceed to Phase 5. Do not stop the run with a presented-but-unwritten
 design.
 
 ## Phase 5 - Create
 
 Write `SKILL.md` under `draft-skills/<approved-name>/`, outside protected active
-skill and installed package roots, with the
-frontmatter contract - a triggers-only third-person description, and
-the pruning pass - with `requires: [skill:<name>]` for every skill the
+skill and installed package roots. Follow skill-authoring's
+frontmatter contract (a triggers-only third-person description) and
+its pruning pass, and add `requires: [skill:<name>]` for every skill the
 overlap check referenced. Do not try to load skill-authoring's own file mid-run
 to check this: only one skill can be active at a time, and a second
 `context(scope="skills", name="skill-authoring")` call is refused while this
@@ -131,8 +131,8 @@ offer a recipe sketch for the agents surface, but do not write recipe files.
 
 Record one RED-GREEN scenario agreed with the user: the prompt, and the
 observable behavior that distinguishes with-skill from without. `clio-coder
-library validate draft-skills/<approved-name>/SKILL.md` needs `bash`, which is outside this skill's tool surface -
-never attempt it; instead `read` the file back and confirm the frontmatter
+library validate draft-skills/<approved-name>/SKILL.md` needs `bash`, which is outside this skill's tool surface,
+so never attempt it. Instead `read` the file back and confirm the frontmatter
 contract from Phase 5 by eye (required keys present, `allowed-tools` entries
 canonical lowercase, under the line budget), and say plainly that a real
 `clio-coder library validate` pass is still owed once bash is available.

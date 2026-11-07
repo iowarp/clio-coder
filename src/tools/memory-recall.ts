@@ -1,6 +1,11 @@
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
-import { MEMORY_RECALL_MAX_LIMIT, recallMemory, renderMemoryRecall } from "../domains/memory/recall.js";
+import {
+	MEMORY_RECALL_DEFAULT_LIMIT,
+	MEMORY_RECALL_MAX_LIMIT,
+	recallMemory,
+	renderMemoryRecall,
+} from "../domains/memory/recall.js";
 import type { TaskMemorySnapshot } from "../domains/memory/task-bank.js";
 import type { MemoryRecord, MemoryRetrievalOptions } from "../domains/memory/types.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
@@ -29,7 +34,11 @@ export function createMemoryRecallTool(deps: MemoryRecallDeps): ToolSpec {
 		parameters: Type.Object({
 			query: Type.String({ minLength: 1, description: "Words to match against memory text." }),
 			limit: Type.Optional(
-				Type.Integer({ minimum: 1, maximum: MEMORY_RECALL_MAX_LIMIT, description: "Most entries to return." }),
+				Type.Integer({
+					minimum: 1,
+					maximum: MEMORY_RECALL_MAX_LIMIT,
+					description: `Most entries to return (default ${MEMORY_RECALL_DEFAULT_LIMIT}).`,
+				}),
 			),
 		}),
 		baseActionClass: "read",

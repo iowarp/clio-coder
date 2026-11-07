@@ -99,6 +99,9 @@ diagnostic agents. Nothing in these reads fetches a remote source or activates
 a component.
 Skills lists discovered runtime skills, including unmanaged local files.
 Inventory is the fixed, body-free skill read for GUI hosts.
+Sync fast-forwards the library catalog from its Git remote and push pushes to
+it; both need integrations.library.sync on and the remote confirmed with
+remote confirm <url>.
 `;
 /** One short operator label per origin; details stay in the JSON record. */
 function originLabel(origin: LibraryOrigin): string {

@@ -309,3 +309,15 @@ This document defines the core architectural concepts and terminology used throu
 ### 77. Workspace Snapshot
 - **Definition**: A private Git commit of the work tree that Clio writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. It also pins HEAD, the stash entries and any branch a delete removes under `refs/clio-coder/snapshots/<session>/pins/<n>/`. `/rewind` restores files from one. Controlled by `safety.snapshots`.
 - **Owning Type**: `WorkspaceSnapshots` in [store.ts](../../src/domains/workspace-snapshots/store.ts).
+
+### 78. Source Pack
+- **Definition**: The single file, `dist/assets/source.pack`, that holds Clio Coder's own `.ts` source in an installed npm package, one brotli stream per file behind a JSON index. `read`, `code_nav` and the component inventory open packed files; `grep`, `find` and `bash` do not see them. A built source checkout has a pack too, but its real files take precedence. See [What the npm package ships](installation-and-lifecycle.md#8-what-the-npm-package-ships).
+- **Owning Type**: `readPackedSource` in [source-pack.ts](../../src/core/source-pack.ts).
+
+### 79. Pinned Asset
+- **Definition**: An optional file Clio downloads on first use from a fixed URL, checks against a pinned sha256 and caches under the cache root: the Ruby and C# code map grammars, the `data` tool's HDF5 and Parquet readers, and the Julia-1 tokenizer. A failed grammar or reader download is recorded beside the cache path so no process retries it for 10 minutes; when that record cannot be written, the next process tries again at once. See [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
+- **Owning Type**: `PinnedAsset` in [pinned-asset.ts](../../src/core/pinned-asset.ts).
+
+### 80. Sweep
+- **Definition**: A Slurm parameter sweep run as one experiment by the `hpc-sweep` skill: a job array planned from a sweep file, dry-run by default, submitted only on the operator's word, checked run by run with a verify catalog check that declares `runs`, and tabulated with every run's verdict. See [Parameter sweeps](slurm.md#parameter-sweeps).
+- **Owning Type**: The `runs` field of a verify catalog check in [catalog.ts](../../src/tools/verify/catalog.ts).

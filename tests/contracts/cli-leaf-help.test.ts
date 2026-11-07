@@ -64,7 +64,7 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 
 describe("telemetry share names the flag it refuses", { concurrency: 2 }, () => {
 	for (const [args, refusal] of [
-		[["telemetry", "share", "--bogus"], /error: unknown flag --bogus\n/],
+		[["telemetry", "share", "--bogus"], /error: unknown flag: --bogus\n/],
 		[["telemetry", "share", "--repo", "a", "--repo", "b"], /error: repeated flag --repo\n/],
 	] as const) {
 		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {

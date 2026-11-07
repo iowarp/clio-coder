@@ -52,7 +52,7 @@ async function probeCodexCli(ctx: ProbeContext): Promise<ProbeResult> {
 
 const codexCliRuntime = createExternalCliRuntime({
 	id: "codex-cli",
-	displayName: "Codex CLI — managed headless delegation",
+	displayName: "Codex CLI (managed headless)",
 	authNotice: "Uses the installed `codex` command and its own login. Clio does not store Codex CLI credentials.",
 	defaultModel: CODEX_CLI_DEFAULT_MODEL,
 	binaryName: "codex",

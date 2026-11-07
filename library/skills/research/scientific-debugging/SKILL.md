@@ -8,7 +8,7 @@ triggers:
   - diagnose NaNs
   - debug with falsifiable hypotheses
   - scientific root cause
-version: 0.3.2
+version: 0.3.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -49,12 +49,12 @@ unregistered tool rather than answered. If the goal,
 a fault-class split, or a ranking call is ambiguous, state your best reading
 in Step 1 or Step 3 and proceed; never stall a step waiting for confirmation.
 
-The Loop below is the plan; do not open a task list for it — `tasks` sits
+The Loop below is the plan; do not open a task list for it. `tasks` sits
 outside this skill's tool surface and any call to it is refused.
 
 Shell rules for every `bash` call: one command per call, plain and direct.
 Never use `$(...)` or backticks; they trigger an approval gate that ends a
-headless run. This skill has no `write`/`edit` tool — the structured-
+headless run. This skill has no `write`/`edit` tool. The structured-
 investigation file in the Tiers section below is written with a `bash`
 heredoc (`cat > file <<'EOF' ... EOF`), never through an edit tool that
 isn't in this skill's surface.

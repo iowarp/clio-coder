@@ -1121,7 +1121,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// Keep the outcome detail, but emit that diagnostic only at the timer.
 		stderrMessage =
 			settlement.live.length > 0
-				? `clio-coder run: canceling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
+				? `clio-coder run: cancelling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
 				: null;
 		if (options.deadline?.expired() !== true) {
 			stderrMessage = [terminal.failureMessage, stderrMessage].filter(Boolean).join("\n") || null;
