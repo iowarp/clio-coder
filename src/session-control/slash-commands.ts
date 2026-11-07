@@ -26,6 +26,7 @@ import {
 } from "../domains/dispatch/failure-headline.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
+import { classifyVerifiability, verifiabilityRoute } from "../domains/evidence/verifiability.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import { isExtensionCommandToken, promptRefs } from "../domains/extensions/operator-commands.js";
 import type { OperatorCommandOutput, OperatorExtensions } from "../domains/extensions/operator-extensions.js";
@@ -53,6 +54,7 @@ import type {
 } from "../domains/resources/index.js";
 import { parseSkillCommand, SKILL_SURFACE_CLEAR_ARG } from "../domains/resources/index.js";
 import { isLibraryKind } from "../domains/resources/library-types.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
@@ -690,7 +692,11 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 			agentId: ORACLE_AGENT_ID,
 			runId: receipt.runId,
 			outcome: receipt.outcome,
-			text: `${formatOracleAnswer(parsed)}\n\n${oracleIndependenceLine(mainModel.model, receipt.targetId, receipt.wireModelId)}`,
+			text: [
+				formatOracleAnswer(parsed),
+				oracleIndependenceLine(mainModel.model, receipt.targetId, receipt.wireModelId),
+				oracleVerifiabilityLine(question, ctx.getAutonomy?.() ?? "default"),
+			].join("\n\n"),
 		});
 		if (note === null) {
 			ctx.notice("error", `/oracle run ${receipt.runId} produced no text to share`);
@@ -744,6 +750,23 @@ function oracleIndependenceLine(mainModel: string | null, advisorTarget: string,
 			return `Advisor: ${advisor}, the same model family as the main model; its agreement is weak corroboration, not independent review.`;
 		default:
 			return `Advisor: ${advisor}; whether it shares the main model's family is unknown, so do not count its agreement as independent.`;
+	}
+}
+
+/**
+ * What the main agent does with the answer. A question a check settles runs
+ * closed-loop: the opinion is a hypothesis until the check runs. A judgment
+ * call goes to the operator, or under yolo the advisor's view stands in.
+ */
+function oracleVerifiabilityLine(question: string, autonomy: AutonomyLevel): string {
+	const verifiability = classifyVerifiability(question);
+	switch (verifiabilityRoute(verifiability.kind, autonomy)) {
+		case "closed-loop":
+			return `Verifiability: ${verifiability.kind}, ${verifiability.reason}. Run that check and act on its result; until it runs, this answer is a hypothesis.`;
+		case "second-opinion":
+			return `Verifiability: judgment, ${verifiability.reason}. Autonomy is yolo, so this advice stands in for the operator; weigh it by the advisor line above.`;
+		default:
+			return `Verifiability: judgment, ${verifiability.reason}. Confirm the decision with the operator before acting on it.`;
 	}
 }
 
@@ -1133,6 +1156,8 @@ export interface SessionCommandContext {
 	getChatModel?: () => string | null | undefined;
 	/** `fleet.agentProfiles`: recipes the operator bound to a worker profile. */
 	getFleetAgentProfiles?: () => Readonly<Record<string, string>>;
+	/** The session's effective autonomy level. */
+	getAutonomy?: () => AutonomyLevel;
 	/**
 	 * Apply a resolved model reference, or hand it to the scope dialog. "pending"
 	 * means the operator has yet to choose session or global and nothing has

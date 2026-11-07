@@ -16,6 +16,7 @@ export const coreTests = [
 	"memory-observation-envelope",
 	"dispatch-memory-scope",
 	"oracle-second-opinion",
+	"verifiability-routing",
 	"mux-private-host",
 	"memory-route-redaction",
 	"prior-session-hint",

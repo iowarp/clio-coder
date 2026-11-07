@@ -333,6 +333,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "clearSkillSurface"
 			| "exportShareArchive"
 			| "getAgentRoleFacts"
+			| "getAutonomy"
 			| "getChatModel"
 			| "getChatTarget"
 			| "getDecisionBoard"
@@ -646,6 +647,7 @@ function sessionCommandContext(
 		...(host.getChatTarget ? { getChatTarget: host.getChatTarget } : {}),
 		...(host.getChatModel ? { getChatModel: host.getChatModel } : {}),
 		...(host.getFleetAgentProfiles ? { getFleetAgentProfiles: host.getFleetAgentProfiles } : {}),
+		...(host.getAutonomy ? { getAutonomy: host.getAutonomy } : {}),
 		...(host.isTurnInFlight ? { isTurnInFlight: host.isTurnInFlight } : {}),
 		...(host.standingTurnConstraints ? { standingTurnConstraints: host.standingTurnConstraints } : {}),
 		...(host.jobs ? { jobs: host.jobs } : {}),
