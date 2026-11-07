@@ -94,6 +94,38 @@ function treeHash(): string[] {
 	return rows.sort();
 }
 
+/** The ceiling the ACP server reported for its new session. */
+let acpCeiling: unknown;
+
+/** One ACP client exchange: initialize, a new session, one prompt, then end of input. */
+function acpExchange(child: ReturnType<typeof spawn>): void {
+	const send = (id: number, method: string, params: unknown) =>
+		child.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+	let buffer = "";
+	child.stdout?.on("data", (chunk) => {
+		buffer += String(chunk);
+		let newline = buffer.indexOf("\n");
+		while (newline >= 0) {
+			const line = buffer.slice(0, newline).trim();
+			buffer = buffer.slice(newline + 1);
+			newline = buffer.indexOf("\n");
+			if (line.length === 0) continue;
+			const message = JSON.parse(line) as {
+				id?: number;
+				method?: string;
+				result?: { sessionId?: string; _meta?: Record<string, unknown> };
+			};
+			if (message.method !== undefined) continue;
+			if (message.id === 2) acpCeiling = message.result?._meta?.["clio-coder/ceiling"];
+			if (message.id === 1) send(2, "session/new", { cwd: work, mcpServers: [] });
+			else if (message.id === 2 && message.result?.sessionId)
+				send(3, "session/prompt", { sessionId: message.result.sessionId, prompt: [{ type: "text", text: "Say done." }] });
+			else child.stdin?.end();
+		}
+	});
+	send(1, "initialize", { protocolVersion: 1, clientCapabilities: {} });
+}
+
 describe("--read-only leaves a set-up Clio home unchanged", { timeout: 300_000 }, () => {
 	let baseline: string[] = [];
 	it("a writable run sets the home up with a session and its records", async () => {
@@ -111,6 +143,7 @@ describe("--read-only leaves a set-up Clio home unchanged", { timeout: 300_000 }
 		["run --read-only --continue", ["--no-context-files", "run", "--read-only", "--continue", "Say done."]],
 		["run --read-only --agent", ["--no-context-files", "run", "--read-only", "--agent", "coder", "--json", "Say done."]],
 		["doctor", ["doctor"]],
+		["acp --read-only", ["--no-context-files", "acp", "--read-only"], acpExchange],
 	];
 	for (const [name, args, stdin] of surfaces) {
 		it(`${name} writes nothing to it`, async () => {
@@ -124,6 +157,7 @@ describe("--read-only leaves a set-up Clio home unchanged", { timeout: 300_000 }
 				ok(fixture.requests.length > requests, `${name} reached the model`);
 			}
 			deepEqual(treeHash(), baseline, `${name} changed the Clio home`);
+			if (name.startsWith("acp")) deepEqual(acpCeiling, { readOnly: true }, "every session is held read-only");
 		});
 	}
 

@@ -303,15 +303,15 @@ async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Prom
 }
 
 /**
- * `run --read-only` refreshes none of Clio's caches, the bytecode cache included,
- * but the command only enters read-only mode after its module graph loaded,
- * which is too late for this process's enable. The run parser takes every
- * `--read-only` token as the flag (no value flag accepts a dash-led value), so
- * the token itself is the decision, read before anything is enabled. Leaving
+ * `run --read-only` and `acp --read-only` refresh none of Clio's caches, the
+ * bytecode cache included, but the command only enters read-only mode after its
+ * module graph loaded, which is too late for this process's enable. Both parsers
+ * take a `--read-only` token as the flag, so the token itself is the decision,
+ * read before anything is enabled. Leaving
  * the cache unsettled is enough: once the run enters read-only mode, a later
  * enable, such as the worker spawn path's, settles it disabled.
  */
-async function enableRunCompileCache(subArgs: ReadonlyArray<string>): Promise<void> {
+async function enableReadOnlyAwareCompileCache(subArgs: ReadonlyArray<string>): Promise<void> {
 	if (subArgs.includes("--read-only")) return;
 	await enableBootCompileCache(subArgs);
 }
@@ -329,7 +329,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"acp",
 		async (subArgs, bootOptions) => {
-			await enableBootCompileCache(subArgs);
+			await enableReadOnlyAwareCompileCache(subArgs);
 			return (await import("./acp.js")).runAcpCommand(subArgs, bootOptions);
 		},
 	],
@@ -392,7 +392,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"run",
 		async (subArgs, bootOptions) => {
-			await enableRunCompileCache(subArgs);
+			await enableReadOnlyAwareCompileCache(subArgs);
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		},
 	],

@@ -8,7 +8,7 @@ import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--allow-tools NAMES] [--delegate-tools NAMES]
+const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]
 clio-coder acp [--cwd PATH] auth login
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
@@ -21,6 +21,9 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
   --allow-tools NAMES      Limit the session's tools to these comma-separated
                            capabilities, as clio-coder run does; none disables all.
   --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
+  --read-only              Hold every session to the read-only ceiling and write
+                           nothing to the Clio home: no session, run record,
+                           telemetry or cache outlives the process.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains
@@ -31,6 +34,7 @@ interface AcpFlags {
 	cwd?: string;
 	permissionTimeoutMs?: number;
 	toolLimits?: SessionToolLimits;
+	readOnly?: true;
 }
 
 /** Parsed flags, or the message explaining why the invocation is not usable. */
@@ -52,6 +56,10 @@ export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 			}
 			flags.permissionTimeoutMs = ms;
 			index += 1;
+			continue;
+		}
+		if (arg === "--read-only") {
+			flags.readOnly = true;
 			continue;
 		}
 		if (arg === "--allow-tools" || arg === "--delegate-tools") {
@@ -81,6 +89,30 @@ export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
  */
 function resolveAcpCwd(value: string): string {
 	return realpathSync(path.resolve(value));
+}
+
+/** Enters read-only mode for the process, or returns why this home cannot be served read-only. */
+async function enterAcpReadOnly(): Promise<string | null> {
+	const [{ enterReadOnlyMode }, { enterPrivateHomeIfNeverSetUp }, { pendingMigrationIds }] = await Promise.all([
+		import("../core/read-only-mode.js"),
+		import("../core/read-only-home.js"),
+		import("../domains/lifecycle/boot-migrations.js"),
+	]);
+	enterReadOnlyMode();
+	if (enterPrivateHomeIfNeverSetUp() !== null) {
+		process.stderr.write("clio-coder acp: --read-only on a home Clio has not set up; this server keeps nothing\n");
+		return null;
+	}
+	// Migrations rewrite and delete home state, and skipping one leaves strict readers on an old shape.
+	const pending = pendingMigrationIds();
+	if (pending === null) return "--read-only cannot read this home's migration record; run clio-coder doctor";
+	if (pending.length > 0) {
+		return `--read-only cannot apply ${pending.length} pending migration${pending.length === 1 ? "" : "s"} (${pending.join(", ")}); run clio-coder upgrade --post-install, then retry`;
+	}
+	process.stderr.write(
+		"clio-coder acp: --read-only writes nothing to the Clio home; sessions, run records and telemetry are not kept\n",
+	);
+	return null;
 }
 
 export async function runAcpCommand(
@@ -113,7 +145,21 @@ export async function runAcpCommand(
 			return 2;
 		}
 	}
+	if (terminalAuth && flags.readOnly) {
+		printError("auth login saves a credential; run it without --read-only");
+		return 2;
+	}
 	if (terminalAuth) return (await import("./configure.js")).runConfigureCommand(["--quick"]);
+	// Entered before the boot registers its build, opens a session or loads a
+	// skill, so none of them writes to the home. Every session, including one
+	// loaded or forked, is held to the read-only ceiling below.
+	if (flags.readOnly) {
+		const refusal = await enterAcpReadOnly();
+		if (refusal !== null) {
+			printError(refusal);
+			return 1;
+		}
+	}
 	takeOverStdout();
 	try {
 		// Both launch forms serve through the deferred front, so initialize is
@@ -177,7 +223,9 @@ export async function runAcpCommand(
 						...(options.noContextFiles ? { noContextFiles: true } : {}),
 						...(options.noSkills ? { noSkills: true } : {}),
 						...(options.skillPaths && options.skillPaths.length > 0 ? { skillPaths: options.skillPaths } : {}),
-						...(flags.toolLimits === undefined ? {} : { toolLimits: flags.toolLimits }),
+						...(flags.toolLimits === undefined && !flags.readOnly
+							? {}
+							: { toolLimits: { ...flags.toolLimits, ...(flags.readOnly ? { readOnly: true as const } : {}) } }),
 						acp: {
 							transport,
 							handshake,

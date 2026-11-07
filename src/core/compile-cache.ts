@@ -14,7 +14,7 @@
  * root already existing, because read-only commands (`paths`, bare `doctor`)
  * promise to write nothing to a home Clio never set up; a pristine home pays
  * one uncached boot and every initialized install caches from then on. A
- * process in read-only mode for good (`run --read-only`) never enables it:
+ * process in read-only mode for good (`run` or `acp --read-only`) never enables it:
  * the CLI reads `--read-only` from argv before its enable, and the handle
  * itself settles disabled once the mode is entered, which also keeps the
  * injection below out of the workers such a run dispatches. In

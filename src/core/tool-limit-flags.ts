@@ -28,6 +28,7 @@ export interface SessionToolLimits {
 	toolSurfaceSources?: readonly ToolSurfaceSource[];
 	delegatedToolSurfaceSources?: readonly ToolSurfaceSource[];
 	delegatedTools?: readonly string[];
+	readOnly?: true;
 }
 
 export function toolLimitConstraints(
