@@ -15,7 +15,12 @@ import type { ApplicationInputTui } from "../engine/tui.js";
 import { type Component, Container, isKeyRelease, isKeyRepeat, matchesKey, ScrollView, VStack } from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
-import { type ClioKeybindingManager, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
+import {
+	actionKeyLabel,
+	type ClioKeybindingManager,
+	createKeybindingManager,
+	formatKeyLabel,
+} from "./keybinding-manager.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { createBootWelcome } from "./welcome-dashboard.js";
 
@@ -180,10 +185,9 @@ function stageZeroRoot(
 	keybindings: ClioKeybindingManager,
 ): Component {
 	const theme = clioTheme();
-	const heading = createBootWelcome(settings, submitKeyLabel, (action) => {
-		const key = keybindings.isDisabled(action) ? undefined : keybindings.getKeys(action)[0];
-		return key ? formatKeyLabel(key, "") : null;
-	});
+	const heading = createBootWelcome(settings, submitKeyLabel, (action) =>
+		keybindings.isDisabled(action) ? null : actionKeyLabel(action),
+	);
 	const footer: Component = {
 		render: () =>
 			shutdownArmed() ? [theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")] : [""],

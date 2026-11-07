@@ -1,5 +1,5 @@
 import type { Component } from "../engine/tui.js";
-import { truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { truncateToWidth } from "../engine/tui.js";
 import type { QueuedChatMessage } from "../session-control/chat-loop.js";
 import { formatQueueAge, queueEntryMarks, queueSlotWord } from "./overlays/queue-navigator.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
@@ -11,7 +11,6 @@ export interface FollowUpQueuePanel extends Component {
 
 export interface FollowUpQueuePanelOptions {
 	/** Action labels already formatted from the live binding manager. */
-	getDequeueKey?: () => string | undefined;
 	getNavigateKey?: () => string | undefined;
 	getSendNowKey?: () => string | undefined;
 	/** The overlay holding the keyboard, `closed` when the composer has it. */
@@ -37,7 +36,6 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 			skinEpoch(),
 			overlay,
 			held,
-			options.getDequeueKey?.(),
 			options.getNavigateKey?.(),
 			options.getSendNowKey?.(),
 			...messages.map((message) => formatQueueAge(now - message.enqueuedAt)),
@@ -76,19 +74,12 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		}
 		// These are composer keys, so they say nothing while an overlay owns the keyboard.
 		if (overlay === "closed") {
-			const hintRow = (spell: (label: string) => string): string => {
-				const hints: string[] = [];
-				const navigate = options.getNavigateKey?.();
-				if (navigate && navigate.length > 0) hints.push(`[${spell(navigate)}] navigate`);
-				const sendNow = options.getSendNowKey?.();
-				if (sendNow && sendNow.length > 0) hints.push(`[${spell(sendNow)}] send now`);
-				const dequeue = options.getDequeueKey?.();
-				hints.push(`[${dequeue && dequeue.length > 0 ? spell(dequeue) : "see /help"}] all to editor`);
-				return hints.join(" · ");
-			};
-			// A narrow dock keeps every verb by giving up the second spelling of each key.
-			const full = hintRow((label) => label);
-			const row = visibleWidth(full) <= bodyWidth ? full : hintRow((label) => label.split(" · ")[0] ?? label);
+			const navigate = options.getNavigateKey?.();
+			const sendNow = options.getSendNowKey?.();
+			const row = [
+				`[${navigate && navigate.length > 0 ? navigate : "/help"}] review, a restores all`,
+				...(sendNow && sendNow.length > 0 ? [`[${sendNow}] send now`] : []),
+			].join(" · ");
 			lines.push(truncateToWidth(theme.fg("annotation", row), bodyWidth, "…", false));
 		}
 
