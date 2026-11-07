@@ -357,6 +357,12 @@ mount with different paths is unsupported. After applying a returned change
 locally, deliberately update the node's original checkout to the next clean
 baseline before dispatching against it again.
 
+Read-only dispatch does not write a fresh shared-storage challenge. If matching
+clean Git trees cannot be verified without one, launch is refused. Remote Git
+verification disables fsmonitor and optional index writes, and refuses configured
+clean/process filters in the checkout or initialized submodules rather than
+executing them. Inspect the remote Git configuration when this refusal appears.
+
 ## Doctor preflight
 
 A remote node needs a passing recorded check for the current project before

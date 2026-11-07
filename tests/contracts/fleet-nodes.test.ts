@@ -1,15 +1,19 @@
 import { match, strictEqual, throws } from "node:assert/strict";
-import { chmodSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { readClioVersion } from "../../src/core/package-root.js";
+import { withReadOnlyMode } from "../../src/core/read-only-mode.js";
+import { shellQuote } from "../../src/core/shell-quote.js";
 import {
 	addFleetNode,
 	inspectFleetNodes,
 	removeFleetNode,
 	testFleetNode,
 } from "../../src/domains/dispatch/fleet-nodes.js";
+import { verifyFleetProject } from "../../src/domains/dispatch/fleet-project-verification.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("fleet node management", () => {
@@ -28,6 +32,70 @@ describe("fleet node management", () => {
 		throws(() => addFleetNode({ id: "builder", host: "other.invalid", maxWorkers: 1 }), /already exists/);
 		removeFleetNode("builder");
 		strictEqual(inspectFleetNodes().length, 0);
+	});
+
+	it("remote Git verification never executes configured fsmonitor", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const project = join(scratch, "project");
+		mkdirSync(project);
+		spawnSync("git", ["init", "-q", project]);
+		spawnSync("git", [
+			"-C",
+			project,
+			"-c",
+			"user.name=Review",
+			"-c",
+			"user.email=review@example.invalid",
+			"commit",
+			"--allow-empty",
+			"-qm",
+			"base",
+		]);
+		const marker = join(scratch, "fsmonitor-ran");
+		const monitor = join(scratch, "monitor");
+		writeFileSync(monitor, `#!/bin/sh\nprintf ran > ${shellQuote(marker)}\n`);
+		chmodSync(monitor, 0o755);
+		const ssh = join(scratch, "ssh");
+		const originalPath = process.env.PATH;
+		try {
+			process.env.PATH = `${scratch}:${originalPath}`;
+			for (const key of ["core.fsmonitor", "filter.review.clean", "filter.review.process"]) {
+				rmSync(marker, { force: true });
+				writeFileSync(
+					ssh,
+					`#!/bin/sh\nfor command do :; done\nexport GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=${shellQuote(key)} GIT_CONFIG_VALUE_0=${shellQuote(monitor)}\nexec /bin/sh -c "$command"\n`,
+				);
+				chmodSync(ssh, 0o755);
+				const result = await verifyFleetProject({ id: "fake", host: "fake.invalid" }, project);
+				strictEqual(existsSync(marker), false, key);
+				strictEqual(result.kind, key === "core.fsmonitor" ? "independent" : "unverified", result.reason ?? key);
+			}
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	it("read-only project verification never creates a shared-storage challenge", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const project = join(scratch, "project");
+		mkdirSync(project);
+		const observed = join(scratch, "observed");
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh\nfind ${shellQuote(project)} -name '.clio-coder-fleet-probe-*' > ${shellQuote(observed)}\nprintf 'shared=no\\n'\n`,
+		);
+		chmodSync(ssh, 0o755);
+		const originalPath = process.env.PATH;
+		try {
+			process.env.PATH = `${scratch}:${originalPath}`;
+			await withReadOnlyMode(() => verifyFleetProject({ id: "fake", host: "fake.invalid" }, project, true));
+			strictEqual(readFileSync(observed, "utf8"), "");
+		} finally {
+			process.env.PATH = originalPath;
+		}
 	});
 
 	it("refuses removing nodes referenced by profile pins", () => {

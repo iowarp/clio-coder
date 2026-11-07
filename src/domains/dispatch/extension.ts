@@ -7129,7 +7129,12 @@ export function createDispatchBundle(
 		if (placement?.node.kind === "ssh") {
 			const node = settings?.fleet.nodes.find((item) => item.id === placement.node.id);
 			if (!node) throw new Error("dispatch: node configuration disappeared before project verification");
-			const project = await verifyFleetProject(node, req.taskWorktree?.root ?? req.cwd ?? process.cwd(), true);
+			const project = await verifyFleetProject(
+				node,
+				req.taskWorktree?.root ?? req.cwd ?? process.cwd(),
+				true,
+				lifecycle.readOnly,
+			);
 			assertFleetProjectAuthority(project, lifecycle.readOnly, req.taskWorktree !== undefined);
 			if (project.kind === "independent" && req.taskWorktree) remoteReturn = { node, worktree: req.taskWorktree };
 		}
