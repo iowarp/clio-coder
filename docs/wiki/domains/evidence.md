@@ -133,8 +133,6 @@ Context provenance is read in `runContextStatus` from the settled `contextProven
 4. `grounded` if validation is `validated`.
 5. Otherwise `unverified`.
 
-`worstTrustVerdict` orders tiers by `TRUST_VERDICT_SEVERITY` (`compromised`, `unverified`, `unknown`, `grounded`, `reviewed`) and returns the worst one present, or `unknown` for an empty list.
-
 `formatTrustSummary` joins five clauses with `"; "` in a fixed order: integrity, validation, independent review, context, completion. Word choices come from `TRUST_STATE_WORDS`. `trustStateWord` falls back to the `unknown` word for an unrecognized state. `validationClause` names the claimant for validated and failed states. `formatTrustSummaryLine` prefixes the verdict word and `trust v1:`.
 
 `summarizeTrustStatus` returns a `TrustSummaryProjection` containing version, verdict, text, axis states, a `claimant` string, the list of unanswered axes (absent or unknown), and up to `TRUST_SUMMARY_MAX_REFS` (8) sorted `<kind>:<id>` references.

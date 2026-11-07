@@ -150,7 +150,6 @@ export { enableFrontmatterCacheWrites } from "./skills/frontmatter-cache.js";
 export { type LexicalMatchMode, lexicalMatches } from "./skills/lexical-match.js";
 export {
 	defaultSkillRoots,
-	expandSkillInvocationInput,
 	type LoadSkillsInput,
 	loadSkills,
 	modelVisibleSkills,
@@ -160,7 +159,6 @@ export {
 	type Skill,
 	type SkillCatalogInvalidReason,
 	type SkillCatalogValidity,
-	type SkillExpansion,
 	type SkillList,
 	type SkillProvenance,
 	type SkillRoot,

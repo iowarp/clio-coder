@@ -13,9 +13,8 @@ import {
 	withinStateRoot,
 	withinStateRootAsync,
 } from "../../core/state-boundary.js";
-import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
-import { readRunEvidence } from "../dispatch/run-result-facts.js";
 import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.js";
 import {
@@ -390,12 +389,6 @@ export function loadRunScopeFilesAsync(stateDir: string, runId: string): Promise
 /** A run's DTO with its seal verdict and result object, from its run scope; null with no run directory (#434). */
 export function loadRunRecord(stateDir: string, runId: string): RunTelemetryV1 | null {
 	return readRunRecord(stateDir, runId);
-}
-
-/** A run's evidence from its sealed run scope: seal verdict, trust and the checks it vouches for (#434 §11.3). */
-export function loadRunEvidence(stateDir: string, runId: string): RunEvidenceV1 {
-	assertSafeId(runId, "run");
-	return readRunEvidence(runId, stateDir);
 }
 
 export function loadSessionTelemetrySource(

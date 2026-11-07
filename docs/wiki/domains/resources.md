@@ -22,7 +22,6 @@ symbols:
   - "modelVisibleSkills"
   - "skillCatalogValidity"
   - "parseSkillCommand"
-  - "expandSkillInvocationInput"
   - "parsePendingSkillRequests"
   - "loadPromptTemplates"
   - "parsePromptCommand"
@@ -149,9 +148,7 @@ function's own ordering is described here.
 
 `parseSkillCommand` (`src/domains/resources/skills/loader.ts:parseSkillCommand`) recognizes only input whose trimmed
 text starts with `/skill `. It returns the first whitespace-delimited token as the name and the
-trailing text as `args`. `expandSkillInvocationInput` returns `expanded: true`, with the skill,
-`text` equal to the args, and `triggeredBy: "slash-command"`, when a loaded skill has that name.
-Otherwise it returns `expanded: false`.
+trailing text as `args`.
 
 `parsePendingSkillRequests` (`src/domains/resources/skills/loader.ts:parsePendingSkillRequests`) classifies a `/skill`
 name. An installed skill that is trusted, or whose source is `plugin` or `clio-coder`, yields a

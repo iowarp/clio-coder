@@ -46,11 +46,6 @@ function failOutput(reason: string, kind: WorkerStdoutFailure, error?: unknown, 
 	failureHandler?.(reason);
 }
 
-/** Why the bulk trail is incomplete, or null while every frame was handed to stdout. */
-export function stdoutFailure(): string | null {
-	return failure;
-}
-
 /** Stop the run when output fails; called at once if it already failed. */
 export function onStdoutFailure(handler: (reason: string) => void): void {
 	failureHandler = handler;

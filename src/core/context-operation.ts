@@ -39,7 +39,6 @@ export interface ContextOperation {
 }
 export const ACP_CONTEXT_STATUS_METHOD = "_clio-coder/context/status";
 /** Invocation reuses commands/invoke with command=context and the existing argv grammar. */
-export const CONTEXT_ACTIVITY_EVENT_KIND = "context.activity_changed";
 export interface ContextOperationStatus {
 	version: 1;
 	active: ContextActivityPayload | null;

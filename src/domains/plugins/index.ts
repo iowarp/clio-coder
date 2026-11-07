@@ -7,7 +7,6 @@ export const PluginsDomainModule: DomainModule = {
 	createExtension: createPluginsBundle,
 };
 export {
-	discoverPluginPackages,
 	isPluginId,
 	PLUGIN_EXTENSION_KEY,
 	PLUGIN_RESOURCE_KINDS,

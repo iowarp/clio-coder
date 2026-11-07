@@ -33,38 +33,6 @@ export function boundedTail(value: string, maxCodePoints: number): string {
 }
 
 /**
- * Tail kept with its line structure. A bulleted list is the difference between
- * a menu the operator must pick from and a sentence that happens to contain
- * dashes, so a message read for what it asks keeps its newlines. Runs of blank
- * lines and of spaces collapse.
- */
-export function boundedTailLines(value: string, maxCodePoints: number): string {
-	const points = endPoints(
-		value
-			.replace(/[ \t]+/g, " ")
-			.replace(/ ?\n ?/g, "\n")
-			.replace(/\n{3,}/g, "\n\n")
-			.trim(),
-		maxCodePoints,
-		"tail",
-	);
-	return points.length <= maxCodePoints
-		? points.join("")
-		: `…${points.slice(points.length - maxCodePoints + 1).join("")}`;
-}
-
-/**
- * The text with fenced code removed. A fenced block is file content or command
- * output an assistant quoted, which is repository text a point must not read as
- * the operator's intent or the assistant's own claim. Backtick and tilde fences
- * of any length that open a line are cut through the matching closing line, and
- * a fence left open runs to the end.
- */
-export function withoutQuotedCode(text: string): string {
-	return text.replace(/(^|\n)[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?(?:\n[ \t]{0,3}\2[`~]*[ \t]*(?=\n|$)|$)/g, "$1");
-}
-
-/**
  * A noul's number, or null for another type, an abstention or malformed mass. What
  * the number is stays on `answer.readout`; a point that needs a real probability
  * says so in `requires` and is never routed to an engine that lacks it.

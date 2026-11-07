@@ -5,7 +5,6 @@ export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
 	admitRunProvenance,
 	extractRunProvenance,
-	hasRunProvenance,
 	PERSONA_HASH_PREFIX_CHARS,
 	provenanceCompactSuffix,
 	provenanceTranscriptLines,
@@ -23,11 +22,9 @@ export {
 	TRUST_STATE_WORDS,
 	TRUST_SUMMARY_MAX_REFS,
 	TRUST_SUMMARY_VERSION,
-	TRUST_VERDICT_SEVERITY,
 	trustStateWord,
 	trustSummaryReferences,
 	trustVerdict,
-	worstTrustVerdict,
 } from "./trust-projection.js";
 export type {
 	AbsentTrustStatus,

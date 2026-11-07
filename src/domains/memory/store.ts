@@ -122,11 +122,6 @@ function parseAndValidate(raw: string, source: string): MemoryRecord[] {
 	return sortMemoryRecords(records);
 }
 
-/** Replaces the whole store under the store lock. Mutations that depend on current content use `mutateMemoryRecords`. */
-export async function writeMemoryRecords(dataDir: string, records: ReadonlyArray<MemoryRecord>): Promise<string> {
-	return withStateFileLock(memoryStorePath(dataDir), () => writeMemoryRecordsUnlocked(dataDir, records));
-}
-
 function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<MemoryRecord>): string {
 	const sorted = sortMemoryRecords(records);
 	if (sorted.length > MEMORY_STORE_MAX_RECORDS) {

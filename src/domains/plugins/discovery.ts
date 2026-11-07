@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { evaluateClioCompatibility, isSemanticVersion } from "../extensions/compatibility.js";
 import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
@@ -301,17 +301,5 @@ export function readPluginManifest(root: string): PluginCandidate {
 			path: manifestPath,
 		});
 		return { path: resolved, manifestPath, valid: false, diagnostics };
-	}
-}
-
-export function discoverPluginPackages(root: string): PluginCandidate[] {
-	if (existsSync(path.join(root, "plugin.json"))) return [readPluginManifest(root)];
-	try {
-		return readdirSync(root)
-			.sort()
-			.filter((name) => !name.startsWith(".") && lstatSync(path.join(root, name)).isDirectory())
-			.map((name) => readPluginManifest(path.join(root, name)));
-	} catch {
-		return [readPluginManifest(root)];
 	}
 }

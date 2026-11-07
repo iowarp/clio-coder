@@ -59,11 +59,6 @@ export function admitRunProvenance(view: RunProvenanceView, status?: CanonicalTr
 	return admitted;
 }
 
-/** True when at least one provenance field set is present. */
-export function hasRunProvenance(view: RunProvenanceView): boolean {
-	return view.pipeline !== undefined || view.personaOverride !== undefined || view.escalation !== undefined;
-}
-
 function escalationCountsFrom(safety: RunResult["safety"]): RunEscalationCounts | null {
 	const decisions = safety?.decisions;
 	if (decisions === undefined || decisions.escalationRequested === undefined) return null;

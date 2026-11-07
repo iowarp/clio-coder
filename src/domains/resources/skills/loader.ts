@@ -202,22 +202,6 @@ export interface LoadSkillsInput {
 	verifyPluginTrees?: boolean;
 }
 
-export type SkillExpansion =
-	| {
-			expanded: false;
-			text: string;
-			args: string;
-			diagnostics: ResourceDiagnostic[];
-	  }
-	| {
-			expanded: true;
-			text: string;
-			args: string;
-			skill: Skill;
-			triggeredBy: "slash-command";
-			diagnostics: ResourceDiagnostic[];
-	  };
-
 /** Collision precedence tiers; higher wins. */
 const SKILL_PRECEDENCE = {
 	package: 10,
@@ -1265,26 +1249,6 @@ export function parseSkillCommand(input: string): { name: string; args: string }
 	if (name.length === 0) return null;
 	const args = separator === -1 ? "" : rest.slice(separator).trim();
 	return { name, args };
-}
-
-export function expandSkillInvocationInput(
-	input: string,
-	skills: SkillList,
-	_options: SkillExpansionOptions = {},
-): SkillExpansion {
-	const command = parseSkillCommand(input);
-	if (!command) return { expanded: false, text: input, args: "", diagnostics: skills.diagnostics };
-	const skill = skills.items.find((entry) => entry.name === command.name);
-	const args = command.args;
-	if (!skill) return { expanded: false, text: input, args, diagnostics: skills.diagnostics };
-	return {
-		expanded: true,
-		text: args,
-		args,
-		skill,
-		triggeredBy: "slash-command",
-		diagnostics: skills.diagnostics,
-	};
 }
 
 export function parsePendingSkillRequests(

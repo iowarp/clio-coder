@@ -1,7 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { ceilChars } from "../session/context-accounting.js";
 import {
 	type MemoryMutationOptions,
 	mutateMemoryRecords,
@@ -77,22 +76,6 @@ export function eligibleMemoryRecords(
 		.filter((record) => runtimeApplies(record, activeRuntime))
 		.filter((record) => agentApplies(record, activeAgent))
 		.sort(compareRetrievalPriority);
-}
-
-export function estimateMemoryTokens(record: MemoryRecord): number {
-	const text = [
-		record.scope,
-		record.key,
-		record.lesson,
-		...(record.repository === undefined ? [] : [record.repository.kind, record.repository.key]),
-		...(record.runtime === undefined ? [] : [record.runtime.kind, record.runtime.key]),
-		...(record.agent === undefined ? [] : [record.agent.kind, record.agent.key]),
-		...record.evidenceRefs,
-		...record.appliesWhen,
-		...record.avoidWhen,
-		...(record.regressions ?? []),
-	].join("\n");
-	return Math.max(1, ceilChars(text.length));
 }
 
 export function cloneMemoryRecord(record: MemoryRecord): MemoryRecord {

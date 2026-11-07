@@ -14,7 +14,6 @@ symbols:
   - "PluginsDomainModule"
   - "parsePluginManifest"
   - "readPluginManifest"
-  - "discoverPluginPackages"
   - "installPlugin"
   - "installLibraryPackage"
   - "withPluginScopeLock"
@@ -44,7 +43,7 @@ This area owns the plugin package model: how a directory with a `plugin.json` is
 
 ## What the area does
 
-- Parses and validates a `plugin.json` (`parsePluginManifest`) and reports a candidate with diagnostics (`readPluginManifest`, `discoverPluginPackages`).
+- Parses and validates a `plugin.json` (`parsePluginManifest`) and reports a candidate with diagnostics (`readPluginManifest`).
 - Installs, updates, enables, disables, and removes packages in one of two scopes, `user` (under the Clio config directory) or `project` (under `.clio-coder/plugins` in the project root), through a writer that holds a per-scope lock and rechecks reviewed facts before writing (`src/domains/plugins/state.ts`).
 - Decides which copy of an id is effective (`resolvePluginPrecedence`).
 - Commits a snapshot of enabled resource roots per working directory and re-verifies them on read (`src/domains/plugins/resources.ts`).
@@ -55,7 +54,7 @@ This area owns the plugin package model: how a directory with a `plugin.json` is
 | --- | --- | --- |
 | Domain registration | `PluginsDomainModule` (manifest and `createPluginsBundle` extension) | `src/domains/plugins/index.ts` |
 | Public types | `PluginScope`, `PluginResourceKind`, `ClioPluginConfiguration`, `PluginManifest`, `PluginCandidate`, `InstalledPlugin`, `PluginExpectedState`, `PluginSnapshot`, `PluginState` | `src/domains/plugins/types.ts` |
-| Manifest parsing and path containment | `PLUGIN_SCHEMA`, `PLUGIN_EXTENSION_KEY` (`ai.iowarp.clio`), `parsePluginManifest`, `readPluginManifest`, `discoverPluginPackages`, `pluginResourcePath`, `isPluginId` | `src/domains/plugins/discovery.ts` |
+| Manifest parsing and path containment | `PLUGIN_SCHEMA`, `PLUGIN_EXTENSION_KEY` (`ai.iowarp.clio`), `parsePluginManifest`, `readPluginManifest`, `pluginResourcePath`, `isPluginId` | `src/domains/plugins/discovery.ts` |
 | Install state, writer lock, install/update/enable/remove, listing, precedence | `installPlugin`, `installLibraryPackage`, `updatePlugin`, `enablePlugin`, `disablePlugin`, `removePlugin`, `listInstalledPlugins`, `withPluginScopeLock`, `observePluginCopy`, `resolvePluginPrecedence`, `newlyBrokenDependents` | `src/domains/plugins/state.ts` |
 | Resource snapshot and enabled roots | `reloadPluginResources`, `pluginSnapshotFor`, `committedPluginSnapshot`, `enabledPluginResourceRoots`, `enabledPluginResourceRootsFor`, `committedPluginResourceRoots`, `buildPluginSnapshot` | `src/domains/plugins/resources.ts` |
 | Discovery memo | `withPluginDiscoveryPass`, `outsidePluginDiscoveryPass`, `passPluginCandidate`, `passPluginSnapshot` | `src/domains/plugins/discovery-pass.ts` |
@@ -73,8 +72,6 @@ The Clio block is validated by `clioConfiguration`. It requires `manifestVersion
 For a non-`plugin` kind, `clioConfiguration` requires exactly one public component of that kind, allows only the matching `<kind>s` resource root, and scans that root so that it exposes only the declared file. A package that exposes an undeclared `.md` (or `SKILL.md` for skills) file is refused.
 
 `readPluginManifest(root)` hashes the tree with `pluginContentDigestWithCapture`, capturing the exact `plugin.json` bytes, and parses those bytes. It also refuses a root that contains `state.json`. When `mcp.json` is present it adds a warning that MCP servers become plugin-scope declarations only after the operator trusts them with `clio-coder mcp trust <id>`. Failures are returned as `valid: false` candidates with an `error` diagnostic rather than thrown.
-
-`discoverPluginPackages(root)` treats a root with `plugin.json` as a single package. Otherwise it reads each non-dot child directory in sorted order and reads it as a candidate. If the directory cannot be listed, it falls back to a single candidate for the root.
 
 ## Install and lifecycle
 

@@ -71,7 +71,6 @@ export {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
 	eligibleMemoryRecords,
-	estimateMemoryTokens,
 	pruneStaleMemory,
 	rejectMemoryRecord,
 } from "./operations.js";
@@ -127,7 +126,6 @@ export {
 	memoryStatus,
 	memoryStorePath,
 	sortMemoryRecords,
-	writeMemoryRecords,
 } from "./store.js";
 export {
 	type SaveTaskMemoryOptions,

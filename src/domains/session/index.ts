@@ -129,7 +129,6 @@ export type { RunListCursor } from "./telemetry-source.js";
 export {
 	listRunTelemetryIds,
 	listRunTelemetrySources,
-	loadRunEvidence,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
