@@ -19,6 +19,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { NoticeSource } from "../../session-control/notice-source.js";
+import { CARD_CALLOUT_MAX_WIDTH, CARD_GUTTER } from "../card.js";
 import { type ClioToken, clioTheme, frame, GLYPH } from "../theme/index.js";
 
 const theme = clioTheme();
@@ -28,8 +29,6 @@ const theme = clioTheme();
 // remainder as the message body.
 const LEADING_TAG = /^(\[[^\]]+\])([\s\S]*)$/u;
 const PRODUCT_TAG = /^\s*\[Clio Coder\]\s*/u;
-const CALLOUT_GUTTER = "  ";
-const CALLOUT_MAX_WIDTH = 88;
 
 export type NoticeMark = "info" | "success" | "warning" | "error" | "retry" | "cancelled";
 
@@ -92,12 +91,10 @@ function renderCallout(source: NoticeSource, text: string, mark: NoticeMark, wid
 	const shown = display(text);
 	if (shown.length === 0) return [];
 	if (width < 8) return wrapTextWithAnsi(theme.fg("body", shown), Math.max(1, width));
-	const boxWidth = Math.min(CALLOUT_MAX_WIDTH, width - CALLOUT_GUTTER.length);
+	const boxWidth = Math.min(CARD_CALLOUT_MAX_WIDTH, width - CARD_GUTTER.length);
 	const { glyph, token } = MARKS[mark];
 	const heading = theme.style(token, `${glyph} ${title}`, { bold: true });
-	return frame(theme, heading, wrapTextWithAnsi(shown, boxWidth - 4), boxWidth).map(
-		(line) => `${CALLOUT_GUTTER}${line}`,
-	);
+	return frame(theme, heading, wrapTextWithAnsi(shown, boxWidth - 4), boxWidth).map((line) => `${CARD_GUTTER}${line}`);
 }
 
 /**
@@ -155,7 +152,7 @@ export function renderNoticeRow(
 			: !tagged && body.includes(" · ")
 				? packFacts(body, inner).map((row) => theme.fg("body", row))
 				: trimStrandedSeparators(wrapTextWithAnsi(styled, inner));
-	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`));
+	return rows.map((row, index) => (index === 0 ? `${theme.fg(token, glyph)} ${row}` : `${CARD_GUTTER}${row}`));
 }
 
 /**

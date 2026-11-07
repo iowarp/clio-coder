@@ -18,11 +18,14 @@ import type { SemanticRole } from "./theme/tokens.js";
 const CARD_GUTTER_WIDTH = 2;
 /** The body rail `  │ `: the gutter's width of indent, the bar and a space. */
 const CARD_RAIL_WIDTH = 4;
-const GUTTER = " ".repeat(CARD_GUTTER_WIDTH);
+/** What a wrapped head row or a framed callout is indented by: the gutter's width of space. */
+export const CARD_GUTTER = " ".repeat(CARD_GUTTER_WIDTH);
+/** Framed callouts stop growing here so a wide terminal does not stretch a sentence across it. */
+export const CARD_CALLOUT_MAX_WIDTH = 88;
 
 /** The body rail, red on a failed card so the whole block reads as the failure. */
 export function cardRail(error = false): string {
-	return `${GUTTER}${clioTheme().fg(error ? "error" : "gutter", "│ ")}`;
+	return `${CARD_GUTTER}${clioTheme().fg(error ? "error" : "gutter", "│ ")}`;
 }
 
 /** Columns a body row has after the rail. */
@@ -46,7 +49,7 @@ function hangingRows(lead: string, width: number, token: SemanticRole): string[]
 	const theme = clioTheme();
 	if (visibleWidth(lead) <= width) return [theme.base(token, releaseSpaces(lead))];
 	return wrapTextWithAnsi(lead, Math.max(1, width - CARD_GUTTER_WIDTH)).map((row, index) =>
-		theme.base(token, releaseSpaces(index === 0 ? row : `${GUTTER}${row}`)),
+		theme.base(token, releaseSpaces(index === 0 ? row : `${CARD_GUTTER}${row}`)),
 	);
 }
 
@@ -66,5 +69,5 @@ export function cardHead(lead: string, tail: string, width: number, token: Seman
 		return rows;
 	}
 	const own = wrapTextWithAnsi(tail.replace(/^ +/u, ""), Math.max(1, width - CARD_GUTTER_WIDTH));
-	return [...rows, ...own.map((row) => `${GUTTER}${releaseSpaces(row)}`)];
+	return [...rows, ...own.map((row) => `${CARD_GUTTER}${releaseSpaces(row)}`)];
 }
