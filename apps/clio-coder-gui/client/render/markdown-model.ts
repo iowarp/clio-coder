@@ -43,6 +43,44 @@ const FOOTNOTE_BLOCK = new RegExp(
 );
 const FOOTNOTE_REF = new RegExp(`^\\[\\^(${FOOTNOTE_LABEL})\\](?!:)`, "u");
 
+/** Where inline math could start: `$`, or the LaTeX delimiters `\(` and `\[` that many models write. */
+function firstMathDelimiter(source: string): number | undefined {
+	let first = -1;
+	for (const delimiter of ["$", "\\(", "\\["]) {
+		const index = source.indexOf(delimiter);
+		if (index >= 0 && (first < 0 || index < first)) first = index;
+	}
+	return first < 0 ? undefined : first;
+}
+
+const LATEX_INLINE = /^\\\(([\s\S]+?)\\\)/u;
+const LATEX_DISPLAY = /^\\\[([\s\S]+?)\\\]/u;
+const DOUBLED_DOLLAR = /^\$\$((?:\\[\s\S]|[^\\$])+?)\$\$/u;
+const SINGLE_DOLLAR = /^\$(?![\s$])((?:\\.|[^\\$`\n])+?)\$(?!\d)/u;
+
+/**
+ * Inline math in its four spellings. `$…$` keeps its currency guards (no space inside the
+ * delimiters, no digit after). `$$…$$` and `\[…\]` inside a sentence are set as display math, the
+ * way GitHub and the model's own preview set them; `\(…\)` is inline. None crosses a blank line.
+ */
+function inlineMath(source: string): MathToken | undefined {
+	for (const [pattern, displayMode] of [
+		[LATEX_INLINE, false],
+		[LATEX_DISPLAY, true],
+		[DOUBLED_DOLLAR, true],
+	] as const) {
+		const match = pattern.exec(source);
+		if (match?.[1] === undefined) continue;
+		if (!match[1].trim() || /\n\s*\n/u.test(match[1])) return undefined;
+		// `\[12\]` is far more often an escaped citation than an equation.
+		if (pattern === LATEX_DISPLAY && /^\s*\d+(?:\s*[,–-]\s*\d+)*\s*$/u.test(match[1])) return undefined;
+		return { type: "math", raw: match[0], text: match[1].trim(), displayMode };
+	}
+	const match = SINGLE_DOLLAR.exec(source);
+	if (match?.[1] && !/\s$/u.test(match[1])) return { type: "math", raw: match[0], text: match[1], displayMode: false };
+	return undefined;
+}
+
 const lexer = new Marked(
 	{ gfm: true, breaks: false, pedantic: false, async: false },
 	{
@@ -73,20 +111,20 @@ const lexer = new Marked(
 			{
 				name: "math",
 				level: "block",
-				start: (source) => /^ {0,3}\$\$/mu.exec(source)?.index,
+				start: (source) => /^ {0,3}(?:\$\$|\\\[)/mu.exec(source)?.index,
 				tokenizer(source): MathToken | undefined {
-					const match = /^ {0,3}\$\$((?:\\[\s\S]|[^\\])+?)\$\$[^\S\n]*(?:\n|$)/u.exec(source);
-					if (match?.[1]) return { type: "math", raw: match[0], text: match[1].trim(), displayMode: true };
+					const match =
+						/^ {0,3}\$\$((?:\\[\s\S]|[^\\])+?)\$\$[^\S\n]*(?:\n|$)/u.exec(source) ??
+						/^ {0,3}\\\[([\s\S]+?)\\\][^\S\n]*(?:\n|$)/u.exec(source);
+					if (match?.[1]?.trim()) return { type: "math", raw: match[0], text: match[1].trim(), displayMode: true };
 				},
 			},
 			{
 				name: "math",
 				level: "inline",
-				start: (source) => source.indexOf("$"),
+				start: (source) => firstMathDelimiter(source),
 				tokenizer(source): MathToken | undefined {
-					const match = /^\$(?![\s$])((?:\\.|[^\\$`\n])+?)\$(?!\d)/u.exec(source);
-					if (match?.[1] && !/\s$/u.test(match[1]))
-						return { type: "math", raw: match[0], text: match[1], displayMode: false };
+					return inlineMath(source);
 				},
 			},
 		],
@@ -165,15 +203,26 @@ const CLOSING_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})\s*$/u;
 export function settledBoundary(source: string, from = 0): number {
 	let boundary = from;
 	let index = from;
-	let displayMath = false;
+	// The delimiter that closes the display math block a line opened, while one is open.
+	let displayMath: "$$" | "\\]" | null = null;
 	let fence: { readonly char: string; readonly length: number } | null = null;
 	while (index < source.length) {
 		const lineEnd = source.indexOf("\n", index);
 		if (lineEnd < 0) break;
 		const line = source.slice(index, lineEnd);
-		if (fence === null && (displayMath || /^ {0,3}\$\$/u.test(line))) {
+		if (fence === null && displayMath === null && /^ {0,3}\\\[/u.test(line)) {
+			if (!/\\\]/u.test(line.slice(line.indexOf("\\[") + 2))) displayMath = "\\]";
+			index = lineEnd + 1;
+			continue;
+		}
+		if (fence === null && displayMath === "\\]") {
+			if (line.includes("\\]")) displayMath = null;
+			index = lineEnd + 1;
+			continue;
+		}
+		if (fence === null && (displayMath === "$$" || /^ {0,3}\$\$/u.test(line))) {
 			const delimiters = line.replace(/\\./gu, "").match(/\$\$/gu)?.length ?? 0;
-			if (delimiters % 2 !== 0) displayMath = !displayMath;
+			if (delimiters % 2 !== 0) displayMath = displayMath === null ? "$$" : null;
 			index = lineEnd + 1;
 			continue;
 		}
@@ -301,15 +350,18 @@ export interface CodeLanguage {
 	/** The Prism grammar id, or null when the language is unknown or the block is a diagram. */
 	readonly grammar: string | null;
 	readonly mermaid: boolean;
+	/** A ```math fence: display TeX, as GitHub and GitLab read it. */
+	readonly math: boolean;
 }
 
 export function codeLanguage(info: string | undefined): CodeLanguage {
 	const word = (info ?? "").trim().split(/\s+/u, 1)[0] ?? "";
 	const label = word.replace(/[^A-Za-z0-9_+#.-]/gu, "").slice(0, 24);
-	if (label.length === 0) return { label: null, grammar: null, mermaid: false };
+	if (label.length === 0) return { label: null, grammar: null, mermaid: false, math: false };
 	const key = label.toLocaleLowerCase("en-US");
-	if (key === MERMAID_LANGUAGE) return { label: "mermaid", grammar: null, mermaid: true };
-	return { label, grammar: LANGUAGE_ALIASES[key] ?? null, mermaid: false };
+	if (key === MERMAID_LANGUAGE) return { label: "mermaid", grammar: null, mermaid: true, math: false };
+	if (key === "math") return { label: "math", grammar: "latex", mermaid: false, math: true };
+	return { label, grammar: LANGUAGE_ALIASES[key] ?? null, mermaid: false, math: false };
 }
 
 export const HIGHLIGHT_MAX_CHARS = 60_000;

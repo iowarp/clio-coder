@@ -56,11 +56,11 @@ test("fence info strings normalize to a label and a known grammar or none", () =
 	equal(codeLanguage("sh").grammar, "bash");
 	equal(codeLanguage("c++").grammar, "cpp");
 	equal(codeLanguage("html").grammar, "markup");
-	deepEqual(codeLanguage("atlasql"), { label: "atlasql", grammar: null, mermaid: false });
-	deepEqual(codeLanguage(undefined), { label: null, grammar: null, mermaid: false });
-	deepEqual(codeLanguage("   "), { label: null, grammar: null, mermaid: false });
-	deepEqual(codeLanguage("mermaid"), { label: "mermaid", grammar: null, mermaid: true });
-	deepEqual(codeLanguage("Mermaid title"), { label: "mermaid", grammar: null, mermaid: true });
+	deepEqual(codeLanguage("atlasql"), { label: "atlasql", grammar: null, mermaid: false, math: false });
+	deepEqual(codeLanguage(undefined), { label: null, grammar: null, mermaid: false, math: false });
+	deepEqual(codeLanguage("   "), { label: null, grammar: null, mermaid: false, math: false });
+	deepEqual(codeLanguage("mermaid"), { label: "mermaid", grammar: null, mermaid: true, math: false });
+	deepEqual(codeLanguage("Mermaid title"), { label: "mermaid", grammar: null, mermaid: true, math: false });
 	equal(codeLanguage("<script>alert(1)</script>").label, "scriptalert1script");
 	equal(codeLanguage("x".repeat(100)).label?.length, 24);
 });
@@ -404,4 +404,28 @@ test("a named file is a preview button only where the host can open one", () => 
 	);
 	match(opened, /<code>npm<\/code>/u);
 	doesNotMatch(renderMarkdown("See `src/a.ts:3`."), /<button/u);
+});
+
+test("LaTeX \\(…\\) and \\[…\\], inline $$…$$ and ```math fences are math; escaped citations are not", () => {
+	const math = (source: string) =>
+		[
+			...JSON.stringify(lexMarkdown(source)).matchAll(
+				/"type":"math","raw":"(?:[^"\\]|\\.)*","text":"((?:[^"\\]|\\.)*)","displayMode":(true|false)/gu,
+			),
+		].map((match) => `${JSON.parse(`"${match[1]}"`)}|${match[2]}`);
+	deepEqual(math("Energy \\(E = mc^2\\) holds."), ["E = mc^2|false"]);
+	deepEqual(math("Then \\[ \\int_0^1 f \\] done"), ["\\int_0^1 f|true"]);
+	deepEqual(math("Text\n\\[\n\\sum_i x_i\n\\]\nafter"), ["\\sum_i x_i|true"]);
+	deepEqual(math("Mid $$a+b$$ end"), ["a+b|true"]);
+	deepEqual(math("see \\[1\\] and \\[2, 3\\]"), []);
+	deepEqual(math("a \\(open\n\nclosed\\) b"), []);
+	deepEqual(math("price \\(cheap) only"), []);
+	const incremental = new IncrementalMarkdown();
+	const source = "Before\n\n\\[\na +\n\nb\n\\]\n\nAfter";
+	equal(incremental.update(source.slice(0, source.indexOf("b\n\\]"))).settledLength, "Before\n\n".length);
+	ok(incremental.update(source).settled.some((token) => token.type === "math"));
+	deepEqual(codeLanguage("math"), { label: "math", grammar: "latex", mermaid: false, math: true });
+	// Until the lazy typesetter arrives, a settled fence reads as its TeX, without the fence.
+	equal(renderMarkdown("```math\n\\frac{a}{b}\n```\n"), '<div class="markdown is-complete">\\frac{a}{b}</div>');
+	match(renderMarkdown("```math\n\\frac{a}{b}", false), /class="code-block/u);
 });

@@ -718,7 +718,13 @@ const Block = memo(function Block({ token, settled }: { token: MarkdownToken; se
 			);
 		case "code": {
 			const code = token as Tokens.Code;
-			if (codeLanguage(code.lang).mermaid) return <MermaidBlock source={code.text} settled={settled} />;
+			const language = codeLanguage(code.lang);
+			if (language.mermaid) return <MermaidBlock source={code.text} settled={settled} />;
+			// Typeset once the fence closes; while it streams the TeX reads as source.
+			if (language.math && settled && code.text.trim())
+				return (
+					<MathTokenContent token={{ type: "math", raw: code.text.trim(), text: code.text.trim(), displayMode: true }} />
+				);
 			return <CodeBlock code={code.text} info={code.lang} settled={settled} />;
 		}
 		case "table":
