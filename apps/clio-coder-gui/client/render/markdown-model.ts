@@ -495,8 +495,12 @@ export function tokenText(tokens: readonly MarkdownToken[]): string {
 	return text;
 }
 
-/** A count, an amount or a measurement: digits with an optional sign, currency mark, separators and a short unit. */
-const NUMERIC_CELL = /^[+\-−±~≈<>]?\s?[$€£¥]?\d[\d,._\u00a0 ]*(?:[eE][+-]?\d+)?\s?(?:%|‰|×|x|[A-Za-zµ°/]{1,6})?$/u;
+/**
+ * A count, an amount or a measurement: digits with an optional sign, currency mark, separators, an
+ * uncertainty (`0.93 ± 0.02`) and a short unit.
+ */
+const NUMERIC_CELL =
+	/^[+\-−±~≈<>]?\s?[$€£¥]?\d[\d,._\u00a0 ]*(?:[eE][+-]?\d+)?(?:\s?(?:±|\+\/-)\s?\d[\d,.]*(?:[eE][+-]?\d+)?)?\s?(?:%|‰|×|x|[A-Za-zµ°/]{1,6})?$/u;
 
 /**
  * Which columns hold only numbers, so they can be set right-aligned in tabular figures and compared

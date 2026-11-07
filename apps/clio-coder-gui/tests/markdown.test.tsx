@@ -30,6 +30,7 @@ import {
 	MERMAID_MAX_LINES,
 	MERMAID_MAX_SOURCE_BYTES,
 	mermaidSourceProblem,
+	numericColumns,
 	pathReference,
 	safeHref,
 	settledBoundary,
@@ -169,8 +170,8 @@ test("completed Markdown renders headings, lists, task lists, tables, quotes, ru
 	);
 	match(html, /<blockquote><p>quoted<\/p><\/blockquote>/u);
 	match(html, /<hr\/>/u);
-	match(html, /<th scope="col" style="text-align:left">a<\/th>/u);
-	match(html, /<td style="text-align:right">2<\/td>/u);
+	match(html, /<th scope="col" class="md-table__number" style="text-align:left">a<\/th>/u);
+	match(html, /<td class="md-table__number" style="text-align:right">2<\/td>/u);
 	ok(!html.includes("undefined"));
 });
 
@@ -552,4 +553,20 @@ test("long JSON parses into a folded tree that opens its top level and pages lon
 	const list = renderToStaticMarkup(<JsonTree value={Array.from({ length: 250 }, (_, i) => i)} />);
 	equal((list.match(/class="json-tree__leaf"/gu) ?? []).length, JSON_TREE_PAGE);
 	match(list, /Show 100 more of 150/u);
+});
+
+test("a measured column stays on one line even when the author aligned it", () => {
+	deepEqual(
+		numericColumns(
+			[
+				["8.00e-3", "0.93 ± 0.02", "1.2 GB", "cavity"],
+				["1.25e-4", "1.01 +/- 0.1", "—", "step"],
+			],
+			4,
+		),
+		[true, true, true, false],
+	);
+	const html = renderMarkdown("| L2 error | Case |\n| ---: | :-- |\n| 8.00e-3 | cavity |", true);
+	match(html, /<td class="md-table__number" style="text-align:right">8\.00e-3<\/td>/u);
+	match(html, /<td style="text-align:left">cavity<\/td>/u);
 });

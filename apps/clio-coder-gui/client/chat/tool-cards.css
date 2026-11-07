@@ -237,8 +237,8 @@
 	max-height: none;
 }
 .tool-card__fold {
+	justify-self: start;
 	min-height: 28px;
-	margin-top: var(--space-1);
 	padding: 2px var(--space-2);
 	border: 1px solid transparent;
 	border-radius: var(--radius-sm);

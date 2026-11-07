@@ -837,8 +837,11 @@ function TableBlock({ table, settled }: { table: Tokens.Table; settled: boolean 
 		const rows = table.rows.map((row) => row.map((cell) => tokenText(cell.tokens)));
 		return { header, rows, numeric: numericColumns(rows, header.length) };
 	}, [table]);
-	const cellProps = (align: Tokens.TableCell["align"], column: number) =>
-		align ? { style: { textAlign: align } } : cells.numeric[column] ? { className: "md-table__number" } : {};
+	// A number keeps its figures on one line whichever way its column is aligned, so `8.00e-3` never breaks at the sign.
+	const cellProps = (align: Tokens.TableCell["align"], column: number) => ({
+		...(cells.numeric[column] ? { className: "md-table__number" } : {}),
+		...(align ? { style: { textAlign: align } } : {}),
+	});
 	return (
 		<TableViewport
 			action={
