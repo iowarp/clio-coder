@@ -983,6 +983,22 @@ function withoutCitations(sentence: string, drop: ReadonlySet<string>): string {
 	});
 }
 
+/** A line's list marker, and its prose sentences split without breaking inside a code span. */
+function proseSentences(line: string): { prefix: string; sentences: string[] } {
+	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
+	const body = line.slice(prefix.length);
+	const masked = body.replace(/`[^`\n]*`/g, (span) => `\`${"x".repeat(span.length - 2)}\``);
+	const sentences: string[] = [];
+	let from = 0;
+	for (const match of masked.matchAll(/[.!?](?=\s+[A-Z`*])/g)) {
+		const at = (match.index ?? 0) + 1;
+		sentences.push(body.slice(from, at));
+		from = at;
+	}
+	sentences.push(body.slice(from));
+	return { prefix, sentences };
+}
+
 interface ClaimCitations {
 	/** Which code spans are cited files; concrete paths below the root by default. */
 	cites?: (path: string) => boolean;
@@ -1004,18 +1020,7 @@ function withUnsupportedClaimsMarked(
 ): string {
 	if (!claim.test(line)) return line;
 	const cites = citations.cites ?? ((path: string) => CONCRETE_FILE_RE.test(path));
-	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
-	const body = line.slice(prefix.length);
-	// Split prose sentences without breaking inside a code span.
-	const masked = body.replace(/`[^`\n]*`/g, (span) => "x".repeat(span.length));
-	const sentences: string[] = [];
-	let from = 0;
-	for (const match of masked.matchAll(/[.!?](?=\s+[A-Z`*])/g)) {
-		const at = (match.index ?? 0) + 1;
-		sentences.push(body.slice(from, at));
-		from = at;
-	}
-	sentences.push(body.slice(from));
+	const { prefix, sentences } = proseSentences(line);
 	const marked = sentences.map((sentence) => {
 		if (!claim.test(sentence)) return sentence;
 		const cited = [
@@ -1056,20 +1061,22 @@ function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGr
 	);
 }
 
-/** "fails CI", "fail on CI", "enforced in CI", "gated by the CI": a check's failure stated as CI's. */
-const CI_CLAIM_RE = /\b([Ff]ail(?:s|ed|ing)?|enforced|gated|checked|caught)\s+(?:(?:in|on|by)\s+)?(?:the\s+)?CI\b/g;
+/** CI named in prose: an acronym, never a lowercase `ci-tests` stem. */
+const CI_PROSE_RE = /\bCI\b|\b[Cc]ontinuous [Ii]ntegration\b|\bGitHub Actions\b/;
 
 /**
- * Cut a model line's claim that CI runs a check. Clio does not decide what CI
- * runs, so a rule names the check and what it refuses: a handbook said both
- * pin `--check` modes "fail CI on drift" when CI reaches neither by name.
- * Code spans are left as written.
+ * Cut each sentence of a model line that speaks for CI, in either voice. Clio
+ * does not verify what CI runs, so a rule names the check and what it refuses:
+ * handbooks said both pin `--check` modes "fail CI on drift" when CI reached
+ * neither by name, and a phrase list of passive claims let "CI enforces" and
+ * "CI will reject" through. The line drops when no sentence remains.
  */
-function withoutCiClaims(line: string): string {
-	return line
-		.split(/(`[^`\n]*`)/)
-		.map((part, index) => (index % 2 === 1 ? part : part.replace(CI_CLAIM_RE, "$1")))
-		.join("");
+function withoutCiStatements(line: string): string {
+	const { prefix, sentences } = proseSentences(line);
+	const kept = sentences.filter((sentence) => !CI_PROSE_RE.test(sentence.replace(/`[^`\n]*`/g, "")));
+	if (kept.length === sentences.length) return line;
+	const body = kept.join("").trim();
+	return body ? `${prefix}${body}` : "";
 }
 
 const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
@@ -1164,6 +1171,11 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
 	});
 }
 
+interface GroundingOptions {
+	/** Keep sentences that name CI: a carried hard invariant stays verbatim, and only model text is cut. */
+	keepCiStatements?: boolean;
+}
+
 /**
  * Keep a Scout line only when it cites the repository and every citation is real.
  *
@@ -1182,7 +1194,8 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
  * `npm publish` in a repository with no publish script is dropped even though the
  * rest of the sentence is unremarkable, which was the real failure mode.
  */
-function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChars = MODEL_SECTION_MAX_CHARS): string {
+function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options: GroundingOptions = {}): string {
+	const maxChars = MODEL_SECTION_MAX_CHARS;
 	const kept: string[] = [];
 	let inFence = false;
 	for (const rawLine of body.split(/\r?\n/)) {
@@ -1202,9 +1215,11 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
+		const marked = withUnsupportedReviewRequirementsMarked(cited, evidence);
 		const line = inFence
 			? cited
-			: withUnsupportedPreloadsMarked(withUnsupportedReviewRequirementsMarked(withoutCiClaims(cited), evidence), evidence);
+			: withUnsupportedPreloadsMarked(options.keepCiStatements ? marked : withoutCiStatements(marked), evidence);
+		if (!line) continue;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
@@ -1249,11 +1264,15 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 const MODEL_SECTION_MAX_CHARS = HANDBOOK_TARGETS.sectionChars;
 
 /** One model-written rule line, kept only when it passes the citation rule whole. */
-function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null): string | null {
+function groundedModelLine(
+	line: string,
+	evidence: ModelGroundingCorpus | null,
+	options: GroundingOptions = {},
+): string | null {
 	const trimmed = line.replace(/\s+/g, " ").trim();
 	if (trimmed.length === 0) return null;
 	if (!evidence) return trimmed;
-	return groundedModelBody(trimmed, evidence) || null;
+	return groundedModelBody(trimmed, evidence, options) || null;
 }
 
 /** Root handbooks are authored policy. A small model may summarize away a
@@ -1521,13 +1540,14 @@ function namedEnforcement(rule: string, names: EnforcementNames): string[] {
  * models left check-enforced rules (case-colliding paths, retired HTML docs,
  * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
  * invariants, and reworded the published-tag rule only `CONTRIBUTING.md`
- * states. A rule whose citations no longer ground is not carried.
+ * states. A rule whose citations no longer ground is not carried; a carried
+ * rule keeps every word, including a sentence that names CI.
  */
 function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): string[] {
 	const carried: string[] = [];
 	for (const invariant of input.previousInvariants ?? []) {
 		const rule = invariant.replace(/\s+/g, " ").trim();
-		if (groundedModelLine(rule, corpus) !== null) pushUnique(carried, rule);
+		if (groundedModelLine(rule, corpus, { keepCiStatements: true }) !== null) pushUnique(carried, rule);
 	}
 	return carried;
 }
@@ -1537,6 +1557,7 @@ function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: Model
  * repository still defines and whose citations still ground. A rewrite on mini
  * dropped Docs and prose, the section documentation workers receive, while its
  * documentation-links, product-namespace and prompts checks all still existed.
+ * A block is grounded like model text, so its sentences that name CI are cut.
  */
 function enforcedPreviousSections(
 	input: BootstrapGenerateInput,
@@ -1715,9 +1736,12 @@ function stabilizeGeneratedOutput(
 		: [];
 	const carriedBlocks = carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : [];
 	// A model rule gives way to carried content only when it states it word for word. One that resembles a
-	// carried rule may add a clause, flip a prohibition or change its scope, so both stay.
+	// carried rule may add a clause, flip a prohibition or change its scope, so both stay. A model copy of a
+	// carried invariant loses its CI sentences, so what remains of it counts as the carried rule too.
 	const carriedKeys = new Set(
-		[...carried, ...carriedBlocks.flatMap((section) => handbookBlocks(section.body))].map(normalizeHandbookRule),
+		[...carried, ...carried.map(withoutCiStatements), ...carriedBlocks.flatMap((section) => handbookBlocks(section.body))]
+			.filter((rule) => rule.length > 0)
+			.map(normalizeHandbookRule),
 	);
 	const duplicatesCarried = (rule: string): boolean => carriedKeys.has(normalizeHandbookRule(rule));
 	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to

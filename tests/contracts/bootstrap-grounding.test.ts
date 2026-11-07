@@ -136,8 +136,9 @@ it("keeps a reviewer requirement its cited policy states, and marks one its cite
 	);
 });
 
-it("cuts a model line's claim that CI runs a check, but keeps a carried invariant verbatim", async () => {
-	const carried = "Never commit a path `.gitignore` excludes: the tracked-ignored check in `scripts/check.js` fails CI.";
+it("cuts every sentence of a model line that names CI, but keeps a carried invariant verbatim", async () => {
+	const carried =
+		"Never commit a path `.gitignore` excludes: the tracked-ignored check in `scripts/check.js` fails CI. Run `npm run check` before pushing.";
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(join(cwd, ".gitignore"), "dist/\n");
 	writeFileSync(join(cwd, "scripts", "check.js"), 'fail("tracked-ignored", "a tracked path is gitignored");\n');
@@ -153,7 +154,13 @@ it("cuts a model line's claim that CI runs a check, but keeps a carried invarian
 			return {
 				projectName: "harbor",
 				identity: "A widget renderer.",
-				invariants: ["Export every widget from `src/index.ts`; `npm run check` is enforced in CI."],
+				invariants: [
+					carried,
+					"Export every widget from `src/index.ts`; `npm run check` is enforced in CI.",
+					"CI enforces `scripts/check.js` on every push.",
+					"CI will reject a change that breaks `scripts/check.js`.",
+					"Keep `src/index.ts` exporting `renderWidget()`. `npm run check` is gated by continuous integration.",
+				],
 				conventions: [],
 				sections: [
 					{
@@ -165,10 +172,13 @@ it("cuts a model line's claim that CI runs a check, but keeps a carried invarian
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	ok(handbook.includes(`1. ${carried}`), handbook);
-	ok(handbook.includes("2. Export every widget from `src/index.ts`; `npm run check` is enforced.\n"), handbook);
-	ok(handbook.includes("rerun `npm run check`. It fails on drift."), handbook);
-	strictEqual(/(?:fails|enforced)(?: on| in)? CI/.test(handbook.replace(carried, "")), false, handbook);
+	ok(handbook.includes(`1. ${carried}\n`), handbook);
+	strictEqual(handbook.split("Run `npm run check` before pushing.").length, 2, handbook);
+	ok(handbook.includes("2. Keep `src/index.ts` exporting `renderWidget()`.\n"), handbook);
+	ok(handbook.includes("- Editing `src/widgets/render.ts`: rerun `npm run check`.\n"), handbook);
+	const generated = handbook.replace(carried, "").split("## Verification")[0] ?? "";
+	strictEqual(/\bCI\b|continuous integration/i.test(generated), false, handbook);
+	strictEqual(/scripts\/check\.js` on every push|breaks `scripts\/check\.js`/.test(handbook), false, handbook);
 });
 
 it("marks a module a rule calls preloaded when no plain node script preloads it", async () => {
