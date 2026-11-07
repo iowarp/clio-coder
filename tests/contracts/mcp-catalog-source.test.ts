@@ -186,6 +186,70 @@ describe("MCP catalog source", () => {
 		ok(results[2].spec);
 	});
 
+	it("notifications and explicit refresh reconcile the live catalog", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		let version = 0;
+		let changed = false;
+		let notifyDuringListing = false;
+		let lists = 0;
+		let calls = 0;
+		const { source, registry, clients } = wire(scene, (spec, options) => {
+			const client = createMcpStdioClient(spec, options);
+			return {
+				...client,
+				callTool: (...args) => {
+					calls++;
+					return client.callTool(...args);
+				},
+				toolsChanged: () => changed,
+				acknowledgeToolsChanged: () => {
+					changed = false;
+				},
+				listTools: async () => {
+					lists++;
+					const listedVersion = version;
+					if (notifyDuringListing) {
+						notifyDuringListing = false;
+						changed = true;
+						version++;
+					}
+					return {
+						tools: [
+							{
+								name: listedVersion === 0 ? "old" : `new${listedVersion}`,
+								title: null,
+								description: "Changing catalog",
+								inputSchema: { type: "object" },
+								annotations: null,
+							},
+						],
+						truncated: false,
+					};
+				},
+			};
+		});
+		open.push(source);
+		await source.refresh("fake");
+		const previous = registry.get("mcp_fake__old" as ToolName);
+		ok(previous);
+		version = 1;
+		changed = true;
+		ok((await source.ensure("mcp_fake__new1")).spec);
+		strictEqual(registry.get("mcp_fake__old" as ToolName), undefined);
+		strictEqual((await previous.run({})).kind, "error");
+		strictEqual(calls, 0, "a retained old spec must not bypass refreshed metadata");
+		version = 2;
+		notifyDuringListing = true;
+		await source.refresh("fake");
+		strictEqual(registry.get("mcp_fake__new1" as ToolName), undefined);
+		ok(registry.get("mcp_fake__new2" as ToolName));
+		strictEqual(source.metadata("mcp_fake__new2").metadata?.provenance, "live");
+		ok((await source.ensure("mcp_fake__new3")).spec, "a notification during tools/list must not be lost");
+		strictEqual(lists, 4);
+		strictEqual(clients.length, 1);
+	});
+
 	it("refuses to discover an undeclared, untrusted, or stale server", async () => {
 		const scene = scenario();
 		const { source, clients } = wire(scene);

@@ -293,6 +293,8 @@ interface OwnedConnection {
 
 interface ServerState {
 	recovery?: Promise<void>;
+	refreshing?: Promise<void>;
+	listed?: boolean;
 	declaration: GatewayMcpServer;
 	client: McpClient | null;
 	connection: OwnedConnection | null;
@@ -627,6 +629,13 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						message: `${name}: mcp server ${declaration.id} is not connected${state.failure ? ` (${state.failure})` : ""}; the next call can retry the trusted declaration`,
 					};
 				}
+				const currentTool = state.tools.find((entry) => entry.name === tool.name);
+				if (currentTool === undefined || JSON.stringify(currentTool) !== JSON.stringify(tool)) {
+					return {
+						kind: "error",
+						message: `${name}: live tool metadata changed; describe the capability and retry under its current schema and authority`,
+					};
+				}
 				try {
 					const result = await client.callTool(tool.name, args, {
 						...(invokeOptions?.signal ? { signal: invokeOptions.signal } : {}),
@@ -675,6 +684,26 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			});
 		}
 		return spec;
+	};
+
+	const installListing = (state: ServerState, listing: McpToolListing): void => {
+		for (const name of state.registered) registry.unregister?.(name);
+		state.registered = [];
+		state.unregistrable = [];
+		state.tools = listing.tools;
+		state.truncated = listing.truncated;
+		state.listed = true;
+		publishCatalog(state, listing);
+		for (const tool of listing.tools) {
+			if (closed || state.client === null || state.failure !== null) return;
+			const name = mcpToolName(state.declaration.id, tool.name);
+			if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) {
+				state.unregistrable.push(tool.name);
+				continue;
+			}
+			registry.register(makeSpec(state, tool, name));
+			state.registered.push(name);
+		}
 	};
 
 	const startConnection = (state: ServerState): OwnedConnection => {
@@ -763,19 +792,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				const connection = await loaded;
 				const { client, listing } = await connection.ready;
 				if (closed || controller.signal.aborted || state.client !== client || state.failure !== null) return;
-				state.tools = listing.tools;
-				state.truncated = listing.truncated;
-				publishCatalog(state, listing);
-				for (const tool of listing.tools) {
-					const name = mcpToolName(declaration.id, tool.name);
-					if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) {
-						state.unregistrable.push(tool.name);
-						continue;
-					}
-					if (closed || controller.signal.aborted || state.client !== client || state.failure !== null) return;
-					registry.register(makeSpec(state, tool, name));
-					state.registered.push(name);
-				}
+				installListing(state, listing);
 			} catch (error) {
 				state.failure ??= errorMessage(error);
 				await close();
@@ -784,7 +801,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		return { ready, close };
 	};
 
-	const discover = async (state: ServerState, signal?: AbortSignal): Promise<void> => {
+	const discover = async (state: ServerState, signal?: AbortSignal, refresh = false): Promise<void> => {
 		const aborted = () => new McpError("aborted", "MCP discovery aborted");
 		if (signal?.aborted) throw aborted();
 		if (closed || state.declaration.trust.status !== "trusted") return;
@@ -799,6 +816,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				await closeClient(state);
 				state.connection = null;
 				state.client = null;
+				state.listed = false;
 				state.failure = null;
 				for (const name of state.registered) registry.unregister?.(name);
 				state.registered = [];
@@ -813,6 +831,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			}
 			if (closed || signal?.aborted) return;
 		}
+		const refreshLive = refresh && state.listed === true;
 		state.connection ??= startConnection(state);
 		const connection = state.connection;
 		const onAbort = (): void => {
@@ -825,6 +844,30 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			if (signal?.aborted) {
 				await connection.close();
 				throw aborted();
+			}
+			const client = state.client;
+			if (closed || client === null || state.failure !== null) return;
+			if (refreshLive || client.toolsChanged() || state.refreshing !== undefined) {
+				state.refreshing ??= (async () => {
+					// A notification received during tools/list stays dirty for the next
+					// discovery; acknowledging after the response would lose it.
+					client.acknowledgeToolsChanged();
+					try {
+						const listing = await client.listTools(signal);
+						if (closed || signal?.aborted || state.client !== client || state.failure !== null) return;
+						installListing(state, listing);
+					} catch (error) {
+						state.failure ??= errorMessage(error);
+						await closeClient(state);
+						for (const name of state.registered) registry.unregister?.(name);
+						state.registered = [];
+						state.listed = false;
+					}
+				})().finally(() => {
+					delete state.refreshing;
+				});
+				await state.refreshing;
+				if (signal?.aborted) throw aborted();
 			}
 		} finally {
 			signal?.removeEventListener("abort", onAbort);
@@ -1078,7 +1121,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			}
 			const refusal = readOnlyLaunchRefusal(state.declaration, invokeOptions?.readOnly);
 			if (refusal !== null) return { listing: listingFor(state), reason: refusal };
-			await discover(state, invokeOptions?.signal);
+			await discover(state, invokeOptions?.signal, true);
 			return {
 				listing: listingFor(state),
 				...(state.failure !== null ? { reason: `mcp server ${id} failed: ${state.failure}` } : {}),
