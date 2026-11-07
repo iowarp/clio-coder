@@ -26,8 +26,6 @@ export interface DetectedChatRoute {
 	runtime: RuntimeDescriptor;
 	target: TargetDescriptor;
 	model?: string;
-	/** A Copilot route whose account has not consented yet: offered, never adopted without asking. */
-	needsConsent?: boolean;
 }
 
 /**
@@ -164,7 +162,6 @@ export async function detectChatRoutes(
 				runtime: copilot,
 				target,
 				model: login.model,
-				...(login.consented ? {} : { needsConsent: true }),
 			});
 		}
 	}
@@ -228,7 +225,6 @@ export async function adoptDetectedChatRoute(settings: Readonly<ClioSettings>): 
 	const found = (await detectChatRoutes(settings)).find(
 		(candidate) =>
 			candidate.model &&
-			candidate.needsConsent !== true &&
 			(memoryTarget === undefined ||
 				(candidate.target.id !== memoryTarget.id &&
 					(memoryTarget.url === undefined || candidate.target.url !== memoryTarget.url))),

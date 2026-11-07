@@ -481,8 +481,8 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 }
 
 /**
- * Copilot's credential belongs to the official runtime (`copilot login`); Clio only records this account's
- * one-time consent, after showing what it bills and whose policy applies.
+ * Copilot's credential belongs to the official runtime (`copilot login`): this step installs the SDK component
+ * when needed and confirms which account the runtime is signed in as. Clio stores nothing.
  */
 async function loginCopilotSdk(): Promise<number> {
 	const interactive = input.isTTY === true && output.isTTY === true;
@@ -496,7 +496,7 @@ async function loginCopilotSdk(): Promise<number> {
 			printError(result.message);
 			return 1;
 		}
-		printOk(`GitHub Copilot ready as ${result.account.login}; consent is recorded for this account.`);
+		printOk(`GitHub Copilot ready as ${result.account.login}`);
 		return 0;
 	} finally {
 		rl?.close();

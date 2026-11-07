@@ -13,11 +13,18 @@
 import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
 import { COPILOT_HEADLESS_LOGIN_FIX, copilotKeychainAllowed } from "../../core/copilot-keychain.js";
-import type { CopilotAccount } from "../../domains/providers/copilot-consent.js";
 import { type CopilotSdkModule, loadCopilotSdk } from "./sdk-module.js";
 import { copilotSessionFsConfig } from "./session-fs.js";
 
 export const COPILOT_CLIENT_NAME = "clio-coder";
+
+/** The GitHub account the official Copilot runtime is signed in as. Signing in is the authorization. */
+export interface CopilotAccount {
+	/** GitHub login the official Copilot runtime reports as signed in. */
+	login: string;
+	/** GitHub host, `https://github.com` unless the account is on GHE. */
+	host: string;
+}
 
 export const COPILOT_LOGIN_MESSAGE =
 	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry. Clio never signs in to Copilot itself.";

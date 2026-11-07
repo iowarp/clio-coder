@@ -18,10 +18,10 @@ import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
-import { hasCopilotConsent, recordCopilotConsent } from "../../src/domains/providers/copilot-consent.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { copilotSdkAccount } from "../../src/engine/ai.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
@@ -405,7 +405,6 @@ test("the copilot-sdk route sends no other client's identity anywhere", () => {
 	const files = [
 		...filesUnder("src/engine/copilot"),
 		...filesUnder("src/domains/providers/runtimes/copilot"),
-		"src/domains/providers/copilot-consent.ts",
 		"src/domains/providers/copilot-setup.ts",
 		"src/domains/lifecycle/copilot-sdk-install.ts",
 	];
@@ -415,13 +414,25 @@ test("the copilot-sdk route sends no other client's identity anywhere", () => {
 	}
 });
 
-test("consent gates the first Copilot call and names how to give it", async () => {
-	strictEqual(hasCopilotConsent({ login: "octo", host: "https://github.com" }), false);
-	const refused = await step({ messages: [user("hello")] });
-	strictEqual(refused.stopReason, "error");
-	match(refused.errorMessage ?? "", /clio-coder auth login copilot-sdk/);
-	strictEqual(fake().sessions.length, 0, "no Copilot session is opened before consent");
-	recordCopilotConsent({ login: "octo", host: "https://github.com" });
+test("the signed-in account is the authorization: no Clio consent is asked, and signed out names copilot login", async () => {
+	// A consent record a 0.7.0-rc.1 home wrote, here for another account, neither grants nor blocks anything.
+	const consentFile = join(resolveClioDirs().state, "copilot-sdk-consent.json");
+	mkdirSync(resolveClioDirs().state, { recursive: true });
+	writeFileSync(
+		consentFile,
+		JSON.stringify({ version: 1, accounts: [{ login: "someone-else", host: "https://github.com", acceptedAt: "x" }] }),
+	);
+	deepStrictEqual(await copilotSdkAccount(), { login: "octo", host: "https://github.com" });
+	const signedIn = fake().auth;
+	fake().auth = { isAuthenticated: false };
+	try {
+		const refused = await step({ messages: [user("hello")] });
+		strictEqual(refused.stopReason, "error");
+		match(refused.errorMessage ?? "", /not signed in.*`copilot login`/);
+		strictEqual(fake().sessions.length, 0, "no Copilot session is opened without a login");
+	} finally {
+		fake().auth = signedIn;
+	}
 	const answered = await step({ messages: [user("hello")] });
 	strictEqual(answered.stopReason, "stop");
 	deepStrictEqual(answered.content, [{ type: "text", text: "hello" }]);
@@ -442,8 +453,6 @@ test("the runtime authenticates as the copilot login user only, and no token rea
 		if (file.includes(join("components", "copilot-sdk"))) continue;
 		strictEqual(readFileSync(file, "utf8").includes(SECRET), false, `${file} holds a token`);
 	}
-	const consent = JSON.parse(readFileSync(join(resolveClioDirs().state, "copilot-sdk-consent.json"), "utf8"));
-	deepStrictEqual(Object.keys(consent.accounts[0]).sort(), ["acceptedAt", "host", "login"]);
 });
 
 test("Clio's loop runs the tool; Copilot continues the same session and reports billing as facts", async () => {

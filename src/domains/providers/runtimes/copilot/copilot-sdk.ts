@@ -10,7 +10,7 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
 export const COPILOT_SDK_RUNTIME_ID = "copilot-sdk";
 
 export const COPILOT_SDK_AUTH_NOTICE =
-	"Runs model calls through the official GitHub Copilot SDK as the account signed in with `copilot login`. Clio stores no Copilot token. Requests bill that account's Copilot seat or its organization's pool, and the enterprise's Copilot policy and retention apply; Clio asks for consent once per account.";
+	"Uses your GitHub Copilot subscription through the official Copilot SDK, as the account signed in with `copilot login`; your organization's Copilot policies apply. Clio stores no Copilot token.";
 
 const copilotCapabilities: CapabilityFlags = {
 	chat: true,

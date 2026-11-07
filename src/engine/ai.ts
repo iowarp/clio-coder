@@ -69,6 +69,8 @@ export async function copilotSdkSignInProbe(keychain: boolean) {
 	return client.probeCopilotSignIn(keychain);
 }
 
+export type { CopilotAccount } from "./copilot/client.js";
+
 /** The account the official Copilot runtime is signed in as; loads the optional SDK on first use. */
 export async function copilotSdkAccount() {
 	const client = await import("./copilot/client.js");

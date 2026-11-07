@@ -313,10 +313,10 @@ const CATEGORY_STEP: Step = {
 			answers.inventoryKey = undefined;
 			wizard.answer("Source", route.source);
 			wizard.answer("Provider", route.runtime.id);
-			// A detected Copilot login still needs this account's consent before it becomes a route.
+			// A detected Copilot login is re-read here, so the line naming the account it uses is shown.
 			if (route.runtime.id === "copilot-sdk") {
-				const consent = await COPILOT_STEP.run(wizard, answers);
-				if (consent !== "next") return consent;
+				const ready = await COPILOT_STEP.run(wizard, answers);
+				if (ready !== "next") return ready;
 			}
 			return "detected";
 		}
@@ -421,7 +421,7 @@ const SDK_STEP: Step = {
 	},
 };
 
-/** Copilot: the SDK component, the `copilot login` check and the account's one-time consent. */
+/** Copilot: the SDK component and the `copilot login` check; the signed-in account is the authorization. */
 const COPILOT_STEP: Step = {
 	id: "copilot-sdk",
 	applies: (answers) => answers.runtime?.id === "copilot-sdk",

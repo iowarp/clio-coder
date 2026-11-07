@@ -473,7 +473,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 		}
 	}
 	if (runtime.id === "copilot-sdk") {
-		// Non-interactive: the target is written, and its calls are refused until consent is given.
+		// Non-interactive: the target is written either way; a missing component or login is named as a warning.
 		const ready = await prepareCopilotSdk({ print: (text) => process.stdout.write(`${text}\n`) });
 		if (!ready.ok) process.stderr.write(`warning: ${ready.message}\n`);
 	}

@@ -41,7 +41,6 @@ import type {
 	ToolResultObject,
 } from "@github/copilot-sdk";
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
-import { copilotConsentMissingMessage, hasCopilotConsent } from "../../domains/providers/copilot-consent.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
 import {
 	COPILOT_CLIENT_NAME,
@@ -863,8 +862,8 @@ async function openConversationHeld(input: {
 	tools: ReadonlyArray<Tool>;
 	reasoningEffort: string | undefined;
 }): Promise<Conversation> {
-	const account = await copilotAccount();
-	if (!hasCopilotConsent(account)) throw new Error(copilotConsentMissingMessage(account));
+	// The signed-in account is the authorization; a missing login fails here with `copilot login` named.
+	await copilotAccount();
 	const client = await copilotClient();
 	let conversation: Conversation | null = null;
 	const sessionId = randomUUID();

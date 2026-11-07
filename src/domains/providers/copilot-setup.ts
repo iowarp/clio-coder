@@ -1,26 +1,34 @@
 import { allowCopilotKeychain } from "../../core/copilot-keychain.js";
-import { copilotSdkAccount, copilotSdkSignInProbe, listCopilotSdkModels } from "../../engine/ai.js";
-import { ensureCopilotSdk, resolveCopilotSdkEntry } from "../lifecycle/copilot-sdk-install.js";
 import {
 	type CopilotAccount,
-	copilotConsentMissingMessage,
-	copilotConsentText,
-	hasCopilotConsent,
-	recordCopilotConsent,
-} from "./copilot-consent.js";
+	copilotSdkAccount,
+	copilotSdkSignInProbe,
+	listCopilotSdkModels,
+} from "../../engine/ai.js";
+import { ensureCopilotSdk, resolveCopilotSdkEntry } from "../lifecycle/copilot-sdk-install.js";
 
 export interface CopilotSetupIo {
-	/** Absent when nobody can answer (headless, non-TTY); the setup then refuses instead of assuming. */
+	/** Absent when nobody can answer (headless, non-TTY); the SDK install is then named, never assumed. */
 	confirm?: (question: string) => Promise<boolean>;
 	print(text: string): void;
 }
 
 export type CopilotSetupResult = { ok: true; account: CopilotAccount } | { ok: false; message: string };
 
+/** `github.com` for the public host, the bare host name for a GHE server. */
+function copilotHostLabel(host: string): string {
+	return host.replace(/^https?:\/\//u, "").replace(/\/+$/u, "");
+}
+
+/** The neutral line setup shows once the account is known; signing in is the authorization, so nothing is asked. */
+function copilotAccountNotice(account: CopilotAccount): string {
+	return `Uses your GitHub Copilot subscription as ${account.login} on ${copilotHostLabel(account.host)}; your organization's Copilot policies apply.`;
+}
+
 /**
- * Everything a copilot-sdk target needs before its first model call: the SDK component (offered once), a
- * `copilot login` session, and this account's one-time consent. Configure, onboarding and
- * `auth login copilot-sdk` run it; the stream itself refuses when consent is missing.
+ * Everything a copilot-sdk target needs before its first model call: the SDK component (offered once) and a
+ * `copilot login` session. Like the ChatGPT and Claude subscriptions, the signed-in account is the
+ * authorization. Configure, onboarding and `auth login copilot-sdk` run it.
  */
 export async function prepareCopilotSdk(io: CopilotSetupIo): Promise<CopilotSetupResult> {
 	// Someone who can answer the setup questions can answer a keychain prompt too.
@@ -28,13 +36,7 @@ export async function prepareCopilotSdk(io: CopilotSetupIo): Promise<CopilotSetu
 	try {
 		await ensureCopilotSdk(io.confirm ? { confirm: io.confirm } : {});
 		const account = await copilotSdkAccount();
-		if (hasCopilotConsent(account)) return { ok: true, account };
-		if (!io.confirm) return { ok: false, message: copilotConsentMissingMessage(account) };
-		io.print(copilotConsentText(account));
-		if (!(await io.confirm(`Allow Clio to use GitHub Copilot as ${account.login}?`))) {
-			return { ok: false, message: "GitHub Copilot consent was declined; the copilot-sdk target stays unusable." };
-		}
-		recordCopilotConsent(account);
+		io.print(copilotAccountNotice(account));
 		return { ok: true, account };
 	} catch (error) {
 		return { ok: false, message: error instanceof Error ? error.message : String(error) };
@@ -44,7 +46,6 @@ export async function prepareCopilotSdk(io: CopilotSetupIo): Promise<CopilotSetu
 export interface DetectedCopilotLogin {
 	account: CopilotAccount;
 	model: string;
-	consented: boolean;
 }
 
 /**
@@ -63,7 +64,7 @@ export async function detectCopilotLogin(timeoutMs: number): Promise<DetectedCop
 			const models = await listCopilotSdkModels();
 			const model = models[0]?.id;
 			if (!model) return null;
-			return { account, model, consented: hasCopilotConsent(account) };
+			return { account, model };
 		} catch {
 			// No login, no runtime or no enabled model: there is no Copilot route to offer.
 			return null;
