@@ -1637,19 +1637,21 @@ function restatesCheckerRule(
 
 /**
  * The coded rules not stated above, listed so a checker rule is never silently
- * missing from the handbook. Rules the model already names or restates in
- * other words are left out.
+ * missing from the handbook. A rule the handbook names by code, or a kept rule
+ * states word for word, is left out. Sharing its citations is not stating it:
+ * a gotcha that `SURFACE_TOTAL_EXEMPTIONS` only shrinks cost rule14, that the
+ * surfaces sum no token or cost field, its place here.
  */
 function uncoveredCheckerSection(
 	rules: ReadonlyArray<CheckerRule>,
 	handbook: string,
-	keptTokens: ReadonlyArray<ReadonlySet<string>>,
+	keptKeys: ReadonlySet<string>,
 ): ClioMdSection | null {
 	const lines: string[] = [];
 	let chars = 0;
 	for (const rule of rules) {
 		if (namesRuleCode(rule.code, handbook)) continue;
-		if (restatesHandbookRule(handbookRuleTokens(rule.sentence), keptTokens)) continue;
+		if (keptKeys.has(normalizeHandbookRule(rule.sentence))) continue;
 		const line = `- ${rule.sentence}`;
 		if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
 		lines.push(line);
@@ -1807,7 +1809,6 @@ function stabilizeGeneratedOutput(
 		...modelInvariants.slice(0, Math.max(0, HANDBOOK_TARGETS.invariants - protectedInvariants.length)),
 	];
 	const uncarriedInvariantTokens = retainedInvariants.filter((rule) => !carried.includes(rule)).map(handbookRuleTokens);
-	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
 		input.cwd,
 		[...retainedInvariants, ...conventions, ...(base.sections ?? []).map((section) => section.body)].join("\n"),
@@ -1824,7 +1825,6 @@ function stabilizeGeneratedOutput(
 			)
 			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
 	];
-	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 	const uncarriedRuleTokens = [...uncarriedInvariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
@@ -1895,10 +1895,15 @@ function stabilizeGeneratedOutput(
 		if (modelSections.delete(current)) modelSections.add(merged);
 		carriedSections.set(merged, blocks);
 	}
+	const keptRules = [
+		...retainedInvariants,
+		...retainedConventions,
+		...ordinarySections.flatMap((section) => handbookBlocks(section.body)),
+	];
 	const checkerSection = uncoveredCheckerSection(
 		checkerRules.filter((rule) => !rule.architectural),
-		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
-		[...keptRuleTokens, ...ordinarySections.flatMap((section) => handbookBlocks(section.body).map(handbookRuleTokens))],
+		keptRules.join("\n"),
+		new Set(keptRules.map(normalizeHandbookRule)),
 	);
 	if (checkerSection) addSection(checkerSection);
 	for (const section of inferredSections) addSection(section);

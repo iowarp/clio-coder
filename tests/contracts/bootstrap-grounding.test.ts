@@ -288,6 +288,44 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 		);
 });
 
+it("lists a checker rule a kept rule shares citations with but does not state", async () => {
+	mkdirSync(join(cwd, "tests", "boundaries"), { recursive: true });
+	writeFileSync(
+		join(cwd, "tests", "boundaries", "check-totals.ts"),
+		[
+			"/**",
+			" * 1. src/widgets/** sums no token or cost field, except the functions TOTAL_EXEMPTIONS names.",
+			" */",
+			"export const TOTAL_EXEMPTIONS: string[] = [];",
+			"export function runTotalsCheck(): string[] {",
+			'\treturn ["rule1: a widget sums a token field"];',
+			"}",
+			"",
+		].join("\n"),
+	);
+	const gotcha =
+		"- `TOTAL_EXEMPTIONS` in `tests/boundaries/check-totals.ts` only shrinks: remove a stale exemption rather than add one.";
+	await runBootstrap({
+		cwd,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: [{ title: "Gotchas", body: gotcha }],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(`${gotcha}\n`), handbook);
+	ok(
+		/sums no token or cost field, except .+ Checked as `rule1` by `tests\/boundaries\/check-totals\.ts`\./.test(handbook),
+		handbook,
+	);
+});
+
 it("carries every previous hard invariant verbatim while its citations still exist", async () => {
 	mkdirSync(join(cwd, "scripts"));
 	writeFileSync(
