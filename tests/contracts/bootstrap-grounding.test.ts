@@ -38,6 +38,9 @@ beforeEach(async () => {
 afterEach(() => isolated.restore());
 
 it("keeps model rules that cite real files, strings, globs and symbols, and drops invented ones", async () => {
+	mkdirSync(join(cwd, "docs", "guide"), { recursive: true });
+	writeFileSync(join(cwd, "docs", "index.md"), "# Docs\n");
+	writeFileSync(join(cwd, "docs", "guide", "setup.md"), "# Setup\n");
 	const result = await runBootstrap({
 		cwd,
 		generate: async (input) => {
@@ -53,6 +56,9 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 				conventions: [
 					"Follow `CONTRIBUTING.md` before review.",
 					"Code under `src/widgets/**` renders through `renderWidget()`.",
+					"Every relative link in `docs/*.md` must resolve.",
+					"Every relative link in `docs/**/*.md` must resolve.",
+					"Each `src/widgets/*.ts` module exports one renderer.",
 				],
 				sections: [
 					{
@@ -77,6 +83,9 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	strictEqual(handbook.includes("src/missing-module.ts"), false, handbook);
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
 	strictEqual(handbook.includes(".github/workflows"), false, handbook);
+	ok(handbook.includes("- Every relative link in `docs/**/*.md` must resolve.\n"), handbook);
+	ok(handbook.includes("- Each `src/widgets/*.ts` module exports one renderer.\n"), handbook);
+	strictEqual(handbook.includes("`docs/*.md`"), false, handbook);
 });
 
 it("keeps a reviewer requirement its cited policy states, marks one its file does not state, and cuts workflow citations", async () => {

@@ -835,14 +835,42 @@ function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boole
 }
 
 /**
+ * A one-level glob, `docs/*.md`, over a directory holding files it would match
+ * deeper down. It reads as the directory's whole scope: a handbook said the
+ * documentation-links check covers `docs/*.md` and two root guides, "all
+ * three", while the check reads Markdown under `docs/` at every depth.
+ */
+function narrowerThanTree(token: string, evidence: ModelGroundingCorpus): boolean {
+	const slash = token.lastIndexOf("/");
+	const dir = token.slice(0, slash).replace(/^\.\//, "");
+	const name = token.slice(slash + 1);
+	if (slash <= 0 || !name.includes("*") || name.includes("**") || /[?<>{}[\]]/.test(name) || /[*?<>{}[\]]/.test(dir))
+		return false;
+	const pattern = new RegExp(
+		`^${name
+			.split("*")
+			.map((piece) => piece.replace(/[.+^$()|\\]/g, "\\$&"))
+			.join("[^/]*")}$`,
+	);
+	for (const path of evidence.repositoryPaths) {
+		if (!path.startsWith(`${dir}/`)) continue;
+		const rest = path.slice(dir.length + 1);
+		if (rest.includes("/") && pattern.test(rest.slice(rest.lastIndexOf("/") + 1))) return true;
+	}
+	return false;
+}
+
+/**
  * A citation may be a pattern rather than a name: a glob (`src/engine/**`,
  * `CLIO_*`), a placeholder (`tests/<name>.test.ts`), or a command chain joined
  * with `&&`. Each literal piece of at least three characters must ground on
- * its own, so a pattern can never smuggle in a name the repository lacks.
+ * its own, so a pattern can never smuggle in a name the repository lacks, and
+ * a one-level glob must not hide deeper matches (`narrowerThanTree`).
  */
 function groundedName(token: string, evidence: ModelGroundingCorpus): boolean {
 	const parts = token.split(/\s*&&\s*/).filter((part) => part.length > 0);
 	if (parts.length > 1) return parts.every((part) => groundedName(part, evidence));
+	if (narrowerThanTree(token, evidence)) return false;
 	const literals = token
 		.split(/<[^<>]*>|\*+|\?|\{[^{}]*\}/)
 		.map((piece) => piece.trim())
