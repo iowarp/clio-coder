@@ -1,5 +1,6 @@
+import { ACP_MAX_JOBS } from "./runtime.js";
 import type { SessionDelta, SessionSnapshot, TimelineItem } from "./sessions.js";
-import { ACP_MAX_JOBS, type AcpJob } from "./wire.js";
+import type { AcpJob } from "./wire.js";
 
 const encoder = new TextEncoder();
 const MARKER = "\n[… stream truncated …]";

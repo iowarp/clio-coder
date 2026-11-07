@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo } from "react";
 import { Link } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { extensionRows, reloadOutcome } from "./extensions-model.js";

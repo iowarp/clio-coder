@@ -4,7 +4,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useMemo, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { AcpJob } from "../../contracts/wire.js";
 import type { Client } from "../api/client.js";
 import { clock } from "../api/clock.js";

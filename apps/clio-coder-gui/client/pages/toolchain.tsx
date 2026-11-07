@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";

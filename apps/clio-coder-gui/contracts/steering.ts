@@ -1,3 +1,7 @@
+import { STEER_TEXT_MAX_BYTES } from "./runtime.js";
+
+export { QUEUE_MAX_ENTRIES, STEER_TEXT_MAX_BYTES } from "./runtime.js";
+
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import {
@@ -17,14 +21,6 @@ import {
 
 const closed = { additionalProperties: false };
 const name = Type.String({ maxLength: 64 });
-
-/**
- * The engine bounds steer text at 16 KiB and a queue at 64 entries; these are
- * the same numbers, restated so a request that would be refused over ACP is
- * refused at this app's edge instead of costing a round trip.
- */
-export const STEER_TEXT_MAX_BYTES = 16384;
-export const QUEUE_MAX_ENTRIES = 64;
 export const SteerMode = Type.Union([Type.Literal("next-slot"), Type.Literal("end-of-turn")]);
 export type SteerMode = Static<typeof SteerMode>;
 export const SteerRequest = Type.Object(

@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { cwdHash } from "../../../../../src/core/cwd-hash.js";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import type { RunListCursor } from "../../../../../src/domains/session/index.js";
 import {
@@ -13,6 +14,7 @@ import {
 	cacheReport,
 	callsReport,
 	costReport,
+	emptyUsageDiagnostics,
 	explain,
 	explainRepoRef,
 	isRepoRef,
@@ -20,8 +22,11 @@ import {
 	runRowTelemetry,
 	runTelemetry,
 	runTimeline,
+	sessionOperatorMetrics,
 	sessionTelemetry,
 	timeline,
+	usageReport,
+	usageWindow,
 	whyStopped,
 } from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
@@ -37,6 +42,21 @@ import { preflightLedger } from "./sessions.js";
  */
 export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	const state = clioStateDir();
+	if (input.kind === "metrics") {
+		const to = Date.now();
+		const from = to - 30 * 24 * 60 * 60 * 1000;
+		const diagnostics = emptyUsageDiagnostics();
+		const scope = input.cwd === null ? null : { hash: cwdHash(input.cwd), inRepo: (cwd: string) => cwd === input.cwd };
+		const { repo } = await usageWindow(state, scope, 30, to, diagnostics);
+		if (diagnostics.notes.length) throw new AppProblem("unavailable", diagnostics.notes.join("; "));
+		const report = usageReport(repo, from, to);
+		return {
+			from: new Date(from).toISOString(),
+			to: new Date(to).toISOString(),
+			cost: report.cost,
+			performance: report.performance,
+		};
+	}
 	if (input.kind === "explain") {
 		const ref = parseFactRef(input.ref);
 		if (!ref) throw new AppProblem("validation", "Invalid telemetry reference.");
@@ -74,6 +94,8 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	if (!preflightLedger() && !input.knownSession) throw notFound();
 	return resolveSession(state, input.sessionId, input.knownSession === true, (source) => {
 		switch (input.kind) {
+			case "session-metrics":
+				return sessionOperatorMetrics(source);
 			case "session":
 				return sessionTelemetry(source);
 			case "calls":

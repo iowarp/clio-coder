@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { InterviewRound, InterviewSubmission } from "../../contracts/interviews.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { useShortcut, useShortcutLayer } from "../interaction/use-shortcut.js";

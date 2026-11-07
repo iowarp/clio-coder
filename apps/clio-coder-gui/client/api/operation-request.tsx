@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import type { Operation } from "../../contracts/operations.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "./client.js";
 import {
 	changedRequestEpoch,

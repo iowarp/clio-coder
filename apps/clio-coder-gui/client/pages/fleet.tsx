@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Facts } from "../design/facts.js";

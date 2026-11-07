@@ -6,6 +6,7 @@ import type { ViewArtifactCategory, ViewArtifactFormat } from "../../domains/ses
 import type { UserTask } from "../../domains/user-tasks/store.js";
 import type { DispatchPlanView } from "../../tools/dispatch-plan.js";
 import type { AgentMessage } from "../types.js";
+import { ACP_MAX_JOBS } from "./runtime.js";
 
 /**
  * ACP extensibility reserves `_meta` for non-spec data. Clio namespaces its
@@ -642,7 +643,7 @@ export const AcpJob = Type.Object(
 );
 export type AcpJob = Static<typeof AcpJob>;
 /** The most jobs one list or one client's view carries. */
-export const ACP_MAX_JOBS = 32;
+export { ACP_MAX_JOBS } from "./runtime.js";
 export const AcpJobList = Type.Object({ jobs: Type.Array(AcpJob, { maxItems: ACP_MAX_JOBS }) }, closed);
 export type AcpJobList = Static<typeof AcpJobList>;
 export const AcpContextCapability = Type.Object({ version: Type.Literal(1), ledger: wireMethod }, closed);

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import {

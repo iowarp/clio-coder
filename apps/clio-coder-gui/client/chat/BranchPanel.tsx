@@ -3,7 +3,7 @@ import { memo, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { SessionTree } from "../../contracts/branches.js";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { notify } from "../design/notifications.js";

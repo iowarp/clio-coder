@@ -3,7 +3,7 @@
 // because the events transport that raises most of these is not a component.
 
 import { useSyncExternalStore } from "react";
-import { APP_TITLE } from "../../contracts/meta.js";
+import { APP_TITLE } from "../../contracts/runtime.js";
 
 export type Urgency = "assertive" | "polite";
 

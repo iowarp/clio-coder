@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { THEME_COLORS } from "../design/navigation.js";
 import { AppPreferencesPanel } from "../design/pwa.js";

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsWorkspace } from "./config-map-model.js";

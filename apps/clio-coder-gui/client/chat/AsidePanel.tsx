@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { memo, useId, useState } from "react";
 import { ASIDE_TEXT_MAX_CHARACTERS } from "../../contracts/aside.js";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton, MarkdownContent } from "../render/Markdown.js";

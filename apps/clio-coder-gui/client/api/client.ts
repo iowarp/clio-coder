@@ -1,6 +1,6 @@
 import type { Problem } from "../../contracts/common.js";
 import { machinePrefix } from "../../contracts/pages.js";
-import { type Input, type Output, type Route, routes } from "../../contracts/routes.js";
+import { type Input, type Output, type Route, routes } from "../../contracts/runtime-routes.js";
 import { tokenRejected } from "./auth-state.js";
 import { clock } from "./clock.js";
 import { CredentialProblem, type Credentials, createCredentials, unauthorizedProblem } from "./credentials.js";

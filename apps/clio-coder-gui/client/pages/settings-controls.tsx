@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { STRUCTURED_SETTINGS } from "../../contracts/structured-settings.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";

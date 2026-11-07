@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";

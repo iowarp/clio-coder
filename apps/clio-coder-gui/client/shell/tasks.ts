@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";

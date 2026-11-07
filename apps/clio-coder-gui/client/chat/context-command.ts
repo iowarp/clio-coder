@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { CommandRequest, CommandResult } from "../../contracts/steering.js";
 import type { ContextOperationStatus } from "../../contracts/wire.js";

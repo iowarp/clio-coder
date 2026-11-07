@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import type { Input } from "../../../contracts/routes.js";
-import { routes } from "../../../contracts/routes.js";
+import type { Input } from "../../../contracts/runtime-routes.js";
+import { routes } from "../../../contracts/runtime-routes.js";
 import type { Client } from "../../api/client.js";
 import { formatTime } from "../../api/clock.js";
 import { tokensText } from "../../chat/session-usage-model.js";

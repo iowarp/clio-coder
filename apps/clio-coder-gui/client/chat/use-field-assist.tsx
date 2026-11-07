@@ -6,7 +6,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { type KeyboardEvent, type ReactNode, type RefObject, useId, useRef, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { type HistoryBrowse, readHistory, stepHistory } from "./composer-history.js";
 import { SuggestionPalette, suggestionOptionId } from "./MentionPalette.js";

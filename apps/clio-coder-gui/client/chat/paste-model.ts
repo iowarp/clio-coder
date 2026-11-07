@@ -1,4 +1,4 @@
-import { TURN_FILE_MAX_BYTES } from "../../contracts/attachments.js";
+import { TURN_FILE_MAX_BYTES } from "../../contracts/runtime.js";
 import { decodeTextFile, type FileAttachment } from "./attachments-model.js";
 import { PROMPT_TEXT_MAX_CHARACTERS } from "./composer-model.js";
 

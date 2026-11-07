@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { routes } from "../../../contracts/routes.js";
+import { routes } from "../../../contracts/runtime-routes.js";
 import type { Client } from "../../api/client.js";
 import { clock, formatTime } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";

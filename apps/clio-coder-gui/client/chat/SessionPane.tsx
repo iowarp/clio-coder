@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { DeferredViewBoundary } from "../interaction/DeferredView.js";

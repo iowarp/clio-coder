@@ -1,4 +1,4 @@
-import { TURN_IMAGES_MAX_BASE64 } from "../../contracts/attachments.js";
+import { TURN_IMAGES_MAX_BASE64 } from "../../contracts/runtime.js";
 import {
 	ATTACHMENT_MAX_EDGE,
 	type Attachment,

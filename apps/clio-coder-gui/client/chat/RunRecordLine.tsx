@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo } from "react";
 import { Link } from "react-router";
-import { routes } from "../../contracts/routes.js";
 import type { RunResultFacts } from "../../contracts/run-result-facts.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { itemRunId, runRecordLine } from "./run-record-model.js";

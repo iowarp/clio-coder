@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { type KeyboardEvent, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";

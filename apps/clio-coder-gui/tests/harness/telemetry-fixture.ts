@@ -151,5 +151,7 @@ export async function writeFixtureTelemetry(path: string, scratch: string): Prom
 	}
 }
 
+export { sessionOperatorMetrics } from "../../../../src/domains/telemetry/index.js";
 export { fixtureEnvelope, fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
 export { writeSettledRun } from "../../../../tests/harness/settled-run.js";
+export { goldenTelemetryRecords } from "../../../../tests/harness/telemetry-view.js";

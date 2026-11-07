@@ -13,15 +13,14 @@
  */
 
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
+import { QUEUE_MAX_ENTRIES, STEER_TEXT_MAX_BYTES } from "../../contracts/runtime.js";
 import type { SessionSnapshot, Turn, Usage } from "../../contracts/sessions.js";
-import {
-	type CommandCatalog,
-	QUEUE_MAX_ENTRIES,
-	type QueueEditRequest,
-	type QueueEditResult,
-	type QueueSnapshot,
-	STEER_TEXT_MAX_BYTES,
-	type SteerMode,
+import type {
+	CommandCatalog,
+	QueueEditRequest,
+	QueueEditResult,
+	QueueSnapshot,
+	SteerMode,
 } from "../../contracts/steering.js";
 import { compactDuration } from "./overview-model.js";
 import { quantityValue } from "./session-usage-model.js";

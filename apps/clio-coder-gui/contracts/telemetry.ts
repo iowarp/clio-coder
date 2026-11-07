@@ -1,6 +1,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
+import { UsagePerformance } from "./reports.js";
 import type { CallFilter } from "./wire.js";
 import { FactRefSchema, TELEMETRY_DTO_SCHEMAS } from "./wire.js";
 
@@ -24,6 +25,17 @@ export const TelemetryTimeline = TELEMETRY_DTO_SCHEMAS.timeline;
 export const TelemetryWhyStopped = TELEMETRY_DTO_SCHEMAS.whyStopped;
 export const TelemetryExplanation = TELEMETRY_DTO_SCHEMAS.explanation;
 export const TelemetryQuota = TELEMETRY_DTO_SCHEMAS.quota;
+export const TelemetryMetrics = Type.Object(
+	{
+		from: Type.String(),
+		to: Type.String(),
+		cost: Type.Array(TELEMETRY_DTO_SCHEMAS.cost),
+		performance: UsagePerformance,
+	},
+	closed,
+);
+export type TelemetryMetrics = Static<typeof TelemetryMetrics>;
+export const TelemetrySessionMetrics = Type.Pick(TelemetryMetrics, ["cost", "performance"]);
 export const TelemetryUpdate = TELEMETRY_DTO_SCHEMAS.update;
 /** A run's sealed record through its integrity check: the facts the seal vouches for, never the raw document. */
 export const TelemetryRunEvidence = TELEMETRY_DTO_SCHEMAS.runEvidence;
@@ -45,7 +57,11 @@ export const TelemetryCallsQuery = Type.Object(
 );
 export type TelemetryCallsQuery = Static<typeof TelemetryCallsQuery>;
 export const TelemetryCostQuery = Type.Object(
-	{ by: Type.Optional(Type.Union([Type.Literal("role"), Type.Literal("model"), Type.Literal("turn")])) },
+	{
+		by: Type.Optional(
+			Type.Union([Type.Literal("role"), Type.Literal("model"), Type.Literal("target"), Type.Literal("turn")]),
+		),
+	},
 	closed,
 );
 export const TelemetryRangeQuery = Type.Object({ from: Type.Optional(utc), to: Type.Optional(utc) }, closed);
@@ -60,9 +76,10 @@ interface SessionRead {
 	knownSession?: boolean;
 }
 export type TelemetryRequest =
-	| ({ kind: "session" | "cache" | "why-stopped" } & SessionRead)
+	| { kind: "metrics"; cwd: string | null }
+	| ({ kind: "session" | "session-metrics" | "cache" | "why-stopped" } & SessionRead)
 	| ({ kind: "calls"; filter: CallFilter } & SessionRead)
-	| ({ kind: "cost"; by: "role" | "model" | "turn" } & SessionRead)
+	| ({ kind: "cost"; by: "role" | "model" | "target" | "turn" } & SessionRead)
 	| ({ kind: "timeline"; range: { from: string; to: string } | null } & SessionRead)
 	| { kind: "runs"; limit: number; cursor?: string }
 	| { kind: "run"; runId: string }

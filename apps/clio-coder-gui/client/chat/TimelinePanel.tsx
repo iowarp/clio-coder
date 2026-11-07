@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useId, useMemo, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { formatClock, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";

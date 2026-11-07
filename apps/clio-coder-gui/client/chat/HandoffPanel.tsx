@@ -3,7 +3,7 @@ import { memo, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { HandoffRefused } from "../../contracts/handoff.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { notify } from "../design/notifications.js";
 import { HANDOFF_MIN_GOAL, handoffDone, handoffRefusal } from "./handoff-model.js";

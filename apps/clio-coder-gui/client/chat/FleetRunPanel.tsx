@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { memo, useId, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { FleetPreview } from "../../contracts/fleet-run.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { notify } from "../design/notifications.js";

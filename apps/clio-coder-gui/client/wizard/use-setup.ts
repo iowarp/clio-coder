@@ -5,7 +5,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SetupAnswer, SetupState } from "../../contracts/setup.js";
 import { type Client, emptyInput } from "../api/client.js";
 

@@ -9,7 +9,7 @@
 import { useIsMutating, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useState, useSyncExternalStore } from "react";
 import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";

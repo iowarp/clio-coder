@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { type Explainable, explanationView } from "./quantity-model.js";

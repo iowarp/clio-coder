@@ -35,7 +35,10 @@ test("telemetry routes serve the read-model DTOs; every quantity passes the lie 
 	const cache = await json(await h.request(`${base}/cache`), routes.telemetryCache.response);
 	const timeline = await json(await h.request(`${base}/timeline`), routes.telemetryTimeline.response);
 	const whyStopped = await json(await h.request(`${base}/why-stopped`), routes.telemetryWhyStopped.response);
-	const served = [session, calls, cost, cache, timeline, whyStopped];
+	const metrics = await json(await h.request(`${base}/metrics`), routes.telemetrySessionMetrics.response);
+	assert.deepEqual(metrics.cost.find((report) => report.groupBy === "model")?.groups, cost.groups);
+	assert.equal(metrics.performance.sessions[0]?.sessionId, id);
+	const served = [session, calls, cost, cache, timeline, whyStopped, metrics];
 	const quantities = served.flatMap((dto) => quantitiesOf(dto));
 	assert.ok(quantities.length > 100);
 	assert.deepEqual(telemetryLies(quantities), []);
@@ -88,6 +91,8 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	t.after(() => h.close());
 	const state = join(h.home.path, "state");
 	assert.equal((await h.request("/api/telemetry/sessions/absent-session")).status, 404);
+	assert.equal((await h.request("/api/telemetry/sessions/absent-session/metrics")).status, 404);
+	assert.equal((await h.request("/api/telemetry/metrics?workspace=absent-workspace")).status, 404);
 	// A session this host holds with no journal is unknown coverage, never a missing resource (R9): the fixture
 	// agent journals nothing, as a session from before journaling or one that never called a model would not.
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
@@ -104,6 +109,12 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	assert.match(unjournaled.totals.tokens.display, /unknown/);
 	assert.match(unjournaled.totals.usd.display, /unknown|not measured/);
 	assert.deepEqual(telemetryLies(quantitiesOf(unjournaled)), []);
+	const unknownMetrics = await json(
+		await h.request(`/api/telemetry/sessions/${held.id}/metrics`),
+		routes.telemetrySessionMetrics.response,
+	);
+	assert.match(unknownMetrics.performance.sessions[0]?.ttft.p50.display ?? "", /unknown/);
+	assert.equal(unknownMetrics.performance.coverage.unavailable, 1);
 	assert.equal((await h.request(`/api/telemetry/sessions/${held.id}/cost`)).status, 200);
 	assert.equal((await h.request(`/api/telemetry/sessions/${held.id}/why-stopped`)).status, 200);
 	const id = seedGoldenSession(state);

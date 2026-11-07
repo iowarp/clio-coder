@@ -5,8 +5,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FleetItem } from "../../contracts/fleet-events.js";
-import { routes } from "../../contracts/routes.js";
-import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
+import { STEER_TEXT_MAX_BYTES } from "../../contracts/runtime.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { capabilityRefusal, steeringAffordances } from "./composer-model.js";

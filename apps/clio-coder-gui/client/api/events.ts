@@ -2,7 +2,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { SessionControl } from "../../contracts/control.js";
 import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
-import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
+import { SessionDeltaKinds as SessionDeltas } from "../../contracts/runtime.js";
+import type { SessionDelta, SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
 import { applyControl, lostControlNotice } from "../chat/control-model.js";
 import { telemetryInvalidations } from "../telemetry/live-model.js";
@@ -227,6 +228,7 @@ export function subscribe(
 			if (event.type === "telemetry.updated") {
 				const keys = refreshReads.get(event.payload.resource) ?? new Set<string>();
 				for (const key of telemetryInvalidations(event.payload.update)) keys.add(key);
+				if (keys.has("telemetry")) invalidate.add("operator-metrics");
 				refreshReads.set(event.payload.resource, keys);
 			}
 			if (event.type === "machine.attach") invalidate.add("machine-attachments");
@@ -308,6 +310,7 @@ export function subscribe(
 			invalidate.add("session-overview");
 		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
 		if (invalidate.has("session-overview")) void queries.cancelQueries({ queryKey: ["session-overview"] });
+		if (invalidate.has("operator-metrics")) void queries.cancelQueries({ queryKey: ["operator-metrics"] });
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 		if (launched !== null) launch(launched);
 	});

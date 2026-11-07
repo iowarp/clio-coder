@@ -1,6 +1,6 @@
 import type { ClientCredential, EventTicket } from "../../contracts/auth.js";
 import type { Problem } from "../../contracts/common.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { markTokenRejected, tokenRejected } from "./auth-state.js";
 import { dropStoredToken } from "./token.js";
 

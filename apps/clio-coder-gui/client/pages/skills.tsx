@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId } from "react";
 import { Link, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { useShell } from "../shell/shell-context.js";

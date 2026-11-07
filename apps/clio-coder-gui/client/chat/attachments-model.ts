@@ -9,7 +9,7 @@ import {
 	TURN_IMAGE_MAX,
 	TURN_IMAGE_TYPES,
 	TURN_IMAGES_MAX_BASE64,
-} from "../../contracts/attachments.js";
+} from "../../contracts/runtime.js";
 
 export type AttachmentType = (typeof TURN_IMAGE_TYPES)[number];
 

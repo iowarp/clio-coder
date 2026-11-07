@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSummary } from "../../contracts/sessions.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";

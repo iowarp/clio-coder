@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "react-router";
 import type { Machine, MachineAdd, MachineAttachment, MachineMutation } from "../../contracts/machines.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";

@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
-import { API_VERSION } from "../contracts/meta.js";
-import { routes } from "../contracts/routes.js";
+import { API_VERSION } from "../contracts/runtime.js";
+import { routes } from "../contracts/runtime-routes.js";
 import type { SessionSummary } from "../contracts/sessions.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { BUNDLE_VERSION } from "./api/bundle-version.js";

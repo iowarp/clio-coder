@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { CommandRequest } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import type { CommandFields } from "./command-model.js";

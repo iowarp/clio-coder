@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";

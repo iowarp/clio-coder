@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { UsageReport } from "../../contracts/reports.js";
+import { UsagePerformance, type UsageReport } from "../../contracts/reports.js";
 import { TelemetryCache, TelemetryCost, TelemetrySession } from "../../contracts/telemetry.js";
 import type { CliRunner } from "./cli-runner.js";
 import { AppProblem } from "./problem.js";
@@ -21,6 +21,7 @@ const UsageDto = Type.Object(
 		tokens: TelemetrySession.properties.own.properties.tokens,
 		cost: Type.Array(TelemetryCost),
 		cache: Type.Array(TelemetryCache),
+		performance: Type.Optional(UsagePerformance),
 	},
 	closed,
 );
@@ -54,6 +55,7 @@ export class ReportsService {
 				})),
 			],
 			opportunities: [],
+			...(report.performance ? { performance: report.performance } : {}),
 		};
 	}
 }

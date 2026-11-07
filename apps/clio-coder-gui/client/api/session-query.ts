@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "./client.js";
 import { sessionBuffer } from "./sessions.js";
 

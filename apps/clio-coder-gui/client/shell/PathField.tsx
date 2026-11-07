@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useId, useState } from "react";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { chosenText, isCurrent, moveHighlight, tabCompletion } from "./path-input-model.js";

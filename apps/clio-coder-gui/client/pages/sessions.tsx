@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";

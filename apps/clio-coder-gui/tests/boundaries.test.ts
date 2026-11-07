@@ -81,6 +81,7 @@ const adapters = new Set([
 	"src/core/package-root.ts",
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
+	"src/core/cwd-hash.ts",
 	"src/core/workspace-files.ts",
 	"src/domains/session/history.ts",
 	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
@@ -196,6 +197,9 @@ function violations(file: string, source: string): string[] {
 					)
 				)
 					errors.push(`wire shim allowlist: ${rootTarget} ${names}`);
+			} else if (name === "server/clio/wire-runtime.ts") {
+				if (rootTarget !== "src/engine/acp/runtime.ts" || names.some((symbol) => symbol !== "ACP_MAX_JOBS"))
+					errors.push(`wire runtime allowlist: ${rootTarget} ${names}`);
 			} else if (name === "server/clio/http-shims.ts") {
 				const allowed = httpModules.get(rootTarget);
 				if (!allowed || names.some((symbol) => !allowed.has(symbol)))
@@ -272,6 +276,10 @@ test("boundary checker rejects representative bypasses", () => {
 		'import { createStdioTransport as spawnAcp } from "../clio/http-shims.js";',
 	])
 		assert.ok(violations(resolve(app, "server/http/escape.ts"), source).length > 0, source);
+	assert.ok(
+		violations(resolve(app, "server/clio/wire-runtime.ts"), 'export * from "../../../../src/engine/acp/types.js";')
+			.length > 0,
+	);
 });
 
 test("the browser contract reaches no Node builtin through its value imports, root modules included", () => {
@@ -293,6 +301,39 @@ test("the browser contract reaches no Node builtin through its value imports, ro
 	};
 	for (const file of files(resolve(app, "contracts"))) visit(file);
 	assert.deepEqual(reached, []);
+});
+
+test("the initial shell's static value graph excludes route and wire validators", () => {
+	const seen = new Set<string>();
+	const forbidden: string[] = [];
+	const visit = (file: string) => {
+		if (seen.has(file) || !existsSync(file)) return;
+		seen.add(file);
+		const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+		for (const node of tree.statements) {
+			if (!(ts.isImportDeclaration(node) || ts.isExportDeclaration(node))) continue;
+			if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) continue;
+			if (ts.isImportDeclaration(node) ? node.importClause?.isTypeOnly : node.isTypeOnly) continue;
+			const bindings = ts.isImportDeclaration(node) ? node.importClause?.namedBindings : node.exportClause;
+			if (
+				bindings &&
+				(ts.isNamedImports(bindings) || ts.isNamedExports(bindings)) &&
+				bindings.elements.every((element) => element.isTypeOnly)
+			)
+				continue;
+			const specifier = node.moduleSpecifier.text;
+			if (specifier === "typebox" || specifier.startsWith("typebox/"))
+				forbidden.push(`${relative(root, file)} -> ${specifier}`);
+			if (!specifier.startsWith(".") || !/\.js$/.test(specifier)) continue;
+			const base = resolve(dirname(file), specifier).slice(0, -3);
+			const target = [".ts", ".tsx"].map((extension) => base + extension).find(existsSync);
+			if (target) visit(target);
+		}
+	};
+	visit(resolve(app, "client/main.tsx"));
+	assert.deepEqual(forbidden, []);
+	assert.equal(seen.has(resolve(app, "contracts/routes.ts")), false);
+	assert.equal(seen.has(resolve(root, "src/engine/acp/types.ts")), false);
 });
 
 test("the client and server sum no telemetry quantity: no accumulation over tokens, cost, calls or missing-usage counts", () => {

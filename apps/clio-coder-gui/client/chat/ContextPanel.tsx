@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionWorkspace } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
 import { Explained } from "../telemetry/Explained.js";

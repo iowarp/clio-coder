@@ -150,7 +150,7 @@ export function createApp(options: {
 	});
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
-	telemetryRoutes(app, hub, options.telemetry);
+	telemetryRoutes(app, hub, options.telemetry, options.sessions.workspaces);
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets, options.setup);
 	fleetRoutes(app, hub, options.fleet, artifacts);

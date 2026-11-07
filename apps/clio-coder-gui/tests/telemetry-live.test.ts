@@ -22,7 +22,7 @@ test("a telemetry_update names the reads to refresh and folds nothing (#434)", (
 	assert.deepEqual(telemetryInvalidations({ topics: [] }), []);
 });
 
-test("the browser subscribes to named telemetry updates and invalidates only their session", async (t) => {
+test("named telemetry updates refresh their session and operator windows, not other session reads", async (t) => {
 	let source: Source | undefined;
 	let stop = () => {};
 	t.after(() => stop());
@@ -49,6 +49,8 @@ test("the browser subscribes to named telemetry updates and invalidates only the
 	t.after(() => queries.clear());
 	queries.setQueryData(["meta"], { epoch: "epoch-1" });
 	queries.setQueryData(["session-overview"], { sessions: [] });
+	queries.setQueryData(["operator-metrics", ""], {});
+	queries.setQueryData(["operator-metrics", "workspace-1"], {});
 	for (const key of ["telemetry", "session-usage"]) {
 		queries.setQueryData([key, "session-1"], {});
 		queries.setQueryData([key, "session-2"], {});
@@ -89,6 +91,8 @@ test("the browser subscribes to named telemetry updates and invalidates only the
 		assert.equal(queries.getQueryState([key, "session-1"])?.isInvalidated, true, key);
 		assert.equal(queries.getQueryState([key, "session-2"])?.isInvalidated, false, key);
 	}
+	for (const workspace of ["", "workspace-1"])
+		assert.equal(queries.getQueryState(["operator-metrics", workspace])?.isInvalidated, true);
 	const previous = source;
 	previous.onerror?.();
 	for (let turn = 0; turn < 150 && source === previous; turn += 1) await setTimeout(10);

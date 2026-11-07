@@ -5,6 +5,7 @@ import { CallFilterSchema } from "../../contracts/wire.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
 import type { TelemetryService } from "../services/telemetry.js";
+import type { WorkspaceService } from "../services/workspaces.js";
 import { parse, register } from "./validate.js";
 
 /** Query strings are flat; the list filters arrive comma-separated and are checked as the read model's CallFilter. */
@@ -21,7 +22,14 @@ function callFilter(query: TelemetryCallsQuery) {
 	});
 }
 
-export function telemetryRoutes(app: Hono, hub: EventHub, telemetry: TelemetryService) {
+export function telemetryRoutes(app: Hono, hub: EventHub, telemetry: TelemetryService, workspaces: WorkspaceService) {
+	register(app, hub, routes.telemetryMetrics, async ({ query }) => {
+		const cwd = query.workspace === undefined ? null : (await workspaces.get(query.workspace)).path;
+		return telemetry.read({ kind: "metrics", cwd }, routes.telemetryMetrics.response);
+	});
+	register(app, hub, routes.telemetrySessionMetrics, ({ params }) =>
+		telemetry.read({ kind: "session-metrics", sessionId: params.id }, routes.telemetrySessionMetrics.response),
+	);
 	register(app, hub, routes.telemetrySession, ({ params }) =>
 		telemetry.read({ kind: "session", sessionId: params.id }, routes.telemetrySession.response),
 	);

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/routes.js";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { ApiProblem, type Client } from "../api/client.js";
