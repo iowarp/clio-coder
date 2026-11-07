@@ -1,8 +1,10 @@
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // Doctor, `run --read-only` and read-only workers probe targets like any run, and
@@ -22,7 +24,13 @@ const { endpointSlotsPath, readDiscoveredEndpointSlots, recordDiscoveredEndpoint
 	"../../src/domains/providers/endpoint-slots-store.js"
 );
 const { withStateFileLock } = await import("../../src/core/state-file-lock.js");
-after(() => rmSync(home, { recursive: true, force: true }));
+const { enableClioCompileCache } = await import("../../src/core/compile-cache.js");
+const { initializeClioHome } = await import("../../src/core/init.js");
+const cliHome = mkdtempSync(join(tmpdir(), "clio-coder-read-only-cli-"));
+after(() => {
+	rmSync(home, { recursive: true, force: true });
+	rmSync(cliHome, { recursive: true, force: true });
+});
 
 const target = { id: "local", runtime: "openai-compat", url: "http://127.0.0.1:9/v1" };
 const endpointKey = "http://127.0.0.1:9";
@@ -61,5 +69,35 @@ describe("read-only mode", () => {
 		deepEqual([readFileSync(snapshotFile, "utf8"), readFileSync(endpointSlotsPath(), "utf8")], before);
 		deepEqual(readTargetModelSnapshot(target)?.models, ["model-a"]);
 		equal(readDiscoveredEndpointSlots()[endpointKey]?.slots, 4);
+	});
+
+	it("a process in read-only mode for good enables no bytecode cache and home setup creates no cache root", () => {
+		ok(existsSync(join(home, "cache")), "the cache root exists, so only the mode can refuse the cache");
+		equal(enableClioCompileCache({}), null);
+		ok(!existsSync(join(home, "cache", "v8-compile-cache")));
+		rmSync(join(home, "cache"), { recursive: true, force: true });
+		initializeClioHome();
+		ok(!existsSync(join(home, "cache")), "read-only home setup leaves a home without a cache root as it found it");
+		ok(existsSync(join(home, "state")), "the rest of the home is still set up");
+	});
+
+	it("`run --read-only` enables no bytecode cache before the run enters the mode; a plain run still does", () => {
+		const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+		const env: NodeJS.ProcessEnv = { ...process.env, ...scratchClioEnvVars(cliHome), HOME: cliHome };
+		delete env.NODE_COMPILE_CACHE;
+		delete env.NODE_DISABLE_COMPILE_CACHE;
+		mkdirSync(join(cliHome, "cache"), { recursive: true });
+		// No task: the run refuses with a usage error after the CLI's enable already ran.
+		const run = (args: string[]) =>
+			spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), entry, ...args], {
+				cwd: cliHome,
+				env,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			}).status;
+		equal(run(["run", "--json", "--read-only"]), 2);
+		deepEqual(readdirSync(join(cliHome, "cache")), []);
+		equal(run(["run", "--json"]), 2);
+		deepEqual(readdirSync(join(cliHome, "cache")), ["v8-compile-cache"]);
 	});
 });

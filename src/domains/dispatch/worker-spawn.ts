@@ -1151,8 +1151,8 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
  * is the only control Node reads early enough. Spawning a worker writes state
  * by definition, so the cache is established here when no boot entrypoint did
  * it earlier (a direct `fleet run` reaches this line with the cache still
- * unsettled); the enable is settle-once, root-gated, and operator-controlled
- * like everywhere else. Operator settings win, stale markers are normalized
+ * unsettled); the enable is settle-once, root-gated, operator-controlled, and
+ * disabled in a read-only process like everywhere else. Operator settings win, stale markers are normalized
  * away, and the worker entry consumes the injected pair from its own
  * process.env right after Node reads it, so the cache serves Clio's own
  * entry graph and never the user's node processes.

@@ -14,9 +14,18 @@ import {
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
+import { readOnlyProcess } from "./read-only-mode.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
-import { assertClioDirLayout, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "./xdg.js";
+import {
+	assertClioDirLayout,
+	clioCacheDir,
+	clioCachePath,
+	clioConfigDir,
+	clioDataDir,
+	clioStateDir,
+	resolveClioDirs,
+} from "./xdg.js";
 
 export interface InitReport {
 	configDir: string;
@@ -79,11 +88,15 @@ export function initializeClioHome(): InitReport {
 	const configDir = clioConfigDir();
 	const dataDir = clioDataDir();
 	const stateDir = clioStateDir();
-	const cacheDir = clioCacheDir();
+	// Only disposable caches live under the cache root, and their writers create it
+	// on their first write. A read-only process writes none of them, so it leaves a
+	// home without one as it found it.
+	const readOnly = readOnlyProcess();
+	const cacheDir = readOnly ? clioCachePath() : clioCacheDir();
 
 	const created: string[] = [];
 
-	for (const dir of [configDir, dataDir, stateDir, cacheDir]) {
+	for (const dir of readOnly ? [configDir, dataDir, stateDir] : [configDir, dataDir, stateDir, cacheDir]) {
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 			created.push(dir);

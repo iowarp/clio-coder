@@ -23,6 +23,7 @@
 
 import { spawn } from "node:child_process";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
+import { readOnlyProcess } from "../../core/read-only-mode.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
@@ -106,7 +107,11 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	// is the group an abort must signal.
 	const labels = (node.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0);
 	const labelAssignment = labels.length > 0 ? ` CLIO_CODER_WORKER_LABELS=${shellQuote(labels.join(","))}` : "";
-	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}`;
+	// A read-only process writes nothing to Clio's home, and neither do its
+	// workers. The remote entry enables its bytecode cache before the spec on
+	// stdin can say the run is read-only, so Node's own switch says it first.
+	const compileCacheAssignment = readOnlyProcess() ? " NODE_DISABLE_COMPILE_CACHE=1" : "";
+	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}${compileCacheAssignment}`;
 }
 
 type TargetLifecycle = NonNullable<WorkerSpec["target"]["lifecycle"]>;
