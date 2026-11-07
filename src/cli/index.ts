@@ -5,10 +5,15 @@
 // a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
 process.title = "clio-coder";
 
-function installHumanStdoutHandler(command: string, args: readonly string[]): void {
-	const streamsToReader =
-		(command === "fleet" && ["code-steps", "events", "status", "view"].includes(args[0] ?? "")) || command === "export";
-	if (!streamsToReader) return;
+/**
+ * A reader that closes early (`clio-coder agents | head -1`) ends the command with SIGPIPE status instead of
+ * an unhandled EPIPE stack trace. Without a listener the same error would crash the process anyway, so this
+ * changes only how it ends. `acp` and `worker` own their stdout errors, and `run` settles its own session.
+ */
+const OWNS_STDOUT_ERRORS: ReadonlySet<string> = new Set(["acp", "worker", "run"]);
+
+function installHumanStdoutHandler(command: string): void {
+	if (OWNS_STDOUT_ERRORS.has(command)) return;
 	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 		if (error.code === "EPIPE") process.exit(141);
 		throw error;
@@ -445,7 +450,7 @@ function isCommandToken(token: string): boolean {
 async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliBootOptions): Promise<number> {
 	const handler = COMMAND_HANDLERS.get(subcommand);
 	if (handler) {
-		installHumanStdoutHandler(subcommand, subArgs);
+		installHumanStdoutHandler(subcommand);
 		try {
 			return await handler(subArgs, bootOptions);
 		} catch (err) {

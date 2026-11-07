@@ -31,6 +31,8 @@ test("closed stdout quietly ends fleet journals, followers, and trace JSON with 
 			["fleet", "events", rootId, "--json"],
 			["fleet", "events", rootId, "--json", "--follow"],
 			["fleet", "code-steps", rootId, "--json"],
+			["agents"],
+			["paths"],
 		]) {
 			const child = spawn(process.execPath, [resolve("dist/cli/index.js"), ...args], {
 				cwd: process.cwd(),
