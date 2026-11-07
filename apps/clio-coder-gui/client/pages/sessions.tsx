@@ -15,14 +15,14 @@ import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
 import { ControlBanner } from "../chat/ControlBanner.js";
 import { ConversationOutline } from "../chat/ConversationOutline.js";
-import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
+import { compactionsByTurn, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
 import { FilePreviewDialog } from "../chat/FilePreviewDialog.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
-import { summarizeHealth } from "../chat/health.js";
+import { compactionRows, summarizeHealth } from "../chat/health.js";
 import { Interview } from "../chat/Interview.js";
 import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
@@ -238,6 +238,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const fleet = snapshot?.fleet;
 	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
+	const compactions = useMemo(
+		() => compactionsByTurn(compactionRows(snapshot?.health ?? []), snapshot?.turns ?? []),
+		[snapshot?.health, snapshot?.turns],
+	);
 
 	const running = snapshot?.turns.at(-1)?.status === "running";
 	const contextActivity = snapshot?.contextWork?.active;
@@ -599,6 +603,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 										nowMs={item.settled ? 0 : now}
 										stopping={false}
 										notices={NO_ROWS}
+										compactions={compactions.get(item.turnId) ?? 0}
 										workspaceRoot={workspaceRoot}
 										liveWorkers={item.settled ? 0 : liveWorkers}
 									/>

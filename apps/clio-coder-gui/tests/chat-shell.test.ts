@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	compactionsByTurn,
 	EMPTY_PROMPT,
 	observeStart,
 	placeHealthRows,
@@ -18,6 +19,7 @@ import {
 	responseText,
 	segmentSettled,
 	toolCount,
+	turnActivity,
 	turnAriaLabel,
 	turnStartedAt,
 } from "../client/chat/chat-turn.js";
@@ -197,6 +199,30 @@ test("placeHealthRows puts a fact at the turn it happened in", () => {
 		(placed.after.get("t2") ?? []).map((entry) => entry.id),
 		["h2"],
 	);
+});
+
+test("turnActivity sums host-timed tool calls and names the slowest; compactions count per turn", () => {
+	const activity = turnActivity(
+		turnOf([
+			item({ id: "a", kind: "tool", toolCallId: "a", title: "Read file", durationMs: 120 }),
+			item({ id: "b", kind: "tool", toolCallId: "b", title: "Run tests", durationMs: 3900, sequence: 1 }),
+			item({ id: "c", kind: "tool", toolCallId: "c", title: "Replayed", origin: "replay", sequence: 2 }),
+			item({ id: "d", kind: "text", text: "done", sequence: 3 }),
+		]),
+		2,
+	);
+	assert.deepEqual(activity, {
+		tools: 3,
+		timed: 2,
+		toolMs: 4020,
+		slowest: { name: "Run tests", ms: 3900 },
+		compactions: 2,
+	});
+	const counts = compactionsByTurn(
+		[healthRow({ id: "h1", at: "2026-09-20T10:01:00.000Z" }), healthRow({ id: "h2", at: "2026-09-20T10:02:00.000Z" })],
+		[row({ id: "t1", startedAt: "2026-09-20T10:00:00.000Z" })],
+	);
+	assert.equal(counts.get("t1"), 2);
 });
 
 test("placeHealthRows keeps a fact it cannot place rather than dropping it", () => {

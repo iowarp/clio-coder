@@ -32,7 +32,7 @@ import {
 	responseAuthor,
 	responseText,
 	segmentSettled,
-	toolCount,
+	turnActivity,
 	turnAriaLabel,
 	turnStartedAt,
 } from "./chat-turn.js";
@@ -74,6 +74,8 @@ export interface ChatTurnProps {
 	readonly stopping: boolean;
 	/** Health facts that happened during this turn, rendered where they happened. */
 	readonly notices: readonly HealthRow[];
+	/** Compactions the session reported while this turn ran. */
+	readonly compactions: number;
 	readonly workspaceRoot: string | undefined;
 	/** Dispatched runs still in flight. Zero for a settled turn, so it never re-renders one. */
 	readonly liveWorkers: number;
@@ -83,6 +85,7 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	if (previous.row !== next.row) return false;
 	if (previous.liveWorkers !== next.liveWorkers) return false;
 	if (previous.notices !== next.notices) return false;
+	if (previous.compactions !== next.compactions) return false;
 	if (previous.stopping !== next.stopping) return false;
 	// A live turn only spins while its session is open.
 	if (!previous.turn.settled && previous.session.state !== next.session.state) return false;
@@ -133,6 +136,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 	stopping,
 	workspaceRoot,
 	liveWorkers,
+	compactions,
 }: ChatTurnProps) {
 	countRender(turn.settled ? "turn.settled" : "turn.live");
 	const reported = liveStatus(turn, row, pending, stopping, liveWorkers);
@@ -268,7 +272,11 @@ export const ChatTurnView = memo(function ChatTurnView({
 				{/* One quiet line closes the turn: its outcome, then what can be done with the response. */}
 				<div className="chat-response__footer">
 					{row !== undefined && row.status !== "running" ? (
-						<TurnOutcome client={client} outcome={turnOutcome(row, toolCount(turn))} formatClock={formatClock} />
+						<TurnOutcome
+							client={client}
+							outcome={turnOutcome(row, turnActivity(turn, compactions))}
+							formatClock={formatClock}
+						/>
 					) : null}
 					<MessageActions
 						sessionId={session.id}

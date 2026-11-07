@@ -11,6 +11,7 @@ import {
 	draftStore,
 	MAX_DRAFT_STORES,
 	messageActionOffers,
+	NO_ACTIVITY,
 	NO_STEERING,
 	noticeForError,
 	noticeForRefusal,
@@ -464,25 +465,59 @@ test("a completed turn footer carries its time, tokens and tool count, and an un
 	assert.equal(withoutUsage.usage, null);
 });
 
-test("the Detailed line reports model, speed and cache only when they were reported", () => {
+test("the Detailed line reports model, speed, the prompt split and cache only when they were reported", () => {
 	const view = turnOutcome(turn({ details: { model: "qwen3.8-27b", ttftMs: 420, outputTokensPerSecond: 38.4 } }), 0);
 	assert.deepEqual(view.nerd, [
 		{ label: "Model", value: "qwen3.8-27b" },
 		{ label: "First token", value: "420 ms" },
+		{ label: "Latency", value: "12 s" },
 		{ label: "Speed", value: "38 tok/s" },
+		{ label: "Prompt", value: "12,436 (90 cached)" },
+		{ label: "Output", value: "678" },
 		{ label: "Cache hit", value: "1%" },
 		{ label: "Reasoning", value: "234" },
 	]);
 	assert.deepEqual(
 		view.breakdown.filter((row) => row.group === "Cache").map((row) => [row.label, row.value]),
 		[
+			["Read", "90"],
 			["Hit share", "1%"],
 			["Written", "1"],
 		],
 	);
-	assert.deepEqual(turnOutcome(turn({ usage: null }), 0).nerd, [], "nothing reported, nothing claimed");
+	assert.deepEqual(
+		turnOutcome(turn({ usage: null }), 0).nerd,
+		[{ label: "Latency", value: "12 s" }],
+		"only the recorded instants remain",
+	);
+	assert.deepEqual(turnOutcome(turn({ startedAt: null, usage: null }), 0).nerd, [], "nothing reported, nothing claimed");
 	assert.equal(tokenRate(7.25), "7.3 tok/s");
 	assert.equal(quantityValue(unmeasured("unknown")), null);
+});
+
+test("tool time names how many calls it measured, and compactions are counted per turn", () => {
+	const view = turnOutcome(turn({ usage: null }), {
+		tools: 3,
+		timed: 2,
+		toolMs: 4200,
+		slowest: { name: "Run tests", ms: 3900 },
+		compactions: 1,
+	});
+	assert.deepEqual(view.nerd.slice(1), [
+		{ label: "Tool time", value: "4.2 s over 2 of 3" },
+		{ label: "Slowest tool", value: "Run tests 3.9 s" },
+		{ label: "Compactions", value: "1" },
+	]);
+	assert.deepEqual(
+		view.breakdown.filter((row) => row.group === "Tools" || row.group === "Context").map((row) => row.value),
+		["3", "4.2 s over 2 of 3", "Run tests 3.9 s", "1"],
+	);
+	const replayed = turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 2 });
+	assert.equal(
+		replayed.nerd.some((fact) => fact.label === "Tool time"),
+		false,
+		"replayed calls carry no host time, so none is claimed",
+	);
 });
 
 test("a failed turn shows its problem detail and its stop reason; a stopped one is not a failure", () => {

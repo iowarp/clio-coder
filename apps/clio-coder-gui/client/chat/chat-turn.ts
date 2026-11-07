@@ -10,6 +10,7 @@
 
 import type { Turn } from "../../contracts/sessions.js";
 import { workerLabel } from "./activity.js";
+import type { TurnActivity } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
 import type { ChatTurn } from "./turns.js";
 
@@ -102,6 +103,31 @@ export function responseAuthor(turn: ChatTurn): ResponseAuthor {
 }
 
 /** Tool calls in this turn, which is the number the outcome footer reports. */
+/** Compactions per turn, placed by the same rule as every other health fact. */
+export function compactionsByTurn(rows: readonly HealthRow[], turns: readonly Turn[]): ReadonlyMap<string, number> {
+	const counts = new Map<string, number>();
+	for (const [turnId, placed] of placeHealthRows(rows, turns).after) counts.set(turnId, placed.length);
+	return counts;
+}
+
+/** What the turn's outcome line counts: its tool calls, their measured time and the compactions in it. */
+export function turnActivity(turn: ChatTurn, compactions: number): TurnActivity {
+	let tools = 0;
+	let timed = 0;
+	let toolMs = 0;
+	let slowest: TurnActivity["slowest"] = null;
+	for (const item of turn.items) {
+		if (item.kind !== "tool") continue;
+		tools += 1;
+		if (item.durationMs === undefined) continue;
+		timed += 1;
+		toolMs += item.durationMs;
+		if (slowest === null || item.durationMs > slowest.ms)
+			slowest = { name: (item.title ?? item.text).slice(0, 48), ms: item.durationMs };
+	}
+	return { tools, timed, toolMs, slowest, compactions };
+}
+
 export function toolCount(turn: ChatTurn): number {
 	let total = 0;
 	for (const item of turn.items) if (item.kind === "tool") total += 1;

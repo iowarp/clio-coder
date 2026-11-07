@@ -220,6 +220,16 @@ const newer = (candidate: HealthRow, held: HealthRow | undefined): boolean =>
  * Reduces the strip to what an operator reads at a glance. Order within `rows` is fixed rather than
  * chronological, so a row does not move under the pointer when an unrelated fact arrives.
  */
+/** Every compaction the session reported, oldest first, rather than only the newest one the summary keeps. */
+export function compactionRows(items: readonly HealthItemLike[]): HealthRow[] {
+	const rows: HealthRow[] = [];
+	for (const item of items) {
+		const row = toRow(item);
+		if (row?.kind === "compaction") rows.push(row);
+	}
+	return rows;
+}
+
 export function summarizeHealth(items: readonly HealthItemLike[]): HealthSummary {
 	let contextWarning: HealthRow | undefined;
 	let compaction: HealthRow | undefined;

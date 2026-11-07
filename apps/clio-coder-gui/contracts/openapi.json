@@ -14071,7 +14071,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_67a6227a"
 								}
 							}
 						},
@@ -15108,7 +15108,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_67a6227a"
 								}
 							}
 						},
@@ -15203,7 +15203,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_67a6227a"
 								}
 							}
 						},
@@ -15253,7 +15253,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_67a6227a"
 									}
 								}
 							}
@@ -15744,7 +15744,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_67a6227a"
 								}
 							}
 						},
@@ -18590,12 +18590,6 @@
 					"$ref": "#/components/schemas/Object_admission_agent_attempt_069e9a76"
 				}
 			},
-			"Array_11bb1234": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_id_kind_locations_1b48846f"
-				}
-			},
 			"Array_296ec6ce": {
 				"type": "array",
 				"items": {
@@ -18917,6 +18911,12 @@
 					"type": "string",
 					"minLength": 1,
 					"maxLength": 512
+				}
+			},
+			"Array_d8147d79": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_durationMs_id_kind_aff0ceb8"
 				}
 			},
 			"Array_d853a408": {
@@ -20011,7 +20011,7 @@
 										"minimum": 1
 									},
 									"item": {
-										"$ref": "#/components/schemas/Object_id_kind_locations_1b48846f"
+										"$ref": "#/components/schemas/Object_durationMs_id_kind_aff0ceb8"
 									}
 								},
 								"additionalProperties": false
@@ -23523,7 +23523,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_548efaff": {
+			"Object_config_contextWork_fleet_67a6227a": {
 				"type": "object",
 				"required": [
 					"id",
@@ -23540,7 +23540,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_4e806c05"
+					"$ref": "#/components/schemas/Shape_fe426d6a"
 				},
 				"additionalProperties": false
 			},
@@ -24101,6 +24101,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_durationMs_id_kind_aff0ceb8": {
+				"type": "object",
+				"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_83e1308f"
+				},
+				"additionalProperties": false
+			},
 			"Object_effective_policy_reasons_fd9ac021": {
 				"type": "object",
 				"required": ["policy", "requested", "effective", "reasons"],
@@ -24639,14 +24647,6 @@
 					"kind": {
 						"enum": ["local", "ssh"]
 					}
-				},
-				"additionalProperties": false
-			},
-			"Object_id_kind_locations_1b48846f": {
-				"type": "object",
-				"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_e5e8cddc"
 				},
 				"additionalProperties": false
 			},
@@ -27564,66 +27564,6 @@
 					]
 				}
 			},
-			"Shape_4e806c05": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_e96cc9df"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -28537,6 +28477,69 @@
 				},
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
+				}
+			},
+			"Shape_83e1308f": {
+				"id": {
+					"type": "string"
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"sequence": {
+					"type": "integer"
+				},
+				"kind": {
+					"$ref": "#/components/schemas/Union_c22e678b"
+				},
+				"text": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"title": {
+					"type": "string"
+				},
+				"toolKind": {
+					"type": "string"
+				},
+				"toolCallId": {
+					"type": "string"
+				},
+				"locations": {
+					"$ref": "#/components/schemas/Array_752b64bf"
+				},
+				"rawInput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"rawOutput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"partialOutput": {
+					"type": "string",
+					"maxLength": 32768
+				},
+				"startedAt": {
+					"type": "string",
+					"maxLength": 64
+				},
+				"durationMs": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
 				}
 			},
 			"Shape_8a16fc8c": {
@@ -29533,61 +29536,6 @@
 					"type": "boolean"
 				}
 			},
-			"Shape_e5e8cddc": {
-				"id": {
-					"type": "string"
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"sequence": {
-					"type": "integer"
-				},
-				"kind": {
-					"$ref": "#/components/schemas/Union_c22e678b"
-				},
-				"text": {
-					"type": "string"
-				},
-				"status": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"title": {
-					"type": "string"
-				},
-				"toolKind": {
-					"type": "string"
-				},
-				"toolCallId": {
-					"type": "string"
-				},
-				"locations": {
-					"$ref": "#/components/schemas/Array_752b64bf"
-				},
-				"rawInput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"rawOutput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"partialOutput": {
-					"type": "string",
-					"maxLength": 32768
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
 			"Shape_e76e46ca": {
 				"firstRecordAt": {
 					"$ref": "#/components/schemas/Union_9d36f13d"
@@ -29783,6 +29731,66 @@
 				},
 				"sseFallbacks": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
+				}
+			},
+			"Shape_fe426d6a": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_d8147d79"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_e96cc9df"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_fe51400d": {

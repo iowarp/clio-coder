@@ -630,11 +630,15 @@
 .turn-outcome__nerd > div {
 	display: flex;
 	gap: var(--space-1);
+	max-width: 100%;
 	white-space: nowrap;
 }
 .turn-outcome__nerd dd {
+	min-width: 0;
 	margin: 0;
+	overflow: hidden;
 	color: var(--ink-muted);
+	text-overflow: ellipsis;
 }
 .turn-details {
 	display: flex;

@@ -111,9 +111,11 @@ test("a prompt-turn command runs as a visible turn with its dispatch call inside
 	const snapshot = h.supervisor.get(session.id);
 	assert.equal(snapshot.turns.at(-1)?.prompt, "/council --roster review Compare the samples");
 	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
-	assert.ok(
-		snapshot.timeline.some((item) => item.kind === "tool" && item.title === "dispatch" && item.status === "completed"),
-	);
+	const dispatch = snapshot.timeline.find((item) => item.kind === "tool" && item.title === "dispatch");
+	assert.equal(dispatch?.status, "completed");
+	// The fixture holds the call open for 60 ms; the host times it from first sighting to settling.
+	assert.ok(dispatch?.startedAt !== undefined && Number.isFinite(Date.parse(dispatch.startedAt)));
+	assert.ok((dispatch?.durationMs ?? 0) >= 40, `host-timed duration ${dispatch?.durationMs}`);
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
 		/"method":"_clio-coder\/commands\/invoke"/,

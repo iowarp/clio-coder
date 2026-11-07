@@ -1033,6 +1033,11 @@ export class Supervisor {
 			// and leaving a stale snapshot beside it would show two versions of the
 			// same output in the same row.
 			const settled = item.status === "completed" || item.status === "failed";
+			if (origin === "live") {
+				const now = Date.now();
+				item.startedAt ??= new Date(now).toISOString();
+				if (settled && item.durationMs === undefined) item.durationMs = Math.max(0, now - Date.parse(item.startedAt));
+			}
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;
