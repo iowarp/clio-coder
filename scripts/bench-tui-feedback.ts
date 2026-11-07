@@ -124,8 +124,6 @@ chat:
 interface:
   mode: ${values.mode}
   smoothStreaming: ${values.smooth}
-  panes:
-    enabled: off
 `,
 );
 const env: Record<string, string> = {};
@@ -133,7 +131,8 @@ for (const [key, value] of Object.entries(process.env)) {
 	if (
 		value === undefined ||
 		key.startsWith("CLIO_CODER_") ||
-		["TMUX", "STY", "SSH_CONNECTION", "SSH_TTY", "CI", "HERDR_ENV"].includes(key)
+		key.startsWith("HERDR_") ||
+		["TMUX", "STY", "SSH_CONNECTION", "SSH_TTY", "CI"].includes(key)
 	)
 		continue;
 	env[key] = value;
@@ -142,6 +141,10 @@ Object.assign(env, {
 	HOME: home,
 	TERM: "xterm-256color",
 	CLIO_CODER_HOME: home,
+	CLIO_CODER_CONFIG_DIR: join(home, "config"),
+	CLIO_CODER_DATA_DIR: join(home, "data"),
+	CLIO_CODER_STATE_DIR: join(home, "state"),
+	CLIO_CODER_CACHE_DIR: join(home, "cache"),
 	CLIO_CODER_INTEROP_HOME: "none",
 	CLIO_CODER_RENDER_TRACE: tracePath,
 	CLIO_CODER_BENCH_KEY: "bench",
@@ -149,7 +152,8 @@ Object.assign(env, {
 	CLIO_CODER_INSTANT_SHELL: "1",
 });
 const cli = resolve("src/cli/index.ts");
-const child = spawn(process.execPath, ["--import", resolve("node_modules/tsx/dist/loader.mjs"), cli], {
+// Guest-only startup without host coordinates measures this PTY, never a private host.
+const child = spawn(process.execPath, ["--import", resolve("node_modules/tsx/dist/loader.mjs"), cli, "--with-panes"], {
 	cols: 120,
 	rows: 40,
 	cwd: project,
