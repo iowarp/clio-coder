@@ -41,6 +41,7 @@ import claudeSubscription from "./2026-10-07-claude-subscription.js";
 import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import approvalsToConfig from "./2026-11-02-approvals-to-config.js";
+import removeCopilotConsent from "./2026-11-07-remove-copilot-consent.js";
 import { appendMigrationNotice } from "./notices.js";
 import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -97,6 +98,7 @@ const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	fleetPermissionsJudge,
 	removeOldTelemetry,
 	approvalsToConfig,
+	removeCopilotConsent,
 ]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id

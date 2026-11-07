@@ -18,6 +18,7 @@ const MIGRATION_IDS = [
 	"2026-10-20-fleet-permissions-judge",
 	"2026-10-31-remove-old-telemetry",
 	"2026-11-02-approvals-to-config",
+	"2026-11-07-remove-copilot-consent",
 ] as const;
 
 const installation = (kind: Installation["kind"]): Installation => ({
@@ -110,7 +111,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"]);
 			strictEqual(code, 0);
-			match(stdout, /Would apply 8 pending migrations:/u);
+			match(stdout, /Would apply 9 pending migrations:/u);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(id.replace(/\./gu, "\\."), "u"));
 			match(stdout, /Would refresh state metadata/u);
 			match(stdout, /Dry run: no changes made/u);
@@ -150,7 +151,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			const { code, stdout } = await upgrade(temp, []);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
-			match(stdout, /8 migrations applied/u);
+			match(stdout, /9 migrations applied/u);
 		} finally {
 			temp.cleanup();
 		}

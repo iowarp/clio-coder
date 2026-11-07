@@ -229,7 +229,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = home.env;
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /8 migrations applied/u);
+			match(first.output, /9 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "config", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
@@ -241,6 +241,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 				"2026-10-20-fleet-permissions-judge",
 				"2026-10-31-remove-old-telemetry",
 				"2026-11-02-approvals-to-config",
+				"2026-11-07-remove-copilot-consent",
 			]);
 			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
 			match(migrated, /^version: 2$/mu);

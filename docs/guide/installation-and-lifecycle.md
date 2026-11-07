@@ -809,7 +809,7 @@ for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers eight migrations in execution order
+The source tree registers nine migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
 1. `2026-09-01-settings-v2`
@@ -820,10 +820,16 @@ The source tree registers eight migrations in execution order
 6. `2026-10-20-fleet-permissions-judge`
 7. `2026-10-31-remove-old-telemetry`
 8. `2026-11-02-approvals-to-config`
+9. `2026-11-07-remove-copilot-consent`
 
 The approvals migration copies project approval records from
 `<stateDir>/workspace-trust/` to `<configDir>/workspace-trust/`, keeps a record
 already at the destination, and then removes the old directory.
+
+The Copilot consent migration deletes `<stateDir>/copilot-sdk-consent.json`,
+the per-account record 0.7.0-rc.1 kept before signing in with `copilot login`
+became the authorization. It removes only a regular file; anything else under
+that name is left in place and named in the report.
 
 The package migration converts the playbook layout and repairs bundled package
 installations as described above. The adapter migration updates only the

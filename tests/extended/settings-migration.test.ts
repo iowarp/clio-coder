@@ -1,6 +1,16 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
@@ -348,6 +358,7 @@ targets:
 			FLEET_JUDGE_MIGRATION_ID,
 			OLD_TELEMETRY_MIGRATION_ID,
 			"2026-11-02-approvals-to-config",
+			"2026-11-07-remove-copilot-consent",
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -378,7 +389,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config","2026-11-07-remove-copilot-consent"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -434,6 +445,31 @@ targets:
 		strictEqual(readFileSync(join(to, "moved.json"), "utf8"), "moved\n");
 		strictEqual(readFileSync(join(to, "both.json"), "utf8"), "new\n", "the newer record stays");
 		strictEqual(existsSync(from), false);
+	});
+
+	it("deletes the rc.1 Copilot consent record once, and leaves a link under its name", async () => {
+		const id = "2026-11-07-remove-copilot-consent";
+		const consent = join(stateDir, "copilot-sdk-consent.json");
+		const manifest = join(scratch.dir, "config", "migrations.json");
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((other) => other !== id);
+		writeFileSync(consent, '{"version":1,"accounts":[]}\n', "utf8");
+		writeFileSync(manifest, `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const first = await runPending(stateDir);
+		deepStrictEqual(first.applied, [id]);
+		strictEqual(first.reports?.[id]?.changed.length, 1);
+		strictEqual(existsSync(consent), false);
+
+		const kept = join(scratch.dir, "kept.json");
+		writeFileSync(kept, "kept\n", "utf8");
+		symlinkSync(kept, consent);
+		writeFileSync(manifest, `${JSON.stringify({ applied: others })}\n`, "utf8");
+		const linked = await runPending(stateDir);
+		strictEqual(linked.reports?.[id]?.changed.length, 0);
+		strictEqual(linked.reports?.[id]?.attention.length, 1);
+		ok(lstatSync(consent).isSymbolicLink());
+		strictEqual(readFileSync(kept, "utf8"), "kept\n");
 	});
 
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {
