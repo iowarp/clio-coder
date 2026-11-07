@@ -70,13 +70,7 @@ function renderObservation(notes: readonly ObservationNote[], units: readonly Ob
 	});
 }
 
-/**
- * The envelope as JSON. One small model (ornith, live 2026-10-17) closes the
- * notes array and then its fence without the envelope's final brace; that
- * omission is unambiguous, so it is repaired like a fence. Anything else
- * malformed is rejected as it was.
- */
-function parseEnvelope(cleaned: string): unknown {
+function parseClosingBraceRepair(cleaned: string): unknown {
 	try {
 		return JSON.parse(cleaned);
 	} catch (error) {
@@ -86,6 +80,68 @@ function parseEnvelope(cleaned: string): unknown {
 			} catch {
 				throw error;
 			}
+		}
+		throw error;
+	}
+}
+
+/** Each balanced top-level `{...}` span, read string-aware so braces inside text do not count. */
+function topLevelObjects(text: string): string[] {
+	const spans: string[] = [];
+	let depth = 0;
+	let start = -1;
+	let inString = false;
+	let escaped = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (ch === "\\") escaped = true;
+			else if (ch === '"') inString = false;
+			continue;
+		}
+		if (ch === '"' && depth > 0) inString = true;
+		else if (ch === "{") {
+			if (depth === 0) start = i;
+			depth++;
+		} else if (ch === "}" && depth > 0) {
+			depth--;
+			if (depth === 0) spans.push(text.slice(start, i + 1));
+		}
+	}
+	return spans;
+}
+
+/**
+ * The envelope as JSON. One small model (ornith, live 2026-10-17) closes the
+ * notes array and then its fence without the envelope's final brace; that
+ * omission is unambiguous, so it is repaired like a fence. Reasoning models
+ * (qwen through a gateway, say) also prepend a `<think>` block or a sentence,
+ * or close with one; the envelope is then located, as the task-memory policy
+ * locates its own, and anything outside it is discarded. An unterminated
+ * reasoning block means the output budget ran out mid-thought, so nothing
+ * after it is read. Anything else malformed is rejected as it was.
+ */
+function parseEnvelope(cleaned: string): unknown {
+	try {
+		return parseClosingBraceRepair(cleaned);
+	} catch (error) {
+		const located = cleaned
+			.replace(/<(think|thinking|reasoning|scratchpad)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ")
+			.replace(/<(think|thinking|reasoning|scratchpad)\b[^>]*>[\s\S]*$/iu, " ")
+			.replace(/^[^\S\n]*```[^\n]*$/gmu, " ")
+			.trim();
+		for (const span of topLevelObjects(located)) {
+			try {
+				const value: unknown = JSON.parse(span);
+				if (record(value) && Array.isArray(value.notes)) return value;
+			} catch {}
+		}
+		const opened = located.search(/\{\s*"notes"\s*:/u);
+		if (opened >= 0) {
+			try {
+				return parseClosingBraceRepair(located.slice(opened).trim());
+			} catch {}
 		}
 		throw error;
 	}

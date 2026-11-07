@@ -274,8 +274,12 @@ The observer answers with one JSON envelope of notes. A note that cites a
 source reference the host did not supply, or that the host cannot read, is
 dropped and the others stand. A `supersedes` link that resolves to no note is
 removed without dropping its note. A batch with no acceptable note is refused.
-The only repair the host makes is one missing final brace after the notes
-array; any other malformed envelope is refused.
+The host repairs one missing final brace after the notes array. When the
+answer wraps the envelope in a closed reasoning block (`<think>` and similar),
+a markdown fence or surrounding prose, the host reads the first JSON object
+that carries a `notes` array and discards the rest. An answer cut off inside
+an unclosed reasoning block, or with no such object, is refused, as is any
+other malformed envelope.
 
 When prepared notes outgrow the journal budget, a reflection consolidates a run
 of adjacent batches. It asks for at most 8 notes whose `supersedes` lists

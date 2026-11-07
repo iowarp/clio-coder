@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 export const coreTests = [
 	"memory-off-marker",
 	"memory-recall-hygiene",
+	"memory-observation-envelope",
 	"mux-private-host",
 	"memory-route-redaction",
 	"prior-session-hint",
