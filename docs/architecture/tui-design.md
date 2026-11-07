@@ -29,6 +29,7 @@ Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal
 | **Helper / Shadow Work** | 1 row (`↳ role · task ✓`) | 1 row (`↳ role · task ✓`), plus the current action while running | Full worker card |
 | **Failures & Refusals** | Up to 4 rows actionable reason | Up to 4 rows actionable reason | Up to 12 rows with context |
 | **Notices & Retries** | Level mark + bounded message | Level mark + bounded message | Diagnostic detail |
+| **Reports** (Doctor, multiline notices, command stdout/stderr, extension results) | Title and counters on 1 row | Counters + up to 8 rows (Doctor lists errors first), then `… N more · Detailed or /view for all` | Every row and detail |
 | **Turn Receipt** | One row: outcome glyph + duration | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
 | **Approval & Question Cards** | Every decision input | Every decision input | Every decision input |
 
@@ -295,6 +296,7 @@ Every transcript row follows a rigid 2-column gutter format:
 - **Prose Continuation**: `  ` indented 2 spaces.
 - **Tool Action Row**: Class glyph (`▸`, `§`, `±`, `$`, `↗`, `?`, `⇢`) + verb + scalar target + outcome (`✓ Done · 12ms`).
 - **Operator Grant**: A call that ran because the operator allowed it at a permission card keeps a rail row under its action row, `? allowed by you · safety-net rail <rule>` or `· autonomy level <level>`, with `?` in `warning`. Minimal never folds such a call into its neighbors. The row is live only, because the approval facts never reach the session ledger.
+- **YOLO Receipt**: A risky call that actually started under `yolo` keeps `YOLO auto-approved · no prompt` under its action row, and a chain keeps it above its step rows. Minimal never folds it away. A local read, a call at `default`, a one-shot grant and a call refused before it started carry none. Unlike an operator grant, the mark is stored with the call, so it returns on replay and on resume after switching to `default`, and calls inside delegated runs and chains keep it.
 - **Edit Preview**: An `edit` call shows its diff as soon as its arguments close, before it runs, in Default and Detailed. Minimal keeps the row alone. Long-running write, edit and command output streams in the fixed-height live windows of the output-style table.
 - **Worker Rows**: The origin mark (`◆` model, `◇` operator) heads the worker block; a running tool inside it shows `⚙`.
 - **Turn Settlement**: The final outcome closes the block with its mark in the gutter. Minimal ends with one dim row of the outcome glyph and duration (`✓ 900ms`), keeping the outcome word for anything but Done. Default prints the outcome and duration (`✓ Done · 14s`). Detailed adds the call count when more than one, input and output tokens, cache read and write, reasoning (`≈` when estimated), why a cold cache was expected, and prewarm results (`✓ Done · 14s · 3 calls · in 100k · out 380`).

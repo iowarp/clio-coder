@@ -954,6 +954,7 @@ The read-only `code_nav` tool queries the local index. Its modes and argument sc
 | Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
 | Workers | Identity, execution and validation outcome | 3 summary rows | 8 summary rows and bounded tool activity |
 | Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
+| Reports (Doctor, multiline notices, command output, extension results) | Title and counters on one row | Up to 8 rows (Doctor lists errors first) | Every row and detail |
 | Turn receipt | One row: the outcome mark and duration (`✓ 4.2s`) | Completion and available duration | Usage and model-call facts |
 
 Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
