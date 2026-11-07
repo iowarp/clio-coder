@@ -62,6 +62,8 @@ export interface OperatorRuntimeOptions {
 	commitHooks?: () => { status: string; generation: number; reason?: string };
 	/** Explicit headless invocation starts only its selected owner. */
 	onlyId?: string;
+	/** Read as each runtime starts: a read-only session's runtimes may not write any file. */
+	readOnly?: () => boolean;
 }
 function identity(entry: InstalledExtension): string {
 	return `${entry.id}:${entry.scope}:${entry.provenance?.canonicalRoot}:${entry.provenance?.contentDigest}`;
@@ -263,27 +265,32 @@ export class OperatorExtensionRuntime {
 				eligible.slice(0, RUNTIME_LIMITS.processes).map(async (entry) => {
 					try {
 						let reportedState = "";
-						const process = new ExtensionRuntimeProcess(entry, { ...context, generation: next }, () => {
-							if (process.state !== reportedState) {
-								reportedState = process.state;
-								if (process.state === "ready")
-									recordPackageActivity({
-										kind: "runtime_start",
-										owner: extensionIdentity(entry),
-										outcome: "ready",
-										details: { generation: next },
-									});
-								if (process.failure)
-									recordPackageActivity({
-										kind: "runtime_failure",
-										owner: extensionIdentity(entry),
-										outcome: "error",
-										details: { generation: next, reason: process.failure },
-									});
-							}
-							if (this.processes.get(entry.id)?.state !== "ready") this.statuses.delete(entry.id);
-							this.changed();
-						});
+						const process = new ExtensionRuntimeProcess(
+							entry,
+							{ ...context, generation: next },
+							() => {
+								if (process.state !== reportedState) {
+									reportedState = process.state;
+									if (process.state === "ready")
+										recordPackageActivity({
+											kind: "runtime_start",
+											owner: extensionIdentity(entry),
+											outcome: "ready",
+											details: { generation: next },
+										});
+									if (process.failure)
+										recordPackageActivity({
+											kind: "runtime_failure",
+											owner: extensionIdentity(entry),
+											outcome: "error",
+											details: { generation: next, reason: process.failure },
+										});
+								}
+								if (this.processes.get(entry.id)?.state !== "ready") this.statuses.delete(entry.id);
+								this.changed();
+							},
+							this.options.readOnly?.() === true,
+						);
 						staged.set(entry.id, process);
 						await process.staged;
 					} catch (error) {

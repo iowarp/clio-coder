@@ -35,6 +35,7 @@ export interface ExtensionHostOptions {
 	frozenTools?: OperatorExtensionsOptions["frozenTools"];
 	embed?: OperatorExtensionsOptions["embed"];
 	sandboxUnixSockets?: OperatorExtensionsOptions["sandboxUnixSockets"];
+	readOnly?: OperatorExtensionsOptions["readOnly"];
 	/** One line naming the extension and the reason. */
 	notify: (message: string) => void;
 	/** ACP's interview channel when the client answers interviews. */
@@ -69,6 +70,7 @@ export function startExtensionHost(options: ExtensionHostOptions): ExtensionHost
 		...(options.frozenTools ? { frozenTools: options.frozenTools } : {}),
 		...(options.embed ? { embed: options.embed } : {}),
 		...(options.sandboxUnixSockets ? { sandboxUnixSockets: options.sandboxUnixSockets } : {}),
+		...(options.readOnly ? { readOnly: options.readOnly } : {}),
 		onChange: () => schedule(),
 		onDiagnostic: (message) => options.notify(message),
 		onReload: (result) => {

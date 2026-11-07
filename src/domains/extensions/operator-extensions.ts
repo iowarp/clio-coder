@@ -30,6 +30,8 @@ export interface OperatorExtensionsOptions extends OperatorRuntimeOptions {
 	embed?: (request: ExtensionEmbeddingRequest, signal: AbortSignal, workspace: string) => Promise<EmbeddingResponse>;
 	/** api 2 runtimes only, since only they run in the OS sandbox; see `OperatorRuntimeV2Options.sandboxUnixSockets`. */
 	sandboxUnixSockets?: () => UnixSocketMode;
+	/** Read as each runtime starts: true in a read-only session, whose runtimes may change no user file. */
+	readOnly?: () => boolean;
 	/** False for an extension the operator muted; see `OperatorRuntimeV2Options.admits`. */
 	admits?: (extensionId: string) => boolean;
 	surface?: ExtensionSurfaceModel;

@@ -49,6 +49,7 @@ export class ExtensionRuntimeProcess {
 		readonly extension: LoadableExtension,
 		readonly snapshot: ExtensionRuntimeSnapshot,
 		onState: () => void = () => {},
+		readOnly = false,
 	) {
 		if (!extension.runtime) throw new Error("extension has no operator runtime");
 		this.declaration = extension.runtime;
@@ -89,7 +90,9 @@ export class ExtensionRuntimeProcess {
 		// The parent never forwards child stdout/stderr to a terminal or protocol stream.
 		this.child = fork(path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child.mjs"), [], {
 			cwd: snapshot.workspace,
-			execArgv: [],
+			// An api 1 runtime declares no file access, so it normally runs with the operator's.
+			// In a read-only session it may read but not write, and may start no program that could.
+			execArgv: readOnly ? ["--permission", "--allow-fs-read=*"] : [],
 			env: buildSafeToolEnv(),
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe", "ipc"],

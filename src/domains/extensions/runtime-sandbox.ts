@@ -14,6 +14,26 @@ import { clioConfigDir } from "../../core/xdg.js";
 import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
 
 /**
+ * The declaration a runtime starts with in a read-only session, which leaves
+ * every user file unchanged. Its workspace write roots are dropped, so none is
+ * created or bound; its `store` root stays, being Clio's own home. A runtime
+ * that may run programs is refused unless bubblewrap confines them, since a
+ * program escapes the Node flags and Seatbelt leaves the shared temp
+ * directories writable.
+ */
+export function readOnlyRuntimeDeclaration(
+	declaration: ExtensionRuntimeDeclarationV2,
+	availability: SandboxAvailability = sandboxAvailability(),
+): ExtensionRuntimeDeclarationV2 {
+	if (declaration.permissions.exec && !(availability.available && availability.backend === "bwrap"))
+		throw new Error(
+			"this session is read-only and the runtime may run programs, which only a bubblewrap sandbox keeps from changing user files",
+		);
+	const write = declaration.permissions.fs.write.filter((entry) => entry === "store");
+	return { ...declaration, permissions: { ...declaration.permissions, fs: { ...declaration.permissions.fs, write } } };
+}
+
+/**
  * What confines one runtime beyond its Node permission flags, said the way
  * `/extensions` shows it. The flags are a seat belt against mistakes; the OS
  * sandbox is what actually refuses a socket or a write outside the roots.

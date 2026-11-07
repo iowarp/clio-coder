@@ -56,6 +56,8 @@ type ReloadReason = "startup" | "reload" | "session-change";
 
 export interface OperatorRuntimeV2Options {
 	context(): RuntimeContext;
+	/** Read as each runtime starts: a read-only session's runtimes may write their store but no user path. */
+	readOnly?: () => boolean;
 	isIdle(): boolean;
 	list?: (cwd: string) => InstalledExtension[];
 	/** Root of per-extension state, store and files. */
@@ -385,6 +387,7 @@ export class OperatorExtensionRuntimeV2 {
 			storeDir: paths.storeDir,
 			...(embed ? { embed: (request, signal) => embed(request, signal, context.workspace) } : {}),
 			...(unixSockets !== undefined ? { unixSockets } : {}),
+			...(this.options.readOnly?.() === true ? { readOnly: true } : {}),
 			onState: () => {
 				const runtime = created.process;
 				if (runtime && runtime.state !== reportedState) {

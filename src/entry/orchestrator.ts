@@ -4959,6 +4959,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				return embedForExtension({ projectRoot: workspace }, request, signal);
 			},
 			sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
+			readOnly: () => options.headless?.constraints?.readOnly === true || chat.toolLimits?.()?.readOnly === true,
 			notify: (line) => process.stderr.write(`clio-coder: ${line}\n`),
 			...(ask ? { ask } : {}),
 		});

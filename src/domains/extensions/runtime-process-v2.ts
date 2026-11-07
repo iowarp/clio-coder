@@ -32,7 +32,12 @@ import {
 	parseInterviewNext,
 } from "./runtime-output-v2.js";
 import type { RuntimeProcessState } from "./runtime-process.js";
-import { type ExtensionSandboxReport, planExtensionLaunch, prepareDeclaredWriteRoots } from "./runtime-sandbox.js";
+import {
+	type ExtensionSandboxReport,
+	planExtensionLaunch,
+	prepareDeclaredWriteRoots,
+	readOnlyRuntimeDeclaration,
+} from "./runtime-sandbox.js";
 import { extensionPlainText, RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
 import type { LoadableExtension } from "./types.js";
@@ -57,6 +62,8 @@ export interface RuntimeProcessV2Options {
 	onState?: () => void;
 	/** The operator's `safety.sandboxUnixSockets` when this runtime starts; absent blocks them. */
 	unixSockets?: UnixSocketMode;
+	/** The session is read-only: the runtime may write its store but no user path (readOnlyRuntimeDeclaration). */
+	readOnly?: boolean;
 }
 
 export interface RuntimeRoots {
@@ -167,10 +174,12 @@ export class ExtensionRuntimeProcessV2 {
 		const temporary = mkdtempSync(path.join(os.tmpdir(), "clio-coder-extension-"));
 		this.copyRoot = temporary;
 		const copy = path.join(temporary, "package");
+		let confined = this.declaration;
 		try {
+			if (options.readOnly === true) confined = readOnlyRuntimeDeclaration(this.declaration);
 			// A declared write root may not reach Clio's own installed resources, state, trust or policy,
 			// and exists as a plain directory before launch so the sandbox binds exactly it.
-			prepareDeclaredWriteRoots(this.declaration, options.snapshot.workspace);
+			prepareDeclaredWriteRoots(confined, options.snapshot.workspace);
 			cpSync(extension.provenance.canonicalRoot, copy, { recursive: true, dereference: false, verbatimSymlinks: true });
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
@@ -205,11 +214,11 @@ export class ExtensionRuntimeProcessV2 {
 		this.staged.catch(() => {});
 		const bootstrap = path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child-v2.mjs");
 		const launch = planExtensionLaunch({
-			declaration: this.declaration,
+			declaration: confined,
 			roots: { workspace: options.snapshot.workspace, packageCopy: copy, storeDir: options.storeDir, bootstrap },
 			argv: [
 				process.execPath,
-				...runtimePermissionArgs(this.declaration, {
+				...runtimePermissionArgs(confined, {
 					bootstrap,
 					packageCopy: copy,
 					workspace: options.snapshot.workspace,

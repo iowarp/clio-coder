@@ -12,14 +12,17 @@ import {
 	recordPackageActivity,
 } from "../../src/core/package-activity.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import type { SandboxAvailability } from "../../src/core/sandbox/types.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
 import { envelopeLines } from "../../src/domains/extensions/envelope-review.js";
+import type { ExtensionRuntimeDeclarationV2 } from "../../src/domains/extensions/manifest-v2.js";
 import { extensionInvocation, promptRefs } from "../../src/domains/extensions/operator-commands.js";
 import { OperatorExtensions } from "../../src/domains/extensions/operator-extensions.js";
 import { OperatorExtensionRuntime, resolveExtensionCommands } from "../../src/domains/extensions/operator-runtime.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { ExtensionRuntimeProcess } from "../../src/domains/extensions/runtime-process.js";
+import { readOnlyRuntimeDeclaration } from "../../src/domains/extensions/runtime-sandbox.js";
 import {
 	extensionPlainText,
 	parseExtensionOutput,
@@ -1013,6 +1016,94 @@ test("a net:false runtime cannot reach loopback, reports its backend, and gets e
 		backend: sandboxAvailability().backend,
 		network: "blocked",
 	});
+});
+
+test("a runtime in a read-only session writes its store but none of its workspace roots, and creates none", async (t) => {
+	const script = [
+		'import { writeFileSync } from "node:fs";',
+		'import path from "node:path";',
+		"export default api => {",
+		'  api.handle("probe", async (storeDir) => {',
+		"    const tryIt = (fn) => { try { fn(); return true; } catch { return false; } };",
+		"    return { text: JSON.stringify({",
+		'      inside: tryIt(() => writeFileSync(".research/inside.txt", "x")),',
+		'      beside: tryIt(() => writeFileSync("beside.txt", "x")),',
+		'      store: tryIt(() => writeFileSync(path.join(storeDir, "kept.txt"), "x")),',
+		"    }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Probe the write roots", timeoutMs: 10_000 }],
+		ui: [],
+		permissions: { fs: { read: [], write: [".research", "store"] }, exec: false, net: false },
+	});
+	const stateDir = path.join(f.env.dir, "state");
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "headless" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => stateDir,
+		readOnly: () => true,
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	const storeDir = path.join(stateDir, "extensions", "lab_status.v1", "files");
+	const output = await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), storeDir);
+	deepStrictEqual(JSON.parse(String(output.text)), { inside: false, beside: false, store: true });
+	equal(existsSync(path.join(f.cwd, ".research")), false, "the declared workspace root is not created");
+	equal(existsSync(path.join(f.cwd, "beside.txt")), false);
+	ok(existsSync(path.join(storeDir, "kept.txt")), "the store is Clio's home and stays writable");
+});
+
+test("a read-only runtime that may run programs needs bubblewrap", () => {
+	const declaration = {
+		permissions: { fs: { read: [], write: ["store", "out"] }, exec: true, net: false },
+	} as unknown as ExtensionRuntimeDeclarationV2;
+	throws(
+		() => readOnlyRuntimeDeclaration(declaration, { available: true, backend: "seatbelt" } as SandboxAvailability),
+		/only a bubblewrap sandbox/,
+	);
+	throws(() => readOnlyRuntimeDeclaration(declaration, { available: false, reason: "none" } as SandboxAvailability));
+	deepStrictEqual(
+		readOnlyRuntimeDeclaration(declaration, { available: true, backend: "bwrap" } as SandboxAvailability).permissions.fs
+			.write,
+		["store"],
+	);
+});
+
+test("an api 1 runtime in a read-only session reads but neither writes nor starts a program", async (t) => {
+	const script = [
+		'import { readFileSync, writeFileSync } from "node:fs";',
+		'import { spawnSync } from "node:child_process";',
+		"export default api => {",
+		'  api.handle("probe", async () => {',
+		"    const tryIt = (fn) => { try { fn(); return true; } catch { return false; } };",
+		"    return { text: JSON.stringify({",
+		'      read: tryIt(() => readFileSync("seen.txt")),',
+		'      write: tryIt(() => writeFileSync("written.txt", "x")),',
+		'      spawn: tryIt(() => { if (spawnSync("true").error) throw new Error("no"); }),',
+		"    }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		commands: [{ name: "probe", description: "Probe file and program access", timeoutMs: 10_000 }],
+	});
+	writeFileSync(path.join(f.cwd, "seen.txt"), "x");
+	const child = new ExtensionRuntimeProcess(
+		f.extension,
+		{ workspace: f.cwd, sessionId: null, generation: 1, mode: "headless" },
+		() => {},
+		true,
+	);
+	t.after(() => child.dispose());
+	await child.staged;
+	await child.activate();
+	const probe = JSON.parse((await child.request({ kind: "command", name: "probe", args: "" }, 5000)).text);
+	deepStrictEqual(probe, { read: true, write: false, spawn: false });
+	equal(existsSync(path.join(f.cwd, "written.txt")), false);
 });
 
 test("a declared extension can request host embeddings without seeing the route", async (t) => {
