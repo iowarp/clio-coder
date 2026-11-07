@@ -130,6 +130,18 @@ export function fillComposer(sessionId: string, text: string): void {
 	focusComposer(sessionId);
 }
 
+/**
+ * The + menu opens upward from its button. A composer that sits high, as it does when zoomed, leaves less room above
+ * than the panel's cap, so the panel is held to that room and scrolls instead of running off the top of the window.
+ */
+function fitAbove(details: HTMLDetailsElement): void {
+	const panel = details.querySelector<HTMLElement>(".composer__options-panel");
+	if (!panel) return;
+	// The panel rises from the composer box it is positioned against, not from its own button.
+	const room = (panel.offsetParent ?? details).getBoundingClientRect().top - 16;
+	panel.style.setProperty("--options-room", `${Math.max(96, Math.round(room))}px`);
+}
+
 export interface ComposerProps {
 	readonly client: Client;
 	readonly sessionId: string;
@@ -1261,7 +1273,10 @@ export const Composer = memo(function Composer({
 							<details
 								className="composer__options"
 								ref={options}
-								onToggle={(event) => setOptionsOpen(event.currentTarget.open)}
+								onToggle={(event) => {
+									setOptionsOpen(event.currentTarget.open);
+									if (event.currentTarget.open) fitAbove(event.currentTarget);
+								}}
 								onKeyDown={(event) => {
 									if (event.key !== "Escape") return;
 									event.preventDefault();

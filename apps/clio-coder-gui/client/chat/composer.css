@@ -123,7 +123,7 @@
 	display: grid;
 	gap: 1px;
 	width: min(17rem, 100%);
-	max-height: 70dvh;
+	max-height: min(70dvh, var(--options-room, 70dvh));
 	overflow: auto;
 	padding: 5px;
 	font-size: var(--text-meta);
@@ -1164,8 +1164,12 @@
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
+/*
+ * Hidden, not removed: pressing any composer control moves focus into the composer, and a hint that took its line only
+ * then would grow the bottom-anchored composer mid-press, so the release would land off the control and the click drop.
+ */
 .composer--conversation:not(:focus-within) .composer__keyboard-hint:not([data-pinned]) {
-	display: none;
+	visibility: hidden;
 }
 .composer--conversation .composer__submit.primary {
 	width: auto;
