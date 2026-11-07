@@ -227,6 +227,18 @@ it("CLI tasks hand retains JSON state and emits the explicit headless pickup tur
 		strictEqual(missing.code, 1);
 		match(missing.stderr, /not found/);
 		strictEqual(missing.stderr.includes("Before working"), false);
+		for (const [args, refusal] of [
+			[["tasks", "list", "--x"], /^error: unknown flag: --x\nUsage:\n/u],
+			[["tasks", "add", "--x", "title"], /^error: unknown flag: --x\nUsage:\n/u],
+			[["tasks", "add"], /^error: tasks add requires the task text\nUsage:\n/u],
+			[["tasks", "hand"], /^error: tasks hand requires a task id \(uN\)\nUsage:\n/u],
+		] as const) {
+			const usage = await runCli([...args], options);
+			strictEqual(usage.code, 2, usage.stderr);
+			strictEqual(usage.stdout, "");
+			match(usage.stderr, refusal);
+			strictEqual(usage.stderr.includes("--expect and --verify are repeatable"), false, usage.stderr);
+		}
 	} finally {
 		scratch.cleanup();
 	}
