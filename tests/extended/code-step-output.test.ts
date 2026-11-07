@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -63,6 +63,53 @@ it("bounds stdout with the existing command capture cap", async () => {
 	strictEqual(Buffer.byteLength(result.stdout, "utf8"), CODE_STEP_CAPTURE_MAX_BYTES);
 	strictEqual(result.record.outputBytes, producedBytes);
 	strictEqual(result.record.outputTruncated, true);
+});
+
+it("a successful leader cannot leave its background child running", {
+	skip: process.platform === "win32",
+}, async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-code-step-descendant-"));
+	roots.push(root);
+	const ready = join(root, "ready");
+	const stopped = join(root, "stopped");
+	const background = `
+		const fs = require('node:fs');
+		process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(stopped)}, 'stopped'); process.exit(0); });
+		fs.writeFileSync(${JSON.stringify(ready)}, 'ready');
+		setInterval(() => {}, 1000);
+	`;
+	const script = `
+		const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(background)}], {stdio:'ignore'});
+		child.unref();
+		const timer = setInterval(() => {
+			if (!require('node:fs').existsSync(${JSON.stringify(ready)})) return;
+			clearInterval(timer);
+			process.stdout.write(String(child.pid), () => process.exit(0));
+		}, 10);
+	`;
+	let pid: number | undefined;
+	try {
+		const result = await runCodeStep({
+			stepId: "descendant",
+			command: {
+				id: "check",
+				argv: [process.execPath, "-e", script],
+				cwd: "",
+				timeoutMs: 10_000,
+				env: [],
+				description: "Owned child",
+			},
+			workspaceRoot: root,
+		});
+		pid = Number(result.stdout);
+		ok(existsSync(stopped), "the descendant must receive cleanup before the code-step settles");
+	} finally {
+		if (pid) {
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {}
+		}
+	}
 });
 
 it("fails the check when a newly reported test fails outside the declared suite", async () => {

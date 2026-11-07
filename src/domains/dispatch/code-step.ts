@@ -25,6 +25,12 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import {
+	createProcessGroupCleanup,
+	type ProcessGroupCleanupStatus,
+	SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
+	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
+} from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
@@ -467,6 +473,12 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		let settled = false;
 		let timedOut = false;
 		let spawnError: string | null = null;
+		let leaderExit: { code: number | null; signal: string | null } | null = null;
+		let closed = false;
+		let drainFinished = false;
+		let pipeDrainIncomplete = false;
+		let drainTimer: ReturnType<typeof setTimeout> | undefined;
+		let cleanupStatus: ProcessGroupCleanupStatus | null = null;
 		const child = spawn(executable, args, {
 			cwd,
 			env: attribution.env,
@@ -486,50 +498,104 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		};
 		child.stdout?.on("data", (chunk: Buffer) => collect(chunk, true));
 		child.stderr?.on("data", (chunk: Buffer) => collect(chunk, false));
-		const kill = (): void => {
-			if (child.pid === undefined) return;
+		const groupExists = (): boolean => {
+			if (child.pid === undefined) return false;
+			if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
 			try {
-				if (process.platform === "win32") child.kill("SIGKILL");
-				else process.kill(-child.pid, "SIGKILL");
-			} catch {
-				child.kill("SIGKILL");
+				process.kill(-child.pid, 0);
+				return true;
+			} catch (error) {
+				return (error as NodeJS.ErrnoException).code !== "ESRCH";
 			}
 		};
+		const owner = createProcessGroupCleanup({
+			graceMs: SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
+			probe: groupExists,
+			signal: (signal) => {
+				if (child.pid === undefined) return false;
+				if (process.platform === "win32") return child.kill(signal);
+				try {
+					process.kill(-child.pid, signal);
+					return true;
+				} catch (error) {
+					return (error as NodeJS.ErrnoException).code !== "ESRCH";
+				}
+			},
+			onDone: (status) => {
+				cleanupStatus = status;
+				boundDrain();
+				finish();
+			},
+		});
 		const timer = setTimeout(() => {
 			timedOut = true;
-			kill();
+			owner.kill();
 		}, command.timeoutMs);
 		const onAbort = (): void => {
-			kill();
+			owner.kill();
 		};
 		input.signal?.addEventListener("abort", onAbort, { once: true });
-		const finish = (exitCode: number, signal: string | null): void => {
-			if (settled) return;
+		function boundDrain(): void {
+			if (closed || drainTimer !== undefined) return;
+			drainTimer = setTimeout(() => {
+				drainFinished = true;
+				pipeDrainIncomplete = !child.stdout.readableEnded || !child.stderr.readableEnded;
+				child.stdout.destroy();
+				child.stderr.destroy();
+				finish();
+			}, SAFE_EXEC_PIPE_DRAIN_BOUND_MS);
+		}
+		function finish(): void {
+			if (settled || cleanupStatus === null || (!closed && !drainFinished)) return;
 			settled = true;
 			clearTimeout(timer);
+			clearTimeout(drainTimer);
 			input.signal?.removeEventListener("abort", onAbort);
+			child.unref();
+			const cleanupFailure = cleanupStatus.incomplete
+				? "command process group survived bounded cleanup"
+				: pipeDrainIncomplete
+					? "command output pipes did not drain before the cleanup deadline"
+					: null;
+			const exitCode = timedOut
+				? CODE_STEP_TIMEOUT_EXIT_CODE
+				: spawnError !== null
+					? CODE_STEP_SPAWN_FAILURE_EXIT_CODE
+					: (leaderExit?.code ?? (leaderExit?.signal ? 128 : 1));
 			resolvePromise({
-				exitCode,
-				signal,
+				exitCode: cleanupFailure !== null && exitCode === 0 ? 1 : exitCode,
+				signal: leaderExit?.signal ?? null,
 				timedOut,
 				captured: Buffer.concat(chunks),
 				stdout: Buffer.concat(stdoutChunks),
 				outputBytes,
-				spawnError,
+				spawnError: spawnError ?? cleanupFailure,
 				launched: child.pid !== undefined,
 			});
-		};
+		}
 		child.on("error", (error) => {
 			// A missing binary lands here. Exit 127 with the real message beats a
 			// preflight probe that guesses.
 			spawnError = error instanceof Error ? error.message : String(error);
-			finish(CODE_STEP_SPAWN_FAILURE_EXIT_CODE, null);
+			if (child.pid === undefined) {
+				owner.dispose();
+				cleanupStatus = { descendantsCleaned: false, incomplete: false };
+			} else owner.kill();
+		});
+		child.once("exit", (code, signal) => {
+			leaderExit = { code, signal };
+			clearTimeout(timer);
+			boundDrain();
+			owner.leaderExited();
+			finish();
 		});
 		child.on("close", (code, signal) => {
-			if (timedOut) return finish(CODE_STEP_TIMEOUT_EXIT_CODE, signal);
-			if (code !== null) return finish(code, signal);
-			finish(signal === null ? 1 : 128, signal);
+			closed = true;
+			leaderExit ??= { code, signal };
+			if (child.pid !== undefined) owner.leaderExited();
+			finish();
 		});
+		if (input.signal?.aborted) onAbort();
 	});
 }
 
