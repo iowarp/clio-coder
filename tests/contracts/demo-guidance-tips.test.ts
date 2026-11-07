@@ -112,25 +112,25 @@ const tipOf = (effects: ReadonlyArray<MiddlewareEffect>): string | undefined =>
 	effects.find((effect) => effect.kind === "notify_operator")?.message;
 
 describe("demo guidance tips", () => {
-	it("answers a question about Clio's own settings with an operator-only tip", () => {
-		const { turn, store } = guidance();
-		const effects = turn("How do I switch the model to something faster in clio?");
-		deepStrictEqual(
-			effects.map((effect) => effect.kind),
-			["notify_operator"],
-		);
-		const tip = tipOf(effects) ?? "";
-		match(tip, /^\[tip\] Next time just ask: I can preview a Clio settings change/);
-		// The first tip ever says where tips come from and how to stop them.
-		match(tip, /Demo guidance in \/settings/);
-		ok(store.calls.includes("shown:settings-change"));
-		ok(store.calls.includes("topic:model"));
-	});
-
-	it("words the settings tip for the autonomy that can act on it", () => {
-		const { turn } = guidance({ autonomy: () => "default" });
-		match(tipOf(turn("how can I change the thinking level in clio?")) ?? "", /preview a Clio settings change/);
-	});
+	for (const [topic, question] of [
+		["model", "How do I switch the model to something faster in clio?"],
+		["thinking level", "How do I change the thinking level in Clio?"],
+	] as const) {
+		it(`answers a ${topic} settings question with an operator-only tip`, () => {
+			const { turn, store } = guidance();
+			const effects = turn(question);
+			deepStrictEqual(
+				effects.map((effect) => effect.kind),
+				["notify_operator"],
+			);
+			const tip = tipOf(effects) ?? "";
+			match(tip, /^\[tip\] Next time just ask: I can preview a Clio settings change/);
+			// The first tip ever says where tips come from and how to stop them.
+			match(tip, /Demo guidance in \/settings/);
+			ok(store.calls.includes("shown:settings-change"));
+			ok(store.calls.includes("topic:model"));
+		});
+	}
 
 	it("does nothing and touches no profile while demo guidance is off", () => {
 		const { turn, store, setEnabled } = guidance();

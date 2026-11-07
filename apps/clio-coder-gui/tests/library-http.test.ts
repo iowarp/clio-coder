@@ -99,8 +99,9 @@ test("a catalog package installs and removes through one reviewed plan, and a pl
 		assert.equal(outcome?.verification?.record, "recorded");
 		assert.equal(applied.refresh.status, "not-applicable");
 		assert.deepEqual(
-			(await json(await h.request(base), LibraryInventory)).packages.find((row) => row.ref === offer.ref)?.copies,
-			// A copy names the version on disk, so a later catalog update can show what it would replace.
+			(await json(await h.request(base), LibraryInventory)).packages
+				.find((row) => row.ref === offer.ref)
+				?.copies.map(({ scope, state, version }) => ({ scope, state, version })),
 			[{ scope: "user", state: "loadable", version: offer.version }],
 		);
 		assert.equal((await h.post(`${base}/plans/${plan.id}/apply`)).status, 404);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readdirSync } from "node:fs";
+import { appendFileSync, readdirSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,22 @@ export const coreTests = [
 	"bash-exec-settlement",
 	"bash-output-cap",
 	"damage-control-shell-segments",
+	"damage-control-git-words",
+	"internal-git-hooks",
+	"safety-gates",
+	"default-containment",
+	"contained-secrets",
+	"true-yolo",
+	"yolo-script-sandbox",
+	"search-completeness",
+	"tool-boundaries",
+	"engine-utilities",
+	"test-runner-vocabulary",
+	"bootstrap-schema-retry-identity",
+	"installed-package-ci",
+	"release-boundary",
 	"dispatch-session-ownership",
+	"monitor-steer-tools",
 	"gateway-authority",
 	"mutation-atomicity",
 	"physical-dotdot",
@@ -42,6 +57,7 @@ export const coreTests = [
 	"skill-frontmatter-cache",
 	"fleet-run-history-prime",
 	"approval-card-arguments",
+	"footer-snapshot",
 	"copilot-sdk-route",
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
@@ -58,18 +74,22 @@ export const guiTests = [
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",
+	"library-http",
 	"app-state",
 	"ssh-model",
 	"machine-proxy",
-	"library-http",
-	"public-help",
-].map((name) => {
-	// A check that renders React is a .tsx file.
-	const tsx = `tests/${name}.test.tsx`;
-	return existsSync(join(root, "apps/clio-coder-gui", tsx)) ? tsx : `tests/${name}.test.ts`;
-});
+	"openapi",
+	"boundaries",
+]
+	.map((name) => `tests/${name}.test.ts`)
+	.concat("tests/public-help.test.tsx");
 
-export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
+export const packageTests = [
+	"tests/smoke/installed-package.test.ts",
+	"tests/smoke/native-call-timing.test.ts",
+	"tests/contracts/instant-shell-import-graph.test.ts",
+	"tests/extended/dogfood-doctor-readonly.test.ts",
+];
 
 // Qualification runs the core, GUI and package tiers at once. Core at four
 // (da71294f7) was measured alone on 24 CPUs; on a 4-vCPU hosted runner the
