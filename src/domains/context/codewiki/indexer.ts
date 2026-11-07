@@ -7,6 +7,7 @@ import type { ProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
 import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
+import { grammarNowCached } from "./fetched-grammars.js";
 import { FETCHED_GRAMMARS } from "./grammar-assets.js";
 import { isIndexablePath, languageForPath } from "./paths.js";
 import {
@@ -1090,6 +1091,7 @@ function inspectCodewikiPaths(
 	const currentTexts = new Map<string, string>();
 	const changedPathSet = new Set<string>();
 	const rebuildPaths: string[] = [];
+	const reparse = grammarNowCached();
 	for (const relPath of normalizedPaths) {
 		const existing = existingFiles.get(relPath);
 		const isCurrentIndexableFile = isIndexablePath(relPath) && visiblePaths.has(relPath);
@@ -1097,7 +1099,7 @@ function inspectCodewikiPaths(
 		if (isCurrentIndexableFile) {
 			const text = readFile(join(cwd, relPath));
 			if (text !== null) {
-				if (existing?.hash === contentHash(text)) continue;
+				if (existing?.hash === contentHash(text) && !reparse(existing)) continue;
 				currentTexts.set(relPath, text);
 				rebuildPaths.push(relPath);
 			}
@@ -1186,6 +1188,12 @@ export async function syncCodewiki(
 	const currentFiles = new Map<string, string>();
 	const currentTexts = new Map<string, string>();
 	const indexedFiles = new Map(codewiki.files.map((file) => [file.path, file] as const));
+	// A file indexed before its first-use grammar was cached is parsed again, as if its content changed.
+	const reparse = grammarNowCached();
+	const unchanged = (relPath: string, hash: string): boolean => {
+		const indexed = indexedFiles.get(relPath);
+		return indexed?.hash === hash && !reparse(indexed);
+	};
 	for (const [index, relPath] of currentPaths.entries()) {
 		// Reads and hashes every visible file in the workspace. Cheap per file,
 		// seconds in aggregate on a large repo.
@@ -1196,13 +1204,13 @@ export async function syncCodewiki(
 			currentFiles.set(relPath, hash);
 			// Unchanged text is never parsed; retaining it duplicated the entire
 			// repository in memory on every refresh and code_nav reconciliation.
-			if (indexedFiles.get(relPath)?.hash !== hash) currentTexts.set(relPath, text);
+			if (!unchanged(relPath, hash)) currentTexts.set(relPath, text);
 		}
 		options.onProgress?.({ stage: "hash", current: index + 1, total: currentPaths.length, path: relPath });
 	}
 	const changedPaths = new Set<string>();
 	for (const [relPath, hash] of currentFiles) {
-		if (indexedFiles.get(relPath)?.hash !== hash) changedPaths.add(relPath);
+		if (!unchanged(relPath, hash)) changedPaths.add(relPath);
 	}
 	for (const relPath of indexedFiles.keys()) {
 		if (!currentFiles.has(relPath)) changedPaths.add(relPath);

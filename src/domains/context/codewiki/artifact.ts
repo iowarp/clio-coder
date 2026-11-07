@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { assertProjectIndexWritable, ensureProjectIgnore } from "../../../core/project-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType } from "../../session/workspace/project-type.js";
+import { grammarNowCached } from "./fetched-grammars.js";
 import {
 	CODEWIKI_VERSION,
 	type Codewiki,
@@ -391,8 +392,13 @@ export async function readCodewikiAsync(cwd: string): Promise<Codewiki | null> {
 		return null;
 	}
 }
+/**
+ * An artifact an unchanged fingerprint must not short-circuit: a file without
+ * a content hash, or one indexed without the first-use grammar now cached.
+ */
 export function codewikiNeedsBackfill(codewiki: Codewiki): boolean {
-	return codewiki.files.some((file) => file.hash.length === 0);
+	const reparse = grammarNowCached();
+	return codewiki.files.some((file) => file.hash.length === 0 || reparse(file));
 }
 export function structuralCodewikiHash(codewiki: Codewiki): string {
 	return createHash("sha256")

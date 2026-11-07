@@ -1164,4 +1164,6 @@ On a host with no network:
 
 To pre-seed an offline host, download the file on a connected machine and copy
 it to the cache path in the table, under the cache root of the account that runs
-Clio. The hash is checked when it is loaded.
+Clio. The hash is checked when it is loaded. Once a grammar is cached, the next
+index update parses again the files that fell back to line patterns, even if
+their content has not changed.

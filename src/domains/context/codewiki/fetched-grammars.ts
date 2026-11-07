@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type PinnedAsset, pinnedAssetFailure, pinnedAssetPresent } from "../../../core/pinned-asset.js";
+import { type PinnedAsset, pinnedAssetFailure, pinnedAssetPresent, sha256Hex } from "../../../core/pinned-asset.js";
 import { resolveClioDirs } from "../../../core/xdg.js";
 import { FETCHED_GRAMMAR_PACKAGE, FETCHED_GRAMMARS, type FetchedGrammar } from "./grammar-assets.js";
 import type { CodewikiFile } from "./schema.js";
@@ -68,4 +69,34 @@ export function missingGrammarNote(files: Iterable<CodewikiFile>): string | unde
 		`${names} symbols come from line patterns, not a parser: Clio downloads the ${names} tree-sitter grammar on first use ` +
 		`and could not (${why}). Symbols and imports for those files may be incomplete; use grep for an exhaustive search.`
 	);
+}
+
+/**
+ * A test for files indexed without their first-use grammar that a parse would
+ * now improve: the grammar's cache file holds its pinned bytes. An incremental
+ * update decides "unchanged" by content hash, so without this a file indexed
+ * offline kept its line-pattern symbols until its bytes changed. A cache file
+ * that fails its hash would not load, so it schedules no reparse. Each
+ * language's cache is read at most once per test.
+ */
+export function grammarNowCached(): (file: CodewikiFile) => boolean {
+	const cached = new Map<string, boolean>();
+	return (file) => {
+		if (file.grammarMissing !== true) return false;
+		let known = cached.get(file.lang);
+		if (known === undefined) {
+			const grammar = FETCHED_GRAMMARS.find((entry) => entry.lang === file.lang);
+			known = false;
+			if (grammar) {
+				const asset = fetchedGrammarAsset(grammar);
+				try {
+					known = sha256Hex(readFileSync(asset.path)) === asset.sha256;
+				} catch {
+					// Not cached: the file keeps its line-pattern symbols.
+				}
+			}
+			cached.set(file.lang, known);
+		}
+		return known;
+	};
 }
