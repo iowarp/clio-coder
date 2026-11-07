@@ -215,6 +215,7 @@ async function main(argv: string[]): Promise<number> {
 		autonomy,
 		toolLimits,
 		bootFlags,
+		rootFlags,
 		rest,
 		error: globalFlagError,
 	} = extractGlobalFlags(argv, isCommandToken);
@@ -222,15 +223,17 @@ async function main(argv: string[]): Promise<number> {
 		printError(globalFlagError);
 		return 2;
 	}
-	const { flags, positional } = parseFlags(rest);
+	const { positional } = parseFlags(rest);
 	const subcommand = positional[0];
 	const subcommandIndex = rest.findIndex((arg) => !arg.startsWith("-"));
-	const firstArg = rest[0];
-	if (firstArg === "--help" || firstArg === "-h" || ((flags.has("help") || flags.has("h")) && !subcommand)) {
-		process.stdout.write(helpText(flags.has("all")));
+	// Only flags before the subcommand are global: `run -- -v` is a prompt and
+	// `paths -v` is the command's own unknown flag, not a version request.
+	const root = new Set(rootFlags);
+	if (root.has("--help") || root.has("-h")) {
+		process.stdout.write(helpText(root.has("--all")));
 		return 0;
 	}
-	if (flags.has("version") || flags.has("v")) {
+	if (root.has("--version") || root.has("-v")) {
 		const { runVersionCommand } = await import("./version.js");
 		return runVersionCommand();
 	}

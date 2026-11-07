@@ -23,7 +23,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively. The finished run settles and seals in its telemetry run scope. |
 | `clio-coder acp [--cwd PATH] [--permission-timeout MS]` | Serve Clio Coder as an ACP v1 agent over stdio for ACP frontends. `--permission-timeout` overrides `integrations.externalAgents.defaults.permissionTimeoutMs`, the server's default bound on a mediated permission request. |
 | `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. `clio-coder --acp` is an alias for `clio-coder acp`. |
-| `clio-coder --version` / `-v` | Print the installed version. `clio-coder version` is the subcommand form. |
+| `clio-coder --version` / `-v` | Print the installed version. Only before a subcommand: after one, or after `--`, the token belongs to that command, so `clio-coder paths -v` is refused as an unknown flag. `clio-coder version` is the subcommand form. |
 | `clio-coder --help [--all]` / `-h` | Print the command list. `--all` appends every command under `clio-coder dev`. |
 | `clio-coder --demo` / `clio-coder --no-demo` | Start the interactive session with the full welcome and guidance, or with the compact startup. Refused with exit 2 before a subcommand. |
 | `clio-coder --api-key <key>` | Override the API key of the target the invocation runs on, for that invocation. The key binds after the route is resolved, so it follows `--target` and the route a resumed `--session` restores instead of the saved chat target. With no resolvable target the invocation exits 2. |

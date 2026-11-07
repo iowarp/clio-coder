@@ -87,6 +87,12 @@ export interface GlobalCliFlags {
 	 * command that cannot honor one can refuse it by the name the operator used.
 	 */
 	bootFlags: string[];
+	/**
+	 * `--help`, `-h`, `--all`, `--version` and `-v` as typed before the
+	 * subcommand. They also stay in `rest`, but only these are root flags: the
+	 * same tokens after the subcommand or after `--` belong to the command.
+	 */
+	rootFlags: string[];
 	rest: string[];
 	error?: string;
 }
@@ -157,6 +163,7 @@ export function extractGlobalFlags(
 	let toolLimits: SessionToolLimits | undefined;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
+	const rootFlags: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
@@ -177,6 +184,7 @@ export function extractGlobalFlags(
 			break;
 		}
 		if (ROOT_FLAG_TOKENS.has(arg)) {
+			rootFlags.push(arg);
 			rest.push(arg);
 			continue;
 		}
@@ -207,6 +215,7 @@ export function extractGlobalFlags(
 					noSkills,
 					skillPaths,
 					bootFlags,
+					rootFlags,
 					rest,
 					error: "--autonomy must be default|yolo",
 					...(apiKey === undefined ? {} : { apiKey }),
@@ -226,6 +235,7 @@ export function extractGlobalFlags(
 					noSkills,
 					skillPaths,
 					bootFlags,
+					rootFlags,
 					rest,
 					error: names?.error ?? `${arg} requires a value`,
 					...(apiKey === undefined ? {} : { apiKey }),
@@ -244,6 +254,7 @@ export function extractGlobalFlags(
 					noSkills,
 					skillPaths,
 					bootFlags,
+					rootFlags,
 					rest,
 					error: `${arg} requires a value`,
 					...(apiKey === undefined ? {} : { apiKey }),
@@ -261,6 +272,7 @@ export function extractGlobalFlags(
 			noSkills,
 			skillPaths,
 			bootFlags,
+			rootFlags,
 			rest,
 			error: unknownGlobalOptionError(arg),
 			...(apiKey === undefined ? {} : { apiKey }),
@@ -272,6 +284,7 @@ export function extractGlobalFlags(
 		noSkills,
 		skillPaths,
 		bootFlags,
+		rootFlags,
 		rest,
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(panes === undefined ? {} : { panes }),

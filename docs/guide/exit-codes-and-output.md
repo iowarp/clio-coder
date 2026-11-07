@@ -46,7 +46,7 @@ the run (`src/cli/run.ts`).
 
 ### Global vs Subcommand Flag Positioning
 
-Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. `--with-panes`, `--demo`, `--no-demo` and a pre-subcommand `--autonomy` apply to the interactive session only and exit `2` when a subcommand follows them. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation line to `stderr` and exits with code `2`. For `clio-coder run` the message reads:
+Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. `--version`, `-v`, `--help` and `-h` are global only there too: after the subcommand or after `--` they belong to that command, so `clio-coder paths -v` exits `2` with `unknown flag: -v` instead of printing the version. `--with-panes`, `--demo`, `--no-demo` and a pre-subcommand `--autonomy` apply to the interactive session only and exit `2` when a subcommand follows them. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, Clio prints a remediation line to `stderr` and exits with code `2`. For `clio-coder run` the message reads:
 
 ```text
 clio-coder run: --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> run ...
