@@ -91,16 +91,23 @@ export const packageTests = [
 	"tests/extended/dogfood-doctor-readonly.test.ts",
 ];
 
+export const fullTests = ["contracts", "extended", "smoke", "extended-smoke"].flatMap((suite) =>
+	readdirSync(join(root, "tests", suite))
+		.filter((name) => name.endsWith(".test.ts"))
+		.sort()
+		.map((name) => `tests/${suite}/${name}`),
+);
+
 // Qualification runs the core, GUI and package tiers at once. Core at four
 // (da71294f7) was measured alone on 24 CPUs; on a 4-vCPU hosted runner the
 // combined eight test processes pushed timing-bound ACP, idle-exit and RPC
 // deadline tests past their limits in ci (22), so small hosts keep two.
-const coreConcurrency = availableParallelism() >= 8 ? 4 : 2;
+const rootConcurrency = availableParallelism() >= 8 ? 4 : 2;
 
 export async function runTests(tier) {
 	const gui = tier === "gui";
 	const cwd = gui ? join(root, "apps/clio-coder-gui") : root;
-	const files = { core: coreTests, gui: guiTests, package: packageTests }[tier];
+	const files = { core: coreTests, gui: guiTests, package: packageTests, full: fullTests }[tier];
 	if (!files) throw new Error(`Unknown test tier: ${tier}`);
 	const preloads = [join(root, "tests/harness/tmp-root.ts"), ...(gui ? ["./tests/harness/no-network.ts"] : [])];
 	const child = spawn(
@@ -111,7 +118,7 @@ export async function runTests(tier) {
 			...preloads.flatMap((preload) => ["--import", preload]),
 			"--test",
 			"--test-reporter=spec",
-			`--test-concurrency=${tier === "core" ? coreConcurrency : 2}`,
+			`--test-concurrency=${tier === "core" || tier === "full" ? rootConcurrency : 2}`,
 			...files,
 		],
 		{ cwd, stdio: ["inherit", "pipe", "pipe"] },
