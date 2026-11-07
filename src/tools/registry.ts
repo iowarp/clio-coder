@@ -3299,6 +3299,9 @@ function buildToolHookInput(
 	// outer occurrence. Every other hook still fires under the inner name.
 	if (options?.nested === true) metadata.nested = true;
 	if (options?.origin === "harness") metadata.origin = "harness";
+	// An approval the operator granted, not the judge's, so guidance can count real stops.
+	if (options?.approval !== undefined && (options.approval.issuer ?? "operator") === "operator")
+		metadata.operatorApproved = true;
 	const validationCommand = detectedValidationCommand(call);
 	if (validationCommand !== null) {
 		metadata.validationCommand = validationCommand;

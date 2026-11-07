@@ -16,6 +16,7 @@ import {
 	type GuidanceDeps,
 	harnessQuestionTopics,
 	LESSON_LIFETIME_SHOWS,
+	NEWCOMER_LESSONS,
 	SESSION_TIP_BUDGET,
 } from "../../src/domains/middleware/guidance.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
@@ -79,7 +80,7 @@ function guidance(overrides: Partial<GuidanceDeps> = {}, store = fakeProfile()) 
 		options: {
 			sessionId?: string;
 			prior?: number;
-			tools?: Array<Pick<MiddlewareHookInput, "toolName" | "toolArgs">>;
+			tools?: Array<Pick<MiddlewareHookInput, "toolName" | "toolArgs" | "metadata">>;
 			end?: Record<string, number | string | boolean>;
 			continuation?: boolean;
 		} = {},
@@ -95,7 +96,7 @@ function guidance(overrides: Partial<GuidanceDeps> = {}, store = fakeProfile()) 
 			},
 		});
 		for (const tool of options.tools ?? [])
-			hook.evaluate({ hook: "after_tool", sessionId, ...tool, metadata: { resultKind: "ok" } });
+			hook.evaluate({ hook: "after_tool", sessionId, ...tool, metadata: { resultKind: "ok", ...tool.metadata } });
 		return hook.evaluate({ hook: "turn_end", sessionId, metadata: { stopReason: "stop", ...options.end } });
 	};
 	return {
@@ -152,14 +153,61 @@ describe("demo guidance tips", () => {
 		ok(harnessQuestionTopics("where is the keybinding for the model picker?").includes("keys"));
 	});
 
-	it("shows one tip in a session, then none even for a direct match", () => {
-		const { turn } = guidance();
-		ok(tipOf(turn("btw, what does this regex do?")));
-		let shown = 1;
-		for (let index = 0; index < 20; index++) {
-			if (tipOf(turn("How do I switch the model in clio?"))) shown += 1;
+	it("gives a newcomer one extra tip a session, and a veteran one tip even for a direct match", () => {
+		const count = (store: FakeProfile): number => {
+			const { turn } = guidance({}, store);
+			let shown = tipOf(turn("btw, what does this regex do?")) ? 1 : 0;
+			for (const prompt of ["How do I switch the model in clio?", "how much have I spent so far?"])
+				for (let index = 0; index < 10; index++) if (tipOf(turn(prompt))) shown += 1;
+			return shown;
+		};
+		strictEqual(count(fakeProfile()), SESSION_TIP_BUDGET + 1);
+		const veteran = fakeProfile();
+		for (let index = 0; index < NEWCOMER_LESSONS; index++)
+			veteran.profile.lessons[`old-${index}`] = { shown: 1, lastShownAt: "t" };
+		// Footer tips share the profile but are not post-turn lessons.
+		veteran.profile.lessons["footer:welcome"] = { shown: 3, lastShownAt: "t" };
+		strictEqual(count(veteran), SESSION_TIP_BUDGET);
+	});
+
+	it("teaches usage, doctor, skills and the Library from questions about them", () => {
+		for (const [prompt, pattern] of [
+			["how much have I spent today?", /^\[tip\] \/usage shows/],
+			["my clio login seems broken, how do I check it?", /\/doctor checks this install/],
+			["how can I use skills in clio?", /\/skills lists the skills/],
+			["can you install a skill for writing changelogs", /Alt\+L opens the Library/],
+		] as const) {
+			const { turn } = guidance({ keyFor: (id) => (id === "clio-coder.library.toggle" ? "Alt+L" : null) });
+			match(tipOf(turn(prompt)) ?? "", pattern, prompt);
 		}
-		strictEqual(shown, SESSION_TIP_BUDGET);
+		// A cost question about the project is not about the operator's spend.
+		strictEqual(tipOf(guidance().turn("what is the cost of this algorithm?")), undefined);
+	});
+
+	it("offers YOLO only after the operator approved stops at default autonomy, naming the bound key", () => {
+		const approved = { toolName: "bash", toolArgs: { command: "make" }, metadata: { operatorApproved: true } };
+		const keyFor = (id: string) => (id === "clio-coder.autonomy.toggle" ? "Ctrl+G Y" : null);
+		match(
+			tipOf(guidance({ keyFor }).turn("build it", { tools: [approved, approved] })) ?? "",
+			/Ctrl\+G Y switches this session to YOLO: nothing stops for approval and commands run unsandboxed/,
+		);
+		strictEqual(tipOf(guidance({ keyFor }).turn("build it", { tools: [approved] })), undefined);
+		strictEqual(
+			tipOf(guidance({ keyFor, autonomy: () => "yolo" }).turn("build it", { tools: [approved, approved] })),
+			undefined,
+		);
+		strictEqual(tipOf(guidance().turn("build it", { tools: [approved, approved] })), undefined);
+	});
+
+	it("suggests a read-only worker for a long investigation that changed nothing", () => {
+		const reads = Array.from({ length: 8 }, (_, index) => ({ toolName: "read", toolArgs: { path: `src/m${index}.ts` } }));
+		const prompt = "review the architecture of this codebase";
+		match(tipOf(guidance().turn(prompt, { tools: reads })) ?? "", /\/run coder --read-only <task>/);
+		strictEqual(
+			tipOf(guidance().turn(prompt, { tools: [...reads, { toolName: "edit", toolArgs: { path: "src/a.ts" } }] })),
+			undefined,
+		);
+		strictEqual(tipOf(guidance().turn(prompt, { tools: reads.slice(0, 7) })), undefined);
 	});
 
 	it("starts a new session's budget and spacing afresh", () => {

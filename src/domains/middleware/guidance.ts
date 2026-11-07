@@ -26,10 +26,14 @@ export const GUIDANCE_REGISTRATION_ID = "observer.guidance";
 export const LESSON_LIFETIME_SHOWS = 2;
 /** Tips per session. A second one inside a working session is noise, so a session gets one. */
 export const SESSION_TIP_BUDGET = 1;
+/** A newcomer, who has seen fewer lessons than this across all sessions, gets one more tip per session. */
+export const NEWCOMER_LESSONS = 6;
 /** Substantive turns between tips, unless a lesson answers the prompt directly. */
 export const TURNS_BETWEEN_TIPS = 3;
 /** A lesson at or above this score answers the prompt itself and may skip the spacing. */
 const DIRECT_SCORE = 3;
+/** A question about one feature outranks the generic ask-Clio lesson, but not a direct match. */
+const SPECIFIC_SCORE = 2.5;
 
 export interface GuidanceTurn {
 	/** The operator's prompt for this turn. */
@@ -44,6 +48,10 @@ export interface GuidanceTurn {
 	paths: string[];
 	assistantChars: number;
 	toolCalls: number;
+	/** Calls that ran only after the operator approved them. */
+	approvals: number;
+	/** Calls of tools that change files: write, edit, artifact. */
+	writes: number;
 }
 
 export interface GuidanceContext {
@@ -79,7 +87,15 @@ const WRITE_TESTS = /\b(?:write|add|create)\b.{0,30}\b(?:unit\s+|regression\s+)?
 const CORRECTION =
 	/^\s*(?:no\b[,.!]?|nope\b|undo\b|revert\s+that|go\s+back|that'?s\s+(?:wrong|not)|not\s+what\s+i|wait\b[,.!])/iu;
 const SIDE_QUESTION = /^\s*(?:btw|by\s+the\s+way|quick\s+question|side\s+question|unrelated)\b[,:\s]/iu;
+const LIBRARY_INSTALL = /\b(?:install|add|get|find|browse)\b.{0,40}\b(?:skills?|plugins?|extensions?|agents?)\b/iu;
+const READ_ONLY_TASK =
+	/\b(?:review|audit|investigate|explain|explore|understand|map|walk\s+me\s+through)\b.{0,60}\b(?:code|codebase|repo(?:sitory)?|project|module|package|architecture|design)\b/iu;
+const READ_TOOLS = ["read", "grep", "find", "ls", "code_nav"] as const;
 const PATH_TOKEN = /(?:^|[\s(`'"])((?:\.{0,2}\/)?[\w.-]+\/[\w./-]*\.[A-Za-z0-9]{1,8})\b/u;
+
+/** Specific enough to stand without the QUESTION gate: it names the operator's own spend or quota. */
+const USAGE_QUESTION =
+	/\b(?:how\s+much\s+(?:have\s+|did\s+)?(?:i|we|you)\s+(?:spent|spend|used?)|token\s+usage|(?:my|our)\s+(?:quotas?|credits|usage|spend(?:ing)?|limits?))\b/iu;
 
 /** Harness topics a question can be about, recorded in the profile. */
 const TOPICS: ReadonlyArray<[string, RegExp]> = [
@@ -90,6 +106,8 @@ const TOPICS: ReadonlyArray<[string, RegExp]> = [
 	["sessions", /\b(?:sessions?|resume|history|fork|tree)\b/iu],
 	["context", /\b(?:context|compact\w*|tokens?)\b/iu],
 	["skills", /\b(?:skills?|plugins?|extensions?|mcp)\b/iu],
+	["usage", USAGE_QUESTION],
+	["setup", /\b(?:install(?:ed|ing|ation)?|credentials?|api\s+keys?|log\s*in|doctor|broken|not\s+working)\b/iu],
 ];
 
 /** Topics of a prompt that asks about the harness itself; empty for ordinary work. */
@@ -98,7 +116,12 @@ export function harnessQuestionTopics(prompt: string): string[] {
 	const topics = TOPICS.filter(([, pattern]) => pattern.test(prompt)).map(([topic]) => topic);
 	if (ABOUT_CLIO.test(prompt)) return topics.length > 0 ? topics : ["clio"];
 	// Without naming Clio, only topics that cannot be ordinary project work count.
-	return topics.filter((topic) => topic === "settings" || topic === "keys");
+	return topics.filter((topic) => topic === "settings" || topic === "keys" || topic === "usage");
+}
+
+/** Footer tips share the profile under a `footer:` prefix; only post-turn lessons count here. */
+function postTurnLessonsSeen(profile: HarnessProfile): number {
+	return Object.keys(profile.lessons).filter((id) => !id.startsWith("footer:")).length;
 }
 
 function used(turn: GuidanceTurn, name: string): number {
@@ -216,9 +239,70 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 			),
 	},
 	{
+		id: "approvals",
+		feature: "key:clio-coder.autonomy.toggle",
+		score: (turn, context) => (context.autonomy === "default" && turn.approvals >= 2 ? 2 : 0),
+		text: (context) =>
+			withKey(
+				context,
+				"clio-coder.autonomy.toggle",
+				(key) =>
+					`You approved those stops yourself. For a job you trust, ${key} switches this session to YOLO: nothing stops for approval and commands run unsandboxed. The same key switches back.`,
+			),
+	},
+	{
+		id: "usage",
+		feature: "/usage",
+		score: (turn) => (USAGE_QUESTION.test(turn.prompt) ? SPECIFIC_SCORE : 0),
+		text: () => "/usage shows subscription quota, credits, and this session's token and cost totals.",
+	},
+	{
+		id: "doctor",
+		feature: "/doctor",
+		score: (turn) => (harnessQuestionTopics(turn.prompt).includes("setup") ? SPECIFIC_SCORE : 0),
+		text: () => "/doctor checks this install, targets and credentials; /doctor deep adds live tool probes.",
+	},
+	{
+		id: "skills",
+		feature: "/skills",
+		score: (turn) =>
+			harnessQuestionTopics(turn.prompt).includes("skills") ? SPECIFIC_SCORE : used(turn, "skill") > 0 ? 1.5 : 0,
+		text: () => "/skills lists the skills ready here, and /skill <name> <task> runs one on purpose.",
+	},
+	{
+		id: "library",
+		feature: "/library",
+		score: (turn) => (LIBRARY_INSTALL.test(turn.prompt) ? SPECIFIC_SCORE : 0),
+		text: (context) =>
+			`${context.keyFor("clio-coder.library.toggle") ?? "/library"} opens the Library: browse, install and update skills, agents and plugins, with a review before anything changes.`,
+	},
+	{
+		id: "read-only",
+		feature: "/run",
+		score: (turn) =>
+			READ_ONLY_TASK.test(turn.prompt) &&
+			turn.writes === 0 &&
+			READ_TOOLS.reduce((sum, name) => sum + used(turn, name), 0) >= 8
+				? 1
+				: 0,
+		text: () =>
+			"/run coder --read-only <task> sends an investigation to a worker that cannot change your files, and keeps this chat's context small.",
+	},
+	{
+		id: "dispatch",
+		feature: "/run",
+		score: (turn) => (turn.toolCalls >= 15 && used(turn, "dispatch") === 0 ? 1 : 0),
+		text: (context) =>
+			`/run coder <task> hands a bounded task to a background worker while we keep talking${
+				context.keyFor("clio-coder.dispatchBoard.toggle")
+					? `; ${context.keyFor("clio-coder.dispatchBoard.toggle")} shows the workers`
+					: ""
+			}.`,
+	},
+	{
 		id: "welcome",
 		feature: "/help",
-		score: (turn, context) => (turn.priorMessages === 0 && Object.keys(context.profile.lessons).length === 0 ? 0.5 : 0),
+		score: (turn, context) => (turn.priorMessages === 0 && postTurnLessonsSeen(context.profile) === 0 ? 0.5 : 0),
 		text: () => "/help lists every command and key, and you can ask me about Clio itself any time.",
 	},
 ];
@@ -297,6 +381,8 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		current.tools.set(key, (current.tools.get(key) ?? 0) + 1);
 		if (capability === "clio_docs") profile.feature("ask-clio");
 		if (capability === "configure_clio") profile.feature("configure");
+		if (input.metadata?.operatorApproved === true) current.approvals += 1;
+		if (name === "write" || name === "edit" || name === "artifact") current.writes += 1;
 		const command = name === "bash" ? stringArg(input.toolArgs, "command") : null;
 		if (command) current.commands.push(command);
 		const path = stringArg(input.toolArgs, "path");
@@ -313,7 +399,10 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 		current.assistantChars = Number(input.metadata?.assistantTextChars ?? 0) || 0;
 		current.toolCalls = Number(input.metadata?.turnToolCalls ?? 0) || 0;
 		turnsSinceTip += 1;
-		if (shown.size >= SESSION_TIP_BUDGET) return [];
+		const known = profile.read();
+		const lessonsSeen = postTurnLessonsSeen(known);
+		const budget = SESSION_TIP_BUDGET + (lessonsSeen < NEWCOMER_LESSONS ? 1 : 0);
+		if (shown.size >= budget) return [];
 		const promptPathMatch = PATH_TOKEN.exec(current.prompt);
 		const promptPath =
 			promptPathMatch?.[1] && !current.prompt.includes(`@${promptPathMatch[1]}`) ? promptPathMatch[1] : null;
@@ -322,18 +411,20 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 			keyFor: deps.keyFor,
 			hasProjectContext: deps.hasProjectContext(),
 			contextPressure: deps.contextPressure?.() ?? null,
-			profile: profile.read(),
+			profile: known,
 			promptPath,
 		};
 		const pick = pickGuidanceLesson(current, context, shown);
 		if (pick === null) return [];
 		if (turnsSinceTip < TURNS_BETWEEN_TIPS && pick.score < DIRECT_SCORE) return [];
 		if (turnsSinceTip < 2) return [];
-		const firstEver = Object.keys(context.profile.lessons).length === 0;
+		const firstEver = lessonsSeen === 0;
 		shown.add(pick.lesson.id);
 		turnsSinceTip = 0;
 		profile.lessonShown(pick.lesson.id);
-		const message = firstEver ? `[tip] ${pick.text} Demo guidance in /settings turns tips off.` : `[tip] ${pick.text}`;
+		const message = firstEver
+			? `[tip] ${pick.text} Tips retire as you learn; Demo guidance in /settings or --no-demo turns them off.`
+			: `[tip] ${pick.text}`;
 		evaluation?.evidence?.(`guidance:${pick.lesson.id}@turn`);
 		return [{ kind: "notify_operator", message, key: `guidance.${pick.lesson.id}` }];
 	};
@@ -359,6 +450,8 @@ export function createGuidanceRegistration(deps: GuidanceDeps): MiddlewareHookRe
 					paths: [],
 					assistantChars: 0,
 					toolCalls: 0,
+					approvals: 0,
+					writes: 0,
 				};
 				return [];
 			}
