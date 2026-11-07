@@ -1,4 +1,4 @@
-import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { lstat, readdir, readFile, rmdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
@@ -11,7 +11,6 @@ import {
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
 	telemetryProcessesDirectory,
-	telemetryRunDirectory,
 	telemetryRunsDirectory,
 	telemetrySessionsDirectory,
 } from "./paths.js";
@@ -443,19 +442,4 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 		if (unlinkedStateDirectory(plan.stateDir, directory)) await rmdir(directory).catch(() => {});
 	}
 	return result;
-}
-
-/**
- * Drop the whole telemetry directory of each run that left the dispatch ledger's ring, whose run has no ledger row
- * to view any more. Best-effort: retention is bookkeeping and never fails the persist that triggered it.
- */
-export function removeRunTelemetry(stateDir: string, runIds: Iterable<string>): void {
-	for (const runId of runIds) {
-		try {
-			const directory = telemetryRunDirectory(stateDir, runId);
-			if (unlinkedStateDirectory(stateDir, directory)) rmSync(directory, { recursive: true, force: true });
-		} catch {
-			// An unsafe id resolves to no directory, and one we could not remove is retained, not an error.
-		}
-	}
 }

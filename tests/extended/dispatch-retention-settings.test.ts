@@ -6,6 +6,8 @@ import { runClioRun } from "../../src/cli/run.js";
 import { updateSettings } from "../../src/core/config.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { AgentsDomainModule } from "../../src/domains/agents/index.js";
 import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
 import { createDispatchDomainModule, type DispatchContract } from "../../src/domains/dispatch/index.js";
@@ -18,7 +20,10 @@ import { ResourcesDomainModule } from "../../src/domains/resources/index.js";
 import { SafetyDomainModule } from "../../src/domains/safety/index.js";
 import { SchedulingDomainModule } from "../../src/domains/scheduling/index.js";
 import { SessionDomainModule } from "../../src/domains/session/index.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { TelemetryDomainModule } from "../../src/domains/telemetry/index.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let scratch: IsolatedClioEnv;
@@ -120,4 +125,31 @@ test("default ledger limits remain live while explicit limits and live-run prote
 			.map((run) => run.id),
 		["live"],
 	);
+});
+
+test("dispatch ring eviction preserves a sealed run referenced by a retained session", async () => {
+	const stateDir = clioStateDir();
+	const ledger = openLedger({ maxRuns: 1 });
+	addRun(ledger, "referenced");
+	ledger.update("referenced", { startedAt: "2026-01-01T00:00:00.000Z" });
+	await ledger.persist();
+	const directory = telemetryRunDirectory(stateDir, "referenced");
+	const run = await openCallJournal({
+		directory,
+		context: { sessionId: "retained", runId: "referenced", agent: { role: "worker", id: "referenced" } },
+		writer: { clioCoderVersion: "test", piVersion: "test" },
+	});
+	ok(await run.sealAndClose());
+	const context = { sessionId: "retained", agent: { role: "main" as const, id: "retained" } };
+	const session = await openCallJournal({
+		directory: telemetrySessionDirectory(stateDir, "retained"),
+		context,
+		writer: { clioCoderVersion: "test", piVersion: "test" },
+	});
+	ok(telemetryHub().emit("run.linked", { runId: "referenced" }, context));
+	ok(await session.sealAndClose());
+	addRun(ledger, "newer");
+	await ledger.persist();
+	strictEqual(ledger.get("referenced"), null);
+	strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(directory)).status, "verified");
 });

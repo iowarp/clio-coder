@@ -28,7 +28,6 @@ import { spendSumsOf, unobservedRunUsageFacts } from "../../core/telemetry/prici
 import { RunSpendSumsSchema, RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { removeRunTelemetry } from "../telemetry/retention.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { removeRunFeeds } from "./run-feed.js";
 import type { RunEnvelope, RunStatus } from "./types.js";
@@ -437,15 +436,12 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 						await sleep(50);
 					}
 				}
-				// A run that left the ring has no ledger row to view any more, so its
-				// event journal is unreachable state. Retention is bound to the ring
-				// rather than to a second policy so the two can never disagree about
-				// how much history exists.
+				// Bound display feeds with the ledger. Telemetry journals may still be referenced by retained sessions
+				// and belong to the separate reference-aware telemetry prune policy.
 				if (merged.length > capped.length) {
 					const kept = new Set(capped.map((run) => run.id));
 					const evicted = merged.filter((run) => !kept.has(run.id)).map((run) => run.id);
 					if (!stateRootRemoved()) {
-						removeRunTelemetry(clioStateDir(), evicted);
 						removeRunFeeds(clioStateDir(), evicted);
 					}
 				}
