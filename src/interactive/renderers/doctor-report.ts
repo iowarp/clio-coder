@@ -3,7 +3,7 @@ import type { DoctorFinding } from "../../domains/lifecycle/doctor.js";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
 import { type ClioToken, clioTheme } from "../theme/index.js";
 
-/** Operator-only diagnostics: keep every detail, with attention items first. */
+/** Operator-only diagnostics: keep attention items complete and fold routine checks by tier. */
 export function renderDoctorReport(
 	findings: ReadonlyArray<DoctorFinding>,
 	width: number,
@@ -47,27 +47,25 @@ export function renderDoctorReport(
 					),
 				);
 			}
-			if (style === "standard" && passed.length > 0) {
-				lines.push(
-					"",
-					...wrapTextWithAnsi(
-						theme.fg("toolMetadata", `OK  ${passed.map((finding) => finding.name).join(" · ")}`),
-						safeWidth,
-					),
-				);
-			}
-			if (style !== "detailed" && passed.length + information.length > 0) {
-				lines.push(
-					...wrapTextWithAnsi(
-						theme.fg(
-							"annotation",
-							`${passed.length + information.length} routine checks folded · Detailed output shows all findings`,
-						),
-						safeWidth,
-					),
-				);
-			}
 		}
+	}
+	if (style === "standard" && passed.length > 0) {
+		lines.push(
+			"",
+			...wrapTextWithAnsi(theme.fg("toolMetadata", `OK  ${passed.map((finding) => finding.name).join(" · ")}`), safeWidth),
+		);
+	}
+	const routineCount = passed.length + information.length;
+	if (style !== "detailed" && routineCount > 0) {
+		lines.push(
+			...wrapTextWithAnsi(
+				theme.fg(
+					"annotation",
+					`${routineCount} routine check${routineCount === 1 ? "" : "s"} folded · Detailed output shows all findings`,
+				),
+				safeWidth,
+			),
+		);
 	}
 	lines.push("");
 	return lines;

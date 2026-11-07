@@ -188,8 +188,13 @@ test("doctor folds routine diagnostics by tier without dropping errors or remedi
 			ok(text.includes("Installthemissingtool."));
 			strictEqual(text.includes("routineinstallationpath"), style === "detailed");
 			strictEqual(text.includes("healthy"), style !== "compact");
+			strictEqual(text.match(/routinechecks?folded/g)?.length ?? 0, style === "detailed" ? 0 : 1);
+			strictEqual(text.match(/healthy/g)?.length ?? 0, style === "compact" ? 0 : 1);
 		}
 	}
+	const healthy = findings.slice(0, 1);
+	match(plain(renderDoctorReport(healthy, 80, "standard")), /OK\s+healthy/);
+	match(plain(renderDoctorReport(healthy, 80, "compact")), /1 routine check folded/);
 });
 
 test("usage suppresses the empty graph outside Detailed and adapts without reopening", () => {
