@@ -13,11 +13,13 @@ import {
 import { dockTop } from "../../src/interactive/dock.js";
 import { createFleetDock } from "../../src/interactive/fleet-dock.js";
 import type { FleetPlanRunView } from "../../src/interactive/fleet-plan-runs.js";
+import { healthLines } from "../../src/interactive/health-overlay.js";
 import { renderDoctorReport } from "../../src/interactive/renderers/doctor-report.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { footerState } from "../harness/footer-fixture.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 const plain = (lines: string[]) => lines.map(stripTerminalSequences).join("\n");
 const fits = (lines: string[], width: number) => {
@@ -214,4 +216,29 @@ test("usage suppresses the empty graph outside Detailed and adapts without reope
 	} finally {
 		handle.hide();
 	}
+});
+
+test("minimal health folds routine connections but retains failures and recovery information", () => {
+	const transport = telemetryViewOf("health", telemetryCall("health")).session().transport;
+	ok(transport);
+	transport.pinReason = null;
+	transport.recovery = null;
+	for (const quantity of [transport.websocketFailures, transport.sseFallbacks]) {
+		quantity.fact = { kind: "measured", value: 0, source: "provider" };
+		quantity.display = "0";
+	}
+	const data = { health: null, sessionId: "health", transport, quota: null, breakers: [], systemOne: null };
+	doesNotMatch(plain(healthLines(data, 80, "compact")), /Connection to the model/);
+	transport.pinReason = "auth_rejection";
+	for (const width of [24, 80, 120, 200]) {
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const rows = healthLines(data, width, style);
+			fits(rows, width);
+			ok(plain(rows).replace(/\s/g, "").includes("WebSocketsign-inwasrejected"));
+		}
+	}
+	transport.pinReason = null;
+	transport.websocketFailures.fact = { kind: "measured", value: 2, source: "provider" };
+	transport.websocketFailures.display = "2";
+	match(plain(healthLines(data, 80, "compact")), /WebSocket failures\s+2/);
 });

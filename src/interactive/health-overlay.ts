@@ -1,6 +1,7 @@
 import type { OutputStyle } from "../core/defaults.js";
 import { stampLocal } from "../core/format-time.js";
 import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemetry/dto.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import { renderCount } from "../core/telemetry/render.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { SystemOneBreakerView } from "../domains/system-one/index.js";
@@ -220,7 +221,7 @@ function textWords(
 }
 
 /** The overlay's lines, from data read once per frame: the summary, then a rule per region. */
-function healthLines(data: HealthData, width: number, style: OutputStyle): string[] {
+export function healthLines(data: HealthData, width: number, style: OutputStyle): string[] {
 	const theme = clioTheme();
 	const safe = Math.max(1, Math.floor(width));
 	const unit = (label: string, display: string, alarm = false) =>
@@ -302,7 +303,14 @@ function healthLines(data: HealthData, width: number, style: OutputStyle): strin
 			);
 	}
 
-	const transport = style === "compact" ? undefined : data.transport;
+	const connection = data.transport;
+	const connectionProblem =
+		connection != null &&
+		(connection.pinReason !== null ||
+			connection.recovery !== null ||
+			factKnownValue(connection.websocketFailures.fact) > 0 ||
+			factKnownValue(connection.sseFallbacks.fact) > 0);
+	const transport = style === "compact" && !connectionProblem ? undefined : connection;
 	if (transport !== undefined) lines.push(sectionRule(theme, safe, "Connection to the model"));
 	if (transport === null) lines.push(...missing("No reply from the model has finished yet."));
 	else if (transport !== undefined) {
