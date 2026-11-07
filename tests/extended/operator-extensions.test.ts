@@ -11,6 +11,7 @@ import {
 	flushPackageActivities,
 	recordPackageActivity,
 } from "../../src/core/package-activity.js";
+import { withReadOnlyMode } from "../../src/core/read-only-mode.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DynamicToolName } from "../../src/core/tool-names.js";
 import { loadManifestFromRoot, parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
@@ -1013,6 +1014,38 @@ test("a net:false runtime cannot reach loopback, reports its backend, and gets e
 		backend: sandboxAvailability().backend,
 		network: "blocked",
 	});
+});
+
+test("a runtime started in read-only mode gets none of its declared write roots and creates none", async (t) => {
+	const script = [
+		'import { writeFileSync } from "node:fs";',
+		"export default api => {",
+		'  api.handle("probe", async () => {',
+		"    let inside = true;",
+		'    try { writeFileSync(".research/inside.txt", "x"); } catch { inside = false; }',
+		"    return { text: JSON.stringify({ inside }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Probe the write roots", timeoutMs: 10_000 }],
+		ui: [],
+		permissions: { fs: { read: [], write: [".research", "store"] }, exec: false, net: false },
+	});
+	const stateDir = path.join(f.env.dir, "state");
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => stateDir,
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	const output = await withReadOnlyMode(() => runtime.invoke(extensionInvocation("lab_status.v1", "probe"), ""));
+	deepStrictEqual(JSON.parse(String(output.text)), { inside: false });
+	equal(existsSync(path.join(f.cwd, ".research")), false, "the declared workspace root is not created");
+	equal(existsSync(path.join(stateDir, "extensions", "lab_status.v1", "files")), false, "nor is the store");
 });
 
 test("a declared extension can request host embeddings without seeing the route", async (t) => {

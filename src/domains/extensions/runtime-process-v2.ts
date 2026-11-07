@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import type { UnixSocketMode } from "../../core/sandbox/types.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
@@ -167,10 +168,19 @@ export class ExtensionRuntimeProcessV2 {
 		const temporary = mkdtempSync(path.join(os.tmpdir(), "clio-coder-extension-"));
 		this.copyRoot = temporary;
 		const copy = path.join(temporary, "package");
+		// A read-only session leaves the workspace and the store as it found them, so its
+		// runtimes start with no write root at all and none is created for them.
+		const readOnly = readOnlyMode();
+		const confined: ExtensionRuntimeDeclarationV2 = readOnly
+			? {
+					...this.declaration,
+					permissions: { ...this.declaration.permissions, fs: { ...this.declaration.permissions.fs, write: [] } },
+				}
+			: this.declaration;
 		try {
 			// A declared write root may not reach Clio's own installed resources, state, trust or policy,
 			// and exists as a plain directory before launch so the sandbox binds exactly it.
-			prepareDeclaredWriteRoots(this.declaration, options.snapshot.workspace);
+			prepareDeclaredWriteRoots(confined, options.snapshot.workspace);
 			cpSync(extension.provenance.canonicalRoot, copy, { recursive: true, dereference: false, verbatimSymlinks: true });
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
@@ -192,7 +202,7 @@ export class ExtensionRuntimeProcessV2 {
 			)
 				throw new Error("runtime declarations differ from verified manifest bytes");
 			resolveExtensionEntrypoint(copy, this.declaration.entrypoint);
-			mkdirSync(options.storeDir, { recursive: true });
+			if (!readOnly) mkdirSync(options.storeDir, { recursive: true });
 		} catch (error) {
 			rmSync(temporary, { recursive: true, force: true });
 			throw error;
@@ -205,11 +215,11 @@ export class ExtensionRuntimeProcessV2 {
 		this.staged.catch(() => {});
 		const bootstrap = path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child-v2.mjs");
 		const launch = planExtensionLaunch({
-			declaration: this.declaration,
+			declaration: confined,
 			roots: { workspace: options.snapshot.workspace, packageCopy: copy, storeDir: options.storeDir, bootstrap },
 			argv: [
 				process.execPath,
-				...runtimePermissionArgs(this.declaration, {
+				...runtimePermissionArgs(confined, {
 					bootstrap,
 					packageCopy: copy,
 					workspace: options.snapshot.workspace,
