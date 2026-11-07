@@ -33,7 +33,7 @@ import {
 } from "../domains/scheduling/local-capacity.js";
 import { workspaceSnapshotRepositoryPresent } from "../domains/workspace-snapshots/store.js";
 import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
-import { copilotSignInFindings } from "./doctor-copilot.js";
+import { copilotSignInReport } from "./doctor-copilot.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { installationFindings } from "./doctor-installation.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
@@ -417,9 +417,15 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
 	// placeholder id saved by configure is reported here and not on the first turn.
-	const modelChecks = await runDoctorModelChecks({ fix, ...(options.confirm ? { confirm: options.confirm } : {}) });
 	// A copilot-sdk target's login lives in the official runtime, so only that runtime can say which one it sees.
-	const copilotChecks = untouched ? [] : await copilotSignInFindings();
+	// It runs first: a login only the keychain holds turns the Copilot connection row into the same warning.
+	const copilot = untouched ? null : await copilotSignInReport();
+	const modelChecks = await runDoctorModelChecks({
+		fix,
+		...(options.confirm ? { confirm: options.confirm } : {}),
+		...(copilot?.check.kind === "keychain-only" ? { copilotKeychainLogin: copilot.check.login } : {}),
+	});
+	const copilotChecks = copilot ? [copilot.finding] : [];
 	// The interop and fleet sweeps read the state and config roots through the
 	// ensuring accessors, which create them, and there is no fleet or interop
 	// state to inspect before Clio has ever written anything. On a home Clio has

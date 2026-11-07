@@ -3,6 +3,7 @@ import { isAbsolute, join, relative as relativePath } from "node:path";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
+import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
 import { initializeClioHome } from "../../core/init.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
@@ -1116,7 +1117,16 @@ export function targetIsActive(settings: ReturnType<typeof readSettings>, id: st
 }
 
 export async function runDoctorModelChecks(
-	options: { fix?: boolean; confirm?: (question: string) => Promise<boolean> } = {},
+	options: {
+		fix?: boolean;
+		confirm?: (question: string) => Promise<boolean>;
+		/**
+		 * The account doctor's sign-in check found only through the system keychain. The passive check runs the
+		 * Copilot runtime with the keychain closed, so its not-signed-in failure is then a warning that says
+		 * interactive surfaces work, not an error.
+		 */
+		copilotKeychainLogin?: string;
+	} = {},
 ): Promise<DoctorFinding[]> {
 	const proposals: Array<{ row: DoctorFinding; repair: SettingsScalarRepair }> = [];
 	let settings: ReturnType<typeof readSettings>;
@@ -1219,12 +1229,21 @@ export async function runDoctorModelChecks(
 										: "; no model list returned"
 								}`,
 							}
-						: {
-								ok: !active,
-								...(!active ? { level: "warn" as const } : {}),
-								name: `connection ${target.id}`,
-								detail: `${where} was not verified: ${observation.probe.error ?? "no reply"}. ${credentialDetail}. This was a passive metadata check; no generation was attempted.`,
-							};
+						: runtime.id === "copilot-sdk" &&
+								observation.probe.failureKind === "authentication" &&
+								options.copilotKeychainLogin !== undefined
+							? {
+									ok: true,
+									level: "warn" as const,
+									name: `connection ${target.id}`,
+									detail: `${where} was checked with the keychain closed and saw no login; ${copilotKeychainOnlyDetail(options.copilotKeychainLogin)}. This was a passive metadata check; no generation was attempted.`,
+								}
+							: {
+									ok: !active,
+									...(!active ? { level: "warn" as const } : {}),
+									name: `connection ${target.id}`,
+									detail: `${where} was not verified: ${observation.probe.error ?? "no reply"}. ${credentialDetail}. This was a passive metadata check; no generation was attempted.`,
+								};
 			const cache = (observation?.cacheAdvisories ?? []).map(
 				(detail): DoctorFinding => ({ ok: true, level: "warn", name: `cache ${target.id}`, detail }),
 			);

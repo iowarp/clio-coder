@@ -13,6 +13,14 @@ let allowed = false;
 export const COPILOT_HEADLESS_LOGIN_FIX =
 	'run `gh auth login`, or add `"storeTokenPlaintext": true` to `settings.json` in the Copilot home (`COPILOT_HOME`, default `~/.copilot`) and run `copilot login` again';
 
+/**
+ * What a `copilot login` held only by the system keychain means, worded once so every doctor row that sees it
+ * agrees: operator surfaces can use it, headless ones cannot, and the headless fix.
+ */
+export function copilotKeychainOnlyDetail(login: string): string {
+	return `signed in as ${login} only through the system keychain: the TUI, ACP and the GUI can use it, but \`clio-coder run\`, fleet workers and other headless paths keep the keychain closed and see no login. For headless use, ${COPILOT_HEADLESS_LOGIN_FIX}`;
+}
+
 export function allowCopilotKeychain(): void {
 	allowed = true;
 }

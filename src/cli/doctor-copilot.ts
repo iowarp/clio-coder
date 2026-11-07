@@ -1,5 +1,5 @@
 import { readSettings } from "../core/config.js";
-import { COPILOT_HEADLESS_LOGIN_FIX } from "../core/copilot-keychain.js";
+import { copilotKeychainOnlyDetail } from "../core/copilot-keychain.js";
 import { resolveCopilotSdkEntry } from "../domains/lifecycle/copilot-sdk-install.js";
 import { type DoctorFinding, targetIsActive } from "../domains/lifecycle/doctor.js";
 import type { CopilotSignInCheck } from "../domains/providers/copilot-setup.js";
@@ -22,12 +22,7 @@ export function copilotSignInFinding(check: CopilotSignInCheck, active = true): 
 				detail: `signed in as ${check.login} through ${signedInVia(check.authType)}; every surface, headless runs and fleet workers included, can use it`,
 			};
 		case "keychain-only":
-			return {
-				ok: true,
-				level: "warn",
-				name: NAME,
-				detail: `signed in as ${check.login} only through the system keychain: the TUI, ACP and the GUI can use it, but \`clio-coder run\`, fleet workers and other headless paths keep the keychain closed and see no login. For headless use, ${COPILOT_HEADLESS_LOGIN_FIX}`,
-			};
+			return { ok: true, level: "warn", name: NAME, detail: copilotKeychainOnlyDetail(check.login) };
 		case "not-signed-in":
 			return {
 				ok: !active,
@@ -44,12 +39,18 @@ export function copilotSignInFinding(check: CopilotSignInCheck, active = true): 
 	}
 }
 
+export interface CopilotSignInReport {
+	check: CopilotSignInCheck;
+	finding: DoctorFinding;
+}
+
 /**
- * One row when a copilot-sdk target is configured and the SDK component is installed: which login the runtime
- * sees with the keychain closed (as headless runs and workers start it), and, from a terminal, whether a
- * `copilot login` lives only in the keychain. Each check starts a short-lived runtime; no token is read.
+ * The sign-in check and its row when a copilot-sdk target is configured and the SDK component is installed: which
+ * login the runtime sees with the keychain closed (as headless runs and workers start it), and, from a terminal,
+ * whether a `copilot login` lives only in the keychain. Doctor runs it before the connection sweep, so a Copilot
+ * connection row can agree with it. Each check starts a short-lived runtime; no token is read.
  */
-export async function copilotSignInFindings(): Promise<DoctorFinding[]> {
+export async function copilotSignInReport(): Promise<CopilotSignInReport | null> {
 	let targets: string[];
 	let active: boolean;
 	try {
@@ -58,9 +59,10 @@ export async function copilotSignInFindings(): Promise<DoctorFinding[]> {
 		active = targets.some((id) => targetIsActive(settings, id));
 	} catch {
 		// An unreadable settings file has its own doctor row.
-		return [];
+		return null;
 	}
-	if (targets.length === 0 || !resolveCopilotSdkEntry()) return [];
+	if (targets.length === 0 || !resolveCopilotSdkEntry()) return null;
 	const { checkCopilotSignIn } = await import("../domains/providers/copilot-setup.js");
-	return [copilotSignInFinding(await checkCopilotSignIn(process.stdin.isTTY === true), active)];
+	const check = await checkCopilotSignIn(process.stdin.isTTY === true);
+	return { check, finding: copilotSignInFinding(check, active) };
 }
