@@ -49,6 +49,27 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	{ kind: "sk-key", re: /\bsk-(?:[A-Za-z0-9_-]{2,20}-)?[A-Za-z0-9_-]{16,}\b/g },
 	{ kind: "slack-token", re: /\bxox[bpars]-[A-Za-z0-9-]{8,}\b/g },
 	{ kind: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}\b/g },
+	{ kind: "gitlab-token", re: /\bgl(?:pat|dt|rt|ptt|soat|ft)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]{2,})*/g },
+	// A webhook URL is its own credential: whoever holds the path can post as the integration.
+	{
+		kind: "slack-webhook",
+		re: /\b(?:https?:\/\/)?hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9_/-]{8,}/gi,
+	},
+	{
+		kind: "discord-webhook",
+		re: /\b(?:https?:\/\/)?(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[A-Za-z0-9_-]{20,}/gi,
+	},
+	// Bot API URLs carry the token as `/bot<id>:<secret>/`; the lookbehind lets the id start right after `bot`.
+	{
+		kind: "telegram-bot-token",
+		re: /(?:(?<=\/bot)|(?<![A-Za-z0-9_:-]))\d{5,12}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])/g,
+	},
+	{
+		kind: "aws-secret-key",
+		// Exactly 40 base64 characters holding upper case, lower case and a digit; awsSecretKeyHolds then
+		// requires it to read as random, so a 40-character name or path stays.
+		re: /(?<![A-Za-z0-9/+=])(?=[A-Za-z0-9/+]*[A-Z])(?=[A-Za-z0-9/+]*[a-z])(?=[A-Za-z0-9/+]*\d)[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g,
+	},
 	{
 		kind: "jwt",
 		// Group 1 is the run ahead of the token and stays in the text. The first `eyJ` of a run is the only start that can
@@ -76,6 +97,36 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		re: /\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|secret|token|passwd|password|credential))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
 	},
 ];
+
+/**
+ * How often adjacent letters and digits switch between upper case, lower case
+ * and digit, per letter or digit. Random base64 or base62 switches on most
+ * characters, hex on about half; words, dates and camel-case names rarely do.
+ */
+export function characterClassSwitchRate(text: string): number {
+	let previous = "";
+	let counted = 0;
+	let switches = 0;
+	for (const char of text) {
+		const kind =
+			char >= "A" && char <= "Z" ? "U" : char >= "a" && char <= "z" ? "L" : char >= "0" && char <= "9" ? "D" : "";
+		if (kind === "") continue;
+		counted += 1;
+		if (previous !== "" && kind !== previous) switches += 1;
+		previous = kind;
+	}
+	return counted === 0 ? 0 : switches / counted;
+}
+
+/** A path of 40 characters has several `/` and few class switches; an AWS secret key has neither. */
+function awsSecretKeyHolds(value: string): boolean {
+	return value.split("/").length <= 4 && characterClassSwitchRate(value) >= 0.3;
+}
+
+/** Whether a match of `kind` is the credential its pattern describes, for the patterns whose shape alone is not enough. */
+function secretShapeHolds(kind: string, value: string): boolean {
+	return kind !== "aws-secret-key" || awsSecretKeyHolds(value);
+}
 
 /** The assignment pattern's key half, for a key that arrives as a JSON property name. */
 const SECRET_PROPERTY_NAME =
@@ -143,6 +194,10 @@ const COMMAND_OUTPUT_SECRET_KINDS: ReadonlySet<string> = new Set([
 	"sk-key",
 	"slack-token",
 	"google-api-key",
+	"gitlab-token",
+	"slack-webhook",
+	"discord-webhook",
+	"telegram-bot-token",
 	"jwt",
 	"authorization",
 ]);
@@ -157,7 +212,8 @@ const COMMAND_OUTPUT_URL_PARAM_VALUE_RE = /^[A-Za-z0-9._~%+/=-]{8,}$/u;
 
 /**
  * Mask the credential shapes trusted on command output: URL userinfo and username tokens, plain secret query values, PEM
- * private keys, AWS access keys, GitHub, `sk-`, Slack and Google API keys, JWTs and Authorization headers.
+ * private keys, AWS access keys, GitHub, GitLab, `sk-`, Slack and Google API keys, Slack and Discord webhooks, Telegram
+ * bot tokens, JWTs and Authorization headers.
  */
 export function redactCommandOutputSecrets(text: string, tally?: RedactionTally): string {
 	let out = text;
@@ -209,6 +265,7 @@ export function redactSecretsText(
 	let out = text;
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
+			if (!secretShapeHolds(pattern.kind, String(match[0]))) return String(match[0]);
 			if (pattern.kind === "assignment" && options?.keepAssignmentValue) {
 				const key = String(match[1]);
 				const before = String(match[4]).slice(0, Number(match[3]) + key.length);
@@ -280,6 +337,7 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 	const ranges: { start: number; end: number; kind: string }[] = [];
 	for (const pattern of SECRET_PATTERNS) {
 		for (const match of joined.matchAll(new RegExp(pattern.re.source, pattern.re.flags))) {
+			if (!secretShapeHolds(pattern.kind, match[0])) continue;
 			const userinfo = pattern.kind === "url-userinfo";
 			if (userinfo && !urlUserinfoHoldsSecret(match[2] ?? "")) continue;
 			const keepsHead = userinfo || pattern.kind === "assignment" || pattern.kind === "jwt";

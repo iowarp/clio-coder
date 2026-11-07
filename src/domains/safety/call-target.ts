@@ -7,7 +7,7 @@
  * or spoof the UI that approves it.
  */
 
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { characterClassSwitchRate, createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { isSecretArgKey, redactSecretString } from "./redaction.js";
 
 const ESC_CHAR = String.fromCharCode(27);
@@ -454,6 +454,21 @@ const SHOWN_STRING_VALUE_RE = /^[A-Za-z0-9/._+:@, -]+$/;
 /** Userinfo in a URL (`//token@host`, `//u:p@host`) or without one (`u:p@host`). */
 const USERINFO_RE = /\/\/[^/\s]*@|:[^/\s]*@/;
 
+/**
+ * A run of 20 or more name characters between `/`, `.`, `:`, `@`, `,` or a space
+ * (a URL path segment, a bare value) that switches between upper case, lower case
+ * and digit this often is opaque: a webhook secret, an API key, a hash. No rule
+ * knows every service's token shape, so the card shows no such run.
+ */
+const OPAQUE_RUN_RE = /[A-Za-z0-9_+-]{20,}/g;
+const OPAQUE_RUN_SWITCH_RATE = 0.4;
+
+function holdsOpaqueRun(value: string): boolean {
+	for (const [run] of value.matchAll(OPAQUE_RUN_RE))
+		if (characterClassSwitchRate(run) >= OPAQUE_RUN_SWITCH_RATE) return true;
+	return false;
+}
+
 /** An HTTP auth scheme as a word, whose next word is the credential: `Basic dXNlcjpw` fits no token shape. */
 const AUTH_SCHEME_WORD_RE = /(?:^|[\s,:])(?:basic|bearer|digest|negotiate|ntlm)(?=[\s,:]|$)/iu;
 
@@ -463,16 +478,16 @@ const AUTH_SCHEME_WORD_RE = /(?:^|[\s,:])(?:basic|bearer|digest|negotiate|ntlm)(
  * `slurm_submit` asked for approval of `script=<string 66 bytes>` where the
  * operator needed the script path. This is an allowlist, not redaction: the
  * name must be one of SHOWN_STRING_ARG_KEYS and the value one line of the
- * conservative charset, free of userinfo, auth schemes and secret words, and
- * left unchanged by every secret rule. Anything else, including a value a
- * rule would only mask, stays summarized by size.
+ * conservative charset, free of userinfo, auth schemes, secret words and
+ * opaque runs, and left unchanged by every secret rule. Anything else,
+ * including a value a rule would only mask, stays summarized by size.
  */
 function shownUnlistedString(tool: string, field: string, value: string): string | null {
 	if (CALL_TARGET_FIELDS[tool] !== undefined) return null;
 	if (!PLAIN_ARG_KEY_RE.test(field) || isSecretArgKey(field)) return null;
 	if (!SHOWN_STRING_ARG_KEYS.has(field.toLowerCase().replace(/[-_]/g, ""))) return null;
 	if (value.length > UNLISTED_STRING_MAX_CHARS || !SHOWN_STRING_VALUE_RE.test(value)) return null;
-	if (USERINFO_RE.test(value) || AUTH_SCHEME_WORD_RE.test(value)) return null;
+	if (USERINFO_RE.test(value) || AUTH_SCHEME_WORD_RE.test(value) || holdsOpaqueRun(value)) return null;
 	// A value that names a secret (`token abc…`, `password hunter2`) is read as holding one.
 	if (isSecretArgKey(value) || redactSecretString(value) !== value) return null;
 	return redactSecretsText(value, createRedactionTally()) === value ? value : null;

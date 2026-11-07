@@ -1,5 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+	createRedactionTally,
+	redactCommandOutputSecrets,
+	redactSecretsText,
+} from "../../src/domains/evidence/redact.js";
 import { describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { redactSecretString } from "../../src/domains/safety/redaction.js";
 
@@ -76,6 +81,44 @@ describe("approval card arguments of an uncurated tool", () => {
 			target({ notes: "short", api_token: "plain-value" }),
 			"notes=<string 5 bytes> · api_token=<string 11 bytes>",
 		);
+	});
+
+	it("summarizes webhooks, GitLab tokens, AWS secret keys and opaque path segments, and the journal hides the shapes", () => {
+		const secrets: Array<[string, string]> = [
+			[
+				`https://hooks.slack.com/services/${["T0AAAAAAA", "B0BBBBBBB", "abcdefghijklmnopqrstuvwx"].join("/")}`,
+				"abcdefghijklmnopqrstuvwx",
+			],
+			[
+				"https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage",
+				"AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw",
+			],
+			[
+				"https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyzABCDEFGHIJ",
+				"abcdefghijklmnopqrstuvwxyzABCDEFGHIJ",
+			],
+			["glpat-abcdefghijklmnopqrst", "abcdefghijklmnopqrst"],
+			["wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "bPxRfiCYEXAMPLEKEY"],
+		];
+		for (const [value, secret] of secrets) {
+			strictEqual(target({ target: value }), `target=<string ${value.length} bytes>`, value);
+			// The run journal keeps the card text through evidence redaction, which knows these shapes.
+			ok(!redactSecretsText(`sent ${value} ok`, createRedactionTally()).includes(secret), value);
+			// Command output masks every shape but the AWS secret key, which needs the randomness check.
+			if (!value.startsWith("wJalr")) ok(!redactCommandOutputSecrets(`sent ${value} ok`).includes(secret), value);
+		}
+		// A webhook of a service no rule knows still hides its opaque path segment.
+		const opaque = "https://example.com/hook/Wm8kQ2xR9vT4pL7nZ3yH6cJd";
+		strictEqual(target({ url: opaque }), `url=<string ${opaque.length} bytes>`);
+		for (const value of [
+			"/data/Project2/RawImages/Batch7/Sample12",
+			"/models/Qwen2.5-Coder-32B-Instruct-GGUF",
+			"/scratch/x86_64-pc-linux-gnu-gcc-13/experiment-results-2024-05-01",
+			"CamelCaseFileNameWithNumbers123",
+		]) {
+			strictEqual(target({ path: value }), `path=${value}`);
+			strictEqual(redactSecretsText(value, createRedactionTally()), value);
+		}
 	});
 
 	it("masks an adjacent quoted assignment whole in the display redactor", () => {

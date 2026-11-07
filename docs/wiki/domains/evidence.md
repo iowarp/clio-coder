@@ -151,7 +151,7 @@ Callers in the repository include `src/cli/fleet-view.ts` (`formatTrustSummaryLi
 
 ## Redaction
 
-`src/domains/evidence/redact.ts` defines a `RedactionTally` counter and a fixed list of value-shaped patterns in `SECRET_PATTERNS`: URL userinfo (shared with display redaction through `URL_USERINFO_RE` from `src/domains/safety/redaction.ts`), PEM private key blocks, AWS access keys, GitHub tokens, `sk-` keys, Slack tokens, Google API keys, JWTs, `authorization` headers or scheme values, and a generic key/token/secret/password assignment.
+`src/domains/evidence/redact.ts` defines a `RedactionTally` counter and a fixed list of value-shaped patterns in `SECRET_PATTERNS`: URL userinfo (shared with display redaction through `URL_USERINFO_RE` from `src/domains/safety/redaction.ts`), PEM private key blocks, AWS access keys, GitHub tokens, `sk-` keys, Slack tokens, Google API keys, GitLab tokens, Slack and Discord webhook URLs, Telegram bot tokens, AWS secret keys (with a randomness check), JWTs, `authorization` headers or scheme values, and a generic key/token/secret/password assignment.
 
 `redactSecretsText(text, tally, options?)` applies each pattern in order. URL userinfo is replaced only when `urlUserinfoHoldsSecret` confirms the value. For the `assignment`, `authorization`, and `jwt` kinds, the key, separator, or leading run is kept and only the value is replaced. An optional `keepAssignmentValue` callback can keep an assignment value.
 

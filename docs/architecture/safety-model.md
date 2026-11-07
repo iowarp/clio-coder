@@ -448,6 +448,7 @@ The card's target line, the decision metadata of an ACP permission request and a
 - the argument name, with case, `_` and `-` folded, is one of `cwd`, `dir`, `directory`, `file`, `filename`, `jobname`, `module`, `name`, `partition`, `path`, `script`, `scriptpath`, `target` or `url`, and does not look like a secret name;
 - the value is at most 96 characters on one line, made only of letters, digits, space and `/ . _ - + : @ ,`, so no `=`, quote, backslash, backtick, `$`, `%`, `?`, `&` or `#`;
 - the value carries no URL userinfo (`//token@host`, `user:pass@host`), no HTTP auth scheme word (`Basic`, `Bearer`, `Digest`, `Negotiate`, `NTLM`) and no secret word such as `token` or `password`;
+- the value holds no opaque run: 20 or more letters, digits, `_`, `+` or `-` whose letters and digits switch between upper case, lower case and digit on at least 4 in 10 characters, as a webhook secret, API key or hash in a URL path does;
 - no display or content secret rule would change the value.
 
 A value that any rule would only mask is not shown masked; it stays summarized by size, like every argument outside the allowlist. A main-session target is clipped at 120 characters and a worker's at 1,000.
