@@ -30,10 +30,13 @@ import type { PinnedTool, PinnedToolDownload, ToolPlatform } from "./types.js";
  *
  * `CLIO_CODER_TOOLCHAIN_MIRROR` points every download at a mirror instead of
  * upstream, for airgapped and proxied machines: a base URL or a local directory
- * that holds the upstream assets under their upstream names (the last path
- * segment of each pinned URL, e.g. `herdr-linux-x86_64`, `LICENSE`). The
- * mirror is trusted for nothing: every byte it serves is checked against the
- * same pinned sha256 as upstream's.
+ * that holds the upstream assets under `<tool id>/<version>/<upstream name>`
+ * (the upstream name is the last path segment of each pinned URL, e.g.
+ * `herdr/0.9.5/LICENSE`). A flat `<upstream name>` at the mirror root is still
+ * tried second, for mirrors laid out before the namespace existed. The mirror
+ * is trusted for nothing: every byte it serves is checked against the same
+ * pinned sha256 as upstream's, and a candidate that fails the check is passed
+ * over for the next one.
  */
 
 /** How a URL becomes bytes. Injectable so the contract tests never touch the network. */
@@ -48,8 +51,9 @@ export interface ToolInstallOptions {
 	root?: string;
 	fetch?: ToolFetcher;
 	/**
-	 * Base URL or local directory serving the pinned assets under their upstream
-	 * basenames. Defaults to `CLIO_CODER_TOOLCHAIN_MIRROR`; null forces upstream.
+	 * Base URL or local directory serving the pinned assets under
+	 * `<id>/<version>/<upstream basename>`, or flat under the basename.
+	 * Defaults to `CLIO_CODER_TOOLCHAIN_MIRROR`; null forces upstream.
 	 */
 	mirror?: string | null;
 	/** Per-asset download timeout. Defaults to five minutes. */
@@ -121,47 +125,26 @@ export async function installPinnedTool(
 	}
 
 	const mirror = options.mirror === undefined ? toolchainMirror() : options.mirror;
-	const source = (url: string): string => (mirror ? mirroredSource(url, mirror) : url);
+	const sources = (url: string): string[] => (mirror ? mirroredSources(url, mirror, entry.id, entry.version) : [url]);
 	const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
 	const fetcher = options.fetch ?? ((url: string) => fetchAsset(url, timeoutMs));
-	let assetBytes: Buffer;
-	try {
-		progress(`downloading ${source(download.url)}`);
-		assetBytes = await fetcher(source(download.url));
-	} catch (error) {
-		return failure(entry.id, entry.version, dir, `download failed: ${messageOf(error)}`);
-	}
 
-	const actual = sha256(assetBytes);
-	if (actual !== download.sha256) {
-		return failure(
-			entry.id,
-			entry.version,
-			dir,
-			`checksum mismatch for ${source(download.url)}: expected ${download.sha256}, got ${actual}. Nothing was written.`,
-		);
+	const asset = await fetchVerified(sources(download.url), download.sha256, fetcher, progress);
+	if (!asset.ok) {
+		const message = asset.mismatch ? asset.message : `download failed: ${asset.message}`;
+		return failure(entry.id, entry.version, dir, message);
 	}
-	progress(`checksum verified (${actual})`);
+	const assetBytes = asset.bytes;
+	progress(`checksum verified (${download.sha256})`);
 
 	const documentBytes = new Map<string, Buffer>();
 	for (const doc of entry.documents) {
-		let bytes: Buffer;
-		try {
-			progress(`downloading ${source(doc.url)}`);
-			bytes = await fetcher(source(doc.url));
-		} catch (error) {
-			return failure(entry.id, entry.version, dir, `download failed for ${doc.name}: ${messageOf(error)}`);
+		const fetched = await fetchVerified(sources(doc.url), doc.sha256, fetcher, progress);
+		if (!fetched.ok) {
+			const message = fetched.mismatch ? fetched.message : `download failed for ${doc.name}: ${fetched.message}`;
+			return failure(entry.id, entry.version, dir, message);
 		}
-		const docHash = sha256(bytes);
-		if (docHash !== doc.sha256) {
-			return failure(
-				entry.id,
-				entry.version,
-				dir,
-				`checksum mismatch for ${source(doc.url)}: expected ${doc.sha256}, got ${docHash}. Nothing was written.`,
-			);
-		}
-		documentBytes.set(doc.name, bytes);
+		documentBytes.set(doc.name, fetched.bytes);
 	}
 
 	let members: Map<string, ArchiveEntry>;
@@ -340,17 +323,53 @@ export function toolchainMirror(env: NodeJS.ProcessEnv = process.env): string | 
 }
 
 /**
- * Where a pinned URL's asset lives on a mirror: the mirror joined with the
- * URL's last path segment. A mirror that is a URL stays a URL; anything else
- * is a local directory and becomes a file path.
+ * Where a pinned URL's asset may live on a mirror, in the order to try them:
+ * `<mirror>/<id>/<version>/<name>` first, then the legacy flat `<mirror>/<name>`,
+ * where `<name>` is the URL's last path segment. The namespace keeps tools whose
+ * assets share a name (every `LICENSE`) from colliding. A mirror that is a URL
+ * stays a URL; anything else is a local directory and becomes a file path.
  */
-export function mirroredSource(url: string, mirror: string): string {
+export function mirroredSources(url: string, mirror: string, id: string, version: string): string[] {
 	const name = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
 	if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(mirror) && !mirror.startsWith("file:")) {
-		return `${mirror.replace(/\/+$/u, "")}/${encodeURIComponent(name)}`;
+		const base = mirror.replace(/\/+$/u, "");
+		const leaf = encodeURIComponent(name);
+		return [`${base}/${encodeURIComponent(id)}/${encodeURIComponent(version)}/${leaf}`, `${base}/${leaf}`];
 	}
 	const dir = mirror.startsWith("file:") ? fileURLToPath(mirror) : mirror;
-	return join(dir, name);
+	return [join(dir, id, version, name), join(dir, name)];
+}
+
+type VerifiedFetch = { ok: true; bytes: Buffer } | { ok: false; mismatch: boolean; message: string };
+
+/**
+ * The first candidate whose bytes match the pinned sha256. A candidate that
+ * cannot be fetched or hashes wrong is skipped, so a stale flat mirror file
+ * never shadows a correct namespaced one or the reverse.
+ */
+async function fetchVerified(
+	candidates: string[],
+	expected: string,
+	fetcher: ToolFetcher,
+	progress: (message: string) => void,
+): Promise<VerifiedFetch> {
+	const mismatches: string[] = [];
+	const errors: string[] = [];
+	for (const source of candidates) {
+		let bytes: Buffer;
+		try {
+			progress(`downloading ${source}`);
+			bytes = await fetcher(source);
+		} catch (error) {
+			errors.push(candidates.length === 1 ? messageOf(error) : `${source}: ${messageOf(error)}`);
+			continue;
+		}
+		const actual = sha256(bytes);
+		if (actual === expected) return { ok: true, bytes };
+		mismatches.push(`checksum mismatch for ${source}: expected ${expected}, got ${actual}`);
+	}
+	if (mismatches.length === 0) return { ok: false, mismatch: false, message: errors.join("; ") };
+	return { ok: false, mismatch: true, message: `${[...mismatches, ...errors].join("; ")}. Nothing was written.` };
 }
 
 async function fetchAsset(url: string, timeoutMs: number): Promise<Buffer> {

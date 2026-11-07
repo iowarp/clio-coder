@@ -43,7 +43,7 @@ import {
 	posixRuntimeDirCandidates,
 	renderPosixShellShim,
 } from "../../src/domains/mux/workspace/platform-posix.js";
-import { mirroredSource } from "../../src/domains/toolchain/install.js";
+import { installPinnedTool, mirroredSources } from "../../src/domains/toolchain/install.js";
 import { findPinnedTool } from "../../src/domains/toolchain/registry.js";
 
 const SESSION = "clio-coder-0123456789ab";
@@ -698,14 +698,92 @@ describe("doctor's panes binary row", () => {
 });
 
 describe("toolchain mirror", () => {
-	it("maps a pinned URL onto a mirror directory, file URL or HTTP mirror by asset name", () => {
+	it("maps a pinned URL onto a mirror directory, file URL or HTTP mirror, namespaced first and flat second", () => {
 		const url = "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64";
-		equal(mirroredSource(url, "/srv/mirror"), "/srv/mirror/herdr-linux-x86_64");
-		equal(mirroredSource(url, "file:///srv/mirror"), "/srv/mirror/herdr-linux-x86_64");
-		equal(mirroredSource(url, "https://cache.example/herdr/"), "https://cache.example/herdr/herdr-linux-x86_64");
-		equal(
-			mirroredSource("https://raw.githubusercontent.com/herdrdev/herdr/v0.9.5/LICENSE", "/srv/mirror"),
-			"/srv/mirror/LICENSE",
+		deepStrictEqual(mirroredSources(url, "/srv/mirror", "herdr", "0.9.5"), [
+			"/srv/mirror/herdr/0.9.5/herdr-linux-x86_64",
+			"/srv/mirror/herdr-linux-x86_64",
+		]);
+		deepStrictEqual(mirroredSources(url, "file:///srv/mirror", "herdr", "0.9.5"), [
+			"/srv/mirror/herdr/0.9.5/herdr-linux-x86_64",
+			"/srv/mirror/herdr-linux-x86_64",
+		]);
+		deepStrictEqual(mirroredSources(url, "https://cache.example/herdr/", "herdr", "0.9.5"), [
+			"https://cache.example/herdr/herdr/0.9.5/herdr-linux-x86_64",
+			"https://cache.example/herdr/herdr-linux-x86_64",
+		]);
+		deepStrictEqual(
+			mirroredSources("https://raw.githubusercontent.com/herdrdev/herdr/v0.9.5/LICENSE", "/srv/mirror", "herdr", "0.9.5"),
+			["/srv/mirror/herdr/0.9.5/LICENSE", "/srv/mirror/LICENSE"],
 		);
+	});
+
+	it("installs tools whose same-named LICENSE files differ from one mirror, and still reads a legacy flat mirror", async (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-toolchain-mirror-"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const digest = (text: string): string => createHash("sha256").update(text).digest("hex");
+		const fixture = (id: string, version: string) => {
+			const program = `${id} program`;
+			const license = `${id} license text`;
+			return {
+				program,
+				license,
+				entry: {
+					id,
+					version,
+					summary: id,
+					homepage: "https://fixture.invalid",
+					license: "MIT",
+					binaries: [id],
+					primaryBinary: id,
+					minimumVersion: version,
+					versionArgs: ["--version"],
+					downloads: {
+						"linux-x64": {
+							url: `https://fixture.invalid/${id}/releases/${id}-linux`,
+							sha256: digest(program),
+							archive: "raw" as const,
+							binaryMembers: { [id]: "" },
+							documentMembers: [],
+						},
+					},
+					documents: [{ name: "LICENSE", url: `https://fixture.invalid/${id}/LICENSE`, sha256: digest(license) }],
+				},
+			};
+		};
+		const alpha = fixture("alpha", "1.0.0");
+		const beta = fixture("beta", "2.0.0");
+		const install = (entry: typeof alpha.entry, mirror: string, root: string) =>
+			installPinnedTool(entry, { root, platform: "linux-x64", mirror });
+
+		const namespaced = join(scratch, "namespaced");
+		for (const tool of [alpha, beta]) {
+			const dir = join(namespaced, tool.entry.id, tool.entry.version);
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, `${tool.entry.id}-linux`), tool.program);
+			writeFileSync(join(dir, "LICENSE"), tool.license);
+		}
+		// A stale flat LICENSE from another tool must not shadow the namespaced copy.
+		writeFileSync(join(namespaced, "LICENSE"), beta.license);
+		for (const tool of [alpha, beta]) {
+			const result = await install(tool.entry, namespaced, join(scratch, "tools-namespaced"));
+			equal(result.ok, true, result.message);
+			equal(readFileSync(join(result.dir, "LICENSE"), "utf8"), tool.license);
+		}
+
+		const flat = join(scratch, "flat");
+		mkdirSync(flat, { recursive: true });
+		writeFileSync(join(flat, "alpha-linux"), alpha.program);
+		writeFileSync(join(flat, "LICENSE"), alpha.license);
+		const legacy = await install(alpha.entry, flat, join(scratch, "tools-flat"));
+		equal(legacy.ok, true, legacy.message);
+		equal(readFileSync(join(legacy.dir, "LICENSE"), "utf8"), alpha.license);
+
+		// The flat LICENSE belongs to alpha, so beta has no copy with its pinned bytes.
+		writeFileSync(join(flat, "beta-linux"), beta.program);
+		const refused = await install(beta.entry, flat, join(scratch, "tools-refused"));
+		equal(refused.ok, false);
+		match(refused.message, /checksum mismatch for .*flat\/LICENSE/);
+		equal(existsSync(refused.dir), false);
 	});
 });

@@ -1,5 +1,5 @@
 export type { ToolFetcher, ToolInstallOptions, ToolInstallResult } from "./install.js";
-export { installPinnedTool, installTool, mirroredSource, toolchainMirror } from "./install.js";
+export { installPinnedTool, installTool, mirroredSources, toolchainMirror } from "./install.js";
 export { toolchainRoot, toolVersionDir, vendoredBinaryPath } from "./paths.js";
 export {
 	currentToolPlatform,
