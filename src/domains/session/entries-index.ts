@@ -1,5 +1,6 @@
+import { createHash, type Hash } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import type { SessionAppendObservation } from "../../engine/session.js";
 import { isSessionJsonlHeader, readSessionFileEntriesRange } from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
@@ -23,6 +24,27 @@ function sameSnapshot(a: BigIntStats | null, b: BigIntStats | null): boolean {
 	);
 }
 
+const PREFIX_READ_BYTES = 64 * 1024;
+
+/** sha256 of the file's first `length` bytes, or null when the file is shorter. */
+function prefixDigest(path: string, length: number): Buffer | null {
+	const hash = createHash("sha256");
+	const fd = openSync(path, "r");
+	try {
+		const buffer = Buffer.allocUnsafe(Math.min(PREFIX_READ_BYTES, Math.max(length, 1)));
+		let position = 0;
+		while (position < length) {
+			const read = readSync(fd, buffer, 0, Math.min(buffer.length, length - position), position);
+			if (read === 0) return null;
+			hash.update(buffer.subarray(0, read));
+			position += read;
+		}
+	} finally {
+		closeSync(fd);
+	}
+	return hash.digest();
+}
+
 /** One live ledger index; no state survives closing or reopening its manager. */
 export class SessionEntriesIndex {
 	private stat: BigIntStats | null = null;
@@ -33,8 +55,9 @@ export class SessionEntriesIndex {
 	private completeEntries = 0;
 	private offset = 0;
 	private lineNumber = 0;
-	private chunks: Buffer[] = [];
-	private trailing = Buffer.alloc(0);
+	// A running digest of the committed bytes [0, offset), never the bytes
+	// themselves: a long session must not hold a second copy of its ledger.
+	private committed: Hash = createHash("sha256");
 	private observedAppend: BigIntStats | null = null;
 
 	constructor(private readonly path: string) {}
@@ -73,16 +96,11 @@ export class SessionEntriesIndex {
 		// Appends preserve the prefix; atomic rewrites change identity. Same-size
 		// edits and truncation must invalidate even when the entry count is unchanged.
 		let append = sameFile && prior !== null && current !== null && current.size > prior.size;
+		// Growth nobody here wrote must keep the committed prefix byte for byte. The
+		// unterminated tail past the cursor is always reparsed, so it needs no check.
 		if (append && !sameSnapshot(current, this.observedAppend)) {
-			const bytes = readFileSync(this.path);
-			let offset = 0;
-			for (const chunk of [...this.chunks, this.trailing]) {
-				if (!bytes.subarray(offset, offset + chunk.length).equals(chunk)) {
-					append = false;
-					break;
-				}
-				offset += chunk.length;
-			}
+			const onDisk = prefixDigest(this.path, this.offset);
+			append = onDisk?.equals(this.committed.copy().digest()) === true;
 		}
 		this.observedAppend = null;
 		const range = readSessionFileEntriesRange(this.path, append ? this.offset : 0, append ? this.lineNumber : 0);
@@ -115,10 +133,9 @@ export class SessionEntriesIndex {
 		for (let i = 0; i < range.completeEntries; i++) if (!isSessionJsonlHeader(range.entries[i])) completeParsed++;
 		this.completeEntries = prefixLength + completeParsed;
 		const rangeOffset = append ? this.offset : 0;
-		if (!append) this.chunks = [];
+		if (!append) this.committed = createHash("sha256");
 		const completeBytes = range.nextOffset - rangeOffset;
-		if (completeBytes > 0) this.chunks.push(range.bytes.subarray(0, completeBytes));
-		this.trailing = Buffer.from(range.bytes.subarray(completeBytes));
+		if (completeBytes > 0) this.committed.update(range.bytes.subarray(0, completeBytes));
 		this.offset = range.nextOffset;
 		this.lineNumber = range.nextLineNumber;
 		this.stat = range.stat;

@@ -1,6 +1,6 @@
 import { ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
@@ -8,7 +8,13 @@ import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery
 import { runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { appendTurn, persistSessionMeta, resumeSessionState, startSession } from "../../src/domains/session/manager.js";
+import {
+	appendTurn,
+	persistSessionMeta,
+	readCurrentEntries,
+	resumeSessionState,
+	startSession,
+} from "../../src/domains/session/manager.js";
 import {
 	reconcilePendingProtectedArtifacts,
 	stagePendingProtectedArtifact,
@@ -166,6 +172,54 @@ describe("session durability boundary", () => {
 		});
 		strictEqual(alternate.parentId, a1.id);
 		await reopened.writer.close();
+	});
+
+	it("indexes a long ledger without holding its bytes and still catches in-place prefix edits", async () => {
+		const state = startSession({ cwd: scratch.dir });
+		const filler = "x".repeat(1500);
+		let parentId: string | null = null;
+		for (let turn = 0; turn < 200; turn++) {
+			parentId = appendTurn(state, {
+				id: `t${turn}`,
+				parentId,
+				kind: "user",
+				payload: { text: `turn ${turn} ${filler}` },
+			}).id;
+			readCurrentEntries(state);
+		}
+		const path = sessionPaths(state.meta).current;
+		ok(statSync(path).size > 250_000);
+		// Every ArrayBuffer reachable from the index: a byte copy of the ledger would pin at least its size.
+		const buffers = new Set<ArrayBufferLike>();
+		const seen = new Set<object>();
+		const stack: unknown[] = [state.entriesIndex];
+		while (stack.length > 0) {
+			const value = stack.pop();
+			if (typeof value !== "object" || value === null || seen.has(value)) continue;
+			seen.add(value);
+			if (ArrayBuffer.isView(value)) buffers.add(value.buffer);
+			else if (value instanceof ArrayBuffer) buffers.add(value);
+			else for (const key of Reflect.ownKeys(value)) stack.push((value as Record<PropertyKey, unknown>)[key]);
+		}
+		strictEqual(
+			[...buffers].reduce((sum, buffer) => sum + buffer.byteLength, 0),
+			0,
+		);
+
+		// External growth that keeps the prefix folds only the new line.
+		const line = (turnId: string, text: string) =>
+			`${JSON.stringify({ kind: "message", turnId, parentTurnId: parentId, timestamp: "2026-06-11T00:00:00.000Z", role: "user", payload: { text } })}\n`;
+		const before = readCurrentEntries(state);
+		appendFileSync(path, line("external", "appended"));
+		const appended = readCurrentEntries(state);
+		strictEqual(appended.length, before.length + 1);
+		strictEqual(appended[0], before[0]);
+		// Same inode, grown, first entry rewritten: the index must reparse instead of trusting the old prefix.
+		writeFileSync(path, `${readFileSync(path, "utf8").replace("turn 0 ", "TURN 0 ")}${line("grown", "after edit")}`);
+		const rewritten = readCurrentEntries(state);
+		strictEqual(rewritten.length, appended.length + 1);
+		ok(JSON.stringify(rewritten[0]).includes("TURN 0 "));
+		await state.writer.close();
 	});
 
 	it("keeps the current session open when a resume target cannot be opened", async () => {
