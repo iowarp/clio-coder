@@ -32,7 +32,7 @@ import { runWikiGenerate } from "../../src/domains/context/wiki/generate.js";
 import { writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
-import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
+import { ensureCodewikiOnDisk } from "../harness/codewiki-ensure.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function index(cwd: string) {
@@ -179,8 +179,7 @@ test("orientation uses declared facts, invalidates changed/added manifests and s
 		unlinkSync(join(env.dir, "Cargo.toml"));
 		writeFileSync(join(env.dir, "package.json"), '{"name":"renamed","scripts":{"test":"changed"}}');
 		match(renderPromptContext(env.dir).text, /snapshot unavailable/);
-		const next = await loadCodewikiForTool(env.dir);
-		ok(next.ok);
+		await ensureCodewikiOnDisk(env.dir);
 		strictEqual(readClioState(env.dir)?.orientation?.identity?.name, "renamed");
 	} finally {
 		env.restore();
@@ -194,15 +193,13 @@ test("legacy codemap migrates under the existing lease; malformed canonical neve
 		await index(env.dir);
 		renameSync(codemapPath(env.dir), legacyCodewikiPath(env.dir));
 		strictEqual(codewikiPath(env.dir), legacyCodewikiPath(env.dir));
-		const next = await loadCodewikiForTool(env.dir);
-		ok(next.ok);
+		await ensureCodewikiOnDisk(env.dir);
 		ok(existsSync(codemapPath(env.dir)));
 		strictEqual(codewikiPath(env.dir), codemapPath(env.dir));
 		writeFileSync(codemapPath(env.dir), "{broken");
 		strictEqual(readCodewiki(env.dir), null);
 		writeFileSync(join(env.dir, "a.ts"), "export const after = 2;\n");
-		const repaired = await loadCodewikiForTool(env.dir);
-		ok(repaired.ok);
+		const repaired = await ensureCodewikiOnDisk(env.dir);
 		ok(repaired.codewiki.symbols.some((s) => s.name === "after"));
 		const reset = await runContextClear({ cwd: env.dir, confirmContext: () => true });
 		ok(reset.removed.includes(".clio-coder/codemap.json"));
@@ -396,8 +393,7 @@ test("legacy configuration-only maps backfill content identities before canonica
 		const original = await index(env.dir);
 		unlinkSync(codemapPath(env.dir));
 		writeFileSync(legacyCodewikiPath(env.dir), JSON.stringify({ ...original.codewiki, version: 4 }));
-		const migrated = await loadCodewikiForTool(env.dir);
-		ok(migrated.ok);
+		const migrated = await ensureCodewikiOnDisk(env.dir);
 		ok(readCodewiki(env.dir));
 		ok(migrated.codewiki.files.every((file) => /^[0-9a-f]{16}$/.test(file.hash)));
 		strictEqual(readClioState(env.dir)?.orientation?.identity?.name, "configuration-only");

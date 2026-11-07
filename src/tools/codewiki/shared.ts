@@ -1,9 +1,9 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { codewikiPath, readCodewiki } from "../../domains/context/codewiki/artifact.js";
-import { coordinateCodewikiWrite, reconcileCodewikiCandidate } from "../../domains/context/codewiki/coordinator.js";
+import { reconcileCodewikiCandidate } from "../../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../../domains/context/codewiki/schema.js";
-import { readClioState, writeClioState } from "../../domains/context/state.js";
+import { readClioState } from "../../domains/context/state.js";
 
 const CODEWIKI_ARTIFACT_CACHE_LIMIT = 4;
 
@@ -76,83 +76,44 @@ function readCodewikiForTool(cwd: string): Codewiki | null {
 	return codewiki;
 }
 
+/**
+ * The current code map for a tool call, reconciled with the working tree in
+ * memory. Nothing is written: the result is held per workspace, keyed to the
+ * artifact on disk, so the next call checks freshness from it instead of
+ * reindexing.
+ */
 export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
-	options: { readOnly?: boolean } = {},
 ): Promise<
 	| { ok: true; codewiki: Codewiki; fingerprint: import("../../domains/context/fingerprint.js").Fingerprint }
 	| { ok: false; message: string }
 > {
 	try {
-		if (options.readOnly) {
-			const workspace = resolve(cwd);
-			const identity = codewikiArtifactIdentity(workspace);
-			const cached = transientCodewikis.get(workspace);
-			const sameDisk =
-				cached &&
-				(identity === null
-					? cached.identity === null
-					: cached.identity !== null && sameArtifactIdentity(identity, cached.identity));
-			const state = readClioState(workspace);
-			const current = sameDisk ? cached.codewiki : readCodewikiForTool(workspace);
-			const language = state?.projectType ?? current?.language;
-			const result = await reconcileCodewikiCandidate({
-				kind: "ensure",
-				cwd: workspace,
-				current,
-				previous: sameDisk ? cached.fingerprint : (state?.fingerprint ?? null),
-				...(language ? { language } : {}),
-			});
-			transientCodewikis.delete(workspace);
-			transientCodewikis.set(workspace, { codewiki: result.codewiki, fingerprint: result.fingerprint, identity });
-			while (transientCodewikis.size > CODEWIKI_ARTIFACT_CACHE_LIMIT) {
-				const oldest = transientCodewikis.keys().next().value;
-				if (oldest !== undefined) transientCodewikis.delete(oldest);
-			}
-			return { ok: true, codewiki: result.codewiki, fingerprint: result.fingerprint };
+		const workspace = resolve(cwd);
+		const identity = codewikiArtifactIdentity(workspace);
+		const cached = transientCodewikis.get(workspace);
+		const sameDisk =
+			cached &&
+			(identity === null
+				? cached.identity === null
+				: cached.identity !== null && sameArtifactIdentity(identity, cached.identity));
+		const state = readClioState(workspace);
+		const current = sameDisk ? cached.codewiki : readCodewikiForTool(workspace);
+		const language = state?.projectType ?? current?.language;
+		const result = await reconcileCodewikiCandidate({
+			kind: "ensure",
+			cwd: workspace,
+			current,
+			previous: sameDisk ? cached.fingerprint : (state?.fingerprint ?? null),
+			...(language ? { language } : {}),
+		});
+		transientCodewikis.delete(workspace);
+		transientCodewikis.set(workspace, { codewiki: result.codewiki, fingerprint: result.fingerprint, identity });
+		while (transientCodewikis.size > CODEWIKI_ARTIFACT_CACHE_LIMIT) {
+			const oldest = transientCodewikis.keys().next().value;
+			if (oldest !== undefined) transientCodewikis.delete(oldest);
 		}
-		const generatedAt = new Date().toISOString();
-		const coordinated = await coordinateCodewikiWrite(
-			cwd,
-			(current, workspace) => {
-				const language = readClioState(workspace)?.projectType ?? current?.language;
-				return {
-					kind: "ensure",
-					cwd,
-					...(language ? { language } : {}),
-					current,
-					previous: readClioState(workspace)?.fingerprint ?? null,
-				};
-			},
-			{
-				readCurrent: (workspace) => readCodewikiForTool(workspace) ?? undefined,
-				afterCommit: ({ codewiki: committed, fingerprint, changed }, workspace) => {
-					const prev = readClioState(workspace);
-					if (!changed && prev?.orientation) return;
-					writeClioState(
-						workspace,
-						{
-							version: 1,
-							projectType: prev?.projectType ?? committed.language,
-							fingerprint,
-							codewikiVersion: committed.version,
-							...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
-							...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
-							...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
-							...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
-							...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
-							lastSessionAt: prev?.lastSessionAt ?? generatedAt,
-							lastIndexedAt: generatedAt,
-						},
-						committed,
-					);
-				},
-			},
-		);
-		if (!coordinated) throw new Error("codewiki coordinator did not admit the demand build");
-		// Not cached here: a post-write stat could pair a concurrent writer's identity
-		// with this object. The next call re-reads once and caches from a clean stat.
-		return { ok: true, codewiki: coordinated.codewiki, fingerprint: coordinated.worker.fingerprint };
+		return { ok: true, codewiki: result.codewiki, fingerprint: result.fingerprint };
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		return { ok: false, message: `codemap unavailable. run /context refresh to rebuild it. ${msg}` };

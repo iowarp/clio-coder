@@ -101,7 +101,7 @@ describe("code_nav tool", () => {
 	});
 
 	it("keeps an unchanged private index without a return clone and still detects same-metadata source edits", async () => {
-		const initial = await loadCodewikiForTool(workspace, { readOnly: true });
+		const initial = await loadCodewikiForTool(workspace);
 		if (!initial.ok) throw new Error(initial.message);
 		for (const needsBackfill of [false, true]) {
 			const outcome = await executeCodewikiBuildOutcome({
@@ -114,7 +114,7 @@ describe("code_nav tool", () => {
 			strictEqual(outcome.codewiki, null);
 			deepStrictEqual(outcome.fingerprint, initial.fingerprint);
 		}
-		const unchanged = await loadCodewikiForTool(workspace, { readOnly: true });
+		const unchanged = await loadCodewikiForTool(workspace);
 		if (!unchanged.ok) throw new Error(unchanged.message);
 		strictEqual(unchanged.codewiki, initial.codewiki);
 		const file = join(workspace, "src/grid.ts");

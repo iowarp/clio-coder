@@ -18,6 +18,7 @@ import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { readClioState, statePath, writeClioState } from "../../src/domains/context/state.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
+import { ensureCodewikiOnDisk } from "../harness/codewiki-ensure.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("codewiki global freshness", () => {
@@ -66,11 +67,11 @@ describe("codewiki global freshness", () => {
 	it("read-only navigation builds and refreshes without creating workspace artifacts", async () => {
 		const cwd = isolated.dir;
 		writeFileSync(join(cwd, "a.ts"), "export const before = 1;\n");
-		const first = await loadCodewikiForTool(cwd, { readOnly: true });
+		const first = await loadCodewikiForTool(cwd);
 		ok(first.ok);
 		ok(first.codewiki.symbols.some((symbol) => symbol.name === "before"));
 		writeFileSync(join(cwd, "a.ts"), "export const afterChange = 2;\n");
-		const second = await loadCodewikiForTool(cwd, { readOnly: true });
+		const second = await loadCodewikiForTool(cwd);
 		ok(second.ok);
 		ok(second.codewiki.symbols.some((symbol) => symbol.name === "afterChange"));
 		strictEqual(existsSync(join(cwd, ".clio-coder")), false);
@@ -143,8 +144,7 @@ describe("codewiki global freshness", () => {
 			const cwd = isolated.dir;
 			writeFileSync(join(cwd, "a.ts"), "export function agentBefore() {}\n");
 			writeFileSync(join(cwd, "b.ts"), "export function externalBefore() {}\n");
-			const initial = await loadCodewikiForTool(cwd);
-			ok(initial.ok, initial.ok ? undefined : initial.message);
+			await ensureCodewikiOnDisk(cwd);
 			if (externalChange === "delete") unlinkSync(join(cwd, "b.ts"));
 			else {
 				writeFileSync(join(cwd, externalChange === "add" ? "c.ts" : "b.ts"), "export function externalAfterLonger() {}\n");
@@ -163,8 +163,7 @@ describe("codewiki global freshness", () => {
 			deepStrictEqual(readClioState(cwd)?.fingerprint, computeFingerprint(cwd, indexed));
 			const artifactBeforeReload = readFileSync(codewikiPath(cwd), "utf8");
 			const modifiedBeforeReload = statSync(codewikiPath(cwd), { bigint: true }).mtimeNs;
-			const reloaded = await loadCodewikiForTool(cwd);
-			ok(reloaded.ok);
+			const reloaded = await ensureCodewikiOnDisk(cwd);
 			deepStrictEqual(reloaded.codewiki, indexed);
 			strictEqual(readFileSync(codewikiPath(cwd), "utf8"), artifactBeforeReload);
 			strictEqual(statSync(codewikiPath(cwd), { bigint: true }).mtimeNs, modifiedBeforeReload);
@@ -176,7 +175,7 @@ describe("codewiki global freshness", () => {
 			const cwd = isolated.dir;
 			writeFileSync(join(cwd, "a.ts"), "export const unchanged = true;\n");
 			writeFileSync(join(cwd, "b.ts"), "export function externalBefore() {}\n");
-			ok((await loadCodewikiForTool(cwd)).ok);
+			await ensureCodewikiOnDisk(cwd);
 			const previous = readClioState(cwd)?.fingerprint;
 			if (missingState) unlinkSync(join(cwd, ".clio-coder", "state.json"));
 			writeFileSync(join(cwd, "b.ts"), "export function externalAfterLonger() {}\n");
@@ -184,8 +183,7 @@ describe("codewiki global freshness", () => {
 			bundle.contract.noteFileChanges(["a.ts"], cwd);
 			await bundle.extension.stop?.();
 			if (!missingState) deepStrictEqual(readClioState(cwd)?.fingerprint, previous);
-			const reloaded = await loadCodewikiForTool(cwd);
-			ok(reloaded.ok);
+			const reloaded = await ensureCodewikiOnDisk(cwd);
 			ok(reloaded.codewiki.symbols.some((symbol) => symbol.name === "externalAfterLonger"));
 			strictEqual(
 				reloaded.codewiki.symbols.some((symbol) => symbol.name === "externalBefore"),
@@ -198,7 +196,7 @@ describe("codewiki global freshness", () => {
 	it("does not rewrite the artifact or freshness state for unchanged and irrelevant notifications", async () => {
 		const cwd = isolated.dir;
 		writeFileSync(join(cwd, "a.ts"), "export const unchanged = true;\n");
-		ok((await loadCodewikiForTool(cwd)).ok);
+		await ensureCodewikiOnDisk(cwd);
 		const artifactBefore = statSync(codewikiPath(cwd), { bigint: true });
 		const stateBefore = readFileSync(join(cwd, ".clio-coder", "state.json"), "utf8");
 		const bundle = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
@@ -349,12 +347,11 @@ describe("codewiki global freshness", () => {
 			),
 			true,
 		);
-		// What makes "available" truthful for an unparseable file: the tool path
-		// reads null for it and rebuilds from source under the lease before
-		// answering, and the rebuilt artifact is what later calls read.
+		// What makes "available" truthful for an unparseable file: an ensure
+		// reads null for it and rebuilds from source under the lease, and the
+		// rebuilt artifact is what later calls read.
 		strictEqual(readCodewiki(cwd), null);
-		const repaired = await loadCodewikiForTool(cwd);
-		ok(repaired.ok);
+		const repaired = await ensureCodewikiOnDisk(cwd);
 		strictEqual(
 			repaired.codewiki.files.some((file) => file.path === "a.ts"),
 			true,
@@ -483,7 +480,7 @@ describe("codewiki global freshness", () => {
 		const cwd = isolated.dir;
 		const path = join(cwd, "a.ts");
 		writeFileSync(path, "export const before = true;\n");
-		ok((await loadCodewikiForTool(cwd)).ok);
+		await ensureCodewikiOnDisk(cwd);
 		const committed = readFileSync(codewikiPath(cwd), "utf8");
 		const state = readFileSync(join(cwd, ".clio-coder", "state.json"), "utf8");
 		let reads = 0;

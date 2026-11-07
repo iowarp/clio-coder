@@ -15,19 +15,6 @@ export interface Fingerprint {
 	loc: number;
 }
 
-export interface FingerprintCacheOptions {
-	ttlMs?: number;
-}
-
-const DEFAULT_FINGERPRINT_CACHE_TTL_MS = 5_000;
-
-interface CachedFingerprint {
-	fingerprint: Fingerprint;
-	expiresAtMs: number;
-}
-
-const cachedFingerprints = new Map<string, CachedFingerprint>();
-
 const LOC_EXTENSIONS = new Set([
 	".ts",
 	".tsx",
@@ -132,24 +119,6 @@ export function computeFingerprint(
 		gitHead: currentGitHead(cwd),
 		loc: artifactLoc ?? loc,
 	};
-}
-
-export function computeFingerprintCached(
-	cwd: string,
-	codewiki: Codewiki | null = readCodewiki(cwd),
-	options: FingerprintCacheOptions & ComputeFingerprintOptions = {},
-): Fingerprint {
-	const now = Date.now();
-	const cached = cachedFingerprints.get(cwd);
-	if (cached && cached.expiresAtMs > now) return cached.fingerprint;
-
-	const fingerprint = computeFingerprint(cwd, codewiki, options);
-	const ttlMs = options.ttlMs ?? DEFAULT_FINGERPRINT_CACHE_TTL_MS;
-	cachedFingerprints.set(cwd, {
-		fingerprint,
-		expiresAtMs: Date.now() + Math.max(0, ttlMs),
-	});
-	return fingerprint;
 }
 
 export function isStale(prev: Fingerprint, curr: Fingerprint): boolean {

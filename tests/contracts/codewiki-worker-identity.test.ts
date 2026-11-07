@@ -42,19 +42,19 @@ it("read-only navigation keeps the object it holds when the tree is unchanged", 
 	// rebuilt that index on every call.
 	const cwd = isolated.dir;
 	writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
-	const transient = await loadCodewikiForTool(cwd, { readOnly: true });
+	const transient = await loadCodewikiForTool(cwd);
 	ok(transient.ok);
-	const again = await loadCodewikiForTool(cwd, { readOnly: true });
+	const again = await loadCodewikiForTool(cwd);
 	ok(again.ok);
 	strictEqual(again.codewiki, transient.codewiki);
 	ok(await coordinateCodewikiWrite(cwd, () => ({ kind: "build", cwd, language: "typescript" })));
-	const disk = await loadCodewikiForTool(cwd, { readOnly: true });
+	const disk = await loadCodewikiForTool(cwd);
 	ok(disk.ok);
-	const unchanged = await loadCodewikiForTool(cwd, { readOnly: true });
+	const unchanged = await loadCodewikiForTool(cwd);
 	ok(unchanged.ok);
 	strictEqual(unchanged.codewiki, disk.codewiki);
 	writeFileSync(join(cwd, "a.ts"), "export const two = 2;\n");
-	const stale = await loadCodewikiForTool(cwd, { readOnly: true });
+	const stale = await loadCodewikiForTool(cwd);
 	ok(stale.ok);
 	ok(stale.codewiki.symbols.some((symbol) => symbol.name === "two"));
 });

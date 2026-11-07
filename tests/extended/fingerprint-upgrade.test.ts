@@ -10,10 +10,10 @@ import { buildCodewiki, updateCodewikiPaths } from "../../src/domains/context/co
 import { isIndexablePath } from "../../src/domains/context/codewiki/paths.js";
 import type { Codewiki } from "../../src/domains/context/codewiki/schema.js";
 import { EXCLUDED_DIRS } from "../../src/domains/context/excluded-dirs.js";
-import { computeFingerprint, computeFingerprintCached } from "../../src/domains/context/fingerprint.js";
+import { computeFingerprint } from "../../src/domains/context/fingerprint.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { readClioState, statePath, writeClioState } from "../../src/domains/context/state.js";
-import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
+import { ensureCodewikiOnDisk } from "../harness/codewiki-ensure.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // Frozen pre-upgrade tree digest from 9214789's fingerprint.ts. This fixture
@@ -48,8 +48,7 @@ async function assertSecondEnsureDoesNotRewrite(cwd: string, expected: Codewiki)
 		text: readFileSync(path, "utf8"),
 		mtimeNs: statSync(path, { bigint: true }).mtimeNs,
 	}));
-	const loaded = await loadCodewikiForTool(cwd);
-	ok(loaded.ok, loaded.ok ? undefined : loaded.message);
+	const loaded = await ensureCodewikiOnDisk(cwd);
 	deepStrictEqual(loaded.codewiki, expected);
 	deepStrictEqual(
 		paths.map((path) => ({ text: readFileSync(path, "utf8"), mtimeNs: statSync(path, { bigint: true }).mtimeNs })),
@@ -76,8 +75,7 @@ describe("context fingerprint upgrade", () => {
 		certifyLegacyIndex(cwd, partial);
 		strictEqual(readClioState(cwd)?.fingerprint.treeHash, legacyTreeHash(cwd));
 
-		const loaded = await loadCodewikiForTool(cwd);
-		ok(loaded.ok, loaded.ok ? undefined : loaded.message);
+		const loaded = await ensureCodewikiOnDisk(cwd);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "externalAfterLonger"));
 		strictEqual(
 			loaded.codewiki.symbols.some((symbol) => symbol.name === "externalBefore"),
@@ -96,8 +94,7 @@ describe("context fingerprint upgrade", () => {
 		writeFileSync(join(cwd, "new.ts"), "export function newlyDiscovered() {}\n");
 		certifyLegacyIndex(cwd, empty);
 
-		const loaded = await loadCodewikiForTool(cwd);
-		ok(loaded.ok, loaded.ok ? undefined : loaded.message);
+		const loaded = await ensureCodewikiOnDisk(cwd);
 		ok(loaded.codewiki.symbols.some((symbol) => symbol.name === "newlyDiscovered"));
 		deepStrictEqual(loaded.codewiki, await buildCodewiki({ cwd, language: "typescript" }));
 		deepStrictEqual(readClioState(cwd)?.fingerprint, computeFingerprint(cwd, loaded.codewiki));
@@ -110,8 +107,7 @@ describe("context fingerprint upgrade", () => {
 		certifyLegacyIndex(cwd, empty);
 		strictEqual(legacyTreeHash(cwd), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
-		const loaded = await loadCodewikiForTool(cwd);
-		ok(loaded.ok, loaded.ok ? undefined : loaded.message);
+		const loaded = await ensureCodewikiOnDisk(cwd);
 		deepStrictEqual(loaded.codewiki, empty);
 		notStrictEqual(readClioState(cwd)?.fingerprint.treeHash, legacyTreeHash(cwd));
 		deepStrictEqual(readClioState(cwd)?.fingerprint, computeFingerprint(cwd, empty));
@@ -149,7 +145,7 @@ describe("context fingerprint upgrade", () => {
 		strictEqual(next.changed, false);
 	});
 
-	it("detects equal-size edits with restored metadata and retains the explicit cache lifetime", async (t) => {
+	it("detects equal-size edits with restored metadata", async () => {
 		const cwd = isolated.dir;
 		const path = join(cwd, "a.ts");
 		writeFileSync(path, "export function before() {}\n");
@@ -158,16 +154,11 @@ describe("context fingerprint upgrade", () => {
 		const current = await buildCodewiki({ cwd, language: "typescript" });
 		const before = computeFingerprint(cwd, current);
 		const metadata = legacyTreeHash(cwd, "clio-codewiki-tree:v2\n");
-		t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
-		deepStrictEqual(computeFingerprintCached(cwd, current), before);
 		writeFileSync(path, "export function after_() {}\n");
 		utimesSync(path, 1_700_000_000, 1_700_000_000);
 		strictEqual(legacyTreeHash(cwd, "clio-codewiki-tree:v2\n"), metadata);
 		const after = computeFingerprint(cwd, current);
 		notStrictEqual(after.treeHash, before.treeHash);
-		deepStrictEqual(computeFingerprintCached(cwd, current), before);
-		t.mock.timers.tick(5_000);
-		deepStrictEqual(computeFingerprintCached(cwd, current), after);
 		const result = await executeCodewikiBuildOutcome({ kind: "ensure", cwd, current, previous: before });
 		ok(result.codewiki);
 		ok(result.codewiki.symbols.some((symbol) => symbol.name === "after_"));
@@ -199,15 +190,4 @@ describe("context fingerprint upgrade", () => {
 			}
 		}
 	});
-
-	for (const hasSource of [false, true]) {
-		it(`keeps sync and cached fingerprints equal for ${hasSource ? "populated" : "empty"} trees`, async () => {
-			const cwd = isolated.dir;
-			if (hasSource) writeFileSync(join(cwd, "a.ts"), "export const present = true;\n");
-			const fingerprint = computeFingerprint(cwd, null);
-			deepStrictEqual(computeFingerprintCached(cwd, null), fingerprint);
-			deepStrictEqual(computeFingerprintCached(cwd, null), fingerprint);
-			notStrictEqual(fingerprint.treeHash, legacyTreeHash(cwd));
-		});
-	}
 });
