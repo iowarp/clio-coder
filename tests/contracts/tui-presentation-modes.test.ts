@@ -24,6 +24,7 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		import { GLYPH, clioTheme, frame } from "./src/interactive/theme/index.ts";
 		import { renderEditorRail } from "./src/interactive/editor-rails.ts";
 		import { ClioOverlayFrame } from "./src/interactive/overlay-frame.ts";
+		import { cardHead, cardRows } from "./src/interactive/card.ts";
 		import { DEFAULT_SETTINGS } from "./src/core/defaults.ts";
 		import { createBootWelcome } from "./src/interactive/welcome-dashboard.ts";
 		const theme = clioTheme();
@@ -34,10 +35,11 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		const lines = frame(theme, "Approval", ["target /work/example", "[Enter] allow [Esc] deny"], 40);
 		const rail = renderEditorRail(theme, 40, {}, { phase: "working", yolo: false, animate: true, now: 0 });
 		const overlay = new ClioOverlayFrame({ render: () => ["target /work/example"], invalidate() {} }, "Approval", "[Enter] allow / [Esc] deny").render(40);
+		const card = [...cardHead(GLYPH.toolHeader + " read /work/example", " " + GLYPH.ok, 40), ...cardRows("target /work/example", 40, true)];
 		const welcome = createBootWelcome(settings).render(80);
 		delete process.env.CLIO_CODER_ASCII;
 		process.env.TERM = "xterm-256color";
-		console.log(JSON.stringify({ glyphs: GLYPH, lines, overlay, rail, welcome }));
+		console.log(JSON.stringify({ glyphs: GLYPH, lines, overlay, card, rail, welcome }));
 	`;
 	for (const fallback of [{ CLIO_CODER_ASCII: "1", TERM: "xterm-256color" }, { TERM: "dumb" }, { TERM: "unknown" }]) {
 		const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
@@ -50,6 +52,7 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 			glyphs: Record<string, string>;
 			lines: string[];
 			overlay: string[];
+			card: string[];
 			rail: string;
 			welcome: string[];
 		};
@@ -60,6 +63,8 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		ok(output.overlay.every((line) => visibleWidth(line) === 40));
 		ok(output.overlay.map(stripTerminalSequences).every((line) => /^[\x20-\x7e]+$/u.test(line)));
 		match(stripTerminalSequences(output.overlay[0] ?? ""), /^\+- Approval /u);
+		ok(output.card.map(stripTerminalSequences).every((line) => /^[\x20-\x7e]+$/u.test(line)));
+		match(stripTerminalSequences(output.card[1] ?? ""), /^ {2}\| target/u);
 		match(stripTerminalSequences(output.rail), /^-+$/u);
 		strictEqual(output.glyphs.rail, "|");
 		strictEqual(output.welcome.length, 1);

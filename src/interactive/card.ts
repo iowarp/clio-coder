@@ -11,7 +11,7 @@
  *     │ … 12 more lines · /view                  cut hint inside the rail
  */
 import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { clioTheme, releaseSpaces } from "./theme/index.js";
+import { clioTheme, GLYPH, releaseSpaces } from "./theme/index.js";
 import type { SemanticRole } from "./theme/tokens.js";
 
 /** The gutter: a mark cell and a space. */
@@ -25,7 +25,7 @@ export const CARD_CALLOUT_MAX_WIDTH = 88;
 
 /** The body rail, red on a failed card so the whole block reads as the failure. */
 export function cardRail(error = false): string {
-	return `${CARD_GUTTER}${clioTheme().fg(error ? "error" : "gutter", "│ ")}`;
+	return `${CARD_GUTTER}${clioTheme().fg(error ? "error" : "gutter", `${GLYPH.rail} `)}`;
 }
 
 /** Columns a body row has after the rail. */
