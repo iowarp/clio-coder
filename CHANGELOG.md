@@ -9,12 +9,14 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 ### Upgrade notes
 
 - Bare `clio-coder` in an interactive terminal always opens Clio Coder's own private pane host, on a pinned herdr 0.9.5 that the installers provision and the first launch installs when missing, with one status line. There is no consent question; if the install or the host fails, Clio prints one line and continues in the terminal, and a failed launch-time install is not retried for a day (`clio-coder panes install` always retries). A herdr on `PATH` is never used to host Clio.
-- The host is private per project: its socket sits in the runtime directory as `clio-coder-<hash>.sock`, its config and state under `<state>/mux/<hash>/`, and it is removed when it stops. Your own herdr, its sessions and `~/.config/herdr` never see it, and shells in its panes get your own `XDG_CONFIG_HOME` and `XDG_STATE_HOME` back.
+- The host is private per project: its socket sits in the runtime directory as `clio-coder-<hash>.sock`, its config and state under `<state>/mux/<hash>/`, and it is removed when it stops. Your own herdr, its sessions and `~/.config/herdr` never see it, and shells in its panes get your own `XDG_CONFIG_HOME` and `XDG_STATE_HOME` back. On Linux, when `XDG_RUNTIME_DIR` is unset, unusable or too long for a socket path, the socket goes to `$TMPDIR/clio-coder-<uid>` before the system temp directory.
 - Started from a pane of your own herdr, Clio opens its host nested with the prefix `ctrl+shift+b` (or `ctrl+]`). Its pane chrome follows `interface.outputDetail` and redraws live when the style changes.
 - Windows x64 gets the same host: `install.ps1` provisions the pinned herdr, and Clio runs it as a herdr `--session` named `clio-coder-<hash>` reached over its named pipe. Panes start herdr's PowerShell, and the files pane's Ctrl+Y and Alt+E work there. Windows on ARM has no herdr build and stays in the plain terminal.
-- `/quit` in the private host closes every pane in it, shell and logs panes included, and stops the host. Each launch starts from one Clio pane; herdr's saved layout is never restored. As a guest in your own herdr (`--with-panes`), `/quit` still leaves your utility panes open and names them.
+- `/quit` in the private host closes every pane in it, shell and logs panes included, and stops the host, then prints the session summary and its `/resume` line in your own terminal. Each launch starts from one Clio pane; herdr's saved layout is never restored. As a guest in your own herdr (`--with-panes`), `/quit` still leaves your utility panes open and names them.
 - `CLIO_CODER_TOOLCHAIN_MIRROR` points `clio-coder tools install` at a local directory, `file:` URL or HTTP(S) mirror; pinned checksums still apply.
 - `clio-coder --version` credits herdr on a second line.
+- In `clio-coder doctor`, `panes mode` says what a bare launch does from where doctor runs. Inside your own herdr it reads `nested` and names `--with-panes` for joining that herdr as a guest. `panes binary` names the pinned herdr the private host runs, as `external tool herdr` does, never a herdr on `PATH`.
+- `clio-coder run --read-only`, read-only workers and `clio-coder doctor`, `/doctor` included, leave Clio's caches and the project's `.clio-coder` as found: no model list snapshot, endpoint slot, `skill-frontmatter.json`, first-use asset, semantic index, Copilot state or MCP catalog is written. `doctor` on a home Clio has not set up creates no directories.
 - The `lmstudio-native` and `ollama-native` runtime ids, removed in 0.5.6, stay removed and are not aliased. Every surface that refuses a target still naming one now names its replacement, `runtime: lmstudio` or `runtime: ollama`: `run`, `targets use`, dispatch, `configure`, TUI startup, the provider status reason and `targets --json`. `run --api-key` tells such a target from an absent one.
 - A plugin manifest whose `ai.iowarp.clio` block carries the `evals` key is refused at install with a message naming the key, the release and the fix, and an installed copy that carries it lists as an invalid plugin. Delete the key from the manifest and reinstall.
 - The retired version 2 settings key `context.compaction.excludeLastTurns` no longer stops `settings.yaml` from loading. The key is ignored, `doctor` names it and `doctor --fix` removes it. `context.workingSet.protectLastTurns` remains.
@@ -135,6 +137,9 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 ### Context handbook
 
 - `clio-coder context init` reads CI `run` blocks as shell scripts, keeps untracked sources out of a handbook Git will publish, warns when the model draft fell back to the heuristic one, lists every coded checker rule the handbook does not state, reads each rule from the checker's own declaration and leads hard invariants with import rules. When the evidence supports a Change recipes or Tests section that the draft omits, it asks once more for that section and warns if it is still missing.
+- `context init --rewrite` carries every previous hard invariant word for word while the paths and symbols it cites exist, and keeps carried sections and their blocks through the final fit. A model rule gives way to a carried one only when it states it word for word.
+- The handbook never says CI runs, enforces or rejects a check: a model sentence that names CI or cites a `.github/workflows` file is cut. A reviewer requirement, or a module called preloaded, that its cited files do not support stays, marked `(unverified: …)`.
+- A checker rule is listed unless the handbook names its code or a kept rule states it word for word, and a check counts only when live code uses it. The recorded spend counts every bootstrap dispatch.
 - The repository ships its first `CLIO-CODER.md`, generated by `clio-coder context init`.
 - Without a loaded handbook, `clio-coder context` and the TUI's context overlay report the project preload as `none found` instead of fully loaded.
 
@@ -142,7 +147,8 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 - `--help` on a telemetry leaf command, `session list`, `session terminate`, `interop inspect` and `interop adopt` prints its usage. `telemetry share` names an unknown or repeated flag.
 - Top-level `--help` lists `--skill`, `--no-skills` and `config trust`, each usage line matches the flags its command accepts, and `components snapshot --help` exits 0. Errors read `unknown flag: X`, `unexpected argument: X` or `unknown subcommand: X`, with any usage printed to stderr.
-- Tool descriptions state each tool's real limits, defaults and parameters, and `code_nav` answers faster on an unchanged workspace because it checks the code map's freshness without copying the map into its build worker.
+- Tool descriptions state each tool's real limits, defaults and parameters, and `code_nav` answers faster on an unchanged workspace because it checks the code map's freshness without copying the map into its build worker, and an unchanged check no longer copies it back.
+- Headless `run` uses less CPU and exits sooner: route history warms only in terminal and ACP sessions, and quota windowing stats the process journals in one batch.
 - A worker run whose route decision weighed a wide catalog now settles.
 - The run ledger leaves `runs.json` alone when a persist would rewrite it unchanged, validates a long ledger with compiled checks and selects rows before copying them for recovery and headless settlement. Telemetry reads back the journal lines its own process accepted without validating them again, holding at most 1M characters of them, and seeds the host's quota history only when a quota reader asks.
 - Scouts and the coordinator trace every path that changes the compared state before calling two implementations equivalent or reporting no defect, and keep untested hypotheses out of evidence. The coordinator states a suspicion in a task or briefing as a question to test.
@@ -153,6 +159,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 - Source pack members compress concurrently, and the extension type declarations ship bundled.
 - The guides and architecture pages were checked against the code and match 0.7.0 behavior.
 - The CI gate runs more safety, boundary, library, Help, doctor and GUI API contracts, and tests use isolated temporary and Git fixtures and wait on settlement rather than fixed timings.
+- `pnpm run test:full` takes about half as long (1048 s to 503 s when it landed), with test concurrency set by the CPU count, shared setup and CLI contracts run against the built entries.
 
 ## 0.6.9 - 2026-11-06
 
