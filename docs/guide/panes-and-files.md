@@ -110,11 +110,14 @@ The host is private. Its server, socket, config and state live under Clio
 Coder's own directories (see [Artifact placement](../architecture/artifact-placement.md)),
 so your own `herdr`, its sessions, its `~/.config/herdr` and its socket never
 see it, and quitting Clio removes it. Shells opened in its panes get your own
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME` back. Clio writes the host's herdr
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` back and keep your `XDG_RUNTIME_DIR`.
+Outside Windows, the files pane's Yazi alone uses a private runtime directory beside the host
+socket as its `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and `TMPDIR`, and that
+directory is removed with the host. Clio writes the host's herdr
 config on every launch: its prefix is `ctrl+b`, herdr's own help, settings,
 workspace, picker and reload screens are unbound, sounds and update checks are
-off, and the pane chrome follows `interface.outputDetail`: compact drops pane
-gaps and scrollbars, detailed draws outer borders. Changing the output style in
+off, and the pane chrome follows `interface.outputDetail`: Minimal (`compact`)
+drops pane gaps and scrollbars, and Detailed draws outer borders. Changing the output style in
 the session redraws the host's chrome live.
 
 Started from a pane of your own herdr (`HERDR_ENV=1` with a socket that is not
@@ -151,7 +154,9 @@ private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 Opening Clio Coder in the same folder from a second terminal reattaches to that project's existing private host within the same Clio state root. The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate Clio roots get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Both attached terminals see the same running Clio session. To start an independent plain-terminal session outside herdr, use `--with-panes`; non-terminal stdin or `TERM=dumb` also skips hosting. This reuse is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
-When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. A closed terminal therefore ends that terminal's Clio and leaves no host behind, as it would for Clio in a plain terminal; leave Clio running by detaching from herdr instead.
+When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. The launcher then exits 129 after SIGHUP and 143 after SIGTERM. A closed terminal therefore ends that terminal's Clio and leaves no host behind, as it would for Clio in a plain terminal; leave Clio running by detaching from herdr instead.
+
+When Clio inside the pane crashes or ends on a signal, it still records its exit status. The launcher disposes of the workspace, prints `Clio workspace ended with exit code N.` on stderr, and exits with that status (for example 1 or 143), so the outer terminal and any script around it see the failure ([workspace-launch.ts](../../src/cli/workspace-launch.ts)).
 
 ## What doctor says
 

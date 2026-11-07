@@ -36,18 +36,18 @@ The interactive session, `clio-coder run` and `clio-coder acp` enable Node's mod
 | Mode | How it is selected | Behavior |
 | --- | --- | --- |
 | Minimal | `interface.outputDetail: compact` | One identity header; no welcome-only reads or optional learning tips. |
-| Default | `interface.demo: true` with `interface.outputDetail: standard` (defaults) | Compact launchpad with route, autonomy, awareness and the next action. Workspace facts remain in the footer. |
-| Detailed | `interface.demo: true` with `interface.outputDetail: detailed` | Artwork, route and autonomy, project facts, two reserved account-usage rows, tagline and shortcut hints where space allows. |
+| Default | `interface.demo: true` with `interface.outputDetail: standard` (defaults) | Seven-row launchpad with model, autonomy, awareness and the next action, plus an `Instructions` row when a project preload exists. Under 48 columns or 20 rows it keeps the route and the next action only. Workspace facts remain in the footer. |
+| Detailed | `interface.demo: true` with `interface.outputDetail: detailed` | Artwork, route and autonomy, project facts, two reserved account-usage rows, tagline and shortcut hints where space allows. The artwork needs at least 48 columns and 30 rows; a smaller terminal gets the Default launchpad. |
 | Quiet | `interface.demo: false` or `--no-demo` | One identity header and no welcome-only reads or learning tips. Immediate controls and warnings remain. |
 | No color | `NO_COLOR=1` | Same labels and meters without color. |
 
 Demo guidance never overrides `interface.smoothStreaming` or terminal motion preferences.
 
-Dumb or unknown terminals (`TERM=dumb` or `TERM=unknown`) and screen-reader mode (`CLIO_CODER_SCREEN_READER=1`) always get the compact header, even with demo on, and those two terminal types also disable color. The thinking meter uses ordinary filled and hollow dots; the Nerd Font brain glyph is opt-in with `CLIO_CODER_NERD_FONT=1` (ignored for screen readers and dumb terminals). Screen-reader mode replaces the meter with exact effort text.
+The ASCII glyph set (`CLIO_CODER_ASCII=1`, `TERM=dumb` or `TERM=unknown`) and screen-reader mode (`CLIO_CODER_SCREEN_READER=1`) always get the identity header, even with demo on. `TERM=dumb` and `TERM=unknown` also disable color. The thinking meter uses ordinary filled and hollow dots; the Nerd Font brain glyph is opt-in with `CLIO_CODER_NERD_FONT=1` (ignored for screen readers and dumb terminals). Screen-reader mode replaces the meter with exact effort text.
 
 The Stage 0 welcome and the hydrated welcome share the tier policy. Detailed subscription rows are reserved from the first paint, so hydrating account data moves nothing. Idle footer tips stay off while a launchpad is visible. Layout details are in [Welcome launchpad and session header](tui-design.md#41-welcome-launchpad--session-header).
 
-Demo-off is a presentation mode. It removes artwork, welcome-only reads and animation, which lowers the bytes written before hydration, but it runs the same hydration as full. Treat it as a rendering and transport saving, and measure before claiming a startup speedup.
+Demo-off is a presentation mode. It removes artwork, welcome-only reads and learning tips, which lowers the bytes written before hydration, but it runs the same hydration as full. Treat it as a rendering and transport saving, and measure before claiming a startup speedup.
 
 ## Worker boundary
 
