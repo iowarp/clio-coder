@@ -12,7 +12,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, describe, it } from "node:test";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
@@ -30,7 +30,6 @@ const { resetXdgCache } = await import("../../src/core/xdg.js");
 resetXdgCache();
 const { enterReadOnlyMode, withReadOnlyMode } = await import("../../src/core/read-only-mode.js");
 const { ensureProjectIgnore } = await import("../../src/core/project-root.js");
-const { withStateFileLock } = await import("../../src/core/state-file-lock.js");
 const { createTelemetryHub } = await import("../../src/core/telemetry/hub.js");
 const { codemapPath, legacyCodewikiPath, readCodewiki, writeCodewiki } = await import(
 	"../../src/domains/context/codewiki/artifact.js"
@@ -39,7 +38,7 @@ const { coordinateCodewikiExclusive, coordinateCodewikiWrite } = await import(
 	"../../src/domains/context/codewiki/coordinator.js"
 );
 const { createContextBundle } = await import("../../src/domains/context/extension.js");
-const { readClioState, statePath, writeClioState } = await import("../../src/domains/context/state.js");
+const { readClioState, writeClioState } = await import("../../src/domains/context/state.js");
 const { convertWorkspaceOnce } = await import("../../src/domains/lifecycle/canonical-names.js");
 const startCwd = process.cwd();
 after(() => {
@@ -113,6 +112,8 @@ const indexedSymbols = (ws: string) => (readCodewiki(ws)?.symbols ?? []).map((sy
 describe("read-only mode and the project's .clio-coder/", () => {
 	it("a read-only session leaves the drifted project byte-identical and every project writer refuses", async () => {
 		const ws = await driftedProject("read-only");
+		const bare = join(home, "never-indexed");
+		mkdirSync(bare);
 		const before = snapshot(ws);
 		const wiki = readCodewiki(ws);
 		const state = readClioState(ws);
@@ -126,9 +127,19 @@ describe("read-only mode and the project's .clio-coder/", () => {
 			);
 			throws(() => writeCodewiki(ws, wiki), /read-only/i);
 			throws(() => writeClioState(ws, state), /read-only/i);
+			// A project never indexed gains no `.clio-coder/` for the lease either.
+			equal(
+				await coordinateCodewikiWrite(bare, (current) => ({ kind: "ensure", cwd: bare, current, previous: null })),
+				null,
+			);
+			await rejects(
+				coordinateCodewikiExclusive(bare, () => "ran"),
+				/read-only/i,
+			);
 		});
 		deepEqual(snapshot(ws), before);
 		deepEqual(indexedSymbols(ws), ["add"]);
+		deepEqual(readdirSync(bare), []);
 	});
 
 	it("the same session outside the mode refreshes the index, the state, the ignore file and the layout", async () => {
@@ -144,32 +155,31 @@ describe("read-only mode and the project's .clio-coder/", () => {
 		ok((readClioState(ws)?.lastSessionAt ?? "") > (lastSessionAt ?? ""));
 	});
 
-	it("an index write or reset already waiting for the lease when the process turns read-only writes nothing", async () => {
+	it("an index write or reset waiting for another holder's lease when the process turns read-only writes nothing", async () => {
 		const [writing, resetting] = [await driftedProject("for-good-write"), await driftedProject("for-good-reset")];
-		const files = () =>
-			[writing, resetting].flatMap((ws) => [codemapPath(ws), statePath(ws)].map((path) => readFileSync(path, "utf8")));
-		const before = files();
-		let waiting: Promise<unknown> | undefined;
-		let exclusive: Promise<unknown> | undefined;
-		await withStateFileLock(legacyCodewikiPath(writing), () =>
-			withStateFileLock(legacyCodewikiPath(resetting), async () => {
-				waiting = coordinateCodewikiWrite(writing, (current) => ({
-					kind: "ensure",
-					cwd: writing,
-					current,
-					previous: null,
-				}));
-				exclusive = coordinateCodewikiExclusive(resetting, (workspace) => {
-					rmSync(codemapPath(workspace));
-					return "reset";
-				});
-				await new Promise((resolve) => setTimeout(resolve, 50));
-				enterReadOnlyMode();
-			}),
-		);
+		const [writeLock, resetLock] = [writing, resetting].map((ws) => `${legacyCodewikiPath(ws)}.lock`) as [string, string];
+		const holder = (pid: number) => `${JSON.stringify({ host: hostname(), pid })}\n`;
+		// Another process holds both leases, so each transaction waits for its holder.
+		for (const lock of [writeLock, resetLock]) writeFileSync(lock, holder(process.pid));
+		const waiting = coordinateCodewikiWrite(writing, (current) => ({
+			kind: "ensure",
+			cwd: writing,
+			current,
+			previous: null,
+		}));
+		const exclusive = coordinateCodewikiExclusive(resetting, (workspace) => {
+			rmSync(codemapPath(workspace));
+			return "reset";
+		});
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		// One synchronous step: the mode begins, one holder releases its lease, and the other exits without
+		// releasing, leaving its lease for a waiter to reclaim (a pid above every platform's range is no process).
+		enterReadOnlyMode();
+		unlinkSync(writeLock);
+		writeFileSync(resetLock, holder(2 ** 22 + 1));
+		const entered = [writing, resetting].map(snapshot);
 		equal(await waiting, null);
-		await rejects(exclusive as Promise<unknown>, /read-only/i);
-		deepEqual(files(), before);
-		for (const ws of [writing, resetting]) equal(existsSync(join(ws, ".clio-coder", ".gitignore")), false);
+		await rejects(exclusive, /read-only/i);
+		deepEqual([writing, resetting].map(snapshot), entered);
 	});
 });

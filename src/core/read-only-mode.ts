@@ -10,7 +10,9 @@
  * probe targets like any other run. In read-only mode they still read that
  * state, and a run still records its own session, but every cache and prior is
  * left as it was found. The writers consult this, so no caller has to know
- * which of its loads or probes would have written.
+ * which of its loads or probes would have written. Each consults it at the
+ * write itself, after the last await before it, so work already pending when
+ * the mode begins writes nothing either.
  *
  * A process whose whole job is read-only enters the mode for good. Work inside
  * a process that writes, such as the terminal's `/doctor`, runs in a scope that

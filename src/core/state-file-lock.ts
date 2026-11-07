@@ -61,6 +61,13 @@ export interface StateFileLockOptions {
 	note?: string;
 	/** An asynchronous wait found another holder, or the holder changed; null when its record cannot be read. */
 	onContended?: (holder: StateFileLockHolder | null) => void;
+	/**
+	 * Throws when the caller may no longer change the files this lock guards, such as in read-only mode. An
+	 * asynchronous acquisition calls it before it creates the lock's directory and before every attempt, after
+	 * each wait, so a caller whose permission ended while it waited creates no lock file and reclaims none; the
+	 * error is the acquisition's failure. Locks over records a read-only run still writes pass none.
+	 */
+	assertWritable?: () => void;
 }
 
 interface LockOwner {
@@ -298,12 +305,24 @@ async function acquireAsync<T>(
 ): Promise<T> {
 	const timeoutMs = options.timeoutMs ?? FILE_LOCK_ACQUIRE_TIMEOUT_MS;
 	let held = false;
+	let refused = false;
+	// Nothing awaits between this check and the syscalls it guards.
+	const assertWritable = (): void => {
+		refused = true;
+		options.assertWritable?.();
+		refused = false;
+	};
+	const attemptAcquire = (): boolean => {
+		assertWritable();
+		return tryAcquire(lockPath, options.note);
+	};
 	try {
 		options.signal?.throwIfAborted();
+		assertWritable();
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = performance.now() + timeoutMs;
 		let reported: number | null | undefined;
-		for (let attempt = 1; !tryAcquire(lockPath, options.note); attempt += 1) {
+		for (let attempt = 1; !attemptAcquire(); attempt += 1) {
 			options.signal?.throwIfAborted();
 			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			if (options.onContended) {
@@ -329,7 +348,8 @@ async function acquireAsync<T>(
 			held = false;
 		}
 		options.signal?.throwIfAborted();
-		if (options.onAcquireFailure !== "run-unlocked") throw err;
+		// A refusal never runs the section unlocked: the caller may not write at all.
+		if (refused || options.onAcquireFailure !== "run-unlocked") throw err;
 	}
 	return enter(held);
 }

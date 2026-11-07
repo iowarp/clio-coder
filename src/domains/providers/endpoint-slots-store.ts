@@ -169,27 +169,38 @@ export async function recordDiscoveredEndpointSlots(
 ): Promise<void> {
 	if (!Number.isInteger(entry.slots) || entry.slots <= 0) return;
 	if (entry.endpointKey.length === 0 || entry.runtimeId.length === 0) return;
-	// Both checked before the lock because acquiring it creates the lock file, and
-	// again under it because read-only mode or an uninstall can land while this
-	// call waits.
-	if (readOnlyMode() || stateRootRemoved()) return;
+	// Checked before the lock because acquiring it creates the lock file, and again
+	// under it because an uninstall can land while this call waits. The lock checks
+	// read-only mode itself, before its file and after every wait, so a mode entered
+	// while this call waits records nothing either.
+	if (stateRootRemoved()) return;
 	const nowMs = options?.nowMs ?? Date.now();
 	const ttlMs = options?.ttlMs ?? endpointSlotsTtlMs();
+	let readOnly = false;
 	try {
-		await withStateFileLock(endpointSlotsPath(), () => {
-			if (readOnlyMode() || stateRootRemoved()) return;
-			const kept = readRecords().filter(
-				(record) => record.endpointKey !== entry.endpointKey && fresh(record, nowMs, ttlMs),
-			);
-			kept.push({
-				endpointKey: entry.endpointKey,
-				runtimeId: entry.runtimeId,
-				slots: entry.slots,
-				observedAt: new Date(nowMs).toISOString(),
-			});
-			writeRecords(kept);
-		});
+		await withStateFileLock(
+			endpointSlotsPath(),
+			() => {
+				if (stateRootRemoved()) return;
+				const kept = readRecords().filter(
+					(record) => record.endpointKey !== entry.endpointKey && fresh(record, nowMs, ttlMs),
+				);
+				kept.push({
+					endpointKey: entry.endpointKey,
+					runtimeId: entry.runtimeId,
+					slots: entry.slots,
+					observedAt: new Date(nowMs).toISOString(),
+				});
+				writeRecords(kept);
+			},
+			{
+				assertWritable: () => {
+					readOnly = readOnlyMode();
+					if (readOnly) throw new Error("read-only mode records no endpoint slots");
+				},
+			},
+		);
 	} catch (error) {
-		options?.onError?.(error);
+		if (!readOnly) options?.onError?.(error);
 	}
 }

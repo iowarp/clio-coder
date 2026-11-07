@@ -248,14 +248,15 @@ export function coordinateCodewikiWrite(
 			// has already finished and this one sees it. The recheck under the lock
 			// stays, and is what still decides the race.
 			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
-			// Read-only mode publishes nothing and takes no lease, whose lock file is a write in the project too;
-			// null is the answer for "nothing written". Checked again under the lease for a mode entered meanwhile.
-			if (readOnlyMode()) return Promise.resolve(null);
+			// Read-only mode publishes nothing and takes no lease, whose directory and lock file are writes in the
+			// project too. The lease checks the mode before each of them, after every wait for another holder, so a
+			// mode entered while this transaction waited still leaves the project as found; null is the answer for
+			// "nothing written".
+			let readOnly = false;
 			return withStateFileLock(
 				legacyCodewikiPath(workspace),
 				async () => {
 					if (options.requireExisting && !existsSync(codewikiPath(workspace))) return null;
-					if (readOnlyMode()) return null;
 					const current = options.readCurrent?.(workspace) ?? readCodewiki(workspace);
 					options.signal?.throwIfAborted();
 					const request = await select(current, workspace);
@@ -276,8 +277,17 @@ export function coordinateCodewikiWrite(
 					await options.afterCommit?.(worker, workspace);
 					return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
 				},
-				options.signal ? { signal: options.signal } : {},
-			);
+				{
+					...(options.signal ? { signal: options.signal } : {}),
+					assertWritable: () => {
+						readOnly = readOnlyMode();
+						assertProjectIndexWritable();
+					},
+				},
+			).catch((error: unknown) => {
+				if (readOnly) return null;
+				throw error;
+			});
 		},
 		options.signal,
 	);
@@ -285,7 +295,7 @@ export function coordinateCodewikiWrite(
 
 /**
  * Serialize a non-build artifact transaction such as reset with every writer. Every such transaction writes, so
- * read-only mode refuses it before the lease and again under it.
+ * read-only mode refuses it before the lease's directory or lock file, including after a wait for another holder.
  */
 export function coordinateCodewikiExclusive<T>(
 	cwd: string,
@@ -295,18 +305,15 @@ export function coordinateCodewikiExclusive<T>(
 	const workspace = resolve(cwd);
 	return enqueueWorkspace(
 		workspace,
-		() => {
-			assertProjectIndexWritable();
-			return withStateFileLock(
+		() =>
+			withStateFileLock(
 				legacyCodewikiPath(workspace),
 				() => {
 					signal?.throwIfAborted();
-					assertProjectIndexWritable();
 					return task(workspace);
 				},
-				signal ? { signal } : {},
-			);
-		},
+				{ ...(signal ? { signal } : {}), assertWritable: assertProjectIndexWritable },
+			),
 		signal,
 	);
 }

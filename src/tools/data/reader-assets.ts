@@ -132,12 +132,14 @@ export async function ensureScientificReader(reader: ScientificReader): Promise<
 	};
 	if (current()) return entry;
 	// Unpacking is a cache write, and the reader runs only from the unpacked tree.
-	if (readOnlyMode()) {
+	const refuseInReadOnlyMode = (): void => {
+		if (!readOnlyMode()) return;
 		throw new ReaderUnavailableError(
 			`Clio reads ${reader.formats} with ${reader.main.name} ${reader.main.version}, which it unpacks into its cache on first use, and read-only mode leaves that cache as it found it. ` +
 				`Run one read of this format outside read-only mode to install it, or use ${reader.fallback}.`,
 		);
-	}
+	};
+	refuseInReadOnlyMode();
 	const tarballs: Array<[ReaderPackage, Buffer]> = [];
 	for (const pkg of [reader.main, ...reader.deps]) {
 		try {
@@ -152,6 +154,8 @@ export async function ensureScientificReader(reader: ScientificReader): Promise<
 			throw downloadUnavailable(reader, pkg, error instanceof Error ? error.message : String(error));
 		}
 	}
+	// The mode may have begun while the downloads were pending; from here to the rename nothing awaits.
+	refuseInReadOnlyMode();
 	const staging = join(dir, `node_modules.tmp-${process.pid}-${Date.now().toString(36)}`);
 	try {
 		for (const [pkg, bytes] of tarballs) extractPackageTarball(bytes, join(staging, pkg.name));

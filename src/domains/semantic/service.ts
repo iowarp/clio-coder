@@ -187,7 +187,8 @@ export class SemanticIndex {
 		// Code-unit order: localeCompare follows LANG, so the TUI and the CLI hashed different snapshots.
 		const records = structuredClone([...input]).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 		this.validateRecords(records);
-		// Storage refuses each write in read-only mode; this refuses the lock file before it is one.
+		// Storage refuses each write in read-only mode; this refuses creating the cache root, and the lock refuses
+		// its own file, also for a mode entered while it waits for another refresh.
 		assertSemanticWritable();
 		// The writable path resolves the root through the accessor that checks the home's layout.
 		if (this.options.cacheDir === undefined) clioCacheDir();
@@ -309,7 +310,11 @@ export class SemanticIndex {
 				this.storage.pruneGenerations(this.generation?.generation ?? null);
 				return { complete: true, embedded, ...this.status() };
 			},
-			{ ...(options.signal ? { signal: options.signal } : {}), timeoutMs: 1000 },
+			{
+				...(options.signal ? { signal: options.signal } : {}),
+				timeoutMs: 1000,
+				assertWritable: assertSemanticWritable,
+			},
 		);
 	}
 

@@ -21,6 +21,8 @@ interface MemoryEntry {
 const sessions = new Map<string, Map<string, MemoryEntry>>();
 /** Sessions Clio closed; as on disk, a closed session's state is never written again. */
 const closed = new Set<string>();
+/** Sessions whose directory has existed; as on disk, one that existed and was removed is never recreated. */
+const anchored = new Set<string>();
 
 function fsError(code: string, path: string): Error {
 	return Object.assign(new Error(`${code}: session entry ${path}`), { code });
@@ -47,6 +49,9 @@ export function createMemorySessionFs(
 	if (!closed.has(sessionId)) sessions.set(sessionId, entries);
 	const live = (): Map<string, MemoryEntry> => {
 		if (sessions.get(sessionId) !== entries) throw new Error(`Copilot session state refused: ${sessionId} was closed`);
+		if (entries.has("")) anchored.add(sessionId);
+		else if (anchored.has(sessionId))
+			throw new Error(`Copilot session state refused: the session directory of ${sessionId} was removed`);
 		return entries;
 	};
 	const now = (): string => new Date().toISOString();
@@ -101,7 +106,8 @@ export function createMemorySessionFs(
 		});
 	};
 	const remove = (key: string): void => {
-		for (const name of [...live().keys()]) if (within(name, key)) live().delete(name);
+		const state = live();
+		for (const name of [...state.keys()]) if (within(name, key)) state.delete(name);
 	};
 	const statOf = async (path: string): Promise<SessionFsFileInfo> => {
 		const located = locate(path);
