@@ -605,7 +605,7 @@ Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-comp
 | `clio-coder auth login [target-or-runtime]` | Sign in or store an API key. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
 
-`auth login` also accepts `--api-key <value>`. Prefer `clio-coder configure --api-key-env <VAR>` (the target's `auth.apiKeyEnvVar`): Clio reads the variable when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` in the config directory with mode `0600`, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
+`auth login` also accepts `--api-key <value>`. Prefer `clio-coder configure --api-key-env <VAR>` (the target's `auth.apiKeyEnvVar`): Clio reads the variable when making a request and stores no key. When the variable is unset in the shell that runs `configure`, the target is still saved and a warning names the variable to export. Stored API keys and OAuth credentials live in `credentials.yaml` in the config directory with mode `0600`, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
 
 The global `clio-coder --api-key <key>` override also satisfies an OAuth
 target for that invocation. It is scoped to the active target and does not
