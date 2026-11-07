@@ -6,7 +6,12 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { ScrollView, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
-import { renderOperatorCommandRows } from "../../src/interactive/command-output.js";
+import {
+	appendNotice,
+	appendReferenceCard,
+	createCommandOutputRunIo,
+	renderOperatorCommandRows,
+} from "../../src/interactive/command-output.js";
 import { preserveTranscriptScroll } from "../../src/interactive/layout.js";
 import { renderBashTranscriptExecution, renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
 import { createStatusController } from "../../src/interactive/status/controller.js";
@@ -18,6 +23,51 @@ import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { INITIAL_STATUS } from "../../src/session-control/status-types.js";
 
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
+
+test("printed reports follow the live tier and preserve every sanitized row for inspection", async () => {
+	let style: OutputStyle = "compact";
+	const panel = createChatPanel({ getOutputStyle: () => style });
+	const sink = { appendReplayBlock: panel.appendReplayBlock, requestRender: () => {} };
+	createCommandOutputRunIo(sink).stdout("Session\nTokens  123\nCost  $0.04\nRoute  long-route-detail\n");
+	match(plain(panel.render(80)), /Tokens 123 · Cost \$0\.04/);
+	strictEqual(panel.render(80).length, 1);
+	style = "standard";
+	const table = plain(panel.render(80));
+	match(table, /Route\s+long-route-detail/);
+	style = "detailed";
+	match(plain(panel.render(80)), /Tokens {2}123/);
+	const artifact = panel.inspectionArtifacts()[0];
+	ok(artifact);
+	const inspected = await artifact.load();
+	match(plain(inspected.lines), /Route {2}long-route-detail/);
+});
+
+test("multiline slash notices and extension results use report cards without flattening or control injection", () => {
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		const panel = createChatPanel({ getOutputStyle: () => style });
+		const sink = { appendReplayBlock: panel.appendReplayBlock, requestRender: () => {} };
+		appendNotice("warn", "Checks\nFailed  2\nWarning  1\nTarget  https://user:password@host/path", sink);
+		appendReferenceCard(
+			{ command: "example:status", source: "example", kind: "result", text: "Ready  3\n\u001b[2JDetail  complete" },
+			sink,
+		);
+		const rows = panel.render(80);
+		const rendered = plain(rows);
+		doesNotMatch(rendered, /user:password|password@/);
+		strictEqual(rows.join("\n").includes("\u001b[2J"), false);
+		if (style === "compact") {
+			match(rendered, /Failed 2 · Warning 1/);
+			match(rendered, /Ready 3/);
+			strictEqual(rows.filter((row) => stripTerminalSequences(row).trim().length > 0).length, 2);
+		} else {
+			match(rendered, /Failed\s+2/);
+			match(rendered, /Warning\s+1/);
+			match(rendered, /Ready\s+3/);
+			match(rendered, /Detail\s+complete/);
+		}
+		ok(rows.every((row) => visibleWidth(row) <= 80));
+	}
+});
 
 test("streamed tool arguments show preparation before execution and clear on answer text", () => {
 	const ctx = { now: 1000, localRuntime: true };
@@ -115,7 +165,7 @@ test("Alt+O has one preset action and retired /output gives migration guidance",
 	strictEqual(nextOutputStyle(nextOutputStyle(nextOutputStyle("standard"))), "standard");
 	const retired = parseSlashCommand("/output verbose");
 	strictEqual(retired.kind, "usage-error");
-	if (retired.kind === "usage-error") match(retired.reason, /\/help.*Output cycle.*\/settings.*\/view/u);
+	if (retired.kind === "usage-error") match(retired.reason, /\/help.*output-detail shortcut.*\/settings.*\/view/u);
 });
 
 test("a long unbroken reasoning paragraph is bounded after wrapping and freezes its tail", async () => {

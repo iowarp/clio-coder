@@ -5,7 +5,9 @@ import type { NoticeLevel, NoticeSource } from "../session-control/notice-source
 import type { PromptReferenceCard, RunIo } from "../session-control/slash-commands.js";
 import { renderNoticeRow } from "./renderers/notice.js";
 import { renderReferenceCard } from "./renderers/reference-card.js";
-import { type ClioToken, clioTheme, GLYPH, wrapPaths } from "./theme/index.js";
+import { renderTranscriptReport, transcriptReportFromText } from "./renderers/report.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
+import type { TranscriptDetailPolicy } from "./transcript-detail.js";
 
 export type { NoticeLevel } from "../session-control/notice-source.js";
 
@@ -20,44 +22,17 @@ const NOTICE_MARKS = { info: "info", success: "success", warn: "warning", error:
  */
 export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutputSink, source?: NoticeSource): void {
 	// A notice can quote an error, and Node's own fetch error quotes the whole URL (#446).
-	const normalized = redactUrlCredentials(text).replace(/\r/g, "").replace(/\n+/gu, " ").trimEnd();
+	const normalized = redactUrlCredentials(text).replace(/\r/g, "").trimEnd();
 	if (normalized.trim().length === 0) return;
-	if (source !== undefined) {
+	if (source === undefined && normalized.includes("\n")) {
+		const report = transcriptReportFromText(normalized, undefined, level);
+		sink.appendReplayBlock((width, detail, unbounded) => renderTranscriptReport(report, width, detail?.style, unbounded));
+	} else {
+		const mark = level === "info" && /^\S+ cancelled\b/u.test(normalized) ? "cancelled" : NOTICE_MARKS[level];
 		sink.appendReplayBlock((width, _detail, unbounded) =>
-			renderNoticeRow(normalized, NOTICE_MARKS[level], width, source, unbounded === true),
+			renderNoticeRow(normalized, mark, width, source, unbounded === true),
 		);
-		sink.requestRender();
-		return;
 	}
-	sink.appendReplayBlock((width) => {
-		const theme = clioTheme();
-		let glyph = "";
-		let token: ClioToken = "annotation";
-		switch (level) {
-			case "info":
-				// A run's cancel settles as `⊘` on its card and the rail, so its notice carries the same mark, not a bare `·`.
-				glyph = /^\S+ cancelled\b/u.test(normalized) ? GLYPH.cancelled : "·";
-				token = "annotation";
-				break;
-			case "success":
-				glyph = GLYPH.ok;
-				token = "success";
-				break;
-			case "warn":
-				glyph = GLYPH.warnInline;
-				token = "warning";
-				break;
-			case "error":
-				glyph = GLYPH.error;
-				token = "error";
-				break;
-		}
-		// The mark holds the gutter and a wrapped reply hangs in the content
-		// column, like every other transcript block.
-		return wrapTextWithAnsi(theme.base("notice", normalized), Math.max(1, width - 2)).map((row, index) =>
-			index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`,
-		);
-	});
 	sink.requestRender();
 }
 
@@ -102,7 +77,7 @@ export function appendOperatorCommand(text: string, sink: CommandOutputSink): vo
  * reaches the model, which is what "display only" promises the author.
  */
 export function appendReferenceCard(card: PromptReferenceCard, sink: CommandOutputSink): void {
-	sink.appendReplayBlock((width) => renderReferenceCard(card, width));
+	sink.appendReplayBlock((width, detail, unbounded) => renderReferenceCard(card, width, detail?.style, unbounded));
 	sink.requestRender();
 }
 
@@ -150,45 +125,20 @@ export function appendInterviewRecord(entries: ReadonlyArray<InterviewRecordEntr
 	sink.requestRender();
 }
 
-export type CommandOutputReplayBlock = (width: number, detail?: unknown, unbounded?: boolean) => string[];
+export type CommandOutputReplayBlock = (
+	width: number,
+	detail?: TranscriptDetailPolicy,
+	unbounded?: boolean,
+) => string[];
 
 export interface CommandOutputSink {
 	appendReplayBlock(renderBlock: CommandOutputReplayBlock): void;
 	requestRender(): void;
 }
 
-export type CommandOutputWrap = (line: string, width: number) => string[];
-
-function appendCommandOutput(text: string, sink: CommandOutputSink, wrap: CommandOutputWrap = wrapPaths): void {
-	const normalized = text.replace(/\r/g, "").replace(/\n$/u, "");
-	if (normalized.length === 0) return;
-	sink.appendReplayBlock((width) => {
-		const lines: string[] = [];
-		for (const rawLine of normalized.split("\n")) {
-			const leading = /^[ \t]*/u.exec(rawLine)?.[0] ?? "";
-			const indent = leading.replace(/\t/gu, "    ").slice(0, Math.max(0, width - 1));
-			const body = rawLine.slice(leading.length);
-			// An indented "Label   value" row wraps under its value, not under its label,
-			// so a narrow terminal keeps the label column readable.
-			const labelled = indent.length > 0 ? /^(\S(?:\S| (?! ))*? {2,})\S/u.exec(body) : null;
-			const hang = labelled ? indent.length + (labelled[1]?.length ?? 0) : 0;
-			if (labelled && hang <= Math.floor(width / 2)) {
-				const label = labelled[1] ?? "";
-				const value = wrap(body.slice(label.length), Math.max(1, width - hang));
-				lines.push(...value.map((line, index) => `${index === 0 ? `${indent}${label}` : " ".repeat(hang)}${line}`));
-				continue;
-			}
-			lines.push(...wrap(body, Math.max(1, width - indent.length)).map((line) => `${indent}${line}`));
-		}
-		return lines;
-	});
-	sink.requestRender();
-}
-
-export function createCommandOutputRunIo(sink: CommandOutputSink, wrap: CommandOutputWrap = wrapPaths): RunIo {
-	const write = (text: string): void => appendCommandOutput(text, sink, wrap);
+export function createCommandOutputRunIo(sink: CommandOutputSink): RunIo {
 	return {
-		stdout: write,
-		stderr: write,
+		stdout: (text) => appendNotice("info", text, sink),
+		stderr: (text) => appendNotice("error", text, sink),
 	};
 }

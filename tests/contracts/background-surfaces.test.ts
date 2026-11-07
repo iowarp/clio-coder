@@ -183,7 +183,9 @@ test("doctor folds routine diagnostics by tier without dropping errors or remedi
 		for (const style of ["compact", "standard", "detailed"] as const) {
 			const lines = renderDoctorReport(findings, width, style);
 			fits(lines, width);
-			const text = plain(lines).replace(/\s/g, "");
+			const text = plain(lines)
+				.replace(/^ {2}[│|] /gmu, "")
+				.replace(/\s/g, "");
 			ok(text.includes("Repairthiscomponentbeforecontinuing."));
 			ok(text.includes("Installthemissingtool."));
 			strictEqual(text.includes("routineinstallationpath"), style === "detailed");

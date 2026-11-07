@@ -97,8 +97,35 @@ describe("/doctor", () => {
 			const plain = lines.map(stripVTControlCharacters).join("\n");
 			ok(plain.indexOf("FAIL") < plain.indexOf("WARN"));
 			ok(plain.indexOf("WARN") < plain.indexOf("OK"));
-			match(plain, /first line\n {2}second line/);
-			ok(plain.replace(/\s/g, "").includes(findings[0]?.detail ?? "missing"));
+			match(plain, /first line\n {2}│ second line/);
+			ok(
+				plain
+					.replace(/^ {2}│ /gmu, "")
+					.replace(/\s/g, "")
+					.includes(findings[0]?.detail ?? "missing"),
+			);
+		}
+	});
+
+	it("keeps attention details in every tier and unfolds routine checks only in Detailed and inspection", () => {
+		const findings = [
+			{ ok: true, name: "healthy", detail: "a long installation path and version" },
+			{ ok: false, name: "broken", detail: "repair instruction\nsecond repair step" },
+			{ ok: true, level: "warn" as const, name: "optional", detail: "how to install the optional tool" },
+		];
+		for (const width of [80, 120, 200]) {
+			const minimal = renderDoctorReport(findings, width, "compact");
+			match(stripVTControlCharacters(minimal[0] ?? ""), /3 checks · 1 errors · 1 warnings · 1 passed/);
+			match(minimal.map(stripVTControlCharacters).join("\n"), /second repair step/);
+			const standard = renderDoctorReport(findings, width);
+			const table = standard.map(stripVTControlCharacters).join("\n");
+			match(table, /broken\s+FAIL/);
+			match(table, /optional\s+WARN/);
+			const full = renderDoctorReport(findings, width, "detailed");
+			match(full.map(stripVTControlCharacters).join("\n"), /a long installation path and version/);
+			match(full.map(stripVTControlCharacters).join("\n"), /second repair step/);
+			deepStrictEqual(renderDoctorReport(findings, width, "compact", true), full);
+			ok([...minimal, ...standard, ...full].every((row) => visibleWidth(row) <= width));
 		}
 	});
 
