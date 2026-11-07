@@ -151,6 +151,11 @@ import {
 	taskMemoryHandoffSeedOffer,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
+import {
+	createMemoryRecallUseRegistration,
+	demotedMemoryIds,
+	readRecallUseLedger,
+} from "../domains/memory/recall-use.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
 	deleteTaskBankSnapshot,
@@ -2850,6 +2855,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		),
 	});
 	middleware.registerHook(memoryIntervention);
+	middleware.registerHook(
+		createMemoryRecallUseRegistration({
+			dataDir: clioDataDir,
+			stateDir: clioStateDir,
+			enabled: () => memoryEnabledNow(),
+			takeRecalled: () => memoryOwner.takeTurnRecalledMemory(),
+		}),
+	);
 	const memoryRouteAvailable = (): boolean => {
 		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
 		const route = resolveMemoryRoute(settings);
@@ -3859,6 +3872,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryReader = createMemoryPromptReader({
 		getDataDir: clioDataDir,
 		onSelection: (selection) => memoryOwner.recordPromptSelection(selection),
+		relevanceGate: { demoted: () => demotedMemoryIds(readRecallUseLedger(clioStateDir())) },
 	});
 	// The turn's own words, for a listing asked for without a query and for triage.
 	let operatorTask = "";
