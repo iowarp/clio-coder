@@ -122,6 +122,11 @@ const testModules = new Set([
 	"src/core/telemetry/schemas.ts",
 	"src/domains/telemetry/index.ts",
 	"src/domains/dispatch/run-settlement.ts",
+	// The fixture child serves telemetry the CLI's own live model computes from records the CLI's encoder writes.
+	"src/core/telemetry/envelope.ts",
+	"src/core/telemetry/segment.ts",
+	"src/domains/quota/observed.ts",
+	"src/domains/telemetry/telemetry-live.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

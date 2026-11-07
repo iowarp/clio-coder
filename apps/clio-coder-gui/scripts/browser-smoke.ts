@@ -14,7 +14,7 @@ import { seedFleet } from "../tests/harness/fleet-fixture.js";
 import { seedLibrary } from "../tests/harness/library-fixture.js";
 import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
-import { seedGoldenSession } from "../tests/harness/telemetry-fixture.js";
+import { seedGoldenSession, writeFixtureTelemetry } from "../tests/harness/telemetry-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const { values } = parseArgs({
@@ -43,6 +43,10 @@ process.env.TMPDIR ??= scratch;
 const output = values.out ?? (await mkdtemp(join(scratch, "browser-")));
 await mkdir(output, { recursive: true });
 let origin = "http://127.0.0.1:0";
+// The usage panel reads the session's telemetry through the child, so the child serves read-model DTOs.
+const telemetryScratch = await mkdtemp(join(scratch, "telemetry-"));
+const telemetryFile = join(telemetryScratch, "dtos.json");
+await writeFixtureTelemetry(telemetryFile, join(telemetryScratch, "state"));
 const h = await harness(
 	{ installDelayMs: 150 },
 	{
@@ -51,7 +55,7 @@ const h = await harness(
 		origin: () => origin,
 		clientDir: values.client,
 		// The real runtime always reports its safe settings and targets, so the smoke does too.
-		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" },
+		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1", CLIO_CODER_WEB_FIXTURE_TELEMETRY: telemetryFile },
 	},
 );
 await seedSettings(h.home.path, h.home.env, "fixture");
@@ -988,8 +992,10 @@ try {
 		// Complete accounting lives with the turn outcome, not as a repeated line above the
 		// composer. Its native disclosure must work from the keyboard and remain accessible open.
 		assert.equal(await page.locator(".conversation__dock > .chat-usage").count(), 0);
-		const usage = page.locator(".turn-outcome").last();
-		const usageSummary = usage.locator("summary");
+		// The outcome line is the summary of the turn's own disclosure; each explained figure inside it is
+		// a nested disclosure of its own.
+		const usage = page.locator(".turn-outcome").last().locator(":scope > details");
+		const usageSummary = usage.locator(":scope > summary");
 		await usageSummary.focus();
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), true);
@@ -997,12 +1003,16 @@ try {
 			has: page.getByRole("heading", { name: "Usage", exact: true }),
 		});
 		assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning"]);
-		assert.deepEqual(await tokenGroup.locator("dd").allTextContents(), ["11", "12", "15"]);
+		// An explained figure carries its explanation beside it; the figure is that disclosure's summary.
+		const figures = (group: Locator) =>
+			group.locator("dd").evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
+		assert.deepEqual(await figures(tokenGroup), ["11", "12", "15"]);
 		const cacheGroup = usage.locator(".turn-details__group", {
 			has: page.getByRole("heading", { name: "Cache", exact: true }),
 		});
-		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Hit share", "Written"]);
-		assert.deepEqual(await cacheGroup.locator("dd").allTextContents(), ["34%", "14"]);
+		// Cache reads and writes are reported as the provider's fields; overlapping token fields establish no hit rate.
+		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Cache read", "Cache write"]);
+		assert.deepEqual(await figures(cacheGroup), ["13", "14"]);
 		await check("conversation-usage");
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
@@ -1611,11 +1621,17 @@ try {
 		// bar's spend chip opens it.
 		await chipOrSlash(/^[\d,]+ tokens.*\. Open usage\.$/, "usage");
 		const usagePanel = pane.locator(".usage-panel");
-		await usagePanel.locator(".usage-panel__route", { hasText: "local · fixture-model" }).waitFor();
-		await usagePanel.getByText("Call details: 1 side question", { exact: true }).waitFor();
+		// Rows are the read model's cost groups by target/model (#434), displays carried through unreworded: the
+		// estimated, partly unpriced cost keeps its "~" and "+?" provenance marks.
+		const modelRow = usagePanel.locator(".usage-panel__models > li", {
+			has: page.locator(".usage-panel__route", { hasText: /^fixture\/fixture-model$/ }),
+		});
+		await modelRow.locator(".usage-panel__cost", { hasText: "~$0.25 +?" }).waitFor();
 		// The provider windows sit under the panel's Provider quota disclosure.
-		await usagePanel.locator("summary", { hasText: /^Provider quota/ }).click();
-		await usagePanel.getByRole("meter", { name: "5h used", exact: true }).waitFor();
+		await usagePanel.locator("summary", { hasText: /^Provider quota · 1 plan$/ }).click();
+		const fiveHour = usagePanel.getByRole("meter", { name: "5h used", exact: true });
+		await fiveHour.waitFor();
+		assert.equal(await fiveHour.getAttribute("aria-valuetext"), "71.4% used");
 		await check("usage");
 		if (width === 1600 || width === 390) {
 			await usagePanel.scrollIntoViewIfNeeded();
@@ -1651,11 +1667,20 @@ try {
 		await closeDialog(draftsDialog);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
 		// The context window: Clio Coder's own accounting, worded and never recomputed. The top bar's
-		// context ring opens it.
+		// context ring opens it. Its figures are the read model's, folded from the session's journal (#434), and the
+		// fixture agent journals nothing: the golden journal is seeded under this session's id, closed by the context
+		// snapshot a real turn journals for the ledger the fixture reports. The timeline below reads the same journal.
+		seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "", {
+			context: { window: 131_072, used: 20_480, reserve: 16_384, free: 94_208, system: 4096, messages: 16_384 },
+		});
 		await chipOrSlash(/Open the context window\.$/, "context");
 		const contextPanel = pane.locator(".context-panel");
-		await contextPanel.locator(".context-panel__figure strong", { hasText: "15.6%" }).waitFor();
-		assert.equal((await contextPanel.locator(".context-panel__of").innerText()).trim(), "20,480 of 131,072 tokens");
+		// The lead reads used, then window and share, each an explainable figure (#434).
+		await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
+		assert.equal(
+			(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
+			"20,480 of 131,072 tokens · 15.6%",
+		);
 		await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 		await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
 		await check("context-window");
@@ -1663,9 +1688,7 @@ try {
 			await contextPanel.scrollIntoViewIfNeeded();
 			await page.screenshot({ path: join(output, `context-window-${width}.png`) });
 		}
-		// The session timeline: the journal newest first, every figure in the server's words (#434 §11.3). The fixture
-		// agent journals nothing, so the golden journal is seeded under this session's id for the cold read to fold.
-		seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "");
+		// The session timeline: the journal seeded above, newest first, every figure in the server's words (#434 §11.3).
 		await pane.getByLabel("Inspect task", { exact: true }).selectOption("timeline");
 		const timelinePanel = pane.locator(".timeline-panel");
 		const timelineCall = timelinePanel.locator(".timeline-panel__rows > li", { hasText: / call · / }).first();
@@ -1755,6 +1778,39 @@ try {
 		await handoffDialog.waitFor({ state: "detached" });
 		await check("handed-off");
 		await page.getByRole("button", { name: "Dismiss Handed off", exact: true }).click();
+		// A second window on the same task only views it: its message box takes nothing the server would
+		// refuse, and says who drives the task until that window takes control.
+		await settled();
+		const viewer = await context.newPage();
+		failedPage = viewer;
+		viewer.on("pageerror", (error) => errors.push(error.message));
+		await viewer.goto(`${page.url()}#token=test-token`);
+		const viewerNote = viewer.locator(".composer__delivery-note");
+		const viewing = (note: typeof viewerNote) => note.locator("strong", { hasText: /^Viewing$/ });
+		await viewing(viewerNote).waitFor();
+		assert.match(await viewerNote.innerText(), /^Viewing\s+Browser window( \d+)? controls this task\.\s+Take control$/);
+		const viewerField = viewer.getByLabel("Message Clio Coder", { exact: true });
+		assert.ok(await viewerField.isDisabled(), "a viewing window's message box takes input the server refuses");
+		assert.ok(await viewer.locator(".composer__submit").isDisabled(), "a viewing window offers Send");
+		assert.ok(await viewer.getByRole("button", { name: "Actions", exact: true }).isDisabled());
+		// One way to take control, in the message box; the banner above the transcript only explains.
+		assert.equal(await viewer.getByRole("button", { name: "Take control", exact: true }).count(), 1);
+		await check("viewer", viewer);
+		if (width === 1600) await viewer.screenshot({ path: join(output, `viewer-${width}.png`) });
+		await viewerNote.getByRole("button", { name: "Take control", exact: true }).click();
+		await viewing(viewerNote).waitFor({ state: "detached" });
+		assert.ok(await viewerField.isEnabled(), "taking control left the message box disabled");
+		// The first window is told, and its own message box now waits for it to take control back.
+		const pageNote = page.locator(".composer__delivery-note");
+		await page.locator(".notice-region .notice", { hasText: "took control of a task" }).waitFor();
+		await viewing(pageNote).waitFor();
+		assert.ok(await page.getByLabel("Message Clio Coder", { exact: true }).isDisabled());
+		await pageNote.getByRole("button", { name: "Take control", exact: true }).click();
+		await viewing(pageNote).waitFor({ state: "detached" });
+		await viewing(viewerNote).waitFor();
+		await page.getByRole("button", { name: /^Dismiss .+ took control of a task$/ }).click();
+		await viewer.close();
+		failedPage = page;
 		// Close lives in the top bar's Task actions menu, away from the composer's Stop.
 		await settled();
 		await taskMenu.locator("summary").click();
@@ -1808,6 +1864,23 @@ try {
 		await page
 			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
 			.waitFor({ state: "detached" });
+		// Forgetting the browser signs this window out on the server before it drops the launch token, so
+		// the credential it held opens nothing afterwards.
+		await navigate("General");
+		await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
+		const [signedOut] = await Promise.all([
+			page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/revoke"),
+			page.getByRole("button", { name: "Forget this browser", exact: true }).click(),
+		]);
+		assert.equal(signedOut.status(), 200);
+		const forgotten = signedOut.request().headers().authorization ?? "";
+		assert.match(forgotten, /^Bearer [\w-]{43}$/);
+		await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
+		assert.equal(
+			(await fetch(`${origin}/api/meta`, { headers: { Authorization: forgotten } })).status,
+			401,
+			"a forgotten window's credential still opens the API",
+		);
 		await context.close();
 		if (zoom === 2) zoomContext = null;
 	}
@@ -1868,4 +1941,5 @@ try {
 	if ("closeAllConnections" in server) server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 	await h.close();
+	await rm(telemetryScratch, { recursive: true, force: true });
 }

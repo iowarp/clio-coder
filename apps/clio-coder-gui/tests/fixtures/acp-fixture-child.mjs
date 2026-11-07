@@ -456,6 +456,13 @@ let libraryGeneration = 1;
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
 const REPLAY_TURNS = Number(process.env.CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS ?? 0);
+// The read model's DTOs, written by the harness (writeFixtureTelemetry) because this plain-node child cannot run it.
+// Present, the child announces and answers the three telemetry methods the session usage route reads.
+const TELEMETRY = process.env.CLIO_CODER_WEB_FIXTURE_TELEMETRY;
+const telemetryDto = (name, sessionId) => {
+	const dto = JSON.parse(readFileSync(TELEMETRY, "utf8"))[name];
+	return sessionId && "sessionId" in dto ? { ...dto, sessionId } : dto;
+};
 const queues = { steer: [], followUp: [] };
 let queueReadFails = false;
 const queueChanged = () => {
@@ -645,11 +652,16 @@ async function handle(frame) {
 													},
 												}
 											: {}),
-										...(scenario === "telemetry"
+										// The smoke scenario announces the telemetry read model as the real engine does, so the
+										// Session column's Usage drill-in is reachable in a browser.
+										...(scenario === "telemetry" || scenario === "markdown"
 											? {
 													"clio-coder/telemetry": {
 														version: 1,
-														methods: { session: "_clio-coder/telemetry/session" },
+														methods: {
+															session: "_clio-coder/telemetry/session",
+															...(TELEMETRY ? { cost: "_clio-coder/telemetry/cost", quota: "_clio-coder/telemetry/quota" } : {}),
+														},
 														update: "_clio-coder/telemetry/update",
 													},
 												}
@@ -1186,6 +1198,12 @@ async function handle(frame) {
 				};
 				break;
 			}
+			case "_clio-coder/telemetry/session":
+			case "_clio-coder/telemetry/cost":
+			case "_clio-coder/telemetry/quota":
+				if (!TELEMETRY) throw Error("method_not_found");
+				result = telemetryDto(frame.method.slice("_clio-coder/telemetry/".length), frame.params?.sessionId);
+				break;
 			case "_clio-coder/aside/cancel":
 				result = { cancelled: false };
 				break;

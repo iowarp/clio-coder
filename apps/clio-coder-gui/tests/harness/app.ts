@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -7,12 +8,14 @@ import type { Operation } from "../../contracts/operations.js";
 import type { PermissionTimers } from "../../server/acp/permissions.js";
 import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
+import { getVersionInfo, runningBuildId } from "../../server/clio/http-shims.js";
 import { parse } from "../../server/http/validate.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { EvidenceService } from "../../server/services/evidence.js";
 import { FleetService } from "../../server/services/fleet.js";
 import { LibraryService } from "../../server/services/library.js";
+import { MachineAttachments } from "../../server/services/machine-attach.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { ReportsService } from "../../server/services/reports.js";
 import { SessionService } from "../../server/services/sessions.js";
@@ -70,12 +73,21 @@ export async function harness(
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
 	const setup = new SetupService(reads, env, workspaces);
+	// Wired as the server wires it, so the machine switcher reads the scratch home's (empty) node registry.
+	const attachments = new MachineAttachments({
+		endpoints: async () =>
+			reads.call("machines.endpoints", { cwd: await realpath(join(home.path, "state")) }, { deadlineMs: 65_000 }),
+		local: () => ({ clio: getVersionInfo().clio, build: runningBuildId }),
+		hub,
+		env,
+	});
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
 		hub,
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
+		attachments,
 		traces: new TraceService(reads),
 		telemetry: new TelemetryService(reads, (id) => supervisor.knows(id)),
 		settings: settingsService,
@@ -152,7 +164,7 @@ export async function harness(
 		exchange,
 		client,
 		close: async () => {
-			await Promise.all([supervisor.shutdown(), cli.close(), setup.close()]);
+			await Promise.all([supervisor.shutdown(), cli.close(), setup.close(), attachments.stopAll()]);
 			await Promise.all([reads.close(), ops.close()]);
 			await home.close();
 		},
