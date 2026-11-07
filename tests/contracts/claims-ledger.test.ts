@@ -1,9 +1,10 @@
 import { strict as assert, match } from "node:assert";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
+import { withReadOnlyMode } from "../../src/core/read-only-mode.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { RunResultObjectSchema } from "../../src/core/telemetry/schemas.js";
@@ -221,6 +222,15 @@ describe("claims ledger (#406)", () => {
 			match(first[0]?.kind === "inject_reminder" ? first[0].message : "", /^\[Claims\] Check 'stats'.*Contested/u);
 			// The same state is not offered again in the session.
 			assert.equal(turn("rerun stats please").length, 0);
+			// A read-only run still offers, but writes no offers file beside the log.
+			const offers = claimsLogPath(project).replace(/\.jsonl$/u, ".offers.jsonl");
+			const [readOnly] = createClaimsDeliveryRegistrations({ cwd: () => repo });
+			const readOnlyTurn = () =>
+				withReadOnlyMode(() => readOnly?.evaluate({ hook: "turn_start", sessionId: "s2", text: "stats?" }) ?? []);
+			const before = existsSync(offers);
+			assert.equal(readOnlyTurn().length, 1);
+			assert.equal(existsSync(offers), before);
+			if (before) assert.doesNotMatch(readFileSync(offers, "utf8"), /"session":"s2"/u);
 		} finally {
 			env.restore();
 		}

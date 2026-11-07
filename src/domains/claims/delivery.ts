@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
@@ -254,10 +255,11 @@ export function createClaimsDeliveryRegistrations(options: {
 	};
 
 	const record = (project: string, states: ReadonlyArray<string>): void => {
-		if (sessionKey === undefined || states.length === 0) return;
+		// A read-only run keeps its offers in memory, so the state dir is left as found.
+		if (sessionKey === undefined || states.length === 0 || readOnlyMode()) return;
 		try {
 			const path = offersPath(project);
-			mkdirSync(dirname(path), { recursive: true });
+			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 			const at = now().toISOString();
 			appendFileSync(path, states.map((state) => `${JSON.stringify({ session: sessionKey, state, at })}\n`).join(""), {
 				mode: 0o600,
