@@ -243,7 +243,11 @@ interface Analysis {
 	/** Unknown contributions added to every whole-scope sum: an incomplete read and unattributed aggregates. */
 	gap: number;
 	runs: Map<string, Run>;
-	/** One running fold per selection a reader asked for, keyed by group; the whole set is `""`. */
+	/**
+	 * One running fold per selection a reader asked for, keyed by group; the whole set is `""` and always stays. The
+	 * other groups are the {@link SELECTION_CACHE_LIMIT} most recently read, oldest first; a group read again after it
+	 * left folds cold to the same sums.
+	 */
 	selections: Map<string, SelectionState>;
 	growth: Growth;
 }
@@ -785,15 +789,38 @@ function selectionFacts(selection: SelectionState, metric: FactMetric): FactSum 
 	return fold.value;
 }
 
+/**
+ * Group selections kept running besides the whole set. Every turn's receipt reads its own `turn` group, so an
+ * unbounded cache grew per turn and every new attempt walked all of them.
+ */
+const SELECTION_CACHE_LIMIT = 64;
+
 function selectionOf(analysis: Analysis, group: { by: FactGroup; key: string } | undefined): SelectionState {
 	const key = group ? `${group.by}\u0000${group.key}` : "";
-	let selection = analysis.selections.get(key);
-	if (!selection) {
-		const matches = (attempt: Attempt) => (group ? attemptInGroup(attempt, group) : true);
-		selection = selectionState(analysis.attempts.filter(matches), matches);
-		analysis.selections.set(key, selection);
+	const selections = analysis.selections;
+	let selection = selections.get(key);
+	if (selection) {
+		if (key !== "") {
+			selections.delete(key);
+			selections.set(key, selection);
+		}
+		return selection;
 	}
+	const matches = (attempt: Attempt) => (group ? attemptInGroup(attempt, group) : true);
+	selection = selectionState(analysis.attempts.filter(matches), matches);
+	selections.set(key, selection);
+	if (selections.size > SELECTION_CACHE_LIMIT + 1)
+		for (const oldest of selections.keys())
+			if (oldest !== "") {
+				selections.delete(oldest);
+				break;
+			}
 	return selection;
+}
+
+/** How many selections a source's own analysis keeps running, the whole set included. */
+export function runningSelectionsForTesting(source: SessionSource): number {
+	return analyze(source).selections.size;
 }
 
 function unreadableAncestors(source: SessionSource): number {

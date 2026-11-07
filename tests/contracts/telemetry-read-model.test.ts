@@ -38,12 +38,15 @@ import type { RepoSource, SessionSource } from "../../src/domains/telemetry/read
 import {
 	cacheReport,
 	callsReport,
+	continueSource,
 	costReport,
 	explain,
 	repoCostReport,
 	repoOwner,
+	runningSelectionsForTesting,
 	sessionTelemetry,
 	timeline,
+	turnsSum,
 	whyStopped,
 } from "../../src/domains/telemetry/read-model.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
@@ -223,6 +226,35 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 		model.stop();
 		await writer.close();
 	}
+});
+
+test("a long session keeps a bounded set of running turn selections, and a turn read again folds to its cold sums (#434 §11)", () => {
+	const sessionId = "many-turns";
+	const sourceOf = (records: readonly TelemetryRecord[]): SessionSource => ({
+		sessionId,
+		journal: { present: true, records, modes: ["standard"], skipped: 0, damaged: 0 },
+		runs: new Map(),
+		parent: null,
+	});
+	const turns = 150;
+	const records = Array.from({ length: turns }, (_, turn) =>
+		telemetryCall(sessionId, { turnId: `turn-${turn}`, usage: { input: turn + 1, output: 2 }, usd: 0.001 * (turn + 1) }),
+	).flat();
+	const live = sourceOf(records);
+	// Each turn's receipt reads its own turn once, as the chat panel does over a long session.
+	for (let turn = 0; turn < turns; turn++) turnsSum(live, [`turn-${turn}`], "input");
+	ok(runningSelectionsForTesting(live) <= 65, `${runningSelectionsForTesting(live)} running selections`);
+	// A later batch lands on a turn that left the cache and on one still in it.
+	const later = [
+		...telemetryCall(sessionId, { turnId: "turn-0", usage: { input: 1000, output: 1 }, usd: 0.5 }),
+		...telemetryCall(sessionId, { turnId: `turn-${turns - 1}`, usage: { input: 7, output: 3 }, usd: 0.25 }),
+	];
+	const next = sourceOf([...records, ...later]);
+	continueSource(next, live);
+	const cold = sourceOf([...records, ...later]);
+	for (const turn of ["turn-0", `turn-${turns - 1}`, "turn-80"])
+		for (const metric of ["calls", "input", "output", "usd"] as const)
+			deepStrictEqual(turnsSum(next, [turn], metric), turnsSum(cold, [turn], metric), `${turn} ${metric}`);
 });
 
 test("a session's lifetime tells a clean close, an open owner, an abnormal end and an unprobeable host apart, and why-stopped reads it (#434 §6.1)", () => {
