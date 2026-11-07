@@ -95,13 +95,11 @@ describe("read-only mode", () => {
 		equal(enableClioCompileCache({}), null);
 		ok(!existsSync(join(home, "cache", "v8-compile-cache")));
 		rmSync(join(home, "cache"), { recursive: true, force: true });
-		initializeClioHome();
+		const stateMtime = statSync(join(home, "state")).mtimeMs;
+		equal(initializeClioHome().createdPaths.length, 0);
 		ok(!existsSync(join(home, "cache")), "read-only home setup leaves a home without a cache root as it found it");
-		ok(existsSync(join(home, "state")), "the rest of the home is still set up");
-		// Setup over a home that has its settings and credentials takes no lock file beside them.
-		const configMtime = statSync(join(home, "config")).mtimeMs;
-		initializeClioHome();
-		equal(statSync(join(home, "config")).mtimeMs, configMtime);
+		ok(!existsSync(join(home, "config")), "nor does it scaffold missing settings or credentials");
+		equal(statSync(join(home, "state")).mtimeMs, stateMtime, "nor a missing state subdir or lock file");
 	});
 
 	it("`run --read-only` enables no bytecode cache before the run enters the mode; a plain run still does", () => {

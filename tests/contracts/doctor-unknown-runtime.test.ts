@@ -52,6 +52,35 @@ test("a target on a retired runtime carries the replacement in its provider stat
 	match(status?.reason ?? "", /'lmstudio-native' was removed in 0\.5\.6.*runtime: lmstudio`/u);
 });
 
+test("doctor proposes the provider catalog model and changes it only after confirmation", async (t) => {
+	const home = await isolateClioEnv("clio-doctor-model-repair-");
+	t.after(() => home.restore());
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const file = join(home.dir, "config", "settings.yaml");
+	const original =
+		"version: 2\ntargets:\n  - { id: anthropic, runtime: anthropic }\ncontext:\n  memory:\n    target: anthropic\n    model: claude-haiku-4.5 # keep the note\n";
+	writeFileSync(file, original);
+	const before = await runDoctorModelChecks({ fix: true, confirm: async () => false });
+	match(
+		before.find((row) => row.name === "model anthropic")?.detail ?? "",
+		/Proposed memory.model: 'claude-haiku-4.5' -> 'claude-haiku-4-5'/,
+	);
+	strictEqual(readFileSync(file, "utf8"), original);
+	let asked = 0;
+	const after = await runDoctorModelChecks({
+		fix: true,
+		confirm: async () => {
+			asked++;
+			return true;
+		},
+	});
+	strictEqual(asked, 1);
+	strictEqual(readSettings().context.memory.model, "claude-haiku-4-5");
+	match(readFileSync(file, "utf8"), /# keep the note/);
+	strictEqual(after.find((row) => row.name === "model anthropic")?.level, undefined);
+});
+
+// `run --read-only` enters read-only mode for the rest of this process, so it runs last.
 test("run --agent with an API key names the replacement for a target on a retired runtime", async (t) => {
 	const home = await isolateClioEnv("clio-retired-runtime-run-");
 	const original = process.cwd();
@@ -83,32 +112,4 @@ test("run --agent with an API key names the replacement for a target on a retire
 		process.chdir(original);
 		home.restore();
 	}
-});
-
-test("doctor proposes the provider catalog model and changes it only after confirmation", async (t) => {
-	const home = await isolateClioEnv("clio-doctor-model-repair-");
-	t.after(() => home.restore());
-	mkdirSync(join(home.dir, "config"), { recursive: true });
-	const file = join(home.dir, "config", "settings.yaml");
-	const original =
-		"version: 2\ntargets:\n  - { id: anthropic, runtime: anthropic }\ncontext:\n  memory:\n    target: anthropic\n    model: claude-haiku-4.5 # keep the note\n";
-	writeFileSync(file, original);
-	const before = await runDoctorModelChecks({ fix: true, confirm: async () => false });
-	match(
-		before.find((row) => row.name === "model anthropic")?.detail ?? "",
-		/Proposed memory.model: 'claude-haiku-4.5' -> 'claude-haiku-4-5'/,
-	);
-	strictEqual(readFileSync(file, "utf8"), original);
-	let asked = 0;
-	const after = await runDoctorModelChecks({
-		fix: true,
-		confirm: async () => {
-			asked++;
-			return true;
-		},
-	});
-	strictEqual(asked, 1);
-	strictEqual(readSettings().context.memory.model, "claude-haiku-4-5");
-	match(readFileSync(file, "utf8"), /# keep the note/);
-	strictEqual(after.find((row) => row.name === "model anthropic")?.level, undefined);
 });

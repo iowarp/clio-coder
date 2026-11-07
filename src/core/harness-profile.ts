@@ -11,8 +11,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stateWritesWithheld } from "./home-write-guard.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { clioStateDir, stateRootRemoved } from "./xdg.js";
+import { clioStateDir } from "./xdg.js";
 
 export interface HarnessProfileLesson {
 	shown: number;
@@ -100,7 +101,7 @@ function update(mutate: (profile: HarnessProfile) => void): HarnessProfile {
 	mutate(next);
 	cache = next;
 	cachePath = path;
-	if (stateRootRemoved()) return next;
+	if (stateWritesWithheld()) return next;
 	try {
 		safeResourceWrite(path, `${JSON.stringify(next, null, "\t")}\n`, { encoding: "utf8" });
 	} catch {

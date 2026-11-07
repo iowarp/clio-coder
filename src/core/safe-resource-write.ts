@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { chmod, copyFile, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { assertClioHomeWritable } from "./home-write-guard.js";
 
 export interface SafeResourceBackupOptions {
 	path?: string;
@@ -118,6 +119,7 @@ export function safeResourceWrite(
 	contents: string | Uint8Array,
 	options: SafeResourceWriteOptions = {},
 ): SafeResourceWriteResult {
+	assertClioHomeWritable(targetPath);
 	const dir = path.dirname(targetPath);
 	mkdirSync(dir, { recursive: true });
 	const tempPath = tempPathFor(targetPath);
@@ -193,6 +195,7 @@ export async function safeResourceWriteAsync(
 ): Promise<SafeResourceWriteResult> {
 	const dir = path.dirname(targetPath);
 	const buffer = bufferFrom(contents, options.encoding);
+	assertClioHomeWritable(targetPath);
 	await mkdir(dir, { recursive: true });
 	const tempPath = tempPathFor(targetPath);
 	let mode = options.mode;
@@ -207,6 +210,8 @@ export async function safeResourceWriteAsync(
 	let tempExists = false;
 	let backupPath: string | undefined;
 	try {
+		// Read-only mode may have begun while the stat above was pending.
+		assertClioHomeWritable(targetPath);
 		const fd = await open(tempPath, "wx", mode);
 		tempExists = true;
 		try {

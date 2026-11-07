@@ -8,8 +8,9 @@
  * conversion), so the workspace is left as found too. Doctor, `run --read-only`
  * and a read-only worker promise to change nothing, yet they load skills and
  * probe targets like any other run. In read-only mode they still read that
- * state, and a run still records its own session, but every cache and prior is
- * left as it was found. The writers consult this, so no caller has to know
+ * state, but every cache and prior is left as it was found, and nothing else
+ * is written to the Clio home either: a run keeps its session, run records and
+ * telemetry in memory (`home-write-guard.ts`). The writers consult this, so no caller has to know
  * which of its loads or probes would have written. Each consults it at the
  * write itself, after the last await before it, so work already pending when
  * the mode begins writes nothing either.

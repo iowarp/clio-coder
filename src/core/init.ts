@@ -13,6 +13,7 @@ import {
 } from "../domains/lifecycle/migrations/registry-ids.js";
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
+import { clioHomeWriteRefused } from "./home-write-guard.js";
 import { readClioVersion } from "./package-root.js";
 import { readOnlyProcess } from "./read-only-mode.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
@@ -84,6 +85,20 @@ export function initializeClioHome(): InitReport {
 	assertClioDirLayout(resolved);
 	const preexistingHome = existsSync(resolved.state) || existsSync(resolved.config) || existsSync(resolved.data);
 	const settingsExisted = existsSync(join(resolved.config, "settings.yaml"));
+
+	// Read-only work writes nothing to the operator's home, so it neither creates
+	// a missing root or subdir nor scaffolds a missing file there. Only a private
+	// home a read-only run set up for itself is scaffolded below.
+	if (clioHomeWriteRefused(resolved.state)) {
+		return {
+			configDir: resolved.config,
+			dataDir: resolved.data,
+			stateDir: resolved.state,
+			cacheDir: resolved.cache,
+			createdPaths: [],
+			touchedSettings: false,
+		};
+	}
 
 	const configDir = clioConfigDir();
 	const dataDir = clioDataDir();

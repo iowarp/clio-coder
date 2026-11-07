@@ -10,7 +10,7 @@
  * copied in and read there, settings default in memory when there is none,
  * credentials come from the environment, and the whole private home is removed
  * when the process exits. A home with `state/home.json` was set up, and a
- * read-only run there still records its session where it always did.
+ * read-only run there keeps those records in memory (see home-write-guard.ts).
  *
  * `credentials.yaml` is never copied: a copy would outlive a killed run in the
  * temp dir, and an OAuth refresh inside it would rotate the operator's token

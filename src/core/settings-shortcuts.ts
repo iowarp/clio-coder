@@ -10,8 +10,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stateWritesWithheld } from "./home-write-guard.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { clioStateDir, stateRootRemoved } from "./xdg.js";
+import { clioStateDir } from "./xdg.js";
 
 export interface SettingsShortcuts {
 	/** Pinned row ids in the order they were pinned, oldest first. */
@@ -80,7 +81,7 @@ function commit(update: (base: SettingsShortcuts) => SettingsShortcuts): Setting
 	cache = next;
 	cachePath = path;
 	// A Settings screen outliving `clio-coder uninstall` must not rebuild the state root.
-	if (stateRootRemoved()) return { pinned: [...next.pinned], recent: [...next.recent] };
+	if (stateWritesWithheld()) return { pinned: [...next.pinned], recent: [...next.recent] };
 	try {
 		safeResourceWrite(path, `${JSON.stringify(next, null, "\t")}\n`, { encoding: "utf8" });
 	} catch {
