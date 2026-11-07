@@ -250,6 +250,21 @@
 	color: var(--ink);
 	background: var(--surface-sunken);
 }
+.tool-card__output-head .tool-card__tree-toggle {
+	margin: 0 0 0 auto;
+}
+.tool-card__output-head .tool-card__tree-toggle[aria-pressed="true"] {
+	color: var(--ink);
+	background: var(--surface-sunken);
+}
+.tool-card__output-head .tool-card__tree-toggle + .code-block__copy {
+	margin-left: 0;
+}
+.tool-card__tree {
+	border: 1px solid var(--code-line);
+	border-radius: var(--radius-sm);
+	background: var(--code-surface);
+}
 .tool-card__output[data-source="none"] .tool-card__pre {
 	font-style: italic;
 }

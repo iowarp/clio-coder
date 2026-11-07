@@ -1,14 +1,23 @@
 import { deepEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import type { Tokens } from "marked";
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type HighlightToken, highlightCode } from "../client/render/highlight.js";
+import JsonTree from "../client/render/JsonTree.js";
+import {
+	JSON_TREE_MAX_CHARS,
+	JSON_TREE_PAGE,
+	jsonSummary,
+	parseJsonContainer,
+} from "../client/render/json-tree-model.js";
 import {
 	Blocks,
 	CodeBlock,
 	decodeEntities,
 	MarkdownContent,
 	MermaidBlock,
+	offersJsonTree,
 	PathOpenerContext,
 } from "../client/render/Markdown.js";
 import type { MathToken } from "../client/render/markdown-model.js";
@@ -504,4 +513,43 @@ test("the languages of scientific code reach a grammar, and a batch script's dir
 	]);
 	ok(flat((await highlightCode("find_package(MPI REQUIRED)", "cmake")) ?? []).includes("keyword:find_package"));
 	ok(flat((await highlightCode("12:00:01 ERROR diverged", "log")) ?? []).includes("level error important:ERROR"));
+});
+
+test("long JSON parses into a folded tree that opens its top level and pages long arrays", () => {
+	// Client modules outside the server tsconfig compile with the classic JSX runtime under tsx.
+	(globalThis as { React?: typeof React }).React = React;
+	equal(parseJsonContainer("42"), undefined, "a scalar has nothing to fold");
+	equal(parseJsonContainer("{ not json"), undefined);
+	equal(parseJsonContainer(" ".repeat(JSON_TREE_MAX_CHARS)), undefined);
+	deepEqual(parseJsonContainer('\n {"a": [1]}'), { a: [1] });
+	equal(jsonSummary({ a: 1 }), "{1 key}");
+	equal(jsonSummary([1, 2]), "[2 items]");
+	ok(offersJsonTree(25, 10) && offersJsonTree(1, 5_000) && !offersJsonTree(3, 60));
+
+	const value = {
+		run: "cavity",
+		converged: true,
+		residual: null,
+		mesh: { cells: 4096 },
+		steps: Array.from({ length: 250 }, (_, i) => i),
+	};
+	const html = renderToStaticMarkup(<JsonTree value={value} />);
+	match(
+		html,
+		/<details class="json-tree__branch" open=""><summary><span class="json-tree__count">\{5 keys\}<\/span><\/summary>/u,
+	);
+	match(
+		html,
+		/<span class="json-tree__key">run<\/span><span class="json-tree__colon">: <\/span><span class="json-tree__string">&quot;cavity&quot;<\/span>/u,
+	);
+	match(html, /<span class="json-tree__null">null<\/span>/u);
+	// Nested levels start folded and render no children until opened.
+	match(
+		html,
+		/<details class="json-tree__branch"><summary><span class="json-tree__key">steps<\/span><span class="json-tree__colon">: <\/span><span class="json-tree__count">\[250 items\]<\/span><\/summary><\/details>/u,
+	);
+	ok(!html.includes("json-tree__more"));
+	const list = renderToStaticMarkup(<JsonTree value={Array.from({ length: 250 }, (_, i) => i)} />);
+	equal((list.match(/class="json-tree__leaf"/gu) ?? []).length, JSON_TREE_PAGE);
+	match(list, /Show 100 more of 150/u);
 });

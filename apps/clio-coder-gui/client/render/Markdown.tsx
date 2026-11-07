@@ -24,6 +24,7 @@ const {
 } = React;
 
 import { type HighlightToken, highlightCode } from "./highlight.js";
+import { type JsonContainer, parseJsonContainer } from "./json-tree-model.js";
 import {
 	codeLanguage,
 	type DiffLineKind,
@@ -45,6 +46,21 @@ import {
 import { type MermaidResult, mermaidThemeKey, renderMermaid, subscribeMermaidTheme } from "./mermaid.js";
 
 const MathContent = React.lazy(() => import("./MathContent.js"));
+const JsonTree = React.lazy(() => import("./JsonTree.js"));
+
+/** A folded view of parsed JSON, loaded on first use; until then the text it came from stands in. */
+export function JsonTreeView({ value, fallback }: { value: JsonContainer; fallback: ReactNode }) {
+	return (
+		<React.Suspense fallback={fallback}>
+			<JsonTree value={value} />
+		</React.Suspense>
+	);
+}
+
+/** Long JSON offers the tree; a short object reads fine as text. */
+export function offersJsonTree(lineCount: number, chars: number): boolean {
+	return lineCount > CODE_VISIBLE_LINES || chars > 2_000;
+}
 
 function MathTokenContent({ token }: { token: MathToken }) {
 	return (
@@ -328,6 +344,16 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 	const [expanded, setExpanded] = useState(false);
 	const foldable = settled && lineCount > CODE_VISIBLE_LINES;
 	const open = foldable && expanded;
+	// Parsed only once the block is settled and in view, and only when a tree would help.
+	const json = useMemo(
+		() =>
+			settled && near && grammar === "json" && offersJsonTree(lineCount, code.length)
+				? parseJsonContainer(code)
+				: undefined,
+		[settled, near, grammar, lineCount, code],
+	);
+	const [tree, setTree] = useState(false);
+	const showTree = tree && json !== undefined;
 	const fold = () => {
 		setExpanded(false);
 		container.current?.scrollIntoView({ block: "nearest" });
@@ -348,7 +374,18 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 						Collapse
 					</button>
 				) : null}
-				{wrappable ? (
+				{json === undefined ? null : (
+					<button
+						type="button"
+						className="code-block__copy"
+						aria-pressed={tree}
+						title="Show the JSON as a tree of folded objects and arrays"
+						onClick={() => setTree((current) => !current)}
+					>
+						Tree
+					</button>
+				)}
+				{wrappable && !showTree ? (
 					<button
 						type="button"
 						className="code-block__copy"
@@ -361,13 +398,17 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 				) : null}
 				<CopyButton text={code} />
 			</div>
-			<CodeViewport>
-				<code className={grammar === null ? undefined : `language-${grammar}`}>
-					{grammar === "diff" ? <DiffLines code={code} /> : tokens === null ? code : <HighlightedCode tokens={tokens} />}
-					{settled ? null : <span className="code-block__cursor" aria-hidden="true" />}
-				</code>
-			</CodeViewport>
-			{foldable ? (
+			{showTree ? (
+				<JsonTreeView value={json} fallback={<CodeViewport>{code}</CodeViewport>} />
+			) : (
+				<CodeViewport>
+					<code className={grammar === null ? undefined : `language-${grammar}`}>
+						{grammar === "diff" ? <DiffLines code={code} /> : tokens === null ? code : <HighlightedCode tokens={tokens} />}
+						{settled ? null : <span className="code-block__cursor" aria-hidden="true" />}
+					</code>
+				</CodeViewport>
+			)}
+			{foldable && !showTree ? (
 				<button
 					type="button"
 					className="code-block__fold"

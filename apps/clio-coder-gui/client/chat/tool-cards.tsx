@@ -27,7 +27,8 @@ import { memo, useMemo, useState } from "react";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { type AnsiSpan, parseAnsi } from "../render/ansi.js";
-import { CopyButton } from "../render/Markdown.js";
+import { parseJsonContainer } from "../render/json-tree-model.js";
+import { CopyButton, JsonTreeView, offersJsonTree } from "../render/Markdown.js";
 import { statusGlyph } from "./activity.js";
 import { ELAPSED_TITLE } from "./chat-turn.js";
 import { DiffView } from "./Diff.js";
@@ -114,6 +115,12 @@ function OutputBlock({ pane }: { pane: OutputPane }) {
 	// Offered once the output is final, so a running command's well does not change height under it.
 	const lines = pane.source === "final" && pane.text ? lineCountOf(pane.text) : 0;
 	const foldable = lines > OUTPUT_VISIBLE_LINES;
+	const json = useMemo(
+		() => (lines > 0 && offersJsonTree(lines, pane.text.length) ? parseJsonContainer(pane.text) : undefined),
+		[lines, pane.text],
+	);
+	const [tree, setTree] = useState(false);
+	const showTree = tree && json !== undefined;
 	return (
 		<div
 			className="tool-card__output"
@@ -126,10 +133,26 @@ function OutputBlock({ pane }: { pane: OutputPane }) {
 					{pane.source === "partial" ? "Output so far" : pane.running ? "Waiting for output" : "Output"}
 				</span>
 				{pane.truncated ? <span className="tool-card__output-cap">Output may be shortened</span> : null}
+				{json === undefined ? null : (
+					<button
+						type="button"
+						className="tool-card__fold tool-card__tree-toggle"
+						aria-pressed={tree}
+						title="Show the JSON as a tree of folded objects and arrays"
+						onClick={() => setTree((current) => !current)}
+					>
+						Tree
+					</button>
+				)}
 				{pane.text ? <CopyButton text={pane.text} label="Copy output" /> : null}
 			</div>
+			{showTree ? (
+				<div className="tool-card__tree">
+					<JsonTreeView value={json} fallback={null} />
+				</div>
+			) : null}
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A long output scrolls inside its own bounded well, so the keyboard must be able to focus it to scroll. */}
-			<pre className="tool-card__pre" tabIndex={0}>
+			<pre className="tool-card__pre" tabIndex={0} hidden={showTree}>
 				{pane.source === "none"
 					? (pane.placeholder ?? "")
 					: spans === null
@@ -146,7 +169,7 @@ function OutputBlock({ pane }: { pane: OutputPane }) {
 								);
 							})}
 			</pre>
-			{foldable ? (
+			{foldable && !showTree ? (
 				<button
 					type="button"
 					className="tool-card__fold"

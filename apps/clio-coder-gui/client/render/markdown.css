@@ -565,3 +565,55 @@
 		display: inline;
 	}
 }
+/* A folded JSON value inside a code well or a tool's output: mono, one row per key, and the guide line
+   of each open level drawn once on its left edge. */
+.json-tree {
+	max-height: 520px;
+	padding: var(--space-3) var(--space-4) var(--space-4);
+	overflow: auto;
+	color: var(--code-ink);
+	font: var(--text-exact) / 1.7 var(--font-mono);
+}
+.json-tree__branch > summary {
+	cursor: pointer;
+	white-space: nowrap;
+}
+.json-tree__children {
+	margin-left: 0.45em;
+	padding-left: 1.1em;
+	border-left: 1px solid var(--code-line);
+}
+.json-tree__leaf {
+	padding-left: 1.05em;
+	white-space: pre;
+}
+.json-tree__key {
+	color: var(--syntax-property);
+}
+.json-tree__colon,
+.json-tree__count {
+	color: var(--code-ink-muted);
+}
+.json-tree__string {
+	color: var(--syntax-string);
+}
+.json-tree__number,
+.json-tree__boolean {
+	color: var(--syntax-number);
+}
+.json-tree__null {
+	color: var(--syntax-keyword);
+}
+.json-tree__more {
+	min-height: 28px;
+	margin-left: 1.05em;
+	padding: 2px var(--space-2);
+	border: 1px solid var(--code-line);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--code-ink-muted);
+	font: var(--text-meta) / 1.4 var(--font-ui);
+}
+.json-tree__more:hover {
+	color: var(--code-ink);
+}
