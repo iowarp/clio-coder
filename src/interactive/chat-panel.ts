@@ -386,6 +386,8 @@ type ToolSegment = {
 	judging?: boolean | undefined;
 	/** Live, redacted approval facts. Never reconstructed during replay. */
 	approvalView?: ApprovalRequestView | undefined;
+	/** The call's card is on the dock, which shows its facts; the row keeps only its head. */
+	approvalDocked?: true | undefined;
 	/** The axis an operator grant answered, kept past settlement (BT-003). Live only, like `approvalView`. */
 	operatorGrant?: string | undefined;
 	settlement?: "blocked" | "aborted" | "orphaned" | undefined;
@@ -1775,7 +1777,11 @@ function renderToolSegmentLines(
 		phase: seg.executionStarted ? ("running" as const) : seg.argsComplete ? ("ready" as const) : ("forming" as const),
 	};
 	if (!seg.finished && seg.awaitingApproval)
-		return renderToolAwaitingApproval(call, width, detail.style === "compact" ? undefined : seg.approvalView);
+		return renderToolAwaitingApproval(
+			call,
+			width,
+			detail.style === "compact" || seg.approvalDocked === true ? undefined : seg.approvalView,
+		);
 	if (!seg.finished && seg.judging === true) return renderToolAwaitingJudge(call, width);
 	const finished = {
 		...call,
@@ -2520,6 +2526,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		seg.previewDiff = undefined;
 		seg.awaitingApproval = undefined;
 		seg.approvalView = undefined;
+		seg.approvalDocked = undefined;
 		seg.judging = undefined;
 	};
 
@@ -3756,6 +3763,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.awaitingApproval = event.state === "awaiting-approval" ? true : undefined;
 					tool.judging = event.state === "judging" ? true : undefined;
 					tool.approvalView = event.state === "awaiting-approval" ? event.view : undefined;
+					tool.approvalDocked = event.state === "awaiting-approval" && event.docked === true ? true : undefined;
 					markDirty();
 				}
 				return;
@@ -3842,6 +3850,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					tool.previewDiff = undefined;
 					tool.awaitingApproval = undefined;
 					tool.approvalView = undefined;
+					tool.approvalDocked = undefined;
 					tool.judging = undefined;
 				}
 				markDirty();

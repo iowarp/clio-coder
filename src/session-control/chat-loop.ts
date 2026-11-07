@@ -350,6 +350,11 @@ export type ToolApprovalStateEvent =
 			 * from raw tool arguments.
 			 */
 			view: ApprovalRequestView;
+			/**
+			 * The card for this call is on the dock, so the transcript row keeps
+			 * only its head: the dock already shows the target and the reason.
+			 */
+			docked?: boolean;
 	  }
 	| {
 			type: "tool_approval_state";

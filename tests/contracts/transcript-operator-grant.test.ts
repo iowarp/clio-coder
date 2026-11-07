@@ -74,3 +74,28 @@ test("compact never folds an allowed call into its neighbors", () => {
 	match(rendered, /› allowed by you/u, rendered);
 	match(rendered, /\/etc\/passwd/u, rendered);
 });
+
+test("a parked row drops the facts its docked card already shows, and keeps them once the card leaves", () => {
+	const panel = createChatPanel({ getOutputStyle: () => "standard", now: () => 1_000 });
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "bash-1",
+		toolName: "bash",
+		args: ARGS,
+	} as ChatLoopEvent);
+	const park = (docked: boolean): string => {
+		panel.applyEvent({
+			type: "tool_approval_state",
+			toolCallId: "bash-1",
+			state: "awaiting-approval",
+			view: VIEW,
+			...(docked ? { docked } : {}),
+		});
+		return panel.render(100).map(stripTerminalSequences).join("\n");
+	};
+	match(park(false), /held this call for you/u);
+	const docked = park(true);
+	match(docked, /git restore \.` ⏸ awaiting approval/u);
+	doesNotMatch(docked, /held this call for you/u);
+	match(park(false), /held this call for you/u);
+});

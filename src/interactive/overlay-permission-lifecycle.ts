@@ -281,7 +281,12 @@ function gateAdvisory(reason: string, build: string | undefined): PermissionAdvi
 }
 
 export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycleDeps): OverlayPermissionLifecycle {
-	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
+	let pendingPermission: {
+		call: ClassifierCall;
+		decision: SafetyDecision;
+		meta?: PermissionRequiredMeta;
+		view: ApprovalRequestView;
+	} | null = null;
 	let pendingWorker: WorkerEscalationEntry | null = null;
 	const workerQueue: WorkerEscalationEntry[] = [];
 	const announcedRequestIds = new Set<string>();
@@ -569,7 +574,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				return;
 			}
 			if (markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) deps.onOperatorParked?.();
-			pendingPermission = { call, decision, meta };
+			if (meta.toolCallId !== undefined) {
+				deps.applyApprovalState({
+					type: "tool_approval_state",
+					toolCallId: meta.toolCallId,
+					state: "awaiting-approval",
+					view,
+					docked: true,
+				});
+			}
+			pendingPermission = { call, decision, meta, view };
 			pendingWorker = null;
 			confirmed = false;
 			denied = false;
@@ -623,6 +637,15 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		// Closing a modal is not an operator decision. Re-present the parked
 		// request when another lifecycle closes its screen without an answer.
 		if (!wasConfirmed && !wasDenied && !stopping && wasTimedOut === null) {
+			// The card left the dock unanswered, so the row carries its facts again until it returns.
+			if (permission?.meta?.toolCallId !== undefined) {
+				deps.applyApprovalState({
+					type: "tool_approval_state",
+					toolCallId: permission.meta.toolCallId,
+					state: "awaiting-approval",
+					view: permission.view,
+				});
+			}
 			if (worker) workerQueue.unshift(worker);
 			retryPending();
 			return;
