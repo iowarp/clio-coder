@@ -337,9 +337,15 @@ function verifiersInspectSnapshot(
 	};
 }
 
+const INSPECT_USAGE = "usage: clio-coder verifiers inspect --json\n";
+
 export function runVerifiersInspect(args: ReadonlyArray<string>): number {
+	if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+		process.stdout.write(INSPECT_USAGE);
+		return 0;
+	}
 	if (args.length !== 1 || args[0] !== "--json") {
-		process.stderr.write("clio-coder verifiers inspect: usage: clio-coder verifiers inspect --json\n");
+		process.stderr.write(`clio-coder verifiers inspect: ${INSPECT_USAGE}`);
 		return 2;
 	}
 	process.stdout.write(`${JSON.stringify(verifiersInspectSnapshot(), null, 2)}\n`);
