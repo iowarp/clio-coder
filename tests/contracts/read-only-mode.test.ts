@@ -11,7 +11,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -151,6 +151,52 @@ describe("read-only mode", () => {
 		const plain = await run(["Say done."]);
 		equal(plain.code, 0, plain.stderr);
 		ok(existsSync(join(freshHome, "state", "home.json")));
+	});
+
+	it("a private home copies no credentials, is removed when a signal kills its process, and sweeps a dead owner's", {
+		timeout: 60_000,
+	}, async (t) => {
+		const signalHome = join(freshRoot, "signal-home");
+		mkdirSync(join(signalHome, "config"), { recursive: true });
+		writeFileSync(join(signalHome, "config", "settings.yaml"), DEFAULT_SETTINGS_YAML);
+		writeFileSync(join(signalHome, "config", "credentials.yaml"), "local:\n  apiKey: secret\n", { mode: 0o600 });
+		const runTmp = join(freshRoot, "signal-tmp");
+		const plant = (name: string, owner: object | null): string => {
+			const dir = join(runTmp, name);
+			mkdirSync(join(dir, "config"), { recursive: true });
+			if (owner) writeFileSync(join(dir, "read-only-owner.json"), JSON.stringify(owner));
+			return dir;
+		};
+		const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+		const orphan = plant("clio-coder-read-only-orphan", { host: hostname(), pid: deadPid, birthToken: null });
+		const live = plant("clio-coder-read-only-live", { host: hostname(), pid: process.pid, birthToken: null });
+		const unmarked = plant("clio-coder-read-only-unmarked", null);
+
+		const module = new URL("../../src/core/read-only-home.ts", import.meta.url).href;
+		const script = `const { enterPrivateHomeIfNeverSetUp } = await import(${JSON.stringify(module)});
+process.stdout.write(enterPrivateHomeIfNeverSetUp() + "\\n");
+setInterval(() => {}, 1000);`;
+		const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", script], {
+			env: { ...process.env, ...scratchClioEnvVars(signalHome), HOME: signalHome, TMPDIR: runTmp },
+			stdio: ["ignore", "pipe", "inherit"],
+		});
+		t.after(() => child.kill("SIGKILL"));
+		const closed = new Promise<NodeJS.Signals | null>((resolve) => child.on("close", (_code, signal) => resolve(signal)));
+		const root = await new Promise<string>((resolve) => {
+			let out = "";
+			child.stdout.on("data", (chunk) => {
+				out += String(chunk);
+				if (out.includes("\n")) resolve(out.trim());
+			});
+		});
+		ok(root.startsWith(join(runTmp, "clio-coder-read-only-")), root);
+		ok(existsSync(join(root, "config", "settings.yaml")), "settings are copied");
+		ok(!existsSync(join(root, "config", "credentials.yaml")), "credentials are not copied");
+		ok(!existsSync(orphan), "a private home whose owner is dead is swept");
+		ok(existsSync(live) && existsSync(unmarked), "a live owner's home and one without an owner record stay");
+		child.kill("SIGTERM");
+		equal(await closed, "SIGTERM", "the process still dies of the signal");
+		ok(!existsSync(root), "the private home is removed before it dies");
 	});
 
 	it("`run --read-only` on a set-up home leaves its record, offloads and sweep alone, and refuses pending migrations", {
