@@ -311,6 +311,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	let stopped = false;
 	let subscription: MuxSubscription | null = null;
 	const paneGoneHandlers = new Set<(record: MuxPaneRecord) => void>();
+	const failedUtilityPanes = new Set<string>();
 
 	const degrade = (what: string, error: unknown): void => {
 		const message = error instanceof Error ? error.message : String(error);
@@ -407,6 +408,7 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return;
 		}
 		docks?.notePaneGone(event.paneId);
+		failedUtilityPanes.delete(event.paneId);
 		const dropped = registry.forget(event.paneId);
 		if (dropped) {
 			log("debug", `mux pane ${event.paneId} left on ${event.kind}; dropped from the registry`);
@@ -443,6 +445,10 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			return await attempt(
 				"openUtilityPane",
 				async (live) => {
+					for (const paneId of failedUtilityPanes) {
+						await live.paneClose(paneId);
+						failedUtilityPanes.delete(paneId);
+					}
 					// herdr's pane shell on Windows is PowerShell, which has no `exec`;
 					// the command rides in the new pane's environment instead.
 					const win32Launch = process.platform === "win32" ? win32PaneLaunch(request.argv, request.stdoutPath) : null;
@@ -479,42 +485,55 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 							...(request.dockKey === undefined ? {} : { dockKey: request.dockKey }),
 						}),
 					);
-					const title = request.title;
-					const titleSupported = title !== undefined && muxSupportsMethod(detection.server, "pane.rename");
-					if (titleSupported) {
-						try {
-							await live.paneRename(ref.paneId, title);
-						} catch {
-							// Presentation is optional. A server that advertises the floor but
-							// lacks or refuses rename must not strand an otherwise healthy pane.
+					try {
+						const title = request.title;
+						const titleSupported = title !== undefined && muxSupportsMethod(detection.server, "pane.rename");
+						if (titleSupported) {
+							try {
+								await live.paneRename(ref.paneId, title);
+							} catch {
+								// Presentation is optional. A server that advertises the floor but
+								// lacks or refuses rename must not strand an otherwise healthy pane.
+							}
 						}
+						// The `role` token is what adoptPane finds again after a restart.
+						await tagOwner(
+							live,
+							ref.paneId,
+							{
+								role: token(purpose),
+								...(request.dockKey === undefined ? {} : { dock_key: token(request.dockKey) }),
+								// The pid lets a later session tell a parked orphan from a live session's dock.
+								...(request.dock ? { dock: token(request.dock.slot), pid: token(String(process.pid)) } : {}),
+							},
+							titleSupported ? title : undefined,
+						);
+						if (win32Launch) {
+							// PowerShell submits a line on carriage return; a line feed only
+							// opens a continuation prompt.
+							await live.paneSendText(ref.paneId, `${win32Launch.line}\r`);
+						} else if (request.argv.length > 0) {
+							// herdr has no argv parameter on pane.split, so the command goes in
+							// through the pane's shell. `exec` replaces the shell so the pane
+							// exits with the program and emits pane.exited for reconciliation.
+							// The leading space keeps the line out of the operator's shell history
+							// under fish, and under bash and zsh with ignorespace.
+							const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
+							await live.paneSendText(ref.paneId, ` exec ${shellQuote(request.argv)}${redirect}\n`);
+						}
+						return ref;
+					} catch (error) {
+						try {
+							await live.paneClose(ref.paneId);
+						} catch (cleanupError) {
+							// Retry rollback on the next open or shutdown, never publish a failed pane as ready.
+							failedUtilityPanes.add(ref.paneId);
+							log("debug", `mux utility rollback failed: ${String(cleanupError)}`);
+						}
+						registry.forget(ref.paneId);
+						docks?.notePaneGone(ref.paneId);
+						throw error;
 					}
-					// The `role` token is what adoptPane finds again after a restart.
-					await tagOwner(
-						live,
-						ref.paneId,
-						{
-							role: token(purpose),
-							...(request.dockKey === undefined ? {} : { dock_key: token(request.dockKey) }),
-							// The pid lets a later session tell a parked orphan from a live session's dock.
-							...(request.dock ? { dock: token(request.dock.slot), pid: token(String(process.pid)) } : {}),
-						},
-						titleSupported ? title : undefined,
-					);
-					if (win32Launch) {
-						// PowerShell submits a line on carriage return; a line feed only
-						// opens a continuation prompt.
-						await live.paneSendText(ref.paneId, `${win32Launch.line}\r`);
-					} else if (request.argv.length > 0) {
-						// herdr has no argv parameter on pane.split, so the command goes in
-						// through the pane's shell. `exec` replaces the shell so the pane
-						// exits with the program and emits pane.exited for reconciliation.
-						// The leading space keeps the line out of the operator's shell history
-						// under fish, and under bash and zsh with ignorespace.
-						const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
-						await live.paneSendText(ref.paneId, ` exec ${shellQuote(request.argv)}${redirect}\n`);
-					}
-					return ref;
 				},
 				null,
 				(error) => report(failureFrom(error)),
@@ -912,12 +931,13 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			// with it. A crash never reaches this method, which is exactly what
 			// leaves dock panes behind for the next session's adoption path.
 			// Unmanaged utility panes are the operator's and stay open.
-			if (client && docks) {
-				for (const paneId of docks.paneIds()) {
+			if (client) {
+				for (const paneId of new Set([...failedUtilityPanes, ...(docks?.paneIds() ?? [])])) {
 					await client.paneClose(paneId).catch(() => undefined);
 					registry.forget(paneId);
 				}
-				docks.clear();
+				failedUtilityPanes.clear();
+				docks?.clear();
 			}
 			if (client) await client.close().catch(() => undefined);
 		},

@@ -77,6 +77,54 @@ function fixture() {
 	};
 }
 
+for (const stage of ["paneReportMetadata", "paneSendText"] as const) {
+	it(`rolls back a newly allocated dock when ${stage} fails and permits a retry`, async () => {
+		const f = fixture();
+		let reject = true;
+		f.client[stage] = async () => {
+			if (reject) throw new Error("initialization failed");
+			if (stage === "paneSendText") f.calls.push("send");
+		};
+		const controller = f.watch();
+		try {
+			strictEqual((await controller.watch("first")).status, "unavailable");
+			deepStrictEqual(f.runtime.contract.list(), []);
+			deepStrictEqual(f.runtime.contract.docks(), []);
+			deepStrictEqual(f.calls, ["split", "close"]);
+			reject = false;
+			strictEqual((await controller.watch("second")).status, "watching");
+			deepStrictEqual(f.calls, ["split", "close", "split", "send"]);
+		} finally {
+			controller.dispose();
+		}
+	});
+}
+
+it("retries a failed utility rollback before allocating another dock", async () => {
+	const f = fixture();
+	f.client.paneReportMetadata = async () => {
+		throw new Error("metadata failed");
+	};
+	f.client.paneClose = async () => {
+		f.calls.push("close-failed");
+		throw new Error("close failed");
+	};
+	const controller = f.watch();
+	try {
+		strictEqual((await controller.watch("first")).status, "unavailable");
+		deepStrictEqual(f.runtime.contract.list(), []);
+		deepStrictEqual(f.runtime.contract.docks(), []);
+		f.client.paneReportMetadata = async () => undefined;
+		f.client.paneClose = async () => {
+			f.calls.push("close");
+		};
+		strictEqual((await controller.watch("second")).status, "watching");
+		deepStrictEqual(f.calls, ["split", "close-failed", "close", "split", "send"]);
+	} finally {
+		controller.dispose();
+	}
+});
+
 for (const [name, error, reason] of [
 	[
 		"structured error",
