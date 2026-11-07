@@ -31,6 +31,7 @@ const workspaceId = (path: string) => createHash("sha256").update(path).digest("
 export class WorkspaceService {
 	private picking = false;
 	private host: PathHost | null = null;
+	private listing: Promise<Workspace[]> | undefined;
 	constructor(
 		private readonly files: AppFiles,
 		private readonly ledger?: WorkerHost,
@@ -103,6 +104,15 @@ export class WorkspaceService {
 		}));
 	}
 	async list(): Promise<Workspace[]> {
+		const read = this.listing ?? this.readList();
+		this.listing = read;
+		try {
+			return structuredClone(await read);
+		} finally {
+			if (this.listing === read) this.listing = undefined;
+		}
+	}
+	private async readList(): Promise<Workspace[]> {
 		const value = await this.files.read("workspaces");
 		if (!Value.Check(Workspaces, value)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
 		const merged = new Map<string, Workspace>();
@@ -156,9 +166,11 @@ export class WorkspaceService {
 			name: basename(canonical) || canonical,
 			openedAt: new Date().toISOString(),
 		};
-		return this.files.update("workspaces", (current) => {
+		const opened = await this.files.update("workspaces", (current) => {
 			if (!Value.Check(Workspaces, current)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
 			return { value: [row, ...current.filter((item) => item.id !== row.id)].slice(0, RECENT_LIMIT), result: row };
 		});
+		this.listing = undefined;
+		return opened;
 	}
 }
