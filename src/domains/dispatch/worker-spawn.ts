@@ -183,7 +183,8 @@ export interface WorkerProcessOptions {
 	onAnnounce?: (attestation: WorkerAttestation) => void;
 	/**
 	 * Invoked when abort escalates from SIGTERM to SIGKILL after the grace
-	 * window. Remote transports hook their remote kill fallback here.
+	 * window. This observes local escalation; remote cancellation owns its
+	 * cleanup independently of whether that escalation was needed.
 	 */
 	onForcedKill?: () => void;
 	/**
@@ -278,6 +279,7 @@ interface LineReader {
 	heldBytes(): number;
 	/** An unterminated line is pending, which a closed pipe leaves truncated. */
 	truncated(): boolean;
+	takeRemainder(): string | null;
 }
 
 /**
@@ -371,6 +373,13 @@ function createLineReader(
 		},
 		heldBytes: () => heldLength + pieceBytes,
 		truncated: () => pieceBytes > 0 || discarding,
+		takeRemainder(): string | null {
+			const remainder = discarding || pieceBytes === 0 ? null : Buffer.concat(pieces).toString("utf8");
+			pieces = [];
+			pieceBytes = 0;
+			discarding = false;
+			return remainder;
+		},
 	};
 }
 
@@ -776,6 +785,7 @@ function attachWorkerChannel(
 		});
 	}
 
+	let flushStderr = (): void => {};
 	if (child.stderr) {
 		const stderrReader = createLineReader(
 			WORKER_BULK_FRAME_MAX_BYTES,
@@ -796,6 +806,12 @@ function attachWorkerChannel(
 			() => appendStderr("[worker] dropped an oversized stderr line\n"),
 		);
 		child.stderr.on("data", (chunk: Buffer) => stderrReader.write(chunk));
+		flushStderr = (): void => {
+			const remainder = stderrReader.takeRemainder();
+			// EOF completes ordinary diagnostics, never the control protocol.
+			if (remainder !== null && !isControlLine(remainder)) appendStderr(remainder);
+		};
+		child.stderr.once("end", flushStderr);
 	}
 
 	const events: AsyncIterableIterator<unknown> = {
@@ -888,6 +904,7 @@ function attachWorkerChannel(
 			malformedStdoutLines += 1;
 			markEvidenceIncomplete("the final bulk frame was truncated");
 		}
+		flushStderr();
 		settled = true;
 		if (drainTimer !== null) clearTimeout(drainTimer);
 		if (attestationGraceTimer !== null) clearTimeout(attestationGraceTimer);
@@ -1140,7 +1157,9 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
 	const { workerEntryPath: _entryPath, ...processOptions } = opts ?? {};
 	return spawnWorkerProcess(process.execPath, [workerEntry], spec, {
 		...processOptions,
-		env: withCompileCacheEnvironment(opts?.env ?? process.env),
+		env: spec.readOnly
+			? { ...(opts?.env ?? process.env), NODE_DISABLE_COMPILE_CACHE: "1" }
+			: withCompileCacheEnvironment(opts?.env ?? process.env),
 	});
 }
 

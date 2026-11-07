@@ -21,9 +21,9 @@
  *     announced, so no remote process is stranded.
  */
 
-import { spawn } from "node:child_process";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import { readOnlyProcess } from "../../core/read-only-mode.js";
+import { runCommandVector } from "../../core/safe-exec.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { RunNodeIdentity } from "./types.js";
@@ -100,7 +100,7 @@ const DEFAULT_REMOTE_CLIO_ENTRY = "clio-coder worker";
  * localhost-served model plane is per-node by construction) and any
  * orchestrator-supplied credential.
  */
-function remoteEnvAssignments(node: SshNodeEndpoint): string {
+function remoteEnvAssignments(node: SshNodeEndpoint, readOnly: boolean): string {
 	// `$$` is the login shell's pid, and it leads the process group the remote
 	// command runs in. `exec` replaces that shell in place, so the worker
 	// inherits both the pid and the group leadership, and the value it announces
@@ -110,7 +110,7 @@ function remoteEnvAssignments(node: SshNodeEndpoint): string {
 	// A read-only process writes nothing to Clio's home, and neither do its
 	// workers. The remote entry enables its bytecode cache before the spec on
 	// stdin can say the run is read-only, so Node's own switch says it first.
-	const compileCacheAssignment = readOnlyProcess() ? " NODE_DISABLE_COMPILE_CACHE=1" : "";
+	const compileCacheAssignment = readOnly || readOnlyProcess() ? " NODE_DISABLE_COMPILE_CACHE=1" : "";
 	return `AI_AGENT=${AI_AGENT_NAME} CLIO_CODER_WORKER_PGID=$$${labelAssignment}${compileCacheAssignment}`;
 }
 
@@ -136,12 +136,12 @@ function workerSpecForSshNode(node: SshNodeEndpoint, spec: WorkerSpec): WorkerSp
 	};
 }
 
-function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string): string {
+function buildRemoteWorkerCommand(node: SshNodeEndpoint, cwd: string, readOnly: boolean): string {
 	const entry =
 		node.clioCoderEntry !== undefined && node.clioCoderEntry.trim().length > 0
 			? node.clioCoderEntry.trim()
 			: DEFAULT_REMOTE_CLIO_ENTRY;
-	return `cd ${shellQuote(cwd)} && exec env ${remoteEnvAssignments(node)} ${entry}`;
+	return `cd ${shellQuote(cwd)} && exec env ${remoteEnvAssignments(node, readOnly)} ${entry}`;
 }
 
 export function buildSshArgs(node: SshNodeEndpoint, remoteCommand: string): string[] {
@@ -171,39 +171,47 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 		spawn(spec, spawnOpts) {
 			const cwd = spawnOpts?.cwd ?? process.cwd();
 			const remote: { pid: number | null; processGroupId: number | null } = { pid: null, processGroupId: null };
+			let remoteCleanup: Promise<string | null> | null = null;
+			let cancellationRequested = false;
+			let settled = false;
 			const killRemote = (): void => {
+				if (settled || remoteCleanup !== null) return;
+				cancellationRequested = true;
 				// The negative pid targets the whole remote process group, so a
 				// runtime's own children go with it. Without an announced group the
 				// single pid is the most the orchestrator can prove it may signal.
 				const group = remote.processGroupId;
-				const command =
-					group !== null
-						? `kill -TERM -${group} 2>/dev/null || kill -TERM ${remote.pid ?? group} 2>/dev/null || true`
-						: remote.pid !== null
-							? `kill -TERM ${remote.pid} 2>/dev/null || true`
-							: null;
-				if (command === null) return;
-				// Best-effort second channel: the primary signal is the channel
-				// close (the worker's parent monitor aborts and exits on stdin
-				// EOF); this covers a worker that stopped reading its stdin.
-				try {
-					const fallback = spawn(sshBinary, buildSshArgs(node, command), {
-						stdio: "ignore",
-						detached: true,
-					});
-					fallback.unref();
-				} catch {
-					// the channel-close path remains the primary termination signal
-				}
+				const target = group !== null ? -group : remote.pid !== null ? remote.pid : null;
+				if (target === null) return;
+				// A closed SSH client says nothing about the remote group. Give the
+				// remote owner one bounded TERM/KILL window, then release its identity.
+				const command = [
+					`kill -0 ${target} 2>/dev/null || exit 0`,
+					`kill -TERM ${target} 2>/dev/null || exit 1`,
+					`for attempt in 1 2 3; do kill -0 ${target} 2>/dev/null || exit 0; sleep 1; done`,
+					`kill -KILL ${target} 2>/dev/null || { kill -0 ${target} 2>/dev/null && exit 1; exit 0; }`,
+					`sleep 1; kill -0 ${target} 2>/dev/null && exit 1; exit 0`,
+				].join("; ");
+				remoteCleanup = runCommandVector(sshBinary, buildSshArgs(node, command), {
+					timeoutMs: 15_000,
+					maxOutputBytes: 4096,
+					killGraceMs: 200,
+				}).then(
+					(result) =>
+						result.exitCode === 0 && !result.timedOut && !result.cleanupIncomplete
+							? null
+							: "remote worker cleanup could not be completed",
+					() => "remote worker cleanup channel could not be started",
+				);
 			};
 			// The remote command cds itself, so cwd is consumed here and never
 			// applied to the local ssh client. The announce and forced-kill hooks
 			// are the transport's own and compose with the caller's rather than
 			// replacing them; every other option is forwarded as handed.
-			const { cwd: _consumedCwd, onAnnounce, onForcedKill, ...forwarded } = spawnOpts ?? {};
-			return spawnWorkerProcess(
+			const { cwd: _consumedCwd, onAnnounce, onForcedKill, onChannelFailure, ...forwarded } = spawnOpts ?? {};
+			const worker = spawnWorkerProcess(
 				sshBinary,
-				buildSshArgs(node, buildRemoteWorkerCommand(node, cwd)),
+				buildSshArgs(node, buildRemoteWorkerCommand(node, cwd, spec.readOnly === true)),
 				workerSpecForSshNode(node, spec),
 				{
 					...(opts?.shutdownGraceMs !== undefined ? { shutdownGraceMs: opts.shutdownGraceMs } : {}),
@@ -212,14 +220,37 @@ export function createSshWorkerTransport(node: SshNodeEndpoint, opts?: SshTransp
 					onAnnounce: (attestation) => {
 						remote.pid = attestation.pid;
 						remote.processGroupId = attestation.processGroupId;
+						if (cancellationRequested) killRemote();
 						onAnnounce?.(attestation);
 					},
 					onForcedKill: () => {
 						killRemote();
 						onForcedKill?.();
 					},
+					onChannelFailure: (fact) => {
+						if (!fact.afterExit) killRemote();
+						onChannelFailure?.(fact);
+					},
 				},
 			);
+			return {
+				...worker,
+				abort() {
+					if (settled) return;
+					killRemote();
+					worker.abort();
+				},
+				promise: worker.promise.then(async (result) => {
+					settled = true;
+					const failure = await remoteCleanup;
+					if (!failure) return result;
+					return {
+						...result,
+						exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+						stderrTail: `${result.stderrTail ?? ""}\n[worker] ${failure}`,
+					};
+				}),
+			};
 		},
 	};
 }

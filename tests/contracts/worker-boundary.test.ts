@@ -1,7 +1,16 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -11,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { initializeClioHome } from "../../src/core/init.js";
+import { shellQuote } from "../../src/core/shell-quote.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -18,6 +28,7 @@ import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.j
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
+import { createSshWorkerTransport } from "../../src/domains/dispatch/transport.js";
 import {
 	approvedIdentityForSpec,
 	CONTROL_FRAME_PREFIX,
@@ -36,6 +47,7 @@ import {
 import {
 	type SpawnedWorker,
 	type SpawnedWorkerResult,
+	spawnNativeWorker,
 	spawnWorkerProcess,
 	WORKER_PROCESS_CLEANUP_BOUND_MS,
 	type WorkerSpec,
@@ -503,6 +515,107 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", ()
 }
 
 describe("worker channel facts", () => {
+	it("a read-only native child disables its startup compile cache", async () => {
+		const env = await isolateClioEnv("clio-worker-cache-review-");
+		try {
+			const entry = join(env.dir, "cache-worker.cjs");
+			const cache = join(env.dir, "node-cache");
+			mkdirSync(cache);
+			writeFileSync(
+				entry,
+				"process.stderr.write('[cache] '+(require('node:module').getCompileCacheDir() ?? 'disabled')+'\\n'); process.exit(0);\n",
+			);
+			const worker = spawnNativeWorker(
+				{ ...bulkFixtureSpec, readOnly: true },
+				{
+					workerEntryPath: entry,
+					env: { ...process.env, NODE_COMPILE_CACHE: cache },
+				},
+			);
+			const result = await worker.promise;
+			match(result.stderrTail ?? "", /\[cache\] disabled/);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("SSH abort owns remote cleanup even when local SIGTERM succeeds", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const env = await isolateClioEnv("clio-worker-ssh-abort-review-");
+		let worker: SpawnedWorker | undefined;
+		try {
+			const marker = join(env.dir, "remote-kill");
+			const commandFile = join(env.dir, "remote-command");
+			const script = join(env.dir, "ssh.mjs");
+			const ssh = join(env.dir, "ssh");
+			writeFileSync(
+				script,
+				`
+				import { writeFileSync } from 'node:fs';
+				import { createInterface } from 'node:readline';
+				import { approvedIdentityForSpec } from ${JSON.stringify(fileURLToPath(new URL("../../src/domains/dispatch/worker-protocol.ts", import.meta.url)))};
+				const command = process.argv.at(-1);
+				if (command.includes('kill -TERM')) {
+					writeFileSync(${JSON.stringify(marker)}, command);
+				} else {
+					writeFileSync(${JSON.stringify(commandFile)}, command);
+					createInterface({input:process.stdin}).once('line', line => {
+						const unknown = {known:false};
+						const attestation = {...approvedIdentityForSpec(JSON.parse(line)), protocolVersion:${WORKER_PROTOCOL_VERSION},
+							pid:424242, processGroupId:424242, host:'fixture',
+							resources:{labels:[],cpuCount:unknown,totalMemoryBytes:unknown,freeMemoryBytes:unknown,gpuCount:unknown,vramBytes:unknown,residentModels:unknown}};
+						process.stderr.write(${JSON.stringify(CONTROL_FRAME_PREFIX)}+JSON.stringify({kind:'announce',attestation})+'\\n');
+					});
+					setInterval(() => {}, 1000);
+				}
+			`,
+			);
+			writeFileSync(
+				ssh,
+				`#!/bin/sh\nexec ${shellQuote(process.execPath)} --import ${shellQuote(fileURLToPath(import.meta.resolve("tsx")))} ${shellQuote(script)} "$@"\n`,
+			);
+			chmodSync(ssh, 0o755);
+			let announced!: () => void;
+			const ready = new Promise<void>((done) => {
+				announced = done;
+			});
+			worker = createSshWorkerTransport(
+				{ id: "fake", host: "fake.invalid" },
+				{ sshBinary: ssh, shutdownGraceMs: 200 },
+			).spawn({ ...bulkFixtureSpec, readOnly: true }, { onAnnounce: () => announced() });
+			await ready;
+			worker.abort();
+			await worker.promise;
+			ok(await waitFor(() => existsSync(marker), 2500), "remote cleanup must not depend on local SIGKILL");
+			match(readFileSync(marker, "utf8"), /kill -TERM -424242/);
+			match(readFileSync(commandFile, "utf8"), /NODE_DISABLE_COMPILE_CACHE=1/);
+		} finally {
+			worker?.abort();
+			await worker?.promise;
+			env.restore();
+		}
+	});
+
+	it("retains final ordinary stderr without accepting partial control frames", async () => {
+		for (const text of ["fatal: final diagnostic", `${CONTROL_FRAME_PREFIX}{"kind":"heartbeat"}`]) {
+			let controls = 0;
+			const worker = spawnWorkerProcess(
+				process.execPath,
+				["-e", `process.stderr.write(${JSON.stringify(text)}, () => process.exit(1));`],
+				bulkFixtureSpec,
+				{
+					onControl: () => {
+						controls++;
+					},
+				},
+			);
+			const result = await worker.promise;
+			strictEqual(controls, 0);
+			if (!text.startsWith(CONTROL_FRAME_PREFIX)) ok(result.stderrTail?.includes(text));
+		}
+	});
+
 	it("reports the frame actually written, its errno and the worker's typed stdout failure (#425)", {
 		timeout: 15_000,
 	}, async () => {
