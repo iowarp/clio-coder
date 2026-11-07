@@ -464,8 +464,12 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	});
 	const promise = (async (): Promise<AcpDelegationResult> => {
 		let selectedModelId: string | null = null;
+		const requireActive = () => {
+			if (aborted) throw new Error("the delegation was cancelled before its prompt");
+		};
 		try {
 			emit({ type: "agent_start" } as AgentEvent);
+			requireActive();
 			initialized = await transport.request<AcpInitializeResponse>(
 				"initialize",
 				{
@@ -482,6 +486,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 				connectTimeoutMs,
 			);
+			requireActive();
 			if (initialized.protocolVersion !== undefined && initialized.protocolVersion !== 1) {
 				throw new Error(`ACP protocol version ${initialized.protocolVersion} is not supported`);
 			}
@@ -491,6 +496,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				connectTimeoutMs,
 			);
 			sessionId = sessionIdFrom(session);
+			requireActive();
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
 			const configOptions = isRecord(session) ? session.configOptions : undefined;
 			const modelOption = peerSelectOption(configOptions, "model", "model");
@@ -525,6 +531,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 						{ sessionId, configId: modelOption.id, value: selected },
 						connectTimeoutMs,
 					);
+					requireActive();
 					// The response carries the complete option state; a peer that
 					// kept another model must not be recorded as running this one.
 					const applied = peerSelectOption(
@@ -550,6 +557,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 						{ sessionId, configId: thoughtOption.id, value: input.thinkingLevel },
 						connectTimeoutMs,
 					);
+					requireActive();
 					const applied = peerSelectOption(
 						isRecord(updated) ? updated.configOptions : undefined,
 						"thought_level",
@@ -559,9 +567,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					}
 				}
 			}
-			if (aborted) {
-				transport.notify("session/cancel", { sessionId });
-			}
+			requireActive();
 			const promptResponse = await transport.request<AcpPromptResponse>(
 				"session/prompt",
 				{

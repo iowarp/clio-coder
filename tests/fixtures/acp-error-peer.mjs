@@ -1,4 +1,6 @@
+import { appendFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { setTimeout } from "node:timers/promises";
 
 const mode = process.argv[2];
 const thoughtOption = mode === "thought-option" || mode === "thought-refuse";
@@ -90,8 +92,10 @@ function advertisesClientCapability(capabilities) {
 
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
+	if (mode === "cancel-connect") appendFileSync(process.argv[3], `${request.method}\n`);
 	if (request.id === undefined) continue;
 	if (request.method === "initialize") {
+		if (mode === "cancel-connect" && process.argv[4]) while (!existsSync(process.argv[4])) await setTimeout(5);
 		if (advertisesClientCapability(request.params?.clientCapabilities)) {
 			send({
 				jsonrpc: "2.0",

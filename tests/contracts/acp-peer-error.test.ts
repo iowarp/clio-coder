@@ -1,5 +1,8 @@
-import { strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
@@ -7,6 +10,61 @@ import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { makeScratchHome } from "../harness/scratch-env.js";
+
+for (const timing of ["before-start", "during-connect"] as const) {
+	test(`ACP cancellation ${timing} never submits the first prompt`, async () => {
+		const home = makeScratchHome("acp-cancel-connect-");
+		const log = join(home.dir, "requests.jsonl");
+		const gate = join(home.dir, "connected");
+		const controller = new AbortController();
+		if (timing === "before-start") controller.abort();
+		const run = startAcpDelegationRun({
+			agent: {
+				id: "cancel-fixture",
+				command: process.execPath,
+				args: [
+					fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url)),
+					"cancel-connect",
+					log,
+					...(timing === "during-connect" ? [gate] : []),
+				],
+				connectTimeoutMs: 5_000,
+			},
+			environment: Object.fromEntries(
+				Object.entries({ ...process.env, ...home.env }).filter(
+					(entry): entry is [string, string] => entry[1] !== undefined,
+				),
+			),
+			task: "must not run",
+			cwd: home.dir,
+			safety: createWorkerSafety({ cwd: home.dir }),
+			signal: controller.signal,
+		});
+		try {
+			if (timing === "during-connect") {
+				let observed = false;
+				for (let attempt = 0; attempt < 200; attempt++) {
+					observed = (await readFile(log, "utf8").catch(() => "")).includes("initialize");
+					if (observed) break;
+					await setTimeout(10);
+				}
+				ok(observed, "the peer reached its gated handshake");
+				controller.abort();
+				await writeFile(gate, "");
+			}
+			const result = await run.promise;
+			const methods = (await readFile(log, "utf8").catch(() => "")).trim().split("\n");
+			ok(!methods.includes("session/prompt"), methods.join(", "));
+			strictEqual(result.stopReason, "cancelled");
+		} finally {
+			controller.abort();
+			await writeFile(gate, "");
+			await run.promise;
+			home.cleanup();
+		}
+	});
+}
 
 test("ACP provider error streamed as text is marked as a failed turn", () => {
 	const mapper = new AcpEventMapper();
