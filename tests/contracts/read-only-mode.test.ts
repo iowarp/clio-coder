@@ -197,6 +197,30 @@ setInterval(() => {}, 1000);`;
 		ok(!existsSync(root), "the private home is removed before it dies");
 	});
 
+	it("a built process registers its running build, but not in read-only mode (RO-6)", () => {
+		// Only a bundle carries a build id, so the child defines the one the bundler would.
+		const register = (readOnly: boolean): string[] | null => {
+			const buildHome = mkdtempSync(join(freshRoot, "running-build-"));
+			const script = `globalThis.__CLIO_BUILD_ID__ = "ro6-test";
+const { enterReadOnlyMode } = await import(${JSON.stringify(new URL("../../src/core/read-only-mode.ts", import.meta.url).href)});
+const { registerRunningBuild } = await import(${JSON.stringify(new URL("../../src/core/running-build.ts", import.meta.url).href)});
+${readOnly ? "enterReadOnlyMode();" : ""}
+registerRunningBuild("run");
+const { existsSync, readdirSync } = await import("node:fs");
+const dir = ${JSON.stringify(join(buildHome, "state", "running-builds"))};
+process.stdout.write(JSON.stringify(existsSync(dir) ? readdirSync(dir) : null));`;
+			const child = spawnSync(
+				process.execPath,
+				["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", script],
+				{ env: { ...process.env, ...scratchClioEnvVars(buildHome), HOME: buildHome }, encoding: "utf8" },
+			);
+			equal(child.status, 0, child.stderr);
+			return JSON.parse(child.stdout) as string[] | null;
+		};
+		equal(register(false)?.length, 1, "a writable process registers");
+		equal(register(true), null, "a read-only process creates no registry, not even its directory");
+	});
+
 	it("`run --read-only` on a set-up home leaves its record, offloads and sweep alone, and refuses pending migrations", {
 		timeout: 120_000,
 	}, async (t) => {
