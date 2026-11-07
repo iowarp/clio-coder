@@ -106,6 +106,8 @@ export function paneGate(
 	sessionOpen: boolean,
 	capabilities: AgentCapabilities | undefined,
 ): "ready" | "checking" | "closed" | "unsupported" {
+	// Recorded accounting is readable without an open agent.
+	if (view === "usage" && !sessionOpen) return "ready";
 	const required = {
 		context: "context",
 		usage: "telemetry",

@@ -6,6 +6,7 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Client } from "../client/api/client.js";
+import { paneGate } from "../client/chat/pane-model.js";
 import { sparkline } from "../client/pages/operator-metrics-model.js";
 import { settingsControlSelection } from "../client/pages/settings-control-model.js";
 import type { SessionSummary } from "../contracts/sessions.js";
@@ -31,6 +32,11 @@ const { OperatorMetrics } = await import("../client/pages/operator-metrics.js");
 const { sessionOperatorMetrics, goldenTelemetryRecords } = await import("./harness/telemetry-fixture.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+test("closed tasks expose recorded usage without enabling live-only inspectors", () => {
+	assert.equal(paneGate("usage", false, undefined), "ready");
+	assert.equal(paneGate("context", false, undefined), "closed");
+	assert.equal(paneGate("usage", true, undefined), "checking");
+});
 function render(cache: QueryClient, path: string, node: ReactNode) {
 	return renderToStaticMarkup(
 		<QueryClientProvider client={cache}>
