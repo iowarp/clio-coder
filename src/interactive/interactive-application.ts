@@ -30,6 +30,7 @@ import type { MuxContract } from "../domains/mux/index.js";
 import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
 import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
+import { holdExitSummaryForLauncher } from "../domains/mux/workspace/exit-summary-handoff.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { expandSubmitText, type SubmitExpansion } from "../domains/resources/submit-expansion.js";
@@ -2235,7 +2236,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							ui?.outputDetail ?? "standard",
 							process.stdout.rows ?? 48,
 						);
-			if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+			if (lines.length === 0) return;
+			const text = `${lines.join("\n")}\n`;
+			process.stdout.write(text);
+			// In Clio's private pane host this pane closes with the workspace, so the
+			// exit marker also carries the summary to the operator's own terminal.
+			holdExitSummaryForLauncher(text);
 		},
 		onShutdown: async () => {
 			// The terminal is already stopped here and the domains have not, so this

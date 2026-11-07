@@ -30,7 +30,10 @@
  * it. Instead the Clio in the pane drops a marker when it quits cleanly
  * (`markWorkspaceExit`), and the launcher detaches the client first and closes
  * the workspace second, with nobody attached to trigger a replacement. A Clio
- * that crashed drops no marker, so its pane and its error stay on screen. And every failure before the terminal is handed
+ * that crashed drops no marker, so its pane and its error stay on screen. The
+ * marker carries the exit summary Clio printed in its pane, and the launcher
+ * prints it in the operator's terminal once the host is gone, so the summary
+ * and its `/resume <id>` line outlive the pane. And every failure before the terminal is handed
  * over returns `fallback`, which the caller answers by booting Clio in the
  * plain terminal, because a pane host that will not start must never be the
  * reason Clio does not.
@@ -50,7 +53,13 @@ import type { MuxClient } from "../socket-client.js";
 import { createMuxClient } from "../socket-client.js";
 import type { MuxLog, MuxPane, MuxServerInfo } from "../types.js";
 import { writeWorkspaceConfig } from "./config.js";
-import { exitMarkerPath, exitMarkerStem, WORKSPACE_SESSION_PREFIX, workspaceSessionFor } from "./exit-marker.js";
+import {
+	exitMarkerPath,
+	exitMarkerStem,
+	readWorkspaceExitSummary,
+	WORKSPACE_SESSION_PREFIX,
+	workspaceSessionFor,
+} from "./exit-marker.js";
 import { type HostLayout, type MuxHostPlatform, muxHostPlatform } from "./platform.js";
 
 /** How long a freshly spawned server gets to answer its first ping. */
@@ -100,8 +109,12 @@ export interface WorkspaceLaunchOptions {
 }
 
 export type WorkspaceLaunchResult =
-	/** The terminal was handed to the workspace and has come back. */
-	| { status: "closed"; exitCode: number; workspaceLeftRunning: boolean }
+	/**
+	 * The terminal was handed to the workspace and has come back. `exitSummary`
+	 * is the summary the Clio in the pane printed on a clean quit, for the
+	 * caller to print in the operator's terminal now that the pane is gone.
+	 */
+	| { status: "closed"; exitCode: number; workspaceLeftRunning: boolean; exitSummary: string | null }
 	/** Nothing was handed over; boot Clio in this terminal instead. */
 	| { status: "fallback"; reason: string };
 
@@ -567,6 +580,8 @@ async function attachWorkspace(
 	}
 	const exitCode = exit.code;
 
+	// Read before the workspace and its marker are cleaned up below.
+	const exitSummary = clioQuit ? readWorkspaceExitSummary(marker) : null;
 	if (clioQuit) await sleep(SHARED_DETACH_SETTLE_MS);
 	let workspaceLeftRunning = true;
 	try {
@@ -593,7 +608,12 @@ async function attachWorkspace(
 	}
 	await client.close();
 	// A hangup the launcher sent is the clean way out, not a failure to report.
-	return { status: "closed", exitCode: clioQuit || workspaceGone ? 0 : exitCode, workspaceLeftRunning };
+	return {
+		status: "closed",
+		exitCode: clioQuit || workspaceGone ? 0 : exitCode,
+		workspaceLeftRunning,
+		exitSummary,
+	};
 }
 
 function messageOf(error: unknown): string {

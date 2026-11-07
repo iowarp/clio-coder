@@ -13,8 +13,9 @@
  */
 
 import { createHash } from "node:crypto";
-import { realpathSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { heldExitSummary } from "./exit-summary-handoff.js";
 import { isClioHostSocket } from "./platform.js";
 
 /**
@@ -62,19 +63,49 @@ export function hostedInWorkspace(env: NodeJS.ProcessEnv = process.env): boolean
 	return env.HERDR_ENV === "1" && isClioHostSocket(env.HERDR_SOCKET_PATH);
 }
 
+/** A marker larger than this is not an exit summary Clio wrote, and is not printed. */
+const EXIT_SUMMARY_MAX_BYTES = 256 * 1024;
+
 /**
  * Called by a Clio that is quitting cleanly. Inside Clio's own host it tells
  * the launcher that owns the terminal that this pane is done; anywhere else it
- * does nothing.
+ * does nothing. The marker's content is the exit summary this Clio printed in
+ * its pane (exit-summary-handoff.ts), which the launcher prints in the
+ * operator's terminal after the host is gone. It is staged and renamed into
+ * place, so the launcher never sees a marker whose summary is half written.
  */
 export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env): void {
 	const socket = env.HERDR_SOCKET_PATH;
 	const paneId = env.HERDR_PANE_ID;
 	if (!hostedInWorkspace(env) || !socket || !paneId) return;
+	const marker = exitMarkerPath(socket, paneId);
+	// Sanitized pane ids hold no dot, so the staged name is never another pane's marker.
+	const staged = `${marker}.${process.pid}.tmp`;
 	try {
-		writeFileSync(exitMarkerPath(socket, paneId), "", { mode: 0o600 });
+		writeFileSync(staged, heldExitSummary() ?? "", { mode: 0o600 });
+		renameSync(staged, marker);
+		return;
+	} catch {
+		rmSync(staged, { force: true });
+	}
+	try {
+		writeFileSync(marker, "", { mode: 0o600 });
 	} catch {
 		// The launcher then leaves the workspace open, which is the safe side.
+	}
+}
+
+/**
+ * The exit summary a marker carries, or null when it carries none. Read by the
+ * launcher before it deletes the marker with the workspace.
+ */
+export function readWorkspaceExitSummary(marker: string): string | null {
+	try {
+		const stat = lstatSync(marker);
+		if (!stat.isFile() || stat.size === 0 || stat.size > EXIT_SUMMARY_MAX_BYTES) return null;
+		return readFileSync(marker, "utf8");
+	} catch {
+		return null;
 	}
 }
 

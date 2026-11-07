@@ -155,6 +155,8 @@ export async function maybeLaunchWorkspace(
 		process.stderr.write(`Clio Coder: terminal panes unavailable (${result.reason}). Continuing in this terminal.\n`);
 		return null;
 	}
+	// The pane that printed the exit summary is gone; this is the terminal the operator reads.
+	if (result.exitSummary !== null) process.stdout.write(result.exitSummary);
 	if (result.workspaceLeftRunning) {
 		process.stdout.write("Clio workspaces are still open. Run `clio-coder` to return to them.\n");
 	}

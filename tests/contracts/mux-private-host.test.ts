@@ -1,9 +1,9 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
 import {
@@ -11,7 +11,14 @@ import {
 	rerenderWorkspaceConfig,
 	writeWorkspaceConfig,
 } from "../../src/domains/mux/workspace/config.js";
-import { clioHostSessionOf, exitMarkerPath, hostedInWorkspace } from "../../src/domains/mux/workspace/exit-marker.js";
+import {
+	clioHostSessionOf,
+	exitMarkerPath,
+	hostedInWorkspace,
+	markWorkspaceExit,
+	readWorkspaceExitSummary,
+} from "../../src/domains/mux/workspace/exit-marker.js";
+import { holdExitSummaryForLauncher } from "../../src/domains/mux/workspace/exit-summary-handoff.js";
 import {
 	createPosixHostPlatform,
 	posixRuntimeDirCandidates,
@@ -212,6 +219,30 @@ describe("host identity and exit markers", () => {
 
 	it("names markers after the socket and sanitizes the pane id", () => {
 		equal(exitMarkerPath(`/run/x/${SESSION}.sock`, "w1:p2"), `/run/x/${SESSION}.exit-w1_p2`);
+	});
+
+	it("carries the clean-exit summary to the launcher in the marker", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-exit-marker-"));
+		t.after(() => {
+			holdExitSummaryForLauncher("");
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		const env = { HERDR_ENV: "1", HERDR_SOCKET_PATH: join(scratch, `${SESSION}.sock`), HERDR_PANE_ID: "w1:p2" };
+		const marker = exitMarkerPath(env.HERDR_SOCKET_PATH, env.HERDR_PANE_ID);
+		const summary = "Clio Coder · Session summary\n/resume 0123\n";
+		holdExitSummaryForLauncher(summary);
+		markWorkspaceExit(env);
+		equal(readWorkspaceExitSummary(marker), summary);
+		equal(statSync(marker).mode & 0o777, 0o600);
+		deepStrictEqual(readdirSync(scratch), [basename(marker)]);
+		// A quit with nothing to report still marks the exit, with no summary to print.
+		holdExitSummaryForLauncher("");
+		markWorkspaceExit(env);
+		equal(readWorkspaceExitSummary(marker), null);
+		writeFileSync(marker, "x".repeat(256 * 1024 + 1));
+		equal(readWorkspaceExitSummary(marker), null);
+		equal(readWorkspaceExitSummary(join(scratch, "missing")), null);
+		equal(readWorkspaceExitSummary(scratch), null);
 	});
 });
 

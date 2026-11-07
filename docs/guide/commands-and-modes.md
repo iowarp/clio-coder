@@ -735,7 +735,7 @@ hydrated first frame. The seam is [terminal-lease.ts](../../src/interactive/term
 
 ## Exit summary
 
-A clean interactive exit prints a session summary on stdout after the TUI has stopped and the terminal is restored. `interface.exitSummary` picks the style: `auto` (the default), `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail`: `compact` gives `brief`, `standard` gives `standard` and `detailed` gives `report`. The older value `full` is still read as `standard`; the settings file is not rewritten. Change it under Settings → Appearance → Transcript → Session summary on exit or with `clio-coder configure --section interface`. The setting reloads hot, so the next exit uses the saved value.
+A clean interactive exit prints a session summary on stdout after the TUI has stopped and the terminal is restored. In Clio's private pane host the summary also travels with the exit handshake, and the launcher prints it in your own terminal after the host closes, so the `/resume <id>` line stays readable. `interface.exitSummary` picks the style: `auto` (the default), `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail`: `compact` gives `brief`, `standard` gives `standard` and `detailed` gives `report`. The older value `full` is still read as `standard`; the settings file is not rewritten. Change it under Settings → Appearance → Transcript → Session summary on exit or with `clio-coder configure --section interface`. The setting reloads hot, so the next exit uses the saved value.
 
 **When it prints.** The summary runs on the application's own shutdown path: `/quit`, `Ctrl+D` on an empty idle composer, and the idle double `Ctrl+C`. It is skipped in these cases:
 
