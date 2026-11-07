@@ -21,12 +21,15 @@ const { values } = parseArgs({
 		bytes: { type: "string", default: "0" },
 		chrome: { type: "string", default: "/usr/bin/google-chrome" },
 		headed: { type: "boolean", default: false },
+		// N > 0 measures resuming a saved N-turn conversation instead of streaming turns.
+		history: { type: "string", default: "0" },
 	},
 });
 if (!values.client) throw new Error("--client <private build> is required.");
 const TURNS = Math.max(2, Number(values.turns));
 const BYTES = Number(values.bytes);
 const WORKLOAD = BYTES > 0 ? `[workload ${BYTES}]` : "[workload]";
+const HISTORY = Math.max(0, Number(values.history));
 const TYPED = "Typing a follow-up question while Clio Coder is still streaming.";
 
 /** Installed before any app script so the record clock and the render counters exist from the start. */
@@ -142,6 +145,51 @@ const sample = (page: Page) =>
 			domNodes: document.getElementsByTagName("*").length,
 		};
 	});
+class Done extends Error {}
+/**
+ * Resume a saved conversation the fixture replays as HISTORY rich turns, then report how long the
+ * page took to show its last turn, and what the open transcript costs at rest.
+ */
+async function resumeHistory(page: Page, id: string) {
+	await page.goto(`${origin}/#token=test-token`);
+	await page.getByPlaceholder("Describe a task or ask a question").waitFor();
+	await setRunning(page, true);
+	const started = await page.evaluate(() => performance.now());
+	await page.evaluate((path) => {
+		history.pushState(null, "", path);
+		dispatchEvent(new PopStateEvent("popstate"));
+	}, `/sessions/${id}`);
+	await page.getByText(`Earlier prompt ${HISTORY}:`, { exact: false }).waitFor({ timeout: 60_000 });
+	const shownMs = (await page.evaluate(() => performance.now())) - started;
+	await page.waitForTimeout(1_500);
+	const settled = await sample(page);
+	const transcript = page.locator(".chat-transcript");
+	// Scroll back through the transcript a screen at a time, as a reader does.
+	await setRunning(page, true);
+	for (let step = 0; step < 30; step++) {
+		await transcript.evaluate((element) => {
+			element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight);
+		});
+		await page.waitForTimeout(80);
+	}
+	const scrolled = await sample(page);
+	await setRunning(page, false);
+	return {
+		turns: HISTORY,
+		lastTurnShownMs: Math.round(shownMs),
+		renderedTurns: await page.locator(".chat-turn").count(),
+		domNodes: settled.domNodes,
+		heapMb: round(Math.max(0, ...settled.heap) / 2 ** 20),
+		longTasksOver50: settled.longTasks.filter((task) => task.duration > 50).length,
+		longestTaskMs: round(Math.max(0, ...settled.longTasks.map((task) => task.duration))),
+		settledTurnRenders: settled.counts["turn.settled"] ?? 0,
+		scrollBack: {
+			frameIntervalMs: summary(scrolled.frames),
+			longTasksOver50: scrolled.longTasks.filter((task) => task.duration > 50).length,
+			domNodes: scrolled.domNodes,
+		},
+	};
+}
 const setRunning = (page: Page, running: boolean) =>
 	page.evaluate((flag) => {
 		const perf = (globalThis as unknown as { __perf: { running: boolean; reset(): void } }).__perf;
@@ -157,7 +205,10 @@ const h = await harness(
 		scenario: "markdown",
 		clientDir: values.client,
 		origin: () => origin,
-		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" },
+		env: {
+			CLIO_CODER_WEB_FIXTURE_ROUTE: "1",
+			...(HISTORY > 0 ? { CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS: String(HISTORY) } : {}),
+		},
 	},
 );
 // A saved connection, or the app opens the setup wizard instead of the home composer.
@@ -167,6 +218,12 @@ await mkdir(join(project, "analysis"), { recursive: true });
 await writeFile(join(project, "analysis", "convergence-notes.md"), "mesh convergence\n");
 const workspace = (await (await h.post("/api/workspaces", { path: project })).json()) as { id?: string };
 if (!workspace.id) throw new Error(`The fixture workspace did not open: ${JSON.stringify(workspace)}`);
+// Loaded before the listener takes its own origin, which the harness's requests would no longer match.
+const HISTORY_ID = "perf-history";
+if (HISTORY > 0) {
+	const loaded = await h.post(`/api/sessions/${HISTORY_ID}/load`, { workspaceId: workspace.id });
+	if (!loaded.ok) throw new Error(`The saved conversation did not load: ${loaded.status} ${await loaded.text()}`);
+}
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
 await new Promise<void>((resolve) => server.on("listening", resolve));
 const address = server.address();
@@ -205,6 +262,12 @@ try {
 	page.on("console", (message) => {
 		if (message.type() === "error") errors.push(message.text());
 	});
+	if (HISTORY > 0) {
+		report.history = await resumeHistory(page, HISTORY_ID);
+		await page.screenshot({ path: join(values.out, `${values.label}-history.png`) });
+		await context.close();
+		throw new Done();
+	}
 	// A task starts from the home composer; its first, plain turn settles before measuring begins.
 	await page.goto(`${origin}/#token=test-token`);
 	const home = page.getByPlaceholder("Describe a task or ask a question");
@@ -306,6 +369,8 @@ try {
 	report.turns = turns;
 	await page.screenshot({ path: join(values.out, `${values.label}-end.png`) });
 	await context.close();
+} catch (error) {
+	if (!(error instanceof Done)) throw error;
 } finally {
 	await browser.close();
 	if ("closeAllConnections" in server) server.closeAllConnections();

@@ -152,7 +152,7 @@ These names are read by the installers, the package launcher, the graphical appl
 | CLIO_CODER_RELEASE_TARBALL | [release-candidate.mjs](../../scripts/release-candidate.mjs) | Absolute path of the packed tarball that `pnpm run test:package` installs. |
 | CLIO_CODER_RELEASE_CONTEXT | [check-release.mjs](../../scripts/check-release.mjs) | `publish` marks the run as an immutable release, so the changelog must carry the dated version heading. |
 
-The graphical application's tests also read CLIO_CODER_WEB_COMMAND_LOG, CLIO_CODER_WEB_COMMAND_SCENARIO, CLIO_CODER_WEB_FIXTURE_LOG, CLIO_CODER_WEB_FIXTURE_SCENARIO, CLIO_CODER_WEB_FIXTURE_ROUTE, CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS, CLIO_CODER_WEB_FIXTURE_LIBRARY_RELOAD and CLIO_CODER_TEST_OPENAI_KEY. They select fixture behavior and do nothing in a shipped build.
+The graphical application's tests also read CLIO_CODER_WEB_COMMAND_LOG, CLIO_CODER_WEB_COMMAND_SCENARIO, CLIO_CODER_WEB_FIXTURE_LOG, CLIO_CODER_WEB_FIXTURE_SCENARIO, CLIO_CODER_WEB_FIXTURE_ROUTE, CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS, CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS, CLIO_CODER_WEB_FIXTURE_LIBRARY_RELOAD and CLIO_CODER_TEST_OPENAI_KEY. They select fixture behavior and do nothing in a shipped build.
 
 ## Test-only
 

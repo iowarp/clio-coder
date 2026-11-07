@@ -454,6 +454,7 @@ let libraryGeneration = 1;
 // Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
 // route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
 const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
+const REPLAY_TURNS = Number(process.env.CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS ?? 0);
 const queues = { steer: [], followUp: [] };
 let queueReadFails = false;
 const queueChanged = () => {
@@ -627,6 +628,7 @@ async function handle(frame) {
 					agentInfo: { name: "fixture", version: "1" },
 					agentCapabilities: {
 						loadSession: true,
+						...(REPLAY_TURNS ? { sessionCapabilities: { list: {} } } : {}),
 						promptCapabilities: { audio: false, embeddedContext: scenario === "markdown", image: scenario === "markdown" },
 						...(STEERING
 							? {
@@ -734,6 +736,27 @@ async function handle(frame) {
 						50,
 					);
 				break;
+			case "session/list":
+				result = {
+					sessions: [
+						{
+							sessionId: "perf-history",
+							cwd: frame.params.cwd,
+							title: "A long saved conversation",
+							updatedAt: "2026-01-01T00:00:00.000Z",
+							_meta: {
+								"clio-coder/session": {
+									createdAt: "2026-01-01T00:00:00.000Z",
+									endedAt: "2026-01-01T00:00:00.000Z",
+									target: "fixture",
+									model: "fixture-model",
+									hasModelTurn: true,
+								},
+							},
+						},
+					],
+				};
+				break;
 			case "session/load":
 				sessionId = frame.params.sessionId;
 				result = {
@@ -748,14 +771,44 @@ async function handle(frame) {
 						],
 					},
 				};
-				update(
-					{ sessionUpdate: "user_message_chunk", content: { type: "text", text: "Earlier prompt" } },
-					{ "clio-coder/replay": { turn: 1 } },
-				);
-				update(
-					{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Earlier reply" } },
-					{ "clio-coder/replay": { turn: 1 } },
-				);
+				// A long saved conversation for scripts/perf-workload.ts `--history`: N rich exchanges.
+				for (let turn = 1; turn <= Math.max(1, REPLAY_TURNS); turn++) {
+					const meta = { "clio-coder/replay": { turn } };
+					const long = REPLAY_TURNS > 0;
+					update(
+						{
+							sessionUpdate: "user_message_chunk",
+							content: { type: "text", text: long ? `Earlier prompt ${turn}: check level L${turn % 4}.` : "Earlier prompt" },
+						},
+						meta,
+					);
+					if (long && turn % 3 === 0)
+						update(
+							{
+								sessionUpdate: "tool_call",
+								toolCallId: `replay-${turn}`,
+								title: "Read analysis/convergence-notes.md",
+								kind: "read",
+								status: "completed",
+								locations: [{ path: "analysis/convergence-notes.md", line: turn }],
+								rawInput: { path: "analysis/convergence-notes.md" },
+								rawOutput: { result: "mesh convergence" },
+							},
+							meta,
+						);
+					update(
+						{
+							sessionUpdate: "agent_message_chunk",
+							content: {
+								type: "text",
+								text: long
+									? `## Level L${turn % 4}\n\nThe residual for case ${turn} falls **monotonically** after iteration 40; see \`analysis/convergence-notes.md:${turn}\`.\n\n- final residual \`${(turn * 1.3e-7).toExponential(2)}\`\n- iterations ${200 + turn}\n\n\`\`\`python\nimport math\nresidual = ${turn} * 1.3e-7\nprint(math.log10(residual))\n\`\`\`\n\n| Cells | Residual |\n| ---: | ---: |\n| ${turn * 128} | ${(turn * 1.3e-7).toExponential(2)} |\n`
+									: "Earlier reply",
+							},
+						},
+						meta,
+					);
+				}
 				break;
 			case "session/prompt": {
 				pendingHandoff = null;
