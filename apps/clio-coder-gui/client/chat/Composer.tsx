@@ -53,6 +53,7 @@ import {
 	noticeForQueueEdit,
 	noticeForRefusal,
 	projectQueue,
+	queueAccess,
 	queueActions,
 	queueSummary,
 	restoredDraft,
@@ -312,13 +313,14 @@ export const Composer = memo(function Composer({
 	const browse = useRef<(HistoryBrowse & { readonly text: string }) | null>(null);
 	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
+	const queuePolicy = queueAccess(steering, sessionState, running);
 	const queue = useQuery({
 		queryKey: ["session-queue", sessionId],
 		queryFn: () => client.call(routes.sessionQueue, params),
-		enabled: steering.queue && running,
+		enabled: queuePolicy.read,
 		retry: false,
 		// An agent with the queue capability pushes every change; an older one is asked.
-		refetchInterval: running && !capabilities.data?.queue ? 3_000 : false,
+		refetchInterval: queuePolicy.read && !capabilities.data?.queue ? 3_000 : false,
 	});
 	const queued = projectQueue(queue.data);
 	const queueOps = capabilities.data?.queue?.ops;
@@ -797,10 +799,8 @@ export const Composer = memo(function Composer({
 							? `${suggestions.length} ${suggestions.length === 1 ? "suggestion" : "suggestions"}`
 							: ""}
 				</p>
-				{/* Only while the turn runs: the query is disabled once it settles, and a
-			    cached snapshot from a finished turn is a claim about the engine that
-			    nothing observed. */}
-				{running && steering.queue && queued.length > 0 ? (
+				{/* A stopped turn can leave held messages waiting for the operator. */}
+				{queuePolicy.read && queued.length > 0 ? (
 					<section className="composer__queue" aria-label="Messages waiting on the engine">
 						<div className="composer__queue-head">
 							<p className="composer__queue-summary" role="status">
@@ -824,7 +824,7 @@ export const Composer = memo(function Composer({
 										{message.text}
 									</span>
 									<span className="composer__queue-actions">
-										{queueActions(message, queued, queueOps).map((action) => (
+										{queueActions(message, queued, queueOps, queuePolicy.sendNow).map((action) => (
 											<button
 												key={action.key}
 												className={`composer__attachment-action${action.icon ? " composer__attachment-remove" : ""}`}

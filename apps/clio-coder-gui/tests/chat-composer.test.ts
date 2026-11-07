@@ -14,6 +14,8 @@ import {
 	noticeForRefusal,
 	PROMPT_TEXT_MAX_CHARACTERS,
 	projectQueue,
+	queueAccess,
+	queueActions,
 	queueSummary,
 	resetDraftStores,
 	restoredDraft,
@@ -283,11 +285,39 @@ test("an empty or absent queue reports nothing waiting rather than an empty list
 	);
 });
 
+test("a stopped open session keeps held queue controls without offering an interrupt", () => {
+	const steering = { ...NO_STEERING, queue: true };
+	const policy = queueAccess(steering, "open", false);
+	assert.deepEqual(policy, { read: true, sendNow: false });
+	const messages = projectQueue({
+		steer: [],
+		followUp: ["held"],
+		entries: [{ id: "held-1", kind: "follow-up", text: "held", enqueuedAt: 1, pinned: false }],
+	});
+	assert.ok(messages[0]);
+	assert.deepEqual(
+		queueActions(messages[0], messages, ["send_now", "restore", "remove"], policy.sendNow).map((action) => action.key),
+		["restore", "remove"],
+	);
+	assert.deepEqual(queueAccess(steering, "open", true), { read: true, sendNow: true });
+	assert.deepEqual(queueAccess(steering, "parked", false), { read: false, sendNow: false });
+	assert.deepEqual(queueAccess(NO_STEERING, "open", false), { read: false, sendNow: false });
+});
+
 test("clearing the queue puts the drained texts back in the draft without duplicating them", () => {
 	assert.equal(restoredDraft("", ["first", "second"]), "first\n\nsecond");
 	assert.equal(restoredDraft("already typed", ["already typed", "new"]), "already typed\n\nnew");
 	assert.equal(restoredDraft("  ", ["  ", "only"]), "only");
-	assert.ok(restoredDraft("x".repeat(PROMPT_TEXT_MAX_CHARACTERS), ["more"]).length <= PROMPT_TEXT_MAX_CHARACTERS);
+});
+
+test("restoring removed queue messages preserves overflow and leaves the limit to submission", () => {
+	const current = "x".repeat(PROMPT_TEXT_MAX_CHARACTERS);
+	const restored = restoredDraft(current, ["more"]);
+	assert.equal(restored.length, current.length + "\n\nmore".length);
+	assert.ok(restored.endsWith("\n\nmore"));
+	assert.equal(submitIntent(draft({ text: restored }), situation()).kind, "blocked");
+	const texts = ["a".repeat(16000), "b".repeat(16000), "c".repeat(16000)];
+	assert.equal(restoredDraft("", texts), texts.join("\n\n"));
 });
 
 // --- refusals --------------------------------------------------------------

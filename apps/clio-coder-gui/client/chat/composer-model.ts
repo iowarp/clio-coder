@@ -501,6 +501,11 @@ export { type ComposerKeyAction, type ComposerKeyContext, composerKeyAction } fr
 
 export type QueueName = "steer" | "follow-up";
 
+export function queueAccess(steering: SteeringAffordances, state: SessionSnapshot["state"], running: boolean) {
+	const read = steering.queue && state === "open";
+	return { read, sendNow: read && running };
+}
+
 export interface QueuedMessage {
 	readonly id: string;
 	readonly queue: QueueName;
@@ -571,12 +576,13 @@ export function queueActions(
 	message: QueuedMessage,
 	messages: readonly QueuedMessage[],
 	ops: readonly string[] | undefined,
+	sendNow = true,
 ): readonly QueueAction[] {
 	const id = message.entryId;
 	if (id === undefined || ops === undefined) return [];
 	const actions: QueueAction[] = [];
 	const siblings = messages.filter((row) => row.queue === message.queue).length;
-	if (ops.includes("send_now"))
+	if (sendNow && ops.includes("send_now"))
 		actions.push({
 			key: "send_now",
 			request: { id, op: "send_now" },
@@ -666,7 +672,7 @@ export function restoredDraft(current: string, restored: readonly string[]): str
 		const trimmed = text.trim();
 		if (trimmed !== "" && !blocks.includes(trimmed)) blocks.push(trimmed);
 	}
-	return blocks.join("\n\n").slice(0, PROMPT_TEXT_MAX_CHARACTERS);
+	return blocks.join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
