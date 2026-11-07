@@ -207,7 +207,14 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	// Removing them here is what keeps `<cache>/yazi/sessions` from growing by
 	// three files per open for the life of the install.
 	const removeTransportFiles = (): void => {
-		for (const path of [streamPath, chooserPath, cwdPath]) rmSync(path, { force: true });
+		for (const path of [streamPath, chooserPath, cwdPath]) {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// Windows refuses while the pane's Yazi still writes the stream; close()
+				// tries again once the pane is gone, and the stale sweep after that.
+			}
+		}
 	};
 
 	const pane = await options.mux.openUtilityPane({
@@ -324,6 +331,7 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 			stream?.stop();
 			stop("stopped");
 			await options.mux.closePane(pane.paneId);
+			removeTransportFiles();
 		},
 	};
 	return { status: "opened", session };

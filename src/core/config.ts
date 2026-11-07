@@ -1031,6 +1031,8 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"fleet.speculativeDispatch": "workers are no longer held ahead of a predicted dispatch",
 	"turnControl.interpretation": "no harness workflow reads the request before a turn any more",
 	"turnControl.orientation": "the orientation workflow is gone; the main agent dispatches Scout when it wants a tour",
+	"interface.panes.enabled":
+		"Clio always opens its own private pane host when the terminal allows it; --with-panes joins an existing host instead",
 } as const);
 
 const RETIRED_TURN_CONTROL_WORKFLOWS: ReadonlySet<unknown> = new Set(["orientation", "direction", "ledger-facts"]);
@@ -2476,10 +2478,6 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				else {
 					const panes = ui.panes;
 					issues.unknownKeys("interface.panes", panes, ["enabled", "notifications", "layout", "workers", "files"]);
-					if ("enabled" in panes) {
-						const parsed = expectEnum(issues, "interface.panes.enabled", panes.enabled, ["auto", "embedded", "off"] as const);
-						if (parsed !== undefined) settings.interface.panes.enabled = parsed;
-					}
 					if ("notifications" in panes) {
 						const parsed = expectEnum(issues, "interface.panes.notifications", panes.notifications, [
 							"failures",

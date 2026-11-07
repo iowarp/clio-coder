@@ -48,8 +48,7 @@ Usage:
   clio-coder --no-context-files, -nc  skip main-session project context preload
   clio-coder --skill <path>       make one explicit skill available for this session, repeatable
   clio-coder --no-skills          disable skill discovery while still honoring --skill
-  clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
-  clio-coder --no-panes           keep panes off even when settings turn them on
+  clio-coder --with-panes         join the current pane host as a guest instead of opening Clio's own
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
@@ -99,7 +98,7 @@ Usage:
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
-  clio-coder panes install|theme|workspace  install the pane multiplexer, print Clio's theme as a herdr block, or manage the remembered workspace answer (on|off|ask|status)
+  clio-coder panes install|theme  repair Clio's pane host (herdr) or print Clio's theme as a herdr block
   clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      full welcome and guidance, or compact startup for this session
   clio-coder --help, -h           this message
@@ -147,17 +146,17 @@ interface CliBootOptions {
 	noContextFiles?: boolean;
 	noSkills?: boolean;
 	skillPaths?: string[];
-	panes?: "with" | "without";
+	panes?: "with";
 }
 
 /**
  * Commands whose handler reads the boot options. Every other command used to
  * receive them and drop them, so `clio-coder --api-key K fleet run` ran on the
- * configured key with no word said. The panes flags belong to the interactive
+ * configured key with no word said. The panes flag belongs to the interactive
  * session alone: neither `run` nor `acp` reads them.
  */
 const BOOT_OPTION_COMMANDS: ReadonlySet<string> = new Set(["run", "acp"]);
-const PANES_FLAGS: ReadonlySet<string> = new Set(["--with-panes", "--no-panes"]);
+const PANES_FLAGS: ReadonlySet<string> = new Set(["--with-panes"]);
 
 /** The refusal for the first boot flag `command` cannot honor, or null when it honors them all. */
 function unhonoredBootFlag(command: string | undefined, bootFlags: ReadonlyArray<string>): string | null {

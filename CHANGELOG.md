@@ -4,10 +4,17 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool reads HDF5, NetCDF and Parquet and summarizes their arrays. A new `reproduce` check kind reruns a computation from sha256-pinned inputs in a clean environment and judges the results against a tolerance, and every judged `reproduce` or `numeric-compare` check is recorded in a per-project claims ledger that names contradictions and superseded results and offers them to the agent when a task touches the check (#406). `/usage` and the exit summary count tokens and cost per verified outcome, and `clio-coder telemetry insights` sorts sessions into research task categories and autonomy levels. Four library packs cover HPC, science data, literature and life science, and `ask_user` can mark a choice that only the operator makes. GitHub Copilot becomes a target through the official Copilot SDK. Compaction summarizes inside a cached prefix when that is cheaper, the desktop app opens a fleet node's own GUI over SSH, command output masks credential shapes, more URL credential forms stay hidden (#448), streaming answers repaint less (#428), every key follows one keyboard model, and the package is smaller.
+Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool reads HDF5, NetCDF and Parquet and summarizes their arrays. A new `reproduce` check kind reruns a computation from sha256-pinned inputs in a clean environment and judges the results against a tolerance, and every judged `reproduce` or `numeric-compare` check is recorded in a per-project claims ledger that names contradictions and superseded results and offers them to the agent when a task touches the check (#406). `/usage` and the exit summary count tokens and cost per verified outcome, and `clio-coder telemetry insights` sorts sessions into research task categories and autonomy levels. Four library packs cover HPC, science data, literature and life science, and `ask_user` can mark a choice that only the operator makes. GitHub Copilot becomes a target through the official Copilot SDK. Compaction summarizes inside a cached prefix when that is cheaper, the desktop app opens a fleet node's own GUI over SSH, command output masks credential shapes, more URL credential forms stay hidden (#448), streaming answers repaint less (#428), every key follows one keyboard model, and the package is smaller. Terminal panes come from a pinned herdr that the installers provision and Clio hosts privately on Linux, macOS and Windows, with no setup question.
 
 ### Upgrade notes
 
+- Bare `clio-coder` in an interactive terminal always opens Clio Coder's own private pane host, on a pinned herdr 0.9.5 that the installers provision and the first launch installs when missing, with one status line. There is no consent question; if the install or the host fails, Clio prints one line and continues in the terminal, and a failed launch-time install is not retried for a day (`clio-coder panes install` always retries). A herdr on `PATH` is never used to host Clio.
+- The host is private per project: its socket sits in the runtime directory as `clio-coder-<hash>.sock`, its config and state under `<state>/mux/<hash>/`, and it is removed when it stops. Your own herdr, its sessions and `~/.config/herdr` never see it, and shells in its panes get your own `XDG_CONFIG_HOME` and `XDG_STATE_HOME` back.
+- Started from a pane of your own herdr, Clio opens its host nested with the prefix `ctrl+shift+b` (or `ctrl+]`). Its pane chrome follows `interface.outputDetail` and redraws live when the style changes.
+- Windows x64 gets the same host: `install.ps1` provisions the pinned herdr, and Clio runs it as a herdr `--session` named `clio-coder-<hash>` reached over its named pipe. Panes start herdr's PowerShell, and the files pane's Ctrl+Y and Alt+E work there. Windows on ARM has no herdr build and stays in the plain terminal.
+- `/quit` in the private host closes every pane in it, shell and logs panes included, and stops the host. Each launch starts from one Clio pane; herdr's saved layout is never restored. As a guest in your own herdr (`--with-panes`), `/quit` still leaves your utility panes open and names them.
+- `CLIO_CODER_TOOLCHAIN_MIRROR` points `clio-coder tools install` at a local directory, `file:` URL or HTTP(S) mirror; pinned checksums still apply.
+- `clio-coder --version` credits herdr on a second line.
 - The `lmstudio-native` and `ollama-native` runtime ids, removed in 0.5.6, stay removed and are not aliased. Every surface that refuses a target still naming one now names its replacement, `runtime: lmstudio` or `runtime: ollama`: `run`, `targets use`, dispatch, `configure`, TUI startup, the provider status reason and `targets --json`. `run --api-key` tells such a target from an absent one.
 - A plugin manifest whose `ai.iowarp.clio` block carries the `evals` key is refused at install with a message naming the key, the release and the fix, and an installed copy that carries it lists as an invalid plugin. Delete the key from the manifest and reinstall.
 - The retired version 2 settings key `context.compaction.excludeLastTurns` no longer stops `settings.yaml` from loading. The key is ignored, `doctor` names it and `doctor --fix` removes it. `context.workingSet.protectLastTurns` remains.
@@ -27,6 +34,7 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 ### Known limits
 
+- The private pane host has not run on macOS. Its macOS paths, the `TMPDIR` socket and the login-shell shim, are covered by contract tests only.
 - The Claude SDK paths are verified against a fake SDK only.
 - Slurm and Lmod use, through `slurm-jobs` and the `hpc` pack, is verified with fake binaries only.
 - The MPI-IO code that `hpc-parallel-io` writes is compile-checked only.
@@ -38,6 +46,9 @@ Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool
 
 ### Removed
 
+- The `interface.panes.enabled` setting. It is ignored when present; `clio-coder doctor` names it and `doctor --fix` removes it.
+- The `--no-panes` flag, now an unknown option (exit 2), and `clio-coder panes workspace`.
+- `install.sh --no-workspace` and `CLIO_CODER_INSTALL_WORKSPACE`. The flag is accepted with a warning and does nothing.
 - The Pi `github-copilot` OAuth login, with its VS Code client id and headers, and the `COPILOT_GITHUB_TOKEN` mapping. Use a `copilot-sdk` target.
 - The Ruby and C# tree-sitter grammars from the package (2.1 MB and 5.1 MB). They download on first use.
 - Loose `src/` TypeScript files other than the extension scaffold templates, now packed, and the uncompressed `codemap.json` from the package. The public extension types ship as bundled declarations. The code map drops from 5.3 MB to 0.88 MB.

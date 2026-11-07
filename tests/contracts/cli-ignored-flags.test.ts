@@ -50,7 +50,7 @@ describe("global startup flags before a subcommand", () => {
 		[["--skill", "skill-dir", "share", "inspect", "x.json"], "--skill", "share"],
 		[["--no-skills", "dev", "share", "inspect", "x.json"], "--no-skills", "share"],
 		[["--with-panes", "run", "hello"], "--with-panes", "run"],
-		[["--no-panes", "acp"], "--no-panes", "acp"],
+		[["--with-panes", "acp"], "--with-panes", "acp"],
 	] as const) {
 		it(`refuses ${args.join(" ")} and names ${flag} and ${command}`, () => {
 			const result = cli(args);
@@ -155,16 +155,18 @@ describe("run --delegate-tools", () => {
 });
 
 describe("--with-panes", () => {
-	it("activates guest detection, and embedded joins a pane host only from inside one", () => {
-		equal(resolvePanesEnablement("with", "embedded", {}), "auto");
-		equal(resolvePanesEnablement("with", "off", {}), "auto");
-		equal(resolvePanesEnablement("with", undefined, {}), "auto");
-		equal(resolvePanesEnablement("without", "embedded", { HERDR_ENV: "1" }), "off");
-		// Hosting is the launcher's job, so `embedded` reaching the boot is a guest
-		// inside a pane host and a plain session outside one.
-		equal(resolvePanesEnablement(undefined, "embedded", { HERDR_ENV: "1" }), "auto");
-		equal(resolvePanesEnablement(undefined, "embedded", {}), "off");
-		equal(resolvePanesEnablement(undefined, undefined, {}), "off");
+	it("activates guest detection; without it, panes follow whether Clio runs in a pane host", () => {
+		equal(resolvePanesEnablement("with", {}), "auto");
+		// Hosting is the launcher's job, so a boot reaching here is a guest inside
+		// a pane host and a plain session outside one.
+		equal(resolvePanesEnablement(undefined, { HERDR_ENV: "1" }), "auto");
+		equal(resolvePanesEnablement(undefined, {}), "off");
+	});
+
+	it("no longer accepts --no-panes", () => {
+		const result = cli(["--no-panes", "doctor"]);
+		equal(result.status, 2, result.stderr);
+		ok(result.stderr.includes("--no-panes"), result.stderr);
 	});
 });
 

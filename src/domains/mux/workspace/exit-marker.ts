@@ -1,35 +1,36 @@
 /**
- * The exit handshake between a workspace-hosted Clio and its launcher.
+ * The exit handshake between a Clio hosted in its private pane host and the
+ * launcher that owns the terminal.
  *
  * Kept apart from the launcher so the Clio in the pane loads these few lines
- * on its way out and nothing else from the workspace code.
+ * on its way out and nothing else from the hosting code.
  *
- * The marker lives beside the session's own socket. Both sides already know
- * that directory, the launcher because it chose the session and the pane
- * because herdr hands every pane `HERDR_SOCKET_PATH`, so they agree on it
- * without a variable of Clio's own having to survive the pane host's
- * environment.
+ * The marker is named after the host's own socket. Both sides already know
+ * that path, the launcher because it chose it and the pane because herdr
+ * hands every pane `HERDR_SOCKET_PATH`, so they agree on it without a variable
+ * of Clio's own having to survive the pane host's environment, and on either
+ * platform layout (src/domains/mux/workspace/platform.ts).
  */
 
 import { createHash } from "node:crypto";
 import { realpathSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
+import { isClioHostSocket } from "./platform.js";
 
 /**
- * Every herdr session Clio hosts is named with this prefix, and Clio acts on
- * no session without it. The bare name `clio-coder` is deliberately not
- * matched: a session by that name is somebody's own, or an earlier build's,
- * and is never attached to, migrated or stopped.
+ * Every pane host Clio starts is named with this prefix and a hash, and Clio
+ * acts on no host without both. The bare name `clio-coder` is deliberately
+ * not matched: a session by that name is somebody's own, or an earlier
+ * build's, and is never attached to, migrated or stopped.
  */
 export const WORKSPACE_SESSION_PREFIX = "clio-coder-";
 
 /**
- * The session for one project: one per concrete directory. herdr keeps focus
- * per server, so two projects sharing a session would share one view, and
- * keys typed in one terminal would land in the other project's Clio. The
- * directory is resolved first, so a symlinked path reaches the same session
- * as the directory it names, and a second worktree, being a different
- * directory, gets its own.
+ * The host for one project: one per concrete directory. herdr keeps focus per
+ * server, so two projects sharing a host would share one view, and keys typed
+ * in one terminal would land in the other project's Clio. The directory is
+ * resolved first, so a symlinked path reaches the same host as the directory
+ * it names, and a second worktree, being a different directory, gets its own.
  */
 export function workspaceSessionFor(cwd: string): { session: string; cwd: string } {
 	const canonical = realpathSync(cwd);
@@ -39,22 +40,30 @@ export function workspaceSessionFor(cwd: string): { session: string; cwd: string
 	};
 }
 
-export const EXIT_MARKER_PREFIX = "clio-exit-";
-
-export function exitMarkerPath(sessionDir: string, paneId: string): string {
-	return join(sessionDir, `${EXIT_MARKER_PREFIX}${paneId.replace(/[^A-Za-z0-9_-]/gu, "_")}`);
+/** The session name a Clio host socket belongs to, or null for any other socket. */
+export function clioHostSessionOf(socketPath: string | undefined): string | null {
+	if (!socketPath || !isClioHostSocket(socketPath)) return null;
+	const normalized = socketPath.replace(/\\/gu, "/");
+	const name = basename(normalized);
+	return name === "herdr.sock" ? basename(dirname(normalized)) : name.slice(0, -".sock".length);
 }
 
-/** True when this process runs in a pane of a workspace session Clio hosts. */
+/** `<socket path without .sock>.exit-`: every marker of one host starts with this. */
+export function exitMarkerStem(socketPath: string): string {
+	return `${socketPath.endsWith(".sock") ? socketPath.slice(0, -".sock".length) : socketPath}.exit-`;
+}
+
+export function exitMarkerPath(socketPath: string, paneId: string): string {
+	return `${exitMarkerStem(socketPath)}${paneId.replace(/[^A-Za-z0-9_-]/gu, "_")}`;
+}
+
+/** True when this process runs in a pane of a private host Clio started. */
 export function hostedInWorkspace(env: NodeJS.ProcessEnv = process.env): boolean {
-	const socket = env.HERDR_SOCKET_PATH;
-	return (
-		env.HERDR_ENV === "1" && Boolean(socket) && basename(dirname(socket ?? "")).startsWith(WORKSPACE_SESSION_PREFIX)
-	);
+	return env.HERDR_ENV === "1" && isClioHostSocket(env.HERDR_SOCKET_PATH);
 }
 
 /**
- * Called by a Clio that is quitting cleanly. Inside a Clio workspace it tells
+ * Called by a Clio that is quitting cleanly. Inside Clio's own host it tells
  * the launcher that owns the terminal that this pane is done; anywhere else it
  * does nothing.
  */
@@ -63,21 +72,20 @@ export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env): void {
 	const paneId = env.HERDR_PANE_ID;
 	if (!hostedInWorkspace(env) || !socket || !paneId) return;
 	try {
-		writeFileSync(exitMarkerPath(dirname(socket), paneId), "");
+		writeFileSync(exitMarkerPath(socket, paneId), "", { mode: 0o600 });
 	} catch {
 		// The launcher then leaves the workspace open, which is the safe side.
 	}
 }
 
 /**
- * Called by a Clio that is starting in a workspace pane. A marker already
- * there belongs to an earlier Clio in the same pane, and left in place it
- * would make the next launcher on this workspace hang up the moment it
- * attached.
+ * Called by a Clio that is starting in a hosted pane. A marker already there
+ * belongs to an earlier Clio in the same pane, and left in place it would make
+ * the next launcher on this host hang up the moment it attached.
  */
 export function clearWorkspaceExit(env: NodeJS.ProcessEnv = process.env): void {
 	const socket = env.HERDR_SOCKET_PATH;
 	const paneId = env.HERDR_PANE_ID;
 	if (!hostedInWorkspace(env) || !socket || !paneId) return;
-	rmSync(exitMarkerPath(dirname(socket), paneId), { force: true });
+	rmSync(exitMarkerPath(socket, paneId), { force: true });
 }

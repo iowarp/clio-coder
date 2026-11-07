@@ -152,7 +152,7 @@ and exit status 1, as does every other installer failure. `--help` exits 0.
 | `--no-post-install` | none | Skip the `clio-coder upgrade --post-install` run after installing. |
 | `--gui` | `CLIO_CODER_INSTALL_GUI=1` | Install the desktop app without asking. See [Desktop app offer](#desktop-app-offer-linux-and-wsl). |
 | `--no-gui` | `CLIO_CODER_INSTALL_GUI=0` | Skip the desktop app. |
-| `--no-workspace` | `CLIO_CODER_INSTALL_WORKSPACE=0` | Skip the workspace pane host. By default the installer runs `clio-coder panes install --if-missing`: a herdr already on `PATH` at a usable version is used as it is, otherwise Clio Coder's pinned copy is downloaded. A failure there never fails the install; Clio Coder offers the workspace again on first launch, or run `clio-coder panes install`. The setup runs on Linux and macOS only. |
+| `--no-workspace` | none | Deprecated and ignored, with a warning. The installer always runs `clio-coder tools install herdr --json`, as `install.ps1` does, which downloads Clio Coder's pinned herdr into its own data directory unless that version is already there. `CLIO_CODER_TOOLCHAIN_MIRROR` points it at a local or internal copy. A failure there never fails the install; bare `clio-coder` installs the copy itself on first launch, or run `clio-coder panes install`. A herdr on `PATH` is never used to host Clio Coder. |
 | `--force`, `-f` | none | Replace a `clio-coder` launcher this installer did not write, including a symlink that points outside the install. A symlink into an npm install of Clio Coder is replaced without it, with a warning. |
 | `--dry-run` | none | Print the platform, Node build, package, install root and launcher, then what would run. Nothing is downloaded or changed. |
 | `-h`, `--help` | none | Print the usage text. |
@@ -200,7 +200,6 @@ inputs preserves the recorded choice.
 | `CLIO_CODER_VERSION`, `CLIO_CODER_CHANNEL`, `CLIO_CODER_PACKAGE`, `CLIO_CODER_NODE_VERSION`, `CLIO_CODER_NODE_TARBALL`, `CLIO_CODER_INSTALL_DIR`, `CLIO_CODER_BIN_DIR`, `CLIO_CODER_MODIFY_PATH`, `CLIO_CODER_AUTO_UPDATE` | `install.sh`, `install.ps1` | Defaults for the options in the tables above. A flag beats the variable. |
 | `CLIO_CODER_HOME` | `install.sh`, `install.ps1` | Selects `$CLIO_CODER_HOME/install` as the install root when no directory is given. |
 | `CLIO_CODER_INSTALL_GUI` | `install.sh` | `1` or `0`, as `--gui` and `--no-gui`; unset asks on a terminal. Any other value stops the run with `CLIO_CODER_INSTALL_GUI must be 1 or 0, got '<value>'`. |
-| `CLIO_CODER_INSTALL_WORKSPACE` | `install.sh` | `0` skips the workspace pane host, as `--no-workspace`. Unset or any other value sets it up. |
 | `CLIO_CODER_INSTALL_ALLOW_SUDO` | `install.sh` | Any non-empty value lets root install when `SUDO_USER` is set. Without it the installer refuses to run under `sudo`, because it installs into the invoking home directory. |
 | `CLIO_CODER_NODE_MIRROR` | both | Base URL, `https://` or `file://`, laid out like `https://nodejs.org/dist`. |
 | `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` | `install.sh` | The same for `unofficial-builds.nodejs.org`. |

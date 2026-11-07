@@ -9,11 +9,16 @@ import {
 	userYaziConfigDir,
 	yaziProfileDir,
 } from "../domains/mux/index.js";
-import { describeResolution, resolveToolBinary, toolStatuses } from "../domains/toolchain/index.js";
+import {
+	describeResolution,
+	resolveToolBinary,
+	resolveVendoredBinary,
+	type ToolStatus,
+	toolStatuses,
+} from "../domains/toolchain/index.js";
 import { popplerInstallHint } from "../tools/read-documents/pdf.js";
 
 export interface ToolchainFindingOptions {
-	panesEnabled?: boolean;
 	filesEnabled?: boolean;
 	fix?: boolean;
 }
@@ -63,9 +68,11 @@ function yaziProfileFinding(enabled: boolean, fix: boolean): DoctorFinding {
  * One row per pinned external tool: where it resolves, and how the version
  * found compares to the pin.
  *
- * Every one of these tools is optional, so no row is ever an error. A missing
- * tool is a WARN with the command that installs it only while an enabled
- * integration needs it; otherwise it is INFO. A fresh home used to show a
+ * No row is ever an error. herdr hosts Clio's panes and always runs from
+ * Clio's own pinned copy, never one on PATH, so its row describes that copy and
+ * a missing one is a WARN that the next launch repairs. Every other tool is
+ * optional: a missing one is a WARN with the command that installs it only
+ * while an enabled integration needs it; otherwise it is INFO. A fresh home used to show a
  * missing croc, which nothing uses yet, as its one warning, above a missing
  * chat target that doctor did not mention at all.
  *
@@ -78,27 +85,52 @@ function yaziProfileFinding(enabled: boolean, fix: boolean): DoctorFinding {
  * a binary that is right there on their PATH.
  */
 export function toolchainFindings(options: ToolchainFindingOptions = {}): DoctorFinding[] {
-	const panesEnabled = options.panesEnabled ?? true;
 	const filesEnabled = options.filesEnabled ?? true;
-	const tools = toolStatuses().map((status) => ({
-		ok: true,
-		name: `external tool ${status.id}`,
-		// Active integrations share the tools-status resolution sentence. Disabled
-		// experimental integrations stay neutral and do not advertise setup work.
-		detail:
-			(status.id === "herdr" && !panesEnabled) || (status.id === "yazi" && !filesEnabled)
-				? "experimental integration disabled by settings"
-				: describeResolution(status),
-		level:
-			(status.id === "herdr" && !panesEnabled) || (status.id === "yazi" && !filesEnabled)
-				? ("ok" as const)
-				: status.resolution.source === "none"
-					? status.id === "herdr" || status.id === "yazi"
-						? ("warn" as const)
-						: ("info" as const)
-					: ("ok" as const),
-	}));
+	const tools = toolStatuses().map((status) =>
+		status.id === "herdr"
+			? paneHostFinding(status)
+			: {
+					ok: true,
+					name: `external tool ${status.id}`,
+					// Active integrations share the tools-status resolution sentence. Disabled
+					// experimental integrations stay neutral and do not advertise setup work.
+					detail:
+						status.id === "yazi" && !filesEnabled
+							? "experimental integration disabled by settings"
+							: describeResolution(status),
+					level:
+						status.id === "yazi" && !filesEnabled
+							? ("ok" as const)
+							: status.resolution.source === "none"
+								? status.id === "yazi"
+									? ("warn" as const)
+									: ("info" as const)
+								: ("ok" as const),
+				},
+	);
 	return [...tools, yaziProfileFinding(filesEnabled, options.fix === true)];
+}
+
+function paneHostFinding(status: ToolStatus): DoctorFinding {
+	const name = "external tool herdr";
+	const vendored = resolveVendoredBinary("herdr");
+	if (vendored !== null) {
+		return {
+			ok: true,
+			name,
+			level: "ok",
+			detail: `pane host ${vendored.version} (Clio's pinned copy) at ${vendored.binaryPath}`,
+		};
+	}
+	if (!status.supported) {
+		return { ok: true, name, level: "info", detail: "no pinned pane host for this platform; Clio runs without panes" };
+	}
+	return {
+		ok: true,
+		name,
+		level: "warn",
+		detail: `pane host ${status.version} is not installed; the next \`clio-coder\` installs it, or run \`clio-coder panes install\``,
+	};
 }
 
 /**

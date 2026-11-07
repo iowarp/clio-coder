@@ -43,7 +43,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"integrations.music.enabled",
 	"integrations.music.station",
 	// The bridge reads these on every explicit open; no mux re-detection is
-	// needed because the host capability rung remains `panes.enabled`.
+	// needed because the pane layer's rung is settled once at boot.
 	"interface.panes.files",
 	// The workers dock reads its share through getWorkersRatio each time the
 	// pane opens, so a new ratio applies to the next dock without a restart.
@@ -114,7 +114,6 @@ const RESTART_REQUIRED_FIELDS = new Set<string>([
 	"systemOne.use",
 	"interface.mode",
 	"interface.fullscreenScrollbar",
-	"interface.panes.enabled",
 	"integrations.runtimePlugins",
 	// The `music` tool is registered once at startup, like consult.
 	"integrations.music.agentControl",

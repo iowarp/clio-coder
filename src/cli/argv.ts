@@ -75,18 +75,15 @@ export interface GlobalCliFlags {
 	noContextFiles: boolean;
 	noSkills: boolean;
 	skillPaths: string[];
-	/**
-	 * Panes activation from the command line. `--with-panes` and `--no-panes`
-	 * both beat the `panes.enabled` setting; absent means the setting decides.
-	 */
-	panes?: "with" | "without";
+	/** `--with-panes`: join the current pane host as a guest. */
+	panes?: "with";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
 	autonomy?: AutonomyLevel;
 	/** `--allow-tools`/`--delegate-tools` before any subcommand: the interactive session's tool limits. */
 	toolLimits?: SessionToolLimits;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
-	 * `--no-skills`, `--with-panes`, `--no-panes`) as typed, in order, so a
+	 * `--no-skills`, `--with-panes`) as typed, in order, so a
 	 * command that cannot honor one can refuse it by the name the operator used.
 	 */
 	bootFlags: string[];
@@ -108,7 +105,7 @@ const GLOBAL_ONLY_FLAGS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** Startup flags only the interactive session reads; no subcommand accepts them in either position. */
-const INTERACTIVE_ONLY_FLAGS: ReadonlySet<string> = new Set(["--with-panes", "--no-panes"]);
+const INTERACTIVE_ONLY_FLAGS: ReadonlySet<string> = new Set(["--with-panes"]);
 
 /**
  * Explain the ordering rule when a rejected option is a global one in the
@@ -155,7 +152,7 @@ export function extractGlobalFlags(
 	let noContextFiles = false;
 	let noSkills = false;
 	let demo: boolean | undefined;
-	let panes: "with" | "without" | undefined;
+	let panes: "with" | undefined;
 	let autonomy: AutonomyLevel | undefined;
 	let toolLimits: SessionToolLimits | undefined;
 	const skillPaths: string[] = [];
@@ -197,10 +194,8 @@ export function extractGlobalFlags(
 			bootFlags.push(arg);
 			continue;
 		}
-		if (arg === "--with-panes" || arg === "--no-panes") {
-			// Last occurrence wins, so a wrapper script's baked-in choice can be
-			// overridden by appending the opposite flag.
-			panes = arg === "--with-panes" ? "with" : "without";
+		if (arg === "--with-panes") {
+			panes = "with";
 			bootFlags.push(arg);
 			continue;
 		}

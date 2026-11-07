@@ -7,6 +7,9 @@ sources:
   - "src/domains/mux/socket-client.ts"
   - "src/domains/mux/dock-controller.ts"
   - "src/domains/mux/workspace/launch.ts"
+  - "src/domains/mux/workspace/platform.ts"
+  - "src/domains/mux/workspace/platform-posix.ts"
+  - "src/domains/mux/workspace/config.ts"
   - "src/domains/mux/peer-inbox.ts"
   - "src/domains/mux/operations.ts"
   - "src/domains/mux/yazi/profile.ts"
@@ -19,6 +22,8 @@ symbols:
   - "planDockOpen"
   - "DOCK_SPECS"
   - "launchWorkspace"
+  - "isClioHostSocket"
+  - "renderWorkspaceConfig"
   - "deliverPeerPrompt"
   - "parsePeerPromptRequest"
   - "PANES_PRESETS"
@@ -29,13 +34,16 @@ tests:
   - "tests/extended/panes-files.test.ts"
   - "tests/extended/session-title-typed-input.test.ts"
   - "tests/contracts/panes-tool.test.ts"
+  - "tests/contracts/mux-private-host.test.ts"
 invariants:
   - "Every method on the pane runtime contract is best-effort: when the layer is absent or a transport or timeout error occurs, the call returns its fallback (null, false, or empty) and does not throw to the caller."
   - "A deliverPeerPrompt call returns not-delivered without writing a request when the inbox owner's paneId or socketPath does not match the request, or when the owner process is not verified alive."
   - "A stale inbox token from a retired conversation cannot create a new conversation in the receiving session (session-title-typed-input test)."
   - "planDockOpen refuses a dock before any split is sent when the anchor axis times half the slot's minCells is below that floor."
   - "The panes preset name yazi resolves to the files preset, and unknown names resolve to null."
+  - "Clio's private pane host never reads or writes the operator's own herdr socket or ~/.config/herdr: its server runs on a clio-coder-<hash> socket with every inherited HERDR_* variable removed."
 validate:
+  - "pnpm run test:file -- tests/contracts/mux-private-host.test.ts"
   - "pnpm run test:file -- tests/extended/panes-files.test.ts"
   - "pnpm run test:file -- tests/extended/session-title-typed-input.test.ts"
   - "pnpm run test:file -- tests/contracts/panes-tool.test.ts"
@@ -56,12 +64,12 @@ The area has these parts:
 - A runtime contract with pane open, close, read, prompt, interrupt and layout methods (`src/domains/mux/contract.ts:MuxContract`).
 - A socket client that speaks newline-delimited JSON to the herdr server (`src/domains/mux/socket-client.ts:createMuxClient`).
 - Dock geometry and lifecycle for managed panes (`src/domains/mux/dock-controller.ts`).
-- A workspace launcher for the embedded rung (`src/domains/mux/workspace/launch.ts:launchWorkspace`).
+- A launcher for Clio's own private pane host (`src/domains/mux/workspace/launch.ts:launchWorkspace`).
 - A peer prompt inbox (`src/domains/mux/peer-inbox.ts`).
 - The operator and model pane vocabulary (`src/domains/mux/operations.ts`).
 - The managed Yazi profile (`src/domains/mux/yazi/profile.ts`).
 
-The `cliamp/` subdirectory is listed in the assigned scope but was not read for this page. The `workspace/` directory also contains `config.ts` and `src/domains/mux/workspace/exit-marker.ts`, which were not read; their behavior is described here only as far as `src/domains/mux/workspace/launch.ts` calls them.
+The `cliamp/` subdirectory is listed in the assigned scope but was not read for this page. The `workspace/` directory also contains `config.ts`, `exit-marker.ts` and the platform seam (`platform.ts`, `platform-posix.ts`, `platform-win32.ts`), described under Workspace launch.
 
 ## Module factory and runtime contract
 
@@ -98,14 +106,16 @@ Caller: `createMuxRuntime` is the only constructor of the controller inside `src
 
 ## Workspace launch
 
-`launchWorkspace(options)` in `src/domains/mux/workspace/launch.ts` is the embedded rung: the pane host Clio starts for itself. Its flow, as read from the function body:
+`launchWorkspace(options)` in `src/domains/mux/workspace/launch.ts` is the private host Clio starts for itself from bare `clio-coder` (`src/cli/workspace-launch.ts` decides eligibility, resolves the vendored herdr with `resolveVendoredBinary`, and installs it when missing with one status line, a 30-second download budget and a one-day negative cache in `<state>/mux/herdr-install-failed.json`; platforms without a pinned build stay plain silently). The host layout comes from the platform seam in `src/domains/mux/workspace/platform.ts`: `muxHostPlatform().hostLayout({ session, env })` returns the socket path, the herdr arguments, the host environment, the managed config path, herdr's session file, the pane shell, the disposable directories and the cleanup command. On POSIX (`platform-posix.ts`) the session is `clio-coder-<12 hex>` of the project directory, the socket is `<runtime dir>/clio-coder/<session>.sock`, and the server runs with `XDG_CONFIG_HOME` and `XDG_STATE_HOME` pointed at `<state>/mux/<hash>/` plus a `pane-shell` shim that restores the operator's XDG roots before it execs their shell. The root records its socket in `socket-path`, and a later launch whose `XDG_RUNTIME_DIR` or `TMPDIR` differs reuses it while the socket exists, so one root never serves two servers. Windows (`platform-win32.ts`) uses herdr's own `--session`. The flow:
 
-1. `resolveHost(options, writeWorkspaceConfig())` prepares the host. A throw returns `{ status: "fallback", reason }`.
-2. `openWorkspace(host)` runs inside `withStateFileLock(lockTarget, ...)`. A refusal or lock failure returns `fallback` with a reason.
-3. The launcher spawns the herdr client with `--session` and inherits stdio. From that point the terminal belongs to the client.
-4. A poll interval (`EXIT_POLL_MS`) checks for an exit marker file for the Clio pane. Every `WORKSPACE_CHECK_EVERY` ticks it asks `stillOwnsWorkspace`. Either signal calls `detach(attach)`.
+1. Under the lock `<state>/mux/locks/<hash>`, `resolveHost` takes the layout and writes the managed config with `writeWorkspaceConfig` (`config.ts`): prefix `ctrl+b`, or `ctrl+shift+b`/`ctrl+]` when the launch is nested in the operator's herdr; herdr's own screens unbound; chrome chosen by `interface.outputDetail`. The host environment is the caller's environment with every `HERDR_*` removed, plus the layout's.
+2. `openWorkspace(host)` starts or reuses the server on the layout's socket (a reused server gets `server.reload_config`; before a fresh start `ensureServer` deletes the layout's `sessionFile`, because herdr always restores `session.json` at startup and has no setting to stop it), finds or opens the Clio pane, and tags it. A refusal or lock failure returns `fallback` with a reason.
+3. `attachWorkspace` spawns the herdr client with the layout's arguments and inherits stdio. From that point the terminal belongs to the client.
+4. A poll interval (`EXIT_POLL_MS`) checks for the Clio pane's exit marker, `<socket without .sock>.exit-<pane>` (`exit-marker.ts`). Every `WORKSPACE_CHECK_EVERY` ticks it asks `stillOwnsWorkspace`. Either signal calls `platform.detach`.
 5. On `spawnError`, the launcher undoes what it created (`undoLaunch`) under the lock, closes the client and returns `fallback`. Undo is skipped for a workspace the launch reattached to.
-6. On normal exit, a clean Clio quit with a single remaining pane closes the workspace and removes the marker. Otherwise, `stopServerIfEmpty` decides whether the server stops. The result is `{ status: "closed", exitCode, workspaceLeftRunning }`.
+6. On normal exit, a clean Clio quit (exit code 0, not a restart handoff) closes the whole workspace, utility panes included, and removes the marker. `describePanesLeftBehind` in `src/interactive/panes-runtime.ts` returns nothing on a Clio host socket for the same reason. Otherwise, `stopServerIfEmpty` decides whether the server stops. A stopped server takes its markers, the layout's disposable directories and, where the layout names one, herdr's own cleanup command with it. The result is `{ status: "closed", exitCode, workspaceLeftRunning }`.
+
+Detection treats a process as hosted in Clio's own host only when `isClioHostSocket(HERDR_SOCKET_PATH)` matches a `clio-coder-<hash>` socket, so a launch from the operator's herdr opens a nested host instead of stopping. In guest mode inside its own host, the mux extension re-renders the managed config when `interface.outputDetail` changes and calls `server.reload_config` (`reloadHostChrome` in `config.ts`).
 
 Two things are stated in the source and reflected in the code: the launcher process never boots Clio itself (the file header), and SIGINT is ignored while the client owns the terminal (`process.on("SIGINT", ignore)`).
 
@@ -158,7 +168,8 @@ The focused test `tests/contracts/doctor-yazi-repair.test.ts` imports from this 
 - `DOCK_SPECS` values are tied to the rendered layouts the source comments describe (the workers floor to the fleet dashboard, the music floor to cliamp's spectrum height). Changing a floor changes the refusal threshold in `planDockOpen`.
 - The peer inbox distinguishes `not-delivered` from `unconfirmed` based on whether a `requestId` was supplied. Callers that retry must pass the same id.
 - The owner token constants and the legacy keys are both read by ownership checks. Removing the legacy match would stop recognizing panes left by older sessions, as the comment in `src/domains/mux/contract.ts` says.
-- The `cliamp/` and `src/domains/mux/workspace/config.ts` files were not read for this page; edits there are not covered by the behavior described here.
+- The `cliamp/` directory was not read for this page; edits there are not covered by the behavior described here.
+- `src/domains/mux/workspace/platform.ts` is the seam between the POSIX and Windows hosts. `launch.ts` must take every host path, argument and environment variable from `hostLayout()`, never derive one itself.
 
 ## Related pages
 

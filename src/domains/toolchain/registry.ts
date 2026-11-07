@@ -78,61 +78,65 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 	},
 	{
 		id: "herdr",
-		version: "0.9.3",
+		version: "0.9.5",
 		summary: "terminal multiplexer with an agent-aware socket API; powers Clio panes",
 		homepage: "https://herdr.dev",
 		license: "Apache-2.0",
 		binaries: ["herdr"],
 		primaryBinary: "herdr",
+		// herdr is a required, auto-provisioned dependency: the installer places
+		// this pin and a bare `clio-coder` re-provisions it silently when it is
+		// missing or superseded. The private pane host Clio opens for itself
+		// always runs this vendored copy (`resolveVendoredBinary`), never a PATH
+		// herdr. The floor below therefore only governs the operator's own herdr,
+		// the one a `--with-panes` Clio joins as a guest.
+		//
 		// Lowered from the pin on evidence, which is the bar this file sets for
 		// moving a floor. `herdr api schema --json` was read from 0.7.5
-		// (protocol 17), 0.8.2 (protocol 20) and the pinned 0.9.3 (protocol 22):
-		// every method the mux domain sends exists in all three, including the
-		// workspace, read, send-keys and wait methods the workspace launcher and
-		// the panes tool use. The two methods
-		// that are not universal are already gated at runtime by protocol number
-		// in `src/domains/mux/protocol.ts`, whose own floor is 17, so an operator's
+		// (protocol 17), 0.8.2 (protocol 20) and 0.9.3 (protocol 22): every method
+		// the mux domain sends as a guest exists in all three, including the read,
+		// send-keys and wait methods the panes tool uses. The two methods that are
+		// not universal are already gated at runtime by protocol number in
+		// `src/domains/mux/protocol.ts`, whose own floor is 17, so an operator's
 		// 0.7.5 takes the documented fallback rather than failing. 0.7.5 is the
 		// oldest release actually checked, not the oldest that might work.
 		minimumVersion: "0.7.5",
 		versionArgs: ["--version"],
 		downloads: {
 			"linux-x64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-x86_64",
-				sha256: "18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64",
+				sha256: "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"linux-arm64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-linux-aarch64",
-				sha256: "4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-aarch64",
+				sha256: "17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"darwin-x64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-x86_64",
-				sha256: "db62d548ff3e832b087a96b1894a08d26be3905f1830309cd556783f215d4054",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-macos-x86_64",
+				sha256: "5fb0a908ec7f6745e3e245738b06bfad56c46391c391ab3c0955fbead01f1369",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			"darwin-arm64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-macos-aarch64",
-				sha256: "5173a3e0ae42d5d1ab7ebfa5d5e6329f7c3d23f8e1a3677c7ce3231da2884157",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-macos-aarch64",
+				sha256: "fb77c2232a05a8035421382c894392f4174e4e38a18e48af3dd0290157c3a7e2",
 				archive: "raw",
 				binaryMembers: { herdr: "" },
 				documentMembers: [],
 			},
 			// The Windows asset is a zip: `herdr.exe` plus the ConPTY runtime it
 			// loads from `conpty/` beside itself, so those members keep their
-			// relative paths. The pin installs and resolves on Windows; the workspace
-			// launcher and the pane client still speak Unix sockets only, so panes
-			// stay off there until the named-pipe transport exists.
+			// relative paths.
 			"win32-x64": {
-				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-windows-x86_64.zip",
-				sha256: "c75b1fa49f7a3ba4b8b11789912a6147e4214a3b6fd3556d0f80076c8887d795",
+				url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-windows-x86_64.zip",
+				sha256: "d2c6c9c971c43a0bfdde8c692a9a1a7a45c3e4807cd01ae45662b4734fac1cbf",
 				archive: "zip",
 				binaryMembers: { herdr: "herdr.exe" },
 				documentMembers: [
@@ -152,7 +156,7 @@ export const PINNED_TOOLS: ReadonlyArray<PinnedTool> = [
 		documents: [
 			{
 				name: "LICENSE",
-				url: "https://raw.githubusercontent.com/herdrdev/herdr/v0.9.3/LICENSE",
+				url: "https://raw.githubusercontent.com/herdrdev/herdr/v0.9.5/LICENSE",
 				sha256: "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
 			},
 		],

@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
 	"memory-off-marker",
+	"mux-private-host",
 	"memory-route-redaction",
 	"prior-session-hint",
 	"auth-storage-durability",
@@ -65,6 +66,7 @@ export const coreTests = [
 	"plugin-engine",
 	"claims-ledger",
 	"cli-leaf-help",
+	"mux-platform-win32",
 	"keyboard-model",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 

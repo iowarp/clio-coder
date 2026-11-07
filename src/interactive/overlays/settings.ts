@@ -176,10 +176,6 @@ const RESTART_REQUIRED_IDS = new Set<string>([
 	"runtimePlugins",
 	"terminal.tuiMode",
 	"terminal.fullscreenScrollbar",
-	// The mux domain runs its detection ladder once, at boot, from the value this
-	// key held then. Changing the rung mid-session would leave the contract on
-	// the rung it resolved to, so the row says restart rather than lying.
-	"panes.enabled",
 	// The consult tool is registered once, at startup, with the engine chosen then.
 	"systemOne.use",
 ]);
@@ -1608,7 +1604,6 @@ export function buildSettingItems(
 			affordance: "opens placement picker",
 		}),
 		...fleetEndpointRows(options?.providers),
-		settingItem("panes.enabled", panes.enabled, { values: ["auto", "off"] }),
 		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
 		settingItem("panes.layout", panes.layout, { values: ["off", "workers", "cockpit"] }),
 		settingItem("panes.workers.ratio", formatThreshold(panes.workers.ratio, "0.34"), {
@@ -2478,9 +2473,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			applyNonNegativeInteger(value, (next) => {
 				settings.fleet.retry.maxRetries = next;
 			});
-			return;
-		case "panes.enabled":
-			if (value === "auto" || value === "embedded" || value === "off") settings.interface.panes.enabled = value;
 			return;
 		case "panes.notifications":
 			if (value === "failures" || value === "all" || value === "off") settings.interface.panes.notifications = value;

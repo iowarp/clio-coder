@@ -115,6 +115,7 @@ function Install-ClioCoder {
 			return
 		}
 		Say "would install Node $($Options.NodeVersion) ($build) and run its npm: npm install --prefix $installRoot\versions\<version>\lib $installSpec"
+		Say "would then install the pinned herdr that hosts Clio Coder's terminal panes: clio-coder tools install herdr"
 		Ok "dry run complete; nothing was downloaded or changed"
 		return
 	}
@@ -346,6 +347,20 @@ function Install-ClioCoder {
 		$reported = & $node $entry --version
 		if ($LASTEXITCODE -ne 0) { Fail "active CLI failed version check" }
 		Ok "$reported"
+
+		# Clio hosts its terminal panes in a private copy of herdr, pinned by sha256 and fetched from
+		# herdr's releases or CLIO_CODER_TOOLCHAIN_MIRROR. It is part of the install, but never fails it:
+		# Clio fetches it again on its next launch and runs in the plain terminal until it has it.
+		$panes = $null
+		$savedPreference = $ErrorActionPreference
+		$ErrorActionPreference = "Continue"
+		try { $panes = (& $node $entry tools install herdr --json 2>$null | Out-String) | ConvertFrom-Json } catch { $panes = $null } finally { $ErrorActionPreference = $savedPreference }
+		if ($panes -and $panes.ok) {
+			Ok "terminal panes ready (powered by herdr $($panes.version), Apache-2.0)"
+		} else {
+			$why = if ($panes -and $panes.message) { $panes.message } else { "the pane host could not be installed" }
+			Warn "terminal panes are not set up yet: $why. Clio Coder retries on its next launch; or run: clio-coder tools install herdr"
+		}
 
 		# Read and write the raw registry value: [Environment]::SetEnvironmentVariable
 		# would store it as REG_SZ and stop %USERPROFILE%-style entries expanding.

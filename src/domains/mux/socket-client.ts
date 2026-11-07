@@ -323,6 +323,8 @@ export interface MuxClient {
 	workspaceClose(workspaceId: string): Promise<void>;
 	/** Stop the server this socket belongs to. Its panes end with it. */
 	serverStop(): Promise<void>;
+	/** Make the server re-read its config file, so chrome changes land without a restart. */
+	serverReloadConfig(): Promise<void>;
 	/** Takes agent authority over a pane. Only ever called on Clio-owned panes and Clio's own pane. */
 	paneReportAgent(request: MuxReportAgentRequest): Promise<void>;
 	paneReportMetadata(request: MuxReportMetadataRequest): Promise<void>;
@@ -341,6 +343,17 @@ export interface MuxClient {
 }
 
 /**
+ * What `net.connect` dials for a herdr socket path. On Windows herdr serves a
+ * named pipe whose name is the whole path string (`\\.\pipe\C:\...\herdr.sock`)
+ * and writes only a marker file at the path itself, so dialling the file would
+ * fail. Verified against herdr 0.9.5 on Windows 11.
+ */
+export function socketTransportPath(socketPath: string, platform: NodeJS.Platform = process.platform): string {
+	if (platform !== "win32" || socketPath.startsWith("\\\\.\\pipe\\")) return socketPath;
+	return `\\\\.\\pipe\\${socketPath}`;
+}
+
+/**
  * Opens one socket, or rejects with a typed error: `transport` when the host
  * could not be reached inside `timeoutMs`, `aborted` when the caller's signal
  * ended the attempt first. An abort destroys the half-open socket, so a
@@ -352,7 +365,7 @@ function connectSocket(socketPath: string, timeoutMs: number, signal?: AbortSign
 			reject(new MuxError("aborted", `mux socket connect to ${socketPath} was cancelled`));
 			return;
 		}
-		const socket = net.connect({ path: socketPath });
+		const socket = net.connect({ path: socketTransportPath(socketPath) });
 		socket.setNoDelay(true);
 		const finish = (outcome: MuxError | null): void => {
 			clearTimeout(timer);
@@ -1189,6 +1202,9 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 		},
 		async serverStop(): Promise<void> {
 			await call("server.stop", {});
+		},
+		async serverReloadConfig(): Promise<void> {
+			await call("server.reload_config", {});
 		},
 		async workspaceClose(workspaceId: string): Promise<void> {
 			await call("workspace.close", { workspace_id: workspaceId });

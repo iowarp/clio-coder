@@ -9,6 +9,7 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
+import { findPinnedTool } from "../../src/domains/toolchain/index.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 // The Stage 0 shell must answer the terminal while Stage 1 hydrates. Boot turns
@@ -75,10 +76,14 @@ targets:
 chat:
   target: handoff-local
   model: handoff-model
-interface:
-  panes:
-    enabled: off
 `,
+	);
+	// The launcher would install herdr into this empty home and host the session in it. A fresh
+	// launch-install failure for the pin keeps it in this terminal, silently, as these frames expect.
+	mkdirSync(join(home.dir, "state", "mux"), { recursive: true });
+	writeFileSync(
+		join(home.dir, "state", "mux", "herdr-install-failed.json"),
+		JSON.stringify({ version: findPinnedTool("herdr")?.version, at: Date.now() }),
 	);
 	const renderTrace = join(home.dir, "render.jsonl");
 	return {

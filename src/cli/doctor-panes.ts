@@ -44,7 +44,6 @@ function journalWritabilityFinding(root = telemetryRunsDirectory(resolveClioDirs
 }
 
 export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promise<DoctorFinding[]> {
-	let enabled: "auto" | "embedded" | "off" = "off";
 	let layoutRow: DoctorFinding = {
 		ok: true,
 		name: "panes layout",
@@ -52,7 +51,6 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	};
 	try {
 		const panes = readSettings().interface.panes;
-		enabled = panes.enabled;
 		if (panes.layout !== "off") {
 			layoutRow = {
 				ok: true,
@@ -65,32 +63,17 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 		// this section answers on the shipped default (off) rather than throwing.
 	}
 
-	// Inactive by choice is a different answer from unavailable. With the
-	// setting off, detection is skipped the same way the boot skips it, and the
-	// row names the two ways to turn the extension on instead of warning about
-	// a socket nobody asked for.
-	if (enabled === "off") {
+	// Outside a pane host is the ordinary state of a machine where Clio hosts
+	// its own: bare `clio-coder` opens its private host, and a command like this
+	// one, run from a plain terminal, is simply not in it. There is no socket to
+	// expect, so probing for one and warning about its absence would put three
+	// warnings on every healthy install.
+	if (env.HERDR_ENV !== "1") {
 		return [
 			{
 				ok: true,
 				name: "panes mode",
-				detail: "off by choice",
-			},
-			layoutRow,
-		];
-	}
-
-	// `embedded` outside a pane host is the ordinary state of a machine where
-	// Clio hosts its own workspace: bare `clio-coder` starts one, and a command
-	// like this one, run from a plain terminal, is simply not in it. There is no
-	// socket to expect, so probing for one and warning about its absence would
-	// put three warnings on every healthy fresh install.
-	if (enabled === "embedded" && env.HERDR_ENV !== "1") {
-		return [
-			{
-				ok: true,
-				name: "panes mode",
-				detail: "workspace (panes.enabled=embedded); this command is not running inside one",
+				detail: "Clio's private pane host opens with bare `clio-coder`; this command is not running inside one",
 			},
 			layoutRow,
 		];
@@ -99,7 +82,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	// Detection is the same ladder the interactive boot runs, so this row is the
 	// answer that boot would get. It opens a socket and nothing else: no file is
 	// created and no pane is touched.
-	const { detection, client } = await detectMux({ enabled, env });
+	const { detection, client } = await detectMux({ enabled: "auto", env });
 	const snapshot = client ? await client.snapshot().catch(() => null) : null;
 	await client?.close().catch(() => undefined);
 
@@ -109,7 +92,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 			ok: true,
 			level: detection.mode === "none" ? "warn" : "ok",
 			name: "panes mode",
-			detail: `${detection.mode} (panes.enabled=${enabled}); ${detection.reason}`,
+			detail: `${detection.mode}; ${detection.reason}`,
 		},
 		{
 			ok: true,

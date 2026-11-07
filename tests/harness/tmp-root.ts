@@ -46,6 +46,12 @@ delete process.env.CLIO_CODER_THEME;
 for (const name of Object.keys(process.env)) {
 	if (/^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/.test(name)) delete process.env[name];
 }
+// A suite run from a pane inside the operator's own herdr inherits its pane
+// identity, and a spawned Clio would boot as a guest of that live server.
+// Pane fixtures set HERDR_* themselves.
+for (const name of Object.keys(process.env)) {
+	if (name.startsWith("HERDR_")) delete process.env[name];
+}
 /** Names every root this harness makes, and the only names it will remove. */
 // Leave room for nested agent and browser Unix sockets under a long TMPDIR.
 export const TEST_TMP_ROOT_PREFIX = "ct-";

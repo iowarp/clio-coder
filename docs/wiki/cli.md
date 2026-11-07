@@ -53,7 +53,7 @@ The `clio-coder` binary is a single entry, `src/cli/index.ts`, that parses globa
 2. It calls `extractGlobalFlags(argv, isCommandToken)`, from `src/cli/argv.ts`. A global flag error returns 2.
 3. It handles `--help`, `-h`, and `--version` before any dispatch.
 4. It builds `bootOptions` from `--api-key`, `--no-context-files`, `--no-skills`, `--skill`, and the panes flags. `--demo`, `--autonomy`, and the tool-limit flags are refused when they appear before a subcommand, because the message tells the operator to place them after it.
-5. `unhonoredBootFlag` refuses a boot flag that the named command does not read. `BOOT_OPTION_COMMANDS` is `run` and `acp`. `--with-panes` and `--no-panes` are refused for every command, since they apply to the interactive session only.
+5. `unhonoredBootFlag` refuses a boot flag that the named command does not read. `BOOT_OPTION_COMMANDS` is `run` and `acp`. `--with-panes` is refused for every command, since it applies to the interactive session only. The retired `--no-panes` is an unknown global option and exits 2.
 6. With no subcommand, `main` calls `runClioRun`'s sibling `runClioCommand` from `src/cli/clio.ts` to start the interactive session. Otherwise it calls `dispatch(subcommand, subArgs, bootOptions)`.
 
 `dispatch` looks up the handler. If none exists it prints `unknown subcommand`, writes the help text to stderr, and returns 2. If one exists, it calls `installHumanStdoutHandler` and then the handler, and converts an incomplete-installation error into a repair message with exit 1. The `dev` entry routes to `dispatch` again with the nested subcommand, after checking `DEV_COMMANDS`.
@@ -72,7 +72,7 @@ flowchart TD
 
 Two details of the dispatcher are constrained by the code itself. `isCommandToken` is the same map, so a top-level value flag such as `--api-key` cannot consume a command name as its value. `RETIRED_SUBCOMMANDS` keeps `context-init`, `context-index`, and `context-clear` as tokens that cannot be dispatched. Adding a subcommand therefore means adding one entry to `COMMAND_HANDLERS`, and that is the only place the name is recognized.
 
-The focused test `tests/contracts/cli-ignored-flags.test.ts` runs `src/cli/index.ts` in a scratch home. Its table asserts that `--with-panes run hello` and `--no-panes acp` each exit 2 with a stderr message naming the flag and the command, and that `--api-key k-123 doctor` exits 2 without echoing the key. A separate case asserts that `--no-context-files --no-skills run --help` still exits 0, which shows that `run` keeps the boot options it honors.
+The focused test `tests/contracts/cli-ignored-flags.test.ts` runs `src/cli/index.ts` in a scratch home. Its table asserts that `--with-panes run hello` and `--with-panes acp` each exit 2 with a stderr message naming the flag and the command, and that `--api-key k-123 doctor` exits 2 without echoing the key. A separate case asserts that `--no-context-files --no-skills run --help` still exits 0, which shows that `run` keeps the boot options it honors.
 
 ## Run: headless turns and fleet dispatch
 
@@ -153,7 +153,7 @@ The remaining rendering and follow loop are not traced on this page.
 
 ## Focused tests
 
-- `tests/contracts/cli-ignored-flags.test.ts` covers the global-flag refusals (`--api-key k-123 doctor`, `-nc fleet status`, `--with-panes run hello`, `--no-panes acp`) against the real entry, the `parseRunCliArgs` diagnostic for `--with-panes`, and `share export --dry-run` writing no archive.
+- `tests/contracts/cli-ignored-flags.test.ts` covers the global-flag refusals (`--api-key k-123 doctor`, `-nc fleet status`, `--with-panes run hello`, `--with-panes acp`, and the retired `--no-panes`) against the real entry, the `parseRunCliArgs` diagnostic for `--with-panes`, and `share export --dry-run` writing no archive.
 - `tests/contracts/upgrade-command.test.ts` drives `runUpgradeCommand` through injected dependencies and an installed-prefix fixture.
 - Other tests that reference these entry points, found by search across `tests/`, include `tests/contracts/run-cost-ceiling.test.ts`, `tests/contracts/targets-use-unused-model.test.ts`, `tests/contracts/dispatch-recording-surface.test.ts`, `tests/extended/upgrade-lifecycle.test.ts`, and `tests/extended/package-manager-upgrade.test.ts`. This page does not read these files, so they are listed for routing only and their cases are not described.
 

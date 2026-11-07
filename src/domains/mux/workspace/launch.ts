@@ -1,18 +1,20 @@
 /**
- * Open a Clio workspace: the pane host Clio starts for itself.
+ * Open a Clio workspace: the private pane host Clio starts for itself.
  *
- * This is the `embedded` rung. The process that runs here is a launcher and
- * never boots Clio. It starts (or finds) the named herdr session, makes a
+ * The process that runs here is a launcher and never boots Clio. It starts
+ * (or finds) this project's private herdr host, makes a
  * workspace for the project, runs Clio in that workspace's first pane, and then
  * hands the terminal to herdr's client until the operator leaves. The Clio that
  * runs in the pane sees `HERDR_ENV=1` and joins as a guest through the ordinary
  * detection ladder, so there is one pane code path, not two.
  *
- * Three ownership rules. The session is Clio's own, one per project
- * directory and named for it, so the operator's default herdr session and any
- * session Clio did not name are never listed, touched or stopped. The
- * pane host outlives the launcher only while it still holds a workspace: when
- * the last one closes, the launcher stops the server rather than leaving a
+ * Three ownership rules. The host is Clio's own, one per project directory
+ * and named for it, laid out by the platform (src/domains/mux/workspace/
+ * platform.ts) so the operator's own herdr, its sessions and its socket are
+ * never listed, touched or stopped. The host always runs Clio's vendored herdr
+ * pin, never a copy on PATH. And the host outlives the launcher only while it
+ * still holds a workspace: when the last one closes, the launcher stops the
+ * server and deletes what the platform marked disposable rather than leaving a
  * daemon nobody asked for.
  *
  * Two launchers share a session when `clio-coder` is run twice in one
@@ -34,22 +36,22 @@
  * reason Clio does not.
  */
 
-import type { ChildProcess } from "node:child_process";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
-import { shellQuote } from "../../../core/shell-quote.js";
+import type { OutputStyle } from "../../../core/defaults.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
-import { herdrConfigDir } from "../detect.js";
+import { clioStateDir } from "../../../core/xdg.js";
 import { MUX_MIN_PROTOCOL } from "../protocol.js";
 import type { MuxClient } from "../socket-client.js";
 import { createMuxClient } from "../socket-client.js";
 import type { MuxLog, MuxPane, MuxServerInfo } from "../types.js";
 import { writeWorkspaceConfig } from "./config.js";
-import { EXIT_MARKER_PREFIX, exitMarkerPath, workspaceSessionFor } from "./exit-marker.js";
+import { exitMarkerPath, exitMarkerStem, WORKSPACE_SESSION_PREFIX, workspaceSessionFor } from "./exit-marker.js";
+import { type HostLayout, type MuxHostPlatform, muxHostPlatform } from "./platform.js";
 
 /** How long a freshly spawned server gets to answer its first ping. */
 const SERVER_START_TIMEOUT_MS = 8_000;
@@ -74,10 +76,16 @@ const WORKSPACE_CHECK_EVERY = 5;
 const SHARED_DETACH_SETTLE_MS = 3 * EXIT_POLL_MS;
 
 export interface WorkspaceLaunchOptions {
-	/** Absolute path of the herdr binary the resolution ladder chose. */
+	/** Absolute path of Clio's vendored herdr pin. */
 	herdrPath: string;
 	/** That binary's version when it could be read; a running server must match it to be reused. */
 	herdrVersion: string | null;
+	/** True when this launch runs inside another herdr, so the host takes the nested prefix. */
+	nested: boolean;
+	/** Clio's output style, which decides the host's pane chrome. */
+	outputStyle: OutputStyle;
+	/** Platform seam override for tests. */
+	platform?: MuxHostPlatform;
 	cwd: string;
 	/** The command line that starts Clio inside the pane, one word per element. */
 	clioArgv: ReadonlyArray<string>;
@@ -99,27 +107,31 @@ export type WorkspaceLaunchResult =
 
 /**
  * The environment herdr's own processes run under: the caller's, minus any
- * herdr coordinates it inherited, plus Clio's managed config. Stripping matters
- * because `HERDR_SOCKET_PATH` beats `--session`, and a stale one would send
- * every command below to whatever session it names.
+ * herdr coordinates it inherited, plus the platform layout's. Stripping matters
+ * because an inherited `HERDR_SOCKET_PATH` would send every command below to
+ * the operator's own host, and an inherited `HERDR_ENV` would make herdr refuse
+ * to start nested inside it.
  */
-function workspaceHostEnv(env: NodeJS.ProcessEnv, configPath: string): NodeJS.ProcessEnv {
+function workspaceHostEnv(env: NodeJS.ProcessEnv, layout: HostLayout): NodeJS.ProcessEnv {
 	const out: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(env)) {
 		if (!key.startsWith("HERDR_")) out[key] = value;
 	}
-	out.HERDR_CONFIG_PATH = configPath;
-	return out;
+	return { ...out, ...layout.hostEnv };
+}
+
+/**
+ * The lifecycle lock's target. It sits outside every directory the platform
+ * may delete with the host, because a lock that can vanish under its holder
+ * serializes nothing.
+ */
+function workspaceLockTarget(session: string): string {
+	return join(clioStateDir(), "mux", "locks", session.slice(WORKSPACE_SESSION_PREFIX.length));
 }
 
 /** The sidebar label for a project: its directory name. */
 function workspaceLabel(cwd: string): string {
 	return basename(cwd) || cwd;
-}
-
-/** The line typed into the pane's shell: the Clio command, one shell word per argument. */
-function workspaceShellLine(clioArgv: ReadonlyArray<string>): string {
-	return clioArgv.map((word) => (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(word) ? word : shellQuote(word))).join(" ");
 }
 
 /**
@@ -130,36 +142,42 @@ function workspaceShellLine(clioArgv: ReadonlyArray<string>): string {
  */
 interface Host {
 	options: WorkspaceLaunchOptions;
+	platform: MuxHostPlatform;
+	layout: HostLayout;
 	hostEnv: NodeJS.ProcessEnv;
 	/** The session name, `clio-coder-<hash of the resolved directory>`. */
 	session: string;
 	/** The project directory with every symlink resolved. */
 	cwd: string;
 	socketPath: string;
-	sessionDir: string;
-	/**
-	 * The lifecycle lock's target. It sits in a directory of Clio's own beside
-	 * herdr's `sessions`, not inside the session directory, because herdr
-	 * deletes that directory with the session and a lock that can vanish under
-	 * its holder serializes nothing.
-	 */
-	lockTarget: string;
 	log: MuxLog;
 }
 
-function resolveHost(options: WorkspaceLaunchOptions, configPath: string): Host {
+/**
+ * Lay the host out and write its config. Call under the session lock: a
+ * launcher stopping an empty host deletes the platform's disposable
+ * directories, and this must not run between that and the server start.
+ */
+function resolveHost(
+	options: WorkspaceLaunchOptions,
+	identity: { session: string; cwd: string },
+	platform: MuxHostPlatform,
+): Host {
 	const env = options.env ?? process.env;
-	const identity = workspaceSessionFor(options.cwd);
-	const configDir = herdrConfigDir(env);
-	const sessionDir = join(configDir, "sessions", identity.session);
+	const layout = platform.hostLayout({ session: identity.session, env });
+	writeWorkspaceConfig(layout.configPath, {
+		shell: layout.shell,
+		nested: options.nested,
+		outputStyle: options.outputStyle,
+	});
 	return {
 		options,
-		hostEnv: workspaceHostEnv(env, configPath),
+		platform,
+		layout,
+		hostEnv: workspaceHostEnv(env, layout),
 		session: identity.session,
 		cwd: identity.cwd,
-		socketPath: join(sessionDir, "herdr.sock"),
-		sessionDir,
-		lockTarget: join(configDir, "clio-coder-locks", identity.session),
+		socketPath: layout.socketPath,
 		log: options.log ?? ((): void => undefined),
 	};
 }
@@ -219,7 +237,12 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 	const running = await pingOnce(host);
 	if (running !== null) {
 		const mismatch = serverMismatch(running.server, host.options.herdrVersion);
-		if (mismatch === null) return { client: running.client, started: false };
+		if (mismatch === null) {
+			// The config was just rewritten for this launch (prefix, chrome); a
+			// host that refuses to reload keeps its previous look, which is harmless.
+			await running.client.serverReloadConfig().catch(() => undefined);
+			return { client: running.client, started: false };
+		}
 		let live: number;
 		try {
 			live = (await running.client.workspaceList()).length;
@@ -239,11 +262,14 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 		if (!stopped) return { refused: `an idle pane host from an earlier version did not stop (${mismatch})` };
 	}
 
-	const server = spawn(host.options.herdrPath, ["--session", host.session, "server"], {
+	// No server is running, so whatever an earlier one saved is dead panes.
+	rmSync(host.layout.sessionFile, { force: true });
+	const server = spawn(host.options.herdrPath, [...host.layout.herdrArgs, "server"], {
 		cwd: host.cwd,
 		env: host.hostEnv,
 		detached: true,
 		stdio: "ignore",
+		windowsHide: true,
 	});
 	let spawnFailed = false;
 	server.once("error", () => {
@@ -273,7 +299,7 @@ async function findRunningClio(host: Host, client: MuxClient): Promise<MuxPane |
 			(pane) =>
 				(pane.agent === CLIO_AGENT || WORKSPACE_NONCE.test(pane.tokens[WORKSPACE_TOKEN] ?? "")) &&
 				pane.cwd === host.cwd &&
-				!existsSync(exitMarkerPath(host.sessionDir, pane.paneId)),
+				!existsSync(exitMarkerPath(host.socketPath, pane.paneId)),
 		);
 		if (clio) return clio;
 	}
@@ -281,11 +307,12 @@ async function findRunningClio(host: Host, client: MuxClient): Promise<MuxPane |
 }
 
 function runHerdr(host: Host, args: ReadonlyArray<string>): boolean {
-	const result = spawnSync(host.options.herdrPath, ["--session", host.session, ...args], {
+	const result = spawnSync(host.options.herdrPath, [...host.layout.herdrArgs, ...args], {
 		cwd: host.cwd,
 		env: host.hostEnv,
 		stdio: "ignore",
 		timeout: 10_000,
+		windowsHide: true,
 	});
 	return result.status === 0;
 }
@@ -299,22 +326,33 @@ async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean
 	}
 	if (!(await stopServer(host, client))) return false;
 	// With the server gone its pane ids start over, so every marker is stale.
+	const stem = basename(exitMarkerStem(host.socketPath));
 	try {
-		for (const name of readdirSync(host.sessionDir)) {
-			if (name.startsWith(EXIT_MARKER_PREFIX)) rmSync(join(host.sessionDir, name), { force: true });
+		for (const name of readdirSync(dirname(host.socketPath))) {
+			if (name.startsWith(stem)) rmSync(join(dirname(host.socketPath), name), { force: true });
 		}
 	} catch {
-		// The directory is herdr's; a marker left behind is cleared by the next Clio in that pane.
+		// A marker left behind is cleared by the next Clio in that pane.
 	}
-	// One session per project would otherwise leave one stopped session behind
-	// for every directory Clio was ever run in. It holds nothing, it is Clio's
-	// own by name, and the lock that guards this lives outside it.
-	spawnSync(host.options.herdrPath, ["session", "delete", host.session], {
-		cwd: host.cwd,
-		env: host.hostEnv,
-		stdio: "ignore",
-		timeout: 10_000,
-	});
+	// One host per project would otherwise leave one stopped host behind for
+	// every directory Clio was ever run in. It holds nothing, it is Clio's own
+	// by name, and the lock that guards this lives outside it.
+	for (const dir of host.layout.disposableDirs) {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch (error) {
+			host.log("debug", `pane host cleanup skipped ${dir}: ${messageOf(error)}`);
+		}
+	}
+	if (host.layout.cleanupArgs !== null) {
+		spawnSync(host.options.herdrPath, [...host.layout.herdrArgs, ...host.layout.cleanupArgs], {
+			cwd: host.cwd,
+			env: host.hostEnv,
+			stdio: "ignore",
+			timeout: 10_000,
+			windowsHide: true,
+		});
+	}
 	return true;
 }
 
@@ -386,11 +424,13 @@ async function openWorkspace(host: Host): Promise<Opened> {
 				workspaceNonce,
 			};
 		}
+		const launch = host.platform.paneLaunch(host.options.clioArgv);
+		const paneEnv = { ...host.options.clioEnv, ...launch.env };
 		const created = await client.workspaceCreate({
 			cwd: host.cwd,
 			label: workspaceLabel(host.cwd),
 			focus: true,
-			...(host.options.clioEnv ? { env: host.options.clioEnv } : {}),
+			...(Object.keys(paneEnv).length > 0 ? { env: paneEnv } : {}),
 		});
 		const clioPane = created.rootPane;
 		createdWorkspaceId = created.workspace.workspaceId;
@@ -398,11 +438,11 @@ async function openWorkspace(host: Host): Promise<Opened> {
 		const workspaceNonce = await tagWorkspace(client, clioPane);
 		// This pane id is new in this server's life, so nobody can be waiting on
 		// its marker; one left by an earlier server would end the launch at once.
-		rmSync(exitMarkerPath(host.sessionDir, clioPane.paneId), { force: true });
+		rmSync(exitMarkerPath(host.socketPath, clioPane.paneId), { force: true });
 		await client.tabRename(clioPane.tabId, "clio").catch(() => undefined);
 		// `pane run` is herdr's own "type this and press enter", so the launcher
 		// inherits whatever shell-readiness handling the installed release has.
-		if (!runHerdr(host, ["pane", "run", clioPane.paneId, workspaceShellLine(host.options.clioArgv)])) {
+		if (!runHerdr(host, ["pane", "run", clioPane.paneId, launch.line])) {
 			await undoLaunch(host, client, { workspaceId: createdWorkspaceId, startedServer });
 			await client.close();
 			return { refused: "the pane host refused to start Clio in the new workspace" };
@@ -416,29 +456,52 @@ async function openWorkspace(host: Host): Promise<Opened> {
 }
 
 export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<WorkspaceLaunchResult> {
-	let host: Host;
+	const platform = options.platform ?? muxHostPlatform();
+	let identity: { session: string; cwd: string };
+	let lockTarget: string;
 	try {
-		host = resolveHost(options, writeWorkspaceConfig());
+		identity = workspaceSessionFor(options.cwd);
+		lockTarget = workspaceLockTarget(identity.session);
 	} catch (error) {
 		return { status: "fallback", reason: `could not prepare the workspace: ${messageOf(error)}` };
 	}
-	const lockTarget = host.lockTarget;
 
+	let host: Host | null = null;
 	let opened: Opened;
 	try {
-		opened = await withStateFileLock(lockTarget, () => openWorkspace(host));
+		opened = await withStateFileLock(lockTarget, async (): Promise<Opened> => {
+			try {
+				host = resolveHost(options, identity, platform);
+			} catch (error) {
+				return { refused: `could not prepare the workspace: ${messageOf(error)}` };
+			}
+			return openWorkspace(host);
+		});
 	} catch (error) {
 		return { status: "fallback", reason: `could not take the workspace session lock: ${messageOf(error)}` };
 	}
-	if ("refused" in opened) return { status: "fallback", reason: opened.refused };
+	if ("refused" in opened || host === null) {
+		return { status: "fallback", reason: "refused" in opened ? opened.refused : "could not prepare the workspace" };
+	}
+	return attachWorkspace(host, opened, lockTarget);
+}
+
+/** Hand the terminal to herdr's client, wait for the operator to leave, and clean up. */
+async function attachWorkspace(
+	host: Host,
+	opened: Exclude<Opened, { refused: string }>,
+	lockTarget: string,
+): Promise<WorkspaceLaunchResult> {
+	const options = host.options;
 	const { client, clioPane, workspaceId } = opened;
-	const marker = exitMarkerPath(host.sessionDir, clioPane.paneId);
+	const marker = exitMarkerPath(host.socketPath, clioPane.paneId);
 
 	// From here the terminal belongs to herdr's client until it exits.
-	const attach = spawn(options.herdrPath, ["--session", host.session], {
+	const attach = spawn(options.herdrPath, [...host.layout.herdrArgs], {
 		cwd: host.cwd,
 		env: host.hostEnv,
 		stdio: "inherit",
+		windowsHide: true,
 	});
 
 	// Two reasons to hang up for the operator: this pane's Clio quit, or another
@@ -451,7 +514,7 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 		if (existsSync(marker)) {
 			clioQuit = true;
 			clearInterval(poll);
-			detach(attach);
+			host.platform.detach(attach);
 			return;
 		}
 		ticks += 1;
@@ -463,7 +526,7 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 				if (owned) return;
 				workspaceGone = true;
 				clearInterval(poll);
-				detach(attach);
+				host.platform.detach(attach);
 			},
 			() => {
 				// An unanswered question is not an answer; ask again next time.
@@ -481,6 +544,7 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 	});
 	process.off("SIGINT", ignore);
 	clearInterval(poll);
+	host.platform.afterClientExit();
 
 	if ("spawnError" in exit) {
 		// The client never ran, so the terminal was never handed over and Clio
@@ -510,16 +574,14 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 			// A co-attached launcher may already have removed our workspace and a new server may reuse its ids.
 			if (!(await stillOwnsWorkspace(client, opened))) return false;
 			if (clioQuit) {
-				// Clio is done. If the operator split nothing beside it the workspace
-				// is only Clio's leftover shell and goes with it; anything else in
-				// there is theirs and stays. The marker goes only with the workspace,
-				// so another launcher still attached to it is never left waiting.
+				// Clio is done, and so is every pane in its workspace. The host is
+				// hidden, and the next launch opens a fresh workspace, so a pane left
+				// here could never be reached again, only kept running with the
+				// server under it. The marker goes only with the workspace, so
+				// another launcher still attached to it is never left waiting.
 				try {
-					const panes = await client.paneList(workspaceId);
-					if (panes.length <= 1) {
-						await client.workspaceClose(workspaceId);
-						rmSync(marker, { force: true });
-					}
+					await client.workspaceClose(workspaceId);
+					rmSync(marker, { force: true });
 				} catch (error) {
 					host.log("debug", `workspace cleanup skipped: ${messageOf(error)}`);
 				}
@@ -532,11 +594,6 @@ export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<
 	await client.close();
 	// A hangup the launcher sent is the clean way out, not a failure to report.
 	return { status: "closed", exitCode: clioQuit || workspaceGone ? 0 : exitCode, workspaceLeftRunning };
-}
-
-/** herdr's client treats a hangup as the terminal going away and detaches cleanly. */
-function detach(attach: ChildProcess): void {
-	if (attach.exitCode === null && !attach.killed) attach.kill("SIGHUP");
 }
 
 function messageOf(error: unknown): string {
