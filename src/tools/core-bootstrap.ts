@@ -252,7 +252,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		});
 		registry.register({
 			...builtin(
-				createConfigureClioTool({ askUser: deps.askUser, ...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}) }),
+				createConfigureClioTool({ interactive: true, ...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}) }),
 				{
 					path: "src/tools/configure-clio.ts",
 					scope: "core",

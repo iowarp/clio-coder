@@ -18,3 +18,6 @@ export function isFleetRoutingPath(path: string): boolean {
 /** The alternative every routing refusal names, so a headless model can still finish the task. */
 export const ROUTING_PIN_HINT =
 	"For a one-off run, pin the worker with dispatch's per-call target and model fields instead of saving routing.";
+
+/** Card rule of a configure_clio save outside fleet routing: the operator approves the exact diff. */
+export const CLIO_SETTINGS_RULE_ID = "clio-settings";

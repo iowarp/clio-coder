@@ -72,7 +72,7 @@ export interface SessionPromptInputs {
 	coordinatorCapabilities: ReadonlyArray<string>;
 	/** False for --no-skills; only explicitly supplied skills remain available. */
 	skillDiscoveryEnabled?: boolean;
-	/** True when configure_clio is registered on this session's gateway (interactive sessions only). */
+	/** True when configure_clio is registered on this session's gateway; headless sessions register it preview-only. */
 	canConfigureClio?: boolean;
 	/**
 	 * True for a headless `clio-coder run`. No operator is attached, so the
@@ -346,9 +346,9 @@ export function sessionHasContext(inputs: SessionPromptInputs): boolean {
 
 /**
  * How the model changes a setting the operator asked for. configure_clio is a
- * gateway capability registered only on interactive sessions, and it previews
- * only in default or yolo mode, so every other
- * session hands the change back to the operator's own settings UI.
+ * gateway capability. An attended session at default previews and applies
+ * after the operator approves the diff card; headless, read-only and yolo
+ * sessions preview only and hand the operator the diff and steps.
  */
 function settingsChangePolicy(inputs: SessionPromptInputs, autonomyLevel: string): string {
 	if (
@@ -357,9 +357,9 @@ function settingsChangePolicy(inputs: SessionPromptInputs, autonomyLevel: string
 		toolSurfaceHasTool(inputs.toolNames, "gateway") &&
 		turnAllowsTool(inputs.turnConstraints, "configure_clio")
 	)
-		return autonomyLevel === "yolo"
-			? 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. Yolo saves the exact preview without another prompt; a stale proposal changes nothing.'
-			: 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. The operator confirms Apply in a dialog, and a stale or cancelled proposal changes nothing.';
+		return autonomyLevel === "yolo" || inputs.headless === true || inputs.turnConstraints?.readOnly === true
+			? 'To change a Clio setting or add a target, call gateway(op="call", capability="configure_clio") with action="preview". This session cannot apply it: show the operator the returned diff and steps. Never run clio-coder configure, targets or auth commands yourself.'
+			: 'To change a Clio setting or add a target, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. The operator approves the exact diff on a card, and a stale or refused proposal changes nothing. Never run clio-coder configure, targets or auth commands yourself.';
 	return "Changing a setting is the operator's step: name the /settings area or the clio-coder configure command that changes it.";
 }
 

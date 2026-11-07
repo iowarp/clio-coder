@@ -209,8 +209,9 @@ effects retain read class without granting source-workspace mutation authority.
 
 Registration is conditional on wiring: `context` gains its workspace scope only
 when a session contract is bound, `dispatch`/`monitor`/`steer` register only
-with a dispatch contract, `ask_user` and `configure_clio` register only when an
-interactive handler exists, `ledger` registers for a worker that bound its
+with a dispatch contract, `ask_user` registers only when an interactive handler
+exists, `configure_clio` registers with apply on an interactive session and
+preview-only on a headless main session, `ledger` registers for a worker that bound its
 dispatch's agent-ledger port and for a session that has a dispatch contract
 (there it is gateway-placed and adds no startup prompt entry), `panes` registers
 only when a pane host answered detection and the mux is live, and `music`

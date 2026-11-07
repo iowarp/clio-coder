@@ -9,6 +9,7 @@ import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
+import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
 /**
@@ -62,6 +63,7 @@ export const SAFETY_JUDGE_OPERATOR_ONLY_RULES: ReadonlySet<string> = new Set([
 	SESSION_CODE_CONSENT_RULE_ID,
 	"project-settings-confirm",
 	"fleet-routing-settings",
+	CLIO_SETTINGS_RULE_ID,
 	"library-confirm",
 	"clio-owned-state",
 	GIT_HOOKS_CHANGED_RULE_ID,

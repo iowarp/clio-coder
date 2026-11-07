@@ -705,6 +705,11 @@ export function classify(rawCall: ClassifierCall): Classification {
 	if (call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)) {
 		return { actionClass: "write", reasons: ["web-fetch:outward"] };
 	}
+	// A configure_clio preview reads the saved settings and returns a diff; only
+	// apply saves, so a read-only or headless run can still propose a change.
+	if (call.tool === ToolNames.ConfigureClio && call.args?.action === "preview") {
+		return { actionClass: "read", reasons: ["configure-clio:preview"] };
+	}
 	const base = baseClassify(call.tool);
 	if (base === null) {
 		return { actionClass: "unknown", reasons: [`unknown tool: ${call.tool}`] };

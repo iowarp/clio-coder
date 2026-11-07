@@ -167,7 +167,7 @@ The compiler fills these tokens by plain string replacement, one occurrence per 
 | `{CLIO_SETTINGS_PATH}` | `identity.self-awareness` | `settings.yaml` inside the live config directory, so an isolated `CLIO_CODER_HOME` or config override moves it |
 | `{CLIO_STATE_PATH}` | `identity.self-awareness` | The live state directory |
 | `{LIBRARY_ROUTING}` | `identity.docs-routing` | The `clio_library` routing sentence when that capability is registered and admitted, otherwise the empty string |
-| `{SETTINGS_CHANGE_POLICY}` | `identity.settings-routing` | The `configure_clio` preview and apply instruction where that capability is registered and autonomy is `default` or `yolo`, otherwise a sentence handing the change to `/settings` or `clio-coder configure` |
+| `{SETTINGS_CHANGE_POLICY}` | `identity.settings-routing` | The `configure_clio` preview and apply instruction where that capability is registered and the session is attended at `default`, the preview-only instruction (show the operator the diff and steps) for headless, read-only and `yolo` sessions, otherwise a sentence handing the change to `/settings` or `clio-coder configure` |
 | `{SKILL_ACTIVATION_POLICY}` | `operating.discovered-skills` | Instructions to load a matching ready skill through the gateway, or to suggest `/skill <name>` when the model may not activate skills |
 
 `wiki.page`, `wiki.plan` and `wiki.repair` use a different placeholder family, double-brace tokens such as `{{pagePath}}`. They are filled by the wiki generator, not the compiler.

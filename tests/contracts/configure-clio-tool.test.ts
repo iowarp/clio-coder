@@ -1,19 +1,30 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { createConfigureClioTool } from "../../src/tools/configure-clio.js";
+import { configureClioApplyRefusal, createConfigureClioTool } from "../../src/tools/configure-clio.js";
 import { createRegistry, type RegistryVerdict } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function yoloRegistry(cwd: string) {
 	return createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "yolo" });
+}
+
+function defaultRegistry(cwd: string) {
+	return createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "default" });
+}
+
+const attended = { interactive: true, getAutonomy: () => "default" as const };
+
+function outputOf(verdict: RegistryVerdict): string {
+	return verdict.kind === "ok" && verdict.result.kind === "ok" ? verdict.result.output : JSON.stringify(verdict);
 }
 
 async function settledWithin(verdict: Promise<RegistryVerdict>, ms: number): Promise<RegistryVerdict | "pending"> {
@@ -35,46 +46,44 @@ function proposalOf(verdict: RegistryVerdict): string {
 	return id;
 }
 
-test("configure_clio previews an exact change and yolo applies without another prompt", async (t) => {
+test("configure_clio previews an exact change, applies it once and logs the save", async (t) => {
 	const env = await isolateClioEnv("clio-configure-preview-");
 	t.after(() => env.restore());
-	let asked = 0;
-	const tool = createConfigureClioTool({
-		getAutonomy: () => "yolo",
-		askUser: async (questions) => {
-			asked += 1;
-			match(questions[0]?.question ?? "", /chat\.thinkingLevel: low → high/);
-			return { answers: [{ question: questions[0]?.question ?? "", answer: "Apply", options: ["Apply"] }] };
-		},
-	});
+	const tool = createConfigureClioTool(attended);
 	strictEqual(tool.name, ToolNames.ConfigureClio);
-	const preview = await tool.run({ action: "preview", path: "chat.thinkingLevel", value: "high" });
-	strictEqual(preview.kind, "ok");
+	const preview = await tool.run({ action: "preview", path: "chat.thinkingLevel", value: "high" }, { sessionId: "s-1" });
+	match(preview.kind === "ok" ? preview.output : "", /chat\.thinkingLevel: low → high/);
 	strictEqual(readSettings().chat.thinkingLevel, "low");
-	strictEqual(asked, 0);
 	const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];
 	if (!proposalId) throw new Error("preview omitted proposal id");
-	const applied = await tool.run({ action: "apply", proposalId });
+	strictEqual(tool.confirmationFor?.({ action: "apply", proposalId })?.ruleId, "clio-settings");
+	const applied = await tool.run({ action: "apply", proposalId }, { sessionId: "s-1" });
 	strictEqual(applied.kind, "ok");
 	match(applied.kind === "ok" ? applied.output : "", /Exit and start a new Clio session/);
-	strictEqual(asked, 0);
 	strictEqual(readSettings().chat.thinkingLevel, "high");
-	const replay = await tool.run({ action: "apply", proposalId });
-	strictEqual(replay.kind, "error");
+	strictEqual((await tool.run({ action: "apply", proposalId })).kind, "error");
+	const log = readFileSync(join(clioStateDir(), "settings-changes.jsonl"), "utf8").trim().split("\n");
+	strictEqual(log.length, 1);
+	const line = JSON.parse(log[0] ?? "{}");
+	strictEqual(line.source, "configure_clio");
+	strictEqual(line.sessionId, "s-1");
+	strictEqual(line.path, "chat.thinkingLevel");
+	deepStrictEqual(line.changes, ["chat.thinkingLevel: low → high"]);
 });
 
-test("configure_clio rejects stale proposals, cancellation, sensitive paths and supervised modes", async (t) => {
+test("configure_clio rejects stale proposals and sensitive paths, and a canceled card saves nothing", async (t) => {
 	const env = await isolateClioEnv("clio-configure-refusal-");
 	t.after(() => env.restore());
-	let asked = 0;
-	const tool = createConfigureClioTool({
-		getAutonomy: () => "yolo",
-		askUser: async (questions) => {
-			asked += 1;
-			return { answers: [{ question: questions[0]?.question ?? "", answer: "Cancel", options: ["Cancel"] }] };
-		},
-	});
-	strictEqual((await tool.run({ action: "preview", path: "targets", value: "[]" })).kind, "error");
+	const tool = createConfigureClioTool(attended);
+	for (const path of [
+		"targets",
+		"safety.mode",
+		"fleet.permissions.default",
+		"integrations.github",
+		"telemetry.consent",
+	]) {
+		strictEqual((await tool.run({ action: "preview", path, value: "[]" })).kind, "error", path);
+	}
 	const preview = await tool.run({ action: "preview", path: "chat.thinkingLevel", value: "high" });
 	const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];
 	if (!proposalId) throw new Error("preview omitted proposal id");
@@ -83,28 +92,31 @@ test("configure_clio rejects stale proposals, cancellation, sensitive paths and 
 		return settings;
 	});
 	strictEqual((await tool.run({ action: "apply", proposalId })).kind, "error");
-	strictEqual(asked, 0);
-	const supervised = createConfigureClioTool({
-		getAutonomy: () => "default",
-		askUser: async (questions) => {
-			asked += 1;
-			return { answers: [{ question: questions[0]?.question ?? "", answer: "Cancel", options: ["Cancel"] }] };
-		},
+	const registry = defaultRegistry(env.dir);
+	registry.register(createConfigureClioTool(attended));
+	let asked = 0;
+	registry.onPermissionRequired(() => {
+		asked += 1;
+		registry.cancelParkedCalls("operator canceled");
 	});
-	const next = await supervised.run({ action: "preview", path: "chat.thinkingLevel", value: "medium" });
-	const nextId = /proposalId="([^"]+)"/.exec(next.kind === "ok" ? next.output : "")?.[1];
-	if (!nextId) throw new Error("second preview omitted proposal id");
-	const canceled = await supervised.run({ action: "apply", proposalId: nextId });
-	strictEqual(canceled.kind, "ok");
-	strictEqual(readSettings().chat.thinkingLevel, "high");
+	const next = await registry.invoke({
+		tool: ToolNames.ConfigureClio,
+		args: { action: "preview", path: "chat.thinkingLevel", value: "medium" },
+	});
+	const canceled = await registry.invoke({
+		tool: ToolNames.ConfigureClio,
+		args: { action: "apply", proposalId: proposalOf(next) },
+	});
 	strictEqual(asked, 1);
+	ok(canceled.kind !== "ok", JSON.stringify(canceled));
+	strictEqual(readSettings().chat.thinkingLevel, "high");
 });
 
 test("configure_clio refuses autonomy at both levels, including padded values and apply", async (t) => {
 	const env = await isolateClioEnv("clio-configure-autonomy-refusal-");
 	t.after(() => env.restore());
 	for (const level of ["default", "yolo"] as const) {
-		const tool = createConfigureClioTool({ getAutonomy: () => level, askUser: async () => ({ answers: [] }) });
+		const tool = createConfigureClioTool({ interactive: true, getAutonomy: () => level });
 		for (const value of ["default", "yolo", " yolo "]) {
 			const refusal = await tool.run({ action: "preview", path: "safety.autonomy", value });
 			strictEqual(refusal.kind, "error");
@@ -123,7 +135,7 @@ test("configure_clio refuses autonomy at both levels, including padded values an
 test("configure_clio reports effect timing for live fleet settings and restart settings", async (t) => {
 	const env = await isolateClioEnv("clio-configure-effect-");
 	t.after(() => env.restore());
-	const tool = createConfigureClioTool({ getAutonomy: () => "yolo", askUser: async () => ({ answers: [] }) });
+	const tool = createConfigureClioTool(attended);
 	for (const [path, value, expected] of [
 		["fleet.limits.toolCallsPerRun", "7", /next request or dispatch/],
 		["fleet.concurrency", "3", /Exit and start a new Clio session/],
@@ -150,7 +162,7 @@ test("configure_clio Apply cards show sanitized changed leaves without unchanged
 		settings.fleet.agentProfiles = { coder: "old", verifier: "keep" };
 		return settings;
 	});
-	const tool = createConfigureClioTool({ getAutonomy: () => "default", askUser: async () => ({ answers: [] }) });
+	const tool = createConfigureClioTool(attended);
 	const preview = await tool.run({
 		action: "preview",
 		path: "fleet.agentProfiles",
@@ -179,7 +191,7 @@ test("configure_clio Apply cards show sanitized changed leaves without unchanged
 	ok(bounded.output.length < 3600);
 });
 
-test("configure_clio fleet routing apply parks for the operator at yolo while its preview stays free", async (t) => {
+test("configure_clio fleet routing apply parks for the operator while its preview stays free", async (t) => {
 	const env = await isolateClioEnv("clio-configure-routing-yolo-");
 	t.after(() => env.restore());
 	updateSettings((settings) => {
@@ -187,8 +199,8 @@ test("configure_clio fleet routing apply parks for the operator at yolo while it
 		settings.fleet.profiles = { fast: { target: "openai-codex", model: "gpt-6-sol", thinkingLevel: "low" } };
 		return settings;
 	});
-	const registry = yoloRegistry(env.dir);
-	registry.register(createConfigureClioTool({ getAutonomy: () => "yolo", askUser: async () => ({ answers: [] }) }));
+	const registry = defaultRegistry(env.dir);
+	registry.register(createConfigureClioTool(attended));
 	const asked: Array<{ actionClass: ActionClass; requestId: string; detail: string }> = [];
 	registry.onPermissionRequired((_call, decision, meta) => {
 		asked.push({
@@ -209,6 +221,7 @@ test("configure_clio fleet routing apply parks for the operator at yolo while it
 	const apply = registry.invoke({ tool: ToolNames.ConfigureClio, args: { action: "apply", proposalId } });
 	strictEqual(await settledWithin(apply, 50), "pending");
 	strictEqual(asked.length, 1);
+	match(asked[0]?.detail ?? "", /settings\.yaml/);
 	match(asked[0]?.detail ?? "", /fleet\.agentProfiles\.coder: fast/);
 	strictEqual(readSettings().fleet.agentProfiles?.coder, undefined);
 	await registry.resumeParkedCalls({
@@ -248,24 +261,111 @@ test("a headless edit of project routing settings is refused with the dispatch p
 	ok(!existsSync(join(workspace, ".clio-coder", "settings.yaml")));
 });
 
-test("a non-routing configure_clio apply at yolo still saves without a prompt", async (t) => {
-	const env = await isolateClioEnv("clio-configure-nonrouting-yolo-");
+test("at yolo, headless and read-only configure_clio only proposes: the diff and the operator's steps", async (t) => {
+	const env = await isolateClioEnv("clio-configure-propose-only-");
 	t.after(() => env.restore());
-	const registry = yoloRegistry(env.dir);
-	registry.register(createConfigureClioTool({ getAutonomy: () => "yolo", askUser: async () => ({ answers: [] }) }));
+	strictEqual(configureClioApplyRefusal({ autonomy: "default", interactive: true, readOnly: false }), null);
+	match(configureClioApplyRefusal({ autonomy: "yolo", interactive: true, readOnly: false }) ?? "", /yolo/);
+	match(configureClioApplyRefusal({ autonomy: "default", interactive: false, readOnly: false }) ?? "", /headless/);
+	match(configureClioApplyRefusal({ autonomy: "default", interactive: true, readOnly: true }) ?? "", /read-only/);
+	const proposeOnly = async (verdict: Promise<RegistryVerdict>) => {
+		const text = outputOf(await verdict);
+		match(text, /not applied/);
+		match(text, /chat\.thinkingLevel: low → high/);
+		match(text, /Operator steps: .*\/settings/);
+		ok(!/proposalId=/.test(text), text);
+	};
+	const yolo = yoloRegistry(env.dir);
+	yolo.register(createConfigureClioTool({ interactive: true, getAutonomy: () => "yolo" }));
+	const headless = defaultRegistry(env.dir);
+	headless.register(createConfigureClioTool({ interactive: false, getAutonomy: () => "default" }));
+	const attendedRegistry = defaultRegistry(env.dir);
+	attendedRegistry.register(createConfigureClioTool(attended));
 	let asked = 0;
-	registry.onPermissionRequired(() => {
-		asked += 1;
-	});
-	const preview = await registry.invoke({
+	for (const registry of [yolo, headless, attendedRegistry]) {
+		registry.onPermissionRequired(() => {
+			asked += 1;
+			registry.cancelParkedCalls(HEADLESS_PERMISSION_DENIED_REASON);
+		});
+	}
+	const preview = {
 		tool: ToolNames.ConfigureClio,
 		args: { action: "preview", path: "chat.thinkingLevel", value: "high" },
-	});
-	const applied = await registry.invoke({
-		tool: ToolNames.ConfigureClio,
-		args: { action: "apply", proposalId: proposalOf(preview) },
-	});
-	strictEqual(applied.kind, "ok", JSON.stringify(applied));
+	};
+	const apply = { tool: ToolNames.ConfigureClio, args: { action: "apply", proposalId: "any" } };
+	await proposeOnly(yolo.invoke(preview));
+	await proposeOnly(headless.invoke(preview));
+	const readOnly = { turnConstraints: { readOnly: true as const } };
+	await proposeOnly(attendedRegistry.invoke(preview, readOnly));
+	for (const [registry, options] of [
+		[yolo, undefined],
+		[headless, undefined],
+		[attendedRegistry, readOnly],
+	] as const) {
+		const verdict = await registry.invoke(apply, options);
+		ok(verdict.kind !== "ok" || verdict.result.kind !== "ok", JSON.stringify(verdict));
+	}
 	strictEqual(asked, 0);
-	strictEqual(readSettings().chat.thinkingLevel, "high");
+	strictEqual(readSettings().chat.thinkingLevel, "low");
+	ok(!existsSync(join(clioStateDir(), "settings-changes.jsonl")));
+});
+
+test("configure_clio sets a target's routing fields, keeps the rest, and never takes a credential", async (t) => {
+	const env = await isolateClioEnv("clio-configure-target-");
+	t.after(() => env.restore());
+	updateSettings((settings) => {
+		settings.targets = [
+			{
+				id: "gw",
+				runtime: "openai-compat",
+				url: "http://192.0.2.1:4000/v1",
+				defaultModel: "old",
+				pricing: "free",
+				auth: { apiKeyEnvVar: "OLD_KEY" },
+			},
+		];
+		return settings;
+	});
+	const tool = createConfigureClioTool(attended);
+	const refused: Array<[string, string, RegExp]> = [
+		["targets.gw", JSON.stringify({ auth: { apiKey: "sk-live-123" } }), /never stores credentials/],
+		["targets.gw", JSON.stringify({ trustedUnmediated: true }), /cannot set targets\.gw\.trustedUnmediated/],
+		["targets.gw", JSON.stringify({ auth: { apiKeyEnvVar: "sk-live-123" } }), /NAME of an environment variable/],
+		["targets.gw", JSON.stringify({ url: "http://user:pw@host:4000" }), /must not carry credentials/],
+		["targets.gw", JSON.stringify({ url: "http://host:4000/v1?api_key=x" }), /key or token/],
+		["targets.new", JSON.stringify({ url: "http://host:4000" }), /needs a runtime/],
+		["targets.new", JSON.stringify({ runtime: "no-such-runtime" }), /unknown runtime/],
+		["targets.gw.url", JSON.stringify({ url: "http://host:4000" }), /names no target/],
+	];
+	for (const [path, value, expected] of refused) {
+		const result = await tool.run({ action: "preview", path, value });
+		ok(result.kind === "error" && expected.test(result.message), `${path} ${value}: ${JSON.stringify(result)}`);
+	}
+	const preview = await tool.run({
+		action: "preview",
+		path: "targets.gw",
+		value: JSON.stringify({ defaultModel: "mini/qwen", auth: { apiKeyEnvVar: "LITELLM_API_KEY" } }),
+	});
+	const text = preview.kind === "ok" ? preview.output : "";
+	match(text, /defaultModel: old → mini\/qwen/);
+	match(text, /apiKeyEnvVar: OLD_KEY → LITELLM_API_KEY/);
+	const proposalId = /proposalId="([^"]+)"/.exec(text)?.[1];
+	if (!proposalId) throw new Error(`preview omitted proposal id: ${text}`);
+	strictEqual((await tool.run({ action: "apply", proposalId })).kind, "ok");
+	const saved = readSettings().targets.find((target) => target.id === "gw");
+	strictEqual(saved?.defaultModel, "mini/qwen");
+	strictEqual(saved?.auth?.apiKeyEnvVar, "LITELLM_API_KEY");
+	strictEqual(saved?.pricing, "free");
+	strictEqual(saved?.url, "http://192.0.2.1:4000/v1");
+	const headless = createConfigureClioTool({ interactive: false, getAutonomy: () => "default" });
+	const added = await headless.run({
+		action: "preview",
+		path: "targets.lab",
+		value: JSON.stringify({ runtime: "openai-compat", url: "http://192.0.2.9:8000/v1", defaultModel: "m" }),
+	});
+	match(
+		added.kind === "ok" ? added.output : "",
+		/clio-coder configure --id lab --runtime openai-compat --url http:\/\/192\.0\.2\.9:8000\/v1/,
+	);
+	strictEqual(readSettings().targets.length, 1);
 });

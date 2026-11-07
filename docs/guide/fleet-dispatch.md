@@ -215,9 +215,9 @@ surface is ignored with a notice. A project save from `/settings` writes
 `.clio-coder/settings.local.yaml` and needs that trust; rosters are edited there as a raw
 collection (Advanced, Raw collections), while profiles and agent routes have guided rows. An agent write to either file asks the operator
 at every autonomy level. `configure_clio` supports `fleet.default`,
-`fleet.profiles` and `fleet.agentProfiles` and asks before saving those routes.
-It does not accept `fleet.rosters` or `fleet.adaptiveRouting`
-([routing-settings.ts](../../src/domains/safety/routing-settings.ts)).
+`fleet.profiles`, `fleet.agentProfiles` and `fleet.rosters` and asks before saving
+those routes; headless and at `yolo` it only proposes them. It does not accept
+`fleet.adaptiveRouting` ([routing-settings.ts](../../src/domains/safety/routing-settings.ts)).
 
 A one-off target or model is never a settings edit. The coordinator pins it with
 the compact dispatch schema's `target` and `model` fields, and may add `node`

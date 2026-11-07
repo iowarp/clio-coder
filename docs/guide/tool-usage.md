@@ -14,7 +14,7 @@ Operational reference for agents and operators. Sections summarize each tool's a
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
 | Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder) |
-| Configure and manage the session | [`configure_clio`](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
+| Configure and manage the session | [`configure_clio`](#configureclio-propose-clio-settings-and-targets-with-an-approved-diff), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
 [Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget),
@@ -183,7 +183,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `web_read` | gateway | gateway | retrieve | read | parallel |
 | `web_fetch` | gateway | gateway | retrieve | read; outward for a non-GET method or a body | parallel |
 | `ask_user` | direct | direct | interact | read | sequential |
-| `configure_clio` | gateway | gateway | interact | write | sequential |
+| `configure_clio` | gateway | gateway | interact | write (`preview` is read) | sequential |
 | `artifact` | gateway | gateway | artifact | write | sequential |
 | `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
 
@@ -526,7 +526,7 @@ The main session attaches a compact schema (`coordinatorDispatchParameters` in [
 
 The canonical schema is composed once per session from the fleet. The council block (`roster`, `members`, `synthesis`, `rounds`) is advertised only when `fleet.rosters` names at least one roster. The compete block (`candidates`, `judge`, `apply_winner`) is always advertised. The adaptive routing fields (`routing.posture`, `minimumQuality`, `locality`, `failover`) are advertised only when `fleet.adaptiveRouting` configures roles, postures or agent roles. Admission reads every field regardless, so a call that sends a field the schema did not advertise is still honored.
 
-A one-off target or model belongs on the call. Persistent fleet routing is operator-owned: a `configure_clio` apply that changes `fleet.default`, `fleet.profiles` or `fleet.agentProfiles` asks the operator at every autonomy level. See [configure_clio](#configureclio-change-routing-and-fleet-settings-with-an-approved-preview).
+A one-off target or model belongs on the call. Persistent fleet routing is operator-owned: a `configure_clio` apply that changes `fleet.default`, `fleet.profiles` or `fleet.agentProfiles` asks the operator, and at `yolo` or headless the tool only proposes it. See [configure_clio](#configureclio-propose-clio-settings-and-targets-with-an-approved-diff).
 
 ```text
 dispatch(list=true)
@@ -1184,18 +1184,24 @@ gateway(op="call", capability="artifact", args={kind: "report", title: "Benchmar
 gateway(op="call", capability="artifact", args={kind: "review", content: "# Review: toolkit-v2\n\n## Findings ..."})
 ```
 
-## configure_clio: change routing and fleet settings with an approved preview
+## configure_clio: propose Clio settings and targets with an approved diff
 
-`configure_clio` changes a small allowlist of saved settings in two steps. Source: [configure-clio.ts](../../src/tools/configure-clio.ts). Reached through the gateway; write class; sequential.
+`configure_clio` is how Clio configures itself: it proposes one change to the user's saved settings, and the operator approves the exact diff before anything is saved. Source: [configure-clio.ts](../../src/tools/configure-clio.ts). Reached through the gateway; `preview` is read class and `apply` is write class; sequential.
 
 | Argument | Contract |
 | --- | --- |
 | `action` | Required: `preview` or `apply`. |
-| `path` | `preview`: the settings path. Only `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.*`, `fleet.default.*`, `fleet.profiles`, `fleet.agentProfiles`, `fleet.concurrency`, `fleet.limits.*`, `context.memory.target`, and `context.memory.model` are eligible. |
-| `value` | `preview`: the new value as text. |
+| `path` | `preview`: the settings path. Eligible: `chat.target`, `chat.model`, `chat.thinkingLevel`, `chat.modelPicker.*`, `chat.maxOutputTokens`, `chat.prewarm`, `chat.cacheKeepalive`, `chat.retry.*`, `fleet.default.*`, `fleet.defaultNode`, `fleet.profiles`, `fleet.agentProfiles`, `fleet.rosters`, `fleet.concurrency`, `fleet.limits.*`, `fleet.retry.*`, `context.memory.target`, `context.memory.model`, the `interface` display settings (`exitSummary`, `demo`, `terminalProgress`, `outputDetail`, `mode`, `fullscreenScrollbar`, `smoothStreaming`, `desktopNotifications`, `panes.*` other than keybindings), and `targets.<id>`. |
+| `value` | `preview`: the new value as text. For `targets.<id>`, a JSON object with any of `runtime`, `url`, `defaultModel`, `wireModels`, `gateway`, `capabilities` and `auth` holding only `apiKeyEnvVar` (the name of an environment variable) or `oauthProfile`. |
 | `proposalId` | `apply`: the id the preview returned. |
 
-`configure_clio` is available only at `default` and `yolo`, and a value is at most 8192 bytes. `preview` returns the changed values and a `proposalId`. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. The Apply card and the transcript row name the setting and leave out the value text the model composed. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. At `default`, `apply` asks the operator to approve the exact preview, and persistent fleet routing (`fleet.default`, `fleet.profiles`, `fleet.agentProfiles`) parks on the registry's `fleet-routing-settings` confirmation rail, which only the operator answers. At `yolo`, `apply` saves it directly, fleet routing included. A one-off run belongs on dispatch's `target` and `model` fields instead. For agent model bindings, preview and apply `fleet.profiles` first, then `fleet.agentProfiles`, each as a complete JSON map. The tool refuses `safety.autonomy`, credentials and arbitrary paths, because only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`. Project-scope saves use the operator's `/settings` UI.
+A value is at most 8192 bytes. `preview` validates the whole resulting settings document and returns the changed values. Each changed leaf is one `path: old → new` line, an object value is compared key by key, and the preview shows at most 20 lines of 160 characters with `… N more changed values` after them. A `targets.<id>` proposal merges into the saved target, so fields the tool cannot set (pricing, cache, lifecycle, concurrency, `trustedUnmediated`, runtime sub-settings) survive; a new target needs a known runtime, a URL may not carry a user, password or key in its query, and removing or renaming a target stays with the operator.
+
+Where the operator can approve, the preview returns a `proposalId`: an attended session at autonomy `default`. `apply` then parks on the registry's confirmation rail with the exact diff on the card, `fleet-routing-settings` for fleet routing and `clio-settings` for everything else. Only the operator answers either card; the safety judge never sees them, and the approval is journaled. One proposal is pending per session, it expires after 10 minutes, and `apply` fails when the saved value changed since the preview. The save goes through the settings writer and appends one line naming the session, path and changed values to `<state>/settings-changes.jsonl`.
+
+Where nobody can approve, `preview` is a proposal only: a headless `clio-coder run`, a read-only run, and autonomy `yolo`. It returns the diff and the operator's steps (the `/settings` area, `clio-coder configure --edit`, or for a target the `clio-coder configure --id ...` command) and no `proposalId`, and `apply` is refused. The one function that decides this is `configureClioApplyRefusal`.
+
+The tool refuses `safety.*`, `fleet.permissions.*`, `fleet.nodes`, `integrations.*`, `telemetry.*`, keybindings, auto-update and arbitrary paths, and never accepts a credential: the operator stores a key with `clio-coder auth login`, and only the operator changes autonomy, through `/settings`, `clio-coder configure` or `--autonomy`. A model shell call that runs Clio's own settings, credential or trust CLI (`clio-coder configure` other than `--json` and `--list`, `targets add|use|profile ...|convert|remove|rename`, `auth login|logout`, `config trust`, `mcp trust|untrust`, `systemone use|off`, `semantic configure`, `telemetry consent`, `reset`, `uninstall`, or any `--api-key`) is blocked at every autonomy level under `settings-authority`, however it is launched. A one-off run belongs on dispatch's `target` and `model` fields instead. For agent model bindings, preview and apply `fleet.profiles` first, then `fleet.agentProfiles`, each as a complete JSON map. Project-scope saves use the operator's `/settings` UI.
 
 A saved `apply` reports when the change takes effect, by the setting's effect timing. Routing paths keep the session's current routing, so run `/restart` (it saves and restarts into this session and workspace) or start a new Clio Coder session to use them. A live setting is picked up automatically once the settings watcher reads the save. A next-turn setting applies to the next request or dispatch, and running workers keep their settings. A restart-required setting needs a new session. `/reload [settings|library|extensions|all]` re-reads those resources and reports what changed and what still needs a new session.
 

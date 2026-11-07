@@ -14,6 +14,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import { builtin, toolPromptHintsForNames } from "./builtin-tool-catalog.js";
 import type { CompeteMuxWorktrees } from "./compete-worktrees.js";
+import { createConfigureClioTool } from "./configure-clio.js";
 import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreTools } from "./core-bootstrap.js";
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
@@ -121,6 +122,15 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			: {}),
 		...(mcpCapabilities ? { mcpCapabilities } : {}),
 	});
+	// A headless main session has no ask_user, but it still proposes settings:
+	// the tool previews the diff and hands the operator the steps (no apply).
+	if (!askUser)
+		registry.register(
+			builtin(
+				createConfigureClioTool({ interactive: false, ...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}) }),
+				{ path: "src/tools/configure-clio.ts", scope: "core" },
+			),
+		);
 	if (deps.requestSelfCompact)
 		registry.register(
 			builtin(createSelfCompactTool(deps.requestSelfCompact), { path: "src/tools/self-compact.ts", scope: "core" }),

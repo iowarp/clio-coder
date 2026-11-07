@@ -57,6 +57,8 @@ export const coreTests = [
 	"judge-screen-park-surfaces",
 	"acp-v1-basics",
 	"configure-routing",
+	"configure-clio-tool",
+	"settings-authority",
 	"mcp-config-trust",
 	"url-userinfo-hold",
 	"url-credential-surfaces",

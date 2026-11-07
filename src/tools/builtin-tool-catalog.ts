@@ -551,13 +551,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			'Do not ask about something the operator already stated. Ask one question per round in interviews, up to four related questions otherwise, then action="complete" with the decisions before final prose.',
 	},
 	[ToolNames.ConfigureClio]: {
-		objective: "Preview one Clio settings change and apply it only after direct operator approval.",
+		objective: "Preview one Clio settings or target change and apply it only after the operator approves the diff.",
 		uiLabel: "Configure",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 8_192 },
 		costLatency: "local_slow",
 		promptHint:
-			"When asked to change Clio settings in default or yolo mode, call configure_clio through gateway. Preview first, then apply the returned proposal id; default asks the operator, yolo saves directly except fleet routing, which always asks, and stale proposals are refused.",
+			"When asked to change Clio settings or add a target, call configure_clio through gateway. Preview first, then apply the returned proposal id; the operator approves the exact diff on a card. Headless, read-only and yolo sessions only preview: hand the operator the diff and steps. Never run clio-coder configure, targets or auth from bash.",
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
