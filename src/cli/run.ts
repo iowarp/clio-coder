@@ -26,6 +26,7 @@ import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
+import { pendingMigrationIds } from "../domains/lifecycle/boot-migrations.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -464,6 +465,17 @@ async function executeRunCommand(
 					process.stderr.write(
 						"clio-coder run: --read-only on a home Clio has not set up; this run keeps nothing, not even its session\n",
 					);
+				} else {
+					// Migrations rewrite and delete home state, and skipping one leaves strict readers on an old shape.
+					const pending = pendingMigrationIds();
+					if (pending === null || pending.length > 0) {
+						writeRunDiagnostic(
+							pending === null
+								? "clio-coder run: --read-only cannot read this home's migration record; run clio-coder doctor\n"
+								: `clio-coder run: --read-only cannot apply ${pending.length} pending migration${pending.length === 1 ? "" : "s"} (${pending.join(", ")}); run clio-coder upgrade --post-install, then retry\n`,
+						);
+						return 1;
+					}
 				}
 			}
 			if (parsed.constraints && parsed.agentId !== undefined) {

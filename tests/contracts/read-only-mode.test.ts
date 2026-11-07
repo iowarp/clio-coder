@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -134,31 +135,7 @@ describe("read-only mode", () => {
 		seedOpenAICompatOrchestrator(configDir, fixture.url);
 		const runTmp = join(freshRoot, "tmp");
 		mkdirSync(runTmp);
-		const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
-		const env: NodeJS.ProcessEnv = {
-			...process.env,
-			...scratchClioEnvVars(freshHome),
-			HOME: freshHome,
-			TMPDIR: runTmp,
-			CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
-		};
-		const run = (args: string[]) =>
-			new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-				const child = spawn(
-					process.execPath,
-					["--import", import.meta.resolve("tsx"), entry, "--no-context-files", "run", ...args],
-					{ cwd: freshHome, env, stdio: ["ignore", "pipe", "pipe"] },
-				);
-				let stdout = "";
-				let stderr = "";
-				child.stdout.on("data", (chunk) => {
-					stdout += String(chunk);
-				});
-				child.stderr.on("data", (chunk) => {
-					stderr += String(chunk);
-				});
-				child.on("close", (code) => resolve({ code, stdout, stderr }));
-			});
+		const run = freshRun(runTmp);
 		const before = inventory(freshHome);
 		const readOnly = await run(["--read-only", "Say done."]);
 		equal(readOnly.code, 0, readOnly.stderr);
@@ -175,7 +152,80 @@ describe("read-only mode", () => {
 		equal(plain.code, 0, plain.stderr);
 		ok(existsSync(join(freshHome, "state", "home.json")));
 	});
+
+	it("`run --read-only` on a set-up home leaves its record, offloads and sweep alone, and refuses pending migrations", {
+		timeout: 120_000,
+	}, async (t) => {
+		const fixture = await startOpenAICompatFixture("done");
+		t.after(() => closeServer(fixture.server));
+		writeFileSync(join(freshHome, "config", "settings.yaml"), DEFAULT_SETTINGS_YAML);
+		seedOpenAICompatOrchestrator(join(freshHome, "config"), fixture.url);
+		const run = freshRun(join(freshRoot, "tmp"));
+		const state = join(freshHome, "state");
+		const record = join(state, "home.json");
+		// A home last opened under another node, with an expired offload and the lesson sweep not yet recorded.
+		writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, "utf8")), nodeVersion: "v0.0.1" }));
+		const offload = join(state, "scratch", "old-session", "result.txt");
+		mkdirSync(join(state, "scratch", "old-session"), { recursive: true });
+		writeFileSync(offload, "old");
+		utimesSync(offload, new Date(0), new Date(0));
+		const marker = join(state, "memory", "flow-sweep-v1.json");
+		rmSync(marker, { force: true });
+		const manifest = join(freshHome, "config", "migrations.json");
+		const facts = () => {
+			const stat = statSync(record);
+			const migrations = existsSync(manifest) ? readFileSync(manifest, "utf8") : null;
+			return [readFileSync(record, "utf8"), stat.mode, stat.mtimeMs, stat.ctimeMs, migrations];
+		};
+		const before = facts();
+
+		const answered = await run(["--read-only", "Say done."]);
+		equal(answered.code, 0, answered.stderr);
+		ok(answered.stdout.includes("done"), answered.stdout);
+		deepEqual(facts(), before, "home.json is neither rewritten, re-moded nor locked");
+		ok(existsSync(offload), "an earlier session's offload is left for a writable boot");
+		ok(!existsSync(marker), "the sweep is not recorded, so a writable boot still runs it");
+
+		const { REGISTERED_MIGRATION_IDS: applied } = await import("../../src/domains/lifecycle/migrations/registry-ids.js");
+		writeFileSync(manifest, JSON.stringify({ applied: applied.slice(0, -1) }));
+		const pending = facts();
+		const requests = fixture.requests.length;
+		const refused = await run(["--read-only", "Say done."]);
+		equal(refused.code, 1, refused.stderr);
+		ok(refused.stderr.includes(`1 pending migration (${applied.at(-1)})`), refused.stderr);
+		equal(fixture.requests.length, requests, "nothing reached the model");
+		deepEqual(facts(), pending, "the pending migration is not applied");
+	});
 });
+
+/** Runs the CLI on the fresh home with a private TMPDIR, as an operator's shell would. */
+function freshRun(runTmp: string) {
+	const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		...scratchClioEnvVars(freshHome),
+		HOME: freshHome,
+		TMPDIR: runTmp,
+		CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+	};
+	return (args: string[]) =>
+		new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+			const child = spawn(
+				process.execPath,
+				["--import", import.meta.resolve("tsx"), entry, "--no-context-files", "run", ...args],
+				{ cwd: freshHome, env, stdio: ["ignore", "pipe", "pipe"] },
+			);
+			let stdout = "";
+			let stderr = "";
+			child.stdout.on("data", (chunk) => {
+				stdout += String(chunk);
+			});
+			child.stderr.on("data", (chunk) => {
+				stderr += String(chunk);
+			});
+			child.on("close", (code) => resolve({ code, stdout, stderr }));
+		});
+}
 
 /** Every entry under `root` with its kind, size and mtime, so any write shows. */
 function inventory(root: string): string[] {

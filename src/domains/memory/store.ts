@@ -91,6 +91,17 @@ export function loadMemoryRecordsSync(dataDir: string): MemoryRecord[] {
 	return parseAndValidate(raw, memoryStorePath(dataDir));
 }
 
+/**
+ * Lessons this process withdrew without writing the store, keyed to when. A
+ * read-only process may not persist the restricted-lesson sweep, yet must not
+ * serve what that sweep would withdraw, so every read here sees them rejected.
+ */
+const withdrawnForProcess = new Map<string, string>();
+
+export function withdrawMemoryRecordsForProcess(ids: Iterable<string>, now: Date = new Date()): void {
+	for (const id of ids) if (!withdrawnForProcess.has(id)) withdrawnForProcess.set(id, now.toISOString());
+}
+
 function parseAndValidate(raw: string, source: string): MemoryRecord[] {
 	const parsed = parseJson(raw, source);
 	const result = validateMemoryStore(parsed, "$");
@@ -99,7 +110,16 @@ function parseAndValidate(raw: string, source: string): MemoryRecord[] {
 			`memory store invalid: ${result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
 		);
 	}
-	return sortMemoryRecords(result.store.records);
+	const records =
+		withdrawnForProcess.size === 0
+			? result.store.records
+			: result.store.records.map((record) => {
+					const at = withdrawnForProcess.get(record.id);
+					if (at === undefined || record.rejectedAt !== undefined) return record;
+					const { approval: _approval, ...rest } = record;
+					return { ...rest, approved: false, rejectedAt: at };
+				});
+	return sortMemoryRecords(records);
 }
 
 /** Replaces the whole store under the store lock. Mutations that depend on current content use `mutateMemoryRecords`. */

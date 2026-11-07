@@ -373,7 +373,7 @@ clio-coder run \
 
 #### Run without changing files with --read-only
 
-To run without changing files, use `clio-coder run --read-only "<task>"`. Read-only admission refuses writes, shell commands and delegation in the main agent; with `--agent`, it restricts the dispatched worker to read-only tools. See the [headless flags](#headless-run-flags) for MCP admission and flag combinations.
+To run without changing files, use `clio-coder run --read-only "<task>"`. Read-only admission refuses writes, shell commands and delegation in the main agent; with `--agent`, it restricts the dispatched worker to read-only tools. On a home Clio has set up, a read-only run records its own session but leaves shared state alone: it does not restamp `state/home.json`, sweep old tool offloads or task worktrees, or record the restricted-lesson sweep (it withholds those lessons in memory instead). If the home has migrations pending, the run refuses before it starts and asks you to run `clio-coder upgrade --post-install` first. On a home Clio has never set up, the run works in a private copy and keeps nothing. See the [headless flags](#headless-run-flags) for MCP admission and flag combinations.
 
 #### Other turn constraints
 

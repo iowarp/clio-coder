@@ -300,7 +300,7 @@ async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Prom
 }
 
 /**
- * `run --read-only` writes nothing to Clio's home, the bytecode cache included,
+ * `run --read-only` refreshes none of Clio's caches, the bytecode cache included,
  * but the command only enters read-only mode after its module graph loaded,
  * which is too late for this process's enable. The run parser takes every
  * `--read-only` token as the flag (no value flag accepts a dash-led value), so

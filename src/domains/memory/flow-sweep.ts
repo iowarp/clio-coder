@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { readOnlyProcess } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { rejectMemoryRecords } from "./operations.js";
-import { loadMemoryRecordsSync } from "./store.js";
+import { loadMemoryRecordsSync, withdrawMemoryRecordsForProcess } from "./store.js";
 import type { MemoryRecord } from "./types.js";
 
 /**
@@ -77,6 +78,11 @@ export async function sweepRestrictedMemory(
 	const marker = memoryFlowSweepMarkerPath(stateDir);
 	if (existsSync(marker)) return null;
 	const ids = restrictedMemoryRecordIds(loadMemoryRecordsSync(dataDir), ports);
+	// A read-only process withholds them from itself only; the next writable boot records the sweep and says so.
+	if (readOnlyProcess()) {
+		withdrawMemoryRecordsForProcess(ids, now);
+		return [];
+	}
 	const rejected =
 		ids.size > 0 ? await rejectMemoryRecords(dataDir, ids, now, { timeoutMs: SWEEP_LOCK_TIMEOUT_MS }) : [];
 	safeResourceWrite(marker, `${JSON.stringify({ version: 1, at: now.toISOString(), rejected }, null, 2)}\n`, {

@@ -174,6 +174,10 @@ export function initializeClioHome(): InitReport {
 	// process's noticedVersion after an upgrade.
 	const installPath = join(stateDir, "home.json");
 	const runningVersion = readClioVersion();
+	// A read-only process on a set-up home reads this record and never stamps,
+	// renames, locks or re-modes it; only a home it set up for itself is written.
+	if (readOnly && existsSync(installPath))
+		return { configDir, dataDir, stateDir, cacheDir, createdPaths: created, touchedSettings: touched };
 	withStateFileLockSync(installPath, () => {
 		// Before 0.6.8 this record was install.json, one of three files with that name.
 		const legacyPath = join(stateDir, "install.json");

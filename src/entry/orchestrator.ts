@@ -27,7 +27,7 @@ import type { CatalogRanker } from "../core/precomputed-rank.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
 import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
 import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
-import { enterReadOnlyMode } from "../core/read-only-mode.js";
+import { enterReadOnlyMode, readOnlyProcess } from "../core/read-only-mode.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
@@ -2133,13 +2133,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		}
 	}
-	sweepExpiredToolOffloads();
+	// A read-only run leaves earlier sessions' offloads and worktrees for a writer to sweep.
+	const sweepsShared = !readOnlyProcess();
+	if (sweepsShared) sweepExpiredToolOffloads();
 	timer.mark("install check");
 
 	// A hard-killed coordinator cannot run domain drains. Reconcile its compete
 	// process leases before dispatch startup scans the ledger, so abandoned rows
 	// observe dead workers and no stale worktree can be reused by this boot.
-	if (isGitRepository(process.cwd())) {
+	if (sweepsShared && isGitRepository(process.cwd())) {
 		try {
 			const pendingGate = readPendingGateDecisions();
 			const pendingCompeteGroups = new Set<string>();
