@@ -449,8 +449,9 @@ describe("mandatory request-fit compaction", () => {
 		const before = f.context.liveContextEstimate(f.runtime, pending);
 		ok(before.tokens + 8192 > 32768);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "overflow", pending), true);
+		// The wire clamp would still send this request; admission keeps a usable eighth plus the wire's margin.
 		const expectedKeep = Math.floor(
-			(Math.min(32768 * f.settings.context.compaction.threshold, before.tokens + 1024) -
+			(Math.min(32768 * f.settings.context.compaction.threshold, 32768 - (32768 / 8 + 4096)) -
 				before.breakdown.systemPromptTokens -
 				before.breakdown.pendingUserTokens) /
 				2,

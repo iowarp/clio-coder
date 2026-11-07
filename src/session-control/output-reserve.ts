@@ -6,7 +6,8 @@
  * resolves through `resolveReservedOutputTokens`, which applies the configured
  * output budget, the model's advertised cap, and the remaining-context clamp
  * the `openai-completions` and `ollama-native` transports already perform on
- * the wire. The capability-resolved cap is the input, because that is what the
+ * the wire, bounded below by a usable response floor plus that clamp's margin.
+ * The capability-resolved cap is the input, because that is what the
  * runtime resolution decided this target may actually be asked for.
  *
  * This is a preflight reservation, not a guarantee of the final wire ceiling:

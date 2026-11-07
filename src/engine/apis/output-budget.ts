@@ -107,10 +107,12 @@ export function resolvePressureOutputReserve(
  * Tokens a preflight context check should hold back for the response: the
  * smaller of the model's advertised output limit and the configured output
  * budget, falling back to the product default when no budget is configured.
- * The safety margin is deliberately not added here; at request time
+ * The safety margin is not added to the full allowance: at request time
  * {@link remainingContextMaxTokens} subtracts it from the window and degrades
  * the output budget gracefully, so a hard preflight reservation of
- * limit + safety would compact earlier than the engine actually needs.
+ * limit + safety would compact earlier than the engine actually needs. For the
+ * transports that degrade, the reserve still covers a usable floor plus that
+ * margin, so the degraded allocation can never shrink to nothing.
  */
 export function resolveReservedOutputTokens(
 	maxOutputTokens?: number | null,
@@ -128,9 +130,26 @@ export function resolveReservedOutputTokens(
 	// Preflight must use that same allocation, rather than demanding room for
 	// the entire configured maximum (which may equal the context window).
 	// Other transports retain their existing reservation contract.
-	return request && clampsOutputAtWire(request.api)
-		? clampOutputToRemainingContext(ceiling, request.contextWindow, request.inputTokens)
-		: ceiling;
+	return request && clampsOutputAtWire(request.api) ? admissionReserve(ceiling, request) : ceiling;
+}
+
+/** Smallest share of the serving window a wire-clamped request must still leave for the response. */
+const MIN_ADMITTED_OUTPUT_SHARE = 1 / 8;
+
+/**
+ * The reserve a wire-clamped request is admitted against. The wire shrinks
+ * max_tokens to the room left after input and the safety margin, which alone
+ * would admit a near-full request with a one-token response. The reserve is
+ * therefore never below a usable floor plus the margin the wire subtracts, so
+ * `input + reserve <= window` holds exactly when the wire allocation is at
+ * least that floor. A larger wire allocation is reserved as is.
+ */
+function admissionReserve(ceiling: number, request: { contextWindow: number; inputTokens: number }): number {
+	const window = request.contextWindow;
+	if (!(window > 0) || !Number.isFinite(window)) return ceiling;
+	const floor = Math.min(ceiling, Math.max(1, Math.floor(window * MIN_ADMITTED_OUTPUT_SHARE)));
+	const wire = clampOutputToRemainingContext(ceiling, window, request.inputTokens);
+	return Math.max(floor + CONTEXT_BUDGET_SAFETY_TOKENS, wire);
 }
 
 function clampOutputToRemainingContext(ceiling: number, contextWindow: number, inputTokens: number): number {

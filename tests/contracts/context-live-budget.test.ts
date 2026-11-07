@@ -535,9 +535,11 @@ describe("live budget adapter", () => {
 		f.runtime.agent.state.messages.push(toolResult("x".repeat(30_000)));
 		const clamped = f.context.refreshLiveBudget();
 		strictEqual(clamped.outputReserveTokens, resolveTurnOutputReserve(f.runtime, clamped.inputTokens ?? 0));
-		ok(
-			(clamped.outputReserveTokens ?? 0) < MODEL_MAX_TOKENS,
-			"openai-completions clamps the reservation to remaining context, and the view must show that",
+		ok(WINDOW - (clamped.inputTokens ?? 0) - 4096 < MODEL_MAX_TOKENS, "the transport's clamp now bites");
+		strictEqual(
+			clamped.outputReserveTokens,
+			WINDOW / 8 + 4096,
+			"a clamped openai-completions request still reserves a usable response plus the wire's margin",
 		);
 	});
 

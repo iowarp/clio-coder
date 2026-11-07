@@ -354,9 +354,10 @@ describe("contracts/metering integrity", () => {
 			strictEqual(reserved, 115_086);
 			strictEqual(reserved, remainingContextMaxTokens(model, context, undefined));
 			ok(11_890 + reserved < model.contextWindow);
+			// A small allowance still reserves the margin the wire subtracts from the window.
 			strictEqual(
 				resolveReservedOutputTokens(4096, { api, contextWindow: model.contextWindow, inputTokens: 11_890 }),
-				4096,
+				4096 + 4096,
 			);
 			strictEqual(
 				resolveReservedOutputTokens(model.maxTokens, {
@@ -364,7 +365,7 @@ describe("contracts/metering integrity", () => {
 					contextWindow: model.contextWindow,
 					inputTokens: model.contextWindow + 1,
 				}),
-				1,
+				model.contextWindow / 8 + 4096,
 			);
 		}
 		strictEqual(
@@ -375,6 +376,27 @@ describe("contracts/metering integrity", () => {
 			}),
 			131_072,
 		);
+	});
+
+	it("never admits a near-full request the wire would answer with a starved response", () => {
+		setGlobalDefaultMaxOutputTokens(32_768);
+		const model = { contextWindow: 20_000, maxTokens: 32_768 };
+		for (const api of ["openai-completions", "ollama-native"]) {
+			const admitted = (inputTokens: number): boolean =>
+				inputTokens +
+					resolveReservedOutputTokens(model.maxTokens, { api, contextWindow: model.contextWindow, inputTokens }) <=
+				model.contextWindow;
+			for (const inputTokens of [15_904, 16_985, 19_999]) {
+				const context = { systemPrompt: "x".repeat(inputTokens * 4), messages: [], tools: [] };
+				ok(remainingContextMaxTokens(model, context, undefined) < 2_500, `${inputTokens}`);
+				ok(!admitted(inputTokens), `${api} admitted ${inputTokens}`);
+			}
+			// The largest admitted input still leaves the wire a usable eighth of the window.
+			const context = { systemPrompt: "x".repeat(13_404 * 4), messages: [], tools: [] };
+			ok(admitted(13_404));
+			ok(!admitted(13_405));
+			strictEqual(remainingContextMaxTokens(model, context, undefined), 2_500);
+		}
 	});
 
 	it("respects configured larger reservations, model caps, and unset fallbacks", () => {
