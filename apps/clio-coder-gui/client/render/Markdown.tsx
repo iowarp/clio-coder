@@ -168,7 +168,20 @@ function fallbackCopy(text: string): boolean {
 	}
 }
 
-export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+/** A header action's words, with a shorter form a narrow block shows instead; the full words stay its name. */
+function ActionLabel({ full, short }: { full: string; short: string | undefined }) {
+	if (short === undefined) return full;
+	return (
+		<>
+			<span className="code-block__full">{full}</span>
+			<span className="code-block__short" aria-hidden="true">
+				{short}
+			</span>
+		</>
+	);
+}
+
+export function CopyButton({ text, label = "Copy", short }: { text: string; label?: string; short?: string }) {
 	const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(
@@ -196,7 +209,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
 			onClick={() => void copy()}
 			aria-label={state === "copied" ? "Copied to the clipboard" : state === "failed" ? "Copy failed" : label}
 		>
-			{state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : label}
+			{state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : <ActionLabel full={label} short={short} />}
 		</button>
 	);
 }
@@ -476,12 +489,13 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 						type="button"
 						className="code-block__copy"
 						aria-pressed={showSource}
+						aria-label="Show source"
 						onClick={() => setShowSource((current) => !current)}
 					>
-						{showSource ? "Hide source" : "Show source"}
+						<ActionLabel full={showSource ? "Hide source" : "Show source"} short="Source" />
 					</button>
 				)}
-				<CopyButton text={source} label="Copy source" />
+				<CopyButton text={source} label="Copy source" short="Copy" />
 			</div>
 			{state === "rendered" && result !== null && result.ok && (
 				// Strict Mermaid output is sanitized by DOMPurify before DOM import.

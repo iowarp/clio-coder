@@ -212,6 +212,7 @@
 	font: var(--text-exact) / 1.4 var(--font-mono);
 }
 .code-block__lang {
+	min-width: 0;
 	margin-right: auto;
 	color: var(--syntax-keyword);
 }
@@ -221,6 +222,8 @@
 }
 /* The copy and source actions name themselves, so they stay frameless until hovered or focused. */
 .code-block__head button {
+	flex: none;
+	white-space: nowrap;
 	min-height: 28px;
 	padding: 2px var(--space-2);
 	border: 1px solid transparent;
@@ -484,4 +487,20 @@
 	min-width: 2ch;
 	color: var(--accent);
 	font-variant-numeric: tabular-nums;
+}
+
+/* A diagram's header holds three actions; in a narrow column they take their short words rather than break. */
+.diagram {
+	container: diagram / inline-size;
+}
+.code-block__short {
+	display: none;
+}
+@container diagram (max-width: 420px) {
+	.diagram .code-block__full {
+		display: none;
+	}
+	.diagram .code-block__short {
+		display: inline;
+	}
 }
