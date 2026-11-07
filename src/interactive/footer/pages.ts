@@ -891,7 +891,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? theme.fg("changedValue", clean(feedback.text))
 				: surfaceOwnsKeys
 					? ""
-					: learning && state.demoHint && !state.welcomeVisible && !immediateKeys && !notice
+					: learning && state.demoHint && !immediateKeys && !notice
 						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
 						: theme.fg(
 								"keyboardHint",

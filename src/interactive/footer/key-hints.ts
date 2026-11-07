@@ -42,6 +42,8 @@ export interface KeyHintFacts {
 	 */
 	workersDock?: boolean;
 	thinkingCycles?: boolean;
+	/** True when the operator already uses `feature` (`?` or `key:<action id>`); a learned key leaves the rotation. */
+	learned?: (feature: string) => boolean;
 }
 
 /** One learning hint holds this long. The row is read at a glance, so it must not move under the eye. */
@@ -150,11 +152,18 @@ function immediateEntries(context: ComposerKeyContext): string[] {
 
 function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): string[] {
 	if (facts.learning === false) return [];
+	const learned = facts.learned ?? (() => false);
+	const unlearned = (ids: ReadonlyArray<keyof typeof CLIO_APP_KEYBINDINGS>) => ids.filter((id) => !learned(`key:${id}`));
 	if (context === "idle") {
 		const newline = firstKey("tui.input.newLine");
-		return ["? Keys", ...(newline ? [`${newline} newline`] : []), ...catalogEntries(idleLearning(facts))];
+		return [
+			...(learned("?") ? [] : ["? Keys"]),
+			...(newline ? [`${newline} newline`] : []),
+			...catalogEntries(unlearned(idleLearning(facts))),
+		];
 	}
-	if (context === "steer" || context === "steer-empty") return catalogEntries(runLearning(context, facts), facts);
+	if (context === "steer" || context === "steer-empty")
+		return catalogEntries(unlearned(runLearning(context, facts)), facts);
 	return [];
 }
 

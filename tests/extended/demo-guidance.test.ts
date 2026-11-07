@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import { createDemoHints } from "../../src/interactive/footer/demo-hints.js";
+import { createDemoHints, FOOTER_TIP_LIFETIME } from "../../src/interactive/footer/demo-hints.js";
 
 test("demo ships enabled, supports validated settings and last-wins session flags", () => {
 	strictEqual(DEFAULT_SETTINGS.interface.demo, true);
@@ -61,7 +61,7 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 		contextBusy: false,
 		dashboardKey: "ctrl+x",
 	};
-	match(hints(input) ?? "", /\? lists keys · Ctrl\+G opens every action/);
+	match(hints(input) ?? "", /Ask Clio how it works · \? keys · Ctrl\+G every action/);
 	strictEqual(hints({ ...input, now: 10_001 }), null);
 	strictEqual(hints({ ...input, now: 59_999, agentActive: true }), null);
 	match(hints({ ...input, now: 60_000, agentActive: true }) ?? "", /ctrl\+x → Activity/);
@@ -72,6 +72,52 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 	strictEqual(hints({ ...input, now: 180_000, toolsUsed: true }), null);
 	match(hints({ ...input, now: 180_000, contextBusy: true }) ?? "", /\/context/);
 	strictEqual(hints({ ...input, now: 240_000, contextBusy: true }), null);
+});
+
+test("footer tips persist their showings and retire after a few sessions", () => {
+	const shown: Record<string, number> = {};
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: false,
+		toolsUsed: true,
+		contextBusy: false,
+		dashboardKey: "Alt+U",
+		learned: (feature: string) => feature === "/help",
+		shownBefore: (id: string) => shown[id] ?? 0,
+		onShown: (id: string) => {
+			shown[id] = (shown[id] ?? 0) + 1;
+		},
+	};
+	for (let session = 0; session < FOOTER_TIP_LIFETIME; session++) match(createDemoHints()(input) ?? "", /\/view/);
+	strictEqual(shown.tools, FOOTER_TIP_LIFETIME);
+	strictEqual(createDemoHints()(input), null);
+});
+
+test("the launchpad shows only the welcome tip, and none where its own hint column teaches", () => {
+	const shown: string[] = [];
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: true,
+		toolsUsed: true,
+		contextBusy: false,
+		dashboardKey: "Alt+U",
+		launchpad: "plain" as const,
+		onShown: (id: string) => shown.push(id),
+	};
+	const hints = createDemoHints();
+	match(hints(input) ?? "", /Ask Clio how it works/);
+	// It holds while the launchpad is up and counts once for the session.
+	match(hints({ ...input, now: 30_000 }) ?? "", /Ask Clio how it works/);
+	deepStrictEqual(shown, ["welcome"]);
+	// Once the launchpad goes, the welcome is spent and a specific tip may follow.
+	const { launchpad: _gone, ...after } = input;
+	match(hints({ ...after, now: 60_000 }) ?? "", /Activity/);
+	strictEqual(createDemoHints()({ ...input, launchpad: "hints" }), null);
+	strictEqual(createDemoHints()({ ...input, learned: (feature) => feature === "/help" }), null);
 });
 
 test("a slash command with a key earns one nudge naming the key, until the key is used", () => {

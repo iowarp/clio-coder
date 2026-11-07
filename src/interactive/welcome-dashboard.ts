@@ -476,6 +476,15 @@ const WELCOME_ART_MIN_ROWS = 30;
 const WELCOME_TIGHT_ROWS = 20;
 
 /** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
+function launchpadHasRoom(terminalRows: number | undefined): boolean {
+	return terminalRows === undefined || terminalRows >= WELCOME_ART_MIN_ROWS;
+}
+
+/** Whether the launchpad at this size shows its own column of key hints. */
+export function launchpadShowsHints(style: OutputStyle | undefined, width: number, terminalRows?: number): boolean {
+	return style === "detailed" && width >= WELCOME_HINT_MIN_WIDTH && launchpadHasRoom(terminalRows);
+}
+
 export function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
 	versionLabel: string,
@@ -502,11 +511,7 @@ export function buildWelcomeDashboardLines(
 		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverageRows(safeWidth)];
 	// A short terminal spends its rows on the composer and the first answer: the
 	// launchpad keeps identity, place and the next step, and drops the rest.
-	if (
-		safeWidth < 48 ||
-		stats.outputStyle !== "detailed" ||
-		(terminalRows !== undefined && terminalRows < WELCOME_ART_MIN_ROWS)
-	)
+	if (safeWidth < 48 || stats.outputStyle !== "detailed" || !launchpadHasRoom(terminalRows))
 		return compactLaunchpad(
 			theme,
 			stats,

@@ -1,6 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { interfaceGuidanceEnabled, type OutputStyle } from "../../core/defaults.js";
-import { readHarnessProfile } from "../../core/harness-profile.js";
+import { readHarnessProfile, recordLessonShown } from "../../core/harness-profile.js";
 import { ACTION_BY_COMMAND } from "../../domains/config/keybindings.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
@@ -27,6 +27,7 @@ import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
+import { launchpadShowsHints } from "../welcome-dashboard.js";
 import { createDemoHints } from "./demo-hints.js";
 import type { ComposerKeyContext, KeyHintFacts } from "./key-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
@@ -271,6 +272,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let disposed = false;
 	const state = (width: number): FooterDashboardRenderState => {
 		const now = deps.now?.() ?? Date.now();
+		const welcomeVisible = deps.getWelcomeVisible?.() === true;
 		const notices = deps.getNotifications?.() ?? [];
 		// Every refresh within one animation step composes the same spinner, so a
 		// refresh the status stream asks for between ticks costs no bytes.
@@ -377,11 +379,19 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			...(keyContext ? { keyContext } : {}),
 			...(deps.getKeyHintFacts ? { keyHintFacts: deps.getKeyHintFacts() } : {}),
 			background: deps.getBackgroundCalls?.() ?? [],
-			welcomeVisible: deps.getWelcomeVisible?.() === true,
+			welcomeVisible,
 			demoHint: demoHints({
-				enabled:
-					settings !== undefined && interfaceGuidanceEnabled(settings.interface) && deps.getWelcomeVisible?.() !== true,
+				enabled: settings !== undefined && interfaceGuidanceEnabled(settings.interface),
+				...(welcomeVisible
+					? {
+							launchpad: launchpadShowsHints(settings?.interface?.outputDetail, width, terminalRows())
+								? ("hints" as const)
+								: ("plain" as const),
+						}
+					: {}),
 				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
+				shownBefore: (id) => readHarnessProfile().lessons[`footer:${id}`]?.shown ?? 0,
+				onShown: (id) => setImmediate(() => recordLessonShown(`footer:${id}`)),
 				now,
 				quiet:
 					dashboardMode !== "compact" ||

@@ -437,6 +437,29 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 	}
 });
 
+test("a key the operator already pressed leaves the learning rotation", () => {
+	const previous = getKeybindings();
+	createKeybindingManager(DEFAULT_SETTINGS);
+	try {
+		const rotation = (context: "idle" | "steer", learned: (feature: string) => boolean) =>
+			Array.from({ length: 40 }, (_, i) =>
+				footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, context, { learned }),
+			).join("\n");
+		const fresh = rotation("idle", () => false);
+		match(fresh, /\? Keys/);
+		match(fresh, /Thinking effort/);
+		const learned = rotation("idle", (feature) => feature === "?" || feature === "key:clio-coder.thinking.cycle");
+		doesNotMatch(learned, /\? Keys|Thinking effort/);
+		match(learned, /newline/);
+		doesNotMatch(
+			rotation("steer", (feature) => feature === "key:clio-coder.message.interrupt"),
+			/Send now/,
+		);
+	} finally {
+		setKeybindings(previous);
+	}
+});
+
 test("worker cards and Status distinguish shared account limits from recorded session usage", () => {
 	const snapshot = state();
 	snapshot.quota = [
@@ -662,9 +685,13 @@ test("the compact footer shows the most severe live notice with its level glyph 
 test("visible welcome owns idle teaching while the footer preserves operational notices", () => {
 	const input = state();
 	input.welcomeVisible = true;
-	input.demoHint = "Explore /help";
+	input.demoHint = null;
 	const idle = renderCompactDashboard(input, 100).map(stripTerminalSequences)[1] ?? "";
 	doesNotMatch(idle, /Dashboard|newline|send|Model|Thinking|Library|Explore/iu);
+	// The one tip the demo hints chose for a launchpad without its own hint column still speaks.
+	input.demoHint = "Explore /help";
+	match(renderCompactDashboard(input, 100).map(stripTerminalSequences)[1] ?? "", /Tip Explore \/help/u);
+	input.demoHint = null;
 	input.notices = [
 		{
 			id: "welcome-priority",

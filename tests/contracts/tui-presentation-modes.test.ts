@@ -76,7 +76,7 @@ test("ASCII glyph selection is startup-wide and keeps decision marks, frames, an
 		strictEqual(output.welcome.length, 1);
 		match(stripTerminalSequences(output.welcome[0] ?? ""), /test-model/u);
 		match(output.status.label, /is ready \. no request yet/u);
-		match(output.tip, /lists keys \. Ctrl\+G opens every action \. \/help/u);
+		match(output.tip, /\? keys \. Ctrl\+G every action \. \/help/u);
 	}
 	const env = { TERM: "xterm-256color", CLIO_CODER_ASCII: "1", CLIO_CODER_NERD_FONT: "1" };
 	strictEqual(asciiOnly(env), true);

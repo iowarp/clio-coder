@@ -384,6 +384,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			// the buffer they are text or cursor movement, as pi delivers them.
 			if (deps.editor.getText().length > 0 || (deps.editor.isShowingAutocomplete?.() ?? false)) return false;
 			if (quickHelp && data === "?") {
+				deps.actions.recordFeature?.("?");
 				quickHelp.open();
 				return true;
 			}

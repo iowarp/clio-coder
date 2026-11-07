@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS, outputStyleLabel } from "../core/defaults.js";
+import { readHarnessProfile } from "../core/harness-profile.js";
 import type { JobRecord } from "../core/job-types.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { CompactionPayload } from "../core/telemetry/live-events.js";
@@ -711,6 +712,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				workers: dispatchBoardStore.rows().length,
 				...(deps.workersDockAvailable ? { workersDock: deps.workersDockAvailable() } : {}),
 				thinkingCycles: mechanism === "effort-levels" || mechanism === "budget-tokens",
+				learned: (feature: string) => (readHarnessProfile().features[feature] ?? 0) > 0,
 			};
 		},
 		get dismissKeyLabel() {
