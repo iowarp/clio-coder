@@ -9,12 +9,50 @@ import { auth } from "../server/http/auth.js";
 import { problemResponse } from "../server/http/problem.js";
 import { type MachineAttachmentsApi, machinesRoutes } from "../server/http/routes-machines.js";
 import { EventHub } from "../server/services/event-hub.js";
+import { MachineAttachments } from "../server/services/machine-attach.js";
+import type { MachineEndpoint } from "../server/worker/protocol.js";
 
 const LOCAL_TOKEN = "local-launch-token-0123456789abcdefghij";
 const REMOTE_TOKEN = "remote-attach-token-0123456789abcdefghij";
 const ORIGIN = "http://127.0.0.1:4317";
 /** The port the node's own GUI listens on, which its auth expects in Host; the forward's port differs. */
 const REMOTE_LISTENER_PORT = 38211;
+
+test("an attachment awaiting the registry cannot start after shutdown", async () => {
+	let resolveRegistry: (endpoints: MachineEndpoint[]) => void = () => {};
+	const registry = new Promise<MachineEndpoint[]>((resolve) => {
+		resolveRegistry = resolve;
+	});
+	const attachments = new MachineAttachments({
+		endpoints: () => registry,
+		local: () => ({ clio: "test", build: "test" }),
+		hub: new EventHub(),
+		env: { ...process.env, PATH: "" },
+	});
+	const pending = attachments.attach("node");
+	const result = assert.rejects(pending, /stopping/);
+	try {
+		await attachments.stopAll();
+		resolveRegistry([
+			{
+				id: "node",
+				host: "127.0.0.1",
+				user: null,
+				port: null,
+				identityFile: null,
+				connectTimeoutSec: null,
+				clioCoderEntry: null,
+			},
+		]);
+		await result;
+		assert.equal(attachments.route("node"), null);
+		await assert.rejects(attachments.attach("node"), /stopping/);
+	} finally {
+		resolveRegistry([]);
+		await pending.catch(() => {});
+		await attachments.stopAll();
+	}
+});
 
 test("the node proxy rewrites Host, Origin and bearer, strips browser credentials, and refuses what is not attached", async (t) => {
 	// The fake node GUI: records what reached it and answers like a private server would.

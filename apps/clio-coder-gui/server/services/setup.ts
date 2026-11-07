@@ -18,14 +18,15 @@ type Running = {
 /** Ephemeral setup, separate from operations/history so credential replies are never persisted. */
 export class SetupService {
 	private running: Running | undefined;
-	private starting = false;
+	private starting: Promise<void> | null = null;
+	private stopped = false;
 	constructor(
-		private readonly reads: WorkerHost,
+		private readonly reads: Pick<WorkerHost, "call">,
 		private readonly env: NodeJS.ProcessEnv = process.env,
 		private readonly workspaces?: WorkspaceService,
 	) {}
 	get busy() {
-		return this.starting || (!!this.running && ["working", "prompt"].includes(this.running.state.status));
+		return this.starting !== null || (!!this.running && ["working", "prompt"].includes(this.running.state.status));
 	}
 	/** Scoped to a workspace, the answer is that project's effective setup; unscoped, the user's. */
 	async status(workspaceId?: string) {
@@ -35,9 +36,13 @@ export class SetupService {
 		return result;
 	}
 	async start(input: SetupStart, key: string): Promise<SetupState> {
+		if (this.stopped) throw new AppProblem("unavailable", "Setup is stopping.");
 		if (this.running?.keys.has(key)) return this.snapshot(this.running.state.id);
 		if (this.starting) throw new AppProblem("conflict", "Setup is already starting. Wait a moment and try again.");
-		this.starting = true;
+		let started: () => void = () => {};
+		this.starting = new Promise((resolve) => {
+			started = resolve;
+		});
 		try {
 			// The newest view wins. A page that was reloaded or closed mid-setup leaves its child running, and
 			// refusing the next start would strand the person on a button that can never work. The older
@@ -47,6 +52,7 @@ export class SetupService {
 				else this.stop(this.running);
 				await this.running.done;
 			}
+			if (this.stopped) throw new AppProblem("unavailable", "Setup is stopping.");
 			const child = await startConfigureChild(this.env);
 			const state: SetupState = { id: randomUUID(), status: "working", prompt: null, messages: [], problem: null };
 			const fail = () => {
@@ -113,10 +119,16 @@ export class SetupService {
 					this.stop(running);
 				}
 			});
+			if (this.stopped) {
+				this.cancel(state.id);
+				await running.done;
+				throw new AppProblem("unavailable", "Setup is stopping.");
+			}
 			child.child.stdin.write(`${JSON.stringify({ kind: "start", ...input })}\n`);
 			return this.snapshot(state.id);
 		} finally {
-			this.starting = false;
+			this.starting = null;
+			started();
 		}
 	}
 	private get(id: string) {
@@ -163,12 +175,15 @@ export class SetupService {
 		return this.snapshot(id);
 	}
 	private stop(running: Running) {
-		stopClioCommand(running.child.child, running.child.birthToken, "SIGTERM");
 		clearTimeout(running.timer);
+		if (running.child.child.exitCode !== null || running.child.child.signalCode !== null) return;
+		stopClioCommand(running.child.child, running.child.birthToken, "SIGTERM");
 		running.timer = setTimeout(() => stopClioCommand(running.child.child, running.child.birthToken, "SIGKILL"), 1500);
 	}
 
 	async close() {
+		this.stopped = true;
+		await this.starting;
 		if (this.running) {
 			this.cancel(this.running.state.id);
 			this.stop(this.running);

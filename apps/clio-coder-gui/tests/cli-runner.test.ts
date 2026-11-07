@@ -7,9 +7,43 @@ import { fileURLToPath } from "node:url";
 import { type CliCommand, commandPlan } from "../server/cli-commands.js";
 import { CliCancelled, CliRunner } from "../server/services/cli-runner.js";
 import { AppProblem } from "../server/services/problem.js";
+import { SetupService } from "../server/services/setup.js";
 import { scratchHome } from "./harness/scratch-home.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/cli-command-child.mjs", import.meta.url));
+
+test("setup shutdown waits for starting children and refuses subsequent starts", async () => {
+	const h = await scratchHome();
+	const setup = new SetupService(
+		{
+			call: async () => {
+				throw new Error("shutdown does not read settings");
+			},
+		},
+		{
+			...h.env,
+			CLIO_CODER_WEB_CLI: fixture,
+			CLIO_CODER_WEB_COMMAND_SCENARIO: "slow",
+		},
+	);
+	let settled = false;
+	const pending = setup.start({}, "first").finally(() => {
+		settled = true;
+	});
+	const rejected = assert.rejects(pending, /stopping/);
+	try {
+		await setup.close();
+		assert.equal(settled, true);
+		await rejected;
+		assert.equal(setup.busy, false);
+		await assert.rejects(setup.start({}, "second"), /stopping/);
+	} finally {
+		await pending.catch(() => {});
+		await setup.close();
+		await h.close();
+	}
+});
+
 test("CLI runner: closed command table, exact argv, canonical cwd and prose outcomes", async () => {
 	for (const input of [
 		[],

@@ -140,6 +140,7 @@ export class MachineAttachments implements MachineAttachmentsApi {
 	async attach(id: string): Promise<MachineAttachment> {
 		if (this.stopped) throw new AppProblem("unavailable", "The app is stopping.");
 		const endpoint = (await this.registry()).find((candidate) => candidate.id === id);
+		if (this.stopped) throw new AppProblem("unavailable", "The app is stopping.");
 		if (!endpoint) throw new AppProblem("not_found", `No fleet node is registered as ${id}.`);
 		const current = this.entries.get(id);
 		if (current && (current.attachment.state === "ready" || current.attachment.state === "connecting"))
