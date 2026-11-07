@@ -844,10 +844,10 @@ those removed migrations:
   replacement, and `clio-coder doctor --fix` rewrites it in place. In a project
   or local layer the leaf falls back to its default with a diagnostic.
 - `runtime: lmstudio-native` becomes `lmstudio`, and `runtime: ollama-native`
-  becomes `ollama`. These ids were removed in 0.7.0 with no alias. The old id
+  becomes `ollama`. These ids were removed in 0.5.6 with no alias. The old id
   passes settings validation, but the target stays unregistered and cannot be
   used. Selecting or dispatching to it is refused with
-  ``runtime '<id>' was removed in 0.7.0; set `runtime: <replacement>` on this target in settings.yaml``,
+  ``runtime '<id>' was removed in 0.5.6; set `runtime: <replacement>` on this target in settings.yaml``,
   and the `target <id>` row of `clio-coder doctor` reads
   `runtime '<id>' is unknown; use '<replacement>' instead in settings.yaml`.
 - A `clio.<action>` keybinding id becomes `clio-coder.<action>`. The old id is
@@ -1114,8 +1114,8 @@ that Clio can answer questions about itself, but in compressed form:
 
 - **Packed source.** Every `.ts` file under `src/`, except the extension scaffold
   templates in `src/domains/extensions/authoring/templates/`, is stored in one
-  file, `dist/assets/source.pack`: an 8-byte `CLIOSRC1` header, a JSON index, and
-  one brotli stream per file (`src/core/source-pack.ts`). Other files under
+  file, `dist/assets/source.pack`: an 8-byte `CLIOSRC1` magic, a 4-byte index length, a JSON
+  index, and one brotli stream per file (`src/core/source-pack.ts`). Other files under
   `src/`, such as prompt fragments and recipes, ship loose. The public extension
   types ship as bundled declarations in `dist/extensions/`.
 - **Code map.** Clio's own code map ships gzipped as `dist/assets/codemap.json.gz`.
@@ -1125,8 +1125,8 @@ that Clio can answer questions about itself, but in compressed form:
 In an installed package, the `read` tool serves a packed file when the loose file
 is absent from `src/`, and a packed directory still reads as a directory.
 `code_nav` and the component inventory see packed files too. `grep`, `find` and
-`bash` do not, and the session prompt says so in an installed package. A source
-checkout has no pack and reads its real files.
+`bash` do not, and the session prompt says so in an installed package. A built
+source checkout has a pack too, but its real files take precedence.
 
 ## 9. First-Use Downloads and Air-Gapped Hosts
 
@@ -1146,7 +1146,8 @@ ship in `dist/assets/grammars/` and need no network.
 A failed grammar or reader download writes a `<path>.unavailable.json` record
 beside the cache path. For 10 minutes no process on the host retries that asset,
 so an air-gapped node pays the timeout once per window rather than once per
-session. A later successful download removes the record.
+session. When the record cannot be written, as in an unwritable cache directory,
+the next process tries again at once. A later successful download removes the record.
 
 On a host with no network:
 

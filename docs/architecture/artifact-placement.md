@@ -131,7 +131,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `system-one/julia-1-<revision>/tokenizer.json` | The Julia-1 tokenizer, downloaded when a `julia-1` engine is bound |
-| `grammars/<package>@<version>/` | The Ruby and C# tree-sitter grammars for the code index, downloaded on first use and pinned by SHA-256. A failed download is recorded beside the cache path, and no process retries it for 10 minutes ([fetched-grammars.ts](../../src/domains/context/codewiki/fetched-grammars.ts)). |
+| `grammars/<package>@<version>/` | The Ruby and C# tree-sitter grammars for the code index, downloaded on first use and pinned by SHA-256. A failed download is recorded beside the cache path, and no process retries it for 10 minutes while that record exists; an unwritable cache directory lets the next process try again ([fetched-grammars.ts](../../src/domains/context/codewiki/fetched-grammars.ts)). |
 | `data-readers/<package>@<version>/` | The HDF5, NetCDF and Parquet readers of the `data` tool, fetched as pinned npm tarballs on first use, with the same 10-minute retry window after a failure ([reader-assets.ts](../../src/tools/data/reader-assets.ts)) |
 | `skill-frontmatter.json` | Parsed `SKILL.md` frontmatter keyed by file path, mtime and size; dropped whole when the Clio version changes ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)) |
 | `update-<fingerprint>.json` | Update-check state |

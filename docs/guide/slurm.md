@@ -173,7 +173,8 @@ never submits, polls or cancels; those go through the five capabilities above.
 5. **Tabulate.** `clio-coder claims list --check <check> --json` feeds the
    helper's `aggregate`, which writes `results.tsv` and `results.md`. Every
    run gets a verdict: `agrees`, `disagrees`, `unverified`, `run failed`,
-   `not terminal` or `unknown`. Failed and unverified runs stay in the table.
+   `not terminal`, `unknown` (a submitted job with no accounting state) or
+   `not submitted` (a task with no job). Failed and unverified runs stay in the table.
 6. **Refine.** A refinement is a new sweep with a new name and its own `runs`
    check entry; a finished sweep's directory is never overwritten.
 

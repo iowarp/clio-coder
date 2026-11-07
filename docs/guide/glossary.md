@@ -311,11 +311,11 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `WorkspaceSnapshots` in [store.ts](../../src/domains/workspace-snapshots/store.ts).
 
 ### 78. Source Pack
-- **Definition**: The single file, `dist/assets/source.pack`, that holds Clio Coder's own `.ts` source in an installed npm package, one brotli stream per file behind a JSON index. `read`, `code_nav` and the component inventory open packed files; `grep`, `find` and `bash` do not see them. A source checkout has no pack. See [What the npm package ships](installation-and-lifecycle.md#8-what-the-npm-package-ships).
+- **Definition**: The single file, `dist/assets/source.pack`, that holds Clio Coder's own `.ts` source in an installed npm package, one brotli stream per file behind a JSON index. `read`, `code_nav` and the component inventory open packed files; `grep`, `find` and `bash` do not see them. A built source checkout has a pack too, but its real files take precedence. See [What the npm package ships](installation-and-lifecycle.md#8-what-the-npm-package-ships).
 - **Owning Type**: `readPackedSource` in [source-pack.ts](../../src/core/source-pack.ts).
 
 ### 79. Pinned Asset
-- **Definition**: An optional file Clio downloads on first use from a fixed URL, checks against a pinned sha256 and caches under the cache root: the Ruby and C# code map grammars, the `data` tool's HDF5 and Parquet readers, and the Julia-1 tokenizer. A failed grammar or reader download is recorded beside the cache path so no process retries it for 10 minutes. See [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
+- **Definition**: An optional file Clio downloads on first use from a fixed URL, checks against a pinned sha256 and caches under the cache root: the Ruby and C# code map grammars, the `data` tool's HDF5 and Parquet readers, and the Julia-1 tokenizer. A failed grammar or reader download is recorded beside the cache path so no process retries it for 10 minutes; when that record cannot be written, the next process tries again at once. See [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
 - **Owning Type**: `PinnedAsset` in [pinned-asset.ts](../../src/core/pinned-asset.ts).
 
 ### 80. Sweep

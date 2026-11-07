@@ -277,10 +277,10 @@ and in a sidebar machine switcher. Opening a node starts that node's own GUI ove
 SSH (`clio-coder gui --foreground --port 0 --no-open --idle-exit <ms> --token-stdin`,
 with a fresh token on stdin), forwards a loopback port to it, and serves it under
 `/m/<id>/` in the same window, so the app on this machine stays the one the browser
-talks to. The node must run the same Clio Coder version and build as the app; a
-mismatch names `clio-coder fleet nodes install <id> --yes`. The node's GUI exits
-after 10 idle minutes. A broken channel reconnects with backoff, and after five
-consecutive failed connections the attachment stays failed until the node is opened
+talks to. The node must run the same Clio Coder version as the app, and the same build when
+both sides report one; a mismatch names `clio-coder fleet nodes install <id> --yes`. The node's GUI exits
+after 10 idle minutes. A broken channel reconnects with backoff up to five times, and when the sixth
+consecutive connection fails the attachment stays failed until the node is opened
 again. Stopping the app stops every channel
 ([machine-attach.ts](../../apps/clio-coder-gui/server/services/machine-attach.ts),
 [ssh-model.ts](../../apps/clio-coder-gui/server/ssh-model.ts)).
