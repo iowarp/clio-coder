@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { clioHomeWriteRefused } from "../../core/home-write-guard.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { visibleWidth } from "../../engine/tui-primitives.js";
 
@@ -98,6 +99,8 @@ export function writeExtensionDockFrame(file: string, frame: ExtensionDockFrame)
 	if (Buffer.byteLength(encoded) > MAX_FILE_BYTES) throw new Error("extension dock frame exceeds 8 MiB");
 	const previous = readExtensionDockFrame(file);
 	if (previous.ok && frame.seq <= previous.frame.seq) throw new Error("extension dock frame sequence must increase");
+	// The frame exists for another process to show; read-only work publishes none.
+	if (clioHomeWriteRefused(file)) return;
 	safeResourceWrite(file, encoded);
 }
 

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { clioHomeWriteRefused } from "../../core/home-write-guard.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ExtensionKeyValueHost } from "./runtime-process-v2.js";
 
@@ -36,7 +37,15 @@ export function extensionDataPaths(
 	};
 }
 
+/**
+ * Tables a read-only process keeps instead of writing them to the Clio home, by
+ * file. A runtime reloaded in the same process reads them back; nothing outlives it.
+ */
+const withheldTables = new Map<string, Table>();
+
 function read(file: string): Table {
+	const withheld = withheldTables.get(file);
+	if (withheld !== undefined) return withheld;
 	let raw: string;
 	try {
 		raw = readFileSync(file, "utf8");
@@ -59,6 +68,10 @@ function read(file: string): Table {
 }
 
 function write(file: string, table: Table): void {
+	if (clioHomeWriteRefused(file)) {
+		withheldTables.set(file, table);
+		return;
+	}
 	safeResourceWrite(file, JSON.stringify({ version: 1, entries: table }), { backup: true });
 }
 

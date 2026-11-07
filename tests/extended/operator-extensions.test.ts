@@ -27,6 +27,7 @@ import {
 	parseExtensionRuntime,
 } from "../../src/domains/extensions/runtime-schema.js";
 import { capabilityEnvelope } from "../../src/domains/extensions/runtime-schema-v2.js";
+import { createExtensionKeyValueHost, extensionDataPaths } from "../../src/domains/extensions/runtime-state.js";
 import {
 	disableExtension,
 	enableExtension,
@@ -1046,6 +1047,54 @@ test("a runtime started in read-only mode gets none of its declared write roots 
 	deepStrictEqual(JSON.parse(String(output.text)), { inside: false });
 	equal(existsSync(path.join(f.cwd, ".research")), false, "the declared workspace root is not created");
 	equal(existsSync(path.join(stateDir, "extensions", "lab_status.v1", "files")), false, "nor is the store");
+});
+
+test("an api 1 runtime started in read-only mode reads but neither writes nor starts a program", async (t) => {
+	const script = [
+		'import { readFileSync, writeFileSync } from "node:fs";',
+		'import { spawnSync } from "node:child_process";',
+		"export default api => {",
+		'  api.handle("probe", async () => {',
+		"    const tryIt = (fn) => { try { fn(); return true; } catch { return false; } };",
+		"    return { text: JSON.stringify({",
+		'      read: tryIt(() => readFileSync("seen.txt")),',
+		'      write: tryIt(() => writeFileSync("written.txt", "x")),',
+		'      spawn: tryIt(() => { if (spawnSync("true").error) throw new Error("no"); }),',
+		"    }) };",
+		"  });",
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		commands: [{ name: "probe", description: "Probe file and program access", timeoutMs: 10_000 }],
+	});
+	writeFileSync(path.join(f.cwd, "seen.txt"), "x");
+	const child = withReadOnlyMode(
+		() =>
+			new ExtensionRuntimeProcess(f.extension, { workspace: f.cwd, sessionId: null, generation: 1, mode: "headless" }),
+	);
+	t.after(() => child.dispose());
+	await child.staged;
+	await child.activate();
+	const probe = JSON.parse((await child.request({ kind: "command", name: "probe", args: "" }, 5000)).text);
+	deepStrictEqual(probe, { read: true, write: false, spawn: false });
+	equal(existsSync(path.join(f.cwd, "written.txt")), false);
+});
+
+test("the host key/value store keeps a read-only process's writes in memory and reads them back", async (t) => {
+	const env = await isolateClioEnv("clio-coder-kv-read-only-");
+	t.after(() => env.restore());
+	const paths = extensionDataPaths(path.join(env.dir, "state"), "lab_status.v1", "session-a");
+	const host = createExtensionKeyValueHost(paths);
+	equal(host.set("store", "kept", 1).ok, true);
+	const before = readFileSync(paths.storeFile, "utf8");
+	withReadOnlyMode(() => {
+		const held = createExtensionKeyValueHost(paths);
+		deepStrictEqual(held.set("store", "kept", 2, 1), { ok: true, version: 2 });
+		equal(held.set("state", "draft", "x").ok, true);
+		equal(createExtensionKeyValueHost(paths).get("store", "kept").value, 2, "a reloaded runtime reads it back");
+	});
+	equal(readFileSync(paths.storeFile, "utf8"), before);
+	equal(existsSync(paths.stateFile ?? ""), false);
 });
 
 test("a declared extension can request host embeddings without seeing the route", async (t) => {

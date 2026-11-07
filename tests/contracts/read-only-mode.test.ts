@@ -42,6 +42,7 @@ const { withStateFileLock } = await import("../../src/core/state-file-lock.js");
 const { enableClioCompileCache } = await import("../../src/core/compile-cache.js");
 const { initializeClioHome } = await import("../../src/core/init.js");
 const { DEFAULT_SETTINGS_YAML } = await import("../../src/core/defaults.js");
+const { writeToolOffload } = await import("../../src/tools/result-shaping.js");
 const cliHome = mkdtempSync(join(tmpdir(), "clio-coder-read-only-cli-"));
 const freshRoot = mkdtempSync(join(tmpdir(), "clio-coder-read-only-fresh-"));
 const freshHome = join(freshRoot, "home");
@@ -100,6 +101,11 @@ describe("read-only mode", () => {
 		ok(!existsSync(join(home, "cache")), "read-only home setup leaves a home without a cache root as it found it");
 		ok(!existsSync(join(home, "config")), "nor does it scaffold missing settings or credentials");
 		equal(statSync(join(home, "state")).mtimeMs, stateMtime, "nor a missing state subdir or lock file");
+	});
+
+	it("a process in read-only mode for good offloads no oversized tool result to the Clio home", () => {
+		equal(writeToolOffload("x".repeat(64), { sessionId: "read-only" }, 16), null);
+		ok(!existsSync(join(home, "state", "scratch")), "the notice names no full copy, and none is written");
 	});
 
 	it("`run --read-only` enables no bytecode cache before the run enters the mode; a plain run still does", () => {
