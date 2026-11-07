@@ -149,6 +149,14 @@ export function recordTargetModelSnapshot(
 	const modelCreatedAt = normalizedLabels(snapshot.models, options.modelCreatedAt);
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	try {
+		// Every successful probe confirms the same list. Rewriting it costs a synchronous fsync on the probe path,
+		// so a snapshot that already says the same and is not yet half way to expiry stands as written.
+		const existing = readTargetModelSnapshot(target, {
+			...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
+			...(options.nowMs !== undefined ? { nowMs: options.nowMs } : {}),
+			ttlMs: TARGET_MODEL_CACHE_TTL_MS / 2,
+		});
+		if (existing !== null && sameSnapshotContent(existing, snapshot)) return true;
 		// The writer's root check; reads resolve the root without creating it.
 		const cacheDir = options.cacheDir ?? clioCacheDir();
 		safeResourceWrite(targetModelSnapshotPath(target.id, cacheDir), `${JSON.stringify(snapshot, null, 2)}\n`, {
@@ -158,4 +166,10 @@ export function recordTargetModelSnapshot(
 	} catch {
 		return false;
 	}
+}
+
+function sameSnapshotContent(left: TargetModelSnapshot, right: TargetModelSnapshot): boolean {
+	const { observedAt: _left, ...leftContent } = left;
+	const { observedAt: _right, ...rightContent } = right;
+	return JSON.stringify(leftContent) === JSON.stringify(rightContent);
 }

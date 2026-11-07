@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { updateSettings } from "../../src/core/config.js";
@@ -9,7 +9,12 @@ import { type ConfigContract, ConfigDomainModule } from "../../src/domains/confi
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import type { TargetStatus } from "../../src/domains/providers/contract.js";
 import { type ProvidersContract, ProvidersDomainModule } from "../../src/domains/providers/index.js";
-import { readTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
+import {
+	readTargetModelSnapshot,
+	recordTargetModelSnapshot,
+	TARGET_MODEL_CACHE_TTL_MS,
+	targetModelSnapshotPath,
+} from "../../src/domains/providers/target-model-cache.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
@@ -179,3 +184,23 @@ for (const ending of ["retargeted", "removed", "stopped", "overridden"] as const
 		}
 	});
 }
+
+test("a probe confirming the snapshot it already has skips the write until the snapshot is half way to expiry", async (t) => {
+	const home = await isolateClioEnv("clio-model-snapshot-");
+	t.after(() => home.restore());
+	const cacheDir = join(home.dir, "cache");
+	const target = { id: "local", runtime: "openai-compat", url: "http://127.0.0.1:9/v1" };
+	const start = Date.parse("2026-01-01T00:00:00.000Z");
+	const observed = (nowMs: number) => readTargetModelSnapshot(target, { cacheDir, nowMs })?.observedAt;
+	ok(recordTargetModelSnapshot(target, ["a", "b"], { cacheDir, nowMs: start }));
+	const path = targetModelSnapshotPath(target.id, cacheDir);
+	const written = statSync(path).mtimeMs;
+	ok(recordTargetModelSnapshot(target, ["a", "b"], { cacheDir, nowMs: start + 60_000 }));
+	strictEqual(statSync(path).mtimeMs, written, "the same list is not rewritten");
+	strictEqual(observed(start + 60_000), new Date(start).toISOString());
+	ok(recordTargetModelSnapshot(target, ["a", "c"], { cacheDir, nowMs: start + 120_000 }));
+	strictEqual(observed(start + 120_000), new Date(start + 120_000).toISOString(), "a changed list is written");
+	const later = start + 120_000 + TARGET_MODEL_CACHE_TTL_MS / 2;
+	ok(recordTargetModelSnapshot(target, ["a", "c"], { cacheDir, nowMs: later }));
+	strictEqual(observed(later), new Date(later).toISOString(), "an aging snapshot is refreshed before it expires");
+});
