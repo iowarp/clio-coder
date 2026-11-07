@@ -65,6 +65,7 @@ export async function runHostDispatch(
 ): Promise<CouncilDispatchOutcome> {
 	const toolCallId = `host-${randomUUID()}`;
 	events.emit({ type: "tool_execution_start", toolCallId, toolName: ToolNames.Dispatch, args: { ...args } });
+	const startedAt = performance.now();
 	const verdict = await registry.invoke(
 		{ tool: ToolNames.Dispatch, args: { ...args } },
 		{ toolCallId, ...(turnConstraints !== undefined ? { turnConstraints } : {}) },
@@ -91,6 +92,7 @@ export async function runHostDispatch(
 		toolName: ToolNames.Dispatch,
 		result: { content: [{ type: "text", text }] },
 		isError: outcome.status !== "ok",
+		durationMs: Math.round(performance.now() - startedAt),
 	});
 	return outcome;
 }

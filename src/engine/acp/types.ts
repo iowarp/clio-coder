@@ -87,6 +87,13 @@ export const ACP_EGGS_META_KEY = "clio-coder/eggs";
 /** `{ state }` of the always-on memory guardian, pushed on `session_info_update` when it changes. */
 export const ACP_MEMORY_META_KEY = "clio-coder/memory";
 export const ACP_TURN_META_KEY = "clio-coder/turn";
+/**
+ * `{ durationMs }` on a terminal `tool_call_update`: the engine's own span for
+ * the call, admission wait excluded, live and on replay when the ledger
+ * recorded it. Purely additive: a client that does not read it sees exactly
+ * the frames it saw before.
+ */
+export const ACP_TOOL_TIMING_META_KEY = "clio-coder/toolTiming";
 export const ACP_TRUNCATED_META_KEY = "clio-coder/truncated";
 export const ACP_TOOLS_META_KEY = "clio-coder/tools";
 export const ACP_RUN_RESULT_META_KEY = "clio-coder/run-result";
@@ -961,8 +968,13 @@ export interface AcpSessionResultMeta {
 /** `_meta["clio-coder/turn"]` on a `session/prompt` result. */
 export interface AcpTurnMeta {
 	model?: string;
+	target?: string;
 	ttftMs?: number;
 	outputTokensPerSecond?: number;
+}
+/** `_meta["clio-coder/toolTiming"]` on a terminal `tool_call_update`. */
+export interface AcpToolTimingMeta {
+	durationMs: number;
 }
 /** `_meta["clio-coder/replay"]` on a replayed `session/update` frame. */
 export interface AcpReplayMeta {
@@ -1522,11 +1534,13 @@ export type AcpUsageMeta = Static<typeof AcpUsageMetaSchema>;
 export const AcpTurnMetaSchema = Type.Object(
 	{
 		model: Type.Optional(Type.String({ maxLength: ACP_MAX_MODEL_ID_BYTES })),
+		target: Type.Optional(Type.String({ maxLength: ACP_MAX_TARGET_ID_BYTES })),
 		ttftMs: Type.Optional(Type.Number({ minimum: 0 })),
 		outputTokensPerSecond: Type.Optional(Type.Number({ minimum: 0 })),
 	},
 	closed,
 );
+export const AcpToolTimingMetaSchema = Type.Object({ durationMs: Type.Integer({ minimum: 0 }) }, closed);
 export const AcpInitializeResultSchema = Type.Object(
 	{ protocolVersion: Type.Literal(1) },
 	{ additionalProperties: true },

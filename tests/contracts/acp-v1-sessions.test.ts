@@ -758,6 +758,112 @@ test("ACP tool call start includes the canonical tool name", async () => {
 	}
 });
 
+test("ACP reports each tool call's engine span and the target and model that served the turn", async () => {
+	const peer = fixture([], (emit) => {
+		emit({ type: "tool_execution_start", toolCallId: "timed", toolName: "read", args: { path: "README.md" } });
+		emit({
+			type: "tool_execution_end",
+			toolCallId: "timed",
+			toolName: "read",
+			result: "ok",
+			isError: false,
+			durationMs: 1234.4,
+		});
+		emit({ type: "tool_execution_start", toolCallId: "untimed", toolName: "read", args: { path: "README.md" } });
+		emit({ type: "tool_execution_end", toolCallId: "untimed", toolName: "read", result: "ok", isError: false });
+		emit({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				model: "model-b",
+				callAccounting: { usageObserved: true, pricedBy: "none", targetId: "target-b" },
+				content: [{ type: "text", text: "Read it" }],
+				stopReason: "stop",
+			},
+		});
+	});
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
+		const result = (await peer.call("session/prompt", {
+			sessionId: opened.sessionId,
+			prompt: [{ type: "text", text: "Read" }],
+		})) as { _meta: Record<string, Record<string, unknown>> };
+		strictEqual(result._meta["clio-coder/turn"]?.model, "model-b");
+		strictEqual(result._meta["clio-coder/turn"]?.target, "target-b");
+		const timing = peer.updates
+			.filter((params) => (params.update as Record<string, unknown>).sessionUpdate === "tool_call_update")
+			.map((params) => (params._meta as Record<string, unknown> | undefined)?.["clio-coder/toolTiming"]);
+		deepStrictEqual(timing, [{ durationMs: 1234 }, undefined]);
+	} finally {
+		await peer.stop();
+	}
+});
+
+test("ACP replay carries each turn's recorded model and route and each call's recorded span", async () => {
+	const message = (
+		role: "user" | "assistant" | "tool_call" | "tool_result",
+		turnId: string,
+		parentTurnId: string | null,
+		payload: unknown,
+	) => ({
+		kind: "message" as const,
+		role,
+		turnId,
+		parentTurnId,
+		timestamp: "2026-09-25T12:00:00.000Z",
+		payload,
+	});
+	const peer = fixture([
+		message("user", "ask-1", null, "Read the notes"),
+		message("assistant", "call-1", "ask-1", { stopReason: "toolUse", model: "model-a", content: [] }),
+		message("tool_call", "read-call", "call-1", { name: "read", toolCallId: "read-1", args: { path: "notes.txt" } }),
+		message("tool_result", "read-result", "read-call", {
+			toolCallId: "read-1",
+			toolName: "read",
+			result: "notes",
+			isError: false,
+			durationMs: 42,
+		}),
+		message("assistant", "answer-1", "read-result", { stopReason: "stop", model: "model-a", content: [] }),
+		{
+			kind: "modelChange" as const,
+			turnId: "swap",
+			parentTurnId: "answer-1",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			provider: "runtime-b",
+			modelId: "model-b",
+			target: "target-b",
+		},
+		message("user", "ask-2", "answer-1", "Again"),
+		message("assistant", "answer-2", "ask-2", {
+			stopReason: "stop",
+			model: "model-b",
+			content: [{ type: "text", text: "Done" }],
+		}),
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const metas = peer.updates.map((params) => params._meta as Record<string, Record<string, unknown>>);
+		deepStrictEqual(
+			[...new Set(metas.map((meta) => JSON.stringify([meta["clio-coder/replay"]?.turn, meta["clio-coder/turn"]])))],
+			[
+				JSON.stringify([1, { model: "model-a", target: "target-a" }]),
+				JSON.stringify([2, { model: "model-b", target: "target-b" }]),
+			],
+		);
+		const terminal = peer.updates.find(
+			(params) =>
+				(params.update as Record<string, unknown>).sessionUpdate === "tool_call_update" &&
+				(params.update as Record<string, unknown>).status === "completed",
+		);
+		deepStrictEqual((terminal?._meta as Record<string, unknown>)["clio-coder/toolTiming"], { durationMs: 42 });
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP advertises only slash commands executable from a prompt", async () => {
 	let submitted = false;
 	const commands: AcpCommandControl = {

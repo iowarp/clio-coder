@@ -39,6 +39,7 @@ import {
 	ACP_TARGETS_META_KEY,
 	ACP_TARGETS_PROBE_METHOD,
 	ACP_THINKING_LEVELS,
+	ACP_TOOL_TIMING_META_KEY,
 	ACP_TOOLS_META_KEY,
 	ACP_TRUNCATED_META_KEY,
 	ACP_TURN_META_KEY,
@@ -690,6 +691,8 @@ interface ActivePrompt {
 	/** The usage block the turn's last meter frame carried, which the prompt response repeats. */
 	settledUsage?: PromptUsage | null;
 	model?: string;
+	/** The target that served the turn's newest assistant call. */
+	target?: string;
 	generationMs?: number;
 	timedOutputTokens?: number;
 	ttftMs?: number;
@@ -1236,6 +1239,12 @@ const ORCHESTRATOR_ATTRIBUTION: AcpAgentAttribution = {
 const ORCHESTRATOR_UPDATE_META: Record<string, unknown> = {
 	[ACP_AGENT_META_KEY]: [ORCHESTRATOR_ATTRIBUTION],
 };
+
+/** Adds the engine's span for the call, when it reported a usable one, to a terminal update's `_meta`. */
+function withToolTiming(meta: Record<string, unknown>, durationMs: unknown): Record<string, unknown> {
+	if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return meta;
+	return { ...meta, [ACP_TOOL_TIMING_META_KEY]: { durationMs: Math.round(durationMs) } };
+}
 
 /** The `_meta` a tool-call frame carries: its own agents when it spawned any, else the orchestrator. */
 function toolCallUpdateMeta(snapshot: AcpToolCallSnapshot | undefined): Record<string, unknown> {
@@ -1911,7 +1920,7 @@ function handleChatEvent(
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
 				rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),
 			},
-			toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
+			withToolTiming(toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)), event.durationMs),
 		);
 		return;
 	}
@@ -1920,6 +1929,9 @@ function handleChatEvent(
 		if (isRecord(message) && message.role === "assistant") {
 			const model = safeStoredIdentifier(message.model, ACP_MAX_MODEL_ID_BYTES);
 			if (model) active.model = model;
+			const accounting = isRecord(message.callAccounting) ? message.callAccounting : undefined;
+			const target = safeStoredIdentifier(accounting?.targetId, ACP_MAX_TARGET_ID_BYTES);
+			if (target) active.target = target;
 			const apiMs = event.modelTimeMs;
 			const ttftMs = event.ttftMs;
 			const output = isRecord(message.usage) ? message.usage.output : undefined;
@@ -2197,6 +2209,9 @@ interface AcpReplayTurn {
 	frames: AcpReplayFrame[];
 	userTurnId?: string;
 	stopReason?: string;
+	/** The newest recorded assistant model and the route the ledger had when it ran. */
+	model?: string;
+	target?: string;
 }
 
 interface PreparedAcpReplay {
@@ -2299,8 +2314,11 @@ function prepareAcpReplay(
 	entries: ReadonlyArray<SessionEntry>,
 	leafTurnId: string | null,
 	sessionId: string,
+	createdTarget: string | null = null,
 ): PreparedAcpReplay {
 	const branch = filterEntriesToActivePath(entries, leafTurnId ?? undefined);
+	// The header names the target the session was created on; each `modelChange` on the branch moves it.
+	let routeTarget = createdTarget;
 	const turns: AcpReplayTurn[] = [];
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
@@ -2328,6 +2346,10 @@ function prepareAcpReplay(
 					meta: { [ACP_NOTICE_META_KEY]: { level: "info" } },
 				});
 			}
+			continue;
+		}
+		if (entry.kind === "modelChange") {
+			if (typeof entry.target === "string" && entry.target.length > 0) routeTarget = entry.target;
 			continue;
 		}
 		if (entry.kind === "bashExecution") {
@@ -2385,6 +2407,12 @@ function prepareAcpReplay(
 		if (current === null) continue;
 		if (entry.role === "assistant") {
 			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
+			const model = safeStoredIdentifier(payload?.model, ACP_MAX_MODEL_ID_BYTES);
+			if (model) current.model = model;
+			// A failed call records the target it ran on; any other call ran on the ledger's route.
+			const failedOn = safeStoredIdentifier(payloadRecord(payload?.failureRoute)?.targetId, ACP_MAX_TARGET_ID_BYTES);
+			const target = failedOn ?? safeStoredIdentifier(routeTarget, ACP_MAX_TARGET_ID_BYTES);
+			if (target) current.target = target;
 			const blocks = replayTextBlocks(entry);
 			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
 			const completed = messageStopCompleted(payload?.stopReason);
@@ -2429,13 +2457,20 @@ function prepareAcpReplay(
 					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
 					rawOutput: boundRawRecord({ result: payload?.result, isError: failed }),
 				},
+				...(typeof payload?.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0
+					? { meta: { [ACP_TOOL_TIMING_META_KEY]: { durationMs: Math.round(payload.durationMs) } } }
+					: {}),
 			});
 		}
 	}
 	if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
 
-	const params = turns.flatMap((turn, index) =>
-		turn.frames.map((frame) => ({
+	const params = turns.flatMap((turn, index) => {
+		const route = {
+			...(turn.model !== undefined ? { model: turn.model } : {}),
+			...(turn.target !== undefined ? { target: turn.target } : {}),
+		};
+		return turn.frames.map((frame) => ({
 			sessionId,
 			update: frame.update,
 			_meta: {
@@ -2443,10 +2478,11 @@ function prepareAcpReplay(
 					turn: index + 1,
 					...(turn.stopReason !== undefined ? { stopReason: turn.stopReason } : {}),
 				},
+				...(turn.model !== undefined || turn.target !== undefined ? { [ACP_TURN_META_KEY]: route } : {}),
 				...frame.meta,
 			},
-		})),
-	);
+		}));
+	});
 	return { params, runs, turns: turns.length, truncated: false };
 }
 
@@ -5088,7 +5124,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return {
 			leafTurnId,
 			replayMessages: options.buildReplayMessages(entries, leafTurnId, scope),
-			replay: replayToClient ? prepareAcpReplay(entries, leafTurnId, id) : undefined,
+			replay: replayToClient
+				? prepareAcpReplay(
+						entries,
+						leafTurnId,
+						id,
+						options.session?.history().find((meta) => meta.id === id)?.target ?? null,
+					)
+				: undefined,
 		};
 	};
 	/**
@@ -5181,7 +5224,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			try {
 				entries = options.readSessionEntries(id);
 				const leaf = options.session.tree(id).leafId;
-				replay = replayToClient ? prepareAcpReplay(entries, leaf, id) : undefined;
+				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, stored.target) : undefined;
 			} catch {
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 			}
@@ -5197,7 +5240,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					},
 					id,
 				);
-				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id) : undefined;
+				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
 			} catch {
 				await options.mcpCapabilities?.detachClientServers();
 				if (options.session.current()?.id === id) {
@@ -5520,7 +5563,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				turnId,
 			);
 			forkLeaf = restored.leafTurnId;
-			replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id);
+			replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
 		} catch (error) {
 			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
 			resetForSession(forkLeaf, []);
@@ -7478,6 +7521,7 @@ function promptResponse(
 			},
 			[ACP_TURN_META_KEY]: {
 				...(active.model ? { model: active.model } : {}),
+				...(active.target ? { target: active.target } : {}),
 				...(active.ttftMs !== undefined ? { ttftMs: active.ttftMs } : {}),
 				// A rate over less than RATE_MIN_WINDOW_MS of generation measured the delivery, not the model, so it is left out.
 				...(active.generationMs !== undefined && active.generationMs >= RATE_MIN_WINDOW_MS && active.timedOutputTokens
