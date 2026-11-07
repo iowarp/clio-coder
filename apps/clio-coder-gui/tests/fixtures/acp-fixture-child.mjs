@@ -773,7 +773,10 @@ async function handle(frame) {
 				};
 				// A long saved conversation for scripts/perf-workload.ts `--history`: N rich exchanges.
 				for (let turn = 1; turn <= Math.max(1, REPLAY_TURNS); turn++) {
-					const meta = { "clio-coder/replay": { turn } };
+					const meta = {
+						"clio-coder/replay": { turn },
+						"clio-coder/turn": { model: "replay-model", target: "replay-target" },
+					};
 					const long = REPLAY_TURNS > 0;
 					update(
 						{
@@ -794,7 +797,7 @@ async function handle(frame) {
 								rawInput: { path: "analysis/convergence-notes.md" },
 								rawOutput: { result: "mesh convergence" },
 							},
-							meta,
+							{ ...meta, "clio-coder/toolTiming": { durationMs: 40 + turn } },
 						);
 					update(
 						{
@@ -846,14 +849,26 @@ async function handle(frame) {
 						status: "in_progress",
 						rawInput: { mode: "council", roster: "review", task: promptText.slice(9) },
 					});
-					await delay(60);
-					update({
-						sessionUpdate: "tool_call_update",
-						toolCallId: "council-1",
-						status: "completed",
-						content: [{ type: "content", content: { type: "text", text: "council dispatched: 2 members" } }],
-					});
-					result = { stopReason: "end_turn", _meta: { "clio-coder/usage": usage } };
+					// The engine reports the call's span and the route that served the turn; the host keeps no clock of its own.
+					update(
+						{
+							sessionUpdate: "tool_call_update",
+							toolCallId: "council-1",
+							status: "completed",
+							content: [{ type: "content", content: { type: "text", text: "council dispatched: 2 members" } }],
+						},
+						{
+							"clio-coder/agent": [{ version: 1, role: "orchestrator", agentId: "orchestrator" }],
+							"clio-coder/toolTiming": { durationMs: 4321 },
+						},
+					);
+					result = {
+						stopReason: "end_turn",
+						_meta: {
+							"clio-coder/usage": usage,
+							"clio-coder/turn": { model: "fixture-model", target: "fixture-target" },
+						},
+					};
 					break;
 				}
 				if (promptText.startsWith("/tasks ") || promptText.startsWith("/skill ")) {

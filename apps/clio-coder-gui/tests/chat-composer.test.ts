@@ -465,10 +465,13 @@ test("a completed turn footer carries its time, tokens and tool count, and an un
 	assert.equal(withoutUsage.usage, null);
 });
 
-test("the Detailed line reports model, speed, the prompt split and cache only when they were reported", () => {
-	const view = turnOutcome(turn({ details: { model: "qwen3.8-27b", ttftMs: 420, outputTokensPerSecond: 38.4 } }), 0);
+test("the Detailed line reports route, speed, the prompt split and cache only when they were reported", () => {
+	const view = turnOutcome(
+		turn({ details: { model: "qwen3.8-27b", target: "lab-gpu", ttftMs: 420, outputTokensPerSecond: 38.4 } }),
+		0,
+	);
 	assert.deepEqual(view.nerd, [
-		{ label: "Model", value: "qwen3.8-27b" },
+		{ label: "Route", value: "lab-gpu · qwen3.8-27b" },
 		{ label: "First token", value: "420 ms" },
 		{ label: "Latency", value: "12 s" },
 		{ label: "Speed", value: "38 tok/s" },
@@ -485,6 +488,17 @@ test("the Detailed line reports model, speed, the prompt split and cache only wh
 			["Written", "1"],
 		],
 	);
+	assert.deepEqual(
+		view.breakdown.filter((row) => row.group === "Model").map((row) => [row.label, row.value]),
+		[
+			["Target", "lab-gpu"],
+			["Model", "qwen3.8-27b"],
+		],
+	);
+	assert.deepEqual(turnOutcome(turn({ usage: null, details: { model: "m" } }), 0).nerd[0], {
+		label: "Route",
+		value: "m",
+	});
 	assert.deepEqual(
 		turnOutcome(turn({ usage: null }), 0).nerd,
 		[{ label: "Latency", value: "12 s" }],

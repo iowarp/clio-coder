@@ -173,12 +173,7 @@ export const TimelineItem = Type.Object(
 		 * bounded string is replaced in O(1), which is the shape a live pane wants.
 		 */
 		partialOutput: Type.Optional(Type.String({ maxLength: 32768 })),
-		/**
-		 * When this server first saw a live tool call, and how long it took to settle as this server saw it.
-		 * The engine does not send a call's duration, so these are the host's own clock; a replayed call has
-		 * neither, because history must not be stamped with the time it was read back.
-		 */
-		startedAt: Type.Optional(Type.String({ maxLength: 64 })),
+		/** The engine's span for a settled call (`clio-coder/toolTiming`), live or recorded; absent when it reported none. */
 		durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
 		provenance: Type.Optional(Provenance),
 	},

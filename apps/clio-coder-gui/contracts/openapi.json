@@ -14071,7 +14071,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9029f09b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76507950"
 								}
 							}
 						},
@@ -15108,7 +15108,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9029f09b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76507950"
 								}
 							}
 						},
@@ -15203,7 +15203,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9029f09b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76507950"
 								}
 							}
 						},
@@ -15253,7 +15253,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_9029f09b"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_76507950"
 									}
 								}
 							}
@@ -15744,7 +15744,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9029f09b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_76507950"
 								}
 							}
 						},
@@ -18911,18 +18911,18 @@
 				},
 				"maxItems": 64
 			},
+			"Array_cc43feb8": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_durationMs_id_kind_0df82c43"
+				}
+			},
 			"Array_d68bdb0a": {
 				"type": "array",
 				"items": {
 					"type": "string",
 					"minLength": 1,
 					"maxLength": 512
-				}
-			},
-			"Array_d8147d79": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_durationMs_id_kind_aff0ceb8"
 				}
 			},
 			"Array_d853a408": {
@@ -20011,7 +20011,7 @@
 										"minimum": 1
 									},
 									"item": {
-										"$ref": "#/components/schemas/Object_durationMs_id_kind_aff0ceb8"
+										"$ref": "#/components/schemas/Object_durationMs_id_kind_0df82c43"
 									}
 								},
 								"additionalProperties": false
@@ -23523,7 +23523,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_9029f09b": {
+			"Object_config_contextWork_fleet_76507950": {
 				"type": "object",
 				"required": [
 					"id",
@@ -23540,7 +23540,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_23872635"
+					"$ref": "#/components/schemas/Shape_a5fb8a60"
 				},
 				"additionalProperties": false
 			},
@@ -24101,11 +24101,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_durationMs_id_kind_aff0ceb8": {
+			"Object_durationMs_id_kind_0df82c43": {
 				"type": "object",
 				"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_83e1308f"
+					"$ref": "#/components/schemas/Shape_51ae6860"
 				},
 				"additionalProperties": false
 			},
@@ -26811,66 +26811,6 @@
 					"$ref": "#/components/schemas/Object_agentId_apiCalls_durationMs_c5921c78"
 				}
 			},
-			"Shape_23872635": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_d8147d79"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_76fc77ae"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_243b6860": {
 				"quantities": {
 					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_2349b159"
@@ -27658,6 +27598,65 @@
 				},
 				"total": {
 					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				}
+			},
+			"Shape_51ae6860": {
+				"id": {
+					"type": "string"
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"sequence": {
+					"type": "integer"
+				},
+				"kind": {
+					"$ref": "#/components/schemas/Union_c22e678b"
+				},
+				"text": {
+					"type": "string"
+				},
+				"status": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"title": {
+					"type": "string"
+				},
+				"toolKind": {
+					"type": "string"
+				},
+				"toolCallId": {
+					"type": "string"
+				},
+				"locations": {
+					"$ref": "#/components/schemas/Array_752b64bf"
+				},
+				"rawInput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"rawOutput": {
+					"type": "object",
+					"patternProperties": {
+						"^.*$": {}
+					}
+				},
+				"partialOutput": {
+					"type": "string",
+					"maxLength": 32768
+				},
+				"durationMs": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
 				}
 			},
 			"Shape_52231196": {
@@ -28475,69 +28474,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
 				}
 			},
-			"Shape_83e1308f": {
-				"id": {
-					"type": "string"
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"sequence": {
-					"type": "integer"
-				},
-				"kind": {
-					"$ref": "#/components/schemas/Union_c22e678b"
-				},
-				"text": {
-					"type": "string"
-				},
-				"status": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"title": {
-					"type": "string"
-				},
-				"toolKind": {
-					"type": "string"
-				},
-				"toolCallId": {
-					"type": "string"
-				},
-				"locations": {
-					"$ref": "#/components/schemas/Array_752b64bf"
-				},
-				"rawInput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"rawOutput": {
-					"type": "object",
-					"patternProperties": {
-						"^.*$": {}
-					}
-				},
-				"partialOutput": {
-					"type": "string",
-					"maxLength": 32768
-				},
-				"startedAt": {
-					"type": "string",
-					"maxLength": 64
-				},
-				"durationMs": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
 			"Shape_8a16fc8c": {
 				"counts": {
 					"$ref": "#/components/schemas/Object_attempts_calls_dispositions_af4b7186"
@@ -28638,6 +28574,66 @@
 				},
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
+				}
+			},
+			"Shape_a5fb8a60": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_cc43feb8"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_76fc77ae"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_a74d22af": {

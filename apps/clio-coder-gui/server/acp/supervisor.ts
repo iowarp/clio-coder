@@ -45,6 +45,7 @@ import {
 	type SessionSnapshot,
 	type TimelineItem,
 	type Turn,
+	TurnDetails,
 } from "../../contracts/sessions.js";
 import {
 	CommandCatalog,
@@ -111,7 +112,9 @@ import {
 	ACP_TARGETS_LIST_METHOD,
 	ACP_TARGETS_PROBE_METHOD,
 	ACP_TELEMETRY_UPDATE_NOTIFICATION,
+	ACP_TOOL_TIMING_META_KEY,
 	ACP_TRUNCATED_META_KEY,
+	ACP_TURN_META_KEY,
 	type AcpJob,
 	AcpJobList,
 	AcpTargetList,
@@ -160,6 +163,8 @@ type Entry = {
 	turnId: string | null;
 	replay: number | null;
 	replayStopReason?: string;
+	/** The replayed turn's recorded model and route, from its frames' `clio-coder/turn`. */
+	replayDetails?: Turn["details"];
 	closing: boolean;
 	bound: boolean;
 	permissions?: Permissions;
@@ -870,8 +875,9 @@ export class Supervisor {
 		const reason = entry.replayStopReason ?? "end_turn";
 		const problem =
 			reason === "error" ? new AppProblem("upstream_acp", "The recorded turn ended with an error.").problem : null;
-		this.finish(entry, reason, null, problem, null);
+		this.finish(entry, reason, null, problem, null, entry.replayDetails);
 		delete entry.replayStopReason;
+		delete entry.replayDetails;
 	}
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
@@ -953,6 +959,10 @@ export class Supervisor {
 					: "end_turn";
 			this.begin(entry, "", "replay", `replay-${replay}`);
 		}
+		if (entry.replay !== null && meta[ACP_TURN_META_KEY] !== undefined) {
+			const details = Value.Clean(TurnDetails, { ...record(meta[ACP_TURN_META_KEY]) });
+			if (Value.Check(TurnDetails, details)) entry.replayDetails = details;
+		}
 		if (!entry.turnId) throw new AppProblem("upstream_acp", "ACP update arrived without a turn.");
 		const origin = entry.replay === null ? ("live" as const) : ("replay" as const);
 		const attribution = meta[ACP_AGENT_META_KEY];
@@ -1033,11 +1043,8 @@ export class Supervisor {
 			// and leaving a stale snapshot beside it would show two versions of the
 			// same output in the same row.
 			const settled = item.status === "completed" || item.status === "failed";
-			if (origin === "live") {
-				const now = Date.now();
-				item.startedAt ??= new Date(now).toISOString();
-				if (settled && item.durationMs === undefined) item.durationMs = Math.max(0, now - Date.parse(item.startedAt));
-			}
+			const timing = record(meta[ACP_TOOL_TIMING_META_KEY]).durationMs;
+			if (settled && typeof timing === "number" && Number.isSafeInteger(timing) && timing >= 0) item.durationMs = timing;
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;

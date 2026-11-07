@@ -889,10 +889,11 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 		factRef?: string;
 	}[] = [];
 	const model = turn.details?.model;
-	if (model) {
-		breakdown.push({ group: "Model", label: "Model", value: model });
-		nerd.push({ label: "Model", value: model });
-	}
+	const target = turn.details?.target;
+	// The route is the engine's report of what served the turn: the target, then the model on it.
+	if (target) breakdown.push({ group: "Model", label: "Target", value: target });
+	if (model) breakdown.push({ group: "Model", label: "Model", value: model });
+	if (target || model) nerd.push({ label: "Route", value: [target, model].filter(Boolean).join(" · ") });
 	const usage = turn.usage;
 	const quantities = usage?.quantities;
 	const ttft = turn.details?.ttftMs;

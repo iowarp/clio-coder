@@ -56,6 +56,8 @@ test("session config retains open/load options, publishes updates, and never sav
 	const loaded = await h.supervisor.open(workspace.id, session.id);
 	assert.equal(configOf(loaded)?.options.find((option) => option.id === "model")?.currentValue, "fixture-model");
 	assert.ok(loaded.timeline.some((item) => item.origin === "replay"));
+	// A replayed turn carries the model and route its ledger recorded.
+	assert.deepEqual(loaded.turns[0]?.details, { model: "replay-model", target: "replay-target" });
 });
 
 test("an older ACP peer has no conversation config and refuses the write locally", async (t) => {
@@ -113,9 +115,9 @@ test("a prompt-turn command runs as a visible turn with its dispatch call inside
 	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
 	const dispatch = snapshot.timeline.find((item) => item.kind === "tool" && item.title === "dispatch");
 	assert.equal(dispatch?.status, "completed");
-	// The fixture holds the call open for 60 ms; the host times it from first sighting to settling.
-	assert.ok(dispatch?.startedAt !== undefined && Number.isFinite(Date.parse(dispatch.startedAt)));
-	assert.ok((dispatch?.durationMs ?? 0) >= 40, `host-timed duration ${dispatch?.durationMs}`);
+	// The span and the route are the engine's report, not a clock the host kept.
+	assert.equal(dispatch?.durationMs, 4321);
+	assert.equal(snapshot.turns.at(-1)?.details?.target, "fixture-target");
 	assert.doesNotMatch(
 		await readFile(join(h.home.path, "acp.jsonl"), "utf8"),
 		/"method":"_clio-coder\/commands\/invoke"/,
