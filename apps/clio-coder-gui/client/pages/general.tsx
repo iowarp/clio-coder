@@ -9,7 +9,7 @@ import { chordHint } from "../shell/chords.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
 import { setThemeChoice, type ThemeChoice, useTheme } from "../shell/theme.js";
-import { useWorkspaceSelection } from "./settings.js";
+import { useWorkspaceSelection } from "./workspace-selection.js";
 import "./general.css";
 
 const THEME_CHOICES: readonly { id: ThemeChoice; label: string; hint: string }[] = [

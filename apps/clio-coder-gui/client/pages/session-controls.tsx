@@ -1,13 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate } from "react-router";
 
 // Deleting a saved task. Naming, working freedom and closing moved to the top bar, the composer and
 // the task actions menu; the approval cards, cancellation and the fleet feed live in chat/.
 
-import { routes } from "../../contracts/routes.js";
 import type { Client } from "../api/client.js";
-import { discardDraftStore } from "../chat/composer-model.js";
+import { useDeleteTask } from "../shell/tasks.js";
 
 /**
  * Deleting a closed session removes its saved conversation for good, so it takes two presses: the
@@ -25,20 +22,8 @@ export function DeleteSession({
 	/** What the accessible names call the session, for a list where every row has a Delete. */
 	name?: string;
 }) {
-	const queries = useQueryClient(),
-		navigate = useNavigate();
 	const [confirming, setConfirming] = useState(false);
-	const remove = useMutation({
-		mutationFn: () => client.call(routes.deleteSession, { params: { id }, query: {}, body: { workspaceId } }),
-		onSuccess: () => {
-			discardDraftStore(id);
-			queries.removeQueries({ queryKey: ["session", id] });
-			void queries.invalidateQueries({ queryKey: ["session-history", workspaceId] });
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void navigate(`/workspaces/${workspaceId}/sessions`);
-		},
-		onError: () => setConfirming(false),
-	});
+	const remove = useDeleteTask(client);
 	return (
 		<div className="delete-session">
 			{confirming ? (
@@ -49,7 +34,7 @@ export function DeleteSession({
 							type="button"
 							className="delete-session__confirm"
 							disabled={remove.isPending}
-							onClick={() => remove.mutate()}
+							onClick={() => remove.mutate({ sessionId: id, workspaceId })}
 							aria-label={`Delete ${name} for good`}
 						>
 							{remove.isPending ? "Deleting…" : "Delete"}

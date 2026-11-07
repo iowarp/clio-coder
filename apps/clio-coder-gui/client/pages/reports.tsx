@@ -10,10 +10,10 @@ import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { Explained } from "../telemetry/Explained.js";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { UsageInsights } from "./usage-insights.js";
 import { usageCacheEvidence } from "./usage-insights-model.js";
 import { filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "./usage.css";
 
 export function UsagePage({ client }: { client: Client }) {

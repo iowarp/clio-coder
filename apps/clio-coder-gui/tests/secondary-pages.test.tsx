@@ -6,6 +6,7 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Client } from "../client/api/client.js";
+import type { SessionSummary } from "../contracts/sessions.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
 
 (globalThis as { React?: typeof React }).React = React;
@@ -20,6 +21,8 @@ const { ShellContext } = await import("../client/shell/shell-context.js");
 const { SettingsPage } = await import("../client/pages/settings.js");
 const { SystemPage } = await import("../client/pages/system.js");
 const { Toolchain } = await import("../client/pages/toolchain.js");
+const { TaskHistoryActions } = await import("../client/pages/tasks.js");
+const { useWorkspaceSelection, WorkspacePicker } = await import("../client/pages/workspace-selection.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 function render(cache: QueryClient, path: string, node: ReactNode) {
@@ -50,6 +53,61 @@ const controls: SettingsControls = {
 		},
 	],
 };
+
+function ProjectPicker() {
+	return <WorkspacePicker selection={useWorkspaceSelection(client)} />;
+}
+
+test("read-only project inspection never describes a save and an empty project list has a working open action", () => {
+	const cache = queries();
+	cache.setQueryData(["workspaces"], [{ id: "workspace-1", name: "Scratch", path: "/scratch" }]);
+	const html = render(cache, "/usage?workspace=workspace-1", <ProjectPicker />);
+	assert.match(html, /Choose the project to inspect/);
+	assert.doesNotMatch(html, /saves go|user settings/);
+	cache.setQueryData(["workspaces"], []);
+	const empty = render(cache, "/usage", <ProjectPicker />);
+	assert.match(empty, /href="\/"[^>]*>Open a workspace/);
+	assert.doesNotMatch(empty, /href="\/sessions"/);
+});
+
+test("saved project tasks can be renamed without resuming and only closed, unheld tasks offer deletion", () => {
+	const summary: SessionSummary = {
+		id: "saved-1",
+		workspaceId: "workspace-1",
+		name: "Sensor notes",
+		createdAt: "2026-09-26T12:00:00Z",
+		endedAt: "2026-09-26T13:00:00Z",
+		model: null,
+		target: null,
+	};
+	const row = {
+		id: summary.id,
+		workspaceId: summary.workspaceId,
+		title: "Sensor notes",
+		open: false,
+		state: "idle" as const,
+		at: summary.createdAt,
+	};
+	const html = render(
+		queries(),
+		"/workspaces/workspace-1/sessions",
+		<TaskHistoryActions client={client} row={row} summary={summary} />,
+	);
+	assert.match(html, /aria-label="Rename Sensor notes"/);
+	assert.match(html, /aria-label="Delete Sensor notes"/);
+	for (const [held, endedAt] of [
+		[true, summary.endedAt],
+		[false, null],
+	] as const) {
+		const protectedHtml = render(
+			queries(),
+			"/workspaces/workspace-1/sessions",
+			<TaskHistoryActions client={client} row={{ ...row, open: held }} summary={{ ...summary, endedAt }} />,
+		);
+		assert.match(protectedHtml, /aria-label="Rename Sensor notes"/);
+		assert.doesNotMatch(protectedHtml, /aria-label="Delete Sensor notes"/);
+	}
+});
 
 test("a URL-selected package beyond the local page limit is inspectable without offering an unstaged apply", () => {
 	const packages = Array.from({ length: 45 }, (_, index) => ({

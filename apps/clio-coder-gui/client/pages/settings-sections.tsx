@@ -3,10 +3,10 @@ import { Link } from "react-router";
 import type { Client } from "../api/client.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import type { SettingsScopeId } from "./settings-control-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
 import { setupLink } from "./target-onboarding.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "./general.css";
 
 /**
@@ -40,7 +40,7 @@ function SettingsPageFrame({
 					<p className="settings-page__lede">{lede}</p>
 				</div>
 			</div>
-			<WorkspacePicker selection={selection} />
+			<WorkspacePicker selection={selection} purpose="settings" />
 			{before?.(id)}
 			{id ? (
 				<SettingsControlsView key={`${id}:${scope}`} client={client} workspaceId={id} scope={scope} />

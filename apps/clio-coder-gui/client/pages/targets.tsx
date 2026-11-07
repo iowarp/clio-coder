@@ -9,8 +9,9 @@ import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { capabilityLabels } from "./model-picker-model.js";
-import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { ConfigurationTabs } from "./settings.js";
 import { ConnectionSetup } from "./target-onboarding.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 
 export function TargetsPage({ client, view }: { client: Client; view: "targets" | "routing" }) {
 	const queries = useQueryClient();
@@ -66,7 +67,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 	return (
 		<section className="settings-connections">
 			<PanelHeading panel={view === "targets" ? PANELS.targets : PANELS.routing} level={1} />
-			<WorkspacePicker selection={selection} />
+			<WorkspacePicker selection={selection} purpose="settings" />
 			<ConfigurationTabs id={id} active={view} />
 			<RequestRecovery tracking={tracking} />
 			{view === "targets" ? (

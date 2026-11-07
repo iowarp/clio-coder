@@ -21,7 +21,7 @@ import {
 	sortInspectionRecords,
 } from "./run-inspection-model.js";
 import "./run-inspection.css";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 
 const verdictText = {
 	unknown: "Trust information is missing or has not been checked.",

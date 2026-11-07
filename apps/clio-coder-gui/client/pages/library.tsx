@@ -18,7 +18,7 @@ import {
 	skillCard,
 	tabAfterKey,
 } from "./library-model.js";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 
 const collections = ["Catalog", "Agents", "Skills", "Prompts", "Playbooks", "Extensions", "Verifiers"] as const;
 type Collection = (typeof collections)[number];

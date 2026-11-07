@@ -6,7 +6,6 @@ import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
-import { useShell } from "../shell/shell-context.js";
 import {
 	configMap,
 	entrySource,
@@ -14,76 +13,13 @@ import {
 	RELOAD_PRESENTATION,
 	SETTING_SOURCE_LABELS,
 	settingFamilies,
-	settingsWorkspace,
 	settingValue,
 } from "./config-map-model.js";
 import { SettingsControlsView } from "./settings-controls.js";
 import { ConnectionSetup } from "./target-onboarding.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "../design/facts.css";
 import "./settings.css";
-
-export function useWorkspaceSelection(client: Client) {
-	const [search, setSearch] = useSearchParams();
-	const workspaces = useQuery({
-		queryKey: ["workspaces"],
-		queryFn: () => client.call(routes.workspaces, emptyInput),
-	});
-	const shell = useShell();
-	const requested = search.get("workspace");
-	const id = settingsWorkspace(requested, shell?.activeWorkspaceId, workspaces.data ?? []);
-	return {
-		workspaces,
-		id,
-		missing: !!requested && !!workspaces.data && !id,
-		select: (workspace: string) =>
-			setSearch((current) => {
-				const next = new URLSearchParams(current);
-				next.set("workspace", workspace);
-				return next;
-			}),
-	};
-}
-export function WorkspacePicker({ selection }: { selection: ReturnType<typeof useWorkspaceSelection> }) {
-	const { workspaces, id, select } = selection;
-	if (workspaces.error)
-		return (
-			<div role="alert">
-				<p>Projects could not be read: {workspaces.error.message}</p>
-				<button type="button" onClick={() => void workspaces.refetch()}>
-					Retry projects
-				</button>
-			</div>
-		);
-	if (workspaces.isPending) return <p>Reading workspaces…</p>;
-	if (!workspaces.data.length)
-		return (
-			<p>
-				<Link to="/sessions">Open a workspace</Link> to inspect its configuration.
-			</p>
-		);
-	return (
-		<label className="workspace-picker">
-			<span className="workspace-picker__label">
-				Project context <small>Resolve values and overrides for this folder; saves go to your user settings</small>
-			</span>
-			<select value={id} onChange={(event) => select(event.target.value)}>
-				{!id && (
-					<option value="" disabled>
-						Choose an open project
-					</option>
-				)}
-				{workspaces.data.map((row) => (
-					<option key={row.id} value={row.id}>
-						{row.name} · {row.path}
-					</option>
-				))}
-			</select>
-			{selection.missing && (
-				<small role="alert">The linked project is no longer open. Choose a project to continue.</small>
-			)}
-		</label>
-	);
-}
 
 export function SettingsPage({ client, view }: { client: Client; view: "settings" | "effective" | "why" }) {
 	const selection = useWorkspaceSelection(client);
@@ -120,7 +56,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 	return (
 		<section className="settings-inspection">
 			<PanelHeading panel={panel} level={1} />
-			<WorkspacePicker selection={selection} />
+			<WorkspacePicker selection={selection} purpose="settings" />
 			{view !== "settings" && <ConfigurationTabs id={id} active={view} />}
 			{!id && view === "settings" && <ConnectionSetup />}
 			{!id && view !== "settings" && !selection.workspaces.isPending && (

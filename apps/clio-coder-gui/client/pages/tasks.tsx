@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { useDeferredValue, useMemo, useRef } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
+import type { SessionSummary } from "../../contracts/sessions.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
@@ -9,14 +10,57 @@ import { InventoryMore } from "../interaction/InventoryMore.js";
 import { useInventoryWindow } from "../interaction/use-inventory-window.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { HomeAside } from "../shell/HomeAside.js";
+import { InlineRename } from "../shell/InlineRename.js";
 import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
-import { useMinuteClock, useSessionOverview, useTaskActions } from "../shell/tasks.js";
+import { useMinuteClock, useRenameTask, useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import { PROJECT_TASK_FILTERS, PROJECT_TASK_SORTS, projectTaskInventory } from "./project-tasks-model.js";
 import { DeleteSession } from "./session-controls.js";
 import "./tasks.css";
 
 const FILTER_NAMES = { all: "All work", open: "Open sessions", attention: "Needs you", saved: "Saved history" };
+
+export function TaskHistoryActions({
+	client,
+	row,
+	summary,
+}: {
+	client: Client;
+	row: TaskRow;
+	summary: SessionSummary;
+}) {
+	const [editing, setEditing] = useState(false);
+	const rename = useRenameTask(client);
+	return (
+		<div className="taskpage__actions">
+			{editing ? (
+				<InlineRename
+					value={summary.name ?? ""}
+					label={`Name ${row.title}`}
+					onCommit={(label) => {
+						setEditing(false);
+						rename.mutate({ sessionId: row.id, workspaceId: row.workspaceId, label });
+					}}
+					onCancel={() => setEditing(false)}
+				/>
+			) : (
+				<button
+					type="button"
+					disabled={rename.isPending}
+					onClick={() => setEditing(true)}
+					aria-label={`Rename ${row.title}`}
+				>
+					{rename.isPending ? "Saving…" : "Rename"}
+				</button>
+			)}
+			{!row.open && summary.endedAt ? (
+				<DeleteSession client={client} id={row.id} workspaceId={row.workspaceId} name={row.title} />
+			) : null}
+			{rename.error ? <p role="alert">{rename.error.message}</p> : null}
+		</div>
+	);
+}
+
 function Glyph({ state }: { state: TaskRow["state"] }) {
 	if (state === "working" || state === "starting") return <ClioPulse size={PULSE_SIZE.row} />;
 	if (state === "approval" || state === "question" || state === "unknown")
@@ -232,27 +276,27 @@ export function Sessions({ client }: { client: Client }) {
 												{body}
 											</button>
 										)}
-										{!row.open && summary?.endedAt ? (
-											<DeleteSession client={client} id={row.id} workspaceId={workspaceId} name={row.title} />
-										) : null}
+										{summary ? <TaskHistoryActions client={client} row={row} summary={summary} /> : null}
 									</li>
 								);
 							})}
 						</ul>
-					) : !loading ? (
+					) : !loading && workspace.data && (history.data || overview.data) ? (
 						<div className="taskpage__empty">
 							<Icon name="sessions" />
 							<h2>
 								{query || filter !== "all"
 									? "No tasks match this view"
-									: unsupported
+									: history.error
 										? "No open sessions here"
 										: "Your next discovery starts here"}
 							</h2>
 							<p>
 								{query || filter !== "all"
 									? "Try another search or activity filter."
-									: "Describe a task to start working in this project."}
+									: history.error
+										? "No open sessions were reported. Saved conversations may still exist in the unavailable history."
+										: "Describe a task to start working in this project."}
 							</p>
 							{query || filter !== "all" ? (
 								<button type="button" onClick={() => setSearch({})}>

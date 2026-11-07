@@ -23,8 +23,8 @@ import {
 	wiringMark,
 	wiringSentence,
 } from "./interop-model.js";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { findingAction, findingCollapsed, healthGroups, healthOverview, SYSTEM_FOLDERS } from "./system-model.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "../design/facts.css";
 import "./system.css";
 

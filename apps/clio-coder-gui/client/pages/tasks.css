@@ -151,12 +151,6 @@
 .taskpage__toolbar select {
 	min-width: 160px;
 }
-.taskpage__row:has(.delete-session) .taskpage__main > .icon {
-	margin-inline-end: var(--space-3);
-}
-.taskpage__row:has(.delete-session__start):is(:hover, :focus-within) .taskpage__main > .icon {
-	visibility: hidden;
-}
 .taskpage__main:disabled {
 	opacity: 0.6;
 }
@@ -174,6 +168,38 @@
 	display: flex;
 	align-items: center;
 	gap: var(--space-3);
+}
+.taskpage__actions {
+	display: flex;
+	flex: none;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-2);
+	max-width: 45%;
+	padding: var(--space-2) var(--space-3);
+}
+.taskpage__actions > button,
+.taskpage__actions .delete-session__start {
+	min-height: 44px;
+	border-color: transparent;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.taskpage__actions > button:hover,
+.taskpage__actions .delete-session__start:hover {
+	border-color: var(--line-strong);
+	color: var(--ink);
+}
+.taskpage__actions .wb-rename {
+	width: min(100%, 16rem);
+}
+.taskpage__actions > p {
+	flex-basis: 100%;
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--status-fail-fg);
 }
 .taskpage__row + .taskpage__row {
 	border-top: 1px solid var(--line);
@@ -245,6 +271,18 @@
 	.taskpage {
 		padding-inline: var(--space-4);
 	}
+	.taskpage__row {
+		flex-wrap: wrap;
+		gap: 0;
+	}
+	.taskpage__main {
+		flex-basis: 100%;
+	}
+	.taskpage__actions {
+		max-width: 100%;
+		width: 100%;
+		padding-top: 0;
+	}
 }
 
 /* Deleting a saved task takes two presses, and the question stays beside the row it asks about. */
@@ -254,36 +292,6 @@
 	align-items: center;
 	justify-content: flex-end;
 	gap: var(--space-2);
-}
-/* The delete control takes no room until it asks its question: it sits over the row's age the way
-   the rail's row menu does, so every age in the list ends on one edge. */
-.taskpage__row .delete-session {
-	flex: none;
-	padding-right: var(--space-3);
-}
-.taskpage__row .delete-session:not(:has(.delete-session__ask)) {
-	position: absolute;
-	right: 0;
-}
-.taskpage__row:has(.delete-session__start):is(:hover, :focus-within) .taskpage__age {
-	visibility: hidden;
-}
-.taskpage__row .delete-session__start {
-	min-height: 0;
-	padding: 4px 10px;
-	border-color: transparent;
-	background: transparent;
-	color: var(--ink-muted);
-	font-size: 12.5px;
-	opacity: 0;
-}
-.taskpage__row:hover .delete-session__start,
-.taskpage__row:focus-within .delete-session__start {
-	opacity: 1;
-}
-.taskpage__row .delete-session__start:hover {
-	border-color: var(--line-strong);
-	color: var(--ink);
 }
 .delete-session__ask {
 	font-size: var(--text-meta);

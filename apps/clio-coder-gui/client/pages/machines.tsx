@@ -24,7 +24,7 @@ import {
 	machineStatus,
 	machineSummary,
 } from "./machines-model.js";
-import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "./machines.css";
 
 type MachinesDraft = {
