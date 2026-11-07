@@ -5319,6 +5319,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										}
 									: {}),
 								...(share ? archiveCommandHost(share) : {}),
+								getChatTarget: () => getCurrentSettings().chat.target,
+								getChatModel: () => getCurrentSettings().chat.model,
+								getFleetAgentProfiles: () => getCurrentSettings().fleet.agentProfiles,
 								...(session
 									? {
 											oracleBriefing: () => {
