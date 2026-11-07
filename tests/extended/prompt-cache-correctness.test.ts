@@ -16,7 +16,11 @@ import {
 	type MainPromptCacheIdentityInput,
 	mainPromptCacheIdentity,
 } from "../../src/session-control/prompt-cache-identity.js";
-import { retiredUserContextWasSent } from "../../src/session-control/session-replay-messages.js";
+import {
+	retiredUserContextWasSent,
+	stringifyPreview,
+	truncateReplayText,
+} from "../../src/session-control/session-replay-messages.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
@@ -571,4 +575,18 @@ it("a changed tool choice is a cold reason for the request that sends it, a #426
 	).observation;
 	deepStrictEqual([observation.cacheReadTokens, observation.inclusiveInputTokens], [6_000, 10_000]);
 	context.dispose();
+});
+
+describe("replay truncation keeps text well formed", () => {
+	it("never cuts a surrogate pair in half", () => {
+		const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+		const text = `ab${"\u{1F600}".repeat(10)}`;
+		for (let limit = 1; limit < text.length; limit += 1) {
+			const replayed = truncateReplayText(text, limit);
+			strictEqual(loneSurrogate.test(replayed), false, `replay limit ${limit}`);
+			const omitted = Number(/(\d+) more characters/u.exec(replayed)?.[1]);
+			strictEqual(replayed.indexOf("\n\n[...") + omitted, text.length, `replay count ${limit}`);
+			strictEqual(loneSurrogate.test(stringifyPreview(text, limit + 3)), false, `preview limit ${limit}`);
+		}
+	});
 });

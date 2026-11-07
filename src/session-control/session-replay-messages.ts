@@ -135,21 +135,32 @@ export function extractTurnText(payload: unknown): string {
 
 export function stringifyPreview(value: unknown, limit = 600): string {
 	if (value === undefined) return "";
-	if (typeof value === "string") return value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
+	const clip = (text: string): string => {
+		if (text.length <= limit) return text;
+		const end = limit - 3;
+		const cut = end > 0 && isHighSurrogate(text.charCodeAt(end - 1)) ? end - 1 : end;
+		return `${text.slice(0, cut)}...`;
+	};
+	if (typeof value === "string") return clip(value);
 	try {
 		const text = JSON.stringify(value);
 		if (!text) return "";
-		return text.length <= limit ? text : `${text.slice(0, limit - 3)}...`;
+		return clip(text);
 	} catch {
-		const text = String(value);
-		return text.length <= limit ? text : `${text.slice(0, limit - 3)}...`;
+		return clip(String(value));
 	}
 }
 
 export function truncateReplayText(text: string, limit = MAX_REPLAY_TEXT_CHARS): string {
 	if (text.length <= limit) return text;
-	const omitted = text.length - limit;
-	return `${text.slice(0, limit)}\n\n[... ${omitted} more characters truncated from replay context]`;
+	// A cut between a surrogate pair would send a lone surrogate to the model.
+	const cut = limit > 0 && isHighSurrogate(text.charCodeAt(limit - 1)) ? limit - 1 : limit;
+	const omitted = text.length - cut;
+	return `${text.slice(0, cut)}\n\n[... ${omitted} more characters truncated from replay context]`;
+}
+
+function isHighSurrogate(code: number): boolean {
+	return code >= 0xd800 && code <= 0xdbff;
 }
 
 const REPLAY_TRUNCATION_MARKER = /\n\n\[\.\.\. \d+ more characters truncated from replay context\]$/u;
