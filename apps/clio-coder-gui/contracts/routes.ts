@@ -16,6 +16,7 @@ import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { ContextLedger } from "./context-ledger.js";
 import { ContextOperationStatus } from "./context-work.js";
+import { SessionControl } from "./control.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
 import { ExtensionReload, SessionExtensions } from "./extensions.js";
@@ -949,6 +950,21 @@ export const routes = {
 		body: Type.Object({ path: Type.String({ maxLength: 512, pattern: "^/" }) }, { additionalProperties: false }),
 		response: Empty,
 		summary: "Ask the app window a launch just focused to show a page",
+	}),
+	sessionControl: defineRoute({
+		...get,
+		path: "/api/sessions/:id/control",
+		params: operationParams,
+		response: SessionControl,
+		summary: "Which client controls the session, and which client is asking",
+	}),
+	takeSessionControl: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		path: "/api/sessions/:id/control",
+		response: SessionControl,
+		summary: "Take control of the session from the client that holds it, which is told",
 	}),
 	viewSession: defineRoute({
 		...post,

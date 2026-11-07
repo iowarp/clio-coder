@@ -11,7 +11,7 @@ import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
 import { Icon } from "./design/icons.js";
 import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation.js";
-import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
+import { dismissAll, LiveRegions, NoticeToasts, notify, useNotices } from "./design/notifications.js";
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
@@ -114,7 +114,14 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			if (client.prefix === "" && path !== window.location.pathname) void navigate(path);
 		});
 	useEffect(() => {
-		if (client.token) return subscribe(client, queries, setConnection, (path) => launched.current(path));
+		if (client.token)
+			return subscribe(
+				client,
+				queries,
+				setConnection,
+				(path) => launched.current(path),
+				(notice) => notify({ tone: "warning", ...notice }),
+			);
 	}, [client, queries]);
 	const setup = useSetupStatus(client, !!client.token && !refused);
 	const overview = useSessionOverview(client, !!client.token && !refused);

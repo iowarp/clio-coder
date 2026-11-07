@@ -19,7 +19,7 @@ export class AppProblem extends Error {
 		detail: string,
 		status = statusByCode[code],
 		instance: string = randomUUID(),
-		extensions: Pick<Problem, "modelSelection"> = {},
+		extensions: Pick<Problem, "modelSelection" | "control"> = {},
 	) {
 		super(detail);
 		this.problem = {

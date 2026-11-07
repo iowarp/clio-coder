@@ -96,9 +96,12 @@ test("credentials rotate with a grace, expire, and resume the same id only when 
 	// Expired: refused, and a window that slept through it resumes its id.
 	now += CREDENTIAL_TTL_MS;
 	assert.equal(clients.authenticate(rotated.credential), null);
-	const resumed = clients.open(undefined, first.clientId);
+	const resumed = clients.open("Window A", first.clientId);
 	assert.equal(resumed.clientId, first.clientId);
 	assert.equal(resumed.label, "Window A");
+	// Two live windows that call themselves the same are told apart.
+	assert.equal(clients.open("Window A").label, "Window A 2");
+	assert.equal(clients.open("Window A").label, "Window A 3");
 	// Tickets are single-use and short-lived.
 	const live = clients.authenticate(resumed.credential);
 	assert.ok(live);

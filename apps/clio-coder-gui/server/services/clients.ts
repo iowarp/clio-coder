@@ -44,13 +44,13 @@ export class ClientRegistry {
 			if (held.previous) this.byCredential.delete(held.previous.hash);
 			held.previous = null;
 			held.lastSeen = now;
-			if (label?.trim()) held.label = label.trim();
+			// The same window, so it keeps the name other windows already know it by.
 			return this.issue(held, now);
 		}
 		this.prune(now);
 		const record: ClientRecord = {
 			clientId: resumable ? resume : randomBytes(9).toString("base64url"),
-			label: label?.trim() || "Client",
+			label: this.distinct(label?.trim() || "Client", now),
 			lastSeen: now,
 			streams: 0,
 			credential: { hash: "", expiresAt: 0 },
@@ -148,6 +148,15 @@ export class ClientRegistry {
 			expiresIn: CREDENTIAL_TTL_MS / 1000,
 			rotateIn: ROTATE_AFTER_MS / 1000,
 		};
+	}
+
+	/** Two windows of one browser both call themselves "Browser window"; a take-over must say which. */
+	private distinct(label: string, now: number) {
+		const taken = new Set<string>();
+		for (const record of this.clients.values()) if (!this.expired(record, now)) taken.add(record.label);
+		if (!taken.has(label)) return label;
+		const base = label.slice(0, 74);
+		for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
 	}
 
 	private expired(record: ClientRecord, now: number) {

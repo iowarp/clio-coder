@@ -1,8 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { SessionControl } from "../../contracts/control.js";
 import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
+import { applyControl, lostControlNotice } from "../chat/control-model.js";
 import { telemetryInvalidations } from "../telemetry/live-model.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import type { Client } from "./client.js";
@@ -21,6 +23,8 @@ export function subscribe(
 	connection: (state: ConnectionState) => void,
 	/** A launch found this app open and named a page for the window it focused. */
 	launch: (path: string) => void = () => {},
+	/** Another window took control of a session this one held. */
+	controlLost: (notice: { title: string; detail: string }) => void = () => {},
 ) {
 	let stream: EventSource | null = null;
 	let cursor: string | undefined;
@@ -225,6 +229,16 @@ export function subscribe(
 				refreshReads.set(event.payload.resource, keys);
 			}
 			if (event.type === "machine.attach") invalidate.add("machine-attachments");
+			if (event.type === "session.control") {
+				const { resource, controller } = event.payload;
+				const key = ["session-control", resource];
+				const you =
+					queries.getQueryData<SessionControl>(key)?.you.clientId ??
+					(client.prefix === "" ? client.credentials.clientId() : null);
+				const notice = lostControlNotice(event.payload, you);
+				if (notice) controlLost(notice);
+				queries.setQueryData<SessionControl | undefined>(key, (control) => applyControl(control, controller));
+			}
 			if (event.type === "app.launch" && clock.now() - Date.parse(event.at) < LAUNCH_FRESH_MS)
 				launched = event.payload.path;
 		}
@@ -340,6 +354,7 @@ export function subscribe(
 			"queue.changed",
 			"telemetry.updated",
 			"app.launch",
+			"session.control",
 			...Object.keys(SessionDeltas),
 		])
 			source.addEventListener(type, receive as EventListener);

@@ -143,7 +143,9 @@ try {
 		page.on("request", (request) => {
 			const path = new URL(request.url()).pathname;
 			if (path === "/api/evidence" && request.method() === "GET") evidenceReads++;
-			if (path.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(request.method()))
+			// Issuing and rotating this window's credential and stream tickets changes nothing it shows.
+			const credentialPlumbing = path.startsWith("/api/auth/") || path === "/api/events/ticket";
+			if (path.startsWith("/api/") && !credentialPlumbing && !["GET", "HEAD", "OPTIONS"].includes(request.method()))
 				apiWrites.push(`${request.method()} ${path}`);
 		});
 		page.on("pageerror", (error) => errors.push(error.message));
@@ -1812,9 +1814,22 @@ try {
 	assert.deepEqual(errors, []);
 	assert.deepEqual(failures, []);
 	// The stale-token step: the shell's first reads (meta, the rail's workspaces and session overview,
-	// setup status) start together, so each is refused once per width. A refused stream must stop, not
-	// reconnect forever: EventSource retries on its own otherwise. Nothing is read again after the refusal.
-	const firstReads = ["/api/meta", "/api/events", "/api/workspaces", "/api/sessions/overview", "/api/setup"];
+	// setup status) start together and wait on one exchange of the launch token, which is refused once per
+	// width; the reads then fail in the browser without asking again. A refused stream must stop, not
+	// reconnect forever. Nothing is read again after the refusal.
+	const firstReads = [
+		"/api/auth/clients",
+		"/api/meta",
+		"/api/events",
+		"/api/events/ticket",
+		"/api/workspaces",
+		"/api/sessions/overview",
+		"/api/setup",
+	];
+	assert.ok(
+		statuses.some((item) => item.path === "/api/auth/clients" && item.status === 401),
+		"the stale launch token was never refused at the exchange",
+	);
 	for (const path of firstReads)
 		assert.ok(
 			statuses.filter((item) => item.path === path && item.status === 401).length <= runs.length,

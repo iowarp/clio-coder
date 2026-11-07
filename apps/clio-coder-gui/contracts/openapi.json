@@ -14071,7 +14071,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
 								}
 							}
 						},
@@ -14974,7 +14974,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
 								}
 							}
 						},
@@ -15069,7 +15069,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
 								}
 							}
 						},
@@ -15119,7 +15119,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
 									}
 								}
 							}
@@ -15610,7 +15610,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_548efaff"
 								}
 							}
 						},
@@ -15699,6 +15699,179 @@
 								"schema": {
 									"type": "object",
 									"properties": {},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/control": {
+			"get": {
+				"operationId": "sessionControl",
+				"summary": "Which client controls the session, and which client is asking",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["sessionId", "controller", "you"],
+									"properties": {
+										"sessionId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"controller": {
+											"$ref": "#/components/schemas/Union_e7b69f9a"
+										},
+										"you": {
+											"$ref": "#/components/schemas/Object_clientId_label_4ff410fa"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "takeSessionControl",
+				"summary": "Take control of the session from the client that holds it, which is told",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["sessionId", "controller", "you"],
+									"properties": {
+										"sessionId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"controller": {
+											"$ref": "#/components/schemas/Union_e7b69f9a"
+										},
+										"you": {
+											"$ref": "#/components/schemas/Object_clientId_label_4ff410fa"
+										}
+									},
 									"additionalProperties": false
 								}
 							}
@@ -18107,7 +18280,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_d616cdcd"
+									"$ref": "#/components/schemas/Union_82be1402"
 								}
 							}
 						},
@@ -18202,7 +18375,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_d616cdcd"
+									"$ref": "#/components/schemas/Union_82be1402"
 								}
 							}
 						},
@@ -18287,12 +18460,6 @@
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_id_kind_locations_1b48846f"
-				}
-			},
-			"Array_1a9e2ef4": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_details_files_finishedAt_cb2e02e5"
 				}
 			},
 			"Array_296ec6ce": {
@@ -18654,6 +18821,12 @@
 					"$ref": "#/components/schemas/Object_agent_apply_dependencies_6396ef67"
 				},
 				"maxItems": 32
+			},
+			"Array_e96cc9df": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_details_files_finishedAt_9e6a01e2"
+				}
 			},
 			"Array_ea04312e": {
 				"type": "array",
@@ -19530,7 +19703,7 @@
 										"minimum": 1
 									},
 									"turn": {
-										"$ref": "#/components/schemas/Object_details_files_finishedAt_cb2e02e5"
+										"$ref": "#/components/schemas/Object_details_files_finishedAt_9e6a01e2"
 									}
 								},
 								"additionalProperties": false
@@ -19760,7 +19933,7 @@
 										"$ref": "#/components/schemas/Object_model_outputTokensPerSecond_ttftMs_28aac3b5"
 									},
 									"problem": {
-										"$ref": "#/components/schemas/Union_17174340"
+										"$ref": "#/components/schemas/Union_fbc21a9b"
 									},
 									"finishedAt": {
 										"anyOf": [
@@ -20665,7 +20838,7 @@
 										"type": "string"
 									},
 									"operation": {
-										"$ref": "#/components/schemas/Union_d616cdcd"
+										"$ref": "#/components/schemas/Union_82be1402"
 									}
 								}
 							}
@@ -20739,6 +20912,48 @@
 									},
 									"update": {
 										"$ref": "#/components/schemas/TelemetryUpdateV1"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "session.control"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "controller", "previous"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"controller": {
+										"$ref": "#/components/schemas/Union_e7b69f9a"
+									},
+									"previous": {
+										"$ref": "#/components/schemas/Union_e7b69f9a"
 									}
 								},
 								"additionalProperties": false
@@ -22793,19 +23008,19 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_cancellable_finishedAt_id_196f4e51": {
+				"type": "object",
+				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "problem"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_79cf016e"
+				},
+				"additionalProperties": false
+			},
 			"Object_cancellable_finishedAt_id_7631365d": {
 				"type": "object",
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_b99de657"
-				},
-				"additionalProperties": false
-			},
-			"Object_cancellable_finishedAt_id_bb0fe198": {
-				"type": "object",
-				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "problem"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_71196fd3"
 				},
 				"additionalProperties": false
 			},
@@ -23106,6 +23321,22 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_clientId_label_4ff410fa": {
+				"type": "object",
+				"required": ["clientId", "label"],
+				"properties": {
+					"clientId": {
+						"type": "string",
+						"pattern": "^[A-Za-z0-9_-]{8,64}$"
+					},
+					"label": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_closed_firstRecordAt_lastRecordAt_a4ab1107": {
 				"type": "object",
 				"required": ["firstRecordAt", "lastRecordAt", "state", "closed"],
@@ -23158,7 +23389,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_0b53b2b8": {
+			"Object_config_contextWork_fleet_548efaff": {
 				"type": "object",
 				"required": [
 					"id",
@@ -23175,7 +23406,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_27ed336a"
+					"$ref": "#/components/schemas/Shape_4e806c05"
 				},
 				"additionalProperties": false
 			},
@@ -23363,6 +23594,14 @@
 				],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_b46e3d08"
+				},
+				"additionalProperties": false
+			},
+			"Object_controller_sessionId_ad59bd8d": {
+				"type": "object",
+				"required": ["sessionId", "controller"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_c6e8ae72"
 				},
 				"additionalProperties": false
 			},
@@ -23658,11 +23897,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_details_files_finishedAt_cb2e02e5": {
+			"Object_details_files_finishedAt_9e6a01e2": {
 				"type": "object",
 				"required": ["id", "prompt", "origin", "status", "startedAt", "finishedAt", "stopReason", "usage", "problem"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_acd70495"
+					"$ref": "#/components/schemas/Shape_5ba57c4e"
 				},
 				"additionalProperties": false
 			},
@@ -25352,7 +25591,7 @@
 				"type": "object",
 				"required": ["type", "title", "status", "detail", "code", "instance"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_0c7d4ebb"
+					"$ref": "#/components/schemas/Shape_03001f9a"
 				},
 				"additionalProperties": false
 			},
@@ -26213,6 +26452,32 @@
 					"type": "string"
 				}
 			},
+			"Shape_03001f9a": {
+				"type": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"status": {
+					"type": "integer"
+				},
+				"detail": {
+					"type": "string"
+				},
+				"code": {
+					"$ref": "#/components/schemas/Union_b7eeb5b0"
+				},
+				"instance": {
+					"type": "string"
+				},
+				"modelSelection": {
+					"$ref": "#/components/schemas/Object_availableModels_code_remedy_eb9b94b8"
+				},
+				"control": {
+					"$ref": "#/components/schemas/Object_controller_sessionId_ad59bd8d"
+				}
+			},
 			"Shape_0335476e": {
 				"status": {
 					"type": "string",
@@ -26284,29 +26549,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_agentId_apiCalls_durationMs_9c2c98d9"
-				}
-			},
-			"Shape_0c7d4ebb": {
-				"type": {
-					"type": "string"
-				},
-				"title": {
-					"type": "string"
-				},
-				"status": {
-					"type": "integer"
-				},
-				"detail": {
-					"type": "string"
-				},
-				"code": {
-					"$ref": "#/components/schemas/Union_b7eeb5b0"
-				},
-				"instance": {
-					"type": "string"
-				},
-				"modelSelection": {
-					"$ref": "#/components/schemas/Object_availableModels_code_remedy_eb9b94b8"
 				}
 			},
 			"Shape_0f2fda0b": {
@@ -26616,66 +26858,6 @@
 				},
 				"display": {
 					"type": "string"
-				}
-			},
-			"Shape_27ed336a": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_1a9e2ef4"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_2b7a18ac": {
@@ -27248,6 +27430,66 @@
 					]
 				}
 			},
+			"Shape_4e806c05": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_e96cc9df"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -27525,6 +27767,74 @@
 				},
 				"executed": {
 					"$ref": "#/components/schemas/Object_agentId_endpointIdentityHash_executionRole_7c0b8997"
+				}
+			},
+			"Shape_5ba57c4e": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"prompt": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"status": {
+					"$ref": "#/components/schemas/Union_8f1f29d6"
+				},
+				"startedAt": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"finishedAt": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"stopReason": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Union_8f3721a3"
+				},
+				"details": {
+					"$ref": "#/components/schemas/Object_model_outputTokensPerSecond_ttftMs_28aac3b5"
+				},
+				"problem": {
+					"$ref": "#/components/schemas/Union_fbc21a9b"
+				},
+				"images": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4
+				},
+				"files": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4
+				},
+				"queued": {
+					"type": "boolean",
+					"const": true
 				}
 			},
 			"Shape_5bd7d227": {
@@ -27857,38 +28167,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
 				}
 			},
-			"Shape_71196fd3": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"cancellable": {
-					"type": "boolean"
-				},
-				"startedAt": {
-					"type": "string"
-				},
-				"progress": {
-					"$ref": "#/components/schemas/Array_62d9e6ab"
-				},
-				"status": {
-					"type": "string",
-					"const": "failed"
-				},
-				"finishedAt": {
-					"type": "string"
-				},
-				"problem": {
-					"$ref": "#/components/schemas/Problem"
-				}
-			},
 			"Shape_73088e00": {
 				"topology": {
 					"type": "string",
@@ -28011,6 +28289,38 @@
 				},
 				"item": {
 					"$ref": "#/components/schemas/Object_at_fact_id_d293cc5a"
+				}
+			},
+			"Shape_79cf016e": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"cancellable": {
+					"type": "boolean"
+				},
+				"startedAt": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/components/schemas/Array_62d9e6ab"
+				},
+				"status": {
+					"type": "string",
+					"const": "failed"
+				},
+				"finishedAt": {
+					"type": "string"
+				},
+				"problem": {
+					"$ref": "#/components/schemas/Problem"
 				}
 			},
 			"Shape_7c21800d": {
@@ -28272,74 +28582,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_blocksThisTurn_budget_disposition_6c12f627"
-				}
-			},
-			"Shape_acd70495": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"prompt": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"status": {
-					"$ref": "#/components/schemas/Union_8f1f29d6"
-				},
-				"startedAt": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"finishedAt": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"stopReason": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Union_8f3721a3"
-				},
-				"details": {
-					"$ref": "#/components/schemas/Object_model_outputTokensPerSecond_ttftMs_28aac3b5"
-				},
-				"problem": {
-					"$ref": "#/components/schemas/Union_17174340"
-				},
-				"images": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 4
-				},
-				"files": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 4
-				},
-				"queued": {
-					"type": "boolean",
-					"const": true
 				}
 			},
 			"Shape_ad0fef61": {
@@ -28902,6 +29144,15 @@
 				},
 				"value": {
 					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_c17b05d1"
+				}
+			},
+			"Shape_c6e8ae72": {
+				"sessionId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"controller": {
+					"$ref": "#/components/schemas/Object_clientId_label_4ff410fa"
 				}
 			},
 			"Shape_ca0d468f": {
@@ -30531,16 +30782,6 @@
 					}
 				]
 			},
-			"Union_17174340": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Problem"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_173f7898": {
 				"anyOf": [
 					{
@@ -31434,6 +31675,22 @@
 					}
 				]
 			},
+			"Union_82be1402": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_d92c15c4"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_196f4e51"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
+					}
+				]
+			},
 			"Union_82d022dc": {
 				"anyOf": [
 					{
@@ -32186,22 +32443,6 @@
 					}
 				]
 			},
-			"Union_d616cdcd": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_d92c15c4"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bb0fe198"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
-					}
-				]
-			},
 			"Union_d7ccdb8b": {
 				"anyOf": [
 					{
@@ -32341,6 +32582,16 @@
 					{
 						"type": "string",
 						"const": "replay"
+					}
+				]
+			},
+			"Union_e7b69f9a": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_clientId_label_4ff410fa"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -32509,6 +32760,16 @@
 						"minLength": 1,
 						"maxLength": 256,
 						"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_fbc21a9b": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Problem"
 					},
 					{
 						"type": "null"

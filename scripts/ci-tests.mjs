@@ -100,6 +100,7 @@ export const guiTests = [
 	"ssh-model",
 	"machine-proxy",
 	"client-auth",
+	"session-control",
 	"openapi",
 	"boundaries",
 ]

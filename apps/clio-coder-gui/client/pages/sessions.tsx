@@ -13,6 +13,7 @@ import { BudgetBanner } from "../chat/BudgetBanner.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
+import { ControlBanner } from "../chat/ControlBanner.js";
 import { ConversationOutline } from "../chat/ConversationOutline.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
@@ -543,6 +544,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								{resume.error.message}
 							</ConversationBanner>
 						) : null}
+						<ControlBanner client={client} session={snapshot} />
 						<BudgetBanner client={client} session={snapshot} />
 						<ApprovalBanner client={client} session={snapshot} />
 					</div>

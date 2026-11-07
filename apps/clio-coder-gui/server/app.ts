@@ -10,6 +10,7 @@ import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot, runningBui
 import { auth, requestClient } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
 import { authRoutes } from "./http/routes-auth.js";
+import { controlGuard, controlRoutes } from "./http/routes-control.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
@@ -35,6 +36,7 @@ import type { MachinesService } from "./services/machines.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
 import type { ReportsService } from "./services/reports.js";
+import { SessionControls } from "./services/session-control.js";
 import type { SessionService } from "./services/sessions.js";
 import type { SettingsService } from "./services/settings.js";
 import type { SetupService } from "./services/setup.js";
@@ -83,7 +85,9 @@ export function createApp(options: {
 	const artifacts = options.artifacts ?? new ArtifactWindow();
 	const clients = options.clients ?? new ClientRegistry();
 	app.onError(problemResponse);
+	const controls = new SessionControls(clients, hub);
 	app.use("*", auth(options.token, options.origin, clients));
+	app.use("/api/sessions/*", controlGuard(controls));
 	if (process.env.NODE_ENV === "test" && options.runtime) {
 		const inspect = options.runtime;
 		app.get("/api/_diagnostics/runtime", async (context) => context.json(await inspect()));
@@ -116,6 +120,7 @@ export function createApp(options: {
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	authRoutes(app, hub, clients);
+	controlRoutes(app, hub, controls, (id) => options.sessions.supervisor.get(id));
 	register(app, hub, routes.events, ({ query }, context) => {
 		const client = requestClient(context);
 		return events(context, hub, query.after, () => clients.stream(client));
@@ -154,7 +159,7 @@ export function createApp(options: {
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
 	reportRoutes(app, hub, options.reports);
 	evidenceRoutes(app, hub, options.evidence, artifacts);
-	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
+	sessionRoutes(app, hub, options.sessions, new Commands(), controls, options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (
 			Object.values(routes).some((route) =>

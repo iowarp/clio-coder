@@ -2,13 +2,16 @@ import type { Hono } from "hono";
 import { routes } from "../../contracts/routes.js";
 import type { Commands } from "../services/commands.js";
 import type { EventHub } from "../services/event-hub.js";
+import type { SessionControls } from "../services/session-control.js";
 import type { SessionService } from "../services/sessions.js";
+import { requestClient } from "./auth.js";
 import { idempotencyKey, register } from "./validate.js";
 export function sessionRoutes(
 	app: Hono,
 	hub: EventHub,
 	sessions: SessionService,
 	commands: Commands,
+	controls: SessionControls,
 	snapshotHold?: () => Promise<void>,
 ) {
 	const { supervisor, workspaces } = sessions;
@@ -77,7 +80,12 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.forkSession, ({ params, body }, context) =>
-		commands.run(`fork:${params.id}`, idempotencyKey(context), body, () => supervisor.fork(params.id, body.turnId)),
+		commands.run(`fork:${params.id}`, idempotencyKey(context), body, async () => {
+			const forked = await supervisor.fork(params.id, body.turnId);
+			// The live session moved to the fork, so control follows it.
+			controls.move(params.id, forked.sessionId, requestClient(context).clientId);
+			return forked;
+		}),
 	);
 	register(app, hub, routes.sessionExtensions, ({ params }) => supervisor.extensions(params.id));
 	register(app, hub, routes.reloadSessionExtensions, ({ params }, context) =>
@@ -157,9 +165,11 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.deleteSession, ({ params, body }, context) =>
-		commands.run(`delete:${params.id}`, idempotencyKey(context), body, () =>
-			sessions.ledgerCommand(params.id, "delete", body.workspaceId),
-		),
+		commands.run(`delete:${params.id}`, idempotencyKey(context), body, async () => {
+			const deleted = await sessions.ledgerCommand(params.id, "delete", body.workspaceId);
+			controls.release(params.id);
+			return deleted;
+		}),
 	);
 	register(app, hub, routes.workspaces, () => workspaces.list());
 	// Both register before routes.workspace: "complete" and "pick" would otherwise match its :id segment.
@@ -174,12 +184,19 @@ export function sessionRoutes(
 		sessions.history(params.id, context.req.raw.signal),
 	);
 	register(app, hub, routes.newSession, ({ params }, context) =>
-		commands.run(`session.new:${params.id}`, idempotencyKey(context), {}, () => supervisor.open(params.id)),
+		commands.run(`session.new:${params.id}`, idempotencyKey(context), {}, async () => {
+			const opened = await supervisor.open(params.id);
+			controls.claimIfFree(opened.id, requestClient(context).clientId);
+			return opened;
+		}),
 	);
 	register(app, hub, routes.loadSession, ({ params, body }, context) =>
-		commands.run(`session.load:${params.id}`, idempotencyKey(context), body, () =>
-			sessions.load(body.workspaceId, params.id),
-		),
+		commands.run(`session.load:${params.id}`, idempotencyKey(context), body, async () => {
+			const loaded = await sessions.load(body.workspaceId, params.id);
+			// Opening a session another window drives views it; that window keeps control.
+			controls.claimIfFree(loaded.id, requestClient(context).clientId);
+			return loaded;
+		}),
 	);
 	register(app, hub, routes.sessions, () => supervisor.list());
 	register(app, hub, routes.sessionOverview, () => supervisor.overview());
@@ -195,7 +212,11 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.closeSession, ({ params }, context) =>
-		commands.run(`session.close:${params.id}`, idempotencyKey(context), {}, () => supervisor.close(params.id)),
+		commands.run(`session.close:${params.id}`, idempotencyKey(context), {}, async () => {
+			const closed = await supervisor.close(params.id);
+			controls.release(params.id);
+			return closed;
+		}),
 	);
 	// A sighting is repeated on purpose and changes nothing durable, so it keeps no command record.
 	register(app, hub, routes.viewSession, ({ params }) => supervisor.view(params.id));

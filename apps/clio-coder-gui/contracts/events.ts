@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { ClientIdentity } from "./auth.js";
 import { Id } from "./common.js";
 import { InterviewRound } from "./interviews.js";
 import { MachineAttachment } from "./machines.js";
@@ -83,6 +84,22 @@ export const Event = Type.Union([
 		...base,
 		type: Type.Literal("telemetry.updated"),
 		payload: Type.Object({ resource: Id, update: TelemetryUpdate }, { additionalProperties: false }),
+	}),
+	/**
+	 * Control of a session moved. `previous` names the client that lost it to a take-over, so that window
+	 * can say so; a null controller means nobody holds it.
+	 */
+	Type.Object({
+		...base,
+		type: Type.Literal("session.control"),
+		payload: Type.Object(
+			{
+				resource: Id,
+				controller: Type.Union([ClientIdentity, Type.Null()]),
+				previous: Type.Union([ClientIdentity, Type.Null()]),
+			},
+			{ additionalProperties: false },
+		),
 	}),
 	/** This app's attachment to a node's own GUI changed state. */
 	Type.Object({ ...base, type: Type.Literal("machine.attach"), payload: MachineAttachment }),
