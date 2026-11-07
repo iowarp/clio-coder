@@ -47,7 +47,8 @@ for (const name of Object.keys(process.env)) {
 	if (/^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/.test(name)) delete process.env[name];
 }
 /** Names every root this harness makes, and the only names it will remove. */
-export const TEST_TMP_ROOT_PREFIX = "clio-coder-tests-";
+// Leave room for nested agent and browser Unix sockets under a long TMPDIR.
+export const TEST_TMP_ROOT_PREFIX = "ct-";
 
 /**
  * The real temp dir, read before TMPDIR is repointed at the run root, and
