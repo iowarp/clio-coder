@@ -15,6 +15,7 @@ import type { ApplicationInputTui } from "../engine/tui.js";
 import { type Component, Container, isKeyRelease, isKeyRepeat, matchesKey, ScrollView, VStack } from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
+import { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
 import {
 	actionKeyLabel,
 	type ClioKeybindingManager,
@@ -25,8 +26,6 @@ import { clioTheme, GLYPH } from "./theme/index.js";
 import { createBootWelcome } from "./welcome-dashboard.js";
 
 export const INSTANT_SHELL_ENV = "CLIO_CODER_INSTANT_SHELL";
-/** Same window as the application's Ctrl+C double tap (APPLICATION_DOUBLE_TAP_MS). */
-const DOUBLE_TAP_MS = 1_200;
 const DIAGNOSTIC_LIMIT_BYTES = 64 * 1024;
 
 export type TerminalLeaseState = "created" | "mounted" | "adopting" | "adopted" | "closing" | "closed";
@@ -341,7 +340,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 
 	const termination = options.testing?.termination ?? getTerminationCoordinator();
 	const signals = options.testing?.signals ?? process;
-	const now = options.testing?.now ?? Date.now;
+	const now = options.testing?.now ?? (() => performance.now());
 	const write =
 		options.testing?.write ??
 		((stream: "stdout" | "stderr", text: string): void => {
@@ -373,23 +372,19 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		});
 	};
 
+	const disarmShutdown = (): void => {
+		if (!shutdownArmed) return;
+		shutdownArmed = false;
+		lastCtrlCAt = 0;
+		tui.requestRender();
+	};
 	const handleStage0CtrlC = (): void => {
-		const text = editor.getText();
-		if (text.length > 0) {
-			editor.setText("");
-			shutdownArmed = false;
-			lastCtrlCAt = 0;
-			tui.requestRender();
-			return;
-		}
 		if (submissions.length > 0) {
-			shutdownArmed = false;
-			lastCtrlCAt = 0;
-			tui.requestRender();
+			disarmShutdown();
 			return;
 		}
 		const pressedAt = now();
-		if (lastCtrlCAt > 0 && pressedAt - lastCtrlCAt <= DOUBLE_TAP_MS) {
+		if (shutdownArmed && pressedAt - lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) {
 			lastCtrlCAt = 0;
 			requestShutdown();
 			return;
@@ -412,6 +407,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			handleStage0CtrlC();
 			return { consume: true };
 		}
+		disarmShutdown();
 		if (keybindings.matches(data, "clio-coder.exit") && editor.getText().length === 0 && submissions.length === 0) {
 			requestShutdown();
 			return { consume: true };
@@ -622,9 +618,10 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		stage0Ms = performance.now();
 		lastTurnAt = stage0Ms;
 		turnProbe = setInterval(() => {
-			const now = performance.now();
-			longestTurnGap = Math.max(longestTurnGap, now - lastTurnAt);
-			lastTurnAt = now;
+			const tickAt = performance.now();
+			longestTurnGap = Math.max(longestTurnGap, tickAt - lastTurnAt);
+			lastTurnAt = tickAt;
+			if (shutdownArmed && now() - lastCtrlCAt > APPLICATION_DOUBLE_TAP_MS) disarmShutdown();
 		}, 10);
 		turnProbe.unref();
 	} catch (error) {

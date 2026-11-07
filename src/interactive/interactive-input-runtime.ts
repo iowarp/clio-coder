@@ -494,7 +494,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				].some((name) => deps.keybindings.matches(data, `tui.editor.${name}` as Keybinding))
 			);
 		},
-		clock: deps.clock ?? { now: Date.now },
+		clock: deps.clock ?? { now: () => performance.now() },
 		signals: deps.signals ?? {
 			takeInterruptOwnership: () => getTerminationCoordinator().releaseInterruptOwnership(),
 			on: (signal, listener) => void process.on(signal, listener),

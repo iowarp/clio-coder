@@ -1,14 +1,11 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
+import { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
 import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
 
-/**
- * How long a first Ctrl+C keeps the second armed. Shorter windows expired before
- * an operator who had typed into the wrong pane could read the "again to quit"
- * hint and press again, so the TUI looked like it ignored Ctrl+C.
- */
-export const APPLICATION_DOUBLE_TAP_MS = 3_000;
+export { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
+
 const ARMED_TICK_MS = 1_000;
 /**
  * How long after Esc closes something an Esc is not read as cancelling the run.

@@ -576,17 +576,18 @@ it("lets held Ctrl+D edit a draft but never quit on repeat, and protects queued 
 	await new Promise((resolve) => setImmediate(resolve));
 	assert.equal(f.counts.shutdown, 1);
 });
-it("preserves literal boot input and queued submissions across the single-editor adoption", async () => {
+function bootFixture() {
 	const previousKeys = getKeybindings();
 	cleanups.push(() => setKeybindings(previousKeys));
 	const terminal = new KeyboardTerminal();
 	const tui = new ApplicationInputTuiAltScreen(terminal);
-	let shutdowns = 0;
-	let policyCalls = 0;
+	const counts = { shutdowns: 0 };
+	const clock = { now: 1 };
+	const recovered: string[] = [];
 	const lease = createProcessTerminalLease({
 		settings: structuredClone(DEFAULT_SETTINGS),
 		shutdown: () => {
-			shutdowns++;
+			counts.shutdowns++;
 		},
 		testing: {
 			shell: {
@@ -614,10 +615,46 @@ it("preserves literal boot input and queued submissions across the single-editor
 				shutdown: async () => {},
 			},
 			signals: { on: () => process, off: () => process },
-			write: noop,
+			write: (_stream, text) => recovered.push(text),
+			now: () => clock.now,
 		},
 	});
 	cleanups.push(() => lease.close());
+	return { terminal, tui, lease, counts, clock, recovered };
+}
+
+it("keeps and recovers the Stage 0 draft on a three-second double interrupt", async () => {
+	const { terminal, lease, counts, clock, recovered } = bootFixture();
+	terminal.input("unsent boot draft");
+	terminal.input("\x03");
+	assert.equal(lease.editor.getText(), "unsent boot draft");
+	clock.now += 1500;
+	terminal.input("\x03");
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(counts.shutdowns, 1);
+	assert.match(recovered.join(""), /unsent boot draft/);
+});
+
+it("disarms Stage 0 shutdown on another key or an expired window", async () => {
+	const { terminal, counts, clock, lease } = bootFixture();
+	terminal.input("\x03");
+	terminal.input("a");
+	terminal.input("\x03");
+	assert.equal(lease.editor.getText(), "a");
+	assert.equal(counts.shutdowns, 0);
+	clock.now += 3001;
+	terminal.input("\x03");
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(counts.shutdowns, 0);
+	clock.now += 1;
+	terminal.input("\x03");
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(counts.shutdowns, 1);
+});
+
+it("preserves literal boot input and queued submissions across the single-editor adoption", async () => {
+	const { terminal, lease, counts } = bootFixture();
+	let policyCalls = 0;
 	terminal.input("\x1b[200~/model\x1b[201~");
 	assert.equal(lease.editor.getText(), "/model");
 	terminal.input("\x1b[13;1:3u");
@@ -628,7 +665,7 @@ it("preserves literal boot input and queued submissions across the single-editor
 	terminal.input("\x04");
 	terminal.input("\x03");
 	terminal.input("\x03");
-	assert.equal(shutdowns, 0);
+	assert.equal(counts.shutdowns, 0);
 	terminal.input("new draft");
 	const editor = lease.editor;
 	const admitted: string[] = [];
