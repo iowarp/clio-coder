@@ -236,8 +236,10 @@ export function formatExactFacts(
 	);
 	const results = collectResults(entries);
 	if (files.length === 0 && results.length === 0) return "";
+	// No re-read advice here: a live 20k-window run took it as an order and re-read whole
+	// files until each read forced another compaction. The edit guard asks at the edit.
 	const lines = [
-		"Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold. A listed file's content left context at this cut: re-read it before editing it.",
+		"Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.",
 		...files,
 		...(results.length > 0 ? [RESULTS_HEADING, ...results] : []),
 	];

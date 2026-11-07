@@ -102,6 +102,8 @@ describe("compaction exact facts", () => {
 		match(block, /^grep `\^export function` src\/a\.ts: 40 matches call=call_grep$/m);
 		match(block, /^bash `node check\.mjs`: exit=1, 57 passed, 3 failed, 2 skipped, 62 total call=call_test$/m);
 		doesNotMatch(result.summary, /lines=39|<read-files>/);
+		// Re-read advice in the block sent a small model into whole-file re-read loops.
+		doesNotMatch(block, /re-?read/i);
 	});
 
 	it("carries files and results into the next checkpoint and re-measures the files on disk", async () => {
