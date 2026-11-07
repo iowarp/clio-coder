@@ -1100,28 +1100,19 @@ const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
 const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
 const SHELL_SYNTAX_RE = /[;&|<>`$(){}\n'"\\]/;
 const NODE_PRELOAD_FLAGS = new Set(["--import", "--require", "-r", "--loader", "--experimental-loader"]);
-const NODE_NONEXECUTING_MODES = new Set([
-	"-e",
-	"--eval",
-	"-p",
-	"--print",
-	"-c",
-	"--check",
-	"-i",
-	"--interactive",
-	"-v",
-	"--version",
-	"-h",
-	"--help",
-	"--run",
-	"--v8-options",
-]);
+/** Options without a value that leave Node running the program after its preloads. */
+const NODE_RUNNING_FLAGS = new Set(["--test", "--watch", "--enable-source-maps", "--no-warnings", "--trace-warnings"]);
+/** Options with an inline value that leave Node running the program, and the values each accepts. */
+const NODE_RUNNING_VALUED_FLAGS = new Map([["--test-concurrency", /^[1-9]\d*$/]]);
 
 /**
  * What a package script makes Node preload and run, read only from a plain
  * `node` command whose preload flags precede the program. Shell syntax (an
- * `echo`, a `cd` before the command, a chain), a non-executing mode, and flags
- * after the program, which become the program's own arguments, prove nothing.
+ * `echo`, a `cd` before the command, a chain) and flags after the program,
+ * which become the program's own arguments, prove nothing. So does any option
+ * not known to leave Node running the program: a non-executing mode such as
+ * `--check`, an unknown flag, or an invalid value such as
+ * `--disable-proto=invalid`, on which Node exits before it preloads anything.
  */
 function plainNodeLaunch(script: string, dir: string): { preloads: string[]; program: string | null } | null {
 	if (SHELL_SYNTAX_RE.test(script)) return null;
@@ -1137,11 +1128,15 @@ function plainNodeLaunch(script: string, dir: string): { preloads: string[]; pro
 		if (!word.startsWith("-")) return { preloads, program: posix.join(dir, word) };
 		const equals = word.indexOf("=");
 		const flag = equals === -1 ? word : word.slice(0, equals);
-		if (NODE_NONEXECUTING_MODES.has(flag)) return null;
-		if (!NODE_PRELOAD_FLAGS.has(flag)) continue;
-		const value = equals === -1 ? words[++index] : word.slice(equals + 1);
-		if (!value) return null;
-		preloads.push(posix.join(dir, value));
+		const inline = equals === -1 ? undefined : word.slice(equals + 1);
+		if (NODE_PRELOAD_FLAGS.has(flag)) {
+			const value = inline ?? words[++index];
+			if (!value || value.startsWith("-")) return null;
+			preloads.push(posix.join(dir, value));
+			continue;
+		}
+		const runs = inline === undefined ? NODE_RUNNING_FLAGS.has(flag) : NODE_RUNNING_VALUED_FLAGS.get(flag)?.test(inline);
+		if (!runs) return null;
 	}
 	return { preloads, program: null };
 }

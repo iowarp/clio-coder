@@ -212,12 +212,16 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 				after: "node scripts/run-tests.mjs --import ./tests/harness/after.ts",
 				"test:web": "cd apps/web && node --import ./tests/harness/no-network.ts --test",
 				syntax: "node --check --import ./tests/harness/checked.ts scripts/run-tests.mjs",
+				unknown: "node --clio-review-unknown-flag --import ./tests/harness/unknown.ts --test",
+				invalid: "node --disable-proto=invalid --import ./tests/harness/invalid.ts --test",
+				serial: "node --test-concurrency=0 --import ./tests/harness/serial.ts --test",
+				"test:pool": "node --test-concurrency=2 --import ./tests/harness/pooled.ts --test",
 			},
 		}),
 	);
 	writeFileSync(join(cwd, "tests", "harness", "tmp-root.ts"), "export const root = process.env.TMPDIR;\n");
 	writeFileSync(join(cwd, "tests", "harness", "scratch-env.ts"), "export function isolateEnv(): void {}\n");
-	for (const name of ["echoed", "after", "no-network", "checked"])
+	for (const name of ["echoed", "after", "no-network", "checked", "unknown", "invalid", "serial", "pooled"])
 		writeFileSync(join(cwd, "tests", "harness", `${name}.ts`), `export const ${name.replace("-", "")} = true;\n`);
 	const spawn = '["--import", "./tests/harness/tmp-root.ts", "--test"]';
 	writeFileSync(join(cwd, "scripts", "run-tests.mjs"), `spawn(process.execPath, ${spawn});\n`);
@@ -232,6 +236,7 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 	const claim =
 		"The `test:file` script in `package.json` preloads `tests/harness/tmp-root.ts` and `tests/harness/scratch-env.ts` for isolation.";
 	const launcher = "`scripts/run-tests.mjs` preloads `tests/harness/tmp-root.ts` for every test file.";
+	const pooled = "Pooled suites preload `tests/harness/pooled.ts`.";
 	// Each names text a script carries but no plain node command preloads or runs.
 	const uncertain = {
 		"tests/harness/echoed.ts": "Logging is set up by preloading `tests/harness/echoed.ts`.",
@@ -239,6 +244,9 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 		"tests/harness/no-network.ts": "Root suites run offline because `tests/harness/no-network.ts` is preloaded.",
 		"tests/harness/checked.ts": "Syntax checks preload `tests/harness/checked.ts`.",
 		"scripts/spawn-tests.mjs": "`scripts/spawn-tests.mjs` preloads `tests/harness/tmp-root.ts` into every spawned suite.",
+		"tests/harness/unknown.ts": "Review hooks preload `tests/harness/unknown.ts`.",
+		"tests/harness/invalid.ts": "Prototype guards preload `tests/harness/invalid.ts`.",
+		"tests/harness/serial.ts": "Serial suites preload `tests/harness/serial.ts`.",
 	};
 	await runBootstrap({
 		cwd,
@@ -249,7 +257,7 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 				projectName: "harbor",
 				identity: "A widget renderer.",
 				invariants: [claim, ...Object.values(uncertain)],
-				conventions: [launcher, workspace],
+				conventions: [launcher, workspace, pooled],
 				sections: [],
 			};
 		},
@@ -263,6 +271,7 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 	);
 	ok(handbook.includes(launcher), handbook);
 	ok(handbook.includes(`${workspace}\n`), handbook);
+	ok(handbook.includes(`${pooled}\n`), handbook);
 	for (const [path, rule] of Object.entries(uncertain))
 		ok(
 			handbook.includes(`${rule.slice(0, -1)} (unverified: \`${path}\` is not preloaded by a package script).`),
