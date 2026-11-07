@@ -17,6 +17,7 @@ import {
 	exitMarkerPath,
 	hostedInWorkspace,
 	markWorkspaceExit,
+	readWorkspaceExitResult,
 	readWorkspaceExitSummary,
 } from "../../src/domains/mux/workspace/exit-marker.js";
 import { holdExitSummaryForLauncher } from "../../src/domains/mux/workspace/exit-summary-handoff.js";
@@ -87,29 +88,30 @@ describe("private pane host layout (POSIX)", () => {
 
 	it("lays out a private root, socket and shim, and hands the operator's XDG roots to the shim", (t) => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-private-host-"));
-		// A real runtime dir is short and exists; the test tmp root may be too long for a socket.
-		const runtime = mkdtempSync("/tmp/cph-");
+		// A short fixture session keeps Unix sockets inside the harness root.
+		const session = "clio-coder-a";
+		const runtime = tmpdir();
 		t.after(() => {
 			rmSync(scratch, { recursive: true, force: true });
-			rmSync(runtime, { recursive: true, force: true });
 		});
 		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
 		const layout = platform.hostLayout({
-			session: SESSION,
+			session,
 			env: { XDG_RUNTIME_DIR: runtime, XDG_CONFIG_HOME: "/home/me/.cfg" },
 		});
-		const root = join(scratch, "state", "mux", "0123456789ab");
-		equal(layout.socketPath, join(runtime, "clio-coder", `${SESSION}.sock`));
+		const root = join(scratch, "state", "mux", "a");
+		equal(layout.socketPath, join(runtime, "clio-coder", `${session}.sock`));
 		equal(statSync(join(runtime, "clio-coder")).mode & 0o777, 0o700);
 		equal(layout.configPath, join(root, "config", "herdr", "config.toml"));
 		deepStrictEqual(layout.hostEnv, {
 			XDG_CONFIG_HOME: join(root, "config"),
 			XDG_STATE_HOME: join(root, "state"),
 			HERDR_SOCKET_PATH: layout.socketPath,
+			XDG_RUNTIME_DIR: join(runtime, "clio-coder", "a"),
 			CLIO_CODER_PANE_XDG_CONFIG_HOME: "/home/me/.cfg",
 		});
 		deepStrictEqual(layout.shell, { defaultShell: join(root, "pane-shell"), shellMode: "non_login" });
-		deepStrictEqual(layout.disposableDirs, [root]);
+		deepStrictEqual(layout.disposableDirs, [root, layout.hostEnv.XDG_RUNTIME_DIR]);
 		equal(layout.sessionFile, join(root, "config", "herdr", "session.json"));
 		equal(layout.cleanupArgs, null);
 		deepStrictEqual(layout.herdrArgs, []);
@@ -118,21 +120,23 @@ describe("private pane host layout (POSIX)", () => {
 
 	it("keeps one socket per root while it is live, whatever runtime dir a later launch sees", async (t) => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-private-host-"));
-		const first = mkdtempSync("/tmp/cph-");
-		const second = mkdtempSync("/tmp/cph-");
+		const session = "clio-coder-b";
+		const first = tmpdir();
+		const second = join(first, "r");
+		mkdirSync(second);
 		const server = createServer();
 		t.after(() => {
 			server.close();
-			for (const dir of [scratch, first, second]) rmSync(dir, { recursive: true, force: true });
+			for (const dir of [scratch, second]) rmSync(dir, { recursive: true, force: true });
 		});
 		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
-		const live = platform.hostLayout({ session: SESSION, env: { XDG_RUNTIME_DIR: first } }).socketPath;
+		const live = platform.hostLayout({ session, env: { XDG_RUNTIME_DIR: first } }).socketPath;
 		await new Promise<void>((resolve) => server.listen(live, resolve));
-		equal(platform.hostLayout({ session: SESSION, env: { XDG_RUNTIME_DIR: second } }).socketPath, live);
+		equal(platform.hostLayout({ session, env: { XDG_RUNTIME_DIR: second } }).socketPath, live);
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		equal(
-			platform.hostLayout({ session: SESSION, env: { XDG_RUNTIME_DIR: second } }).socketPath,
-			join(second, "clio-coder", `${SESSION}.sock`),
+			platform.hostLayout({ session, env: { XDG_RUNTIME_DIR: second } }).socketPath,
+			join(second, "clio-coder", `${session}.sock`),
 		);
 	});
 
@@ -245,6 +249,21 @@ describe("host identity and exit markers", () => {
 		equal(readWorkspaceExitSummary(marker), null);
 		equal(readWorkspaceExitSummary(join(scratch, "missing")), null);
 		equal(readWorkspaceExitSummary(scratch), null);
+	});
+
+	it("carries crash and signal exit status so the launcher can dispose the private host without masking failure", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-exit-status-"));
+		t.after(() => {
+			holdExitSummaryForLauncher("");
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		const env = { HERDR_ENV: "1", HERDR_SOCKET_PATH: join(scratch, `${SESSION}.sock`), HERDR_PANE_ID: "w1:p2" };
+		const marker = exitMarkerPath(env.HERDR_SOCKET_PATH, env.HERDR_PANE_ID);
+		holdExitSummaryForLauncher("session ended\n");
+		for (const exitCode of [1, 143]) {
+			markWorkspaceExit(env, exitCode);
+			deepStrictEqual(readWorkspaceExitResult(marker), { exitCode, summary: "session ended\n" });
+		}
 	});
 });
 

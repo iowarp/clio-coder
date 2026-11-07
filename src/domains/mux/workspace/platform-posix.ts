@@ -174,6 +174,11 @@ function hostSocketPath(
 	return socketPath;
 }
 
+/** Keep DDS sockets short enough for Unix, beside this host's socket but never shared with another host. */
+export function posixHostRuntimeDir(socketPath: string): string {
+	return join(dirname(socketPath), basename(socketPath, ".sock").replace(/^clio-coder-/u, ""));
+}
+
 export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHostPlatform {
 	const platform = options.platform ?? process.platform;
 	const uid = (): number => options.uid ?? process.getuid?.() ?? 0;
@@ -185,6 +190,8 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 			mkdirSync(join(stateDir(), "mux"), { recursive: true, mode: 0o700 });
 			ensurePrivateDir(root, owner);
 			const socketPath = hostSocketPath(root, env, session, platform, owner);
+			const privateRuntime = posixHostRuntimeDir(socketPath);
+			ensurePrivateDir(privateRuntime, owner);
 			const configHome = join(root, "config");
 			const stateHome = join(root, "state");
 			mkdirSync(join(configHome, "herdr"), { recursive: true, mode: 0o700 });
@@ -196,6 +203,7 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 				XDG_CONFIG_HOME: configHome,
 				XDG_STATE_HOME: stateHome,
 				HERDR_SOCKET_PATH: socketPath,
+				XDG_RUNTIME_DIR: privateRuntime,
 			};
 			for (const name of SHIM_SAVED_XDG) {
 				const value = env[name];
@@ -208,7 +216,7 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 				configPath: join(configHome, "herdr", "config.toml"),
 				shell: { defaultShell: shim, shellMode: "non_login" },
 				sessionFile: join(configHome, "herdr", "session.json"),
-				disposableDirs: [root],
+				disposableDirs: [root, privateRuntime],
 				cleanupArgs: null,
 			};
 		},

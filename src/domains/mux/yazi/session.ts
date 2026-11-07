@@ -7,6 +7,8 @@ import { findPinnedTool } from "../../toolchain/registry.js";
 import { describeResolution, resolveToolBinary, toolStatus } from "../../toolchain/resolve.js";
 import type { MuxContract } from "../contract.js";
 import type { MuxPaneRef } from "../types.js";
+import { isClioHostSocket } from "../workspace/platform.js";
+import { posixHostRuntimeDir } from "../workspace/platform-posix.js";
 import {
 	createYaziEventStream,
 	YAZI_DOCK_EVENT,
@@ -180,7 +182,11 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 	const chooserPath = join(sessionsDir, `${sessionId}.chooser`);
 	const cwdPath = join(sessionsDir, `${sessionId}.cwd`);
 	const token = options.mode === "companion" ? (options.pickToken ?? randomUUID()) : null;
+	const socketPath = options.mux.detection().socketPath;
+	const runtimeDir =
+		process.platform !== "win32" && socketPath && isClioHostSocket(socketPath) ? posixHostRuntimeDir(socketPath) : null;
 	const env: Record<string, string> = {
+		...(runtimeDir ? { XDG_RUNTIME_DIR: runtimeDir, XDG_STATE_HOME: runtimeDir, TMPDIR: runtimeDir } : {}),
 		...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
 		...(token ? { CLIO_CODER_YAZI_PICK_TOKEN: token } : {}),
 	};
@@ -304,7 +310,7 @@ export async function createYaziSession(options: YaziSessionOptions): Promise<Ya
 			if (!instanceId || !binaries.yaPath) return false;
 			const pushed = await (options.runYa ?? runYa)(binaries.yaPath, ["emit-to", instanceId, "cd", cwd], {
 				...process.env,
-				...(managedProfile ? { YAZI_CONFIG_HOME: managedProfile.dir } : {}),
+				...env,
 			});
 			return pushed;
 		},

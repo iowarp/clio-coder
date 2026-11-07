@@ -157,6 +157,7 @@ export async function maybeLaunchWorkspace(
 	}
 	// The pane that printed the exit summary is gone; this is the terminal the operator reads.
 	if (result.exitSummary !== null) process.stdout.write(result.exitSummary);
+	if (result.exitCode !== 0) process.stderr.write(`Clio workspace ended with exit code ${result.exitCode}.\n`);
 	if (result.workspaceLeftRunning) {
 		process.stdout.write("Clio workspaces are still open. Run `clio-coder` to return to them.\n");
 	}

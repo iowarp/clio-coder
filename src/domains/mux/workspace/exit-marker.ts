@@ -67,29 +67,30 @@ export function hostedInWorkspace(env: NodeJS.ProcessEnv = process.env): boolean
 const EXIT_SUMMARY_MAX_BYTES = 256 * 1024;
 
 /**
- * Called by a Clio that is quitting cleanly. Inside Clio's own host it tells
+ * Called by a Clio that is exiting. Inside Clio's own host it tells
  * the launcher that owns the terminal that this pane is done; anywhere else it
  * does nothing. The marker's content is the exit summary this Clio printed in
  * its pane (exit-summary-handoff.ts), which the launcher prints in the
  * operator's terminal after the host is gone. It is staged and renamed into
  * place, so the launcher never sees a marker whose summary is half written.
  */
-export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env): void {
+export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env, exitCode = 0): void {
 	const socket = env.HERDR_SOCKET_PATH;
 	const paneId = env.HERDR_PANE_ID;
 	if (!hostedInWorkspace(env) || !socket || !paneId) return;
 	const marker = exitMarkerPath(socket, paneId);
+	const header = exitCode === 0 ? "" : `clio-coder-exit:${exitCode}\n`;
 	// Sanitized pane ids hold no dot, so the staged name is never another pane's marker.
 	const staged = `${marker}.${process.pid}.tmp`;
 	try {
-		writeFileSync(staged, heldExitSummary() ?? "", { mode: 0o600 });
+		writeFileSync(staged, `${header}${heldExitSummary() ?? ""}`, { mode: 0o600 });
 		renameSync(staged, marker);
 		return;
 	} catch {
 		rmSync(staged, { force: true });
 	}
 	try {
-		writeFileSync(marker, "", { mode: 0o600 });
+		writeFileSync(marker, header, { mode: 0o600 });
 	} catch {
 		// The launcher then leaves the workspace open, which is the safe side.
 	}
@@ -100,10 +101,19 @@ export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env): void {
  * launcher before it deletes the marker with the workspace.
  */
 export function readWorkspaceExitSummary(marker: string): string | null {
+	return readWorkspaceExitResult(marker)?.summary ?? null;
+}
+
+export function readWorkspaceExitResult(marker: string): { exitCode: number; summary: string | null } | null {
 	try {
 		const stat = lstatSync(marker);
-		if (!stat.isFile() || stat.size === 0 || stat.size > EXIT_SUMMARY_MAX_BYTES) return null;
-		return readFileSync(marker, "utf8");
+		if (!stat.isFile() || stat.size > EXIT_SUMMARY_MAX_BYTES) return null;
+		const raw = readFileSync(marker, "utf8");
+		const header = /^clio-coder-exit:(\d+)\n/u.exec(raw);
+		const exitCode = header ? Number(header[1]) : 0;
+		if (exitCode > 255) return null;
+		const summary = header ? raw.slice(header[0].length) : raw;
+		return { exitCode, summary: summary || null };
 	} catch {
 		return null;
 	}

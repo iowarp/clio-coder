@@ -30,7 +30,7 @@
  * it. Instead the Clio in the pane drops a marker when it quits cleanly
  * (`markWorkspaceExit`), and the launcher detaches the client first and closes
  * the workspace second, with nobody attached to trigger a replacement. A Clio
- * that crashed drops no marker, so its pane and its error stay on screen. The
+ * that crashed records its exit status too, so its utility panes cannot outlive it. The
  * marker carries the exit summary Clio printed in its pane, and the launcher
  * prints it in the operator's terminal once the host is gone, so the summary
  * and its `/resume <id>` line outlive the pane. And every failure before the terminal is handed
@@ -56,7 +56,7 @@ import { writeWorkspaceConfig } from "./config.js";
 import {
 	exitMarkerPath,
 	exitMarkerStem,
-	readWorkspaceExitSummary,
+	readWorkspaceExitResult,
 	WORKSPACE_SESSION_PREFIX,
 	workspaceSessionFor,
 } from "./exit-marker.js";
@@ -523,6 +523,7 @@ async function attachWorkspace(
 	let workspaceGone = false;
 	let ticks = 0;
 	let asking = false;
+	let signalExitCode: number | null = null;
 	const poll = setInterval(() => {
 		if (existsSync(marker)) {
 			clioQuit = true;
@@ -550,7 +551,15 @@ async function attachWorkspace(
 
 	// The client owns the terminal, so Ctrl+C belongs to the pane it is typed in.
 	const ignore = (): void => undefined;
+	const terminate = (): void => {
+		signalExitCode = 143;
+		// A reattached launcher owns its client, not the earlier launch's workspace.
+		clioQuit = opened.createdWorkspace;
+		clearInterval(poll);
+		host.platform.detach(attach);
+	};
 	process.on("SIGINT", ignore);
+	process.on("SIGTERM", terminate);
 	const exit = await new Promise<{ code: number } | { spawnError: Error }>((resolve) => {
 		attach.once("error", (error) => resolve({ spawnError: error }));
 		attach.once("exit", (code) => resolve({ code: code ?? 0 }));
@@ -576,12 +585,14 @@ async function attachWorkspace(
 			host.log("debug", `workspace launch undo skipped: ${messageOf(error)}`);
 		}
 		await client.close();
+		process.off("SIGTERM", terminate);
 		return { status: "fallback", reason: `the pane host client did not start: ${exit.spawnError.message}` };
 	}
-	const exitCode = exit.code;
+	const exitCode = signalExitCode ?? exit.code;
 
 	// Read before the workspace and its marker are cleaned up below.
-	const exitSummary = clioQuit ? readWorkspaceExitSummary(marker) : null;
+	const markedExit = clioQuit ? readWorkspaceExitResult(marker) : null;
+	const exitSummary = markedExit?.summary ?? null;
 	if (clioQuit) await sleep(SHARED_DETACH_SETTLE_MS);
 	let workspaceLeftRunning = true;
 	try {
@@ -607,10 +618,11 @@ async function attachWorkspace(
 		host.log("debug", `workspace session cleanup skipped: ${messageOf(error)}`);
 	}
 	await client.close();
+	process.off("SIGTERM", terminate);
 	// A hangup the launcher sent is the clean way out, not a failure to report.
 	return {
 		status: "closed",
-		exitCode: clioQuit || workspaceGone ? 0 : exitCode,
+		exitCode: signalExitCode ?? markedExit?.exitCode ?? (clioQuit || workspaceGone ? 0 : exitCode),
 		workspaceLeftRunning,
 		exitSummary,
 	};

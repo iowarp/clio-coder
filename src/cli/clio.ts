@@ -117,8 +117,8 @@ export async function runClioCommand(
 		if (launched !== null) return launched;
 	}
 	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
-		// Hosted in a Clio workspace: a clean quit tells the launcher this pane is
-		// done so it can hand the operator's own terminal back. Interactive
+		// Every completed hosted process releases its workspace, including a
+		// crash or signal exit, so its utility processes and sockets cannot linger. Interactive
 		// shutdown ends the process itself, so the exit event is the one place
 		// every clean path passes through.
 		const { clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
@@ -127,7 +127,7 @@ export async function runClioCommand(
 		if (hostedInWorkspace()) {
 			clearWorkspaceExit();
 			process.once("exit", (code) => {
-				if (code === 0 && !isRestartHandoff()) markWorkspaceExit();
+				if (!isRestartHandoff()) markWorkspaceExit(process.env, code);
 			});
 		}
 	}

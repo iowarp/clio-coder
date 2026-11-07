@@ -484,6 +484,43 @@ describe("contracts/files pane bridge", () => {
 });
 
 describe("contracts/files pane session transport", () => {
+	it("keeps companion and picker DDS state and scratch inside the private host runtime", async (t) => {
+		const cacheDir = mkdtempSync(join(tmpdir(), "clio-coder-files-runtime-"));
+		const runtime = join(cacheDir, "0123456789ab");
+		t.after(() => {
+			rmSync(cacheDir, { recursive: true, force: true });
+		});
+		for (const mode of ["companion", "chooser"] as const) {
+			const host = fakeMux();
+			const mux = {
+				...host.mux,
+				detection: () => ({
+					...host.mux.detection(),
+					socketPath: join(cacheDir, "clio-coder-0123456789ab.sock"),
+				}),
+			};
+			const result = await createYaziSession({
+				mux,
+				mode,
+				profileMode: "user",
+				cwd: "/w",
+				cacheDir,
+				onEvent: () => undefined,
+				onChooser: () => undefined,
+				resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: "/bin/ya", missingYaziDetail: "" }),
+			});
+			strictEqual(result.status, "opened");
+			if (result.status !== "opened") return;
+			try {
+				strictEqual(host.requests[0]?.env?.XDG_RUNTIME_DIR, runtime);
+				strictEqual(host.requests[0]?.env?.XDG_STATE_HOME, runtime);
+				strictEqual(host.requests[0]?.env?.TMPDIR, runtime);
+			} finally {
+				await result.session.close();
+			}
+		}
+	});
+
 	it("labels the pane files and removes its transport files when the session ends", async () => {
 		const cacheDir = mkdtempSync(join(tmpdir(), "clio-coder-files-session-"));
 		try {
