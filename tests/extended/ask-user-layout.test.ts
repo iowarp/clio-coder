@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import { test } from "node:test";
 import type { TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
@@ -618,6 +619,32 @@ class FakeSession {
 
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 const MODEL_CALL = { turnId: "turn-1", toolCallId: "call-1" };
+
+test("harness wait removes its abort listener after release or cancellation", async () => {
+	for (const abort of [false, true]) {
+		const { lifecycle, sessions } = lifecycleFixture();
+		const controller = new AbortController();
+		const hold = createHarnessHold();
+		try {
+			const card = lifecycle.handler([{ question: "Harness?" }], { origin: "harness", harnessHold: hold });
+			await tick();
+			sessions[0]?.answer("Done");
+			await card;
+			const model = lifecycle.handler([{ question: "Model?" }], { ...MODEL_CALL, signal: controller.signal });
+			await tick();
+			strictEqual(getEventListeners(controller.signal, "abort").length, 1);
+			if (abort) controller.abort();
+			else hold.release();
+			await tick();
+			strictEqual(getEventListeners(controller.signal, "abort").length, 0);
+			if (!abort) sessions.at(-1)?.answer("Done");
+			await model;
+		} finally {
+			hold.release();
+			lifecycle.dispose();
+		}
+	}
+});
 
 test("a permission prompt over an interview that ends restores nothing instead of a dead session", async () => {
 	const { lifecycle, transitions, sessions } = lifecycleFixture();

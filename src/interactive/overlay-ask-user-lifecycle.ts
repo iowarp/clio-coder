@@ -158,8 +158,16 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 	const waitForHarness = async (signal: AbortSignal | undefined): Promise<boolean> => {
 		while (harnessHold !== null) {
 			if (signal?.aborted === true) return false;
-			const aborted = new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
-			await Promise.race([harnessHold, aborted]);
+			let onAbort = (): void => {};
+			const aborted = new Promise<void>((resolve) => {
+				onAbort = () => resolve();
+				signal?.addEventListener("abort", onAbort, { once: true });
+			});
+			try {
+				await Promise.race([harnessHold, aborted]);
+			} finally {
+				signal?.removeEventListener("abort", onAbort);
+			}
 		}
 		return signal?.aborted !== true;
 	};
