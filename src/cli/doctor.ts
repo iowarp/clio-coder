@@ -1,5 +1,6 @@
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
+import { withReadOnlyMode } from "../core/read-only-mode.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import {
 	mainSandboxLine,
@@ -379,8 +380,16 @@ function foldDoctorFindings(findings: ReadonlyArray<DoctorFinding>): {
  * Every doctor check in report order. The CLI prints these; the TUI's
  * `/doctor` renders the same list in-session and passes its own providers
  * contract so the deep probe runs against the session's targets.
+ *
+ * Doctor loads skills and probes targets but refreshes no cache or prior they
+ * feed, even from inside a writable session; `--fix` repairs the home, not
+ * those.
  */
 export async function collectDoctorFindings(options: DoctorCollectOptions = {}): Promise<DoctorFinding[]> {
+	return withReadOnlyMode(() => collectFindings(options));
+}
+
+async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFinding[]> {
 	const fix = options.fix === true;
 	const workspaceRoot = options.workspaceRoot ?? process.cwd();
 	// Decided before runDoctor so a --fix run, which initializes the home, still

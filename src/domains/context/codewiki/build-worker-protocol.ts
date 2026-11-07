@@ -43,6 +43,13 @@ export type CodewikiBuildWorkerRequest =
 			previous?: Fingerprint | null;
 	  };
 
+/** What a build worker starts with. A worker thread has its own module state, so the mode travels with it. */
+export interface CodewikiBuildWorkerData {
+	request: CodewikiBuildWorkerRequest;
+	/** The spawner's `readOnlyMode()`: a read-only reconcile may fetch a grammar but never caches it. */
+	readOnly: boolean;
+}
+
 export interface CodewikiBuildWorkerResult {
 	codewiki: Codewiki;
 	fingerprint: Fingerprint;
@@ -50,9 +57,10 @@ export interface CodewikiBuildWorkerResult {
 }
 
 /**
- * What the worker posts back. An unchanged reconciliation of an artifact it
- * was handed by reference leaves `codewiki` null: the caller still holds the
- * object, and returning it would clone the whole artifact a second time.
+ * What the worker posts back. An unchanged reconciliation leaves `codewiki`
+ * null, whether the artifact was handed by reference or as an object: the
+ * caller still holds it, and returning it would clone the whole artifact a
+ * second time and break the caller's identity-keyed caches.
  * A check returns no artifact and uses `changed` to report whether a full
  * reconciliation is required.
  */

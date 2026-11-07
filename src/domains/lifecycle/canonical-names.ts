@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { LifecycleContext } from "../../core/library-receipts.js";
+import { readOnlyMode } from "../../core/read-only-mode.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
@@ -400,9 +401,11 @@ function readMarkers(): WorkspaceMarkers {
  * A workspace's `.clio-coder/`, converted the first time Clio opens it: `fleets/`
  * becomes `playbooks/` and the project's install records and packages follow the
  * same rules as the user home. Returns null when there was nothing to convert or
- * the workspace was converted before.
+ * the workspace was converted before, and in read-only mode, which leaves the
+ * workspace as it found it until the next writable open converts it.
  */
 export function convertWorkspaceOnce(workspace: string): ConversionReport | null {
+	if (readOnlyMode()) return null;
 	let root: string;
 	try {
 		root = realpathSync(workspace);

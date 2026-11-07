@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureProjectIgnore } from "../../../core/project-root.js";
+import { assertProjectIndexWritable, ensureProjectIgnore } from "../../../core/project-root.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { ProjectType } from "../../session/workspace/project-type.js";
 import {
@@ -117,6 +117,7 @@ function normalizeCodewiki(codewiki: Codewiki): Codewiki {
 				hash: file.hash,
 				imports: uniqueSorted(file.imports),
 				...(file.summary ? { summary: file.summary } : {}),
+				...(file.grammarMissing !== undefined ? { grammarMissing: file.grammarMissing } : {}),
 			}))
 			.sort(compareFiles),
 		symbols: codewiki.symbols.map(normalizeSymbol).sort(compareSymbols),
@@ -139,6 +140,7 @@ export function serializeCodewiki(codewiki: Codewiki): string {
 	return `${JSON.stringify(normalizeCodewiki(codewiki))}\n`;
 }
 export function writeCodewiki(cwd: string, codewiki: Codewiki): string {
+	assertProjectIndexWritable();
 	const serialized = serializeCodewiki(codewiki);
 	ensureProjectIgnore(cwd);
 	safeResourceWrite(codemapPath(cwd), serialized, { encoding: "utf8" });
@@ -258,7 +260,8 @@ function validFile(value: unknown, hash: boolean): boolean {
 			(typeof item.hash === "string" &&
 				Array.isArray(item.imports) &&
 				item.imports.every((v) => typeof v === "string"))) &&
-		(!("summary" in item) || typeof item.summary === "string")
+		(!("summary" in item) || typeof item.summary === "string") &&
+		(!("grammarMissing" in item) || typeof item.grammarMissing === "boolean")
 	);
 }
 function validSymbol(value: unknown): boolean {

@@ -1,13 +1,16 @@
 import { parentPort, workerData } from "node:worker_threads";
+import { enterReadOnlyMode } from "../../../core/read-only-mode.js";
 import { executeCodewikiBuildOutcome } from "./build-operation.js";
-import type { CodewikiBuildWorkerMessage, CodewikiBuildWorkerRequest } from "./build-worker-protocol.js";
+import type { CodewikiBuildWorkerData, CodewikiBuildWorkerMessage } from "./build-worker-protocol.js";
 
 const port = parentPort;
 if (!port) throw new Error("codewiki build worker requires a worker_threads parent");
+const data = workerData as CodewikiBuildWorkerData;
+if (data.readOnly) enterReadOnlyMode();
 
 let lastProgressAt = 0;
 let lastStage = "";
-executeCodewikiBuildOutcome(workerData as CodewikiBuildWorkerRequest, {
+executeCodewikiBuildOutcome(data.request, {
 	onProgress: (progress) => {
 		const now = performance.now();
 		if (progress.stage === lastStage && now - lastProgressAt < 150 && progress.current !== progress.total) return;
@@ -17,7 +20,10 @@ executeCodewikiBuildOutcome(workerData as CodewikiBuildWorkerRequest, {
 	},
 }).then(
 	(result) => {
-		port.postMessage({ ok: true, result } satisfies CodewikiBuildWorkerMessage);
+		// Unchanged means the artifact is the one the caller handed in; posting it
+		// back would clone the whole index again and hand the caller a copy.
+		const posted = result.changed ? result : { ...result, codewiki: null };
+		port.postMessage({ ok: true, result: posted } satisfies CodewikiBuildWorkerMessage);
 		port.close();
 	},
 	(error: unknown) => {

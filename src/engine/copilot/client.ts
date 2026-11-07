@@ -162,7 +162,8 @@ export async function copilotClient(): Promise<CopilotClient> {
 				// "empty" keeps the runtime's own memory, skills, session store and config discovery off: Clio
 				// supplies the prompt and every tool, and keeps the transcript.
 				mode: "empty",
-				// Empty mode needs a persistence location; session records go under Clio's cache (session-fs.ts).
+				// Empty mode needs a persistence location; session records go under Clio's cache, or stay in memory in
+				// read-only mode (session-fs.ts).
 				sessionFs: copilotSessionFsConfig(),
 				env: runtimeEnvironment(),
 				logLevel: "error",

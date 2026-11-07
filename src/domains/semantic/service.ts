@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { clioCacheDir } from "../../core/xdg.js";
+import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
 import type { ExtractionResult } from "./ingestion.js";
 import type { Checkpoint, Generation } from "./storage.js";
 import {
+	assertSemanticWritable,
 	DEFAULT_SEMANTIC_LIMITS,
 	decodeVector,
 	encodeVector,
@@ -69,7 +70,8 @@ export class SemanticIndex {
 		for (const value of Object.values(this.limits))
 			if (!Number.isSafeInteger(value) || value < 1) throw new Error("Invalid semantic limit");
 		this.storage = new SemanticStorage(
-			join(options.cacheDir ?? clioCacheDir(), "semantic", sourceHash(options.projectId), this.profileKey),
+			// Named, not created: opening an index to search it leaves the home as it found it.
+			join(options.cacheDir ?? clioCachePath(), "semantic", sourceHash(options.projectId), this.profileKey),
 			Math.floor(this.limits.maxBytes / 3),
 		);
 		this.adopt(this.storage.load(options.projectId, this.profileKey));
@@ -185,6 +187,11 @@ export class SemanticIndex {
 		// Code-unit order: localeCompare follows LANG, so the TUI and the CLI hashed different snapshots.
 		const records = structuredClone([...input]).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 		this.validateRecords(records);
+		// Storage refuses each write in read-only mode; this refuses creating the cache root, and the lock refuses
+		// its own file, also for a mode entered while it waits for another refresh.
+		assertSemanticWritable();
+		// The writable path resolves the root through the accessor that checks the home's layout.
+		if (this.options.cacheDir === undefined) clioCacheDir();
 		return withStateFileLock(
 			join(this.storage.directory, "manifest.json"),
 			async () => {
@@ -303,7 +310,11 @@ export class SemanticIndex {
 				this.storage.pruneGenerations(this.generation?.generation ?? null);
 				return { complete: true, embedded, ...this.status() };
 			},
-			{ ...(options.signal ? { signal: options.signal } : {}), timeoutMs: 1000 },
+			{
+				...(options.signal ? { signal: options.signal } : {}),
+				timeoutMs: 1000,
+				assertWritable: assertSemanticWritable,
+			},
 		);
 	}
 

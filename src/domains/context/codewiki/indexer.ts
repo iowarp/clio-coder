@@ -7,6 +7,7 @@ import type { ProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
 import { extractCMake, isCMakePath } from "./cmake.js";
 import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
+import { FETCHED_GRAMMARS } from "./grammar-assets.js";
 import { isIndexablePath, languageForPath } from "./paths.js";
 import {
 	type BuildCodewikiInput,
@@ -22,6 +23,7 @@ import {
 	type CodewikiSymbol,
 	type CodewikiSymbolKind,
 	type ExtractedSymbol,
+	GrammarUnavailableError,
 	type LanguageExtraction,
 	type LanguageExtractor,
 } from "./schema.js";
@@ -773,13 +775,14 @@ function extractSourceFile(
 	relPath: string,
 	text: string,
 	treeSitterExtractor: LanguageExtractor,
-): LanguageExtraction {
+): LanguageExtraction & { grammarMissing?: true } {
 	if (!treeSitterExtractor.langs.includes(language)) return fallbackExtraction(language, relPath, text);
 	if (text.length > MAX_TREE_SITTER_SOURCE_CHARS) return fallbackExtraction(language, relPath, text);
 	try {
 		return mergeTreeSitterWithRegexImports(language, relPath, text, treeSitterExtractor.extract(relPath, text));
-	} catch {
-		return fallbackExtraction(language, relPath, text);
+	} catch (error) {
+		const fallback = fallbackExtraction(language, relPath, text);
+		return error instanceof GrammarUnavailableError ? { ...fallback, grammarMissing: true } : fallback;
 	}
 }
 
@@ -810,9 +813,10 @@ function buildFile(
 		role: roleFor(relPath, language),
 		hash: contentHash(text),
 		imports: [],
+		...(FETCHED_GRAMMARS.some((grammar) => grammar.lang === language) ? { grammarMissing: false } : {}),
 	};
 	if (text.trim().length === 0) return { file, symbols: [] };
-	const extracted: LanguageExtraction | null = isCMakePath(relPath)
+	const extracted: (LanguageExtraction & { grammarMissing?: true }) | null = isCMakePath(relPath)
 		? extractCMake(text)
 		: language !== "config"
 			? extractSourceFile(language, relPath, text, treeSitterExtractor)
@@ -823,6 +827,7 @@ function buildFile(
 		...file,
 		imports: extracted.imports,
 		...(summary ? { summary } : {}),
+		...(extracted.grammarMissing ? { grammarMissing: true as const } : {}),
 	};
 	const symbols = extracted.symbols.map((symbol) => ({
 		name: symbol.name,

@@ -14,6 +14,15 @@ export interface CodewikiFile {
 	hash: string;
 	imports: string[];
 	summary?: string;
+	/**
+	 * Set on every file of a language whose tree-sitter grammar Clio downloads on
+	 * first use: true when that grammar could not be loaded when the file was
+	 * indexed, so its symbols and imports came from line patterns. Recorded per
+	 * file because the grammar may have been held only in memory, by whichever
+	 * process indexed it. Absent on other languages and on files indexed before
+	 * Clio recorded it.
+	 */
+	grammarMissing?: boolean;
 }
 
 export interface CodewikiSymbol {
@@ -75,6 +84,11 @@ export interface ExtractedSymbol {
 export interface LanguageExtraction {
 	symbols: ExtractedSymbol[];
 	imports: string[];
+}
+
+/** An extractor without the grammar for a file throws this; the indexer records it on the file. */
+export class GrammarUnavailableError extends Error {
+	override name = "GrammarUnavailableError";
 }
 
 export interface LanguageExtractor {

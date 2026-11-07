@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { readOnlyMode } from "./read-only-mode.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 function physical(path: string): string {
@@ -81,12 +82,23 @@ const PROJECT_IGNORE = `# Written by clio-coder. Generated files stay out of Git
 `;
 
 /**
+ * The project's generated index and state (`<cwd>/.clio-coder/`) are written only outside read-only mode: a
+ * read-only run or worker leaves the workspace as it found it. Their writers and the lease that serializes them
+ * call this first.
+ */
+export function assertProjectIndexWritable(): void {
+	if (readOnlyMode()) throw new Error("Read-only mode leaves this project's .clio-coder/ index as it found it");
+}
+
+/**
  * Keep generated files under `<cwd>/.clio-coder/` out of Git without touching the
  * project's own `.gitignore`. Every generated writer calls this, and it never
  * replaces a file the operator may have edited. A failure only leaves generated
  * files visible to Git, which is no reason to fail the write that asked.
  */
 export function ensureProjectIgnore(cwd: string): void {
+	// Read-only mode writes nothing under `.clio-coder/`, so there is nothing to keep out of Git.
+	if (readOnlyMode()) return;
 	const dir = join(cwd, ".clio-coder");
 	const file = join(dir, ".gitignore");
 	try {

@@ -285,8 +285,22 @@ export function clioCacheDir(): string {
 	return cachedCacheDir;
 }
 
+/** The config root without creating it, for a reader that must leave the home as it found it. */
+export function clioConfigPath(): string {
+	return cachedConfigDir ?? resolveClioDirs().config;
+}
+
+export function clioDataPath(): string {
+	return cachedDataDir ?? resolveClioDirs().data;
+}
+
 export function clioStatePath(): string {
 	return cachedStateDir ?? resolveClioDirs().state;
+}
+
+/** The cache root without creating it, for a reader that must leave the home as it found it. */
+export function clioCachePath(): string {
+	return cachedCacheDir ?? resolveClioDirs().cache;
 }
 
 /**

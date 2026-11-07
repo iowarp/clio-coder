@@ -14,12 +14,13 @@ import {
 	GRAMMAR_FETCH_TIMEOUT_MS,
 } from "./fetched-grammars.js";
 import { TREE_SITTER_RUNTIME_WASM } from "./grammar-assets.js";
-import type {
-	CodewikiLanguage,
-	CodewikiSymbolKind,
-	ExtractedSymbol,
-	LanguageExtraction,
-	LanguageExtractor,
+import {
+	type CodewikiLanguage,
+	type CodewikiSymbolKind,
+	type ExtractedSymbol,
+	GrammarUnavailableError,
+	type LanguageExtraction,
+	type LanguageExtractor,
 } from "./schema.js";
 
 const { Language, Parser } = TreeSitter;
@@ -802,10 +803,11 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 			const grammar = grammarForSourceFile(path, text);
 			if (!grammar || text.trim().length === 0) return { symbols: [], imports: [] };
 			const parser = parsers.get(grammar);
-			// A missing parser means the caller skipped ensureGrammarsForPaths for this
-			// path; throwing routes the file to the regex fallback instead of silently
+			// A missing parser means the grammar could not be loaded, or the caller
+			// skipped ensureGrammarsForPaths for this path; throwing routes the file to
+			// the regex fallback, which the file then records, instead of silently
 			// indexing it with zero symbols.
-			if (!parser) throw new Error(`tree-sitter grammar not loaded for ${path}`);
+			if (!parser) throw new GrammarUnavailableError(`tree-sitter grammar not loaded for ${path}`);
 			let tree: Tree | null = null;
 			try {
 				const parsed = parser.parse(text);

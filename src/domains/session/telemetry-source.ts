@@ -1,3 +1,5 @@
+import { lstatSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
@@ -50,6 +52,7 @@ type Io =
 	| { op: "list"; path: string }
 	| { op: "exists"; path: string }
 	| { op: "mtime"; path: string }
+	| { op: "writtenSince"; paths: readonly string[]; since: number }
 	| { op: "scope"; directory: string };
 type Load<T> = Generator<Io, T, unknown>;
 
@@ -70,6 +73,14 @@ function* exists(path: string): Load<boolean> {
 /** Last write time in epoch ms; null when the file cannot be stat'ed. */
 function* mtime(path: string): Load<number | null> {
 	return (yield { op: "mtime", path }) as number | null;
+}
+
+/**
+ * The regular files, never symlinks, last written at or after `since`, stat'ed together. A filter only: it can skip
+ * a path but never admits one, so it takes a plain lstat and leaves the state boundary to the read that follows.
+ */
+function* writtenSince(paths: readonly string[], since: number): Load<ReadonlySet<string>> {
+	return (yield { op: "writtenSince", paths, since }) as ReadonlySet<string>;
 }
 
 /** A scope directory's files for its seal verdict; null when the directory cannot be read. */
@@ -114,6 +125,18 @@ function performSync(stateDir: string, io: Io): unknown {
 			return withinStateRoot(stateDir, io.path);
 		case "mtime":
 			return statStatePathSync(stateDir, io.path)?.mtimeMs ?? null;
+		case "writtenSince":
+			return new Set(
+				io.paths.filter((path) => {
+					try {
+						const stats = lstatSync(path);
+						return stats.isFile() && stats.mtimeMs >= io.since;
+					} catch {
+						// Missing: nothing written since.
+						return false;
+					}
+				}),
+			);
 	}
 }
 
@@ -135,6 +158,17 @@ async function performAsync(stateDir: string, io: Io): Promise<unknown> {
 			return withinStateRootAsync(stateDir, io.path);
 		case "mtime":
 			return (await statStatePath(stateDir, io.path))?.mtimeMs ?? null;
+		case "writtenSince": {
+			const written = await Promise.all(
+				io.paths.map((path) =>
+					lstat(path).then(
+						(stats) => (stats.isFile() ? stats.mtimeMs : null),
+						() => null,
+					),
+				),
+			);
+			return new Set(io.paths.filter((_, index) => (written[index] ?? -1) >= io.since));
+		}
 	}
 }
 
@@ -281,13 +315,14 @@ const PROCESS_ID = /^prc_[0-9a-f-]+$/u;
 function* hostQuotaRecords(stateDir: string, since: number | null): Load<TelemetryRecord[]> {
 	const host = hostname();
 	const records: TelemetryRecord[] = [];
-	for (const name of ((yield* list(telemetryProcessesDirectory(stateDir))) ?? []).sort()) {
-		if (!PROCESS_ID.test(name)) continue;
-		const directory = telemetryProcessDirectory(stateDir, name);
-		if (since !== null) {
-			const written = yield* mtime(telemetryJournalPath(directory));
-			if (written === null || written < since) continue;
-		}
+	const directories = ((yield* list(telemetryProcessesDirectory(stateDir))) ?? [])
+		.filter((name) => PROCESS_ID.test(name))
+		.sort()
+		.map((name) => telemetryProcessDirectory(stateDir, name));
+	// One batched stat, not a boundary check per journal: a host keeps hundreds, and most predate the window.
+	const recent = since === null ? null : yield* writtenSince(directories.map(telemetryJournalPath), since);
+	for (const directory of directories) {
+		if (recent !== null && !recent.has(telemetryJournalPath(directory))) continue;
 		for (const { record, origin } of (yield* journal(directory)).records)
 			if (record.k === "quota.read" && origin.host === host) records.push(record);
 	}

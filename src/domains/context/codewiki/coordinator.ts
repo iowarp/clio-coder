@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
+import { assertProjectIndexWritable } from "../../../core/project-root.js";
+import { readOnlyMode } from "../../../core/read-only-mode.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
 import {
 	codemapPath,
@@ -15,6 +17,7 @@ import {
 import type {
 	CodewikiArtifactRef,
 	CodewikiBuildProgress,
+	CodewikiBuildWorkerData,
 	CodewikiBuildWorkerMessage,
 	CodewikiBuildWorkerOutcome,
 	CodewikiBuildWorkerRequest,
@@ -65,6 +68,23 @@ function byReference(request: CodewikiWriteRequest, held: Codewiki | null): Code
 	return { ...request, current: artifactRef(held) };
 }
 
+/** An unchanged outcome omits the artifact; restore the very object the caller handed in. */
+function withHandedArtifact(
+	outcome: CodewikiBuildWorkerOutcome,
+	request: CodewikiBuildWorkerRequest,
+): CodewikiBuildWorkerOutcome {
+	if (
+		outcome.codewiki ||
+		request.kind === "build" ||
+		request.kind === "check" ||
+		request.current === null ||
+		"source" in request.current
+	) {
+		return outcome;
+	}
+	return { ...outcome, codewiki: request.current };
+}
+
 async function executeInWorker(
 	request: CodewikiBuildWorkerRequest,
 	onProgress?: (progress: CodewikiBuildProgress) => void,
@@ -74,7 +94,8 @@ async function executeInWorker(
 	// `--import tsx` would be re-resolved from a hermetic fixture cwd before the
 	// source bootstrap can install its absolute loader.
 	signal?.throwIfAborted();
-	const worker = new Worker(buildWorkerUrl(), { workerData: request, execArgv: [] });
+	const workerData: CodewikiBuildWorkerData = { request, readOnly: readOnlyMode() };
+	const worker = new Worker(buildWorkerUrl(), { workerData, execArgv: [] });
 	let exited = false;
 	const exit = new Promise<void>((resolve) => {
 		worker.once("exit", () => {
@@ -116,7 +137,7 @@ async function executeInWorker(
 					return;
 				}
 				finish(() => {
-					if (message.ok) resolve(message.result);
+					if (message.ok) resolve(withHandedArtifact(message.result, request));
 					else {
 						const error = new Error(message.error);
 						if (message.stack) error.stack = message.stack;
@@ -227,6 +248,11 @@ export function coordinateCodewikiWrite(
 			// has already finished and this one sees it. The recheck under the lock
 			// stays, and is what still decides the race.
 			if (options.requireExisting && !existsSync(codewikiPath(workspace))) return Promise.resolve(null);
+			// Read-only mode publishes nothing and takes no lease, whose directory and lock file are writes in the
+			// project too. The lease checks the mode before each of them, after every wait for another holder, so a
+			// mode entered while this transaction waited still leaves the project as found; null is the answer for
+			// "nothing written".
+			let readOnly = false;
 			return withStateFileLock(
 				legacyCodewikiPath(workspace),
 				async () => {
@@ -251,14 +277,26 @@ export function coordinateCodewikiWrite(
 					await options.afterCommit?.(worker, workspace);
 					return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
 				},
-				options.signal ? { signal: options.signal } : {},
-			);
+				{
+					...(options.signal ? { signal: options.signal } : {}),
+					assertWritable: () => {
+						readOnly = readOnlyMode();
+						assertProjectIndexWritable();
+					},
+				},
+			).catch((error: unknown) => {
+				if (readOnly) return null;
+				throw error;
+			});
 		},
 		options.signal,
 	);
 }
 
-/** Serialize a non-build artifact transaction such as reset with every writer. */
+/**
+ * Serialize a non-build artifact transaction such as reset with every writer. Every such transaction writes, so
+ * read-only mode refuses it before the lease's directory or lock file, including after a wait for another holder.
+ */
 export function coordinateCodewikiExclusive<T>(
 	cwd: string,
 	task: (workspace: string) => T | Promise<T>,
@@ -274,7 +312,7 @@ export function coordinateCodewikiExclusive<T>(
 					signal?.throwIfAborted();
 					return task(workspace);
 				},
-				signal ? { signal } : {},
+				{ ...(signal ? { signal } : {}), assertWritable: assertProjectIndexWritable },
 			),
 		signal,
 	);
