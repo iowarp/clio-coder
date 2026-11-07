@@ -1,11 +1,12 @@
 /**
- * One Copilot runtime per process, started through the official SDK with the signed-in user only.
+ * One Copilot runtime per process, started through the official SDK as a signed-in user.
  *
- * Clio passes no token and reads no token store: `useLoggedInUser` makes the runtime use the login that
- * the official `copilot login` wrote under `COPILOT_HOME` (default `~/.copilot`). GitHub token variables
- * are removed from the runtime's environment so an ambient `GH_TOKEN` cannot stand in for that login.
- * The SDK identifies itself to GitHub with its own client identity plus `clientName`; Clio sets no
- * request headers of its own.
+ * Clio passes no token and reads no token store. `useLoggedInUser` lets the runtime pick the login
+ * itself: the official `copilot login` stored on disk under `COPILOT_HOME` (default `~/.copilot`), or the
+ * GitHub CLI's `gh auth login`. The SDK's `empty` mode Clio runs in turns the system keychain off, so a
+ * `copilot login` kept only in the keychain is invisible here. GitHub token variables are removed from
+ * the runtime's environment so an ambient `GH_TOKEN` cannot stand in for a login. The SDK identifies
+ * itself to GitHub with its own client identity plus `clientName`; Clio sets no request headers of its own.
  */
 import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
@@ -16,9 +17,9 @@ import { copilotSessionFsConfig } from "./session-fs.js";
 export const COPILOT_CLIENT_NAME = "clio-coder";
 
 export const COPILOT_LOGIN_MESSAGE =
-	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`), then retry. Clio never signs in to Copilot itself.";
+	"GitHub Copilot is not signed in. Sign in with the official GitHub Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`), then retry; a `copilot login` kept only in the system keychain is not visible to the runtime Clio starts. Clio never signs in to Copilot itself.";
 
-/** Environment variables that would authenticate the runtime as someone other than the `copilot login` user. */
+/** Environment variables that would authenticate the runtime as someone other than a signed-in user. */
 const TOKEN_ENV_VARS = [
 	"COPILOT_GITHUB_TOKEN",
 	"GH_TOKEN",
