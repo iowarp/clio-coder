@@ -231,6 +231,14 @@ describe("wiki source freshness without a usable Git comparison", () => {
 			await assertVerdict("stale");
 		});
 	}
+	it("lists a change set whose Git output exceeds Node's default 1 MiB buffer", () => {
+		const head = git("rev-parse", "HEAD").trim();
+		mkdirSync(join(cwd, "generated"));
+		const count = 5_000;
+		for (let index = 0; index < count; index += 1)
+			writeFileSync(join(cwd, "generated", `${String(index).padStart(5, "0")}${"x".repeat(235)}.ts`), "");
+		assert.equal(changedPathsSince(cwd, head)?.length, count);
+	});
 	it("revalidates a dirty-source publication after rollback even when Git confirms no changed paths", async () => {
 		changeSource();
 		await initialize();

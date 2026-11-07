@@ -9,6 +9,8 @@ export type WikiStaleness =
 	| { state: "stale"; changedFiles: number; warning?: string };
 
 const GIT_DIFF_LINE_CAP = 200;
+/** Above Node's 1 MiB default, so a large change set is listed rather than reported as unavailable. */
+const GIT_PATH_LIST_MAX_BYTES = 128 * 1024 * 1024;
 
 function splitNullTerminatedPaths(output: string): string[] {
 	return output.split("\0").filter((path) => path.length > 0);
@@ -31,16 +33,19 @@ function collectChangedPaths(cwd: string, gitHead: string): Set<string> {
 	const committed = execFileSync("git", internalGitArgv(["diff", "--name-only", "-z", `${gitHead}..HEAD`], cwd), {
 		cwd,
 		encoding: "utf8",
+		maxBuffer: GIT_PATH_LIST_MAX_BYTES,
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	const trackedWorking = execFileSync("git", internalGitArgv(["diff", "--name-only", "-z", "HEAD"], cwd), {
 		cwd,
 		encoding: "utf8",
+		maxBuffer: GIT_PATH_LIST_MAX_BYTES,
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	const untracked = execFileSync("git", internalGitArgv(["ls-files", "--others", "--exclude-standard", "-z"], cwd), {
 		cwd,
 		encoding: "utf8",
+		maxBuffer: GIT_PATH_LIST_MAX_BYTES,
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	return new Set([
