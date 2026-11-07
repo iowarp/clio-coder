@@ -1467,9 +1467,12 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	const detailed = stripTerminalSequences(
 		renderWorkerEntryLines(replayed, 100, { detail: transcriptDetail("detailed") }).join("\n"),
 	);
-	strictEqual(detailed.split("\n").length, 2);
-	match(detailed, /\n {2}│ blade · model/u);
-	doesNotMatch(detailed, /full findings/u);
+	// Detailed keeps the settled card whole: the task, the answer and its evidence status.
+	match(
+		detailed,
+		/^↳ scout · internal · blade\/model · run helper-run ✓ done\n {2}│ Explore the source architecture\n {2}│ full findings\n/u,
+	);
+	match(detailed, /not admitted as evidence/u);
 
 	replayed.result = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
@@ -2903,7 +2906,8 @@ describe("agent invocations", () => {
 				panel.applyWorkerState(first);
 				if (style === "detailed") {
 					const rows = renderWorkerEntryLines(first, width, { detail: transcriptDetail(style), siblings });
-					strictEqual(rows.length, 2);
+					ok(rows.length >= 2, "a settled sibling keeps its card in Detailed");
+					ok(rows.every((row) => visibleWidth(row) <= width));
 				}
 				if (style === "detailed" && width >= 80) match(plainRender(panel, width), /4 workers · 3 running · 1 done/u);
 			}

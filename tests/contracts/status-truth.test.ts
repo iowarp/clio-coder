@@ -1210,8 +1210,8 @@ test("a worker card with a parent-owned window offers the hold, then says it is 
 			() => window,
 		)
 			.render(200)
-			.map((row) => stripTerminalSequences(row))
-			.join("\n");
+			.map((row) => stripTerminalSequences(row).trim())
+			.join(" ");
 	match(card({ remainingMs: 119_000, held: false }), /No answer in 1:59 denies this call.*Any key holds the card\./u);
 	const held = card({ remainingMs: 822_000, held: true });
 	match(held, /Extended for you\. No answer in 13:42 denies this call/u);

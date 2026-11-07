@@ -65,17 +65,17 @@ test("run --read-only denies the main agent's write and reports the ceiling that
 	);
 });
 
-test("run --read-only answers in full after a refused command and exits 0", { timeout: 30_000 }, async (t) => {
-	const { code, end } = await terminalFrame(t, { name: "bash", arguments: { command: "touch made.txt" } }, [
+// Read-only runs a shell command in a read-only sandbox where one exists and refuses it where none does;
+// either way the workspace is unchanged and the run still answers in full.
+test("run --read-only answers in full after a shell write and leaves the workspace unchanged", {
+	timeout: 30_000,
+}, async (t) => {
+	const { code, end, dir } = await terminalFrame(t, { name: "bash", arguments: { command: "touch made.txt" } }, [
 		"--read-only",
 	]);
 	strictEqual(code, 0);
 	strictEqual(end.outcome, "succeeded");
-	const attempts = (end.safety as { blockedAttempts: Array<Record<string, unknown>> }).blockedAttempts;
-	deepStrictEqual(
-		attempts.map(({ tool, reasonCode }) => ({ tool, reasonCode })),
-		[{ tool: "bash", reasonCode: "task:read_only" }],
-	);
+	strictEqual(existsSync(join(dir, "made.txt")), false);
 });
 
 test("a headless run reports an ask it could not put to anyone as a permission request", {
