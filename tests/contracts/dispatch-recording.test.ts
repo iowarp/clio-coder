@@ -1,4 +1,5 @@
 import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -154,6 +155,22 @@ it("strict reader rejects input capture, environment, terminal controls and nonm
 });
 
 it("dispatch preserves the explicit capture option with journal history disabled on local and SSH placement", async () => {
+	const project = join(env.dir, "project");
+	execFileSync("git", ["init", "-q", project]);
+	execFileSync("git", [
+		"-C",
+		project,
+		"-c",
+		"user.name=Contract",
+		"-c",
+		"user.email=contract@example.invalid",
+		"-c",
+		"commit.gpgsign=false",
+		"commit",
+		"--allow-empty",
+		"-qm",
+		"fixture",
+	]);
 	for (const placed of [false, true]) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.nodes = [{ id: node.id, host: node.host, maxWorkers: 1 }];
@@ -172,7 +189,9 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		const originalPath = process.env.PATH;
 		const bin = join(env.dir, "bin");
 		mkdirSync(bin, { recursive: true });
-		writeFileSync(join(bin, "ssh"), "#!/bin/sh\nprintf 'shared=yes\\n'\n", { mode: 0o755 });
+		writeFileSync(join(bin, "ssh"), '#!/bin/sh\nfor command do :; done\nexec /bin/sh -c "$command"\n', {
+			mode: 0o755,
+		});
 		if (placed) process.env.PATH = `${bin}:${originalPath ?? ""}`;
 		const spawnWorker = (spec: WorkerSpec) => ({
 			pid: null,
@@ -248,7 +267,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 				agentId: "scout",
 				executionRole: "researcher",
 				task: "Inspect isolated evidence.",
-				cwd: env.dir,
+				cwd: project,
 				requestOrigin: "internal",
 				record: true,
 				resultContractOverride: { kind: "provenance-report" },
