@@ -591,16 +591,27 @@ describe("runner cleanup failure compatibility", () => {
 	it("returns an error through the actual runVectorTool consumer for incomplete cleanup", async (t) => {
 		if (process.platform === "win32") return t.skip("process groups require POSIX");
 		const original = process.kill;
+		let markCleaning!: () => void;
+		const cleaning = new Promise<void>((resolve) => {
+			markCleaning = resolve;
+		});
+		t.mock.timers.enable({ apis: ["setTimeout"] });
 		process.kill = ((pid: number, signal?: string | number) => {
 			if (pid >= 0) return original.call(process, pid, signal as NodeJS.Signals);
+			if (signal === "SIGTERM") markCleaning();
 			return true;
 		}) as typeof process.kill;
 		try {
-			const result = await runVectorTool("fixture", process.execPath, ["-e", "process.exit(0)"], {});
+			const pending = runVectorTool("fixture", process.execPath, ["-e", "process.exit(0)"], {});
+			await cleaning;
+			t.mock.timers.tick(3000);
+			t.mock.timers.tick(1000);
+			const result = await pending;
 			strictEqual(result.kind, "error");
 			strictEqual(result.details?.exitCode, 1);
 		} finally {
 			process.kill = original;
+			t.mock.timers.reset();
 		}
 	});
 

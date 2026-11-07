@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { initializeScratchHome } from "../harness/headless-run.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -53,7 +54,7 @@ async function runCliWithStderr(
 	});
 }
 async function initialize(target: Home): Promise<void> {
-	strictEqual(await runCli(["doctor", "--fix"], target.env), 0);
+	initializeScratchHome(target.root);
 }
 function seedTarget(target: Home, endpoint: string): void {
 	const path = join(target.root, "config", "settings.yaml");

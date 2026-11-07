@@ -22,6 +22,7 @@ import { trustProjectPackages } from "../harness/project-trust.js";
  */
 
 const materioSource = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
+const materioDigest = pluginContentDigest(materioSource);
 const roots: string[] = [];
 
 function scratch(): string {
@@ -35,7 +36,7 @@ function withMaterio(): string {
 	const result = installPlugin(materioSource, {
 		cwd: project,
 		scope: "project",
-		expectedDigest: pluginContentDigest(materioSource),
+		expectedDigest: materioDigest,
 		expectedId: "materio",
 	});
 	trustProjectPackages(project, "plugins");

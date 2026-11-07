@@ -434,7 +434,6 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			await terminal.waitFor(EDITOR);
 			terminal.resize(120, 36);
 			await terminal.waitFor(HYDRATED);
-			await new Promise((settle) => setTimeout(settle, 300));
 			process.kill(terminal.pid, "SIGTERM");
 			strictEqual(await terminal.exited(), 143, terminal.visible().slice(-2_000));
 			const output = terminal.raw();

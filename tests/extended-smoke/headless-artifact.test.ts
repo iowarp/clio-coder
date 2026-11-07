@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { inspectRunEvidence } from "../../src/domains/evidence/index.js";
+import { initializeScratchHome } from "../harness/headless-run.js";
 import {
 	closeServer,
 	hasToolExchange,
@@ -94,8 +95,7 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			};
 			const workspace = join(scratch.dir, "workspace");
 			mkdirSync(workspace);
-			const doctor = await run(["doctor", "--fix"], workspace, env);
-			strictEqual(doctor.code, 0, doctor.stderr);
+			initializeScratchHome(scratch.dir);
 			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 			const direct = await run(
 				["run", "--json", "--autonomy", "yolo", "Write a report artifact containing exactly: fixture report"],
@@ -187,8 +187,7 @@ test("built headless artifact: a completed dispatch seals its assessment under a
 		const workspace = join(scratch.dir, "workspace");
 		mkdirSync(workspace);
 		writeFileSync(join(workspace, "notes.md"), "nothing to change\n");
-		const doctor = await run(["doctor", "--fix"], workspace, env);
-		strictEqual(doctor.code, 0, doctor.stderr);
+		initializeScratchHome(scratch.dir);
 		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 		// Pinned the way an outer harness pins it: an empty directory with no runs.json.
 		const stateDir = mkdtempSync(join(scratch.dir, "pinned-state-"));

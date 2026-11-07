@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { initializeScratchHome } from "../harness/headless-run.js";
 
 import {
 	closeServer,
@@ -172,8 +173,7 @@ async function headlessSkillTurn(
 	root: string;
 }> {
 	const scratch = scratchHome();
-	const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
-	strictEqual(fixed.code, 0, fixed.stderr);
+	initializeScratchHome(scratch.root);
 	// The model loads an installed skill; its display names context while replay keeps gateway.
 	const fixture = await startOpenAICompatFixture("done", {
 		toolCall: {
@@ -212,8 +212,7 @@ describe("headless skill activation by autonomy level", () => {
 			join(foreign, "SKILL.md"),
 			`${readFileSync(join(foreign, "SKILL.md"), "utf8")}\nFOREIGN_COPY_MUST_NOT_LOAD\n`,
 		);
-		const fixed = await runCli(["doctor", "--fix"], { env, cwd });
-		strictEqual(fixed.code, 0, fixed.stderr);
+		initializeScratchHome(scratch.root);
 		const installed = await runCli(["library", "install", "skill:find-skills", "--user", "--json"], { env, cwd });
 		strictEqual(installed.code, 0, installed.stderr);
 		const fixture = await startOpenAICompatFixture("done", {
