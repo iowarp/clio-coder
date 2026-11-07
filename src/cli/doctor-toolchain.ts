@@ -111,8 +111,12 @@ export function toolchainFindings(options: ToolchainFindingOptions = {}): Doctor
 	return [...tools, yaziProfileFinding(filesEnabled, options.fix === true)];
 }
 
-function paneHostFinding(status: ToolStatus): DoctorFinding {
-	const name = "external tool herdr";
+/**
+ * The pinned herdr the launcher runs (`vendoredHerdr` in workspace-launch.ts),
+ * never a herdr on PATH. Shared by the toolchain row and doctor's
+ * `panes binary` row, so the two cannot disagree about which binary hosts the panes.
+ */
+export function paneHostFinding(status: ToolStatus, name = "external tool herdr"): DoctorFinding {
 	const vendored = resolveVendoredBinary("herdr");
 	if (vendored !== null) {
 		return {

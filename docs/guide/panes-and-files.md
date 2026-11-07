@@ -176,7 +176,7 @@ A missing pinned herdr is a WARN that names `clio-coder panes install`, and the 
 on a platform with no pinned herdr the row is INFO. A missing yazi is a WARN only while the files pane is enabled;
 otherwise `files pane profile` reads `disabled by settings`. A missing croc or cliamp is always INFO. Outside a pane host,
 doctor prints only `panes mode` and `panes layout` and does not probe a socket. Run inside a pane host, it adds
-`panes socket`, `panes protocol` and `panes binary`.
+`panes socket`, `panes protocol` and `panes binary`. `panes binary` names the pinned herdr the private host runs, as the `external tool herdr` row does; a herdr on PATH is never that binary.
 The `panes mode` row reports what a bare `clio-coder` would do from where doctor runs, by the same rule the launcher uses.
 From a pane of your own herdr it reads ``nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane ...``
 and names `clio-coder --with-panes` as the way to join that herdr as a guest; this row is OK even when your herdr does not answer.

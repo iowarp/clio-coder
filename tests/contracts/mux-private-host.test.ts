@@ -1,11 +1,11 @@
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "node:test";
-import { panesModeFinding } from "../../src/cli/doctor-panes.js";
+import { panesFindings, panesModeFinding } from "../../src/cli/doctor-panes.js";
 import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
 import {
 	renderWorkspaceConfig,
@@ -26,6 +26,7 @@ import {
 	renderPosixShellShim,
 } from "../../src/domains/mux/workspace/platform-posix.js";
 import { mirroredSource } from "../../src/domains/toolchain/install.js";
+import { findPinnedTool } from "../../src/domains/toolchain/registry.js";
 
 const SESSION = "clio-coder-0123456789ab";
 const shell = { defaultShell: "/state/mux/0123456789ab/pane-shell", shellMode: "non_login" } as const;
@@ -284,6 +285,51 @@ describe("launcher eligibility", () => {
 			panesModeFinding({ TMUX: "/x/tmux" }, null).detail,
 			/^plain; bare `clio-coder` stays in this terminal \(already inside a terminal multiplexer \(TMUX\)\)/,
 		);
+	});
+});
+
+describe("doctor's panes binary row", () => {
+	it("names the pinned herdr the launcher runs, not a herdr on PATH", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-panes-binary-"));
+		const saved = { PATH: process.env.PATH, CLIO_CODER_DATA_DIR: process.env.CLIO_CODER_DATA_DIR };
+		t.after(() => {
+			for (const [key, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		const pin = findPinnedTool("herdr");
+		ok(pin);
+		// A PATH herdr that meets the floor, which the private host still never runs.
+		const bin = join(scratch, "bin");
+		mkdirSync(bin);
+		writeFileSync(join(bin, "herdr"), `#!/bin/sh\necho "herdr ${pin.version}"\n`);
+		chmodSync(join(bin, "herdr"), 0o755);
+		process.env.PATH = bin;
+		process.env.CLIO_CODER_DATA_DIR = join(scratch, "data");
+		const env = {
+			HERDR_ENV: "1",
+			HERDR_SOCKET_PATH: join(scratch, "operator.sock"),
+			XDG_CONFIG_HOME: join(scratch, "cfg"),
+			HOME: scratch,
+		};
+		const row = async (): Promise<{ level?: string; detail: string } | undefined> =>
+			(await panesFindings(env)).find((finding) => finding.name === "panes binary");
+
+		const missing = await row();
+		equal(missing?.level, "warn");
+		match(missing?.detail ?? "", /is not installed; the next `clio-coder` installs it/);
+		equal(missing?.detail.includes(bin), false);
+
+		const vendored = join(scratch, "data", "tools", "herdr", pin.version, "herdr");
+		mkdirSync(join(vendored, ".."), { recursive: true });
+		writeFileSync(vendored, "");
+		const present = await row();
+		equal(present?.level, "ok");
+		equal(present?.detail, `pane host ${pin.version} (Clio's pinned copy) at ${vendored}`);
 	});
 });
 

@@ -5,7 +5,8 @@ import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { detectMux, MUX_METHOD_MIN_PROTOCOL, resolveSocketCandidates } from "../domains/mux/index.js";
 import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
 import { telemetryRunsDirectory } from "../domains/telemetry/index.js";
-import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolchain/index.js";
+import { findPinnedTool, toolStatus } from "../domains/toolchain/index.js";
+import { paneHostFinding } from "./doctor-toolchain.js";
 import { workspaceEligibility } from "./workspace-launch.js";
 
 /**
@@ -163,12 +164,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 					name: "panes binary",
 					detail: `${PANE_HOST_TOOL_ID} is not in the pinned tool registry`,
 				}
-			: {
-					ok: true,
-					level: toolStatus(entry).resolution.source === "none" ? "warn" : "ok",
-					name: "panes binary",
-					detail: describeResolution(toolStatus(entry)),
-				},
+			: paneHostFinding(toolStatus(entry), "panes binary"),
 	);
 
 	findings.push(layoutRow);
