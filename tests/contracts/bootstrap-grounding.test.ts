@@ -354,11 +354,17 @@ function writeCarryFixture(): string[] {
 	return carried;
 }
 
-it("removes a model rule only when it restates a carried invariant, not when it shares its check", async () => {
+it("removes a model rule only when it states a carried invariant word for word", async () => {
 	const carried = writeCarryFixture();
 	const approval = "Get maintainer approval before disabling the case-portable-paths check in `scripts/check.js`.";
 	const recipe =
 		"Renaming `src/widgets/render.ts`: update the export in `src/index.ts` in the same commit; the case-portable-paths check in `scripts/check.js` refuses a case-only rename.";
+	// Each resembles a carried rule in most of its words but states another obligation.
+	const reworded =
+		"Never join a gitignored directory name into a literal string: the gitignored-literal check in `scripts/check.js` refuses it.";
+	const flipped =
+		"Add paths that differ only by case: they collide on case-insensitive filesystems (case-portable-paths check in `scripts/check.js`).";
+	const extended = `${carried[1]} Require maintainer approval before disabling that check.`;
 	await runBootstrap({
 		cwd,
 		rewriteClioMd: true,
@@ -368,12 +374,14 @@ it("removes a model rule only when it restates a carried invariant, not when it 
 				projectName: "harbor",
 				identity: "A widget renderer.",
 				invariants: [
-					// The carried rule in nearly its own words gives way to it.
-					"Never join a gitignored directory name into a literal string: the gitignored-literal check in `scripts/check.js` refuses it.",
+					// Only case and closing punctuation differ from carried invariant 3.
+					(carried[2] ?? "").toLowerCase().replace(/\.$/, ""),
+					reworded,
+					flipped,
+					extended,
 					// The same script and file as a carried rule, with an obligation of its own.
 					"The `prepublishOnly` script in `package.json` throws, so publication runs only from the release job.",
 					approval,
-					"Keep each widget's tests beside it under `src/widgets/`; the case-portable-paths check in `scripts/check.js` also runs on test file names.",
 				],
 				conventions: [
 					"`renderWidget` returns a string and never touches the DOM; a case-only rename of its file fails the case-portable-paths check in `scripts/check.js`.",
@@ -383,11 +391,19 @@ it("removes a model rule only when it restates a carried invariant, not when it 
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	for (const rule of carried) ok(handbook.includes(rule), handbook);
-	strictEqual(handbook.includes("into a literal string"), false, handbook);
-	ok(handbook.includes("publication runs only from the release job"), handbook);
-	ok(handbook.includes(approval), handbook);
-	ok(handbook.includes("Keep each widget's tests beside it under `src/widgets/`"), handbook);
+	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
+	deepStrictEqual(
+		[...hard.matchAll(/^\d+\. (.+)$/gm)].map((match) => match[1]),
+		[
+			...carried,
+			reworded,
+			flipped,
+			extended,
+			"The `prepublishOnly` script in `package.json` throws, so publication runs only from the release job.",
+			approval,
+		],
+		handbook,
+	);
 	ok(handbook.includes("`renderWidget` returns a string and never touches the DOM"), handbook);
 	ok(handbook.includes(recipe), handbook);
 });
@@ -539,7 +555,7 @@ it("carries a section title the rewrite dropped with the blocks that name a defi
 	]);
 });
 
-it("returns a previous block under a kept title unless the handbook restates it", async () => {
+it("returns a previous block under a kept title unless a protected rule states it word for word", async () => {
 	const carried = writeCarryFixture();
 	mkdirSync(join(cwd, "docs"), { recursive: true });
 	writeFileSync(join(cwd, "docs", "guide.md"), "# Guide\n");
@@ -558,12 +574,12 @@ it("returns a previous block under a kept title unless the handbook restates it"
 			"",
 			"## Docs and prose",
 			"",
-			"- Pages are Markdown under `docs/`, never HTML; the retired-html check in `scripts/check.js` refuses an HTML tree.",
+			`- ${carried[1]}`,
 			previousCorpus,
 			"",
 		].join("\n"),
 	);
-	// Names the corpus check for another instruction. The previous retired-html block restates carried invariant 2.
+	// Names the corpus check for another instruction. The previous retired-html block is carried invariant 2.
 	const modelDocs = "- Name each page in kebab case; the corpus check in `scripts/check.js` also reads page names.";
 	await runBootstrap({
 		cwd,

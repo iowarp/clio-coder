@@ -1347,24 +1347,13 @@ const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
 function restatesHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
 	const citations = [...tokens].filter((token) => token.startsWith("`"));
 	return kept.some((other) => {
-		if (restatesLexically(tokens, [other])) return true;
+		const shorter = tokens.size <= other.size ? tokens : other;
+		const longer = tokens.size <= other.size ? other : tokens;
+		if (shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7) return true;
 		const otherCitations = [...other].filter((token) => token.startsWith("`"));
 		const shared = citations.filter((token) => other.has(token));
 		const fewest = Math.min(citations.length, otherCitations.length);
 		return shared.length >= 2 && shared.some((token) => CITED_FILE_RE.test(token)) && shared.length / fewest >= 2 / 3;
-	});
-}
-
-/**
- * Two rules are one when most of their words match. A carried rule is compared
- * only this way: shared citations show a shared subject, not the same action,
- * and an approval rule citing the files a prohibition cites is its own rule.
- */
-function restatesLexically(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
-	return kept.some((other) => {
-		const shorter = tokens.size <= other.size ? tokens : other;
-		const longer = tokens.size <= other.size ? other : tokens;
-		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
 	});
 }
 
@@ -1724,11 +1713,13 @@ function stabilizeGeneratedOutput(
 	const carried = carryCorpus
 		? groundedPreviousInvariants(input, carryCorpus).filter((rule) => !restatesArchitecture(rule))
 		: [];
-	const carriedTokens = carried.map(handbookRuleTokens);
-	// Only a rule that restates a carried one in its words gives way, and a carried rule gives way only to one
-	// that restates it so. Sharing a check, a script or a cited file does not show it states no other
-	// obligation: approval before disabling a check is its own rule.
-	const duplicatesCarried = (rule: string): boolean => restatesLexically(handbookRuleTokens(rule), carriedTokens);
+	const carriedBlocks = carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : [];
+	// A model rule gives way to carried content only when it states it word for word. One that resembles a
+	// carried rule may add a clause, flip a prohibition or change its scope, so both stay.
+	const carriedKeys = new Set(
+		[...carried, ...carriedBlocks.flatMap((section) => handbookBlocks(section.body))].map(normalizeHandbookRule),
+	);
+	const duplicatesCarried = (rule: string): boolean => carriedKeys.has(normalizeHandbookRule(rule));
 	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to
 	// them, and the cap applies to model rules alone. When they exceed the target on their own they all stay,
 	// and the handbook parser warns that hard invariants exceed it.
@@ -1739,8 +1730,8 @@ function stabilizeGeneratedOutput(
 	}
 	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushUnique(protectedInvariants, rule);
 	for (const rule of authoredInvariants) pushUnique(protectedInvariants, rule);
-	// A previous section block counts as stated only by a rule the final fit cannot cut.
-	const protectedTokens = protectedInvariants.map(handbookRuleTokens);
+	// A previous section block counts as stated only by a rule the final fit cannot cut, word for word.
+	const protectedKeys = new Set(protectedInvariants.map(normalizeHandbookRule));
 	const modelInvariants = invariants.filter(
 		(rule) => !protectedInvariants.includes(rule) && !restatesArchitecture(rule) && !duplicatesCarried(rule),
 	);
@@ -1777,15 +1768,13 @@ function stabilizeGeneratedOutput(
 	const seenSectionTitles = new Set<string>();
 	const addSection = (section: ClioMdSection, modelSection = false, carriedSection = false): boolean => {
 		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
-		const restatesKept = (tokens: ReadonlySet<string>): boolean =>
+		const restatesKept = (block: string): boolean =>
 			carriedSection
-				? restatesLexically(tokens, protectedTokens)
-				: restatesHandbookRule(tokens, uncarriedRuleTokens) || restatesLexically(tokens, carriedTokens);
+				? protectedKeys.has(normalizeHandbookRule(block))
+				: restatesHandbookRule(handbookRuleTokens(block), uncarriedRuleTokens) || duplicatesCarried(block);
 		const body = handbookBlocks(section.body)
 			.filter(
-				(block) =>
-					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
-					(!restatesKept(handbookRuleTokens(block)) && !restatesArchitecture(block)),
+				(block) => !/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || (!restatesKept(block) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -1808,11 +1797,11 @@ function stabilizeGeneratedOutput(
 		if (sanitized) addSection(sanitized, true);
 	}
 	// A previous section returns under its title when the draft dropped the title. Under a kept title, each
-	// enforced block returns unless a protected rule or the kept section restates it: naming the same check is
-	// not stating the same instruction. A section holding a previous block is protected, even when the model
-	// already wrote the block, so neither the section limit nor the final fit cuts it.
+	// enforced block returns unless a protected rule or the kept section states it word for word: naming the
+	// same check is not stating the same instruction. A section holding a previous block is protected, even
+	// when the model already wrote the block, so neither the section limit nor the final fit cuts it.
 	const carriedSections = new Set<ClioMdSection>();
-	for (const section of carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : []) {
+	for (const section of carriedBlocks) {
 		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
 		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
 		const current = ordinarySections[index];
@@ -1821,12 +1810,10 @@ function stabilizeGeneratedOutput(
 			if (retained) carriedSections.add(retained);
 			continue;
 		}
-		const blocks = handbookBlocks(section.body).filter(
-			(block) => !restatesLexically(handbookRuleTokens(block), protectedTokens),
-		);
+		const blocks = handbookBlocks(section.body).filter((block) => !protectedKeys.has(normalizeHandbookRule(block)));
 		if (blocks.length === 0) continue;
-		const currentTokens = handbookBlocks(current.body).map(handbookRuleTokens);
-		const missing = blocks.filter((block) => !restatesLexically(handbookRuleTokens(block), currentTokens));
+		const currentKeys = new Set(handbookBlocks(current.body).map(normalizeHandbookRule));
+		const missing = blocks.filter((block) => !currentKeys.has(normalizeHandbookRule(block)));
 		const merged = missing.length === 0 ? current : { ...current, body: [current.body, ...missing].join("\n") };
 		ordinarySections[index] = merged;
 		if (merged !== current && modelSections.delete(current)) modelSections.add(merged);
