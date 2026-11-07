@@ -4,12 +4,14 @@ import { type Event, EventCursor } from "../../contracts/events.js";
 import type { EventHub } from "../services/event-hub.js";
 import { parse } from "./validate.js";
 
-/** `present` marks the client present while the stream is open and returns the call that ends it. */
-export function events(context: Context, hub: EventHub, after?: string, present?: () => () => void) {
+/**
+ * `present` marks the client present while the stream is open and returns the call that ends it; the
+ * server calls the `end` it is given to close the stream itself.
+ */
+export function events(context: Context, hub: EventHub, after?: string, present?: (end: () => void) => () => void) {
 	const cursor = context.req.header("Last-Event-ID") ?? after;
 	if (cursor !== undefined) parse(EventCursor, cursor);
 	return streamSSE(context, async (stream) => {
-		const release = present?.();
 		let queuedBytes = 0;
 		let pending = Promise.resolve();
 		let finish: () => void = () => {};
@@ -22,6 +24,7 @@ export function events(context: Context, hub: EventHub, after?: string, present?
 			finish();
 		};
 		stream.onAbort(stop);
+		const release = present?.(stop);
 		const receive = (event: Event) => {
 			if (stopped) return;
 			const data = JSON.stringify(event),

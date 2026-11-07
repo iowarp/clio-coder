@@ -148,6 +148,7 @@ export function GeneralPage({ client }: { client: Client }) {
 						enabled={meta.data?.pwa ?? false}
 						version={meta.data?.clio}
 						platform={meta.data?.platform}
+						revoke={client.credentials.revoke}
 					/>
 				</div>
 			</section>

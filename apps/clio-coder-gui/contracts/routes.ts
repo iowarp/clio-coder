@@ -1112,6 +1112,15 @@ export const routes = {
 		response: ClientCredential,
 		summary: "Replace this client's credential before it expires; the old one is honoured for a short grace",
 	}),
+	authRevoke: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/auth/revoke",
+		response: Empty,
+		summary:
+			"Sign this client out: its credential and stream tickets stop working, its event streams close and the sessions it controls are freed",
+	}),
 	eventTicket: defineRoute({
 		...post,
 		status: 200,

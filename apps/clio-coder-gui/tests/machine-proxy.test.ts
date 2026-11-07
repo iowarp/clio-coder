@@ -12,6 +12,7 @@ import { type MachineAttachmentsApi, machinesRoutes } from "../server/http/route
 import { ClientRegistry } from "../server/services/clients.js";
 import { EventHub } from "../server/services/event-hub.js";
 import { MachineAttachments } from "../server/services/machine-attach.js";
+import { SessionControls } from "../server/services/session-control.js";
 import type { MachineEndpoint } from "../server/worker/protocol.js";
 
 const LOCAL_TOKEN = "local-launch-token-0123456789abcdefghij";
@@ -68,7 +69,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		"*",
 		auth(REMOTE_TOKEN, () => `http://127.0.0.1:${REMOTE_LISTENER_PORT}`, nodeClients),
 	);
-	authRoutes(upstream, nodeHub, nodeClients);
+	authRoutes(upstream, nodeHub, nodeClients, new SessionControls(nodeClients, nodeHub));
 	upstream.all("*", async (context) => {
 		const body = context.req.method === "POST" ? await context.req.text() : "";
 		const client = requestClient(context).clientId;
@@ -107,7 +108,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		"*",
 		auth(LOCAL_TOKEN, () => ORIGIN, localClients),
 	);
-	authRoutes(app, hub, localClients);
+	authRoutes(app, hub, localClients, new SessionControls(localClients, hub));
 	machinesRoutes(app, hub, undefined, attachments);
 	const request = (path: string, init: RequestInit = {}) => app.request(`${ORIGIN}${path}`, init);
 	const command = (path: string, bearer: string) =>
@@ -219,6 +220,8 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	// Credentials are this app's to issue; the prefix never forwards an exchange.
 	assert.equal((await command("/m/blade/api/auth/clients", browser)).status, 404);
 	assert.equal((await command("/m/blade/api/events/ticket", browser)).status, 404);
+	// Nor a sign-out, which would revoke this app's own credential at the node rather than the window's.
+	assert.equal((await command("/m/blade/api/auth/revoke", browser)).status, 404);
 	assert.equal(seen.length, guarded);
 
 	// A remote refusal is reported as the node being unavailable, never as this app's credential being refused.

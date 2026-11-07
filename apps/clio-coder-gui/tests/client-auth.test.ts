@@ -203,3 +203,29 @@ test("a reload keeps the window's credential, but a document opened from another
 		{ authorization: "Bearer token-b", resume: id },
 	]);
 });
+
+test("a window that signs out is refused by the server and hands nothing to the next page", async (t) => {
+	const { stored, listeners } = browserPage(t);
+	const clients = new ClientRegistry();
+	const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
+		const bearer = new Headers(init.headers).get("Authorization")?.slice(7) ?? "";
+		if (String(input) === routes.authRevoke.path) {
+			const record = clients.authenticate(bearer);
+			if (!record) return Response.json({}, { status: 401 });
+			clients.revoke(record);
+			return Response.json({});
+		}
+		const body = JSON.parse(String(init.body)) as { label?: string; resume?: string };
+		return Response.json(clients.open(body.label, body.resume));
+	}) as typeof fetch;
+	const credentials = createCredentials("token-a", fetcher);
+	t.after(() => credentials.dispose());
+	const bearer = await credentials.bearer();
+	assert.ok(clients.authenticate(bearer));
+	await credentials.revoke();
+	assert.equal(clients.authenticate(bearer), null);
+	await assert.rejects(credentials.bearer(), /launch token/);
+	// The reload that follows a sign-out must not carry the credential, or the id, into the next document.
+	for (const listener of listeners.get("pagehide") ?? []) listener();
+	assert.deepEqual([...stored.keys()], []);
+});

@@ -19,6 +19,8 @@ const MAX_TICKETS = 1024;
 export interface ClientRecord extends ClientIdentity {
 	lastSeen: number;
 	streams: number;
+	/** Ends each event stream this client holds open, so a revoked credential stops hearing the server at once. */
+	enders: Set<() => void>;
 	credential: { hash: string; expiresAt: number };
 	previous: { hash: string; expiresAt: number } | null;
 }
@@ -53,6 +55,7 @@ export class ClientRegistry {
 			label: this.distinct(label?.trim() || "Client", now),
 			lastSeen: now,
 			streams: 0,
+			enders: new Set(),
 			credential: { hash: "", expiresAt: 0 },
 			previous: null,
 		};
@@ -108,16 +111,28 @@ export class ClientRegistry {
 		return record;
 	}
 
-	/** Count an open event stream as presence; the returned function ends it. */
-	stream(record: ClientRecord) {
+	/** Count an open event stream as presence; the returned function ends it. `end` closes it from this side. */
+	stream(record: ClientRecord, end: () => void = () => {}) {
 		record.streams += 1;
+		record.enders.add(end);
 		let open = true;
 		return () => {
 			if (!open) return;
 			open = false;
 			record.streams -= 1;
+			record.enders.delete(end);
 			record.lastSeen = this.now();
 		};
+	}
+
+	/**
+	 * A client that signs out: its credential, the one still in rotation grace and its unspent tickets
+	 * stop working now rather than at expiry, and its event streams close. Its id is free to be issued again.
+	 */
+	revoke(record: ClientRecord) {
+		this.drop(record);
+		for (const [hash, entry] of this.tickets) if (entry.clientId === record.clientId) this.tickets.delete(hash);
+		for (const end of [...record.enders]) end();
 	}
 
 	identity(id: string): ClientIdentity | null {

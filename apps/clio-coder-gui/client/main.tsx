@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider, useRouteError } from "react-router
 import { machinePrefix } from "../contracts/pages.js";
 import { ApiProblem, createClient } from "./api/client.js";
 import { createCredentials } from "./api/credentials.js";
-import { launchToken } from "./api/token.js";
+import { launchToken, listenForForget } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
@@ -25,6 +25,7 @@ const credentials = createCredentials(
 	fetch,
 	matchMedia("(display-mode: standalone)").matches ? "Installed app window" : "Browser window",
 );
+listenForForget(credentials.revoke);
 const client = createClient(token, fetch, prefix, credentials);
 const local = prefix ? createClient(token, fetch, "", credentials) : client;
 const queries = new QueryClient({

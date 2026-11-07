@@ -44,6 +44,11 @@ export interface Credentials {
 	/** A single-use ticket that opens one event stream for this client. */
 	ticket(): Promise<string>;
 	clientId(): string | null;
+	/**
+	 * Sign this window out: the server stops honouring its credential now, and this holder keeps nothing,
+	 * so neither a rotation nor the next page brings it back.
+	 */
+	revoke(): Promise<void>;
 	dispose(): void;
 }
 
@@ -78,6 +83,7 @@ export function createCredentials(
 	let pending: Promise<Held> | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let disposed = false;
+	let revoked = false;
 	const now = () => performance.now();
 
 	const handoff = read(session, handoffKey);
@@ -140,6 +146,11 @@ export function createCredentials(
 		}
 	};
 	const adopt = (value: ClientCredential): Held => {
+		// An exchange that was in flight when the window signed out is signed out with it.
+		if (revoked) {
+			void post(routes.authRevoke.path, value.credential, {}).catch(() => {});
+			throw new CredentialProblem(unauthorizedProblem());
+		}
 		write(session, clientIdKey, value.clientId);
 		held = {
 			clientId: value.clientId,
@@ -195,7 +206,7 @@ export function createCredentials(
 	return {
 		launchToken,
 		async bearer() {
-			if (tokenRejected()) throw new CredentialProblem(unauthorizedProblem());
+			if (tokenRejected() || revoked) throw new CredentialProblem(unauthorizedProblem());
 			if (pending) return (await pending).credential;
 			if (held && now() < held.rotateAt) return held.credential;
 			try {
@@ -224,6 +235,20 @@ export function createCredentials(
 			}
 		},
 		clientId: () => held?.clientId ?? null,
+		async revoke() {
+			revoked = true;
+			const current = held;
+			held = null;
+			if (timer !== null) clearTimeout(timer);
+			timer = null;
+			write(session, clientIdKey, null);
+			write(session, handoffKey, null);
+			if (!current || current.expiresAt <= now()) return;
+			const response = await post(routes.authRevoke.path, current.credential, {});
+			// A 401 means the server already holds no such credential, which is the outcome asked for.
+			if (!response.ok && response.status !== 401)
+				throw new CredentialProblem((await response.json().catch(unavailableProblem)) as Problem);
+		},
 		dispose() {
 			disposed = true;
 			if (timer !== null) clearTimeout(timer);

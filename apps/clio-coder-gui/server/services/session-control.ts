@@ -57,6 +57,11 @@ export class SessionControls {
 		this.assign(to, clientId);
 	}
 
+	/** Frees every session a client holds, so a client that signed out hands control on at once. */
+	releaseAll(clientId: string) {
+		for (const [sessionId, holder] of [...this.holders]) if (holder === clientId) this.release(sessionId);
+	}
+
 	release(sessionId: string) {
 		const previous = this.controller(sessionId);
 		if (!this.holders.delete(sessionId)) return;

@@ -119,11 +119,11 @@ export function createApp(options: {
 		build: runningBuildId,
 	}));
 	register(app, hub, routes.openapi, () => openapi());
-	authRoutes(app, hub, clients);
+	authRoutes(app, hub, clients, controls);
 	controlRoutes(app, hub, controls, (id) => options.sessions.supervisor.get(id));
 	register(app, hub, routes.events, ({ query }, context) => {
 		const client = requestClient(context);
-		return events(context, hub, query.after, () => clients.stream(client));
+		return events(context, hub, query.after, (end) => clients.stream(client, end));
 	});
 	// The launcher focuses the open window and stops, so a launch that named a page sends it here and
 	// every window hears it. The one that has the focus goes there.

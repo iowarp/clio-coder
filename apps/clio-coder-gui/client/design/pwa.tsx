@@ -83,8 +83,11 @@ export function AppPreferencesPanel({
 	desktopManaged = false,
 	version,
 	platform,
+	revoke,
 }: {
 	enabled: boolean;
+	/** Signs this window's credential out on the server before the browser forgets the launch token. */
+	revoke: () => Promise<void>;
 	desktopManaged?: boolean;
 	version: string | undefined;
 	/** The server's `process.platform-arch`, which decides whether background setup exists at all. */
@@ -92,6 +95,7 @@ export function AppPreferencesPanel({
 }) {
 	const pwa = useSyncExternalStore(subscribe, read, read);
 	const [note, setNote] = useState("");
+	const [forgetting, setForgetting] = useState(false);
 	const message = note || pwa.message;
 	return (
 		<div className="pwa-controls">
@@ -155,8 +159,15 @@ export function AppPreferencesPanel({
 						This browser stays connected on this device. Forgetting it keeps saved tasks in Clio, removes unsent drafts from
 						this tab, and requires a fresh launch link to reconnect.
 					</p>
-					<button type="button" onClick={forgetBrowser}>
-						Forget this browser
+					<button
+						type="button"
+						disabled={forgetting}
+						onClick={() => {
+							setForgetting(true);
+							void forgetBrowser(revoke);
+						}}
+					>
+						{forgetting ? "Signing out…" : "Forget this browser"}
 					</button>
 				</>
 			) : (

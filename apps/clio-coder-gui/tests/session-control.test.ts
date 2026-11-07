@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { Value } from "typebox/value";
 import { lostControlNotice } from "../client/chat/control-model.js";
 import { Problem } from "../contracts/common.js";
@@ -69,6 +70,47 @@ test("one window drives a session; another views it until it takes control, and 
 	// A session this server does not hold has no control to read or take.
 	assert.equal((await a.request("/api/sessions/no-such-session/control")).status, 404);
 	assert.equal((await a.post("/api/sessions/no-such-session/control")).status, 404);
+});
+
+test("a window that signs out stops working at once and hands its tasks on", async (t) => {
+	const h = await harness();
+	t.after(h.close);
+	const seen: Event[] = [];
+	t.after(h.hub.connect(undefined, (event) => seen.push(event)));
+	const workspace = await h.workspaces.open(h.home.path);
+	const a = await h.client("Window A");
+	const b = await h.client("Window B");
+	const session = await json(await a.post(`/api/workspaces/${workspace.id}/sessions`), SessionSnapshot);
+	const autonomy = `/api/sessions/${session.id}/autonomy`;
+	assert.equal((await b.post(autonomy, { level: "yolo" })).status, 409);
+	const ticket = async () => ((await (await a.post("/api/events/ticket")).json()) as { ticket: string }).ticket;
+	const stream = await h.app.request(`http://127.0.0.1:4317/api/events?ticket=${await ticket()}`);
+	assert.equal(stream.status, 200);
+	const unspent = await ticket();
+
+	assert.equal((await a.post("/api/auth/revoke")).status, 200);
+	// The open stream ends from the server's side rather than carrying events to a signed-out window.
+	const reader = stream.body?.getReader();
+	assert.ok(reader);
+	t.after(() => reader.cancel());
+	const ended = (async () => {
+		for (;;) if ((await reader.read()).done) return true;
+	})();
+	assert.equal(await Promise.race([ended, setTimeout(5_000, false)]), true, "the revoked client's stream stayed open");
+	assert.equal((await a.request("/api/meta")).status, 401);
+	for (const path of ["/api/auth/rotate", "/api/auth/revoke", "/api/events/ticket"])
+		assert.equal((await a.post(path)).status, 401, path);
+	assert.equal((await h.app.request(`http://127.0.0.1:4317/api/events?ticket=${unspent}`)).status, 401);
+	// Its task is free at once, and the viewer is told so instead of waiting out the holder's presence.
+	const released = seen.filter((event) => event.type === "session.control").at(-1);
+	assert.ok(released?.type === "session.control");
+	assert.deepEqual(released.payload, {
+		resource: session.id,
+		controller: null,
+		previous: { clientId: a.clientId, label: "Window A" },
+	});
+	assert.equal((await b.post(autonomy, { level: "yolo" })).status, 200);
+	assert.equal((await b.request("/api/meta")).status, 200);
 });
 
 test("a holder that went away is claimed by the next window to act, never by one that only opened it", () => {

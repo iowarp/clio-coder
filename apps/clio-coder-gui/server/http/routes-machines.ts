@@ -85,7 +85,12 @@ export function machinesRoutes(
 		const url = new URL(context.req.url);
 		const path = url.pathname.slice(`/m/${id}`.length);
 		// A browser's credentials and tickets belong to this app; the node issues its own.
-		if (path === routes.authClients.path || path === routes.authRotate.path || path === routes.eventTicket.path)
+		if (
+			path === routes.authClients.path ||
+			path === routes.authRotate.path ||
+			path === routes.authRevoke.path ||
+			path === routes.eventTicket.path
+		)
 			throw new AppProblem("not_found", "Credentials and stream tickets are issued by this app, not through it.");
 		const client = requestClient(context);
 		const refused = () =>
