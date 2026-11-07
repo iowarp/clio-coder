@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, parse, relative, resolve } from "node:path";
+import { dirname, join, parse, posix, relative, resolve } from "node:path";
 import { readCiRunCommands } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -9,6 +9,7 @@ import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
+import { sumFacts } from "../../core/telemetry/pricing.js";
 import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
@@ -47,7 +48,12 @@ import {
 import type { Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
-import { fitGeneratedHandbook, handbookBlocks, normalizeHandbookRule } from "./handbook-budget.js";
+import {
+	fitGeneratedHandbook,
+	handbookBlocks,
+	normalizeHandbookRule,
+	type ProtectedHandbook,
+} from "./handbook-budget.js";
 import { instructionUnits } from "./instruction-units.js";
 import { ContextOperationAbortError } from "./operation-result.js";
 import { packageManager } from "./package-manager.js";
@@ -94,6 +100,18 @@ export interface BootstrapGenerateInput {
 	codewiki: Codewiki;
 	existingClioMd?: ParsedClioMd;
 	existingClioMdText?: string;
+	/**
+	 * Hard invariants of the handbook a rewrite replaces. The draft ignores
+	 * them as source; each one whose cited paths and symbols still exist is
+	 * carried forward verbatim.
+	 */
+	previousInvariants?: ReadonlyArray<string>;
+	/**
+	 * Custom sections of the handbook a rewrite replaces. Handbook units route a
+	 * section to fleet workers by its title, so a title the draft drops is
+	 * carried with the blocks that name a check the repository still defines.
+	 */
+	previousSections?: ReadonlyArray<ClioMdSection>;
 	/** What CI runs and which custom checks exist; the model explains each as a rule. */
 	enforcement?: EnforcementInventory;
 	depth?: BootstrapDepth;
@@ -135,7 +153,15 @@ export interface BootstrapGenerationTelemetry {
 	mode: BootstrapGenerationMode;
 	parserOutcome: BootstrapParserOutcome;
 	fallbackReason?: string;
+	/** The dispatch whose draft this generation reports on. */
 	run?: BootstrapRunTelemetry;
+	/**
+	 * Every dispatch this generation made, in order: schema fallback, repair and
+	 * section requests each spend tokens and tool calls that `run` alone omits.
+	 */
+	runs?: ReadonlyArray<BootstrapRunTelemetry>;
+	/** Monotonic span of the whole generation, every dispatch included. */
+	durationMs?: number;
 	repairRan?: boolean;
 	repairProducedHandbook?: boolean;
 }
@@ -666,6 +692,8 @@ interface ModelGroundingCorpus {
 	repositoryPaths: ReadonlySet<string>;
 	/** Lowercased text of the visible repository files, read once on first need. */
 	repositoryText: () => string;
+	/** Lowercased text of one visible repository file, or null when it cannot be read. */
+	fileText: (path: string) => string | null;
 	/** Opening text of each long package script body, whitespace-collapsed. */
 	scriptRecitals: ReadonlyArray<string>;
 	/** Script-specific bodies prevent test:full's smoke glob from being attributed to test. */
@@ -748,6 +776,7 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		// An unreadable tree leaves the indexed evidence as the only grounding.
 	}
 	let text: string | null = null;
+	const fileTexts = new Map<string, string | null>();
 	return {
 		lower: evidence.toLowerCase(),
 		indexedPaths,
@@ -763,6 +792,11 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 		repositoryText: () => {
 			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
 			return text;
+		},
+		fileText: (path) => {
+			if (!fileTexts.has(path))
+				fileTexts.set(path, repositoryPaths.includes(path) ? repositoryGroundingText(input.cwd, [path]) || null : null);
+			return fileTexts.get(path) ?? null;
 		},
 	};
 }
@@ -801,14 +835,42 @@ function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boole
 }
 
 /**
+ * A one-level glob, `docs/*.md`, over a directory holding files it would match
+ * deeper down. It reads as the directory's whole scope: a handbook said the
+ * documentation-links check covers `docs/*.md` and two root guides, "all
+ * three", while the check reads Markdown under `docs/` at every depth.
+ */
+function narrowerThanTree(token: string, evidence: ModelGroundingCorpus): boolean {
+	const slash = token.lastIndexOf("/");
+	const dir = token.slice(0, slash).replace(/^\.\//, "");
+	const name = token.slice(slash + 1);
+	if (slash <= 0 || !name.includes("*") || name.includes("**") || /[?<>{}[\]]/.test(name) || /[*?<>{}[\]]/.test(dir))
+		return false;
+	const pattern = new RegExp(
+		`^${name
+			.split("*")
+			.map((piece) => piece.replace(/[.+^$()|\\]/g, "\\$&"))
+			.join("[^/]*")}$`,
+	);
+	for (const path of evidence.repositoryPaths) {
+		if (!path.startsWith(`${dir}/`)) continue;
+		const rest = path.slice(dir.length + 1);
+		if (rest.includes("/") && pattern.test(rest.slice(rest.lastIndexOf("/") + 1))) return true;
+	}
+	return false;
+}
+
+/**
  * A citation may be a pattern rather than a name: a glob (`src/engine/**`,
  * `CLIO_*`), a placeholder (`tests/<name>.test.ts`), or a command chain joined
  * with `&&`. Each literal piece of at least three characters must ground on
- * its own, so a pattern can never smuggle in a name the repository lacks.
+ * its own, so a pattern can never smuggle in a name the repository lacks, and
+ * a one-level glob must not hide deeper matches (`narrowerThanTree`).
  */
 function groundedName(token: string, evidence: ModelGroundingCorpus): boolean {
 	const parts = token.split(/\s*&&\s*/).filter((part) => part.length > 0);
 	if (parts.length > 1) return parts.every((part) => groundedName(part, evidence));
+	if (narrowerThanTree(token, evidence)) return false;
 	const literals = token
 		.split(/<[^<>]*>|\*+|\?|\{[^{}]*\}/)
 		.map((piece) => piece.trim())
@@ -917,6 +979,243 @@ function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus)
 	);
 }
 
+const REVIEW_REQUIREMENT_RE = /\breviewers?\b|\brequired reviews?\b/i;
+/** An approval gate: approval in a sentence about a deployment environment, not "approval before disabling a check". */
+const APPROVAL_GATE_RE = /^(?=.*\bapprov(?:al|als|e|es|ed|ing)\b)(?=.*\benvironments?\b)/is;
+/**
+ * Review policy stated as configuration: branch protection and rulesets
+ * (`required_pull_request_reviews`, `required_approving_review_count`,
+ * `require_code_owner_reviews`), deployment environments (`reviewers:`,
+ * `required_reviewers`), or a CODEOWNERS file.
+ */
+const REVIEW_POLICY_KEY_RE =
+	/["']?\b(?:required_pull_request_reviews|required_approving_review_count|require_code_owner_reviews?|required_reviewers|dismiss_stale_reviews|require_last_push_approval|reviewers)["']?\s*:/i;
+
+function statesReviewPolicy(path: string, text: string): boolean {
+	return /(?:^|\/)CODEOWNERS$/.test(path) || REVIEW_POLICY_KEY_RE.test(text) || REVIEW_REQUIREMENT_RE.test(text);
+}
+
+/** A cited path as the repository names it: `./src/cart.ts:26` is `src/cart.ts`. */
+function citedPath(token: string): string {
+	const path = token.trim().replace(/^\.\//, "");
+	return CITED_LOCATION_RE.exec(path)?.[1] ?? path;
+}
+
+/** Cut `drop` from each parenthesized citation list, `(`a`, `b`)`, and the list when none remain. */
+function withoutCitations(sentence: string, drop: ReadonlySet<string>): string {
+	return sentence.replace(/\s*\((`[^`\n]+`(?:\s*(?:,|;|\band\b)\s*`[^`\n]+`)*)\)/g, (list, inner: string) => {
+		const spans = [...inner.matchAll(CODE_TOKEN_RE)];
+		const kept = spans.filter((span) => !drop.has(citedPath(span[1] ?? ""))).map((span) => span[0]);
+		if (kept.length === spans.length) return list;
+		return kept.length > 0 ? ` (${kept.join(", ")})` : "";
+	});
+}
+
+/** A line's list marker, and its prose sentences split without breaking inside a code span. */
+function proseSentences(line: string): { prefix: string; sentences: string[] } {
+	const prefix = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?/.exec(line)?.[0] ?? "";
+	const body = line.slice(prefix.length);
+	const masked = body.replace(/`[^`\n]*`/g, (span) => `\`${"x".repeat(span.length - 2)}\``);
+	const sentences: string[] = [];
+	let from = 0;
+	for (const match of masked.matchAll(/[.!?](?=\s+[A-Z`*])/g)) {
+		const at = (match.index ?? 0) + 1;
+		sentences.push(body.slice(from, at));
+		from = at;
+	}
+	sentences.push(body.slice(from));
+	return { prefix, sentences };
+}
+
+interface ClaimCitations {
+	/** Which code spans are cited files; concrete paths below the root by default. */
+	cites?: (path: string) => boolean;
+	/** Cited files that do not support the claim, cut from citation lists when another cited file does. */
+	unsupporting?: (cited: string[]) => string[];
+}
+
+/**
+ * Append `(unverified: …)` to each sentence of a line that makes a `claim` the
+ * files it cites do not support; `unsupported` names what is missing, or null.
+ * The claim may still hold, so the sentence stays, marked as not found in what
+ * it cites, rather than vanishing as a safety rule.
+ */
+function withUnsupportedClaimsMarked(
+	line: string,
+	claim: RegExp,
+	unsupported: (cited: string[]) => string | null,
+	citations: ClaimCitations = {},
+): string {
+	if (!claim.test(line)) return line;
+	const cites = citations.cites ?? ((path: string) => CONCRETE_FILE_RE.test(path));
+	const { prefix, sentences } = proseSentences(line);
+	const marked = sentences.map((sentence) => {
+		if (!claim.test(sentence)) return sentence;
+		const cited = [
+			...new Set([...sentence.matchAll(CODE_TOKEN_RE)].map((match) => citedPath(match[1] ?? "")).filter(cites)),
+		];
+		const missing = cited.length > 0 ? unsupported(cited) : null;
+		if (missing === null) return withoutCitations(sentence, new Set(citations.unsupporting?.(cited) ?? []));
+		const note = ` (unverified: ${missing})`;
+		const end = /([.!?])(\s*)$/.exec(sentence);
+		return end ? `${sentence.slice(0, end.index)}${note}${end[1]}${end[2]}` : `${sentence.trimEnd()}${note}`;
+	});
+	return `${prefix}${marked.join("").trim()}`;
+}
+
+/**
+ * Every generated handbook said the `release` environment "in
+ * `.github/workflows/release.yml`" requires the owner as reviewer: the path is
+ * real, so the citation grounded, but reviewers are a GitHub environment setting
+ * that only `CONTRIBUTING.md` describes, and the workflow names no reviewer. A
+ * later one cited both for the environment's owner approval; the workflow is cut
+ * from that citation list, since the guide states the policy.
+ */
+function withUnsupportedReviewRequirementsMarked(line: string, evidence: ModelGroundingCorpus): string {
+	const statesPolicy = (path: string): boolean => {
+		const text = evidence.fileText(path);
+		return text === null || statesReviewPolicy(path, text);
+	};
+	return withUnsupportedClaimsMarked(
+		line,
+		new RegExp(`${REVIEW_REQUIREMENT_RE.source}|${APPROVAL_GATE_RE.source}`, "is"),
+		(cited) =>
+			cited.some(statesPolicy) ? null : `${cited.map((path) => `\`${path}\``).join(", ")} states no review policy`,
+		{
+			// A root guide such as `CONTRIBUTING.md` states review policy, so it counts as cited.
+			cites: (path) => CONCRETE_FILE_RE.test(path) || evidence.repositoryPaths.has(path),
+			unsupporting: (cited) => cited.filter((path) => !statesPolicy(path)),
+		},
+	);
+}
+
+/** CI named in prose: an acronym, never a lowercase `ci-tests` stem. */
+const CI_PROSE_RE = /\bCI\b|\b[Cc]ontinuous [Ii]ntegration\b|\bGitHub Actions\b/;
+const WORKFLOW_PATH_RE = /\.github\/workflows\b/;
+
+/** Cut each sentence of a line that `drops`; the line is empty when none remains. */
+function withoutSentences(line: string, drops: (sentence: string) => boolean): string {
+	const { prefix, sentences } = proseSentences(line);
+	const kept = sentences.filter((sentence) => !drops(sentence));
+	if (kept.length === sentences.length) return line;
+	const body = kept.join("").trim();
+	return body ? `${prefix}${body}` : "";
+}
+
+/**
+ * Cut each sentence of a model line that speaks for CI, in either voice. Clio
+ * does not verify what CI runs, so a rule names the check and what it refuses:
+ * handbooks said both pin `--check` modes "fail CI on drift" when CI reached
+ * neither by name, and a phrase list of passive claims let "CI enforces" and
+ * "CI will reject" through. The line drops when no sentence remains.
+ */
+function withoutCiStatements(line: string): string {
+	return withoutSentences(line, (sentence) => CI_PROSE_RE.test(sentence.replace(/`[^`\n]*`/g, "")));
+}
+
+/**
+ * Cut each sentence that cites a workflow file. A workflow defines what CI
+ * runs, and every generated handbook cited `.github/workflows/release.yml` for
+ * an owner review that only `CONTRIBUTING.md` states; the path is real, so the
+ * citation grounded. A citation list that also names a supporting guide has
+ * already lost the workflow (`withUnsupportedReviewRequirementsMarked`).
+ */
+function withoutWorkflowCitations(line: string): string {
+	return withoutSentences(line, (sentence) => WORKFLOW_PATH_RE.test(sentence));
+}
+
+const PRELOAD_CLAIM_RE = /\bpre-?load(?:s|ed|ing)?\b/i;
+const MODULE_FILE_RE = /\.(?:[cm]?[jt]s|tsx|jsx)$/;
+const SHELL_SYNTAX_RE = /[;&|<>`$(){}\n'"\\]/;
+const NODE_PRELOAD_FLAGS = new Set(["--import", "--require", "-r", "--loader", "--experimental-loader"]);
+/** Options without a value that leave Node running the program after its preloads. */
+const NODE_RUNNING_FLAGS = new Set(["--test", "--watch", "--enable-source-maps", "--no-warnings", "--trace-warnings"]);
+/** Options with an inline value that leave Node running the program, and the values each accepts. */
+const NODE_RUNNING_VALUED_FLAGS = new Map([["--test-concurrency", /^[1-9]\d*$/]]);
+
+/**
+ * What a package script makes Node preload and run, read only from a plain
+ * `node` command whose preload flags precede the program. Shell syntax (an
+ * `echo`, a `cd` before the command, a chain) and flags after the program,
+ * which become the program's own arguments, prove nothing. So does any option
+ * not known to leave Node running the program: a non-executing mode such as
+ * `--check`, an unknown flag, or an invalid value such as
+ * `--disable-proto=invalid`, on which Node exits before it preloads anything.
+ */
+function plainNodeLaunch(script: string, dir: string): { preloads: string[]; program: string | null } | null {
+	if (SHELL_SYNTAX_RE.test(script)) return null;
+	const words = script.trim().split(/\s+/);
+	if (words[0] !== "node") return null;
+	const preloads: string[] = [];
+	for (let index = 1; index < words.length; index++) {
+		const word = words[index] ?? "";
+		if (word === "--") {
+			const program = words[index + 1];
+			return { preloads, program: program === undefined ? null : posix.join(dir, program) };
+		}
+		if (!word.startsWith("-")) return { preloads, program: posix.join(dir, word) };
+		const equals = word.indexOf("=");
+		const flag = equals === -1 ? word : word.slice(0, equals);
+		const inline = equals === -1 ? undefined : word.slice(equals + 1);
+		if (NODE_PRELOAD_FLAGS.has(flag)) {
+			const value = inline ?? words[++index];
+			if (!value || value.startsWith("-")) return null;
+			preloads.push(posix.join(dir, value));
+			continue;
+		}
+		const runs = inline === undefined ? NODE_RUNNING_FLAGS.has(flag) : NODE_RUNNING_VALUED_FLAGS.get(flag)?.test(inline);
+		if (!runs) return null;
+	}
+	return { preloads, program: null };
+}
+
+/**
+ * Mark a module a line calls preloaded that no package script preloads. A
+ * generated handbook called both `tests/harness/tmp-root.ts` and
+ * `tests/harness/scratch-env.ts` preloaded; `test:file` preloads only the first,
+ * and tests import the second's helpers. Scripts of every visible package.json
+ * count, resolved from that package's directory, so a workspace app's own
+ * preload is supported. Only a plain `node` command counts (`plainNodeLaunch`);
+ * anything less certain marks the claim. The program such a script runs, such
+ * as a test runner, is the launcher, not a claimed preload.
+ */
+function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCorpus): string {
+	if (!PRELOAD_CLAIM_RE.test(line)) return line;
+	// fileText is lowercased, so every comparison here is.
+	const preloaded = new Set<string>();
+	const launchers = new Set<string>();
+	const addPreloads = (dir: string, script: string): void => {
+		const launch = plainNodeLaunch(script, dir);
+		if (!launch) return;
+		for (const path of launch.preloads) preloaded.add(path.toLowerCase());
+		if (launch.program) launchers.add(launch.program.toLowerCase());
+	};
+	for (const script of evidence.scriptBodies.values()) addPreloads("", script);
+	for (const path of evidence.repositoryPaths) {
+		if (!path.endsWith("/package.json")) continue;
+		try {
+			const scripts = (JSON.parse(evidence.fileText(path) ?? "{}") as { scripts?: unknown }).scripts;
+			if (!scripts || typeof scripts !== "object") continue;
+			for (const script of Object.values(scripts))
+				if (typeof script === "string") addPreloads(posix.dirname(path), script);
+		} catch {
+			// An unparsable manifest preloads nothing.
+		}
+	}
+	return withUnsupportedClaimsMarked(line, PRELOAD_CLAIM_RE, (cited) => {
+		const missing = cited.filter(
+			(path) => MODULE_FILE_RE.test(path) && !preloaded.has(path.toLowerCase()) && !launchers.has(path.toLowerCase()),
+		);
+		if (missing.length === 0) return null;
+		return `${missing.map((path) => `\`${path}\``).join(", ")} ${missing.length === 1 ? "is" : "are"} not preloaded by a package script`;
+	});
+}
+
+interface GroundingOptions {
+	/** Keep sentences that name CI: a carried hard invariant stays verbatim, and only model text is cut. */
+	keepCiStatements?: boolean;
+}
+
 /**
  * Keep a Scout line only when it cites the repository and every citation is real.
  *
@@ -935,7 +1234,8 @@ function correctSymbolAttributions(line: string, evidence: ModelGroundingCorpus)
  * `npm publish` in a repository with no publish script is dropped even though the
  * rest of the sentence is unremarkable, which was the real failure mode.
  */
-function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChars = MODEL_SECTION_MAX_CHARS): string {
+function groundedModelBody(body: string, evidence: ModelGroundingCorpus, options: GroundingOptions = {}): string {
+	const maxChars = MODEL_SECTION_MAX_CHARS;
 	const kept: string[] = [];
 	let inFence = false;
 	for (const rawLine of body.split(/\r?\n/)) {
@@ -951,10 +1251,17 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// Keep a nested bullet's indentation; flattening it turned a recipe's
 		// sub-steps into unrelated top-level rules.
 		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
-		const line = correctSymbolAttributions(
+		const cited = correctSymbolAttributions(
 			wrapBareCitations(inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`, evidence),
 			evidence,
 		);
+		const marked = withUnsupportedReviewRequirementsMarked(cited, evidence);
+		const line = withoutWorkflowCitations(
+			inFence
+				? cited
+				: withUnsupportedPreloadsMarked(options.keepCiStatements ? marked : withoutCiStatements(marked), evidence),
+		);
+		if (!line) continue;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
@@ -999,11 +1306,15 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 const MODEL_SECTION_MAX_CHARS = HANDBOOK_TARGETS.sectionChars;
 
 /** One model-written rule line, kept only when it passes the citation rule whole. */
-function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null): string | null {
+function groundedModelLine(
+	line: string,
+	evidence: ModelGroundingCorpus | null,
+	options: GroundingOptions = {},
+): string | null {
 	const trimmed = line.replace(/\s+/g, " ").trim();
 	if (trimmed.length === 0) return null;
 	if (!evidence) return trimmed;
-	return groundedModelBody(trimmed, evidence) || null;
+	return groundedModelBody(trimmed, evidence, options) || null;
 }
 
 /** Root handbooks are authored policy. A small model may summarize away a
@@ -1183,6 +1494,132 @@ function namesRuleCode(code: string, text: string): boolean {
 	return new RegExp(`\\b${parts[1]}s\\s+(?:[\\w-]+\\s*(?:,|and|or|/|&)\\s*)*${parts[2]}(?![a-z0-9])`).test(lower);
 }
 
+/** Scripts npm runs on install, pack, publish and version without being asked. */
+const LIFECYCLE_SCRIPTS: ReadonlySet<string> = new Set([
+	"preinstall",
+	"install",
+	"postinstall",
+	"prepublish",
+	"preprepare",
+	"prepare",
+	"postprepare",
+	"prepublishOnly",
+	"prepack",
+	"postpack",
+	"publish",
+	"postpublish",
+	"preversion",
+	"version",
+	"postversion",
+	"dependencies",
+]);
+
+interface EnforcementNames {
+	/** Lifecycle scripts package.json declares: cited only in backticks. */
+	scripts: ReadonlySet<string>;
+	/** Single-word failure codes (`lint`): cited in backticks, or named bare before "check" ("the prompts check"). */
+	codes: ReadonlySet<string>;
+	/** Codes with a hyphen or digit (`case-portable-paths`, `rule12`) and check functions, which prose names bare. */
+	named: ReadonlyArray<string>;
+}
+
+/**
+ * Every name under which the inventory shows a check failing a change: the
+ * checks and coded failures check files define, and the lifecycle scripts npm
+ * runs unasked. A check file's path is not one: a rule citing
+ * `scripts/check-hygiene.ts` may name a check that file no longer defines.
+ */
+function enforcementNames(input: BootstrapGenerateInput): EnforcementNames {
+	const scripts = new Set(Object.keys(packageScripts(input.cwd)).filter((name) => LIFECYCLE_SCRIPTS.has(name)));
+	const codes = new Set<string>();
+	const named = new Set<string>();
+	const addCode = (code: string): void => {
+		if (/[-\d]/.test(code)) named.add(code);
+		else codes.add(code);
+	};
+	for (const file of input.enforcement?.checkFiles ?? []) {
+		for (const check of file.checks) named.add(check);
+		for (const failure of file.failures) {
+			const head = /^([\w.:/-]+): /.exec(failure)?.[1];
+			for (const code of head?.split("/") ?? []) addCode(code);
+		}
+		for (const rule of file.rules ?? []) addCode(rule.code);
+	}
+	return { scripts, codes, named: [...named] };
+}
+
+/** A check function (`checkCasePortablePaths`) keyed as its failure code (`case-portable-paths`). */
+function checkCode(name: string): string {
+	return /^check[A-Z]/.test(name)
+		? name
+				.slice(5)
+				.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+				.toLowerCase()
+		: name.toLowerCase();
+}
+
+/** The enforcement a rule names, typed so a script and a code of one name stay apart: `script:prepublishOnly`, `code:case-portable-paths`. */
+function namedEnforcement(rule: string, names: EnforcementNames): string[] {
+	const found = new Set<string>();
+	for (const match of rule.matchAll(/`([^`\n]+)`/g)) {
+		const token = (match[1] ?? "").trim();
+		const script = /^(?:pnpm|npm|yarn|bun)(?: run)? ([\w:.-]+)$/.exec(token)?.[1] ?? token;
+		if (names.scripts.has(script)) found.add(`script:${script}`);
+		if (names.codes.has(token)) found.add(`code:${token.toLowerCase()}`);
+	}
+	const lower = rule.toLowerCase();
+	for (const code of names.codes) {
+		const exact = code.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		if (new RegExp(`(?<![\\w\`.:-])${exact}\\s+checks?\\b`).test(lower)) found.add(`code:${code.toLowerCase()}`);
+	}
+	for (const name of names.named) if (namesRuleCode(name, rule)) found.add(`code:${checkCode(name)}`);
+	return [...found];
+}
+
+/**
+ * The previous handbook's hard invariants, verbatim, while every path and
+ * symbol each one cites still grounds. A rewrite drafts afresh, and small
+ * models left check-enforced rules (case-colliding paths, retired HTML docs,
+ * the gitignored-literal join, the throwing `prepublishOnly`) out of Hard
+ * invariants, and reworded the published-tag rule only `CONTRIBUTING.md`
+ * states. A rule whose citations no longer ground is not carried; a carried
+ * rule keeps every word, including a sentence that names CI, but not one that
+ * cites a workflow file.
+ */
+function groundedPreviousInvariants(input: BootstrapGenerateInput, corpus: ModelGroundingCorpus): string[] {
+	const carried: string[] = [];
+	for (const invariant of input.previousInvariants ?? []) {
+		const rule = withoutWorkflowCitations(invariant.replace(/\s+/g, " ").trim());
+		if (rule && groundedModelLine(rule, corpus, { keepCiStatements: true }) !== null) pushUnique(carried, rule);
+	}
+	return carried;
+}
+
+/**
+ * Sections of the replaced handbook, cut to the blocks that name a check the
+ * repository still defines and whose citations still ground. A rewrite on mini
+ * dropped Docs and prose, the section documentation workers receive, while its
+ * documentation-links, product-namespace and prompts checks all still existed.
+ * A block is grounded like model text, so its sentences that name CI are cut.
+ */
+function enforcedPreviousSections(
+	input: BootstrapGenerateInput,
+	names: EnforcementNames,
+	corpus: ModelGroundingCorpus,
+): ClioMdSection[] {
+	const carried: ClioMdSection[] = [];
+	for (const section of input.previousSections ?? []) {
+		if (section.title === CHECKER_SECTION_TITLE) continue;
+		const blocks = handbookBlocks(section.body).flatMap((block) => {
+			if (namedEnforcement(block, names).length === 0) return [];
+			const grounded = groundedModelBody(block, corpus);
+			return grounded && namedEnforcement(grounded, names).length > 0 ? [grounded] : [];
+		});
+		if (blocks.length > 0) carried.push({ title: section.title, body: blocks.join("\n") });
+	}
+	return carried;
+}
+
 /**
  * A model rule the checker already states: it names only codes the checker
  * declares in `stated`, or restates one of them in other words.
@@ -1200,19 +1637,21 @@ function restatesCheckerRule(
 
 /**
  * The coded rules not stated above, listed so a checker rule is never silently
- * missing from the handbook. Rules the model already names or restates in
- * other words are left out.
+ * missing from the handbook. A rule the handbook names by code, or a kept rule
+ * states word for word, is left out. Sharing its citations is not stating it:
+ * a gotcha that `SURFACE_TOTAL_EXEMPTIONS` only shrinks cost rule14, that the
+ * surfaces sum no token or cost field, its place here.
  */
 function uncoveredCheckerSection(
 	rules: ReadonlyArray<CheckerRule>,
 	handbook: string,
-	keptTokens: ReadonlyArray<ReadonlySet<string>>,
+	keptKeys: ReadonlySet<string>,
 ): ClioMdSection | null {
 	const lines: string[] = [];
 	let chars = 0;
 	for (const rule of rules) {
 		if (namesRuleCode(rule.code, handbook)) continue;
-		if (restatesHandbookRule(handbookRuleTokens(rule.sentence), keptTokens)) continue;
+		if (keptKeys.has(normalizeHandbookRule(rule.sentence))) continue;
 		const line = `- ${rule.sentence}`;
 		if (chars + line.length + 1 > HANDBOOK_TARGETS.sectionChars - 200) break;
 		lines.push(line);
@@ -1293,6 +1732,7 @@ function stabilizeGeneratedOutput(
 	base: BootstrapStructuredOutput,
 	onModelSectionRetained?: () => void,
 	groundModelOutput = false,
+	onProtected?: (content: ProtectedHandbook) => void,
 ): BootstrapStructuredOutput {
 	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
 	const existing = input.existingClioMd;
@@ -1331,12 +1771,44 @@ function stabilizeGeneratedOutput(
 	const architecturalTokens = architectural.map((rule) => handbookRuleTokens(rule.sentence));
 	const restatesArchitecture = (rule: string): boolean =>
 		architectural.length > 0 && restatesCheckerRule(rule, architectural, checkerRules, architecturalTokens);
+	const names = enforcementNames(input);
+	const carryCorpus =
+		(input.previousInvariants?.length ?? 0) > 0 || (input.previousSections?.length ?? 0) > 0
+			? (groundingCorpus ?? createModelGroundingCorpus(input))
+			: null;
+	const carried = carryCorpus
+		? groundedPreviousInvariants(input, carryCorpus).filter((rule) => !restatesArchitecture(rule))
+		: [];
+	const carriedBlocks = carryCorpus ? enforcedPreviousSections(input, names, carryCorpus) : [];
+	// A model rule gives way to carried content only when it states it word for word. One that resembles a
+	// carried rule may add a clause, flip a prohibition or change its scope, so both stay. A model copy of a
+	// carried invariant loses its CI sentences, so what remains of it counts as the carried rule too.
+	const carriedKeys = new Set(
+		[...carried, ...carried.map(withoutCiStatements), ...carriedBlocks.flatMap((section) => handbookBlocks(section.body))]
+			.filter((rule) => rule.length > 0)
+			.map(normalizeHandbookRule),
+	);
+	const duplicatesCarried = (rule: string): boolean => carriedKeys.has(normalizeHandbookRule(rule));
+	// Checker import rules, carried rules and authored rules lead and are never cut: a model rule gives way to
+	// them, and the cap applies to model rules alone. When they exceed the target on their own they all stay,
+	// and the handbook parser warns that hard invariants exceed it.
+	const authoredInvariants = existing?.invariants ?? [];
+	const protectedInvariants: string[] = [];
+	for (const rule of architectural) {
+		if (!authoredInvariants.includes(rule.sentence)) pushUnique(protectedInvariants, rule.sentence);
+	}
+	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushUnique(protectedInvariants, rule);
+	for (const rule of authoredInvariants) pushUnique(protectedInvariants, rule);
+	// A previous section block counts as stated only by a rule the final fit cannot cut, word for word.
+	const protectedKeys = new Set(protectedInvariants.map(normalizeHandbookRule));
+	const modelInvariants = invariants.filter(
+		(rule) => !protectedInvariants.includes(rule) && !restatesArchitecture(rule) && !duplicatesCarried(rule),
+	);
 	const retainedInvariants = [
-		...architectural.map((rule) => rule.sentence).filter((rule) => !invariants.includes(rule)),
-		// Authored invariants always stay; only a generated one gives way.
-		...invariants.filter((rule) => existing?.invariants.includes(rule) === true || !restatesArchitecture(rule)),
-	].slice(0, HANDBOOK_TARGETS.invariants);
-	const invariantTokens = retainedInvariants.map(handbookRuleTokens);
+		...protectedInvariants,
+		...modelInvariants.slice(0, Math.max(0, HANDBOOK_TARGETS.invariants - protectedInvariants.length)),
+	];
+	const uncarriedInvariantTokens = retainedInvariants.filter((rule) => !carried.includes(rule)).map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
 		input.cwd,
 		[...retainedInvariants, ...conventions, ...(base.sections ?? []).map((section) => section.body)].join("\n"),
@@ -1345,10 +1817,15 @@ function stabilizeGeneratedOutput(
 	const retainedConventions = [
 		...(typescriptConvention ? [typescriptConvention] : []),
 		...conventions
-			.filter((rule) => !restatesHandbookRule(handbookRuleTokens(rule), invariantTokens) && !restatesArchitecture(rule))
+			.filter(
+				(rule) =>
+					!restatesHandbookRule(handbookRuleTokens(rule), uncarriedInvariantTokens) &&
+					!duplicatesCarried(rule) &&
+					!restatesArchitecture(rule),
+			)
 			.slice(0, HANDBOOK_TARGETS.conventions - (typescriptConvention ? 1 : 0)),
 	];
-	const keptRuleTokens = [...invariantTokens, ...retainedConventions.map(handbookRuleTokens)];
+	const uncarriedRuleTokens = [...uncarriedInvariantTokens, ...retainedConventions.map(handbookRuleTokens)];
 
 	const verification = verificationSection(input.cwd, tomlFiles);
 	const inferredSections = inferHeuristicSections(input);
@@ -1356,13 +1833,15 @@ function stabilizeGeneratedOutput(
 	const ordinarySections: ClioMdSection[] = [];
 	const modelSections = new Set<ClioMdSection>();
 	const seenSectionTitles = new Set<string>();
-	const addSection = (section: ClioMdSection, modelSection = false): boolean => {
+	const addSection = (section: ClioMdSection, modelSection = false, carriedSection = false): boolean => {
 		if (VERIFICATION_SECTION_RE.test(section.title)) return false;
+		const restatesKept = (block: string): boolean =>
+			carriedSection
+				? protectedKeys.has(normalizeHandbookRule(block))
+				: restatesHandbookRule(handbookRuleTokens(block), uncarriedRuleTokens) || duplicatesCarried(block);
 		const body = handbookBlocks(section.body)
 			.filter(
-				(block) =>
-					!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) ||
-					(!restatesHandbookRule(handbookRuleTokens(block), keptRuleTokens) && !restatesArchitecture(block)),
+				(block) => !/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || (!restatesKept(block) && !restatesArchitecture(block)),
 			)
 			.join("\n");
 		if (!body.trim()) return false;
@@ -1384,18 +1863,60 @@ function stabilizeGeneratedOutput(
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized) addSection(sanitized, true);
 	}
+	// A previous section returns under its title when the draft dropped the title. Under a kept title, its
+	// enforced blocks lead, verbatim, and the model's blocks follow unless one states a carried block word for
+	// word: naming the same check is not stating the same instruction. A block a protected rule or an earlier
+	// carried block states word for word is not repeated. Only the carried blocks are protected, so neither the
+	// section limit nor the final fit cuts them, while the model's additions fit like any other content.
+	const carriedSections = new Map<ClioMdSection, string[]>();
+	const carriedSeen = new Set(protectedKeys);
+	for (const section of carriedBlocks) {
+		const blocks = handbookBlocks(section.body).filter((block) => {
+			const blockKey = normalizeHandbookRule(block);
+			if (carriedSeen.has(blockKey)) return false;
+			carriedSeen.add(blockKey);
+			return true;
+		});
+		if (blocks.length === 0) continue;
+		const key = section.title.replace(/\s+/g, " ").trim().toLowerCase();
+		const index = ordinarySections.findIndex((kept) => kept.title.replace(/\s+/g, " ").trim().toLowerCase() === key);
+		const current = ordinarySections[index];
+		if (!current) {
+			const retained = addSection({ title: section.title, body: blocks.join("\n") }, false, true)
+				? ordinarySections.at(-1)
+				: undefined;
+			if (retained) carriedSections.set(retained, handbookBlocks(retained.body));
+			continue;
+		}
+		const blockKeys = new Set(blocks.map(normalizeHandbookRule));
+		const additions = handbookBlocks(current.body).filter((block) => !blockKeys.has(normalizeHandbookRule(block)));
+		const merged = { ...current, body: [...blocks, ...additions].join("\n") };
+		ordinarySections[index] = merged;
+		if (modelSections.delete(current)) modelSections.add(merged);
+		carriedSections.set(merged, blocks);
+	}
+	const keptRules = [
+		...retainedInvariants,
+		...retainedConventions,
+		...ordinarySections.flatMap((section) => handbookBlocks(section.body)),
+	];
 	const checkerSection = uncoveredCheckerSection(
 		checkerRules.filter((rule) => !rule.architectural),
-		[...retainedInvariants, ...retainedConventions, ...ordinarySections.map((section) => section.body)].join("\n"),
-		[...keptRuleTokens, ...ordinarySections.flatMap((section) => handbookBlocks(section.body).map(handbookRuleTokens))],
+		keptRules.join("\n"),
+		new Set(keptRules.map(normalizeHandbookRule)),
 	);
 	if (checkerSection) addSection(checkerSection);
 	for (const section of inferredSections) addSection(section);
 	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
-	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);
+	let room = ordinaryLimit - carriedSections.size;
+	const retainedOrdinarySections = ordinarySections.filter((section) => carriedSections.has(section) || room-- > 0);
 	for (const section of retainedOrdinarySections) {
 		if (modelSections.has(section)) onModelSectionRetained?.();
 	}
+	onProtected?.({
+		invariants: protectedInvariants,
+		sections: [...carriedSections].map(([section, blocks]) => ({ title: section.title, body: blocks.join("\n") })),
+	});
 	return {
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
@@ -1732,6 +2253,10 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 	};
 	const fallbackReason = boundedStateString(telemetry.fallbackReason, 500);
 	if (fallbackReason) state.fallbackReason = fallbackReason;
+	// The generation's own span, kept even when no dispatch ran; one dispatch's
+	// receipt is not the span of several.
+	const durationMs = safeStateCounter(telemetry.durationMs);
+	if (durationMs !== undefined) state.durationMs = durationMs;
 	const run = telemetry.run;
 	if (!run) return state;
 	state.structuredOutputMode = run.structuredOutputMode;
@@ -1746,13 +2271,27 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 		const bounded = boundedStateString(value, 512);
 		if (bounded) state[key] = bounded;
 	}
+	// A dispatch without a run id never started a worker and spent nothing.
+	const runs = (telemetry.runs ?? [run]).filter((entry) => entry === run || entry.runId !== undefined);
+	const measuredTotal = (entries: ReadonlyArray<BootstrapRunTelemetry>): number | undefined => {
+		const sum = sumFacts(entries.flatMap((entry) => (entry.spend ? [entry.spend.totalTokens] : [])));
+		return sum.coverage.measured === entries.length ? sum.measured : undefined;
+	};
+	const across = (field: (entry: BootstrapRunTelemetry) => number | undefined): number | undefined => {
+		let total = 0;
+		for (const entry of runs) {
+			const value = field(entry);
+			if (value === undefined) return undefined;
+			total += value;
+		}
+		return total;
+	};
 	for (const [key, value] of [
-		// The project state keeps a plain count, so only a measured total is recorded (#434).
-		["tokenCount", run.spend?.totalTokens.kind === "measured" ? run.spend.totalTokens.value : undefined],
-		["toolCalls", run.toolCalls],
-		["durationMs", run.durationMs],
-		["promptBytes", run.promptBytes],
-		["outputBytes", run.outputBytes],
+		// The project state keeps a plain count, so a total is recorded only when every dispatch measured its own (#434).
+		["tokenCount", measuredTotal(runs)],
+		["toolCalls", across((entry) => entry.toolCalls)],
+		["promptBytes", across((entry) => entry.promptBytes)],
+		["outputBytes", across((entry) => entry.outputBytes)],
 	] as const) {
 		const counter = safeStateCounter(value);
 		if (counter !== undefined) state[key] = counter;
@@ -1960,6 +2499,9 @@ async function runBootstrapWork(
 	const existingClioMdText = useExistingClioMdAsSource ? originalClioMdText : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
 	const existingParsed = existingClioMd?.ok ? existingClioMd.value : undefined;
+	const replaced = hadClioMd && input.rewriteClioMd === true ? tryReadClioMd(cwd) : null;
+	const previousInvariants = replaced?.ok && replaced.value ? replaced.value.invariants : [];
+	const previousSections = replaced?.ok && replaced.value ? replaced.value.sections : [];
 	const replaceClioMd = input.applyClioMd === true || input.rewriteClioMd === true;
 	if (
 		input.adopt === true &&
@@ -1984,6 +2526,7 @@ async function runBootstrapWork(
 	const shouldPropose =
 		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
+	let protectedContent: ProtectedHandbook | undefined;
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
 		parserOutcome: "not-run",
@@ -2033,6 +2576,8 @@ async function runBootstrapWork(
 			repositoryFiles,
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
+			...(previousInvariants.length > 0 ? { previousInvariants } : {}),
+			...(previousSections.length > 0 ? { previousSections } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
 			reportGeneration,
 			missingSections: (draft) => missingHandbookSections({ cwd, enforcement }, draft),
@@ -2088,12 +2633,17 @@ async function runBootstrapWork(
 				repositoryFiles,
 				...(existingParsed ? { existingClioMd: existingParsed } : {}),
 				...(existingClioMdText ? { existingClioMdText } : {}),
+				...(previousInvariants.length > 0 ? { previousInvariants } : {}),
+				...(previousSections.length > 0 ? { previousSections } : {}),
 			},
 			output,
 			() => {
 				retainedModelSections += 1;
 			},
 			generation.mode === "model",
+			(content) => {
+				protectedContent = content;
+			},
 		);
 		if (generation.mode === "model" && retainedModelSections === 0) {
 			generation = {
@@ -2123,7 +2673,14 @@ async function runBootstrapWork(
 	if (input.adopt === true) {
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
-	if (shouldGenerate && generation.mode !== "existing") output = fitGeneratedHandbook(output);
+	if (shouldGenerate && generation.mode !== "existing") {
+		output = fitGeneratedHandbook(output, protectedContent, ({ chars, lines }) =>
+			warn(
+				input.io,
+				`  warning: the carried and authored hard invariants and carried section blocks exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
+			),
+		);
+	}
 	if (shouldGenerate && generation.mode === "model") {
 		for (const section of missingHandbookSections(
 			{ cwd, ...(enforcementSeen ? { enforcement: enforcementSeen } : {}) },

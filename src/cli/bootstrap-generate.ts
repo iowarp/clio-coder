@@ -411,14 +411,20 @@ async function attemptBootstrapDispatch(
 async function generateBootstrapWithModel(
 	dispatch: DispatchContract,
 	input: BootstrapGenerateInput,
-	route?: BootstrapRoute,
+	route: BootstrapRoute | undefined,
+	runs: BootstrapRunTelemetry[],
+	generationStartedAt: number,
 ): Promise<BootstrapStructuredOutput> {
 	let prompt = buildBootstrapPrompt(input);
+	// The draft's own dispatch; repair and section requests below never replace
+	// it, they only add their spend to `runs`.
 	let attemptTelemetry: BootstrapGenerationTelemetry | undefined;
+	let latestAttempt: BootstrapGenerationTelemetry | undefined;
 	const attemptInput: BootstrapGenerateInput = {
 		...input,
 		reportGeneration: (telemetry) => {
-			attemptTelemetry = telemetry;
+			latestAttempt = telemetry;
+			if (telemetry.run) runs.push(telemetry.run);
 		},
 	};
 	const policy = BOOTSTRAP_DEPTH_POLICY[input.depth ?? "standard"];
@@ -462,18 +468,31 @@ async function generateBootstrapWithModel(
 			...(route ? { target: route.target } : {}),
 			...(route?.model ? { model: route.model } : {}),
 		});
+	const attempt = async (
+		attemptPrompt: string,
+		structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
+	): Promise<BootstrapStructuredOutput> => {
+		latestAttempt = undefined;
+		try {
+			return await attemptBootstrapDispatch(
+				dispatch,
+				attemptInput,
+				attemptPrompt,
+				startedAtClock,
+				structuredOutputMode,
+				timeoutMs,
+				dispatchBootstrap,
+			);
+		} catch (err) {
+			// A refused or failed dispatch still spent what its worker used.
+			if (err instanceof BootstrapAttemptError) runs.push(err.telemetry);
+			throw err;
+		}
+	};
 	let output: BootstrapStructuredOutput;
 	let mode: BootstrapRunTelemetry["structuredOutputMode"] = "native-schema";
 	try {
-		output = await attemptBootstrapDispatch(
-			dispatch,
-			attemptInput,
-			prompt,
-			startedAtClock,
-			"native-schema",
-			timeoutMs,
-			dispatchBootstrap,
-		);
+		output = await attempt(prompt, "native-schema");
 	} catch (err) {
 		const refusal = responseSchemaRefusal(err);
 		if (refusal === null) throw err;
@@ -484,16 +503,9 @@ async function generateBootstrapWithModel(
 			detail: refusal,
 		});
 		mode = "prompt-parser";
-		output = await attemptBootstrapDispatch(
-			dispatch,
-			attemptInput,
-			prompt,
-			startedAtClock,
-			"prompt-parser",
-			timeoutMs,
-			dispatchBootstrap,
-		);
+		output = await attempt(prompt, "prompt-parser");
 	}
+	attemptTelemetry = latestAttempt;
 	const feedback = input.assessDraft?.(output);
 	// An identical deterministic retry reproduces the empty draft; change its task within the original deadline.
 	if (feedback && performance.now() - startedAtClock < timeoutMs) {
@@ -508,17 +520,12 @@ async function generateBootstrapWithModel(
 			detail: feedback,
 		});
 		try {
-			const repaired = await attemptBootstrapDispatch(
-				dispatch,
-				attemptInput,
-				prompt,
-				startedAtClock,
-				mode,
-				timeoutMs,
-				dispatchBootstrap,
-			);
+			const repaired = await attempt(prompt, mode);
 			producedHandbook = input.assessDraft?.(repaired) === null;
-			if (producedHandbook) output = repaired;
+			if (producedHandbook) {
+				output = repaired;
+				attemptTelemetry = latestAttempt;
+			}
 		} catch {
 			// A failed repair retains the original empty draft for the existing heuristic fallback decision.
 		}
@@ -546,15 +553,7 @@ async function generateBootstrapWithModel(
 			detail: missing.map((section) => section.title).join(", "),
 		});
 		try {
-			const extra = await attemptBootstrapDispatch(
-				dispatch,
-				attemptInput,
-				`${prompt}\n\n${request}`,
-				startedAtClock,
-				mode,
-				timeoutMs,
-				dispatchBootstrap,
-			);
+			const extra = await attempt(`${prompt}\n\n${request}`, mode);
 			const present = new Set((output.sections ?? []).map((section) => section.title.toLowerCase()));
 			const added = (extra.sections ?? []).filter((section) => !present.has(section.title.toLowerCase()));
 			if (added.length > 0) output = { ...output, sections: [...(output.sections ?? []), ...added] };
@@ -562,7 +561,12 @@ async function generateBootstrapWithModel(
 			// The draft stands without the section; context init warns that it is missing.
 		}
 	}
-	if (attemptTelemetry) input.reportGeneration?.(attemptTelemetry);
+	if (attemptTelemetry)
+		input.reportGeneration?.({
+			...attemptTelemetry,
+			runs: [...runs],
+			durationMs: Math.round(performance.now() - generationStartedAt),
+		});
 	return output;
 }
 
@@ -626,16 +630,19 @@ async function loadBootstrapDispatch(): Promise<{
 export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = {}): BootstrapGenerate {
 	return async (input) => {
 		let stop: (() => Promise<void>) | null = null;
+		const runs: BootstrapRunTelemetry[] = [];
+		// One monotonic span for the whole generation, reported by success and fallback alike.
+		const startedAtClock = performance.now();
 		try {
 			if (options.dispatch) {
 				const route = options.route ?? options.resolveRoute?.();
-				return await generateBootstrapWithModel(options.dispatch, input, route);
+				return await generateBootstrapWithModel(options.dispatch, input, route, runs, startedAtClock);
 			}
 			{
 				const lazy = await loadBootstrapDispatch();
 				stop = lazy.stop;
 				const route = options.route ?? resolveBootstrapRoute(lazy.config.get());
-				return await generateBootstrapWithModel(lazy.dispatch, input, route);
+				return await generateBootstrapWithModel(lazy.dispatch, input, route, runs, startedAtClock);
 			}
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -645,6 +652,8 @@ export function modelBootstrapGenerate(options: ModelBootstrapGenerateOptions = 
 				parserOutcome: err instanceof BootstrapAttemptError ? err.parserOutcome : "not-run",
 				fallbackReason: error.message,
 				...(err instanceof BootstrapAttemptError ? { run: err.telemetry } : {}),
+				...(runs.length > 0 ? { runs } : {}),
+				durationMs: Math.round(performance.now() - startedAtClock),
 			};
 			input.progress?.({
 				phase: "generate",

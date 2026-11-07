@@ -21,47 +21,59 @@ Clio Coder is a TypeScript/Node.js project. It is an open-source coding agent fo
 15. Do not run `npm publish` directly: `prepublishOnly` in `package.json` throws; publication happens only through the approved GitHub release job.
 16. Never join a gitignored literal onto this checkout's own root in `scripts/` or `src/`: it works in your working copy but is absent on a fresh clone (gitignored-reference check, #84).
 17. Do not restore retired HTML documentation: `docs/html/` must not exist, no Markdown may link into it, and `package.json` files must not ship `docs/html/**` (docs-source and prompts checks).
+18. Never commit or push a path that `.gitignore` excludes: `scripts/git-guard.mjs` refuses the commit/push and check-hygiene's tracked-ignored rule fails; unstage with `git rm --cached <path>`.
+19. Do not move a published tag, rebuild a published candidate, or republish different bytes (`CONTRIBUTING.md`); publish order is npm first, then the GitHub tag/release, then promote `main` and `gh-pages`, resuming a partial failure from the original artifact.
+20. Provider usage in message/ledger payloads is immutable outside `src/engine/**`: rule12 in `tests/boundaries/check-boundaries.ts` forbids mutating it or putting usage-shaped fields on ledger payloads; keep Clio accounting beside the raw usage and link the call journal.
 
 ## Conventions
 
-- `tsconfig.json` enables `exactOptionalPropertyTypes` (an optional property is omitted, never assigned `undefined`), `noUncheckedIndexedAccess` (an index access yields `T | undefined`), `noImplicitOverride` (an overriding member is marked `override`).
-- Formatting is tabs, double quotes, trailing commas, 120 columns per `biome.json`; `pnpm run lint` runs `biome check .` plus `scripts/check-hygiene.ts`, so a biome-clean file can still fail the gate on hygiene rules.
-- Money is formatted only in `src/core/telemetry/render.ts` via `renderPricing`, `renderUsdSum` or a DTO display; GUI browser code consumes server-rendered display strings (rule10).
-- Token and cost figures in `src/interactive/**`, `src/engine/acp/**` and `src/cli/**` must be the read model's quantity displays, never fresh sums of token/cost fields, unless the function is named with a reason in `SURFACE_TOTAL_EXEMPTIONS` (rule14).
-- Terminal colors live only under `src/interactive/theme/`: raw SGR escapes, `38;2;`/`38;5;` fragments and hex colors anywhere else in `src/interactive/**` fail the theme-discipline check in `scripts/check-hygiene.ts`.
+- `tsconfig.json` enables `noImplicitOverride` (an overriding member is marked `override`).
+- Formatting is tabs, double quotes, trailing commas, 120 columns per `biome.json`; `pnpm run lint` runs `biome check .` plus `scripts/check-hygiene.ts`, so a formatting-only diff still fails the gate.
+- TypeScript is strict with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` and `noUnusedLocals` in `tsconfig.json`; index access returns `T | undefined` and optional properties must not be assigned `undefined` explicitly.
+- Terminal colors live in `src/interactive/theme/`: raw SGR escapes, `38;2;`-style fragments and hex colors anywhere else under `src/interactive/**` fail the theme-discipline check in `scripts/check-hygiene.ts`.
+- Money is formatted only through `renderPricing`, `renderUsdSum` or a DTO display in `src/core/telemetry/render.ts` (rule10); GUI code consumes server-rendered display strings.
 
 ## Change recipes
 
 - Adding or changing a setting: update `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` in `src/core/defaults.ts` together (the defaults-yaml check parses the YAML and deep-compares it to the object), add an inventory row for every new leaf path under `## Settings inventory` in `docs/guide/configuration-and-targets.md` with its default and an effect timing word (`immediately`, `next turn`, `next session`, `next dispatch`, `restart`), and keep the section at 40+ rows.
-- Adding a `CLIO_*` environment variable read in `src/`: add a row to `docs/guide/environment-variables.md`; removing a read requires deleting its row. The check scans both directions, so a comment naming a removed variable does not keep a row alive.
 - Writing a new entry under the state root (`clioStateDir()`, `stateRoot`, etc.): name it in `docs/architecture/artifact-placement.md` or the state-root-inventory check fails.
-- Resolving a new path from `resolvePackageRoot()` in `src/`: add that file or tree to the `files` allowlist in `package.json` (and to `scripts/release-manifest.json` if it is release-required); bare root-only use must be one of the files in `ROOT_ONLY_RESOLVERS`.
-- Editing any `library/skills/<name>/SKILL.md`: rerun `pnpm run skills:pin` to regenerate `library/skills/registry.yaml`; adding or editing any curated package under `library/` requires `pnpm run library:pin`. Both `--check` modes fail CI on drift.
-- Editing the README install steps: the npm block must install `@iowarp/clio-coder`, and the From-source block must keep the exact `export PATH=` line `scripts/install-local.sh` prints, a `--version` verification by installed path after that export, and a clone pinned to the current version branch; the Get started section must ask `command -v clio-coder`.
+- New setting: update `DEFAULT_SETTINGS` and `DEFAULT_SETTINGS_YAML` in `src/core/defaults.ts`, add a row with default value and effect timing to the `## Settings inventory` section of `docs/guide/configuration-and-targets.md`; if it reads an env var, also add a row to `docs/guide/environment-variables.md`.
+- New runtime resource resolved from the installed package root: add the path to the `files` allowlist in `package.json` and to `requiredFiles`/`requiredPrefixes` in `scripts/release-manifest.json`; `checkPackaging` in `scripts/check-hygiene.ts` cross-checks both against every `resolvePackageRoot()` join in `src/**`, and a bare root use must be listed in `ROOT_ONLY_RESOLVERS`.
+- New state-root entry: write the file under the state root, then name the entry in `docs/architecture/artifact-placement.md` (state-root-inventory).
+- New skill or library payload: re-pin with `pnpm run skills:pin` / `pnpm run library:pin`; check-hygiene's library-pin rule runs `scripts/pin-library.ts --check` against `library/registry.yaml`.
 
 ## Tests
 
-- Ordinary CI runs only the explicit file lists in `scripts/ci-tests.mjs`: core is 25 named files in `tests/contracts/`, gui is 8 named files in `tests/` run from `apps/clio-coder-gui`, package is two files in `tests/smoke/`. A new regression test must be added to the matching list there or CI will not run it.
-- `pnpm run test:full` and `pnpm run test:package` are broader investigation commands, not part of ordinary CI; use them when a change touches behavior outside the core lists.
-- Run single files with `pnpm run test:file -- tests/contracts/<name>.test.ts`; it preloads `tests/harness/tmp-root.ts`, and state isolation comes from `tests/harness/scratch-env.ts`. Never mutate `process.stdout.write` across async test boundaries.
+- Ordinary development checks are the explicit lists in `scripts/ci-tests.mjs`: `pnpm run test` runs only the named `tests/contracts/*.test.ts` core files, and `pnpm run test:gui` runs the named GUI tests. A new regression test must be added to the matching list in `scripts/ci-tests.mjs` or it will not run; `pnpm run test:list` shows which `tests/contracts` files are omitted from the default tier.
+- `test:full`, `test:package` and `tests/extended/**` are full-investigation tiers, not part of the ordinary core list; `tests/contracts/instant-shell-import-graph.test.ts` (package tier) only fails after a full build because it walks built chunks.
+- Use `pnpm run test:file -- <paths>` for single files; it preloads `tests/harness/tmp-root.ts`, and `tests/harness/scratch-env.ts` provides state isolation (unverified: `tests/harness/scratch-env.ts` is not preloaded by a package script). Never mutate `process.stdout.write` across async test boundaries (`CONTRIBUTING.md`).
+
+## Git and release
+
+- Work on a focused branch cut from the current version branch (e.g. `v062`) and open the pull request against it; `main` moves only when a release ships (`CONTRIBUTING.md`).
+- Install git hooks with `pnpm run hooks:install` so `scripts/git-guard.mjs` blocks ignored paths before they leave the machine.
+- Publication is the approved GitHub release job only: `prepublishOnly` in `package.json` throws, and agents must leave npm publish and its approval to that job (`CONTRIBUTING.md`).
 
 ## Docs and prose
 
 - Every relative link, heading anchor, and backticked `src/`, `tests/`, `scripts/`, or `apps/` path in `docs/**/*.md`, `README.md`, and `CONTRIBUTING.md` must resolve; the documentation-links check fails on a missing target, anchor, or cited path.
 - Project state paths use the `clio-coder` namespace: `.clio` (without `-coder`) is banned in tracked text files by the product-namespace check, except `CHANGELOG.md`, `CLIO-CODER.md`, `docs/history/`, and `.github/releases/` which quote the old names.
 - New Markdown docs must be reachable by the docs corpus: the prompts check fails if a file under `docs/` (outside `docs/html/` and `docs/wiki/`) is missing from the `context(scope="docs")` corpus or vice versa.
-
-## Git and release
-
-- Work on a focused branch cut from the current version branch (e.g. `v062` for 0.6.2) and open the pull request against it; `main` moves only by fast-forward when a stable release completes.
-- Publish order is npm first, then the GitHub tag/release, then promote `main` and `gh-pages`; there is no atomic transaction across services, so resume a partial failure with the original artifact.
-- The `release` environment in `.github/workflows/release.yml` requires the owner as reviewer; agents must leave npm publish and that approval to the owner. Preserve the required check names `ci (22)` and `ci (24)`.
+- Links in `docs/**`, `README.md` and `CONTRIBUTING.md` are checked by check-hygiene's documentation-links rule: targets must exist, heading anchors must match the slugified heading, and backticked `src/`, `tests/`, `scripts/`, `apps/` paths must resolve in the checkout.
+- The README `## Get started` block is held to `scripts/install-local.sh`: it must contain the installer's exact `export PATH="<bin_dir>:$PATH"` line, verify with the installed launcher by path (not bare `clio-coder --version`), and clone with `--branch v<installable version>`; the npm block must install `@iowarp/clio-coder`.
+- Retired HTML documentation must not return: no `docs/html/` directory, no links to it from Markdown, and no `docs/html/**` in the package `files` (docs-source and prompts rules).
 
 ## Gotchas
 
-- Keep CLI subcommands dynamically imported to preserve fast `--help` and startup (`CONTRIBUTING.md`).
 - A function used only by its own file must not carry the `export` keyword: export-hygiene sweeps `src/entry`, `src/cli`, `src/core`, `src/engine`, `src/tools`, `src/interactive`, and `src/domains`.
-- An entry in `SURFACE_TOTAL_EXEMPTIONS` that no longer matches a token/cost fold fails the boundary check; the list only shrinks, so remove stale exemptions.
+- Export hygiene: a function used only by the file that declares it must not carry the `export` keyword; check-hygiene sweeps `src/entry`, `src/cli`, `src/core`, `src/engine`, `src/tools`, `src/interactive`, `src/domains` and fails on dead exports.
+- Scripts under `scripts/**` and `src/**` must not join a gitignored literal onto the checkout root (the `fileURLToPath(new URL(..., import.meta.url))` idiom): it works in your working copy but throws ENOENT on a fresh clone (gitignored-reference).
+- `biome.json` excludes `apps/clio-coder-gui`, `.claude`, `.clio-coder` and `dist`; GUI code is checked by its own workspace scripts (`pnpm run check:gui`).
+
+## Checker-enforced invariants
+
+Rules the project's checks declare that the rules above do not state, each in its checker's words. A change that breaks one fails that check.
+- `src/interactive/**`, `src/engine/acp/**` and `src/cli/**` sum no token or cost field: their figures are the read model's quantity displays, except the functions `SURFACE_TOTAL_EXEMPTIONS` names with a reason. Checked as `rule14` by `tests/boundaries/check-boundaries.ts`.
 
 ## Verification expectations
 

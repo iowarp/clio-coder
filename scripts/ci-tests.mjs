@@ -53,6 +53,7 @@ export const coreTests = [
 	"mcp-config-trust",
 	"url-userinfo-hold",
 	"url-credential-surfaces",
+	"bootstrap-grounding",
 	"in-prefix-summary",
 	"packed-source-directory",
 	"code-nav",
