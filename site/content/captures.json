@@ -6,14 +6,14 @@
 			"image": "assets/tui-boot.webp",
 			"original": "assets/tui-boot.png",
 			"width": 2240,
-			"height": 870,
+			"height": 886,
 			"label": "Ready",
-			"alt": "Clio Coder terminal at start: the Clio Coder mark, session start time, workspace and Git state, and the composer with the Nemotron 3.5 Lightning model.",
+			"alt": "Clio Coder terminal at start: the Clio Coder mark beside the model, autonomy, workspace and Git state, and the composer reporting the Qwen 3.8 model ready.",
 			"caption": "The terminal at start, with the project, its Git state, and the selected model.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. Fresh clio-coder launch in ~/projects/calibration-lab with Demo guidance on; the welcome panel and composer (rows 1-21)."
+			"version": "0.7.0-rc.1",
+			"capturedAt": "2026-11-07",
+			"source": "clio-coder 0.7.0-rc.1 (commit d84913de3) built from the repository, in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x. Chat: Qwen 3.8 27B through a LiteLLM gateway. Fresh clio-coder launch in ~/projects/calibration-lab, no prompt sent; the welcome panel, composer and footer (rows 1-23)."
 		},
 		"tui-verify": {
 			"image": "assets/tui-verify.webp",

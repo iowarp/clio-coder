@@ -95,34 +95,34 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "fe1d390cfa40f09bde7e5fd511eb05494bdd764ec32a4254add1f62ba577a761",
-			"provenance": "Actual capture of Clio Coder 0.6.0-dev (commit 9ade954) on 2026-10-01, installed with scripts/install.sh in an isolated profile. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane and rendered with xterm.js; Nemotron 3.5 Lightning through a LiteLLM gateway. Welcome panel and composer (rows 1-21).",
+			"sha256": "284f41d7dbbef31e43c0e130de517466319c004119878008a851c156568388e7",
+			"provenance": "Actual capture of Clio Coder 0.7.0-rc.1 (commit d84913de3) on 2026-11-07, built from the repository and run in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x; Qwen 3.8 27B through a LiteLLM gateway. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 1-23).",
 			"dimensions": {
 				"width": 2240,
-				"height": 870
+				"height": 886
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.png"],
-			"capturedVersion": "0.6.0-dev"
+			"capturedVersion": "0.7.0-rc.1"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "9bcdbac229a5f296d16b90ba8b2cc6f961157e84d52616e066d0388e363ed93f",
-			"provenance": "Actual capture of Clio Coder 0.6.0-dev (commit 9ade954) on 2026-10-01, installed with scripts/install.sh in an isolated profile. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane and rendered with xterm.js; Nemotron 3.5 Lightning through a LiteLLM gateway. Welcome panel and composer (rows 1-21).",
+			"sha256": "475eb28e4675e342c1983dda75473ebe384d05996583c9a56d6bebd310a29885",
+			"provenance": "Actual capture of Clio Coder 0.7.0-rc.1 (commit d84913de3) on 2026-11-07, built from the repository and run in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x; Qwen 3.8 27B through a LiteLLM gateway. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 1-23).",
 			"dimensions": {
 				"width": 2240,
-				"height": 870
+				"height": 886
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
 			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.webp"],
-			"capturedVersion": "0.6.0-dev"
+			"capturedVersion": "0.7.0-rc.1"
 		},
 		{
 			"id": "gui-conversation-png",

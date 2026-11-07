@@ -26,26 +26,26 @@
   },
   "assets/tui-boot.webp": {
     "width": 2240,
-    "height": 870,
-    "sha256": "9bcdbac229a5f296d16b90ba8b2cc6f961157e84d52616e066d0388e363ed93f",
+    "height": 886,
+    "sha256": "475eb28e4675e342c1983dda75473ebe384d05996583c9a56d6bebd310a29885",
     "variants": [
       {
         "path": "assets/responsive/tui-boot-640.webp",
         "width": 640,
-        "height": 249,
-        "sha256": "df8017d7391d91396f2c316d4a4a7ed80095daf193570aa064483cc5cff3ad0a"
+        "height": 253,
+        "sha256": "8a6b1a1363133f1696a719136152c65969a7af44a48f94d32569cad6289fdab9"
       },
       {
         "path": "assets/responsive/tui-boot-960.webp",
         "width": 960,
-        "height": 373,
-        "sha256": "f995f8b10d05de315a8087a9c3d3e6cb361c82a379f15fae9ad663da067b314c"
+        "height": 380,
+        "sha256": "b4fe77f6836be4dec3eee102a6dccf927c5addaeb717093e43f529b1b0373c69"
       },
       {
         "path": "assets/responsive/tui-boot-1280.webp",
         "width": 1280,
-        "height": 497,
-        "sha256": "19a394dbd5736e78160a599c8fad23c7b58cac9b80c99e1bbeaf8ab6e6a64f5d"
+        "height": 506,
+        "sha256": "b8879e048a563a75a26b8fb8b8b61a0b45c777b20a8a63305c2114765d68df1a"
       }
     ]
   },
