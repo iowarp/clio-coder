@@ -1,5 +1,5 @@
 import { deepEqual, equal, match, ok } from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
@@ -9,6 +9,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,8 +30,9 @@ import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // The 0.7.0 read-only contract: no file outside Clio's home changes. Clio still
 // writes its own home, so a read-only run keeps its session. The test
-// fingerprints the workspace (less Clio's project directory) and a sentinel
-// directory outside both, and never looks at the home.
+// fingerprints the workspace (less Clio's project directory, and with its Git
+// metadata, where a workspace snapshot would land) and a sentinel directory
+// outside both, and never looks at the home.
 
 const root = mkdtempSync(join(tmpdir(), "clio-coder-read-only-user-files-"));
 const home = join(root, "home");
@@ -63,6 +65,18 @@ before(async () => {
 	mkdirSync(sentinel);
 	mkdirSync(runTmp);
 	writeFileSync(join(work, "notes.txt"), "workspace\n");
+	// Older than the index, so a later `git status` finds it clean and rewrites nothing.
+	const past = new Date(Date.now() - 3_600_000);
+	utimesSync(join(work, "notes.txt"), past, past);
+	const git = (...args: string[]) =>
+		execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+			cwd: work,
+			stdio: "ignore",
+		});
+	git("init", "-q");
+	git("add", "-A");
+	git("commit", "-qm", "init");
+	git("status", "--porcelain");
 	writeFileSync(join(sentinel, "keep.txt"), "sentinel\n");
 	writeFileSync(join(home, "config", "settings.yaml"), DEFAULT_SETTINGS_YAML);
 	seedOpenAICompatToolOrchestrator(join(home, "config"), fixture.url);

@@ -1062,8 +1062,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): Promise<{ note: MiddlewareEffect | null; missing: string | null }> => {
 		const recoverable = decision.policy?.recoverable === true;
 		const take = deps.workspaceSnapshot;
-		if (take === undefined || (deps.principal ?? "main") !== "main") {
-			return { note: null, missing: recoverable ? "this session takes no workspace snapshots" : null };
+		// A read-only call changes no user file, and a snapshot would write refs into the user's repository.
+		const readOnly = deps.readOnly === true || options?.turnConstraints?.readOnly === true;
+		if (take === undefined || readOnly || (deps.principal ?? "main") !== "main") {
+			const why = readOnly ? "a read-only run takes no workspace snapshots" : "this session takes no workspace snapshots";
+			return { note: null, missing: recoverable ? why : null };
 		}
 		let effect: ClassifierCall = call;
 		try {

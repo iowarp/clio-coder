@@ -177,7 +177,7 @@ Recoverability is the layer that lets an undoable action run without an approval
 - every destructive call, every bash delete, every git discard (`checkout` with a pathspec, `.` or `--force`, `restore`, `clean`, `reset --hard`, `--merge` or `--keep`, `stash drop`, `clear` or `pop`), every branch delete (`git branch -d`, `-D` or `--delete`, reason `git-ref-delete`), and every `git reset` that names a commit other than `HEAD` (reason `git-ref-move`), each with a snapshot of its own;
 - every call admitted because a snapshot undoes it.
 
-This happens on every surface (TUI, ACP and headless) and at both levels. Dispatched workers take no snapshots.
+This happens on every surface (TUI, ACP and headless) and at both levels. Dispatched workers take no snapshots, and neither does a read-only run: it changes no user file, and a snapshot would write objects and refs into the user's repository.
 
 A snapshot captures tracked files and untracked files that are not ignored, in a private per-session index under `<stateDir>/snapshots/<session>/`, and stores the commit at `refs/clio-coder/snapshots/<session>/<n>`, which Git keeps in the common directory of a linked worktree ([store.ts](../../src/domains/workspace-snapshots/store.ts)). Ignored files, untracked files over 16 MiB and nested repositories are skipped and recorded. The operator's index, HEAD and branches are never touched, and the commit carries a fixed Clio Coder identity.
 
