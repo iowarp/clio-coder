@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
+import { QueryClient } from "@tanstack/react-query";
+import { createClient } from "../client/api/client.js";
+import { subscribe } from "../client/api/events.js";
 import { telemetryInvalidations } from "../client/telemetry/live-model.js";
 import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
@@ -16,6 +19,61 @@ test("a telemetry_update names the reads to refresh and folds nothing (#434)", (
 	assert.deepEqual(telemetryInvalidations({ topics: ["cache", "timeline", "runs"] }), ["telemetry"]);
 	assert.deepEqual(telemetryInvalidations({ topics: ["quota", "health"] }), []);
 	assert.deepEqual(telemetryInvalidations({ topics: [] }), []);
+});
+
+test("the browser subscribes to named telemetry updates and invalidates only their session", (t) => {
+	let source: EventTarget | undefined;
+	let stop = () => {};
+	t.after(() => stop());
+	class Source extends EventTarget {
+		constructor() {
+			super();
+			source = this;
+		}
+		close() {}
+	}
+	for (const [name, value] of [
+		["EventSource", Source],
+		["document", Object.assign(new EventTarget(), { visibilityState: "visible" })],
+	] as const) {
+		const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+		Object.defineProperty(globalThis, name, { configurable: true, value });
+		t.after(() => {
+			if (previous) Object.defineProperty(globalThis, name, previous);
+			else Reflect.deleteProperty(globalThis, name);
+		});
+	}
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	for (const key of ["telemetry", "session-usage"]) {
+		queries.setQueryData([key, "session-1"], {});
+		queries.setQueryData([key, "session-2"], {});
+	}
+	stop = subscribe(createClient("token"), queries, () => {});
+	assert.ok(source);
+	const event: Event = {
+		v: 1,
+		epoch: "epoch-1",
+		seq: 1,
+		at: new Date().toISOString(),
+		type: "telemetry.updated",
+		payload: {
+			resource: "session-1",
+			update: {
+				v: 1,
+				kind: "telemetry_update",
+				sessionId: "session-1",
+				seq: 1,
+				generatedAt: new Date().toISOString(),
+				topics: ["session", "cost"],
+			},
+		},
+	};
+	source.dispatchEvent(new MessageEvent(event.type, { data: JSON.stringify(event) }));
+	for (const key of ["telemetry", "session-usage"]) {
+		assert.equal(queries.getQueryState([key, "session-1"])?.isInvalidated, true, key);
+		assert.equal(queries.getQueryState([key, "session-2"])?.isInvalidated, false, key);
+	}
 });
 
 test("the live usage DTO carries the parity fixture's session totals as the read model words them (#434 §13.2)", async (t) => {

@@ -320,6 +320,7 @@ export function subscribe(
 			"machine.attach",
 			"interview.changed",
 			"queue.changed",
+			"telemetry.updated",
 			"app.launch",
 			...Object.keys(SessionDeltas),
 		])
