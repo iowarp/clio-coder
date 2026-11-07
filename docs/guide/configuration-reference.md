@@ -140,9 +140,9 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `safety.judge.allow` | `[]` | List of allow rules appended to the judge's defaults. | hot reload |
 | `safety.judge.deny` | `[]` | List of block rules appended to the judge's defaults. | hot reload |
 | `interface.exitSummary` | `"auto"` | `auto`, `brief`, `standard`, `report` or `off`. `auto` follows `interface.outputDetail` (`compact` gives `brief`, `detailed` gives `report`, otherwise `standard`). `brief` prints the model, total tokens and cost, `standard` the visit's activity and usage, `report` a one-page report, `off` only how to resume. `full` is read as `standard`. Read at the next exit. | hot reload |
-| `interface.demo` | `true` | Boolean. Full welcome presentation, tips and footer hints; off starts with a compact header. | hot reload |
+| `interface.demo` | `true` | Boolean. Tier-bounded welcome and learning tips; off starts with an identity header. Immediate controls, motion preferences and stream pacing are independent. | hot reload |
 | `interface.terminalProgress` | `false` | Boolean. Running-task progress in terminals that show tab or taskbar badges. | next turn |
-| `interface.outputDetail` | `"standard"` | `compact`, `standard` or `detailed`. `minimal`, `default` and `verbose` are accepted as synonyms. | hot reload |
+| `interface.outputDetail` | `"standard"` | `compact`, `standard` or `detailed`, labelled Minimal, Default and Detailed. Governs terminal presentation, not model reasoning. `minimal`, `default` and `verbose` are accepted as synonyms. | hot reload |
 | `interface.mode` | `"regular"` | `regular` keeps scrollback; `fullscreen` uses the alternate screen with a sticky composer and footer. | restart required |
 | `interface.fullscreenScrollbar` | `"auto"` | `hidden`, `auto` or `always`. | restart required |
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |

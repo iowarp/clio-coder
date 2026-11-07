@@ -1,5 +1,5 @@
 import type { ClioSettings } from "../core/config.js";
-import { nextOutputStyle } from "../core/defaults.js";
+import { interfaceGuidanceEnabled, nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
@@ -499,7 +499,7 @@ export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDe
 export async function createInteractiveApplication(host: InteractiveDeps): Promise<number> {
 	const deps = presentContextCommands(host);
 	const initialInterface = deps.getSettings?.().interface;
-	const initialSmoothStreaming = initialInterface?.demo === false ? "off" : (initialInterface?.smoothStreaming ?? "off");
+	const initialSmoothStreaming = initialInterface?.smoothStreaming ?? "off";
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const lease = deps.terminalLease;
 	let removeDiagnosticSink = () => {};
@@ -1158,7 +1158,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			presentation.announceSettingChanges();
 			footer.refresh();
 			tui.requestRender();
-			const mode = settings.interface.demo === false ? "off" : settings.interface.smoothStreaming;
+			const mode = settings.interface.smoothStreaming;
 			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
 			chatRenderer.setSmoothStreamingMode(mode);
 			shell.setStreamPacingActive(mode === "on" || (mode === "auto" && autoAllowed));
@@ -1180,7 +1180,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const recordFeature = (feature: string): void => {
 		if (feature.startsWith("/")) lastSlashCommand = feature;
 		else if (feature.startsWith("key:")) lastSlashCommand = null;
-		if (deps.getSettings?.().interface.demo === true) setImmediate(() => recordHarnessFeature(feature));
+		const settings = deps.getSettings?.();
+		if (settings && interfaceGuidanceEnabled(settings.interface)) setImmediate(() => recordHarnessFeature(feature));
 	};
 	// Every submit expansion in flight owns its controller, so a second submit
 	// never orphans the first. A huge `@file.pdf` could otherwise hold Enter for

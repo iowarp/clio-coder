@@ -87,7 +87,7 @@ export function rule(theme: ClioTheme, width: number, options: RuleOptions = {})
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
 	const fill = options.renderFill
 		? options.renderFill(safeWidth - labelsWidth, visibleWidth(left))
-		: theme.style(options.fillToken ?? "divider", "─".repeat(safeWidth - labelsWidth), {
+		: theme.style(options.fillToken ?? "divider", GLYPH.rule.repeat(safeWidth - labelsWidth), {
 				bold: options.fillToken === "composerRail",
 			});
 	return `${left}${fill}${right}`;
@@ -144,18 +144,23 @@ export function frame(
 	const rightVisible = hasMeta ? metaWidth + 4 : 1;
 	const fillWidth = Math.max(0, safeWidth - leftVisible - rightVisible);
 
-	const leftStr = hasTitle ? `${frameFg("┌─")} ${styledTitle} ` : frameFg("┌─");
-	const rightStr = hasMeta ? ` ${theme.fg("annotation", meta)} ${frameFg("─┐")}` : frameFg("┐");
-	const composedTop = `${leftStr}${frameFg("─".repeat(fillWidth))}${rightStr}`;
+	const opening = frameFg(`${GLYPH.topLeft}${GLYPH.rule}`);
+	const leftStr = hasTitle ? `${opening} ${styledTitle} ` : opening;
+	const rightStr = hasMeta
+		? ` ${theme.fg("annotation", meta)} ${frameFg(`${GLYPH.rule}${GLYPH.topRight}`)}`
+		: frameFg(GLYPH.topRight);
+	const composedTop = `${leftStr}${frameFg(GLYPH.rule.repeat(fillWidth))}${rightStr}`;
 	// A title or meta wider than the island is clipped before the corner, so the
 	// top border keeps the exact width every body row has.
 	const top =
 		leftVisible + rightVisible > safeWidth
-			? `${truncateToWidth(composedTop, safeWidth - 1, GLYPH.ellipsis, false)}${frameFg("┐")}`
+			? `${truncateToWidth(composedTop, safeWidth - 1, GLYPH.ellipsis, false)}${frameFg(GLYPH.topRight)}`
 			: composedTop;
 
-	const body = lines.map((line) => `${frameFg("│")} ${padAnsi(theme.base("body", line), contentWidth)} ${frameFg("│")}`);
-	const bottom = `${frameFg("└")}${frameFg("─".repeat(safeWidth - 2))}${frameFg("┘")}`;
+	const body = lines.map(
+		(line) => `${frameFg(GLYPH.rail)} ${padAnsi(theme.base("body", line), contentWidth)} ${frameFg(GLYPH.rail)}`,
+	);
+	const bottom = `${frameFg(GLYPH.bottomLeft)}${frameFg(GLYPH.rule.repeat(safeWidth - 2))}${frameFg(GLYPH.bottomRight)}`;
 	return [top, ...body, bottom];
 }
 

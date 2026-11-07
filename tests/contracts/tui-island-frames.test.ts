@@ -89,6 +89,7 @@ function assertIsland(
 }
 
 const stats: WelcomeDashboardStats = {
+	outputStyle: "detailed",
 	cwd: "/work/clio",
 	workspace: null,
 	targetLabel: "blade",
@@ -103,7 +104,7 @@ const stats: WelcomeDashboardStats = {
 	quota: "Claude 5h 23% used · Codex wk 21% used",
 };
 
-test("the launchpad is a standard island with a quiet border and version in its action row", () => {
+test("the detailed launchpad is a standard island with a quiet border and version in its action row", () => {
 	for (const width of WIDTHS) {
 		const lines = buildWelcomeDashboardLines(stats, "0.5.6", width, "launchpad");
 		assertIsland(lines, width, null, new Set([...PALETTE_HEX, ...BRAND_RAMP_HEX, ...ROW_RAMP_HEX]));

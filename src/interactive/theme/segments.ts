@@ -23,12 +23,12 @@ export function brandMark(theme: ClioTheme): string {
 
 /** Quiet structural middot used to separate chips inside a single section. */
 export function dotSep(theme: ClioTheme): string {
-	return theme.fg("divider", " · ");
+	return theme.fg("divider", ` ${GLYPH.dot} `);
 }
 
 /** Frame-colored vertical bar used to separate sections on one row. */
 export function barSep(theme: ClioTheme): string {
-	return theme.fg("border", " │ ");
+	return theme.fg("border", ` ${GLYPH.rail} `);
 }
 
 /** Concise orange title; machine sections use the stronger harness-heading role. */
@@ -44,7 +44,7 @@ export function screenTitle(theme: ClioTheme, label: string): string {
  * string, so a change to the group vocabulary had to be made twice and was not.
  */
 export function listGroupHeader(theme: ClioTheme, label: string): string {
-	return theme.fg("groupHeading", `── ${label}`);
+	return theme.fg("groupHeading", `${GLYPH.rule.repeat(2)} ${label}`);
 }
 
 /** Join chips with a quiet structural middot, dropping empties. */

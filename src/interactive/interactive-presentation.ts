@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
-import { DEFAULT_SETTINGS } from "../core/defaults.js";
+import { DEFAULT_SETTINGS, outputStyleLabel } from "../core/defaults.js";
 import type { JobRecord } from "../core/job-types.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { CompactionPayload } from "../core/telemetry/live-events.js";
@@ -961,7 +961,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			};
 		},
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
-		getMotionEnabled: () => deps.getSettings?.().interface.demo !== false,
+		getMotionEnabled: () => motionEnabled(),
 		isStreaming: () => deps.chat.isStreaming(),
 		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
@@ -1014,10 +1014,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		lastSettingState = next;
 		const changes: string[] = [];
 		if (next.thinking !== previous.thinking) changes.push(`Thinking set to ${next.thinking}`);
-		if (next.output !== previous.output)
-			changes.push(
-				`Transcript detail set to ${{ compact: "minimal", standard: "default", detailed: "detailed" }[next.output]}`,
-			);
+		if (next.output !== previous.output) changes.push(`Output detail: ${outputStyleLabel(next.output)}`);
 		if (next.autonomy !== previous.autonomy)
 			changes.push(`Autonomy set to ${next.autonomy === "yolo" ? "YOLO" : next.autonomy}`);
 		if (changes.length)
@@ -1114,7 +1111,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					streamIngress: deps.resolveStreamIngress,
 					getSmoothStreamingMode: () => {
 						const current = deps.getSettings?.();
-						const mode = current?.interface.demo === false ? "off" : (current?.interface.smoothStreaming ?? "off");
+						const mode = current?.interface.smoothStreaming ?? "off";
 						const autoAllowed = processAutoPacingAllowed(deps.hasObservedBackpressure?.() ?? false);
 						deps.onSmoothStreamingMode?.(mode, mode === "on" || (mode === "auto" && autoAllowed));
 						return mode;
@@ -1199,8 +1196,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const phase = statusController.current().phase;
 		return phase !== "idle" && phase !== "ended" && phase !== "tool_blocked";
 	};
-	const presentationInterval = (): number =>
-		deps.getSettings?.().interface.demo !== false && motionEnabled() && workIsMoving() ? ACTIVITY_STEP_MS : 1_000;
+	const presentationInterval = (): number => (motionEnabled() && workIsMoving() ? ACTIVITY_STEP_MS : 1_000);
 	let tickerInterval = presentationInterval();
 	// A minute of silence on a model call earns a transcript row that outlives the rail's escalation (F8).
 	const silenceRow = createSilenceTranscriptRow({

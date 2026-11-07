@@ -1,6 +1,6 @@
-import { motionEnabled } from "../../core/terminal-preferences.js";
+import { asciiOnly, motionEnabled } from "../../core/terminal-preferences.js";
 
-export const GLYPH = {
+const UNICODE_GLYPHS = {
 	// Clio wordmark, shown in the welcome and dashboard headers only.
 	brand: ">C_",
 	// Agent voice glyph for the chat reply prefix. It renders in accent on a
@@ -44,6 +44,12 @@ export const GLYPH = {
 	up: "↑",
 	down: "↓",
 	rail: "│",
+	rule: "─",
+	topLeft: "┌",
+	topRight: "┐",
+	bottomLeft: "└",
+	bottomRight: "┘",
+	dot: "·",
 	innerDivider: "╌",
 	barFull: "█",
 	barEmpty: "░",
@@ -101,6 +107,69 @@ export const GLYPH = {
 	times: "×",
 	favorite: "★",
 } as const;
+
+const ASCII_GLYPHS: { readonly [K in keyof typeof UNICODE_GLYPHS]: string } = {
+	...UNICODE_GLYPHS,
+	agent: "*",
+	user: ">",
+	userBar: "|",
+	cursor: ">",
+	laneOwner: ">",
+	laneRule: "-",
+	laneCurrent: ">",
+	toolHeader: ">",
+	classKnowledge: "K",
+	classMutate: "+",
+	classNetwork: "N",
+	classExternal: "E",
+	running: "@",
+	queued: "o",
+	speed: "~",
+	ok: "+",
+	error: "x",
+	cancelled: "-",
+	active: "@",
+	up: "^",
+	down: "v",
+	rail: "|",
+	rule: "-",
+	topLeft: "+",
+	topRight: "+",
+	bottomLeft: "+",
+	bottomRight: "+",
+	dot: ".",
+	innerDivider: "-",
+	barFull: "#",
+	barEmpty: ".",
+	contextFull: "#",
+	contextFree: ".",
+	contextReserve: ":",
+	phaseWaiting: "o",
+	phaseThinking: "?",
+	brain: "?",
+	phaseWriting: ">",
+	phaseTool: "$",
+	phaseBlocked: "!",
+	scheduled: "t",
+	phaseRetry: "r",
+	phaseCompact: "c",
+	phaseDispatch: "D",
+	subProcess: ">",
+	workerHuman: "o",
+	workerAgent: "*",
+	workerInternal: ".",
+	ellipsis: "~",
+	recent: "r",
+	meterFull: "#",
+	meterEmpty: "-",
+	codeWrap: ">",
+	next: ">",
+	times: "x",
+	favorite: "*",
+};
+
+/** One glyph vocabulary for the process; cards never select their own fallback. */
+export const GLYPH = asciiOnly() ? ASCII_GLYPHS : UNICODE_GLYPHS;
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;
 

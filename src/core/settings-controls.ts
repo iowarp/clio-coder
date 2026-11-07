@@ -105,7 +105,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.streamStallMs": "Wait for a stalled reply",
 	"retry.firstTokenStallMs": "Wait for reply to start",
 	"terminal.showTerminalProgress": "Terminal progress indicator",
-	"terminal.outputVerbosity": "Output style",
+	"terminal.outputVerbosity": "Output detail",
 	"terminal.tuiMode": "Transcript layout",
 	"terminal.fullscreenScrollbar": "Fullscreen scrollbar",
 	"terminal.smoothStreaming": "Smooth streaming",
@@ -317,7 +317,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"watchdog.cadenceToolCalls":
 		"Set a tool count to check work during a long turn. Leave blank to review only when the turn ends.",
 	keybindings:
-		"Alt+O cycles Output style: Compact, Standard, Detailed. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
+		"Alt+O cycles output detail: Minimal, Default, Detailed across terminal surfaces. Use /view for full reasoning and action details. Shift+Tab changes model thinking effort.",
 };
 
 /** Per-value meaning, surfaced for the current value of an enum knob. */
@@ -611,7 +611,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"interface.demo": [
 		"Demo presentation and guidance",
-		"The full welcome artwork, dashboard, and shortcut hints. Off starts with a compact identity header and skips welcome-only reads. Also controls a short tip after some turns, picked from what the turn did, plus idle footer tips and key hints. On by default before 1.0. Off stops every tip and the guidance profile. No automatic demonstrations or permission changes.",
+		"Welcome presentation and optional learning tips, bounded by output detail. Minimal stays quiet; Default shows a compact launchpad; Detailed adds artwork and shortcut hints. Off starts with an identity header, skips welcome-only reads, and stops tips and the guidance profile. Immediate controls and warnings remain. Stream pacing, motion preferences and permissions are independent.",
 	],
 	"interface.autoUpdate": [
 		"Background updates",

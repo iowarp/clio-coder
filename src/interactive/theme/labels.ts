@@ -1,6 +1,7 @@
 import { userInfo } from "node:os";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { GLYPH } from "./glyphs.js";
 
 const identitySegments = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -9,7 +10,7 @@ export function fitIdentityLabel(value: string, width: number): string {
 	value = sanitizeCallTargetText(value);
 	const room = Math.max(0, Math.floor(width));
 	if (visibleWidth(value) <= room) return value;
-	if (room <= 1) return room === 1 ? "…" : "";
+	if (room <= 1) return room === 1 ? GLYPH.ellipsis : "";
 	const tailBudget = Math.ceil((room - 1) / 2);
 	let tail = "";
 	for (const { segment } of [...identitySegments.segment(value)].reverse()) {
@@ -22,7 +23,7 @@ export function fitIdentityLabel(value: string, width: number): string {
 		if (visibleWidth(head + segment) > headBudget) break;
 		head += segment;
 	}
-	return `${head}…${tail}`;
+	return `${head}${GLYPH.ellipsis}${tail}`;
 }
 
 /**
@@ -39,7 +40,7 @@ export function fitPathLabel(value: string, width: number): string {
 	const segments = parts.slice(root === "" ? 0 : 1).filter((part) => part.length > 0);
 	for (let kept = segments.length - 1; kept >= 1; kept -= 1) {
 		const tail = segments.slice(segments.length - kept).join("/");
-		for (const lead of [`${root}…/`, "…/"]) {
+		for (const lead of [`${root}${GLYPH.ellipsis}/`, `${GLYPH.ellipsis}/`]) {
 			const candidate = `${lead}${tail}`;
 			if (visibleWidth(candidate) <= room) return candidate;
 		}
@@ -71,7 +72,7 @@ export function holdFact(fact: string): string {
  * short one. `style` paints the separator (a dim dot among colored facts).
  */
 export function joinFacts(facts: ReadonlyArray<string>, style: (separator: string) => string = (dot) => dot): string {
-	return facts.map(holdFact).join(` ${style("·")} `);
+	return facts.map(holdFact).join(` ${style(GLYPH.dot)} `);
 }
 
 /** A wrapped row as the terminal shows it: its held spaces back to ordinary ones. */
@@ -111,7 +112,7 @@ export function exactRouteLabel(route: TargetIdentity | string): string | null {
 	if (typeof route === "string") return sanitizeCallTargetText(route) || null;
 	const target = sanitizeCallTargetText(route.targetId ?? "");
 	if (!target || !route.modelId) return null;
-	return `${fitIdentityLabel(target, MODEL_ID_LABEL_WIDTH)} · ${abbreviateModelId(route.modelId)}`;
+	return `${fitIdentityLabel(target, MODEL_ID_LABEL_WIDTH)} ${GLYPH.dot} ${abbreviateModelId(route.modelId)}`;
 }
 
 /** The activity rail names the model family/version; inspection retains the wire id. */
@@ -136,17 +137,17 @@ export function modelNickname(modelId: string | null | undefined): string {
 }
 
 function fitIdentityPrefix(value: string, width: number): string {
-	return stripTerminalSequences(truncateToWidth(value, Math.max(0, width), "…", false));
+	return stripTerminalSequences(truncateToWidth(value, Math.max(0, width), GLYPH.ellipsis, false));
 }
 
 /** Preserve a complete model suffix by eliding only at a wire-id separator. */
 function fitModelTokenSuffix(value: string, width: number): string {
 	if (visibleWidth(value) <= width) return value;
 	if (width <= 0) return "";
-	let best = "…";
+	let best = GLYPH.ellipsis;
 	for (let index = 0; index < value.length; index += 1) {
 		if (!"/@-._".includes(value[index] ?? "")) continue;
-		const candidate = `…${value.slice(index)}`;
+		const candidate = `${GLYPH.ellipsis}${value.slice(index)}`;
 		if (visibleWidth(candidate) <= width && candidate.length > best.length) best = candidate;
 	}
 	return best;
@@ -187,7 +188,7 @@ export function formatTargetLabel(
 	if (target.length === 0 && model.length === 0) return fit("not configured");
 	if (options.width !== undefined && target.length > 0 && model.length > 0) {
 		const width = Math.max(0, Math.floor(options.width));
-		const separator = options.separator ?? " · ";
+		const separator = options.separator ?? ` ${GLYPH.dot} `;
 		const full = `${target}${separator}${model}`;
 		if (visibleWidth(full) <= width) return full;
 		const leaf = model.slice(model.lastIndexOf("/") + 1);
@@ -198,9 +199,9 @@ export function formatTargetLabel(
 		return fitModelTokenSuffix(leaf, width);
 	}
 	const shown = options.abbreviate === false ? model : abbreviateModelId(model);
-	if (target.length === 0) return fit(`no target · ${shown}`);
-	if (model.length === 0) return fit(`${target} · no model`);
-	return `${target}${options.separator ?? " · "}${shown}`;
+	if (target.length === 0) return fit(`no target ${GLYPH.dot} ${shown}`);
+	if (model.length === 0) return fit(`${target} ${GLYPH.dot} no model`);
+	return `${target}${options.separator ?? ` ${GLYPH.dot} `}${shown}`;
 }
 
 /**

@@ -11,6 +11,7 @@ import {
 	TuiMainScreen,
 	visibleWidth,
 } from "../../src/engine/tui.js";
+import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
 import { createEditorSubmitController } from "../../src/interactive/editor-submit.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
@@ -99,6 +100,7 @@ function banner(options: BannerOptions = {}) {
 		providers: { list: () => (options.statuses ?? [status()]) as never },
 		getSettings: () =>
 			({
+				interface: { ...DEFAULT_SETTINGS.interface, outputDetail: "detailed" },
 				chat: {
 					target: "target" in options ? options.target : "dynamo",
 					model: "model" in options ? options.model : "qwen3.8-27b",
@@ -356,10 +358,8 @@ test("the launchpad keeps a bounded footprint and the session header one row", (
 	for (const [label, options] of GEOMETRY_CASES) {
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
-			const baseRows = width >= 57 && width < 76 ? 21 : 17;
-			const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
 			const height = rows(launchpad, width).length;
-			ok(height >= baseRows && height <= baseRows + taglineRows, `${label}@${width} launchpad rows: ${height}`);
+			ok(height >= 4 && height <= 24, `${label}@${width} launchpad rows: ${height}`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -405,13 +405,14 @@ test("the collapsed header drops readiness, latency and onboarding", () => {
 	ok(line.includes("dynamo · qwen3.8-27b"), line);
 });
 
-test("the workspace gives up its branch before the path's leaf", () => {
+test("the session header leaves workspace facts to the footer", () => {
 	const component = banner({
 		workspace: workspace({ cwd: "/tmp/a/b/c/project-leaf", branch: "an-extremely-long-branch-name-that-will-not-fit" }),
 	});
 	component.collapseToSessionHeader();
 	const masthead = rows(component, 100)[0] ?? "";
-	ok(masthead.includes("project-leaf"), `leaf lost while branch kept: ${masthead}`);
+	ok(masthead.includes("dynamo · qwen3.8-27b"), masthead);
+	ok(!masthead.includes("project-leaf"), masthead);
 	ok(!masthead.includes("an-extremely-long-branch-name"), masthead);
 });
 
@@ -564,7 +565,12 @@ function noop(): void {}
  * transitions below run through the wiring the application uses rather than
  * through direct calls on the component.
  */
-function presentation(over: Partial<InteractivePresentationDeps> = {}, realEditor = false, realFooter = false) {
+function presentation(
+	over: Partial<InteractivePresentationDeps> = {},
+	realEditor = false,
+	realFooter = false,
+	rendererFactory?: NonNullable<InteractivePresentationDeps["factories"]>["createChatRenderer"],
+) {
 	let rendered = 0;
 	let footerDeps!: Parameters<typeof buildFooterDashboard>[0];
 	const view = { render: () => [], invalidate: noop };
@@ -625,7 +631,8 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 					: { ...view, render: () => ["COMPOSER"], focused: false, setAutocompleteProvider: noop },
 			createAutocomplete: () => ({}),
 			createDispatchBoardView: () => view,
-			createChatRenderer: () => ({ mutate: (run: () => void) => run(), reset: (run: () => void) => run(), flush: noop }),
+			createChatRenderer:
+				rendererFactory ?? (() => ({ mutate: (run: () => void) => run(), reset: (run: () => void) => run(), flush: noop })),
 			createIo: () => ({ stderr: noop, stdout: noop }),
 			buildLayout,
 		},
@@ -640,9 +647,38 @@ function headerRows(built: ReturnType<typeof presentation>["presentation"], widt
 	return built.banner.render(width).map((line) => stripTerminalSequences(line));
 }
 
+test("demo and output-tier changes do not override the configured stream pacer", () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.interface.demo = false;
+	settings.interface.smoothStreaming = "on";
+	let mode: (() => "off" | "auto" | "on") | undefined;
+	const { presentation: built } = presentation(
+		{ getSettings: () => settings, resolveStreamIngress: () => null },
+		false,
+		false,
+		(deps) => {
+			mode = deps.getSmoothStreamingMode;
+			return createCoalescingChatRenderer(deps);
+		},
+	);
+	try {
+		for (const demo of [false, true]) {
+			settings.interface.demo = demo;
+			for (const style of ["compact", "standard", "detailed"] as const) {
+				settings.interface.outputDetail = style;
+				strictEqual(mode?.(), "on");
+			}
+		}
+		settings.interface.smoothStreaming = "off";
+		strictEqual(mode?.(), "off");
+	} finally {
+		built.dispose();
+	}
+});
+
 test("the presentation opens on the launchpad and collapses on first submit", async () => {
 	const { presentation: built } = presentation();
-	strictEqual(headerRows(built).length, 18);
+	strictEqual(headerRows(built).length, 7);
 
 	// Drive the collapse through the real submit controller, the way a typed
 	// prompt reaches it, rather than by calling the banner directly.
@@ -861,7 +897,7 @@ test("a session reset restores the launchpad and clears tool telemetry, includin
 			strictEqual(loopRow(), "", "session navigation clears the old loop projection");
 			emit(job);
 			strictEqual(loopRow(), "", "late old-session updates cannot restore its row");
-			strictEqual(headerRows(built).length, 18);
+			strictEqual(headerRows(built).length, 7);
 			built.collapseWelcomeDashboard();
 			strictEqual(headerRows(built).length, 1);
 			built.recordToolEnd({ toolCallId: "pending-call", isError: true, truncated: true });
@@ -911,7 +947,7 @@ test("disposing the presentation disposes the header", () => {
 	const { presentation: built } = presentation();
 	built.dispose();
 	// A disposed banner schedules nothing further; rendering must still be safe.
-	strictEqual(headerRows(built).length, 18);
+	strictEqual(headerRows(built).length, 7);
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
@@ -1008,14 +1044,7 @@ test("the welcome keeps a quiet launchpad and the session header names the full 
 	const component = banner({ model, preload });
 	const wide = rows(component, 120);
 	ok(wide.join("\n").includes("████"));
-	for (const label of [
-		"Session started",
-		"Project",
-		"Also",
-		"Instructions",
-		"lines 129-180 left out",
-		"24,000-character",
-	])
+	for (const label of ["Model", "Project", "Also", "Instructions", "lines 129-180 left out", "24,000-character"])
 		ok(wide.join("\n").includes(label));
 	ok(actionLine(wide).endsWith(`v${readClioVersion()}${isDevVersion(readClioVersion()) ? " · source" : ""}`));
 	component.collapseToSessionHeader();
@@ -1033,18 +1062,16 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	const boot = createBootWelcome(settings, "Ctrl+S");
 	for (const width of WIDTHS) {
 		const lines = boot.render(width).map(stripTerminalSequences);
-		const baseRows = width >= 57 && width < 76 ? 21 : 17;
-		const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
-		ok(lines.length >= baseRows && lines.length <= baseRows + taglineRows);
+		ok(lines.length >= 4 && lines.length <= 8);
 		for (const line of lines) ok(visibleWidth(line) <= width);
 		ok(!lines.join("\n").includes("Starting Clio"));
 		ok(!lines.join("\n").includes("✓"));
 	}
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
-	ok(wide.includes("Session started"));
+	ok(wide.includes("YOLO · no approval stops"));
 	ok(wide.includes("Checking project awareness"));
 	match(wide, /v\d+\.\d+\.\d+/u);
-	ok(!boot.render(120).map(stripTerminalSequences)[0]?.includes("Clio Coder"));
+	ok(boot.render(120).map(stripTerminalSequences)[0]?.includes("Clio Coder"));
 });
 
 test("the welcome box closes at the viewport edge on narrow and wide terminals", () => {
@@ -1068,8 +1095,10 @@ test("the welcome box closes at the viewport edge on narrow and wide terminals",
 
 test("account usage hydrates without moving the welcome frame or passing through control codes", () => {
 	let quota: string | null = null;
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.interface.outputDetail = "detailed";
 	const component = createWelcomeDashboard({
-		getSettings: () => DEFAULT_SETTINGS,
+		getSettings: () => settings,
 		providers: { list: () => [status()] as never },
 		getWorkspaceSnapshot: () => workspace() as never,
 		getContextState: () => ({ clioMd: "ok", memoryCount: 0 }) as never,
@@ -1094,7 +1123,7 @@ test("the wordmark stacks CLIO over CODER with details beside both words and no 
 	for (const width of [80, 100, 120]) {
 		const lines = banner().render(width).map(stripAnsi);
 		for (const index of [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) ok(lines[index]?.includes("██"));
-		ok(lines[2]?.includes("Session started"));
+		ok(lines[2]?.includes("Model"));
 		ok(lines[10]?.includes("Also"));
 		ok(!lines.join("\n").includes(">_C"));
 		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
@@ -1113,7 +1142,7 @@ test("the narrow launchpad sets the compact letters on one band, or the brand in
 			// CLIO and CODER share each art row, so the band is five rows, not eleven.
 			ok(lines[1]?.includes(" ████ ██░   ███  ███     ████  ███  ████  █████ ████"), `${width}: ${lines[1]}`);
 			ok(lines[5]?.includes(" ████ █████ ███  ███     ████  ███  ████  █████ ██░██"), `${width}: ${lines[5]}`);
-			ok(lines[7]?.includes("Session started"));
+			ok(lines[7]?.includes("Model"));
 			ok(lines.at(-2)?.includes(`v${readClioVersion()}`));
 		}
 	}

@@ -35,13 +35,17 @@ The interactive session, `clio-coder run` and `clio-coder acp` enable Node's mod
 
 | Mode | How it is selected | Behavior |
 | --- | --- | --- |
-| Full | `interface.demo: true` (default) | Stacked cyan-to-copper wordmark, session-start time, workspace, Git and project-awareness facts, two reserved account-usage rows, a rotating tagline, footer tips and rotating key hints, attention animation and smooth-streaming pacing where the terminal allows. |
-| Normal | `interface.demo: false` or `--no-demo` | One compact identity header line instead of the launchpad. Welcome-only reads (account usage, project-awareness readings) are skipped, and attention animation, smooth-streaming pacing, footer tips and key hints are off. The editor and the chosen regular or fullscreen layout are unchanged. |
-| Portable | Normal plus `NO_COLOR=1` | Color-disabled output with the same labels and meters. |
+| Minimal | `interface.outputDetail: compact` | One identity header; no welcome-only reads or optional learning tips. |
+| Default | `interface.demo: true` with `interface.outputDetail: standard` (defaults) | Compact launchpad with route, autonomy, awareness and the next action. Workspace facts remain in the footer. |
+| Detailed | `interface.demo: true` with `interface.outputDetail: detailed` | Artwork, route and autonomy, project facts, two reserved account-usage rows, tagline and shortcut hints where space allows. |
+| Quiet | `interface.demo: false` or `--no-demo` | One identity header and no welcome-only reads or learning tips. Immediate controls and warnings remain. |
+| No color | `NO_COLOR=1` | Same labels and meters without color. |
+
+Demo guidance never overrides `interface.smoothStreaming` or terminal motion preferences.
 
 Dumb or unknown terminals (`TERM=dumb` or `TERM=unknown`) and screen-reader mode (`CLIO_CODER_SCREEN_READER=1`) always get the compact header, even with demo on, and those two terminal types also disable color. The thinking meter uses ordinary filled and hollow dots; the Nerd Font brain glyph is opt-in with `CLIO_CODER_NERD_FONT=1` (ignored for screen readers and dumb terminals). Screen-reader mode replaces the meter with exact effort text.
 
-The Stage 0 welcome and the hydrated welcome share one geometry, and the subscription rows are reserved from the first paint, so hydrating account data moves nothing. Idle footer tips stay off while the full welcome is visible. Layout details of the launchpad are in [Welcome launchpad and session header](tui-design.md#41-welcome-launchpad--session-header).
+The Stage 0 welcome and the hydrated welcome share the tier policy. Detailed subscription rows are reserved from the first paint, so hydrating account data moves nothing. Idle footer tips stay off while a launchpad is visible. Layout details are in [Welcome launchpad and session header](tui-design.md#41-welcome-launchpad--session-header).
 
 Demo-off is a presentation mode. It removes artwork, welcome-only reads and animation, which lowers the bytes written before hydration, but it runs the same hydration as full. Treat it as a rendering and transport saving, and measure before claiming a startup speedup.
 

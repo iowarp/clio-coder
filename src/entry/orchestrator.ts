@@ -13,7 +13,11 @@ import { readClioVersionLabel } from "../core/build-info.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
-import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS, type OutputStyle } from "../core/defaults.js";
+import {
+	DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
+	interfaceGuidanceEnabled,
+	type OutputStyle,
+} from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
@@ -4604,7 +4608,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// does, profile writes included, stops while interface.demo is off.
 		middleware.registerHook(
 			createGuidanceRegistration({
-				enabled: () => getCurrentSettings().interface.demo,
+				enabled: () => interfaceGuidanceEnabled(getCurrentSettings().interface),
 				autonomy: () => resolveEffectiveAutonomy(),
 				keyFor: (actionId) =>
 					Object.hasOwn(CLIO_KEYBINDINGS, actionId) ? actionKeyLabel(actionId as ClioKeybinding) : null,

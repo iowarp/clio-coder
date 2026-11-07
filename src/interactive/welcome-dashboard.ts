@@ -1,5 +1,7 @@
 import { readClioVersionLabel } from "../core/build-info.js";
 import type { ClioSettings } from "../core/config.js";
+import type { OutputStyle } from "../core/defaults.js";
+import { asciiOnly } from "../core/terminal-preferences.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -26,27 +28,9 @@ import {
 } from "./welcome-art.js";
 
 /** Reduced terminals and screen readers get the same compact identity as demo-off. */
-function richWelcomeEnabled(demo: boolean | undefined): boolean {
-	return (
-		demo !== false &&
-		process.env.TERM !== "dumb" &&
-		process.env.TERM !== "unknown" &&
-		process.env.CLIO_CODER_SCREEN_READER !== "1"
-	);
+function richWelcomeEnabled(demo: boolean | undefined, style: OutputStyle = "standard"): boolean {
+	return demo !== false && style !== "compact" && !asciiOnly() && process.env.CLIO_CODER_SCREEN_READER !== "1";
 }
-
-// One process-start timestamp shared by Stage 0 and hydration; no live clock timer.
-const SESSION_STARTED_AT = new Intl.DateTimeFormat("en-US", {
-	weekday: "short",
-	month: "short",
-	day: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-	timeZoneName: "short",
-}).format(new Date(performance.timeOrigin));
-const SESSION_STARTED_TIME = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(
-	new Date(performance.timeOrigin),
-);
 
 export const WELCOME_TAGLINES = [
 	"Ask Clio how to use or extend it.",
@@ -120,6 +104,7 @@ export interface WelcomeDashboardDeps {
 }
 
 export interface WelcomeDashboardStats {
+	outputStyle?: OutputStyle;
 	cwd: string;
 	workspace: WorkspaceSnapshot | null;
 	/** Null when unset. `formatTargetLabel` owns the one spelling for that. */
@@ -274,7 +259,7 @@ interface Unit {
  * casualty of a long path.
  */
 function fitByPriority(theme: ClioTheme, units: ReadonlyArray<Unit>, maxWidth: number, protectRank = 0): string {
-	const separator = " · ";
+	const separator = ` ${GLYPH.dot} `;
 	const sep = theme.fg("annotation", separator);
 	const sepWidth = visibleWidth(separator);
 	const kept = units.map((unit) => ({ ...unit, dropped: false }));
@@ -324,16 +309,19 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 	if (stats.route === "unset") {
 		// Name the half that is missing; both are fixed at the same surface.
 		const detail = stats.targetLabel === null ? "no route selected" : "no model selected";
-		return say("warning", `${detail} · /model`);
+		return say("warning", `${detail} ${GLYPH.dot} /model`);
 	}
-	if (stats.route === "unavailable") return say("error", "route unavailable · /settings targets");
-	if (stats.route === "degraded") return say("warning", "route degraded · /settings targets");
-	if (stats.projectContext === "malformed") return say("warning", "CLIO-CODER.md malformed · /context to inspect");
+	if (stats.route === "unavailable") return say("error", `route unavailable ${GLYPH.dot} /settings targets`);
+	if (stats.route === "degraded") return say("warning", `route degraded ${GLYPH.dot} /settings targets`);
+	if (stats.projectContext === "malformed")
+		return say("warning", `CLIO-CODER.md malformed ${GLYPH.dot} /context to inspect`);
 	if (stats.projectContext === "none") return say("guidance", "/context init to index this repo");
 	if (stats.projectContext === "stale") return say("guidance", "Stale project awareness: /context refresh to fix.");
 	return say(
 		"guidance",
-		stats.projectContext === "checking" ? "Checking project awareness…" : "Next: type a task, then press Enter",
+		stats.projectContext === "checking"
+			? `Checking project awareness${GLYPH.ellipsis}`
+			: "Next: type a task, then press Enter",
 	);
 }
 
@@ -353,7 +341,6 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	const markWidth = visibleWidth(mark);
 	if (width <= markWidth + 1) return truncateToWidth(mark, width, "", false);
 	const room = width - markWidth - 1;
-	const branch = workspaceBranch(stats);
 	const versionTag = theme.fg("annotation", `v${version}`);
 	const route = theme.fg(
 		"footerIdentity",
@@ -369,15 +356,6 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 			text: route,
 			rank: 0,
 		},
-		{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 2 },
-		...(branch
-			? [
-					{
-						text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", " *") : ""}`,
-						rank: 3,
-					},
-				]
-			: []),
 	];
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
@@ -465,7 +443,7 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 
 function awarenessLabel(stats: WelcomeDashboardStats): string {
 	return {
-		checking: "Checking…",
+		checking: `Checking${GLYPH.ellipsis}`,
 		ok: "Up to date",
 		stale: "Out of date",
 		none: "Not indexed yet",
@@ -476,7 +454,7 @@ function awarenessLabel(stats: WelcomeDashboardStats): string {
 function gitSummary(stats: WelcomeDashboardStats): string {
 	const workspace = stats.workspace;
 	// Before the first probe lands the placeholder says nothing about Git, so it reads as a check in progress.
-	if (workspace === null || workspace.pending === true) return "Checking…";
+	if (workspace === null || workspace.pending === true) return `Checking${GLYPH.ellipsis}`;
 	// A probe that ran out of time is no answer: a real repository read `No Git repository` under load.
 	if (workspace.gitUnknown === true) return "Git did not answer yet";
 	if (!workspace.isGit) return "No Git repository";
@@ -485,7 +463,11 @@ function gitSummary(stats: WelcomeDashboardStats): string {
 		workspace.dirty === null ? "changes unknown" : workspace.dirty ? "uncommitted changes" : "clean",
 		...(workspace.ahead ? [`${workspace.ahead} ahead`] : []),
 		...(workspace.behind ? [`${workspace.behind} behind`] : []),
-	].join(" · ");
+	].join(` ${GLYPH.dot} `);
+}
+
+function autonomySummary(stats: WelcomeDashboardStats): string {
+	return stats.autonomy === "yolo" ? `YOLO ${GLYPH.dot} no approval stops` : `Default ${GLYPH.dot} reviewed approvals`;
 }
 
 /** Under this height the art gives way and the brand moves into the frame title. */
@@ -505,7 +487,7 @@ export function buildWelcomeDashboardLines(
 	terminalRows?: number,
 ): string[] {
 	const version = versionLabel.replace(/ \(unreleased(?: · ([^)]+))?\)$/u, (_match, commit: string | undefined) =>
-		commit ? ` · ${commit}` : "",
+		commit ? ` ${GLYPH.dot} ${commit}` : "",
 	);
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
@@ -520,8 +502,19 @@ export function buildWelcomeDashboardLines(
 		return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth), ...coverageRows(safeWidth)];
 	// A short terminal spends its rows on the composer and the first answer: the
 	// launchpad keeps identity, place and the next step, and drops the rest.
-	if (terminalRows !== undefined && terminalRows < WELCOME_ART_MIN_ROWS)
-		return compactLaunchpad(theme, stats, version, safeWidth, terminalRows < WELCOME_TIGHT_ROWS, coverageRows);
+	if (
+		safeWidth < 48 ||
+		stats.outputStyle !== "detailed" ||
+		(terminalRows !== undefined && terminalRows < WELCOME_ART_MIN_ROWS)
+	)
+		return compactLaunchpad(
+			theme,
+			stats,
+			version,
+			safeWidth,
+			safeWidth < 48 || (terminalRows !== undefined && terminalRows < WELCOME_TIGHT_ROWS),
+			coverageRows,
+		);
 	const panelWidth = safeWidth;
 	const room = Math.max(1, panelWidth - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
@@ -574,11 +567,22 @@ export function buildWelcomeDashboardLines(
 	const subscriptionRows = Array.from({ length: WELCOME_SUBSCRIPTION_ROWS }, (_, index) => subscriptions[index] ?? "");
 	const awareness = awarenessLabel(stats);
 	const git = gitSummary(stats);
+	const modelRows = wrappedField(
+		"Model",
+		theme.fg(
+			"footerIdentity",
+			plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
+		),
+	);
+	const shownModelRows = modelRows.slice(0, 2);
+	if (modelRows.length > 2) {
+		const hint = theme.fg("guidance", `${GLYPH.ellipsis} /model`);
+		shownModelRows[1] = `${truncateToWidth(modelRows[1] ?? "", Math.max(0, detailWidth - visibleWidth(hint) - 1), "", false)} ${hint}`;
+	}
 	const details = [
 		...(band.length > 0 ? [...band, ""] : [""]),
-		...(band.length > 0
-			? [`${theme.style("sectionHeading", "Session started", { bold: true })}  ${theme.fg("body", SESSION_STARTED_AT)}`]
-			: [theme.style("sectionHeading", "Session started", { bold: true }), theme.fg("body", SESSION_STARTED_AT)]),
+		...shownModelRows,
+		field("Autonomy", theme.fg(stats.autonomy === "yolo" ? "warning" : "body", autonomySummary(stats))),
 		"",
 		theme.style("sectionHeading", "Project", { bold: true }),
 		field(
@@ -676,74 +680,24 @@ function compactLaunchpad(
 	const room = Math.max(1, width - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
 	const title = `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`;
-	const started = theme.fg("annotation", `started ${SESSION_STARTED_TIME}`);
-	const actionLine = (): string => {
-		const spare = room - visibleWidth(started) - 2;
-		const action = actionRow(theme, stats, spare >= 24 ? spare : room);
-		return spare >= 24
-			? `${action}${" ".repeat(Math.max(2, room - visibleWidth(action) - visibleWidth(started)))}${started}`
-			: action;
-	};
+	const actionLine = (): string => actionRow(theme, stats, room);
 	if (tight) {
-		const branch = workspaceBranch(stats);
-		const place = fitByPriority(
-			theme,
-			[
-				{ text: theme.fg("workspacePath", fitPathTail(workspacePath(stats), Math.max(8, room - 12))), rank: 0 },
-				...(branch
-					? [
-							{
-								text: `${theme.fg("branch", branch)}${stats.workspace?.dirty === true ? theme.fg("warning", " *") : ""}`,
-								rank: 1,
-							},
-						]
-					: []),
-			],
-			room,
-		);
-		return frame(theme, title, [fit(place), fit(actionLine())], width);
+		const route = theme.fg("footerIdentity", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel)));
+		return frame(theme, title, [fit(route), fit(actionLine())], width);
 	}
 	const labelWidth = "Awareness".length + 2;
 	const field = (label: string, value: string): string =>
 		fit(`${theme.fg("fieldName", label.padEnd(labelWidth))}${value}`);
-	const valueRoom = Math.max(1, room - labelWidth);
-	const accounts =
-		stats.quota === null
-			? []
-			: [
-					field(
-						"Accounts",
-						`${truncateToWidth(
-							theme.fg(
-								"body",
-								sanitizeCallTargetText(stats.quota)
-									.replace(/% used/g, "%")
-									.replace(/\/wk /g, " · wk "),
-							),
-							Math.max(1, valueRoom - 8),
-							GLYPH.ellipsis,
-							false,
-						)} ${theme.fg("guidance", "/usage")}`,
-					),
-				];
-	const also = fitByPriority(
-		theme,
-		[
-			{ text: `${theme.fg("guidance", "/help")} ${theme.fg("body", "commands")}`, rank: 0 },
-			{ text: `${theme.fg("guidance", "/context")} ${theme.fg("body", "repo awareness")}`, rank: 1 },
-			...(stats.quota === null
-				? [{ text: `${theme.fg("guidance", "/usage")} ${theme.fg("body", "limits")}`, rank: 2 }]
-				: []),
-		],
-		valueRoom,
-	);
 	const coverage = coverageRows(room);
 	return frame(
 		theme,
 		title,
 		[
-			field("Workspace", theme.fg("workspacePath", fitPathTail(workspacePath(stats), valueRoom))),
-			field("Git", theme.fg("body", gitSummary(stats))),
+			...wrapTextWithAnsi(
+				`${theme.fg("fieldName", "Model".padEnd(labelWidth))}${theme.fg("footerIdentity", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })))}`,
+				room,
+			),
+			field("Autonomy", theme.fg(stats.autonomy === "yolo" ? "warning" : "body", autonomySummary(stats))),
 			field(
 				"Awareness",
 				theme.fg(
@@ -751,8 +705,6 @@ function compactLaunchpad(
 					awarenessLabel(stats),
 				),
 			),
-			...accounts,
-			field("Also", also),
 			...(coverage.length > 0 ? [fit(coverage.length > 1 ? `${coverage[0]}${GLYPH.ellipsis}` : (coverage[0] ?? ""))] : []),
 			innerDivider(theme, room),
 			fit(actionLine()),
@@ -780,6 +732,8 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.routeReason,
 		stats.projectContext,
 		stats.projectPreload,
+		stats.autonomy,
+		stats.outputStyle,
 		stats.quota,
 	].join("\0");
 }
@@ -830,7 +784,8 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	}
 
 	render(width: number): string[] {
-		const mode = richWelcomeEnabled(this.deps.getSettings?.().interface?.demo) ? this.mode : "session";
+		const settings = this.deps.getSettings?.();
+		const mode = richWelcomeEnabled(settings?.interface?.demo, settings?.interface?.outputDetail) ? this.mode : "session";
 		const stats = this.stats(mode);
 		// Existing presentation refreshes advance the hints; no extra timer or startup work.
 		const hintPage =
@@ -860,7 +815,8 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	}
 
 	isLaunchpadVisible(): boolean {
-		return this.mode === "launchpad" && richWelcomeEnabled(this.deps.getSettings?.().interface?.demo);
+		const settings = this.deps.getSettings?.();
+		return this.mode === "launchpad" && richWelcomeEnabled(settings?.interface?.demo, settings?.interface?.outputDetail);
 	}
 
 	/** Collapse once, before first-submit dispatch can append transcript output. */
@@ -919,6 +875,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		// and the check resumes on the next frame.
 		const launchpad = mode === "launchpad";
 		return {
+			outputStyle: settings?.interface?.outputDetail ?? "standard",
 			cwd,
 			workspace,
 			targetLabel,
@@ -929,7 +886,8 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			projectPreload: launchpad && this.context?.cwd === cwd ? this.context.preload : null,
 			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
-			quota: launchpad ? (this.deps.getQuotaSummary?.() ?? null) : null,
+			quota:
+				launchpad && settings?.interface?.outputDetail === "detailed" ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			targets: "",
 			fleet: "",
 		};
@@ -1022,8 +980,9 @@ export function createBootWelcome(
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const model = settings.chat.model ?? target?.defaultModel ?? null;
 	const version = readClioVersionLabel();
-	const mode = richWelcomeEnabled(settings.interface.demo) ? "launchpad" : "session";
+	const mode = richWelcomeEnabled(settings.interface.demo, settings.interface.outputDetail) ? "launchpad" : "session";
 	const stats: WelcomeDashboardStats = {
+		outputStyle: settings.interface.outputDetail,
 		cwd: process.cwd(),
 		workspace: null,
 		targetLabel: settings.chat.target ?? null,

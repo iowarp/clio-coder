@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { interfaceGuidanceEnabled, type OutputStyle } from "../../core/defaults.js";
 import { readHarnessProfile } from "../../core/harness-profile.js";
 import { ACTION_BY_COMMAND } from "../../domains/config/keybindings.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
@@ -119,6 +120,8 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	/** Session-wide presentation tier; absent uses the default tier. */
+	outputStyle?: OutputStyle;
 	/** Extension status facts that join the compact second line. */
 	extensionFacts?: ReadonlyArray<string>;
 	quota?: QuotaProviders;
@@ -126,7 +129,7 @@ export interface FooterDashboardRenderState {
 	demoHint?: string | null;
 	/** What a long silence owes the operator, widest form first; the row shows the first that fits. */
 	silenceNotes?: readonly string[] | null;
-	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
+	/** Optional learning is enabled; immediate controls are independent. */
 	demo?: boolean;
 	keyContext?: ComposerKeyContext;
 	keyHintFacts?: KeyHintFacts;
@@ -292,6 +295,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		return {
+			outputStyle: settings?.interface.outputDetail ?? "standard",
 			...(deps.getExtensionFacts ? { extensionFacts: deps.getExtensionFacts(width) } : {}),
 			resources: machine.snapshot(),
 			quota: deps.getQuotaSnapshots?.() ?? [],
@@ -369,13 +373,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						routeFirstOutput(deps.getTelemetry?.(), settings?.chat?.target, settings?.chat?.model),
 					)
 				: null,
-			demo: settings?.interface.demo !== false,
+			demo: settings ? interfaceGuidanceEnabled(settings.interface) : true,
 			...(keyContext ? { keyContext } : {}),
 			...(deps.getKeyHintFacts ? { keyHintFacts: deps.getKeyHintFacts() } : {}),
 			background: deps.getBackgroundCalls?.() ?? [],
 			welcomeVisible: deps.getWelcomeVisible?.() === true,
 			demoHint: demoHints({
-				enabled: settings?.interface.demo === true && deps.getWelcomeVisible?.() !== true,
+				enabled:
+					settings !== undefined && interfaceGuidanceEnabled(settings.interface) && deps.getWelcomeVisible?.() !== true,
 				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
 				now,
 				quiet:

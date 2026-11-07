@@ -81,6 +81,7 @@ export const coreTests = [
 	"telemetry-multi-install",
 	"approval-card-arguments",
 	"footer-snapshot",
+	"tui-presentation-modes",
 	"copilot-sdk-route",
 	"copilot-keychain",
 	"retired-settings-keys",

@@ -1,4 +1,4 @@
-import { type ClioTheme, type ClioToken, type RuleOptions, rule } from "./theme/index.js";
+import { type ClioTheme, type ClioToken, GLYPH, type RuleOptions, rule } from "./theme/index.js";
 
 export interface EditorRailState {
 	phase: "idle" | "working" | "attention";
@@ -18,7 +18,8 @@ export function renderEditorRail(
 ): string {
 	const attention = state.phase === "attention";
 	const base: ClioToken = state.tone ?? "composerRail";
-	const paint = (columns: number, token: ClioToken): string => theme.style(token, "━".repeat(columns), { bold: true });
+	const paint = (columns: number, token: ClioToken): string =>
+		theme.style(token, GLYPH.laneRule.repeat(columns), { bold: true });
 	if (!attention || !state.animate) {
 		return rule(theme, width, {
 			...options,

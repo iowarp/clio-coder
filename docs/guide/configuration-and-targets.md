@@ -75,7 +75,7 @@ Configure and GUI Settings use the same eight sections. TUI `/settings` groups i
 | Fleet | Worker defaults, profiles, routing, capacity, limits |
 | Context & Memory | Working-set eviction, compaction, memory |
 | Permissions & Limits | Autonomy, approvals, spending, safety limits |
-| Appearance | Output style, terminal mode, streaming, panes |
+| Appearance | Output detail, terminal mode, streaming, panes |
 | Integrations | External agents, project resources, plugins, library, Git |
 | Advanced | Diagnostics and validated full-file editor |
 
@@ -276,7 +276,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `interface.terminalProgress` | `false` | next turn |
-| `interface.demo` | `true` | welcome presentation, attention motion, streaming pacing, tips and footer hints immediately; prompt line next turn |
+| `interface.demo` | `true` | tier-bounded welcome presentation, tips and optional footer learning immediately; prompt line next turn; pacing and motion independent |
 | `interface.outputDetail` | `standard` | immediately |
 | `interface.mode` | `regular` | restart |
 | `interface.fullscreenScrollbar` | `auto` | restart |

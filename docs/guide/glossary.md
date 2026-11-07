@@ -87,7 +87,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `WorkerShareFacts` in [worker-share.ts](../../src/session-control/worker-share.ts).
 
 ### 21. Fold
-- **Definition**: Presenting an action as a short summary in the current Output style. `Alt+O` cycles Compact, Standard, and Detailed. Use `/view transcript` for full available details.
+- **Definition**: Presenting an action as a short summary in the current output tier. `Alt+O` cycles Minimal, Default, and Detailed. Use `/view transcript` for full available details.
 - **Owning Type**: `WorkerEntryRenderOptions` in [worker-entry.ts](../../src/interactive/renderers/worker-entry.ts).
 
 ### 22. Interop

@@ -290,6 +290,14 @@ export interface RetrySettings {
 export const OUTPUT_STYLES = ["compact", "standard", "detailed"] as const;
 export type OutputStyle = (typeof OUTPUT_STYLES)[number];
 
+export function outputStyleLabel(style: OutputStyle): string {
+	return { compact: "Minimal", standard: "Default", detailed: "Detailed" }[style];
+}
+
+export function interfaceGuidanceEnabled(settings: Pick<InterfaceSettings, "demo" | "outputDetail">): boolean {
+	return settings.demo && settings.outputDetail !== "compact";
+}
+
 /** Read older preferences without rewriting a user's settings on startup. */
 export function normalizeOutputStyle(value: unknown): OutputStyle | undefined {
 	switch (value) {
@@ -332,10 +340,10 @@ export function resolveExitSummaryStyle(
 
 export interface InterfaceSettings {
 	exitSummary: ExitSummaryStyle;
-	/** Full welcome presentation, interactive guidance, and contextual footer tips. */
+	/** Optional welcome and learning guidance; outputDetail sets their density. */
 	demo: boolean;
 	terminalProgress: boolean;
-	/** Output style: Compact, Standard, or Detailed bounded previews. */
+	/** Minimal, Default, or Detailed presentation across terminal surfaces; never changes model reasoning. */
 	outputDetail: OutputStyle;
 	/** Regular scrollback-preserving renderer or alternate-screen sticky layout. */
 	mode: TuiMode;

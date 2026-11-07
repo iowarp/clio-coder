@@ -55,7 +55,7 @@ const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, st
 		"data-analysis": "Data analysis",
 		"web-design": "Web design",
 	},
-	"interface.outputDetail": { compact: "Compact", standard: "Standard", detailed: "Detailed" },
+	"interface.outputDetail": { compact: "Minimal", standard: "Default", detailed: "Detailed" },
 	"interface.mode": { regular: "Scrollback", fullscreen: "Full screen" },
 	"interface.fullscreenScrollbar": { hidden: "Hidden", auto: "Automatic", always: "Always" },
 	"interface.smoothStreaming": { off: "Off", auto: "Automatic", on: "On" },

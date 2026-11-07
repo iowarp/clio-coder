@@ -77,6 +77,7 @@ test("footer hydration reads time and notices once per snapshot", () => {
 			return [];
 		},
 	});
+
 	try {
 		clocks = 0;
 		notices = 0;
@@ -85,6 +86,39 @@ test("footer hydration reads time and notices once per snapshot", () => {
 		strictEqual(notices, 1);
 	} finally {
 		panel.dispose();
+	}
+});
+
+test("minimal and demo-off footers suppress teaching without hiding immediate controls or safety mode", () => {
+	const state = footerState();
+	state.dispatchRows = [];
+	state.session.activeSkills = [];
+	state.notices = [];
+	state.keyContext = "idle";
+	state.demoHint = "learn a shortcut";
+	for (const autonomy of ["default", "yolo"]) {
+		state.session.autonomy = autonomy;
+		for (const [style, demo] of [
+			["compact", true],
+			["standard", false],
+		] as const) {
+			state.outputStyle = style;
+			state.demo = demo;
+			for (const width of [40, 80, 120, 200]) {
+				const lines = renderCompactDashboard(state, width);
+				const text = lines.map(stripTerminalSequences).join("\n");
+				match(text, autonomy === "yolo" ? /YOLO/u : /default/u);
+				ok(!/learn a shortcut|Dashboard/u.test(text));
+				strictEqual(lines.length, 1, "quiet idle footer has no empty hint row");
+				state.keyContext = "command:/settings";
+				match(renderCompactDashboard(state, width).map(stripTerminalSequences).join("\n"), /runs \/settings/u);
+				state.keyContext = "idle";
+				state.notices = [{ id: "fail", level: "error", text: "Route failed", key: null, addedAt: 0, expiresAt: null }];
+				match(renderCompactDashboard(state, width).map(stripTerminalSequences).join("\n"), /Route failed/u);
+				state.notices = [];
+				ok(lines.every((line) => visibleWidth(line) <= width));
+			}
+		}
 	}
 });
 

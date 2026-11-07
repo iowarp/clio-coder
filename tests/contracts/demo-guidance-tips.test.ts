@@ -186,7 +186,7 @@ describe("demo guidance tips", () => {
 
 	it("names a key only when it is bound, and grounds a mention tip in the prompt", () => {
 		const bound = guidance();
-		match(tipOf(bound.turn("explain it", { end: { assistantTextChars: 9_000 } })) ?? "", /Alt\+O cycles output styles/);
+		match(tipOf(bound.turn("explain it", { end: { assistantTextChars: 9_000 } })) ?? "", /Alt\+O cycles output detail/);
 		const unbound = guidance({ keyFor: () => null });
 		strictEqual(tipOf(unbound.turn("explain it", { end: { assistantTextChars: 9_000 } })), undefined);
 		const mention = guidance();

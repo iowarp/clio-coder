@@ -1,5 +1,5 @@
 import type { OutputStyle } from "../core/defaults.js";
-import { colorDisabled, nerdFontEnabled } from "../core/terminal-preferences.js";
+import { asciiOnly, colorDisabled, nerdFontEnabled } from "../core/terminal-preferences.js";
 import {
 	Editor,
 	getKeybindings,
@@ -64,7 +64,7 @@ const KILL_ACTIONS = [
 // finds the cursor by those markers rather than by an SGR sequence.
 const FAKE_CURSOR_BLANK = renderFakeCursor(" ");
 const FAKE_CURSOR_START = FAKE_CURSOR_BLANK.slice(0, FAKE_CURSOR_BLANK.indexOf(" "));
-const EMPTY_PROMPT = "Ask Clio…  / for commands";
+const EMPTY_PROMPT = `Ask Clio${GLYPH.ellipsis}  / for commands`;
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
 const COMPACTING_PROMPT = "Clio is compacting the session context";
@@ -118,7 +118,7 @@ export interface EditorChrome {
 	getAutonomy?: () => string;
 	/** Monotonic animation clock, injectable for deterministic rendering tests. */
 	getAnimationTime?: () => number;
-	/** Demo-off keeps optional attention motion static. */
+	/** Optional motion override; terminal accessibility preferences always apply. */
 	getMotionEnabled?: () => boolean;
 	/** Whether Enter currently targets the active Clio response. */
 	isStreaming?: () => boolean;
@@ -243,7 +243,7 @@ function thinkingRailHint(
 	const level = thinking.label;
 	const levels = thinking.supportedLevels ?? [];
 	const count = Object.hasOwn(THINKING_BRAINS, level) ? THINKING_BRAINS[level] : undefined;
-	const glyph = nerdFontEnabled() ? GLYPH.brain : "●";
+	const glyph = nerdFontEnabled() ? GLYPH.brain : GLYPH.running;
 	const glyphWidth = visibleWidth(glyph);
 	const graphicalWidth = THINKING_BRAIN_SLOTS * glyphWidth + THINKING_BRAIN_SLOTS - 1;
 	if (thinking.note) {
@@ -258,6 +258,7 @@ function thinkingRailHint(
 		(level !== "off" && !levels.includes(level)) ||
 		process.env.CLIO_CODER_SCREEN_READER === "1" ||
 		colorDisabled() ||
+		asciiOnly() ||
 		width < graphicalWidth
 	)
 		return theme.fg("thinkingLevel", `think ${level}`);
@@ -287,9 +288,9 @@ function renderEmptyPrompt(line: string, width: number, theme: ClioTheme, text =
 	const available = Math.max(0, width - 1);
 	const invitation =
 		text === EMPTY_PROMPT
-			? `${theme.fg("inputPlaceholder", "Ask Clio…  ")}${theme.fg("commandHint", "/ for commands")}`
+			? `${theme.fg("inputPlaceholder", `Ask Clio${GLYPH.ellipsis}  `)}${theme.fg("commandHint", "/ for commands")}`
 			: theme.fg("inputPlaceholder", text);
-	const prompt = truncateToWidth(invitation, available, "…", false);
+	const prompt = truncateToWidth(invitation, available, GLYPH.ellipsis, false);
 	const consumed = visibleWidth(prompt);
 	return `${line.slice(0, afterCursorAt)}${prompt}${line.slice(afterCursorAt + consumed)}`;
 }
@@ -547,7 +548,7 @@ export class ClioEditor extends Editor {
 
 	/** Breadcrumb, effect and next action for the selected suggestion, drawn under the list. */
 	private suggestionPanel(item: SlashCompletionItem, width: number, theme: ClioTheme): string[] {
-		const gutter = `${theme.fg("border", "│")} `;
+		const gutter = `${theme.fg("border", GLYPH.rail)} `;
 		const room = Math.max(1, width - 4 - visibleWidth(gutter));
 		const parts = item.path?.split(" › ") ?? [];
 		const crumb = parts
@@ -732,7 +733,7 @@ export class ClioEditor extends Editor {
 		labelRoom = this.railLabelRoom(width),
 	): string {
 		const left = rail.yolo
-			? `${theme.fg(rail.tone ?? "composerRail", "━")} ${theme.style("yoloLabel", "YOLO", { bold: true })}`
+			? `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${theme.style("yoloLabel", "YOLO", { bold: true })}`
 			: "";
 		const room = Math.max(0, labelRoom - (left ? visibleWidth(left) + 1 : 0));
 		const fitted = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));
@@ -780,7 +781,7 @@ export class ClioEditor extends Editor {
 		// The current task takes only what the rail's state left over, and an active loop outranks it.
 		const task = !loop && loopRoom >= TASK_RAIL_MIN_ROOM ? this.chrome.getTaskRail?.(loopRoom) : null;
 		const leftText = loop ?? task;
-		const left = leftText ? `${theme.fg(rail.tone ?? "composerRail", "━")} ${leftText}` : "";
+		const left = leftText ? `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${leftText}` : "";
 		return renderEditorRail(theme, width, { left, leftRaw: true, right: hint, rightRaw: true }, rail);
 	}
 

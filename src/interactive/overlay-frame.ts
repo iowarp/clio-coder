@@ -456,16 +456,17 @@ export function createChoiceList(options: ChoiceListOptions): ChoiceList {
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
 	const frame = (text: string): string => clioFrame(text, tone ?? "border");
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
-	const formatted = clean.length > 0 ? `─ ${clean} ` : "─";
-	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
-	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
+	const formatted = clean.length > 0 ? `${GLYPH.rule} ${clean} ` : GLYPH.rule;
+	const clipped =
+		visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, GLYPH.ellipsis, true) : formatted;
+	const fill = GLYPH.rule.repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
 	const cleanIndex = clipped.indexOf(clean);
 	if (cleanIndex !== -1) {
 		const prefix = clipped.slice(0, cleanIndex);
 		const suffix = clipped.slice(cleanIndex + clean.length);
-		return `${frame("┌")}${frame(prefix)}${clioTitle(clean, tone)}${frame(suffix)}${frame(fill)}${frame("┐")}`;
+		return `${frame(GLYPH.topLeft)}${frame(prefix)}${clioTitle(clean, tone)}${frame(suffix)}${frame(fill)}${frame(GLYPH.topRight)}`;
 	}
-	return `${frame("┌")}${frame(clipped)}${frame(fill)}${frame("┐")}`;
+	return `${frame(GLYPH.topLeft)}${frame(clipped)}${frame(fill)}${frame(GLYPH.topRight)}`;
 }
 
 /**
@@ -674,23 +675,24 @@ function fitHint(hint: string, maxCleanWidth: number): string {
 function brandedBottomBorder(innerWidth: number, hint?: string, tone?: ClioToken): string {
 	const frame = (text: string): string => clioFrame(text, tone ?? "border");
 	if (!hint || hint.trim().length === 0) {
-		return `${frame("└")}${frame("─".repeat(innerWidth))}${frame("┘")}`;
+		return `${frame(GLYPH.bottomLeft)}${frame(GLYPH.rule.repeat(innerWidth))}${frame(GLYPH.bottomRight)}`;
 	}
 	let clean = hint.trim();
 	const maxCleanWidth = innerWidth - 3;
 	if (clean.includes(" · ") && visibleWidth(`─ ${clean} `) > innerWidth) {
 		clean = fitHint(clean, maxCleanWidth);
 	}
-	const formatted = `─ ${clean} `;
-	const clipped = visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, "…", true) : formatted;
-	const fill = "─".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
+	const formatted = `${GLYPH.rule} ${clean} `;
+	const clipped =
+		visibleWidth(formatted) > innerWidth ? truncateToWidth(formatted, innerWidth, GLYPH.ellipsis, true) : formatted;
+	const fill = GLYPH.rule.repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
 	const cleanIndex = clipped.indexOf(clean);
 	if (cleanIndex !== -1) {
 		const prefix = clipped.slice(0, cleanIndex);
 		const suffix = clipped.slice(cleanIndex + clean.length);
-		return `${frame("└")}${frame(prefix)}${clioTheme().fg("keyboardHint", clean)}${frame(suffix)}${frame(fill)}${frame("┘")}`;
+		return `${frame(GLYPH.bottomLeft)}${frame(prefix)}${clioTheme().fg("keyboardHint", clean)}${frame(suffix)}${frame(fill)}${frame(GLYPH.bottomRight)}`;
 	}
-	return `${frame("└")}${frame(clipped)}${frame(fill)}${frame("┘")}`;
+	return `${frame(GLYPH.bottomLeft)}${frame(clipped)}${frame(fill)}${frame(GLYPH.bottomRight)}`;
 }
 
 export function formatRuntimeResolutionDiagnostic(diagnostic: RuntimeResolutionDiagnostic): string {
@@ -860,8 +862,7 @@ export class ClioOverlayFrame implements Component {
 		) {
 			return cached.lines;
 		}
-		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
-		const side = clioFrame("│", tone ?? "border");
+		const side = clioFrame(GLYPH.rail, tone ?? "border");
 		const body = fitBody(childLines, this.rowBudget, contentWidth).map((line) => clioTheme().base("menuOption", line));
 		if (this.fullscreen) {
 			while (body.length < Math.max(0, this.rowBudget - 2)) body.push("");
@@ -873,7 +874,7 @@ export class ClioOverlayFrame implements Component {
 					padAnsi(`  ${clioTheme().fg("keyboardHint", hint ?? "")}`, boxWidth),
 				]
 			: [
-					brandedTopBorder(label, contentWidth + 2, tone),
+					brandedTopBorder(titleText, contentWidth + 2, tone),
 					...body.map((line) => `${side} ${padAnsi(line, contentWidth)} ${side}`),
 					brandedBottomBorder(contentWidth + 2, hint, tone),
 				];

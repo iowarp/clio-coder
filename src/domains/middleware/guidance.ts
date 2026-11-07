@@ -211,7 +211,8 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 			withKey(
 				context,
 				"clio-coder.output.cycle",
-				(key) => `${key} cycles output styles: compact folds tool trails, detailed shows every step.`,
+				(key) =>
+					`${key} cycles output detail: Minimal folds tool trails; Detailed shows bounded previews. /view opens full details.`,
 			),
 	},
 	{

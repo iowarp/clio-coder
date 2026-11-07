@@ -4,7 +4,7 @@ This guide covers the installed CLI, headless run behavior, interactive commands
 
 ## Demo presentation and guidance
 
-Demo presentation and guidance are on by default before 1.0. The full welcome shows the stacked cyan-to-copper wordmark, workspace and fleet facts, and shortcut hints. It reserves two subscription rows from the first paint, keeping its height and Fleet placement steady while account data hydrates. Longer summaries show an ellipsis and `/usage` for the complete account details. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI open with a compact identity header: the same editor and chosen regular/fullscreen layout, without artwork or welcome-only context, subscription, and recipe reads. Optional attention animation and smooth-streaming pacing are disabled; work status and approval text remain visible. Dumb/unknown terminals and screen-reader mode also use the compact welcome.
+Demo presentation and guidance are on by default before 1.0 and follow output detail. Minimal opens with an identity header. Default shows a compact launchpad with the route, autonomy, project awareness and next action; Detailed adds artwork, project facts and shortcut hints. Detailed reserves two subscription rows from the first paint; longer account summaries end in an ellipsis and `/usage`. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI use the identity header and skip welcome-only reads and learning tips. Immediate controls, work status and approval text remain visible. Stream pacing and motion preferences are independent. Dumb/unknown terminals and screen-reader mode also use the identity header.
 
 After a turn, Clio Coder may show one fading footer line beginning `tip: ...` that fits what the turn did: a question about Clio Coder's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most one tip appears per session, and a tip retires once you use its feature yourself or it has been shown twice.
 
@@ -621,7 +621,7 @@ Three rules cover every key:
 | --- | --- | --- | --- |
 | `Alt+M` | `m` | Model picker | `/model` |
 | `Shift+Tab` | `t` | Cycle supported thinking effort for this session | `/thinking` |
-| `Alt+O` | `o` | Cycle output detail: Compact, Standard, Detailed | |
+| `Alt+O` | `o` | Cycle output detail: Minimal, Default, Detailed | |
 | `Alt+L` | `l` | Toggle the top-level Library | `/library` |
 | `Alt+U` | `u` | Cycle the dashboard: Activity, Context, Status, closed | |
 | `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
@@ -942,9 +942,9 @@ The read-only `code_nav` tool queries the local index. Its modes and argument sc
 
 ## Output styles
 
-**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings chat → Replies → Output style → Apply and save globally**, or `clio-coder configure --section interface`.
+**Alt+O** cycles **Minimal → Default → Detailed → Minimal**. Default is the startup tier, so the first press reveals Detailed. Changes are acknowledged in the footer. Cycling applies immediately to the current session, including startup chrome, streaming output and history. Save a preferred startup tier through **/settings interface → Output detail**, or `clio-coder configure --section interface`. The persisted values remain `compact`, `standard` and `detailed`.
 
-| Content | Compact | Standard | Detailed |
+| Content | Minimal | Default | Detailed |
 | --- | --- | --- | --- |
 | Answers and user messages | Complete | Complete | Complete |
 | Supplied reasoning | Marker | 3 rows | 12 rows |

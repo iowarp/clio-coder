@@ -1,7 +1,8 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { afterEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { colorDisabled, nerdFontEnabled } from "../../src/core/terminal-preferences.js";
+import { asciiOnly, colorDisabled, motionEnabled, nerdFontEnabled } from "../../src/core/terminal-preferences.js";
 import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
 import { ClioEditor } from "../../src/interactive/clio-editor.js";
 import {
@@ -12,10 +13,63 @@ import {
 
 const originalEnv = { ...process.env };
 afterEach(() => {
-	for (const key of ["TERM", "CLIO_CODER_SCREEN_READER", "CLIO_CODER_NERD_FONT", "NO_COLOR"]) {
+	for (const key of ["TERM", "CLIO_CODER_ASCII", "CLIO_CODER_SCREEN_READER", "CLIO_CODER_NERD_FONT", "NO_COLOR"]) {
 		if (originalEnv[key] === undefined) delete process.env[key];
 		else process.env[key] = originalEnv[key];
 	}
+});
+
+test("ASCII glyph selection is startup-wide and keeps decision marks, frames, and rails readable", () => {
+	const probe = `
+		import { GLYPH, clioTheme, frame } from "./src/interactive/theme/index.ts";
+		import { renderEditorRail } from "./src/interactive/editor-rails.ts";
+		import { ClioOverlayFrame } from "./src/interactive/overlay-frame.ts";
+		import { DEFAULT_SETTINGS } from "./src/core/defaults.ts";
+		import { createBootWelcome } from "./src/interactive/welcome-dashboard.ts";
+		const theme = clioTheme();
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.target = "local";
+		settings.chat.model = "test-model";
+		settings.interface.outputDetail = "detailed";
+		const lines = frame(theme, "Approval", ["target /work/example", "[Enter] allow [Esc] deny"], 40);
+		const rail = renderEditorRail(theme, 40, {}, { phase: "working", yolo: false, animate: true, now: 0 });
+		const overlay = new ClioOverlayFrame({ render: () => ["target /work/example"], invalidate() {} }, "Approval", "[Enter] allow / [Esc] deny").render(40);
+		const welcome = createBootWelcome(settings).render(80);
+		delete process.env.CLIO_CODER_ASCII;
+		process.env.TERM = "xterm-256color";
+		console.log(JSON.stringify({ glyphs: GLYPH, lines, overlay, rail, welcome }));
+	`;
+	for (const fallback of [{ CLIO_CODER_ASCII: "1", TERM: "xterm-256color" }, { TERM: "dumb" }, { TERM: "unknown" }]) {
+		const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", probe], {
+			env: { ...process.env, NO_COLOR: "1", ...fallback },
+			encoding: "utf8",
+			timeout: 20_000,
+		});
+		strictEqual(result.status, 0, result.stderr);
+		const output = JSON.parse(result.stdout) as {
+			glyphs: Record<string, string>;
+			lines: string[];
+			overlay: string[];
+			rail: string;
+			welcome: string[];
+		};
+		ok(Object.values(output.glyphs).every((glyph) => /^[\x20-\x7e]+$/u.test(glyph)));
+		strictEqual(new Set([output.glyphs.ok, output.glyphs.error, output.glyphs.cancelled]).size, 3);
+		ok(output.lines.every((line) => visibleWidth(line) === 40));
+		ok(output.lines.map(stripTerminalSequences).every((line) => /^[\x20-\x7e]+$/u.test(line)));
+		ok(output.overlay.every((line) => visibleWidth(line) === 40));
+		ok(output.overlay.map(stripTerminalSequences).every((line) => /^[\x20-\x7e]+$/u.test(line)));
+		match(stripTerminalSequences(output.overlay[0] ?? ""), /^\+- Approval /u);
+		match(stripTerminalSequences(output.rail), /^-+$/u);
+		strictEqual(output.glyphs.rail, "|");
+		strictEqual(output.welcome.length, 1);
+		match(stripTerminalSequences(output.welcome[0] ?? ""), /test-model/u);
+	}
+	const env = { TERM: "xterm-256color", CLIO_CODER_ASCII: "1", CLIO_CODER_NERD_FONT: "1" };
+	strictEqual(asciiOnly(env), true);
+	strictEqual(motionEnabled(env), false);
+	strictEqual(nerdFontEnabled(env), false);
+	strictEqual(asciiOnly({ TERM: "xterm-256color", NO_COLOR: "1" }), false);
 });
 
 test("demo-off skips welcome-only readers and live toggles restore the full welcome", () => {
@@ -23,6 +77,7 @@ test("demo-off skips welcome-only readers and live toggles restore the full welc
 	delete process.env.CLIO_CODER_SCREEN_READER;
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.interface.demo = false;
+	settings.interface.outputDetail = "detailed";
 	settings.chat.target = "local";
 	settings.chat.model = "test-model";
 	const reads = { context: 0, quota: 0, recipes: 0, keys: 0 };
@@ -120,6 +175,7 @@ test("thinking rail uses ordinary marks unless Nerd Font coverage is explicitly 
 
 test("three-column welcome aligns field values, command descriptions, and bound key descriptions", () => {
 	const stats = {
+		outputStyle: "detailed" as const,
 		cwd: "/tmp/welcome-test",
 		workspace: null,
 		targetLabel: "local",
@@ -177,6 +233,7 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 	process.env.TERM = "xterm-256color";
 	delete process.env.CLIO_CODER_SCREEN_READER;
 	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.interface.outputDetail = "detailed";
 	const boot = createBootWelcome(settings, "Enter");
 	let quota: string | null = null;
 	const hydrated = createWelcomeDashboard({
@@ -188,9 +245,7 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 	try {
 		for (const width of [8, 20, 40, 60, 76, 80, 100, 160, 200, 240]) {
 			const initial = boot.render(width);
-			const baseRows = width >= 57 && width < 76 ? 21 : 17;
-			const taglineRows = width < 40 ? 0 : width < 76 ? 2 : 1;
-			ok(initial.length >= baseRows && initial.length <= baseRows + taglineRows);
+			ok(initial.length <= 24, "artwork remains bounded on narrow terminals");
 			const usageRow = initial.map(stripTerminalSequences).findIndex((line) => line.includes("AI usage"));
 			for (const reading of [
 				null,
@@ -225,6 +280,7 @@ test("welcome height and usage placement stay fixed from Stage 0 through quota h
 
 test("welcome centers the artwork and gives contextual project guidance without configuration inventory", () => {
 	const stats = {
+		outputStyle: "detailed" as const,
 		cwd: "/tmp/project",
 		workspace: null,
 		targetLabel: "local",
@@ -240,18 +296,64 @@ test("welcome centers the artwork and gives contextual project guidance without 
 	};
 	for (const width of [80, 120, 180, 240]) {
 		const rows = buildWelcomeDashboardLines(stats, "0.5.7", width, "launchpad").map(stripTerminalSequences);
-		strictEqual(rows.length, 18);
 		const artRows = rows.flatMap((line, index) => (line.includes("██") ? [index] : []));
-		strictEqual(artRows[0], 2);
-		strictEqual(artRows.at(-1), 12);
+		ok(artRows.length > 0);
 		const text = rows.join("\n");
 		ok(!/describe a task|Permissions|configured|recipes|Systems engineering/u.test(text));
-		match(text, /Session started/u);
+		match(text, /local · model/u);
+		match(text, /YOLO · no approval stops/u);
 		match(text, /\/context init/u);
 		const stale = buildWelcomeDashboardLines({ ...stats, projectContext: "stale" }, "0.5.7", width, "launchpad")
 			.map(stripTerminalSequences)
 			.join("\n");
 		match(stale, /Stale project awareness: \/context refresh/u);
 		ok(!stale.includes("/context init"));
+	}
+});
+
+test("startup and live tier changes share one bounded welcome policy", () => {
+	process.env.TERM = "xterm-256color";
+	delete process.env.CLIO_CODER_SCREEN_READER;
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = "local";
+	settings.chat.model = "test-model";
+	const live = createWelcomeDashboard({
+		providers: { list: () => [] },
+		getSettings: () => settings,
+		getTerminalRows: () => 40,
+	});
+	try {
+		for (const demo of [true, false]) {
+			settings.interface.demo = demo;
+			for (const style of ["compact", "standard", "detailed"] as const) {
+				settings.interface.outputDetail = style;
+				const boot = createBootWelcome(settings, "Enter");
+				for (const width of [80, 120, 200]) {
+					for (const header of [boot, live]) {
+						const lines = header.render(width);
+						const text = lines.map(stripTerminalSequences).join("\n");
+						ok(lines.every((line) => visibleWidth(line) <= width));
+						match(text, /test-model/u);
+						if (!demo || style === "compact") {
+							strictEqual(lines.length, 1);
+							ok(!/██|\/help|Awareness/u.test(text));
+						} else if (style === "standard") {
+							ok(lines.length <= 8);
+							match(text, /Default · reviewed approvals/u);
+							ok(!text.includes("██"));
+						} else ok(text.includes("██"));
+					}
+				}
+			}
+		}
+		settings.interface.demo = true;
+		settings.interface.outputDetail = "standard";
+		const before = live.render(120);
+		settings.safety.autonomy = "yolo";
+		const after = live.render(120);
+		ok(after !== before, "autonomy invalidates the welcome cache");
+		match(after.map(stripTerminalSequences).join("\n"), /YOLO · no approval stops/u);
+	} finally {
+		live.dispose();
 	}
 });

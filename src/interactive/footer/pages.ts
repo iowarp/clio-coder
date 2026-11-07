@@ -9,6 +9,7 @@
  * Runs board and a quota meter here reads like one in `/usage`.
  */
 
+import { outputStyleLabel } from "../../core/defaults.js";
 import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
@@ -729,10 +730,19 @@ const STATS_RESERVE_WIDTH = 35;
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const w = Math.max(1, width);
+	const style = state.outputStyle ?? "standard";
+	const minimal = style === "compact";
+	const learning = !minimal && state.demo !== false;
+	const autonomy = state.session.autonomy;
+	const mode = autonomy
+		? theme.fg(autonomy === "yolo" ? "warning" : "annotation", autonomy === "yolo" ? "YOLO" : clean(autonomy))
+		: "";
+	const modeLead = mode ? `${mode}${theme.fg("separator", ` ${GLYPH.dot} `)}` : "";
+	const identityWidth = Math.max(1, w - visibleWidth(modeLead));
 	const narrow = w <= 60;
 	const fit = (text: string, room = w) =>
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
-	const separator = theme.fg("separator", " · ");
+	const separator = theme.fg("separator", ` ${GLYPH.dot} `);
 	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
 	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
 	const newest = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
@@ -754,14 +764,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tok/s")}`
 			: "";
 	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
-	const metrics = [counter, speed].filter(Boolean).join(theme.fg("separator", " · "));
-	const statsCap = Math.floor(w * 0.4);
-	const values = visibleWidth(metrics) <= statsCap ? metrics : counter;
+	const metrics = [counter, speed].filter(Boolean).join(separator);
+	const statsCap = Math.floor(identityWidth * 0.4);
+	const values = !minimal && visibleWidth(metrics) <= statsCap ? metrics : counter;
 	// Once a figure shows, the stats column keeps its widest width (and the dirty
 	// marker its two columns) whatever the turn adds or drops, so the path's cut
 	// point stays where it was. With no figure yet the path has the whole row.
 	const valueWidth = values === "" ? 0 : Math.min(statsCap, Math.max(visibleWidth(values), STATS_RESERVE_WIDTH));
-	const workspaceWidth = Math.max(1, valueWidth === 0 ? w : w - valueWidth - 3);
+	const workspaceWidth = Math.max(1, valueWidth === 0 ? identityWidth : identityWidth - valueWidth - 3);
 	// Until the first probe lands the branch is unknown, not absent: say nothing.
 	// A detached HEAD is still a repository: name the commit rather than claim there is no branch to speak of.
 	const unnamed =
@@ -780,9 +790,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: `${cwdLabel}${separator}${theme.fg("branch", fitIdentityLabel(git, Math.max(1, gitWidth - visibleWidth(dirtyMarker))))}${dirtyMarker}`;
 	const statsGap = " ".repeat(Math.max(0, valueWidth - visibleWidth(values)));
 	const firstRow = fit(
-		valueWidth === 0
-			? fit(workspace, workspaceWidth)
-			: `${fit(workspace, workspaceWidth)}   ${statsGap}${fit(values, valueWidth - statsGap.length)}`,
+		modeLead +
+			(valueWidth === 0
+				? fit(workspace, workspaceWidth)
+				: `${fit(workspace, workspaceWidth)}   ${statsGap}${fit(values, valueWidth - statsGap.length)}`),
 	);
 
 	const feedback = topNotification(
@@ -837,8 +848,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? theme.fg("unknownValue", "memory review paused")
 				: "";
 	const facts = [
-		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
-		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
+		!minimal && state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
+		!minimal && state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
 		queuedWorkers ? theme.fg("annotation", `${queuedWorkers} queued`) : "",
 		plans ? theme.fg("activity", `${plans} ${plans === 1 ? "plan" : "plans"}`) : "",
@@ -846,13 +857,19 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		skills.length
 			? `${theme.fg("skillAction", "skill ")}${theme.fg("counter", fitNames("", skills.map(clean), Math.max(8, Math.floor(w / 3))))}`
 			: "",
-		weekly
+		weekly && (!minimal || weekly.severity === "critical")
 			? theme.fg(
 					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "counter" : "warning",
 					weekly.label,
 				)
 			: "",
 		...(state.extensionFacts ?? []),
+		...(style === "detailed"
+			? [
+					theme.fg("annotation", outputStyleLabel(style)),
+					...(state.telemetry.kind === "ready" ? sessionSpendChips(state.telemetry) : []),
+				]
+			: []),
 	]
 		.filter(Boolean)
 		.join(separator);
@@ -860,7 +877,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const silence = state.silenceNotes ?? null;
 	const silenceNote = silence?.find((form) => visibleWidth(form) <= w) ?? silence?.at(-1) ?? null;
 	// A narrow footer drops its idle hint row, but never the silence note that row exists to carry (HS16).
-	if (narrow && !urgent && !notice && !feedback && !facts && silenceNote === null) return [firstRow];
+	if (narrow && !immediateKeys && !urgent && !notice && !feedback && !facts && silenceNote === null) return [firstRow];
 	const alone = urgent !== null || silenceNote !== null || !tail;
 	// A wide footer gives its facts half the row, so two extension statuses both fit beside the key hints.
 	const tailWidth = alone ? 0 : Math.min(Math.floor(w * (w >= 100 ? 0.5 : 0.4)), visibleWidth(tail));
@@ -874,7 +891,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? theme.fg("changedValue", clean(feedback.text))
 				: surfaceOwnsKeys
 					? ""
-					: state.demoHint && !state.welcomeVisible && !immediateKeys && !notice
+					: learning && state.demoHint && !state.welcomeVisible && !immediateKeys && !notice
 						? `${theme.fg("guidance", "Tip")} ${theme.fg("counter", clean(state.demoHint))}`
 						: theme.fg(
 								"keyboardHint",
@@ -882,11 +899,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 									? ""
 									: (footerKeyHint(state.now, narrow, room, keyContext, {
 											...state.keyHintFacts,
-											learning: state.demo !== false,
-										}) ?? `${key} Dashboard`),
+											learning,
+										}) ?? ""),
 							);
 	const row = (text: string): string => (alone ? fit(text) : fit(`${fit(text, room)}   ${fit(tail, tailWidth)}`));
-	if (!notice) return [firstRow, row(controls)];
+	const hasControls = visibleWidth(controls) > 0;
+	if (!notice) return !hasControls && !tail ? [firstRow] : [firstRow, row(controls)];
 	// A narrow footer spends no row on hints it cannot fit, so there the notice keeps the shared row it always had;
 	// only a quit or leader prompt outranks it.
 	if (narrow)
@@ -897,7 +915,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const noticeRow = renderNoticeRow(theme, notice, otherNotices, w, key, state.dismissKeyLabel);
 	const hintRow = row(controls);
 	// With nothing else to say on the hint row, the notice keeps the one row it always had.
-	if (controls === "" && !tail) return [firstRow, noticeRow];
+	if (!hasControls && !tail) return [firstRow, noticeRow];
 	return [firstRow, noticeRow, hintRow];
 }
 

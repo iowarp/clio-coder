@@ -1147,7 +1147,7 @@ export interface SessionCommandContext {
 	setThinkingLevel?: (level: string) => SetThinkingLevelResult;
 	thinkingLevelChoices?: () => ReadonlyArray<{ value: string; label: string }>;
 	openThinkingPicker?: () => void;
-	/** Apply a transcript verbosity named on the command line; refused values are reported by the caller. */
+	/** Open the model picker when no model pattern was supplied. */
 	openModel?: () => void;
 	/** Live providers contract used by `/model <pattern>` to resolve directly. */
 	providers: ProvidersContract;
@@ -3597,7 +3597,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 			kind: "usage-error",
 			command: "output",
 			reason:
-				"Use /help for the effective Output cycle keys, or /settings interface to save a default. Use /view for full details",
+				"Use /help for the output-detail shortcut, or /settings interface to save a default. Use /view for full details",
 		};
 	}
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
@@ -3727,7 +3727,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		const usage = entry ? ` ${usageNotice(entry)}` : "";
 		const reason =
 			command.command === "output" && ctx.keyboardActions
-				? `Use ${ctx.keyboardActions.outputLabel()} to cycle Output style, or /settings interface to save a default`
+				? `Use ${ctx.keyboardActions.outputLabel()} to cycle output detail, or /settings interface to save a default; /view shows full details`
 				: command.reason;
 		ctx.notice("error", `${reason}.${usage}`);
 		ctx.render?.();

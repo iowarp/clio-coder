@@ -12,7 +12,7 @@ The governing architectural principle: **the user reads state from color, struct
 
 ## Output Styles
 
-Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compact`). Standard is the default (`interface.outputDetail`). The control is **Chat → Replies → Output style** in `/settings chat`, and **Appearance → Display & keyboard → Output style** in `clio-coder configure --section interface`. The row budgets below are the `POLICIES` in [transcript-detail.ts](../../src/interactive/transcript-detail.ts).
+Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal`). Default is the startup tier (`interface.outputDetail: standard`). Persisted values remain `compact`, `standard` and `detailed`. The control is **Output detail** in `/settings interface` or `clio-coder configure --section interface`. The row budgets below are the `POLICIES` in [transcript-detail.ts](../../src/interactive/transcript-detail.ts).
 
 | Content | Compact | Standard (Default) | Detailed |
 | :--- | :--- | :--- | :--- |
@@ -171,7 +171,7 @@ A run's status is a glyph and a word from `dispatchStatusPresentation` in [dispa
 | failed (`fail` when compact), dead | `✗` | `error` |
 | aborted (`abort` when compact) | `⊘` | `annotation` |
 
-Only a pending human decision animates (`spinnerFrame` with `attention`). Routine progress stays a static `●`, and nothing animates under `CLIO_CODER_REDUCE_MOTION=1`, screen-reader mode, `NO_COLOR` or `interface.demo: false`.
+Live work may animate through `activityCue`; waits on the operator hold a static mark. Nothing animates under `CLIO_CODER_REDUCE_MOTION=1`, screen-reader mode or `NO_COLOR`. Demo guidance does not control motion.
 
 ### 3.4 Width Degradation
 
@@ -237,8 +237,8 @@ The visual hierarchy coordinates four primary screen surfaces: Header, Transcrip
 ### 4.1 Welcome Launchpad & Session Header
 
 The header operates in two distinct modes:
-- **Launchpad (before the first prompt)**: A standard island whose bottom row, under an inner divider, names the one next step by what blocks work (`/model` for an unset route, `/settings targets` for an unavailable or degraded one, then `/context init`, `/context refresh` or `/context` by project-awareness state) and carries the version at the right. The island has no title at normal widths because the wordmark carries the brand; under 57 columns the title is `>C_ Clio Coder v<version>`. Rows: session start time, project (workspace, Git state, project awareness), account usage (two rows reserved from the first paint, ending in `… /usage` when more accounts exist), and one tagline chosen per process from `WELCOME_TAGLINES` when the island's inner width is at least 36 cells. Usage and awareness are read off the render path. The launchpad shows only with `interface.demo` on, a terminal that is not `dumb` or `unknown`, and screen-reader mode off.
-- **Session Header (after prompt admission)**: Collapses once into a single compact line showing the brand mark, product name and version, the active route, the working directory and the Git branch (`*` when dirty), preserving vertical space for the transcript. It stays live, so a mid-session model change shows. `/new` brings the launchpad back. Demo-off and compact-terminal starts show this line from the first frame.
+- **Launchpad (before the first prompt)**: Default shows a compact titled panel with route, autonomy, awareness and one next action. Detailed adds artwork, project facts, two reserved account-usage rows and a process-local tagline. The next action names what blocks work (`/model` for an unset route, `/settings targets` for an unavailable or degraded one, then `/context init`, `/context refresh` or `/context` by awareness). Welcome-only reads happen off the render path. Minimal, demo-off, dumb/unknown terminals and screen-reader mode skip the launchpad.
+- **Session Header (after prompt admission)**: One live line with brand, version and active route. Workspace and Git facts stay in the footer instead of repeating above the transcript. `/new` restores the tier-appropriate welcome.
 
 ### 4.2 Composer (ClioEditor)
 
@@ -250,8 +250,8 @@ The input surface (`ClioEditor`) frames the operator's prompt:
 
 ### 4.3 Progressively Disclosed Footer
 
-The compact footer is two lines:
-- **Line 1 (Workspace & Metrics)**: Working directory and Git branch with a `*` when dirty, then a right-hand stats column with context occupancy (`used/window (percent)`) and throughput (`tps`). Branch and context figures stay blank until known. Once metrics appear, the footer reserves their column and the dirty marker's space so changing numbers do not shift the path's cut point. A narrow row drops the percent, then states it as `ctx N%`.
+The compact footer uses one row when quiet and adds rows only for useful controls, facts or notices:
+- **Line 1 (Workspace & Metrics)**: Effective autonomy first, then working directory and Git branch with a `*` when dirty, and right-hand context occupancy. Default and Detailed may add throughput; Minimal leaves it to inspection. Branch and context figures stay blank until known. Once metrics appear, the footer reserves their column and the dirty marker's space so changing numbers do not shift the path's cut point. A narrow row drops the percent, then states it as `ctx N%`.
 - **Line 2 (Notices & Hints)**: One message, in this order of precedence: an armed quit or leader key, the top notice, setting feedback, a footer tip, then key hints. Beside it, when space permits, the tail shows active worker count, armed skill names and the selected model's weekly quota headroom. Key hints pin the keys that answer the moment and describe what the composer holds now ([key-hints.ts](../../src/interactive/footer/key-hints.ts)). While the composer is empty, one learning hint may sit beside them and changes once a minute; a draft, a narrow footer that already pins keys, or `interface.demo` off drops it. A hint is shown whole or not at all, and a key whose target does not exist right now is never offered.
 - **Notice Slot**: Line 2 has room for one notice. It shows the head of the notice center's order, most severe first and newest within a level, with the level's glyph and token. A notice that is multi-line or wider than its room is cut and ends in the dashboard key plus `more`; the expanded dashboard wraps it in full.
 - **Narrow Terminals**: Secondary hints yield space to the context percentage and phase without wrapping; optional counts drop before a number is cut.
