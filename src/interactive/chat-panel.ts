@@ -1766,6 +1766,7 @@ function renderToolSegmentLines(
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
 	stopRequestedAt: number | null = null,
+	nameRequester = true,
 ): string[] {
 	const call = {
 		toolCallId: seg.id,
@@ -1795,7 +1796,7 @@ function renderToolSegmentLines(
 		evictedReason: seg.evictedReason,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
-		...shellActor(seg),
+		...shellActor(seg, nameRequester),
 	};
 	const options = { unbounded, diffStyle: seg.replayed ? ("plain" as const) : ("color" as const) };
 	if (unbounded && seg.finished) return renderToolExecution(finished, width, options);
@@ -1807,7 +1808,7 @@ function renderToolSegmentLines(
 			? [stopSentRow(Math.max(0, nowMs - stopRequestedAt), width)]
 			: [];
 	// A started process names who runs it while it runs, as its settled row does, so a stop reads `Clio is stopping`.
-	const running = seg.executionStarted ? { ...call, ...shellActor(seg) } : call;
+	const running = seg.executionStarted ? { ...call, ...shellActor(seg, nameRequester) } : call;
 	const rows = renderToolPreview(stopRow.length > 0 ? { ...running, stopping: true } : running, width, detail, {
 		...options,
 		terminalRows,
@@ -1818,10 +1819,16 @@ function renderToolSegmentLines(
 	return [...rows, ...stopRow];
 }
 
-/** Shell-class calls say who started the process. Anything else already reads as a named action. */
-function shellActor(seg: ToolSegment): { actor?: "harness"; requestedBy?: string } {
+/**
+ * Shell-class calls say who started the process. Anything else already reads as a named action.
+ * The requesting model is named only where the turn's `Reply from` row does not already settle it.
+ */
+function shellActor(seg: ToolSegment, nameRequester = true): { actor?: "harness"; requestedBy?: string } {
 	if (seg.name !== ToolNames.Bash && seg.name !== ToolNames.RunScript) return {};
-	return { actor: "harness", ...(seg.requestedBy !== undefined ? { requestedBy: seg.requestedBy } : {}) };
+	return {
+		actor: "harness",
+		...(nameRequester && seg.requestedBy !== undefined ? { requestedBy: seg.requestedBy } : {}),
+	};
 }
 
 /** A finished call changes only when a late result upgrades it or a worker card attaches to it. */
@@ -1838,7 +1845,7 @@ function shownArgs(seg: ToolSegment): unknown {
 }
 
 /** A settled tool segment as the renderers read a finished call. */
-function finishedCall(seg: ToolSegment): ToolExecutionFinished {
+function finishedCall(seg: ToolSegment, nameRequester = true): ToolExecutionFinished {
 	return {
 		toolCallId: seg.id,
 		toolName: seg.name,
@@ -1855,7 +1862,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		cardAttached: seg.cardAttached,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
 		operatorGrant: seg.operatorGrant,
-		...shellActor(seg),
+		...shellActor(seg, nameRequester),
 	};
 }
 
@@ -2000,7 +2007,10 @@ function renderEntryLines(
 	if (entry.models?.length && !(entry.models.length === 1 && entry.sameModelAsBefore === true))
 		blocks.push({ kind: "prose", lines: renderNoticeRow(`Reply from ${entry.models.join(" → ")}`, "info", width) });
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
-	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${skinEpoch()}`;
+	// One model answered the whole turn, so its shell rows need not each name it;
+	// after a failover the row says which of the turn's models asked for it.
+	const nameRequester = (entry.models?.length ?? 0) > 1;
+	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${nameRequester}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
 	// per run of it: stretches that nothing visible separates read as one. A run
 	// is held until the block after it is known, because what follows decides
@@ -2097,7 +2107,7 @@ function renderEntryLines(
 				) {
 					const lines = renderFoldedGroup(
 						family,
-						grouped.map(finishedCall),
+						grouped.map((member) => finishedCall(member, nameRequester)),
 						width,
 						previewBudget(detail.invocationRows, terminalRows),
 					);
@@ -2118,6 +2128,7 @@ function renderEntryLines(
 						detail,
 						terminalRows,
 						seg.finished ? null : stopRequestedAt,
+						nameRequester,
 					);
 					rows = { key: settledKey, lines, body: hasToolBody(lines) };
 					if (seg.finished) seg.settledRows = rows;

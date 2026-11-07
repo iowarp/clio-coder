@@ -463,3 +463,36 @@ test("fresh worker output clears the silence timer while waiting for dispatch", 
 	const tick = reduceStatus(progress, { type: "watchdog_tick" }, { now: 600002, localRuntime: false });
 	strictEqual(tick.phase, "tool_running");
 });
+
+test("a shell row names the model that asked for it only when the turn had more than one", () => {
+	const panel = createChatPanel({ getRunTarget: () => "router", now: () => 1_000 });
+	panel.appendUser("check");
+	panel.applyEvent({ type: "agent_start" } as never);
+	const reply = (model: string) =>
+		panel.applyEvent({
+			type: "message_start",
+			message: { role: "assistant", provider: "openai-completions", model, content: [] },
+		} as never);
+	reply("model-a");
+	panel.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "b1",
+		toolName: "bash",
+		args: { command: "npm test" },
+	} as never);
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "b1",
+		toolName: "bash",
+		result: { content: [{ type: "text", text: "ok" }], details: { exitCode: 0 } },
+		isError: false,
+		durationMs: 5,
+	} as never);
+	const one = panel.render(120).map(stripTerminalSequences).join("\n");
+	match(one, /Reply from/u, one);
+	match(one, /\$ Clio ran `npm test`/u, one);
+	doesNotMatch(one, /requested by/u, "the Reply from row already names the only model in the turn");
+	reply("model-b");
+	const failover = panel.render(120).map(stripTerminalSequences).join("\n");
+	match(failover, /\$ Clio ran `npm test` \(requested by [^)]*model-a[^)]*\)/iu, failover);
+});
