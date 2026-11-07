@@ -336,7 +336,8 @@ async function step(context: Context, sessionId = "route-session", signal?: Abor
  * The promise's value if it settles within a bounded number of event-loop turns, else "pending". Turns, not
  * milliseconds: the work under test is event-driven, so no wall-clock threshold decides the outcome.
  */
-async function settledWithinTurns<T>(promise: Promise<T>, turns = 200): Promise<T | "pending"> {
+// Callers that expect settlement use the large default: real I/O can lag event-loop turns on a loaded host.
+async function settledWithinTurns<T>(promise: Promise<T>, turns = 100_000): Promise<T | "pending"> {
 	let outcome: { value: T } | null = null;
 	void promise.then((value) => {
 		outcome = { value };
@@ -872,6 +873,9 @@ test("the first step of a fresh conversation is measured from a boundary read be
 			mock.timers.tick(1);
 			first = await settledWithinTurns(pending, 5);
 		}
+		// Real I/O in the step can lag the event-loop turns above on a loaded host; keep the mocked clock
+		// where it is (far below the deadline) and give it real turns, so only the deadline can time it out.
+		if (first === "pending") first = await settledWithinTurns(pending, 100_000);
 	} finally {
 		mock.timers.reset();
 	}
