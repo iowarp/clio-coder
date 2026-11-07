@@ -23,6 +23,8 @@ import {
 	setGitCommitAttributionEnabled,
 	withManagedGitCommitAttributionEnvironment,
 } from "../core/git-commit-attribution.js";
+import { enterPrivateHomeIfNeverSetUp } from "../core/read-only-home.js";
+import { enterReadOnlyMode } from "../core/read-only-mode.js";
 import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
 import { ToolNames } from "../core/tool-names.js";
 
@@ -157,6 +159,12 @@ async function main(): Promise<number> {
 
 	const spec = await demux.readSpec();
 	process.title = `clio-coder-worker:${spec.agentId}`;
+	// A read-only worker leaves its home as it found it from its first write
+	// on: one Clio never set up is swapped for a private one removed at exit.
+	if (spec.readOnly === true) {
+		enterReadOnlyMode();
+		enterPrivateHomeIfNeverSetUp();
+	}
 	const attributionEnabled = spec.gitCommitAttribution ?? true;
 	setGitCommitAttributionEnabled(attributionEnabled);
 	// Every child this worker spawns through bash-exec or safe-exec runs under

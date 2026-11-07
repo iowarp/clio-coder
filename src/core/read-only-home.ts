@@ -1,5 +1,6 @@
 /**
- * `run --read-only` on a home Clio has never set up writes nothing to it.
+ * `run --read-only`, and a read-only worker (local or over SSH), on a home Clio
+ * has never set up writes nothing to it.
  *
  * A run records its session, telemetry, run ledger, heartbeat and running-build
  * entry, and its first boot scaffolds config, credentials, data and state. On

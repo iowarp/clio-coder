@@ -1,7 +1,7 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -10,8 +10,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { initializeClioHome } from "../../src/core/init.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
@@ -56,7 +58,7 @@ import { createOrderedSteerHandler } from "../../src/worker/stdin-demux.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 function recipe() {
 	return parseAgentRecipeSchema({
@@ -331,6 +333,21 @@ describe("worker boundary", () => {
 
 const WORKER_ENTRY = fileURLToPath(new URL("../../dist/worker/entry.js", import.meta.url));
 
+/** Every entry under `root` with its kind, size and mtime, so any write shows. */
+function homeInventory(root: string): string[] {
+	const rows: string[] = [];
+	const walk = (dir: string): void => {
+		rows.push(`${dir}\td\t${statSync(dir).mtimeMs}`);
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) walk(path);
+			else rows.push(`${path}\tf\t${statSync(path).size}\t${statSync(path).mtimeMs}`);
+		}
+	};
+	walk(root);
+	return rows.sort();
+}
+
 async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
@@ -396,9 +413,10 @@ async function dispatchedWorkerSpec(url: string, cwd: string): Promise<WorkerSpe
 }
 
 /** The real worker entry, driven by the test instead of the orchestrator's channel. */
-function startWorkerEntry(spec: WorkerSpec, cwd: string) {
+function startWorkerEntry(spec: WorkerSpec, cwd: string, env: NodeJS.ProcessEnv = process.env) {
 	const child = spawn(process.execPath, [WORKER_ENTRY], {
 		cwd,
+		env,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	const seen: { stdout: string; stderr: string; announce: WorkerAttestation | null } = {
@@ -744,6 +762,49 @@ describe("worker admission", () => {
 					ok(await waitFor(() => worker.seen.stdout.length > 0 && requests() > 0, 30_000), worker.seen.stderr);
 				} finally {
 					await worker.stop();
+				}
+			});
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("a read-only worker writes nothing to its home, set up or never set up", { timeout: 120_000 }, async () => {
+		const env = await isolateClioEnv("clio-worker-read-only-home-");
+		try {
+			// A Git project: commit attribution installs its managed hooks under the home's state only inside one.
+			const project = join(env.dir, "project");
+			mkdirSync(project);
+			spawnSync("git", ["init", "-q", project]);
+			const workerTmp = join(env.dir, "tmp");
+			mkdirSync(workerTmp);
+			const setUpHome = join(env.dir, "set-up-home");
+			Object.assign(process.env, scratchClioEnvVars(setUpHome));
+			resetXdgCache();
+			initializeClioHome();
+			Object.assign(process.env, scratchClioEnvVars(env.dir));
+			resetXdgCache();
+			await withModelFixture(async (url, requests) => {
+				const spec = await dispatchedWorkerSpec(url, project);
+				strictEqual(spec.readOnly, true, "a scout dispatches read-only");
+				for (const home of [join(env.dir, "never-set-up-home"), setUpHome]) {
+					mkdirSync(home, { recursive: true });
+					const before = homeInventory(home);
+					const sent = requests();
+					const worker = startWorkerEntry(spec, project, {
+						...process.env,
+						...scratchClioEnvVars(home),
+						TMPDIR: workerTmp,
+					});
+					try {
+						ok(await waitFor(() => worker.seen.announce !== null, 45_000), worker.seen.stderr);
+						worker.child.stdin.write(`${JSON.stringify({ type: "admit", specDigest: worker.seen.announce?.specDigest })}\n`);
+						ok(await waitFor(() => requests() > sent && worker.seen.stdout.includes("done"), 30_000), worker.seen.stderr);
+					} finally {
+						await worker.stop();
+					}
+					deepStrictEqual(homeInventory(home), before, home);
+					deepStrictEqual(readdirSync(workerTmp), [], "no private home is left behind");
 				}
 			});
 		} finally {
