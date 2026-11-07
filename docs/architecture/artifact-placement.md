@@ -104,6 +104,7 @@ problem.
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
 | `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
+| `memory/recall-use-v1.json` | Per-record recall and use counts that demote memory a session keeps carrying unused ([recall-use.ts](../../src/domains/memory/recall-use.ts)) |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
 | `interviews/` | Interview transcripts |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
