@@ -12,6 +12,7 @@ import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
@@ -95,6 +96,7 @@ integrations:
 		CLIO_CODER_DATA_DIR: dataDir,
 		CLIO_CODER_STATE_DIR: stateDir,
 		CLIO_CODER_CACHE_DIR: cacheDir,
+		PATH: "",
 	};
 
 	return {
@@ -104,11 +106,7 @@ integrations:
 		env,
 		cleanup: () => {
 			resetXdgCache();
-			try {
-				rmSync(root, { recursive: true, force: true });
-			} catch {
-				// Ignore cleanup
-			}
+			rmSync(root, { recursive: true, force: true });
 		},
 	};
 }
@@ -177,15 +175,41 @@ async function captureConfigure(
  * A home with no targets, which is what makes `configure` open the first-run
  * wizard rather than the settings menu.
  *
- * PATH is emptied so the interop detection at the end of the wizard resolves no
- * coding agents: it reads the real PATH, and whether the developer happens to
- * have Codex installed must not decide how many prompts this test answers.
+ * PATH controls interop detection, but Copilot route discovery also loads the
+ * package-local SDK, which resolves its binary independently. Shadow that SDK
+ * with a no-login fixture so discovery cannot start an installed Copilot.
  */
 function unconfiguredEnv(): { root: string; settingsFile: string; env: Record<string, string>; cleanup: () => void } {
 	const rand = Math.random().toString(36).slice(2, 8);
 	const root = join(tmpdir(), `clio-coder-test-onboarding-${rand}`);
 	const configDir = join(root, ".config", "clio-coder");
+	const dataDir = join(root, ".local", "share", "clio-coder");
+	const sdkDir = join(
+		dataDir,
+		"components",
+		"copilot-sdk",
+		COPILOT_SDK_VERSION,
+		"node_modules",
+		"@github",
+		"copilot-sdk",
+	);
 	mkdirSync(configDir, { recursive: true });
+	mkdirSync(sdkDir, { recursive: true });
+	writeFileSync(
+		join(sdkDir, "package.json"),
+		JSON.stringify({ name: "@github/copilot-sdk", type: "module", exports: "./index.js" }),
+	);
+	writeFileSync(
+		join(sdkDir, "index.js"),
+		`import { writeFileSync } from "node:fs";
+export class CopilotClient {
+	constructor() {
+		writeFileSync(${JSON.stringify(join(root, "copilot-probe"))}, "no login");
+		throw new Error("Copilot is unavailable in this configure fixture");
+	}
+}
+`,
+	);
 	return {
 		root,
 		settingsFile: join(configDir, "settings.yaml"),
@@ -193,7 +217,7 @@ function unconfiguredEnv(): { root: string; settingsFile: string; env: Record<st
 			HOME: root,
 			CLIO_CODER_HOME: "",
 			CLIO_CODER_CONFIG_DIR: configDir,
-			CLIO_CODER_DATA_DIR: join(root, ".local", "share", "clio-coder"),
+			CLIO_CODER_DATA_DIR: dataDir,
 			CLIO_CODER_STATE_DIR: join(root, ".local", "state", "clio-coder"),
 			CLIO_CODER_CACHE_DIR: join(root, ".cache", "clio-coder"),
 			TERM: "xterm-256color",
@@ -201,11 +225,7 @@ function unconfiguredEnv(): { root: string; settingsFile: string; env: Record<st
 		},
 		cleanup: () => {
 			resetXdgCache();
-			try {
-				rmSync(root, { recursive: true, force: true });
-			} catch {
-				// Ignore cleanup
-			}
+			rmSync(root, { recursive: true, force: true });
 		},
 	};
 }
@@ -474,6 +494,7 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			strictEqual(readFileSync(join(testEnv.root, "copilot-probe"), "utf8"), "no login");
 
 			const screen = plainText(result.transcript());
 			for (const expected of [
@@ -512,6 +533,7 @@ describe("contracts/configure-onboarding", () => {
 			await server.close();
 			testEnv.cleanup();
 		}
+		strictEqual(existsSync(testEnv.root), false, "the discovery fixture's home must be removed");
 	});
 
 	it("offers the detected delegation peers as one list instead of a y/N each", async () => {
