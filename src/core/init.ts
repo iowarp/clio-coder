@@ -120,14 +120,19 @@ export function initializeClioHome(): InitReport {
 
 	// Structure only: an existing settings.yaml is never read, validated, or
 	// rewritten here. Content validation belongs to readSettings/doctor.
+	// Both scaffolds are checked before their lock as well as inside it: the lock is
+	// a file beside the target, so taking it for a file that is already there
+	// rewrote the config root on every boot, a read-only one included.
 	const settingsPath = join(configDir, "settings.yaml");
 	let touched = false;
-	withStateFileLockSync(settingsPath, () => {
-		if (existsSync(settingsPath)) return;
-		safeResourceWrite(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
-		created.push(settingsPath);
-		touched = true;
-	});
+	if (!existsSync(settingsPath)) {
+		withStateFileLockSync(settingsPath, () => {
+			if (existsSync(settingsPath)) return;
+			safeResourceWrite(settingsPath, DEFAULT_SETTINGS_YAML, { encoding: "utf8", mode: SETTINGS_FILE_MODE });
+			created.push(settingsPath);
+			touched = true;
+		});
+	}
 
 	// Settings this call just wrote are in the current shape, so every registered
 	// migration is already satisfied. Without this record doctor reports them
@@ -148,16 +153,18 @@ export function initializeClioHome(): InitReport {
 	}
 
 	const credentialsPath = join(configDir, "credentials.yaml");
-	withStateFileLockSync(credentialsPath, () => {
-		if (existsSync(credentialsPath)) return;
-		safeResourceWrite(
-			credentialsPath,
-			"# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n",
-			{ encoding: "utf8", mode: 0o600 },
-		);
-		chmodSync(credentialsPath, 0o600);
-		created.push(credentialsPath);
-	});
+	if (!existsSync(credentialsPath)) {
+		withStateFileLockSync(credentialsPath, () => {
+			if (existsSync(credentialsPath)) return;
+			safeResourceWrite(
+				credentialsPath,
+				"# Managed via `clio-coder auth`. Do not edit manually unless you know what you are doing.\n{}\n",
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			chmodSync(credentialsPath, 0o600);
+			created.push(credentialsPath);
+		});
+	}
 
 	// installedAt is written exactly once, at first install. Any later
 	// version/platform/node change preserves it and stamps upgradedAt instead.

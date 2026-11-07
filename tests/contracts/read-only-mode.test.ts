@@ -1,6 +1,6 @@
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
@@ -79,6 +79,10 @@ describe("read-only mode", () => {
 		initializeClioHome();
 		ok(!existsSync(join(home, "cache")), "read-only home setup leaves a home without a cache root as it found it");
 		ok(existsSync(join(home, "state")), "the rest of the home is still set up");
+		// Setup over a home that has its settings and credentials takes no lock file beside them.
+		const configMtime = statSync(join(home, "config")).mtimeMs;
+		initializeClioHome();
+		equal(statSync(join(home, "config")).mtimeMs, configMtime);
 	});
 
 	it("`run --read-only` enables no bytecode cache before the run enters the mode; a plain run still does", () => {
