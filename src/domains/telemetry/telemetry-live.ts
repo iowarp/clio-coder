@@ -99,11 +99,12 @@ const runOwner = (runId: string) => `run:${runId}`;
 
 /** A view and whether its session references a run, without building the run's DTO or reading its scope. */
 type LocalView = TelemetryView & { references(runId: string): boolean };
+type VerifiedRun = { source: JournalSource; telemetry: RunTelemetryV1 };
 
 export function telemetryView(
 	source: SessionSource,
 	scope: (runId: string) => TelemetryScopeFiles | null = () => null,
-	verifiedRuns: Map<string, RunTelemetryV1> = new Map(),
+	verifiedRuns: Map<string, VerifiedRun> = new Map(),
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
 	return {
@@ -117,14 +118,14 @@ export function telemetryView(
 		timeline: (range) => timeline(source, range ?? null),
 		runs: () => runsReport(source),
 		run: (runId) => {
-			// A verified seal closes the journal, so nothing can change this DTO. Verifying rewalks the whole chain, 50 ms at
-			// 578 KB, and every frame asks per row: a finished run on screen held a core while its sibling streamed.
+			// Reuse verification across unchanged frames, not a cold reread or a reopened run's new journal snapshot.
 			const run = source.runs.get(runId);
 			if (!run) return null;
 			const verified = verifiedRuns.get(runId);
-			if (verified !== undefined) return verified;
+			if (verified?.source === run) return verified.telemetry;
 			const telemetry = runTelemetry(runId, run, {}, scope(runId));
-			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, telemetry);
+			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, { source: run, telemetry });
+			else verifiedRuns.delete(runId);
 			return telemetry;
 		},
 		runEnqueued: (runId) => runEnqueued(source, runId),
@@ -313,7 +314,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	const load = async () => (loaded ??= await importLoader());
 	// Scope files are read only once the cold loader is in; a run DTO before that names no seal rather than guessing.
 	const scope = (runId: string) => loaded?.loadRunScopeFiles?.(options.stateDir(), runId) ?? null;
-	const verifiedRuns = new Map<string, RunTelemetryV1>();
+	const verifiedRuns = new Map<string, VerifiedRun>();
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
 	let current: Binding | null = null;
@@ -367,6 +368,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 
 	const onEvent = (binding: Binding) => (owner: string, event: PersistedTelemetry) => {
 		if (current !== binding) return;
+		if (owner.startsWith("run:")) verifiedRuns.delete(owner.slice(4));
 		if (event.kind === "failed") {
 			markDirty(["health"]);
 			return;

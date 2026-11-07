@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
-import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { storeTelemetryObject } from "../../src/domains/telemetry/objects.js";
-import { telemetryObjectsDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
-import { seal } from "../../src/domains/telemetry/read-model.js";
+import {
+	telemetryObjectsDirectory,
+	telemetryRunDirectory,
+	telemetrySessionDirectory,
+} from "../../src/domains/telemetry/paths.js";
+import { journalSourceFromRead, seal } from "../../src/domains/telemetry/read-model.js";
 import { readTelemetryScopeFiles } from "../../src/domains/telemetry/seal.js";
 import { telemetryView } from "../../src/domains/telemetry/telemetry-live.js";
 
@@ -116,4 +120,61 @@ test("a run's verified seal is walked once, however many frames ask for it", asy
 	}
 	deepStrictEqual(reads, { sealed: 1, running: 3 });
 	strictEqual(view.run("absent"), null);
+});
+
+test("a verified run cache follows a reopened and resealed journal", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-reopen-"));
+	const runId = "run_reseal";
+	const directory = telemetryRunDirectory(stateDir, runId);
+	const context: TelemetryContext = { sessionId: "ses_reseal", runId, agent: { role: "worker", id: runId } };
+	const options = { directory, context, writer: { clioCoderVersion: "test", piVersion: "test" } };
+	const first = await openCallJournal(options);
+	ok(await first.sealAndClose());
+	const cache = new Map();
+	const view = async () => {
+		const run = journalSourceFromRead(await readCallJournal(directory), true, runId);
+		const scope = await readTelemetryScopeFiles(directory);
+		return telemetryView(
+			{
+				sessionId: context.sessionId as string,
+				journal: { present: false, records: [], modes: [], skipped: 0, damaged: 0 },
+				runs: new Map([[runId, run]]),
+				parent: null,
+			},
+			() => scope,
+			cache,
+		);
+	};
+	const before = (await view()).run(runId);
+	strictEqual(before?.seal?.status, "verified");
+	const reopened = await openCallJournal(options);
+	try {
+		strictEqual((await view()).run(runId)?.seal?.status, "unsealed", "opening withdrew the old bundle");
+		ok(
+			reopened.enqueue({
+				kind: "gate.decided",
+				data: {
+					decisionId: "decision",
+					group: "group",
+					topology: "review",
+					cycle: 0,
+					outcome: "pass",
+					subjects: [],
+					digest: "a".repeat(64),
+				},
+				ctx: context,
+				wallMs: Date.now(),
+				mono: performance.now(),
+			}),
+		);
+		ok(await reopened.sealAndClose());
+		const after = (await view()).run(runId);
+		strictEqual(after?.seal?.status, "verified");
+		ok(after && before);
+		strictEqual(after.journal.records, before.journal.records + 2);
+		ok(after.seal?.status === "verified" && before.seal?.status === "verified");
+		ok(after.seal.seal.head !== before.seal.seal.head);
+	} finally {
+		await reopened.close();
+	}
 });
