@@ -844,7 +844,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				...verdict.result,
 				details: { ...verdict.result.details, capability: spec.name, ...(admission ? { chainAdmission: admission } : {}) },
 			},
-			verdict.decision,
+			verdict,
 		);
 	};
 
@@ -863,17 +863,22 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			if (op === "find") return runFind(args, options);
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
-			if (op === "chain")
-				return nestedChainResult(
-					await runGatewayChain(
-						args.steps,
-						{
-							getSpec: (name) => registry.get(name as ToolName),
-							call: (name, stepArgs, stepOptions) => runCall({ capability: name, args: stepArgs }, stepOptions, true),
+			if (op === "chain") {
+				const executed: ToolResult[] = [];
+				const result = await runGatewayChain(
+					args.steps,
+					{
+						getSpec: (name) => registry.get(name as ToolName),
+						call: async (name, stepArgs, stepOptions) => {
+							const step = await runCall({ capability: name, args: stepArgs }, stepOptions, true);
+							executed.push(step);
+							return step;
 						},
-						options,
-					),
+					},
+					options,
 				);
+				return nestedChainResult(result, executed);
+			}
 			return { kind: "error", message: `gateway: op must be ${GATEWAY_OPS.join(", ")}; got '${op}'` };
 		},
 	};

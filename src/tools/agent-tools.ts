@@ -322,6 +322,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			...(verdict.kind === "blocked" && verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
 			...(verdict.kind === "blocked" && verdict.denial !== undefined ? { denial: verdict.denial } : {}),
 			...(verdict.kind === "blocked" && verdict.executionStarted === true ? { executionStarted: true as const } : {}),
+			...(verdict.kind === "blocked" && verdict.executionDecisions !== undefined
+				? { executionDecisions: verdict.executionDecisions }
+				: {}),
 		});
 		// The model sees only this thrown message. The short verdict reason
 		// starves the next turn of the policy's why and how-to-recover, so
@@ -339,6 +342,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		...withCallId,
 		...(resultFacts ? { callFacts: resultFacts } : {}),
 		...(verdict.executionStarted === true ? { executionStarted: true as const } : {}),
+		...(verdict.executionDecisions !== undefined ? { executionDecisions: verdict.executionDecisions } : {}),
 	};
 	if (verdict.result.kind === "error") {
 		finish(
@@ -498,6 +502,7 @@ function emitFinish(
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
 		executionStarted?: true;
+		executionDecisions?: ReadonlyArray<SafetyDecision>;
 	},
 ): void {
 	if (!telemetry?.onFinish) return;
@@ -533,11 +538,14 @@ function emitFinish(
 		if (extra.decision.policy?.policySource !== undefined) event.policySource = extra.decision.policy.policySource;
 		if (
 			extra.executionStarted === true &&
-			extra.decision.policy?.posture === "yolo" &&
-			(extra.decision.classification.actionClass !== "read" ||
-				extra.decision.classification.exposure === "outward" ||
-				isMcpToolName(tool) ||
-				extra.decision.policy.reasonCode.startsWith(YOLO_ADMITTED_REASON_PREFIX))
+			(extra.executionDecisions ?? [extra.decision]).some(
+				(decision) =>
+					decision.policy?.posture === "yolo" &&
+					(decision.classification.actionClass !== "read" ||
+						decision.classification.exposure === "outward" ||
+						isMcpToolName(decision.policy.tool) ||
+						decision.policy.reasonCode.startsWith(YOLO_ADMITTED_REASON_PREFIX)),
+			)
 		)
 			event.autoApproved = "yolo";
 	} else if (outcome === "blocked") {

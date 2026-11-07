@@ -11,7 +11,7 @@ import { readSettings } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { type YoloHostFacts, yoloRootRefusal } from "../../src/core/yolo-host.js";
 import { evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js";
@@ -32,6 +32,7 @@ import { jobAuthorityRefusal } from "../../src/entry/job-runtime.js";
 import { createYoloActivation, YOLO_ACCEPT_LABEL, YOLO_DECLINE_LABEL } from "../../src/interactive/yolo-activation.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRunScriptTool, runScriptSafetyProjection } from "../../src/tools/run-script.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -46,6 +47,8 @@ test("execution telemetry distinguishes risky YOLO auto-approval from Default an
 	const previousCwd = process.cwd();
 	process.chdir(root);
 	t.after(() => process.chdir(previousCwd));
+	const capability = mcpToolName("receipt", "query");
+	if (capability === null) throw new Error("Invalid MCP receipt fixture name");
 	for (const autonomy of ["default", "yolo"] as const) {
 		const registry = createRegistry({
 			safety: createWorkerSafety({ cwd: root }),
@@ -65,6 +68,38 @@ test("execution telemetry distinguishes risky YOLO auto-approval from Default an
 		strictEqual(readFileSync(join(root, `${autonomy}.txt`), "utf8"), autonomy);
 		strictEqual(events[0]?.autoApproved, autonomy === "yolo" ? "yolo" : undefined);
 		strictEqual(events[0]?.decision, "allowed");
+		registry.register({
+			...writeTool,
+			name: capability,
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "query ran" }),
+		});
+		registry.register(createGatewayTool({ registry }));
+		events.length = 0;
+		await invokeRegisteredTool(
+			registry,
+			ToolNames.Gateway,
+			{ op: "call", capability, args: { path: join(root, "query.txt"), content: "" } },
+			{ telemetry: { onFinish: (event) => events.push(event) } },
+		);
+		strictEqual(events[0]?.tool, ToolNames.Gateway);
+		strictEqual(events[0]?.outcome, "ok");
+		strictEqual(events[0]?.actionClass, "read");
+		strictEqual(events[0]?.autoApproved, autonomy === "yolo" ? "yolo" : undefined);
+		events.length = 0;
+		const chainPath = join(root, `${autonomy}-chain.txt`);
+		await invokeRegisteredTool(
+			registry,
+			ToolNames.Gateway,
+			{
+				op: "chain",
+				steps: [{ id: "write", capability: ToolNames.Write, args: { path: chainPath, content: autonomy } }],
+			},
+			{ telemetry: { onFinish: (event) => events.push(event) } },
+		);
+		strictEqual(readFileSync(chainPath, "utf8"), autonomy);
+		strictEqual(events[0]?.outcome, "ok");
+		strictEqual(events[0]?.autoApproved, autonomy === "yolo" ? "yolo" : undefined);
 	}
 	const registry = createRegistry({
 		safety: createWorkerSafety({ cwd: root }),
@@ -92,7 +127,7 @@ test("execution telemetry distinguishes risky YOLO auto-approval from Default an
 			...safety,
 			evaluate: (call, posture, scope) => {
 				const decision = safety.evaluate(call, posture, scope);
-				return decision.policy === undefined
+				return decision.policy === undefined || call.tool === ToolNames.Gateway
 					? decision
 					: { ...decision, policy: { ...decision.policy, shellSandbox: { workspace: root, scratchRoots: [] } } };
 			},
@@ -117,6 +152,25 @@ test("execution telemetry distinguishes risky YOLO auto-approval from Default an
 		/preparation failed/,
 	);
 	strictEqual(existsSync(join(root, "not-started.txt")), false);
+	strictEqual(events[0]?.autoApproved, undefined);
+	preparationFailure.register({
+		...writeTool,
+		name: capability,
+		baseActionClass: "read",
+		run: async () => ({ kind: "ok", output: "query ran" }),
+	});
+	preparationFailure.register(createGatewayTool({ registry: preparationFailure }));
+	events.length = 0;
+	await rejects(
+		invokeRegisteredTool(
+			preparationFailure,
+			ToolNames.Gateway,
+			{ op: "call", capability, args: { path: join(root, "not-queried.txt"), content: "" } },
+			{ telemetry: { onFinish: (event) => events.push(event) } },
+		),
+		/preparation failed/,
+	);
+	strictEqual(events[0]?.outcome, "error");
 	strictEqual(events[0]?.autoApproved, undefined);
 });
 

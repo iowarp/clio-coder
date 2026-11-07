@@ -879,14 +879,18 @@ export interface ParkCancelOptions {
 	unattended?: boolean;
 }
 
+interface ExecutionProvenance {
+	executionStarted?: true;
+	/** Actual delegated admissions, not the gateway envelope's read-class admission. */
+	executionDecisions?: ReadonlyArray<SafetyDecision>;
+}
+
 export type RegistryVerdict =
-	| { kind: "ok"; result: ToolResult; decision: SafetyDecision; executionStarted?: true }
-	| {
+	| ({ kind: "ok"; result: ToolResult; decision: SafetyDecision } & ExecutionProvenance)
+	| ({
 			kind: "blocked";
 			reason: string;
 			decision: SafetyDecision;
-			/** A post-execution result guard withheld output; admission refusals never carry this. */
-			executionStarted?: true;
 			/**
 			 * The call parked for approval and the park was answered without one:
 			 * denied (by an operator, or by a headless run that has none) or
@@ -903,7 +907,7 @@ export type RegistryVerdict =
 			 * refuses that repeat in the same turn without running or asking again.
 			 */
 			denial?: ToolDenial;
-	  }
+	  } & ExecutionProvenance)
 	| { kind: "not_visible"; reason: string };
 
 interface ParkedCall {
@@ -1150,6 +1154,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		let rewrittenArgs: Record<string, unknown> | undefined;
 		/** When the body started, so an awaited after_tool hook learns how long it ran. */
 		let bodyStartedAt: number | undefined;
+		let execution: ExecutionProvenance = {};
 		const bodyMs = (): number => (bodyStartedAt === undefined ? 0 : Math.round(performance.now() - bodyStartedAt));
 		// Resolved once per admitted call, so the before_tool hook, the body and
 		// the after_tool hook all mean the same landing (undefined: not yet resolved).
@@ -1273,6 +1278,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						: {}),
 				};
 				bodyStartedAt = performance.now();
+				execution = { executionStarted: true };
 				const result = await spec.run(preparedArgs, executionOptions);
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back
@@ -1280,7 +1286,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// model, telemetry, and the ledger then see exactly what a direct
 				// call to the capability would have produced.
 				const nestedBlocked = nestedBlockedVerdict(result);
-				if (nestedBlocked === null) decision = nestedDecisions.get(result) ?? decision;
+				const nested = nestedExecutions.get(result);
+				if (nestedBlocked !== null) execution = recordedExecution(nestedBlocked);
+				else if (nested !== undefined) {
+					decision = nested.decision;
+					execution = nested.execution;
+				} else execution = nestedChainResults.get(result) ?? execution;
 				// A trusted body (dispatch, monitor) labels what it carried back from
 				// a worker's context; that label joins the source rule's own.
 				const reportedRestrictions = result.details?.[FLOW_RESTRICTIONS_DETAIL];
@@ -1304,7 +1315,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					if (unlabeled !== null) {
 						const reason = `${spec.name} result withheld: ${unlabeled}`;
 						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
-						return { ...flowBlockedVerdict(decision, call.tool, reason), executionStarted: true };
+						return { ...flowBlockedVerdict(decision, call.tool, reason), ...execution };
 					}
 				}
 				// A refusal settles only after its label is absorbed: an MCP server's
@@ -1337,12 +1348,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						labeled,
 						[...beforeEffects, ...afterEffects],
 						labeled !== result,
-						nestedDecisions.has(result) ? "call" : nestedChainResults.has(result) ? "chain" : null,
+						nestedExecutions.has(result) ? "call" : nestedChainResults.has(result) ? "chain" : null,
 					),
 					options,
 					resultDisposition,
 				);
-				return { kind: "ok", result: finalResult, decision, executionStarted: true };
+				return { kind: "ok", result: finalResult, decision, ...execution };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				// A body that threw may have read the source before failing, so
@@ -1360,7 +1371,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
 					return {
 						...flowBlockedVerdict(decision, call.tool, reason),
-						...(bodyStartedAt !== undefined ? { executionStarted: true as const } : {}),
+						...execution,
 					};
 				}
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
@@ -1392,7 +1403,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						resultDisposition,
 					),
 					decision,
-					...(bodyStartedAt !== undefined ? { executionStarted: true as const } : {}),
+					...execution,
 				};
 			}
 		} finally {
@@ -2783,7 +2794,7 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 		actionClass: readOnly ? (spec.readOnlyActionClass ?? spec.baseActionClass) : spec.baseActionClass,
 		reasons: [`registered tool: ${spec.name}`],
 	};
-	return decision.kind === "allow" ? { kind: "allow", classification } : { ...decision, classification };
+	return { ...decision, classification };
 }
 
 /** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
@@ -2844,24 +2855,35 @@ function askUserAnswered(verdict: RegistryVerdict): boolean {
 	return details?.cancelled !== true && Array.isArray(details?.answers) && details.answers.length > 0;
 }
 
-/**
- * Details key under which a tool body hands a refused nested verdict back to
- * the registry. Written by {@link nestedBlockedResult}, read once by `runSpec`,
- * never persisted: the registry settles the outer call as that verdict.
- */
-const nestedDecisions = new WeakMap<ToolResult, SafetyDecision>();
+/** Delegated execution evidence stays in process, never in model-visible result fields. */
+const nestedExecutions = new WeakMap<ToolResult, { decision: SafetyDecision; execution: ExecutionProvenance }>();
 
-const nestedChainResults = new WeakSet<ToolResult>();
+const nestedChainResults = new WeakMap<ToolResult, ExecutionProvenance>();
+const nestedBlockedExecutions = new WeakMap<object, ExecutionProvenance>();
+
+function recordedExecution(verdict: ExecutionProvenance & { decision: SafetyDecision }): ExecutionProvenance {
+	return verdict.executionStarted === true
+		? { executionStarted: true, executionDecisions: verdict.executionDecisions ?? [verdict.decision] }
+		: {};
+}
 
 /** Mark a gateway chain's combined result, whose step notes the nested calls recorded. */
-export function nestedChainResult(result: ToolResult): ToolResult {
-	nestedChainResults.add(result);
+export function nestedChainResult(result: ToolResult, steps: ReadonlyArray<ToolResult>): ToolResult {
+	const decisions = steps.flatMap((step) => {
+		const blocked = nestedBlockedVerdict(step);
+		const execution = blocked === null ? nestedExecutions.get(step)?.execution : recordedExecution(blocked);
+		return execution?.executionDecisions ?? [];
+	});
+	nestedChainResults.set(result, decisions.length > 0 ? { executionStarted: true, executionDecisions: decisions } : {});
 	return result;
 }
 
 /** Carry trusted in-process delegation authority without adding model-visible metadata. */
-export function nestedExecutedResult(result: ToolResult, decision: SafetyDecision): ToolResult {
-	nestedDecisions.set(result, decision);
+export function nestedExecutedResult(
+	result: ToolResult,
+	verdict: Extract<RegistryVerdict, { kind: "ok" }>,
+): ToolResult {
+	nestedExecutions.set(result, { decision: verdict.decision, execution: recordedExecution(verdict) });
 	return result;
 }
 
@@ -2889,6 +2911,7 @@ export function nestedBlockedResult(verdict: Extract<RegistryVerdict, { kind: "b
 		...(verdict.redundantRepeat === true ? { redundantRepeat: true } : {}),
 		...(verdict.denial !== undefined ? { denial: verdict.denial } : {}),
 	};
+	nestedBlockedExecutions.set(marker, recordedExecution(verdict));
 	return { kind: "error", message: verdict.reason, details: { [NESTED_BLOCKED_DETAIL]: marker } };
 }
 
@@ -2913,6 +2936,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 		...(deniedPark === true ? { deniedPark: true } : {}),
 		...(redundantRepeat === true ? { redundantRepeat: true } : {}),
 		...(denial !== undefined ? { denial } : {}),
+		...nestedBlockedExecutions.get(marker),
 	};
 }
 
