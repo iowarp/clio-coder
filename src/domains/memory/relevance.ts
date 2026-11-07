@@ -86,6 +86,17 @@ const GENERIC_TASK_TERMS = new Set(
 		" ",
 	),
 );
+/**
+ * Directory and extension fragments a path splits into. A task naming
+ * `src/x.json` and a lesson naming `src/y.json` share layout, not a subject;
+ * an exact path still matches through the path feature. Plural forms appear
+ * folded (`scripts` is checked as `script`).
+ */
+const PATH_FRAGMENT_TERMS = new Set(
+	"src lib docs doc app apps pkg cmd bin dist out script package internal vendor json yaml yml toml tsx jsx mjs cjs".split(
+		" ",
+	),
+);
 /** Distinctive subject terms a record must share with the turn to ride in unasked. */
 export const MEMORY_GATE_MIN_TERMS = 2;
 /** What a record the model kept leaving unused must share instead. */
@@ -96,7 +107,7 @@ export function memoryGateTerms(value: string): Set<string> {
 	return new Set(
 		subjectTerms(value)
 			.map((term) => (term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term))
-			.filter((term) => !GENERIC_TASK_TERMS.has(term)),
+			.filter((term) => !GENERIC_TASK_TERMS.has(term) && !PATH_FRAGMENT_TERMS.has(term)),
 	);
 }
 
@@ -106,7 +117,9 @@ export function memoryGateTerms(value: string): Set<string> {
  * of the lesson's own text and conditions. A record with no overlap is never
  * promoted, so an unrelated lesson stays out of the request; `memory_recall`
  * still reaches it. A `demoted` record, one the model kept leaving unused when
- * it was carried, needs `MEMORY_GATE_DEMOTED_MIN_TERMS` shared terms. Order is
+ * it was carried, needs `MEMORY_GATE_DEMOTED_MIN_TERMS` shared terms unless an
+ * active path or symbol names it. Path fragments (`src`, `json`) are not subject
+ * terms. Order is
  * the ranking's, fallback promotion excluded.
  */
 export function selectRelevantMemory(
@@ -120,8 +133,9 @@ export function selectRelevantMemory(
 		.filter((candidate) => {
 			const own = memoryGateTerms([candidate.record.lesson, ...candidate.record.appliesWhen].join("\n"));
 			const shared = [...task].filter((term) => own.has(term)).length;
-			if (demoted.has(candidate.record.id)) return shared >= MEMORY_GATE_DEMOTED_MIN_TERMS;
-			return candidate.matches.paths.length + candidate.matches.symbols.length > 0 || shared >= MEMORY_GATE_MIN_TERMS;
+			// An exact active path or symbol is the strongest signal the gate has, so it carries even a demoted record.
+			if (candidate.matches.paths.length + candidate.matches.symbols.length > 0) return true;
+			return shared >= (demoted.has(candidate.record.id) ? MEMORY_GATE_DEMOTED_MIN_TERMS : MEMORY_GATE_MIN_TERMS);
 		})
 		.map((candidate) => (candidate.fallback ? { ...candidate, fallback: false } : candidate))
 		.sort((a, b) => b.score - a.score);

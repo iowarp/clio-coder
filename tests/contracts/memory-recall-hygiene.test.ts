@@ -68,6 +68,17 @@ test("the gate drops records with no distinctive overlap and never promotes a ze
 	);
 });
 
+test("an exact active path carries even a demoted record, and shared path fragments carry nothing", () => {
+	const SCHEMA = record("mem-00000000000000a4", "Regenerate src/schema/settings.json after editing the settings types.");
+	const records = [SCHEMA, record("mem-00000000000000a5", "Keep src/locale/strings.json sorted by key.")];
+	const ids = (taskText: string, activePaths: string[], demoted?: ReadonlySet<string>) =>
+		selectRelevantMemory(records, ELIGIBLE, { taskText, activePaths }, demoted).map((c) => c.record.id);
+	deepStrictEqual(ids("look at src/app/config.json", []), [], "src and json are layout, not a subject");
+	deepStrictEqual(ids("bump a default", ["src/schema/settings.json"], new Set(["mem-00000000000000a4"])), [
+		"mem-00000000000000a4",
+	]);
+});
+
 function readerFixture(t: TestContext, records: MemoryRecord[]) {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-memory-gate-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
