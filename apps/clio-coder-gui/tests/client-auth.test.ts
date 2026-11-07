@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { Value } from "typebox/value";
 import { tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
+import { createCredentials } from "../client/api/credentials.js";
 import { ClientCredential } from "../contracts/auth.js";
 import { Problem } from "../contracts/common.js";
 import { routes } from "../contracts/routes.js";
@@ -151,4 +152,54 @@ test("a window whose credential a restarted server no longer knows exchanges aga
 		{ authorization: "Bearer launch-token", resume: id },
 	]);
 	assert.equal(tokenRejected(), false);
+});
+
+/** A browser page: session storage and the pagehide that hands the credential to the next document. */
+function browserPage(t: TestContext) {
+	const stored = new Map<string, string>();
+	const listeners = new Map<string, Set<() => void>>();
+	const page = globalThis as unknown as Record<string, unknown>;
+	const saved = ["sessionStorage", "addEventListener", "removeEventListener"].map((key) => [key, page[key]] as const);
+	page.sessionStorage = {
+		getItem: (key: string) => stored.get(key) ?? null,
+		setItem: (key: string, value: string) => stored.set(key, value),
+		removeItem: (key: string) => stored.delete(key),
+	};
+	page.addEventListener = (type: string, listener: () => void) =>
+		listeners.set(type, (listeners.get(type) ?? new Set()).add(listener));
+	page.removeEventListener = (type: string, listener: () => void) => listeners.get(type)?.delete(listener);
+	t.after(() => {
+		for (const [key, value] of saved) page[key] = value;
+	});
+	return { stored, listeners };
+}
+
+test("a reload keeps the window's credential, but a document opened from another launch link exchanges that link", async (t) => {
+	const { listeners } = browserPage(t);
+	const clients = new ClientRegistry();
+	const exchanges: { authorization: string | null; resume: string | undefined }[] = [];
+	const fetcher = (async (_input: string | URL | Request, init: RequestInit = {}) => {
+		const body = JSON.parse(String(init.body)) as { label?: string; resume?: string };
+		exchanges.push({ authorization: new Headers(init.headers).get("Authorization"), resume: body.resume });
+		return Response.json(clients.open(body.label, body.resume));
+	}) as typeof fetch;
+	const open = async (launchToken: string, previous?: ReturnType<typeof createCredentials>) => {
+		for (const listener of listeners.get("pagehide") ?? []) listener();
+		previous?.dispose();
+		const credentials = createCredentials(launchToken, fetcher);
+		t.after(() => credentials.dispose());
+		return { credentials, bearer: await credentials.bearer() };
+	};
+	const first = await open("token-a");
+	const bought = first.bearer;
+	const id = first.credentials.clientId();
+	const same = await open("token-a", first.credentials);
+	assert.equal(same.bearer, bought, "a plain reload exchanged again instead of keeping its credential");
+	// The page carried a different launch token in its address: the old credential must not cover for it.
+	const relinked = await open("token-b", same.credentials);
+	assert.notEqual(relinked.bearer, bought);
+	assert.deepEqual(exchanges, [
+		{ authorization: "Bearer token-a", resume: undefined },
+		{ authorization: "Bearer token-b", resume: id },
+	]);
 });

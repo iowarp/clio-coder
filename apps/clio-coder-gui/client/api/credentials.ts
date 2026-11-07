@@ -84,9 +84,16 @@ export function createCredentials(
 	write(session, handoffKey, null);
 	if (handoff) {
 		try {
-			const value = JSON.parse(handoff) as { clientId: string; credential: string; expiresAt: number };
+			const value = JSON.parse(handoff) as {
+				clientId: string;
+				credential: string;
+				expiresAt: number;
+				launchToken: string;
+			};
 			const left = value.expiresAt - Date.now();
-			if (left > 30_000)
+			// A document opened from a different launch link exchanges that link: inheriting the old credential would
+			// leave an unchecked token behind it that fails only when the credential next needs replacing.
+			if (left > 30_000 && value.launchToken === launchToken)
 				held = {
 					clientId: value.clientId,
 					credential: value.credential,
@@ -106,6 +113,7 @@ export function createCredentials(
 					clientId: held.clientId,
 					credential: held.credential,
 					expiresAt: Date.now() + (held.expiresAt - now()),
+					launchToken,
 				}),
 			);
 	};
