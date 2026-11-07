@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
 import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
@@ -16,11 +17,12 @@ import {
 	noteCodexStreamQuota,
 	observedCodexQuota,
 	observedQuota,
+	type QuotaReading,
 	quotaReadingFingerprint,
 	quotaReadingFromMessage,
 } from "../../src/domains/quota/index.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
-import { quotaAccount } from "../../src/domains/telemetry/read-model.js";
+import { foldAccountQuota, quotaAccount } from "../../src/domains/telemetry/read-model.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
 import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
 import type { CodexQuotaObservation } from "../../src/engine/types.js";
@@ -388,4 +390,44 @@ it("journals a codex.rate_limits event as one quota reading whose identity ignor
 		quotaReadingFingerprint({ ...polled, observedAt: "2026-01-01T00:10:00.000Z" }),
 	);
 	assert.equal(quotaReadingFromMessage({ codexQuota: first }, "openai", "codex-target"), null);
+});
+
+it("never folds one account's quota window against another account's reading on the same target (T7)", () => {
+	const at = (seconds: number, used: number) =>
+		parseCodexQuotaEvent(
+			{
+				type: "codex.rate_limits",
+				rate_limits: { primary: { used_percent: used, window_minutes: 300, reset_after_seconds: 3600 - seconds } },
+			},
+			"unused",
+			NOW.getTime() + seconds * 1000,
+		);
+	const read = (scope: string, seconds: number, used: number) => {
+		const observation = at(seconds, used);
+		assert.ok(observation);
+		const reading = quotaReadingFromMessage(
+			{ codexQuota: { ...observation, accountScope: scope } },
+			"openai-codex",
+			"codex-target",
+		);
+		assert.ok(reading && validPayload("quota.read", reading));
+		return reading;
+	};
+	const a1 = read("a".repeat(64), 0, 10);
+	const b = read("b".repeat(64), 10, 60);
+	const a2 = read("a".repeat(64), 20, 15);
+	assert.ok(a1.account && b.account && a1.account !== b.account);
+	assert.equal(a1.account, a2.account);
+	assert.ok(!JSON.stringify(a1).includes("a".repeat(16)), "the journaled account is not the runtime's scope");
+	const fold = (...readings: QuotaReading[]) =>
+		foldAccountQuota(readings.map((data) => ({ k: "quota.read", data }) as unknown as TelemetryRecord)).get(
+			"codex:codex-target",
+		);
+	assert.equal(fold(a1, b)?.consumed.size, 0, "a second account's reading is not the first account's consumption");
+	assert.deepEqual(fold(a1, b, a2)?.consumed.get("session"), {
+		kind: "estimated",
+		value: 5,
+		method: "shared-account-window-delta",
+	});
+	assert.equal(fold(a1, b, a2)?.reading, a2);
 });

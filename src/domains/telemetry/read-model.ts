@@ -2398,7 +2398,8 @@ export interface AccountQuota {
  * Each account's newest journaled reading and the window consumption between it and the reading before it (#434
  * §12.5, C2). Consumption is estimated, never measured: other devices draw from the same shared window, so the delta
  * is the account's, not this host's. A window whose reset moved, or whose share fell, restarted between the two
- * readings and has no delta.
+ * readings and has no delta. Readings from two different provider accounts on one target are never compared; the
+ * delta is taken against the newest earlier reading whose account is the same or unstated.
  */
 export function foldAccountQuota(records: readonly TelemetryRecord[]): Map<string, AccountQuota> {
 	const byAccount = new Map<string, QuotaReading[]>();
@@ -2411,7 +2412,13 @@ export function foldAccountQuota(records: readonly TelemetryRecord[]): Map<strin
 	for (const [account, readings] of byAccount) {
 		readings.sort((a, b) => (a.observedAt < b.observedAt ? -1 : a.observedAt > b.observedAt ? 1 : 0));
 		const reading = readings.at(-1) as QuotaReading;
-		const previous = readings.length > 1 ? readings.at(-2) : undefined;
+		const previous = readings
+			.slice(0, -1)
+			.reverse()
+			.find(
+				(candidate) =>
+					candidate.account === undefined || reading.account === undefined || candidate.account === reading.account,
+			);
 		const consumed = new Map<string, Fact<number>>();
 		for (const window of reading.windows) {
 			const prior = previous?.windows.find((candidate) => candidate.key === window.key);

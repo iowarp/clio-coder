@@ -1265,6 +1265,8 @@ export const QuotaReadSchema = Type.Object(
 		stale: Type.Optional(Type.Boolean()),
 		/** The provider reported that this account cannot send now. */
 		limitReached: Type.Optional(Type.Boolean()),
+		/** Opaque digest of the provider account a call's reading came from; never the account id itself. */
+		account: Type.Optional(Type.String({ pattern: "^[0-9a-f]{16}$" })),
 	},
 	closed,
 );

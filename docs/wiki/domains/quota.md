@@ -33,7 +33,7 @@ tests:
 invariants:
   - "Within a quota cache, a snapshot younger than the TTL is served without calling the provider's fetch; an expired entry triggers one provider read (src/domains/quota/cache.ts:createQuotaCache)."
   - "A failed read does not erase the last good snapshot for the process observer; the stored snapshot is kept and marked stale (src/domains/quota/observed.ts:noteQuotaRead)."
-  - "A quota reading is journaled only when its account fingerprint differs from the last journaled reading for the same provider and target (src/domains/quota/reading.ts:journalAccountQuota)."
+  - "A quota reading is journaled only when its account fingerprint differs from the last journaled reading for the same provider, target and account (src/domains/quota/reading.ts:journalAccountQuota)."
   - "A window whose usedPct is not a finite number between 0 and 100 is dropped from a journaled reading (src/domains/quota/reading.ts:readingWindows)."
   - "The anthropic-max and claude-code snapshots for one account are folded into one entry only when their windows match in key, scope, reset time, and percentage (src/domains/quota/presentation.ts:foldDuplicateAccounts)."
   - "The Claude Code adapter does not issue a usage request when the stored access token is already expired per its own record (src/domains/quota/claude-code-provider.ts:createClaudeCodeQuotaProvider)."
@@ -77,9 +77,9 @@ Stream observations are kept separately. `noteCodexStreamQuota` and `noteAnthrop
 
 ## Readings and journaling
 
-`quotaReadingFromMessage(message, runtimeId, targetId)` in `src/domains/quota/reading.ts` produces a reading from a settled model message. It handles two runtimes. For `openai-codex` it reads `codexQuota` and maps it through `codexStreamSnapshot`, setting `source: "stream-event"`. For `anthropic-max` it reads `anthropicResponse` through `parseAnthropicHeaders` and sets `source: "response-headers"`. It returns `null` unless at least one window survives and `observedAt` is a UTC ISO instant.
+`quotaReadingFromMessage(message, runtimeId, targetId)` in `src/domains/quota/reading.ts` produces a reading from a settled model message. It handles two runtimes. For `openai-codex` it reads `codexQuota` and maps it through `codexStreamSnapshot`, setting `source: "stream-event"`. For `anthropic-max` it reads `anthropicResponse` through `parseAnthropicHeaders` and sets `source: "response-headers"`. A call reading whose runtime reported an account scope carries `account`, the first 16 hex digits of a domain-separated SHA-256 of that already hashed scope; share profiles anonymize it. It returns `null` unless at least one window survives and `observedAt` is a UTC ISO instant.
 
-`journalAccountQuota(reading)` keys its last-journaled fingerprint by `[provider, targetId]`. It emits a `quota.read` telemetry event only when `quotaReadingFingerprint` differs from the stored value. For `source: "poll"`, the fingerprint includes `observedAt`, so each fresh poll is treated as a new observation. For other sources, the fingerprint covers `limitReached`, status, plan, credits, message, retry seconds, stale flag, and each window's key, percentage, and reset time truncated to the minute.
+`journalAccountQuota(reading)` keys its last-journaled fingerprint by `[provider, targetId, account]`. It emits a `quota.read` telemetry event only when `quotaReadingFingerprint` differs from the stored value. For `source: "poll"`, the fingerprint includes `observedAt`, so each fresh poll is treated as a new observation. For other sources, the fingerprint covers `limitReached`, status, plan, credits, message, retry seconds, stale flag, and each window's key, percentage, and reset time truncated to the minute.
 
 The turn runtime is the main caller of the message path. In `src/session-control/turn-runtime.ts`, after a model call settles, `quotaReadingFromMessage` runs on the message. The result is attached to the settlement and `journalAccountQuota` is called when the call facts exist. `src/session-control/turn-persistence.ts` calls `noteCodexStreamQuota` and `noteAnthropicStreamQuota` as stream observations arrive.
 

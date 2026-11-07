@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
@@ -8,6 +9,14 @@ import { codexStreamSnapshot } from "./observed.js";
 import type { UsageSnapshot, UsageWindow } from "./types.js";
 
 export type QuotaReading = EventPayload<"quota.read">;
+
+/**
+ * The journaled account of a call's reading: a digest of the runtime's already hashed account scope, so two accounts on
+ * one target never fold into each other and the journal never holds the scope a provider request was keyed on.
+ */
+function readingAccount(scope: string | null | undefined): { account: string } | Record<string, never> {
+	return scope ? { account: createHash("sha256").update(`quota-account\0${scope}`).digest("hex").slice(0, 16) } : {};
+}
 
 const utc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
@@ -89,6 +98,7 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 			targetId,
 			source: "stream-event",
 			...(limited === undefined ? {} : { limitReached: limited }),
+			...readingAccount(observation.accountScope),
 		};
 	} else if (runtimeId === "anthropic-max" && raw.anthropicResponse) {
 		const snapshot = parseAnthropicHeaders(raw.anthropicResponse);
@@ -99,6 +109,7 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 				targetId,
 				source: "response-headers",
 				...(status === undefined ? {} : { limitReached: status === "rejected" }),
+				...readingAccount(raw.anthropicResponse.accountScope),
 			};
 		}
 	}
@@ -132,7 +143,7 @@ const journaledAccounts = new Map<string, string>();
  * belongs to the account, not to the session whose call happened to see it, and other devices draw from it too (#434).
  */
 export function journalAccountQuota(reading: QuotaReading): boolean {
-	const account = JSON.stringify([reading.provider, reading.targetId]);
+	const account = JSON.stringify([reading.provider, reading.targetId, reading.account ?? null]);
 	const fingerprint = quotaReadingFingerprint(reading);
 	if (journaledAccounts.get(account) === fingerprint) return false;
 	if (!telemetryHub().emit("quota.read", reading)) return false;

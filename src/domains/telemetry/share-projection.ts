@@ -337,6 +337,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		credits: { display: "withhold", usedPct: "keep" },
 		targetId: "model-id",
 		message: "withhold",
+		account: "user",
 	},
 	"budget.crossed": keep("level", "spendUsd", "projectedUsd", "ceilingUsd", "contextTokens"),
 	"budget.held": keep(
