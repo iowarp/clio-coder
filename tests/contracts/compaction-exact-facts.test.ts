@@ -4,6 +4,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	buildLivePrefixUserText,
+	buildTurnPrefixUserText,
+	buildUserText,
+} from "../../src/domains/memory/compaction-prompts.js";
 import { compact } from "../../src/domains/session/compaction/compact.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -150,5 +155,16 @@ describe("compaction exact facts", () => {
 		match(result.summary, /^Native Codex checkpoint/);
 		match(result.summary, /^read src\/a\.ts lines=40 sha256=[0-9a-f]{12}$/m);
 		match(result.summary, /exit=1, 57 passed/);
+	});
+
+	it("asks the summarizer to mark its own counts unverified on every route", () => {
+		for (const prompt of [
+			buildUserText("conversation"),
+			buildTurnPrefixUserText("conversation"),
+			buildLivePrefixUserText({ retainedFrom: "next" }),
+		]) {
+			match(prompt, /count or quantity the assistant worked out itself[^\n]*"\(unverified\)"/);
+			match(prompt, /do not write one yourself/);
+		}
 	});
 });

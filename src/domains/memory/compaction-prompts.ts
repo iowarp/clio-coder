@@ -46,7 +46,9 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.
 
-Copy every literal the user stated verbatim into Constraints & Preferences or Critical Context: codewords, passphrases, names, numbers, versions, paths, URLs, identifiers, and decisions the user made. This holds even when the assistant declined to store the value as memory or called it conversation-only. A literal the user asked to be remembered is never droppable.`;
+Copy every literal the user stated verbatim into Constraints & Preferences or Critical Context: codewords, passphrases, names, numbers, versions, paths, URLs, identifiers, and decisions the user made. This holds even when the assistant declined to store the value as memory or called it conversation-only. A literal the user asked to be remembered is never droppable.
+
+A count or quantity the assistant worked out itself (helpers in a file, lines, matches, passing or failing tests) is its own tally, not a measurement: write it with "(unverified)" after it so the next turn recounts before relying on it. Clio appends an <exact-facts> block of measured line counts and tool results after the checkpoint; do not write one yourself.`;
 
 export const COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE = `The messages above are the beginning of the currently active user turn. They will be removed from the live context because the retained suffix starts in the middle of that turn.
 
@@ -59,6 +61,8 @@ In addition to that carried-forward context, summarize ONLY the active-turn deta
 - tool results, file paths, commands, errors, and decisions already observed
 - what should happen next
 - every literal the user stated verbatim (codewords, names, numbers, paths, decisions), including any the assistant declined to store as memory
+
+A count or quantity the assistant worked out itself (helpers in a file, lines, matches, passing or failing tests) is its own tally, not a measurement: write it with "(unverified)" after it so the next turn recounts before relying on it. Clio appends an <exact-facts> block of measured line counts and tool results after the checkpoint; do not write one yourself.
 
 Do NOT answer the user. Do NOT summarize unrelated older history.`;
 
