@@ -6,18 +6,20 @@ import { useEffect, useRef, useState } from "react";
  */
 export function InlineRename({
 	value,
+	initialDraft = value,
 	label,
 	onCommit,
 	onCancel,
 	className,
 }: {
 	value: string;
+	initialDraft?: string;
 	label: string;
 	onCommit: (next: string) => void;
 	onCancel: () => void;
 	className?: string;
 }) {
-	const [draft, setDraft] = useState(value);
+	const [draft, setDraft] = useState(initialDraft);
 	const field = useRef<HTMLInputElement>(null);
 	// Enter and the blur it causes when the field unmounts must save once.
 	const done = useRef(false);
