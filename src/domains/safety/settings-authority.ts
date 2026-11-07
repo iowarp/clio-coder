@@ -17,6 +17,7 @@ const LAUNCHER_PATH =
 	/(?:^|\/)(?:@iowarp\/)?clio-coder[^/]*\/(?:.*\/)?(?:dist\/cli\/index\.js|src\/cli\/index\.ts|bin\/clio-coder\.cjs)$/u;
 const PACKAGE_SPEC = /^@iowarp\/clio-coder(?:@\S*)?$/u;
 const HELP = new Set(["--help", "-h"]);
+const REDIRECT = /^(?:\d*[<>]{1,2}[&|]?|&>>?|<<<?-?)$/u;
 
 function isLauncher(token: ShellToken): boolean {
 	const word = token.value.replace(/^['"]|['"]$/gu, "");
@@ -86,9 +87,21 @@ export function invokesSettingsMutation(command: string): boolean {
 			segment = [];
 			return hit;
 		};
+		let redirectTarget = false;
 		for (const token of scanShellLikeDeep(script)) {
+			if (token.operator && REDIRECT.test(token.value)) {
+				// `2>&1` and `>out.json` belong to the command: drop the fd number and the target word.
+				if (/^\d+$/u.test(segment.at(-1)?.value ?? "")) segment.pop();
+				redirectTarget = true;
+				continue;
+			}
 			if (token.operator) {
+				redirectTarget = false;
 				if (check()) return true;
+				continue;
+			}
+			if (redirectTarget) {
+				redirectTarget = false;
 				continue;
 			}
 			segment.push(token);

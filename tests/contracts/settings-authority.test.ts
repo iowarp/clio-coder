@@ -31,12 +31,15 @@ test("Clio's settings, credential and trust CLI is recognized however it is laun
 		"$(which clio-coder) configure --id x --runtime y",
 		"clio-coder --api-key sk-test run hello",
 		"clio-coder mcp trust docs",
+		"clio-coder configure --json 2>&1 && clio-coder targets use gw >/dev/null",
 		"clio-coder reset --settings --force",
 	];
 	for (const command of mutating) strictEqual(invokesSettingsMutation(command), true, command);
 	const reads = [
 		"clio-coder configure --json",
 		"clio-coder configure --list --all",
+		"clio-coder configure --list 2>&1 | head -40; echo ---; clio-coder configure --help 2>&1 | head -60",
+		"clio-coder configure --json >settings.json 2>/dev/null",
 		"clio-coder configure --id x --help",
 		"clio-coder targets --json; clio-coder targets fleet",
 		"clio-coder targets profile list",
