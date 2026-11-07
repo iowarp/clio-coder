@@ -203,7 +203,6 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 				XDG_CONFIG_HOME: configHome,
 				XDG_STATE_HOME: stateHome,
 				HERDR_SOCKET_PATH: socketPath,
-				XDG_RUNTIME_DIR: privateRuntime,
 			};
 			for (const name of SHIM_SAVED_XDG) {
 				const value = env[name];

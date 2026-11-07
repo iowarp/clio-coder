@@ -107,11 +107,10 @@ describe("private pane host layout (POSIX)", () => {
 			XDG_CONFIG_HOME: join(root, "config"),
 			XDG_STATE_HOME: join(root, "state"),
 			HERDR_SOCKET_PATH: layout.socketPath,
-			XDG_RUNTIME_DIR: join(runtime, "clio-coder", "a"),
 			CLIO_CODER_PANE_XDG_CONFIG_HOME: "/home/me/.cfg",
 		});
 		deepStrictEqual(layout.shell, { defaultShell: join(root, "pane-shell"), shellMode: "non_login" });
-		deepStrictEqual(layout.disposableDirs, [root, layout.hostEnv.XDG_RUNTIME_DIR]);
+		deepStrictEqual(layout.disposableDirs, [root, join(runtime, "clio-coder", "a")]);
 		equal(layout.sessionFile, join(root, "config", "herdr", "session.json"));
 		equal(layout.cleanupArgs, null);
 		deepStrictEqual(layout.herdrArgs, []);
@@ -165,6 +164,45 @@ describe("private pane host layout (POSIX)", () => {
 		equal(run.stdout.trim(), "cfg=/home/me/.cfg state=unset saved=unset args=");
 		match(renderPosixShellShim("darwin"), /bash\|zsh[^)]*\) exec "\$shell" -l ;;/u);
 		ok(!renderPosixShellShim("linux").includes(" -l"));
+	});
+
+	it("preserves the operator's runtime directory or its absence in user shells and inner Clio", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-runtime-env-"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const fake = join(scratch, "fake-shell");
+		const preload = join(scratch, "runtime.mjs");
+		writeFileSync(
+			fake,
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
+			'#!/bin/sh\nprintf "pane-runtime=%s\\n" "${XDG_RUNTIME_DIR-unset}"\nexec /bin/sh\n',
+			{ mode: 0o755 },
+		);
+		writeFileSync(preload, 'console.log("clio-runtime=" + (process.env.XDG_RUNTIME_DIR ?? "unset"));\n');
+		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
+		for (const runtime of [tmpdir(), undefined]) {
+			const env: NodeJS.ProcessEnv = { HOME: scratch, PATH: "/usr/bin:/bin", SHELL: fake, TMPDIR: tmpdir() };
+			if (runtime !== undefined) env.XDG_RUNTIME_DIR = runtime;
+			const layout = platform.hostLayout({ session: "r", env });
+			ok(layout.shell.defaultShell);
+			const command = platform.paneLaunch([
+				process.execPath,
+				"--import",
+				"tsx",
+				"--import",
+				preload,
+				"src/cli/index.ts",
+				"--version",
+			]);
+			const run = spawnSync("/bin/sh", [layout.shell.defaultShell], {
+				encoding: "utf8",
+				env: { ...env, ...layout.hostEnv },
+				input: `${command.line}\n`,
+			});
+			equal(run.status, 0, run.stderr);
+			const lines = run.stdout.split("\n");
+			equal(lines[0], `pane-runtime=${runtime ?? "unset"}`);
+			equal(lines[1], `clio-runtime=${runtime ?? "unset"}`);
+		}
 	});
 
 	it("types the Clio command with a leading space so the operator's shell history skips it", () => {
