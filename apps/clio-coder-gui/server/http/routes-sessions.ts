@@ -125,9 +125,12 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.commitHandoff, ({ params, body }, context) =>
-		commands.run(`handoff.commit:${params.id}`, idempotencyKey(context), body, () =>
-			supervisor.commitHandoff(params.id, body.handoffId, body.document),
-		),
+		commands.run(`handoff.commit:${params.id}`, idempotencyKey(context), body, async () => {
+			const committed = await supervisor.commitHandoff(params.id, body.handoffId, body.document);
+			// As with a fork, the live session moved to a new id, and control follows it.
+			if (committed.status === "committed") controls.move(params.id, committed.sessionId, requestClient(context).clientId);
+			return committed;
+		}),
 	);
 	register(app, hub, routes.cancelHandoff, ({ params, body }, context) =>
 		commands.run(`handoff.cancel:${params.id}`, idempotencyKey(context), body, () =>

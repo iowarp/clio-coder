@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { Value } from "typebox/value";
 import { Problem } from "../contracts/common.js";
+import { SessionControl } from "../contracts/control.js";
 import { Event } from "../contracts/events.js";
 import { ACP_TO_WEB_EVENT } from "../contracts/fleet-events.js";
 import { routes } from "../contracts/routes.js";
@@ -377,6 +378,11 @@ test("a handoff is drawn up without writing, commits the reviewed edit once, and
 			?.length,
 		2,
 	);
+	// The window that handed off drives the new conversation; another window only views it.
+	const control = await json(await h.request(`/api/sessions/${committed.sessionId}/control`), SessionControl);
+	assert.equal(control.controller?.clientId, control.you.clientId);
+	const other = await h.client("Window B");
+	assert.equal((await other.post(`/api/sessions/${committed.sessionId}/autonomy`, { level: "yolo" })).status, 409);
 	assert.equal((await h.request(`/api/sessions/${committed.sessionId}/autonomy`)).status, 200);
 	assert.equal((await h.post(`/api/sessions/${committed.sessionId}/turns`, { text: "Carry on" })).status, 202);
 	await until(() => h.supervisor.get(committed.sessionId).turns.at(-1)?.status !== "running");
