@@ -6,6 +6,7 @@ import { turnDelegatesTool } from "../../core/turn-constraints.js";
 import { canonicalJson, workerPermitDigest } from "../../worker/protocol.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import type { RuntimeEnforcement } from "../providers/index.js";
+import { readOnlyWorkAdmitted } from "../providers/runtime-enforcement.js";
 import { classify } from "./action-classifier.js";
 import type { ApprovalAuthority } from "./admission.js";
 
@@ -322,10 +323,7 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 	if (declarationErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${declarationErrors.join("; ")}`);
 	const ceilingErrors = capabilityClassCeilingErrors(input.capabilityClass, input.tools, input.mcp);
 	if (ceilingErrors.length > 0) throw new WorkerPermitAdmissionError(`${who}: ${ceilingErrors.join("; ")}`);
-	// A read-only run changes no user file. A runtime Clio cannot mediate per
-	// call keeps that only inside an OS-level read-only sandbox of its own; an
-	// allowlist, a plan mode or a prompt does not, and trust does not either.
-	if (input.readOnly && !input.runtime.enforcement.perCallMediation && input.runtime.readOnlySandbox !== true) {
+	if (input.readOnly && !readOnlyWorkAdmitted(input.runtime)) {
 		throw new WorkerPermitAdmissionError(
 			`runtime '${input.runtime.id}' cannot run read-only work: Clio cannot mediate its individual calls and it has no OS-level read-only sandbox, so it could change user files; trustedUnmediated does not change this. Choose a native, claude-sdk or codex-cli target for target '${input.runtime.targetId}'`,
 		);

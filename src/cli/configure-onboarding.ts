@@ -46,6 +46,7 @@ import {
 	listProviderSupportEntries,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
+	runtimeAdmitsReadOnlyWork,
 	runtimeListsModelsLive,
 } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
@@ -144,7 +145,8 @@ interface Answers {
 	probe?: ProbeResult | null | undefined;
 	/** The address step's failure, when it already told the operator why the model list will not come. */
 	unreachable?: string | undefined;
-	antigravity?: { targetId: string; model: string } | undefined;
+	/** A runtime read-only admission accepts, bound to the read-only world-knowledge agent. */
+	colleague?: { runtimeId: string; targetId: string; model: string } | undefined;
 }
 
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected";
@@ -1053,28 +1055,50 @@ const THINKING_STEP: Step = {
 	},
 };
 
-const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
-	id: "antigravity-colleague",
+/**
+ * External CLI runtimes on PATH that read-only admission accepts, so the
+ * read-only world-knowledge agent bound to one can actually run there.
+ */
+function readOnlyColleagueRuntimes(): RuntimeDescriptor[] {
+	const configured = new Set(readSettings().targets.map((target) => target.runtime));
+	return getRuntimeRegistry()
+		.list()
+		.filter(
+			(runtime) =>
+				runtime.kind === "subprocess" &&
+				runtime.binaryName !== undefined &&
+				!configured.has(runtime.id) &&
+				runtimeAdmitsReadOnlyWork(runtime) &&
+				resolveOnPath([runtime.binaryName]).presence === "present",
+		);
+}
+
+const READ_ONLY_COLLEAGUE_STEP: Step = {
+	id: "read-only-colleague",
 	applies: (answers) =>
 		answers.mode === "first" &&
 		answers.runtime !== undefined &&
 		isOrchestratorEligibleRuntime(answers.runtime) &&
-		resolveOnPath(["agy"]).presence === "present" &&
-		!readSettings().targets.some((target) => target.runtime === "antigravity-code"),
+		readOnlyColleagueRuntimes().length > 0,
 	run: async (wizard, answers) => {
-		const runtime = getRuntimeRegistry().get("antigravity-code");
-		if (!runtime) return "next";
-		const choice = await wizard.select<boolean>({
+		const candidates = readOnlyColleagueRuntimes();
+		if (candidates.length === 0) return "next";
+		const previous = candidates.findIndex((runtime) => runtime.id === answers.colleague?.runtimeId);
+		const choice = await wizard.select<string>({
 			heading: [
 				"",
-				chalk.bold("Add your local Antigravity research colleague?"),
+				chalk.bold("Add a local read-only research colleague?"),
 				chalk.dim("optional, experimental, dispatch-only; Clio does not authenticate or inspect its session"),
 			],
 			choices: [
-				{ value: false, label: "Not now", hint: "your primary Clio target is unchanged" },
-				{ value: true, label: "Add read-only colleague", hint: "probe the non-generating model catalog" },
+				{ value: "", label: "Not now", hint: "your primary Clio target is unchanged" },
+				...candidates.map((runtime) => ({
+					value: runtime.id,
+					label: `Add ${runtime.displayName}`,
+					hint: "runs world-knowledge read-only",
+				})),
 			],
-			initialIndex: answers.antigravity ? 1 : 0,
+			initialIndex: previous + 1,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
@@ -1083,28 +1107,30 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 		});
 		if (choice.kind === "quit") return "quit";
 		if (choice.kind === "back") return "back";
-		if (!choice.value) {
-			answers.antigravity = undefined;
+		const runtime = candidates.find((entry) => entry.id === choice.value);
+		if (!runtime) {
+			answers.colleague = undefined;
 			wizard.answer("Colleague", "not added");
 			return "next";
 		}
 		const targetId = deriveTargetId(runtime.id, readSettings().targets);
 		const descriptor = buildDescriptor(runtime, targetId, {});
-		const inventory = await resolveSupportedWireModels(runtime, descriptor);
-		if (inventory.source !== "probe" || inventory.models.length === 0) {
-			answers.antigravity = undefined;
+		const probe = await runtimeProbe(runtime, descriptor);
+		if (!probe?.ok || !probe.models || probe.models.length === 0) {
+			answers.colleague = undefined;
 			wizard.presenter.warn(
-				inventory.probeError ??
-					"Antigravity did not return a live catalog. Run `agy` yourself, complete sign-in, then add it from Configure → Targets.",
+				probe?.error ??
+					`${runtime.displayName} did not answer its probe. Run \`${runtime.binaryName}\` yourself, complete sign-in, then add it from Configure → Targets.`,
 			);
-			wizard.answer("Colleague", "not added; sign in with agy first");
+			wizard.answer("Colleague", `not added; sign in with ${runtime.binaryName} first`);
 			return "next";
 		}
+		const labels = probe.modelLabels;
 		const picked = await wizard.select<string>({
-			heading: ["", chalk.bold("Antigravity research model"), chalk.dim("live account catalog")],
-			choices: inventory.models.map((model) => ({
+			heading: ["", chalk.bold(`${runtime.displayName} research model`), chalk.dim("reported by its probe")],
+			choices: probe.models.map((model) => ({
 				value: model,
-				label: inventory.labels?.[model] ? `${model} — ${inventory.labels[model]}` : model,
+				label: labels?.[model] ? `${model} — ${labels[model]}` : model,
 			})),
 			initialIndex: 0,
 			railPrefix: wizard.rail,
@@ -1115,7 +1141,7 @@ const ANTIGRAVITY_COLLEAGUE_STEP: Step = {
 		});
 		if (picked.kind === "quit") return "quit";
 		if (picked.kind === "back") return "back";
-		answers.antigravity = { targetId, model: picked.value };
+		answers.colleague = { runtimeId: runtime.id, targetId, model: picked.value };
 		wizard.answer("Colleague", `${targetId}/${picked.value} → world-knowledge`);
 		return "next";
 	},
@@ -1285,7 +1311,7 @@ const STEPS: ReadonlyArray<Step> = [
 	MODEL_STEP,
 	THINKING_STEP,
 	CONTEXT_STEP,
-	ANTIGRAVITY_COLLEAGUE_STEP,
+	READ_ONLY_COLLEAGUE_STEP,
 	REVIEW_STEP,
 ];
 
@@ -1314,14 +1340,15 @@ function applyAnswers(
 		settings.chat.thinkingLevel = answers.thinking;
 		settings.fleet.default.thinkingLevel = answers.thinking;
 	}
-	if (answers.antigravity !== undefined) {
-		const antigravityRuntime = getRuntimeRegistry().get("antigravity-code");
-		if (!antigravityRuntime) throw new Error("Antigravity runtime disappeared before settings were written");
-		const external = buildDescriptor(antigravityRuntime, answers.antigravity.targetId, {
-			model: answers.antigravity.model,
-		});
+	if (answers.colleague !== undefined) {
+		const { runtimeId, targetId, model } = answers.colleague;
+		const colleagueRuntime = getRuntimeRegistry().get(runtimeId);
+		if (!colleagueRuntime) throw new Error(`Runtime '${runtimeId}' disappeared before settings were written`);
+		if (!runtimeAdmitsReadOnlyWork(colleagueRuntime))
+			throw new Error(`Runtime '${runtimeId}' cannot run read-only work, so world-knowledge cannot be bound to it`);
+		const external = buildDescriptor(colleagueRuntime, targetId, { model });
 		applyTarget(settings, external);
-		setWorkerProfilePointer(settings, "world-knowledge-external", external, answers.antigravity.model);
+		setWorkerProfilePointer(settings, "world-knowledge-external", external, model);
 		bindAgentProfileInSettings(settings, "world-knowledge", "world-knowledge-external");
 	}
 }
@@ -1562,9 +1589,9 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 	else presenter.note("Use Settings → Chat, Fleet, or Context & Memory to change model defaults.");
 	if (answers.mode === "first" && answers.thinking !== undefined)
 		presenter.completedStep(`thinking level ${answers.thinking}`);
-	if (answers.antigravity !== undefined) {
+	if (answers.colleague !== undefined) {
 		presenter.completedStep(
-			`world-knowledge bound read-only to ${answers.antigravity.targetId}/${answers.antigravity.model}`,
+			`world-knowledge bound read-only to ${answers.colleague.targetId}/${answers.colleague.model}`,
 		);
 	}
 	presenter.completedStep(`settings written to ${shortenPath(settingsPath())}`);

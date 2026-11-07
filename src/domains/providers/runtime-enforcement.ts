@@ -38,3 +38,23 @@ export function runtimeEnforcement(runtime: Pick<RuntimeDescriptor, "kind" | "en
 	if (runtime.kind === "http") return NATIVE_ENFORCEMENT;
 	return runtime.enforcement ?? UNMEDIATED_ENFORCEMENT;
 }
+
+/**
+ * Read-only admission. A read-only run changes no user file, so a runtime
+ * takes one only when Clio mediates its every call or it confines its own
+ * tools in an OS-level read-only sandbox. An allowlist, a plan mode, a prompt
+ * or operator trust does not qualify.
+ */
+export function readOnlyWorkAdmitted(runtime: { enforcement: RuntimeEnforcement; readOnlySandbox?: boolean }): boolean {
+	return runtime.enforcement.perCallMediation || runtime.readOnlySandbox === true;
+}
+
+/** The same rule read from a descriptor, for a caller choosing a runtime before admission sees it. */
+export function runtimeAdmitsReadOnlyWork(
+	runtime: Pick<RuntimeDescriptor, "kind" | "enforcement" | "readOnlySandbox">,
+): boolean {
+	return readOnlyWorkAdmitted({
+		enforcement: runtimeEnforcement(runtime),
+		readOnlySandbox: runtime.readOnlySandbox === "os",
+	});
+}

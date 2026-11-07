@@ -479,6 +479,14 @@ printf '%s\\n' 'agy 1.2.3'
 	return binDir;
 }
 
+/** A signed-in Codex CLI fixture: it answers the version and login probes only. */
+function fakeCodexOnPath(root: string): string {
+	const binDir = join(root, "fake-codex-bin");
+	mkdirSync(binDir, { recursive: true });
+	writeFileSync(join(binDir, "codex"), "#!/bin/sh\necho 'codex-cli 1.2.3'\n", { encoding: "utf8", mode: 0o755 });
+	return binDir;
+}
+
 describe("contracts/configure-onboarding", () => {
 	it("takes a fresh home through guided setup with listed choices and writes what it says it wrote", async () => {
 		const testEnv = unconfiguredEnv();
@@ -575,10 +583,14 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
-	it("offers Antigravity only after a primary target and binds the read-only world-knowledge profile", async () => {
+	it("binds world-knowledge only to a colleague runtime that read-only admission accepts", async () => {
 		const testEnv = unconfiguredEnv();
 		const server = await modelServer();
-		const env = { ...testEnv.env, PATH: fakeAntigravityOnPath(testEnv.root) };
+		// Both are installed; only codex has the OS read-only sandbox admission requires.
+		const env = {
+			...testEnv.env,
+			PATH: `${fakeAntigravityOnPath(testEnv.root)}:${fakeCodexOnPath(testEnv.root)}`,
+		};
 		try {
 			const result = await runWizard(env, [
 				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
@@ -586,8 +598,8 @@ describe("contracts/configure-onboarding", () => {
 				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Add your local Antigravity research colleague?", keys: [DOWN, ENTER] },
-				{ waitFor: "Antigravity research model", keys: [ENTER] },
+				{ waitFor: "Add a local read-only research colleague?", keys: [DOWN, ENTER] },
+				{ waitFor: "Codex CLI (managed headless) research model", keys: [ENTER] },
 				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
@@ -595,15 +607,15 @@ describe("contracts/configure-onboarding", () => {
 
 			const screen = plainText(result.transcript());
 			ok(screen.includes("optional, experimental, dispatch-only"), screen);
-			ok(screen.includes("agy-alpha — Agy Alpha"), screen);
+			ok(screen.includes("Add Codex CLI"), screen);
+			ok(!/Add Antigravity/u.test(screen), `a runtime admission refuses read-only work was offered:\n${screen}`);
+			ok(screen.includes("world-knowledge bound read-only to codex-cli/codex-cli-default"), screen);
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: openai-compat/u);
 			match(settings, /chat:[\s\S]*target: openai-compat/u);
-			match(settings, /id: antigravity-code/u);
-			match(settings, /runtime: antigravity-code/u);
-			match(settings, /defaultModel: agy-alpha/u);
-			match(settings, /world-knowledge-external:[\s\S]*target: antigravity-code/u);
+			match(settings, /runtime: codex-cli/u);
+			match(settings, /world-knowledge-external:[\s\S]*target: codex-cli/u);
 			match(settings, /world-knowledge: world-knowledge-external/u);
+			ok(!/antigravity-code/u.test(settings), settings);
 		} finally {
 			await server.close();
 			testEnv.cleanup();
