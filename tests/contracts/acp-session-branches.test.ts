@@ -56,6 +56,7 @@ async function peer(options: { wired?: boolean } = {}) {
 		cwd,
 		autonomy: () => "default",
 		routing: () => ({ target: null, model: null }),
+		labelOperatorCommand: () => null,
 		...(wired
 			? {
 					readSessionEntries: readEntries,
@@ -213,6 +214,32 @@ test("ACP switch_turn pins the branch, resets the model context and replays only
 		deepStrictEqual(replayText(replay), ["first question", "first answer", "second question", "second answer"]);
 		ok(replay.every((frame) => frame.sessionId === sessionId));
 	} finally {
+		await agent.stop();
+	}
+});
+
+test("ACP fork waits for an operator shell line to leave its original session", async () => {
+	const agent = await peer();
+	let shell: Promise<unknown> | undefined;
+	try {
+		await agent.call("initialize", { protocolVersion: 1 });
+		await agent.call("session/new", { cwd: agent.cwd, mcpServers: [] });
+		seed(agent.contract);
+		const parentId = agent.contract.current()?.id;
+		ok(parentId);
+		shell = agent.call("_clio-coder/session/shell", { sessionId: parentId, command: "printf shell-proof" });
+		void shell.catch(() => {});
+		await refusal(agent.call("_clio-coder/session/fork", { sessionId: parentId, turnId: "a1" }), "shell_active");
+		strictEqual(agent.contract.current()?.id, parentId);
+		await shell;
+		ok(readEntries(parentId).some((entry) => entry.kind === "bashExecution" && entry.output === "shell-proof"));
+		const fork = (await agent.call("_clio-coder/session/fork", { sessionId: parentId, turnId: "a1" })) as {
+			sessionId: string;
+		};
+		ok(fork.sessionId !== parentId);
+		ok(!readEntries(fork.sessionId).some((entry) => entry.kind === "bashExecution"));
+	} finally {
+		await shell?.catch(() => {});
 		await agent.stop();
 	}
 });

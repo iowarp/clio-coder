@@ -1,7 +1,72 @@
 import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+
+test("ACP transport close waits for an admitted context command to settle", async () => {
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	let close = () => {};
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: () => {},
+		onNotification: () => () => {},
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	let resolveCommand: (value: { level: "info"; lines: string[] }) => void = () => {};
+	const command = new Promise<{ level: "info"; lines: string[] }>((resolve) => {
+		resolveCommand = resolve;
+	});
+	let stopped = false;
+	const served = serveClioAcpAgent({
+		transport,
+		cwd: process.cwd(),
+		chat: {
+			submit: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+		commands: {
+			catalog: () => ({ version: 1, commands: [] }),
+			invoke: () => command,
+			injectsUserTurn: () => false,
+			capability: {},
+		},
+	}).then(() => {
+		stopped = true;
+	});
+	await handlers.get("initialize")?.({ protocolVersion: 1 });
+	const { sessionId } = (await handlers.get("session/new")?.({ cwd: process.cwd(), mcpServers: [] })) as {
+		sessionId: string;
+	};
+	const pending = handlers.get("_clio-coder/commands/invoke")?.({ sessionId, command: "context", argv: ["refresh"] });
+	try {
+		await setImmediate();
+		close();
+		await setImmediate();
+		strictEqual(stopped, false);
+		resolveCommand({ level: "info", lines: [] });
+		await Promise.all([pending, served]);
+		strictEqual(stopped, true);
+	} finally {
+		resolveCommand({ level: "info", lines: [] });
+		close();
+		await Promise.all([pending, served]);
+	}
+});
 
 test("ACP child accepts a new session after closing its bound session", async () => {
 	const home = makeScratchHome("clio-coder-acp-session-close-");

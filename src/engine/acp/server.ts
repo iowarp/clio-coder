@@ -3319,8 +3319,24 @@ function installPermissionBridge(input: {
 	};
 }
 
-/** How long transport close waits for an in-flight prompt handler to settle. */
+/** How long teardown waits for accepted work to finish after cancellation. */
 const ACP_PROMPT_SETTLE_BOUND_MS = 5000;
+
+async function settleAcpWork(pending: readonly Promise<unknown>[]): Promise<void> {
+	if (pending.length === 0) return;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			Promise.allSettled(pending),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, ACP_PROMPT_SETTLE_BOUND_MS);
+				timer.unref?.();
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 /**
  * Where a steer lands. `interrupt` is deliberately not admitted here: the
@@ -5280,6 +5296,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	/** A branch change rewrites the context a running turn is reading, so it waits for the turn. */
 	const requireIdle = (session: AcpServerSession, action: string): void => {
+		if (activeShell !== null)
+			throw new AcpRequestError(-32602, `cannot ${action} while a shell line is running`, { code: "shell_active" });
 		if (
 			contextCommandInFlight !== null ||
 			session.activePrompt !== null ||
@@ -5602,16 +5620,27 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// never a turn. The chat loop answers beside a turn in flight over a snapshot
 	// of its history (#415); a refusal it reports is an outcome, not a protocol
 	// error.
-	let asideRound: AbortController | null = null;
-	const runAside = async <T>(round: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+	let asideRound: { sessionId: string; abort: AbortController; settled: Promise<void> } | null = null;
+	const runAside = async <T>(sessionId: string, round: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+		if (closingSessions.has(sessionId) || options.transport.closed)
+			throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
 		if (asideRound !== null)
 			throw new AcpRequestError(-32602, "a side question or draft is already running", { code: "aside_active" });
 		const controller = new AbortController();
-		asideRound = controller;
+		let settle: () => void = () => {};
+		const active = {
+			sessionId,
+			abort: controller,
+			settled: new Promise<void>((resolve) => {
+				settle = resolve;
+			}),
+		};
+		asideRound = active;
 		try {
 			return await round(controller.signal);
 		} finally {
-			if (asideRound === controller) asideRound = null;
+			if (asideRound === active) asideRound = null;
+			settle();
 		}
 	};
 	const requireAside = () => {
@@ -5631,16 +5660,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "question"]));
 		const aside = requireAside();
-		getSession(request);
+		const session = getSession(request);
 		const question = asideText(request.question, "question");
-		return projectAsideAnswer(await runAside((signal) => aside.ask(question, signal)), options.diagnostics);
+		return projectAsideAnswer(await runAside(session.id, (signal) => aside.ask(question, signal)), options.diagnostics);
 	});
 	options.transport.onRequest(ACP_ASIDE_DRAFT_METHOD, async (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "request", "count"]));
 		const aside = requireAside();
-		getSession(request);
+		const session = getSession(request);
 		const text = asideText(request.request, "request");
 		const count = request.count ?? ACP_ASIDE_DRAFT_COUNTS.default;
 		if (
@@ -5652,7 +5681,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, `count must be ${ACP_ASIDE_DRAFT_COUNTS.min} to ${ACP_ASIDE_DRAFT_COUNTS.max}`, {
 				code: "invalid_params",
 			});
-		return projectDraftOutcome(await runAside((signal) => aside.draft(text, count, signal)), options.diagnostics);
+		return projectDraftOutcome(
+			await runAside(session.id, (signal) => aside.draft(text, count, signal)),
+			options.diagnostics,
+		);
 	});
 	options.transport.onRequest(ACP_ASIDE_CANCEL_METHOD, (params) => {
 		requireInitialized();
@@ -5660,7 +5692,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireAside();
 		getSession(request);
 		const round = asideRound;
-		round?.abort();
+		round?.abort.abort();
 		return { cancelled: round !== null };
 	});
 
@@ -6883,6 +6915,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (inFlightClose) return inFlightClose;
 		const session = getSession(params);
 		const close = (async (): Promise<Record<string, never>> => {
+			const aside = asideRound?.sessionId === session.id ? asideRound : null;
+			aside?.abort.abort();
 			// The prompt writer must settle before the durable session is closed.
 			cancelSession(session, "session closed");
 			if (session.activePrompt) {
@@ -6892,6 +6926,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				await contextCommandInFlight.catch(() => undefined);
 			// The aborted line still appends its entry; the ledger must outlive that write.
 			if (activeShell?.sessionId === session.id) await activeShell.settled;
+			if (aside !== null) await settleAcpWork([aside.settled]);
 			if (options.session?.current()?.id === session.id) await options.session.close();
 			await options.mcpCapabilities?.detachClientServers();
 			sessions.delete(session.id);
@@ -7304,25 +7339,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");
 			unsubscribeQueueEvents();
+			const aside = asideRound;
+			aside?.abort.abort();
 			for (const session of sessions.values()) cancelSession(session, "ACP transport closed");
-			const settling = [promptSettled, activeShell?.settled ?? null].filter(
-				(pending): pending is Promise<void> => pending !== null,
-			);
-			if (settling.length === 0) {
-				resolve(0);
-				return;
-			}
-			const inFlight = Promise.all(settling);
-			// The prompt handler owns the chat loop's settlement; resolving the
-			// serve promise before it returns lets the orchestrator stop domains
-			// under a live writer. The bound keeps a wedged turn from holding the
-			// process open forever.
-			const timer = setTimeout(() => resolve(0), ACP_PROMPT_SETTLE_BOUND_MS);
-			timer.unref?.();
-			void inFlight.then(() => {
-				clearTimeout(timer);
-				resolve(0);
-			});
+			const settling = [
+				promptSettled,
+				activeShell?.settled ?? null,
+				contextCommandInFlight,
+				aside?.settled ?? null,
+			].filter((pending): pending is Promise<unknown> => pending !== null);
+			// Accepted out-of-turn work owns its finalization just as a prompt does.
+			void settleAcpWork(settling).then(() => resolve(0));
 		});
 	});
 }

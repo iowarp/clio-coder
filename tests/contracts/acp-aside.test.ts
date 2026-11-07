@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { type AcpAsideControl, projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/aside.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -136,6 +137,42 @@ test("one round at a time, and cancel aborts the one in flight", async () => {
 		await agent.stop();
 	}
 });
+
+for (const teardown of ["transport", "session"] as const) {
+	test(`${teardown} teardown aborts and waits for an admitted aside`, async () => {
+		let resolveRound: (value: { status: "aborted"; text: string }) => void = () => {};
+		const round = new Promise<{ status: "aborted"; text: string }>((resolve) => {
+			resolveRound = resolve;
+		});
+		let signal: AbortSignal | undefined;
+		const agent = await peer({
+			ask: (_question, supplied) => {
+				signal = supplied;
+				return round;
+			},
+			draft: async () => ({ status: "refused", reason: "unused" }),
+		});
+		const pending = agent.call("_clio-coder/aside/ask", { sessionId: agent.sessionId, question: "still working" });
+		let closed = false;
+		const closing = (
+			teardown === "transport" ? agent.stop() : agent.call("session/close", { sessionId: agent.sessionId })
+		).then(() => {
+			closed = true;
+		});
+		try {
+			await setImmediate();
+			assert.equal(signal?.aborted, true);
+			assert.equal(closed, false, "teardown waits for the aborted round to finish");
+			resolveRound({ status: "aborted", text: "partial" });
+			await Promise.all([pending, closing]);
+			assert.equal(closed, true);
+		} finally {
+			resolveRound({ status: "aborted", text: "" });
+			await Promise.all([pending, closing]);
+			await agent.stop();
+		}
+	});
+}
 
 test("drafts come back labelled", async () => {
 	const seen: Array<[string, number]> = [];
