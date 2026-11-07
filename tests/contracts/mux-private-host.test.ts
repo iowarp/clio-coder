@@ -18,7 +18,6 @@ import {
 	hostedInWorkspace,
 	markWorkspaceExit,
 	readWorkspaceExitResult,
-	readWorkspaceExitSummary,
 } from "../../src/domains/mux/workspace/exit-marker.js";
 import { holdExitSummaryForLauncher } from "../../src/domains/mux/workspace/exit-summary-handoff.js";
 import {
@@ -276,17 +275,17 @@ describe("host identity and exit markers", () => {
 		const summary = "Clio Coder · Session summary\n/resume 0123\n";
 		holdExitSummaryForLauncher(summary);
 		markWorkspaceExit(env);
-		equal(readWorkspaceExitSummary(marker), summary);
+		deepStrictEqual(readWorkspaceExitResult(marker), { exitCode: 0, summary });
 		equal(statSync(marker).mode & 0o777, 0o600);
 		deepStrictEqual(readdirSync(scratch), [basename(marker)]);
 		// A quit with nothing to report still marks the exit, with no summary to print.
 		holdExitSummaryForLauncher("");
 		markWorkspaceExit(env);
-		equal(readWorkspaceExitSummary(marker), null);
+		deepStrictEqual(readWorkspaceExitResult(marker), { exitCode: 0, summary: null });
 		writeFileSync(marker, "x".repeat(256 * 1024 + 1));
-		equal(readWorkspaceExitSummary(marker), null);
-		equal(readWorkspaceExitSummary(join(scratch, "missing")), null);
-		equal(readWorkspaceExitSummary(scratch), null);
+		equal(readWorkspaceExitResult(marker), null);
+		equal(readWorkspaceExitResult(join(scratch, "missing")), null);
+		equal(readWorkspaceExitResult(scratch), null);
 	});
 
 	it("carries crash and signal exit status so the launcher can dispose the private host without masking failure", (t) => {

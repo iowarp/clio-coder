@@ -513,15 +513,6 @@ function mapToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): Mapp
 	if (rawTool && Object.values(ToolNames).includes(rawTool as (typeof ToolNames)[keyof typeof ToolNames])) {
 		return { tool: rawTool, args: rawInput, evaluations: [{ tool: rawTool, args: rawInput }], known: true, displayTool };
 	}
-	// Fallback: some ACP agents (notably claude-agent-acp) send a
-	// permission request carrying only rawInput + title, omitting both `kind` and
-	// the tool name. Infer the clio tool from the rawInput shape so the dangerous
-	// classes (shell, writes, edits) are still classified and gated instead of
-	// being blanket-denied as an unknown tool.
-	if (stringField(rawInput, "command", "cmd", "shell")) {
-		const args = commandArgs(rawInput, cwd);
-		return { tool: ToolNames.Bash, args, evaluations: [{ tool: ToolNames.Bash, args }], known: true, displayTool };
-	}
 	// A search names where it looks as well as what it looks for, so the
 	// inferred grep keeps its path targets for the policy to judge.
 	if (stringField(rawInput, "pattern")) {

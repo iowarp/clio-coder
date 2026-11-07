@@ -97,13 +97,9 @@ export function markWorkspaceExit(env: NodeJS.ProcessEnv = process.env, exitCode
 }
 
 /**
- * The exit summary a marker carries, or null when it carries none. Read by the
+ * The exit status and summary a marker carries, or null when it is invalid. Read by the
  * launcher before it deletes the marker with the workspace.
  */
-export function readWorkspaceExitSummary(marker: string): string | null {
-	return readWorkspaceExitResult(marker)?.summary ?? null;
-}
-
 export function readWorkspaceExitResult(marker: string): { exitCode: number; summary: string | null } | null {
 	try {
 		const stat = lstatSync(marker);

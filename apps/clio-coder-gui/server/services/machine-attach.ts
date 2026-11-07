@@ -46,8 +46,6 @@ type Entry = {
 	timer: ReturnType<typeof setTimeout> | null;
 	/** Consecutive failed connections since the operator last opened the machine. */
 	failures: number;
-	/** Bumped on every start, so a late exit or timeout from an earlier run changes nothing. */
-	generation: number;
 };
 
 const READY_OUTPUT_LIMIT = 64 * 1024;
@@ -237,7 +235,6 @@ export class MachineAttachments implements MachineAttachmentsApi {
 			},
 			timer: null,
 			failures,
-			generation: (previous?.generation ?? 0) + 1,
 		};
 		this.entries.set(endpoint.id, entry);
 		this.publish(entry);
