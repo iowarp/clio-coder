@@ -65,6 +65,18 @@ fails or required credentials are missing; an unused target is a warning. Succes
 configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
 a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
 
+A `copilot sign-in` row appears when a `copilot-sdk` target is configured and the
+Copilot SDK component is installed. Doctor starts a short-lived Copilot runtime
+with the system keychain closed, as headless `run` and fleet workers start it,
+and reports the account it sees and whether that is a `copilot login` on disk or
+a GitHub CLI session. When it sees none and doctor runs in a terminal, a second
+runtime asks with the keychain open: a login found only there is a `WARN` that
+names the headless fix, because the TUI, ACP and the GUI can use it but `run` and
+workers cannot. Without a terminal the keychain is not checked, and the row says
+so. A missing login is an error when chat, memory or the fleet routes to a
+Copilot target and a warning otherwise. Clio reads no token; only the runtime
+answers.
+
 The `local worker capacity` row reports usable CPUs, currently available memory,
 any process/cgroup memory bound, and the worker count `auto` resolves to. It
 also states that Clio did not inspect GPU/VRAM or model fit.
