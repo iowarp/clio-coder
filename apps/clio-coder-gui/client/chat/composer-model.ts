@@ -961,7 +961,7 @@ export function composerDelivery(
 	mode: SteerMode,
 	contextRunning: boolean,
 	readingAttachments: boolean,
-): { label: string; detail: string; tone: "neutral" | "running" | "warn" } {
+): { label: string; detail: string; tone: "neutral" | "running" | "warn"; quiet?: true } {
 	if (situation.sessionControl)
 		return {
 			label: situation.sessionControl === "unresolved" ? "Review session request" : "Session request",
@@ -985,7 +985,12 @@ export function composerDelivery(
 	if (contextRunning && !situation.turnRunning)
 		return { label: "Context work", detail: "Your draft is kept until the current operation finishes.", tone: "running" };
 	if (!situation.turnRunning)
-		return { label: "Your next message", detail: "Attach context or explore Actions before sending.", tone: "neutral" };
+		return {
+			label: "Your next message",
+			detail: "Attach context or explore Actions before sending.",
+			tone: "neutral",
+			quiet: true,
+		};
 	if (situation.steeringUnavailable)
 		return {
 			label: "Working",

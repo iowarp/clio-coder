@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	capabilityRefusal,
+	composerDelivery,
 	composerKeyAction,
 	DEFAULT_STEER_MODE,
 	type Draft,
@@ -547,4 +548,16 @@ test("a turn with no usage quantities invents no tokens", () => {
 		outcome.breakdown.filter((row) => row.group === "Usage"),
 		[],
 	);
+});
+
+test("only the idle composer's note is quiet; anything the reader must know stays visible", () => {
+	assert.equal(composerDelivery(situation(), DEFAULT_STEER_MODE, false, false).quiet, true);
+	for (const [state, context, reading] of [
+		[situation({ turnRunning: true }), false, false],
+		[situation({ sending: true }), false, false],
+		[situation({ sessionState: "parked" }), false, false],
+		[situation(), true, false],
+		[situation(), false, true],
+	] as const)
+		assert.equal(composerDelivery(state, DEFAULT_STEER_MODE, context, reading).quiet, undefined);
 });

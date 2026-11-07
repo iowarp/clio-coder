@@ -740,7 +740,7 @@ export const Composer = memo(function Composer({
 					void attach([...event.dataTransfer.files]);
 				}}
 			>
-				<div className="composer__delivery-note" data-tone={delivery.tone}>
+				<div className="composer__delivery-note" data-tone={delivery.tone} data-quiet={delivery.quiet}>
 					<strong>{delivery.label}</strong>
 					<span>{delivery.detail}</span>
 				</div>
@@ -1142,7 +1142,11 @@ export const Composer = memo(function Composer({
 						{attachProblem}
 					</p>
 				) : null}
-				<p className="composer__hint composer__keyboard-hint" id={hintId}>
+				<p
+					className="composer__hint composer__keyboard-hint"
+					id={hintId}
+					{...(attachments.length > 0 ? { "data-pinned": true } : {})}
+				>
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
 					recalls earlier messages
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
