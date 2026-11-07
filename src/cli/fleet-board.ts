@@ -26,6 +26,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+import type { OutputStyle } from "../core/defaults.js";
 import { renderCalls } from "../core/telemetry/render.js";
 import { terminalBackground } from "../core/terminal-background.js";
 import { colorDisabled } from "../core/terminal-preferences.js";
@@ -56,7 +57,6 @@ import type { fleetInspectionScope } from "./fleet-project-scope.js";
 
 /** Poll cadence, matching the monitor tool and the feed's coalescing window. */
 const POLL_MS = 250;
-const MIN_WIDTH = 24;
 const TIMER_WIDTH = 7;
 const NAME_MAX = 16;
 const SEPARATOR = " · ";
@@ -294,7 +294,7 @@ function renderCard(
 	paint: BoardPaint,
 	card: WorkerCard,
 	width: number,
-	options: { selected: boolean; nameWidth: number; nowMs: number },
+	options: { selected: boolean; nameWidth: number; nowMs: number; style: OutputStyle },
 ): string[] {
 	const gutter = options.selected ? paint.fg("selectionBadge", "▌") : " ";
 	const inner = width - 1;
@@ -309,7 +309,13 @@ function renderCard(
 	const attempt = card.attempt > 0 ? `↻${card.attempt + 1} ` : "";
 	const facts = `  ${paint.fg("toolMetadata", `${attempt}${factsText(card, inner - 2 - attempt.length)}`)}`;
 	const activity = `  ${cut(activityText(paint, card), inner - 2)}`;
-	return [first, facts, activity].map((row) => `${gutter}${cut(row, inner)}`);
+	const lines =
+		options.style === "detailed"
+			? [first, facts, activity]
+			: options.style === "standard"
+				? [first, activity]
+				: [`${head} ${activityText(paint, card)}`];
+	return lines.map((row) => cut(`${gutter}${cut(row, inner)}`, width));
 }
 
 // ---------------------------------------------------------------------------
@@ -324,10 +330,12 @@ export interface BoardView {
 
 function boardCounts(paint: BoardPaint, board: BoardModel): string {
 	const done = board.finished.filter((card) => card.state === "succeeded").length;
-	const failed = board.finished.length - done;
+	const cancelled = board.finished.filter((card) => card.state === "canceled").length;
+	const failed = board.finished.length - done - cancelled;
 	return [
 		paint.fg("activity", `● ${board.running.length} running`),
 		paint.fg("success", `✓ ${done} done`),
+		...(cancelled > 0 ? [paint.fg("toolMetadata", `⊘ ${cancelled} cancelled`)] : []),
 		...(failed > 0 ? [paint.fg("error", `✗ ${failed} failed`)] : []),
 	].join("  ");
 }
@@ -360,8 +368,9 @@ function renderBoard(
 	width: number,
 	height: number,
 	nowMs: number,
+	style: OutputStyle,
 ): string[] {
-	const columns = Math.max(MIN_WIDTH, width);
+	const columns = Math.max(1, width);
 	const rule = paint.fg("divider", RULE.repeat(columns));
 	const cards = [...board.running, ...board.finished];
 	const header = [cut(` ${paint.fg("heading", "workers", true)}  ${boardCounts(paint, board)}`, columns), rule];
@@ -384,19 +393,25 @@ function renderBoard(
 		}
 		const selected = card.runId === view.selectedRunId;
 		if (selected) selectedStart = rows.length;
-		rows.push(...renderCard(paint, card, columns, { selected, nameWidth, nowMs }));
+		rows.push(...renderCard(paint, card, columns, { selected, nameWidth, nowMs, style }));
 		if (selected) selectedEnd = rows.length;
 	});
-	// Keep the selected card whole on screen, moving the window as little as possible.
-	let top = Math.min(view.top, Math.max(0, rows.length - bodyHeight));
+	const scrolls = rows.length > bodyHeight;
+	const pageRows = Math.max(1, bodyHeight - (scrolls ? 1 : 0));
+	// Reserve the position row instead of overwriting the selected card with a scroll marker.
+	let top = Math.min(view.top, Math.max(0, rows.length - pageRows));
 	if (selectedStart < top) top = selectedStart;
-	if (selectedEnd > top + bodyHeight) top = selectedEnd - bodyHeight;
+	if (selectedEnd > top + pageRows) top = selectedEnd - pageRows;
 	top = Math.max(0, top);
 	view.top = top;
-	const body = rows.slice(top, top + bodyHeight);
-	if (top > 0) body[0] = cut(` ${paint.fg("scrollMarker", `↑ ${top} more`)}`, columns);
-	const below = rows.length - (top + bodyHeight);
-	if (below > 0) body[body.length - 1] = cut(` ${paint.fg("scrollMarker", `↓ ${below} more`)}`, columns);
+	const body = rows.slice(top, top + pageRows);
+	if (scrolls)
+		body.push(
+			cut(
+				` ${paint.fg("scrollMarker", `${top + 1}-${Math.min(rows.length, top + pageRows)} / ${rows.length} rows`)}`,
+				columns,
+			),
+		);
 	while (body.length < bodyHeight) body.push("");
 	return [...header, ...body, ...footer];
 }
@@ -592,7 +607,7 @@ function renderTakeover(
 	height: number,
 	nowMs: number,
 ): string[] {
-	const columns = Math.max(MIN_WIDTH, width);
+	const columns = Math.max(1, width);
 	const rule = paint.fg("divider", RULE.repeat(columns));
 	if (model === null) {
 		const waiting = [
@@ -755,7 +770,7 @@ export async function runWorkersDashboard(options: WorkersDashboardOptions): Pro
 			if (mode === "takeover" && takeoverView !== null) {
 				return renderTakeover(paint, takeover, takeoverView, width, height, nowMs);
 			}
-			return renderBoard(paint, board, boardView, width, height, nowMs);
+			return renderBoard(paint, board, boardView, width, height, nowMs, request?.outputDetail ?? "standard");
 		},
 		invalidate(): void {},
 	};

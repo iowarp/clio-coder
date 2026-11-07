@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import type { OutputStyle } from "../../src/core/defaults.js";
 import { createMuxRuntime, type MuxPaneOpenFailure } from "../../src/domains/mux/contract.js";
 import { createMuxClient, type MuxClient } from "../../src/domains/mux/socket-client.js";
 import { MuxError } from "../../src/domains/mux/types.js";
@@ -11,6 +12,7 @@ import { createWatchPaneController } from "../../src/interactive/watch-pane.js";
 
 function fixture() {
 	const calls: string[] = [];
+	const writes: string[] = [];
 	let width = 200;
 	let anchor = true;
 	let failure: Error | null = null;
@@ -51,19 +53,23 @@ function fixture() {
 			refused: false,
 		},
 	});
-	const watch = () =>
+	const watch = (getOutputStyle: () => OutputStyle = () => "standard") =>
 		createWatchPaneController({
+			getOutputStyle,
 			mux: runtime.contract,
 			getCwd: () => "/repo",
 			selectionPath: "/fixture/watch-selection",
 			dirs: { config: "/fixture/config", data: "/fixture/data", state: "/fixture/state", cache: "/fixture/cache" },
 			command: () => ["viewer"],
-			writeFile: () => {},
+			writeFile: (_path, content) => {
+				writes.push(content);
+			},
 		});
 	return {
 		runtime,
 		client,
 		calls,
+		writes,
 		watch,
 		setWidth: (value: number) => {
 			width = value;
@@ -76,6 +82,24 @@ function fixture() {
 		},
 	};
 }
+
+it("updates the worker pane tier without retargeting the selected run", async () => {
+	const f = fixture();
+	let style: OutputStyle = "compact";
+	const controller = f.watch(() => style);
+	try {
+		await controller.watch("run-one");
+		const first = f.writes.at(-1) ?? "";
+		match(first, /^run-one\n/);
+		match(first, /outputDetail=compact\n/);
+		style = "detailed";
+		strictEqual(controller.refreshPresentation?.(), true);
+		const next = f.writes.at(-1) ?? "";
+		strictEqual(next, first.replace("outputDetail=compact", "outputDetail=detailed"));
+	} finally {
+		controller.dispose();
+	}
+});
 
 for (const stage of ["paneReportMetadata", "paneSendText"] as const) {
 	it(`rolls back a newly allocated dock when ${stage} fails and permits a retry`, async () => {

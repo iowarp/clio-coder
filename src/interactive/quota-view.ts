@@ -324,20 +324,22 @@ export function renderWorkerUsage(
 	recorded: ReadonlyArray<RecordedWorkerRun>,
 	snapshots: QuotaProviders,
 	width: number,
+	style: OutputStyle = "standard",
 ): string[] {
 	const theme = clioTheme();
 	const safe = Math.max(1, Math.floor(width));
 	const onBoard = new Set(rows.map((row) => row.runId));
 	const history = recorded.filter(({ run }) => !onBoard.has(run.row.runId));
-	const out = [
-		theme.fg("annotation", "Active and recent workers · recorded tokens and cost · account limits are shared."),
-	];
+	const out =
+		style === "compact"
+			? []
+			: [theme.fg("annotation", "Active and recent workers · recorded tokens and cost · account limits are shared.")];
 	if (!rows.length && !history.length) {
 		out.push("", ...emptyState(theme, "No worker invocations recorded.", safe));
 		return out;
 	}
 	if (rows.length) {
-		const table = runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots });
+		const table = runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots, style });
 		out.push(
 			sectionRule(theme, safe, "On the board", { meta: `${rows.length} run${rows.length === 1 ? "" : "s"}` }),
 			...table,
@@ -407,3 +409,5 @@ export function renderWorkerUsage(
 	out.push(theme.fg("annotation", "/view dispatch:<run> opens a run's record"));
 	return out.flatMap((line) => wrapTextWithAnsi(theme.base("fieldValue", line), safe));
 }
+
+import type { OutputStyle } from "../core/defaults.js";

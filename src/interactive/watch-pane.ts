@@ -26,6 +26,7 @@
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { OutputStyle } from "../core/defaults.js";
 import { type ClioDirs, clioCacheDir, clioConfigDir, clioDataDir, clioStateDir } from "../core/xdg.js";
 import type { MuxContract, MuxPaneOpenFailure, MuxPaneRecord, MuxPaneRef } from "../domains/mux/index.js";
 import type { PanesWatchController, PanesWatchResult, PanesWorkersResult } from "../domains/mux/operations.js";
@@ -47,6 +48,7 @@ function watchTapPath(stateDir: string = clioStateDir()): string {
 }
 
 export interface WatchPaneDeps {
+	getOutputStyle?: () => OutputStyle;
 	mux: MuxContract;
 	getCwd: () => string;
 	/**
@@ -143,7 +145,10 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		}
 		const session = deps.getSessionId?.() ?? "";
 		try {
-			write(selectionPath, `${requested}\nseq=${seq}\nsession=${session}\nsince=${since}\n`);
+			write(
+				selectionPath,
+				`${requested}\nseq=${seq}\nsession=${session}\nsince=${since}\noutputDetail=${deps.getOutputStyle?.() ?? "standard"}\n`,
+			);
 			return true;
 		} catch {
 			return false;
@@ -279,6 +284,9 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 			if (record() === null) return false;
 			if (runId === requested) return true;
 			return writeRequest(runId, true);
+		},
+		refreshPresentation(): boolean {
+			return record() === null || writeRequest(requested, false);
 		},
 
 		toggle(): Promise<PanesWorkersResult> {

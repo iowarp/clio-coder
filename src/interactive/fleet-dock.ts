@@ -1,3 +1,4 @@
+import type { OutputStyle } from "../core/defaults.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { TaskBoardSnapshot } from "../domains/session/task-board.js";
 import { taskBoardCounts } from "../domains/session/task-board.js";
@@ -10,6 +11,7 @@ import type { QuotaProviders } from "./quota-view.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
 export interface FleetDockDeps {
+	getOutputStyle?: () => OutputStyle;
 	getRows: () => ReadonlyArray<DispatchBoardRow>;
 	getQuotaSnapshots?: () => QuotaProviders;
 	/** Bound to TaskBoardStore.cachedSnapshot; a repaint must never fold the session ledger. */
@@ -30,7 +32,7 @@ const FLEET_DOCK_CARD_MIN_ROWS = 32;
  * operator next. It replaced a top-right overlay that painted over transcript
  * words, so it takes a row of its own above the composer instead.
  */
-function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | null {
+function taskBoardDockRow(board: TaskBoardSnapshot, width: number, style: OutputStyle): string | null {
 	const counts = taskBoardCounts(board);
 	if (counts.open === 0 || width < 1) return null;
 	const theme = clioTheme();
@@ -40,12 +42,12 @@ function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | nul
 	const separator = theme.fg("annotation", " · ");
 	const focus = blocked
 		? `${theme.fg("warning", GLYPH.phaseBlocked)} ${theme.fg("annotation", blocked.id)} ${theme.fg("body", sanitizeCallTargetText(blocked.title))}`
-		: next
+		: next && style !== "compact"
 			? `${theme.fg(next.status === "active" ? "activity" : "annotation", next.status === "active" ? GLYPH.running : GLYPH.queued)} ${theme.fg("annotation", next.id)} ${theme.fg("body", sanitizeCallTargetText(next.title))}`
 			: null;
 	const lead = [
 		theme.style("sectionHeading", "Tasks", { bold: true }),
-		theme.fg("body", sanitizeCallTargetText(board.title)),
+		...(style === "compact" ? [] : [theme.fg("body", sanitizeCallTargetText(board.title))]),
 		taskBoardValue(theme, board),
 	].join(separator);
 	const hint = theme.fg("commandHint", "/tasks");
@@ -59,17 +61,19 @@ function taskBoardDockRow(board: TaskBoardSnapshot, width: number): string | nul
 export function createFleetDock(deps: FleetDockDeps): Component {
 	return {
 		render(width) {
+			const style = deps.getOutputStyle?.() ?? "standard";
 			const rows = summaryFleetRuns(deps.getRows());
 			if (rows.length > 0 && deps.isFleetBoardOpen?.() === true) return [];
 			if (rows.length === 0) {
 				if (deps.isFooterExpanded?.() === true) return [];
 				const board = deps.getTaskBoard?.() ?? null;
-				const row = board ? taskBoardDockRow(board, width) : null;
+				const row = board ? taskBoardDockRow(board, width, style) : null;
 				return row === null ? [] : [row];
 			}
 			const quota = deps.getQuotaSnapshots?.() ?? [];
-			if ((deps.getTerminalRows?.() ?? FLEET_DOCK_CARD_MIN_ROWS) < FLEET_DOCK_CARD_MIN_ROWS)
-				return formatFleetDockRows(rows, width, quota);
+			const short = (deps.getTerminalRows?.() ?? FLEET_DOCK_CARD_MIN_ROWS) < FLEET_DOCK_CARD_MIN_ROWS;
+			if (style !== "detailed" || short)
+				return formatFleetDockRows(rows, width, quota, style === "compact" ? 1 : 2, short ? "compact" : style);
 			// One card keeps the composer reachable; the summary names the remaining
 			// cards, all of which are inspectable in Fleet Runs.
 			return formatTaskIslandLines(rows, 1, quota, Math.max(1, width - 4));

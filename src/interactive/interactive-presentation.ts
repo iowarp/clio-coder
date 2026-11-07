@@ -1102,6 +1102,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const dispatchBoard = factories.createDispatchBoardView(
 		() => dispatchBoardStore.rows(),
 		() => telemetrySnapshot,
+		() => deps.getSettings?.().interface.outputDetail ?? "standard",
 	);
 	const chatRenderer = factories.createChatRenderer({
 		chatPanel,
@@ -1150,6 +1151,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			...(deps.workspaceSurfaces ? { workspace: deps.workspaceSurfaces.board } : {}),
 			pending,
 			fleet: createFleetDock({
+				getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 				getRows: () => dispatchBoardStore.liveRows?.() ?? dispatchBoardStore.activeRows(),
 				getQuotaSnapshots: () => {
 					quotaSummary.peekSnapshots();

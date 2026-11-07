@@ -84,6 +84,7 @@ export interface DispatchBoardOverlayKeyDeps {
 	toggleSelectedDispatchDetail: () => void;
 	/** Whether the selected run's detail is open, so Esc folds it before it closes the board. */
 	isSelectedDispatchDetailOpen?: () => boolean;
+	scrollSelectedDispatchDetail?: (direction: -1 | 1) => void;
 	/**
 	 * Open or retarget the watch pane for the selected run. True when the pane
 	 * layer took the key; false hands Enter back to the inline detail toggle,
@@ -240,6 +241,10 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 		return true;
 	}
 	if (isKeyRelease(data)) return false;
+	if (deps.isSelectedDispatchDetailOpen?.() && (matchesKey(data, "pageUp") || matchesKey(data, "pageDown"))) {
+		deps.scrollSelectedDispatchDetail?.(matchesKey(data, "pageUp") ? -1 : 1);
+		return true;
+	}
 	if (matchesKey(data, "up") || matchesKey(data, "k")) {
 		deps.selectPreviousDispatch();
 		return true;

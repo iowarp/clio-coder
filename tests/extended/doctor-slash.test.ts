@@ -92,7 +92,7 @@ describe("/doctor", () => {
 			{ ok: false, name: "broken", detail: "first line\nsecond line" },
 		];
 		for (const width of [24, 80, 160]) {
-			const lines = renderDoctorReport(findings, width);
+			const lines = renderDoctorReport(findings, width, "detailed");
 			ok(lines.every((line) => visibleWidth(line) <= width));
 			const plain = lines.map(stripVTControlCharacters).join("\n");
 			ok(plain.indexOf("FAIL") < plain.indexOf("WARN"));

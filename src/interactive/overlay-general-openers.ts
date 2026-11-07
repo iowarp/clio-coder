@@ -247,6 +247,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			deps.requestRender();
 		});
 		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.telemetry, {
+			getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
 			getChanges: () => changes,
 			sessionStartedAt: deps.getSessionMeta()?.createdAt ?? null,
@@ -265,6 +266,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.state = "health";
 		const systemOne = deps.systemOne?.();
 		deps.transitions.handle = openHealthOverlay(deps.tui, deps.telemetry.read, {
+			getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
 			...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
 		});
@@ -810,8 +812,10 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		// The settled card reads each step beside its worker's own row, and draws at the width of each paint.
 		const appendPlanCard = (settled: FleetPlanRunView): FleetPlanRunView => {
 			const view = planWithWorkerRows(settled, deps.getDispatchRows?.() ?? []);
-			if (deps.appendBlock !== undefined) deps.appendBlock((width) => renderFleetPlanCard(view, width));
-			else deps.stderr(`${renderFleetPlanCard(view, deps.terminal.columns).join("\n")}\n`);
+			const render = (width: number) =>
+				renderFleetPlanCard(view, width, deps.getSettings?.().interface.outputDetail ?? "standard");
+			if (deps.appendBlock !== undefined) deps.appendBlock(render);
+			else deps.stderr(`${render(deps.terminal.columns).join("\n")}\n`);
 			return view;
 		};
 		fleetInFlight = { name: preview.name };

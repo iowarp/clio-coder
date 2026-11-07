@@ -1,3 +1,4 @@
+import type { OutputStyle } from "../core/defaults.js";
 import { stampLocal } from "../core/format-time.js";
 import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemetry/dto.js";
 import { renderCount } from "../core/telemetry/render.js";
@@ -219,7 +220,7 @@ function textWords(
 }
 
 /** The overlay's lines, from data read once per frame: the summary, then a rule per region. */
-function healthLines(data: HealthData, width: number): string[] {
+function healthLines(data: HealthData, width: number, style: OutputStyle): string[] {
 	const theme = clioTheme();
 	const safe = Math.max(1, Math.floor(width));
 	const unit = (label: string, display: string, alarm = false) =>
@@ -244,12 +245,14 @@ function healthLines(data: HealthData, width: number): string[] {
 	// Without a read model the summary has said so once; the regions it would feed are left out rather than each
 	// repeating it.
 	const health = data.health;
-	if (health) {
+	if (health && style !== "compact") {
 		lines.push(
 			sectionRule(theme, safe, "Saving what Clio records"),
-			...note(
-				"Clio writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
-			),
+			...(style === "detailed"
+				? note(
+						"Clio writes every model call and event to a journal on disk: one for this process, one for each session and worker run.",
+					)
+				: []),
 		);
 		const outside = [
 			unit("records a journal refused", health.producer.sinkFailures.display, lost(health.producer.sinkFailures)),
@@ -291,13 +294,15 @@ function healthLines(data: HealthData, width: number): string[] {
 					],
 					safe,
 				),
-				...note(
-					`How late Clio's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
-				),
+				...(style === "detailed"
+					? note(
+							`How late Clio's 10 ms timer ran in the latest ${WINDOW_SECONDS}-second check. Under ${SLOW_TICK_MS}ms is not noticeable.`,
+						)
+					: []),
 			);
 	}
 
-	const transport = data.transport;
+	const transport = style === "compact" ? undefined : data.transport;
 	if (transport !== undefined) lines.push(sectionRule(theme, safe, "Connection to the model"));
 	if (transport === null) lines.push(...missing("No reply from the model has finished yet."));
 	else if (transport !== undefined) {
@@ -359,23 +364,27 @@ function healthLines(data: HealthData, width: number): string[] {
 		);
 	}
 
-	if (data.quota) {
+	if (data.quota && (style === "detailed" || data.quota.providers.length > 0)) {
 		lines.push(sectionRule(theme, safe, "Provider limits"));
 		const providers = data.quota.providers;
 		if (providers.length === 0) lines.push(...missing("No provider has reported a usage limit to this session."));
 		else lines.push(...quotaAccountRows(providers, safe));
 	}
 
-	lines.push(sectionRule(theme, safe, "Model routes"));
-	if (data.breakers.length === 0) lines.push(...missing("No model route is paused or counting failures."));
+	if (style === "detailed" || data.breakers.length > 0) lines.push(sectionRule(theme, safe, "Model routes"));
+	if (style === "detailed" && data.breakers.length === 0)
+		lines.push(...missing("No model route is paused or counting failures."));
 	for (const route of data.breakers)
 		lines.push(
 			`${statusChip(theme, route.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
 		);
 
-	lines.push(sectionRule(theme, safe, "System One engines"));
-	if (data.systemOne === null) lines.push(...missing("Not available: this process has no System One."));
-	else if (data.systemOne.length === 0) lines.push(...missing("No System One engine is paused or counting timeouts."));
+	if (style === "detailed" || (data.systemOne?.length ?? 0) > 0)
+		lines.push(sectionRule(theme, safe, "System One engines"));
+	if (style === "detailed" && data.systemOne === null)
+		lines.push(...missing("Not available: this process has no System One."));
+	else if (style === "detailed" && data.systemOne?.length === 0)
+		lines.push(...missing("No System One engine is paused or counting timeouts."));
 	for (const breaker of data.systemOne ?? [])
 		lines.push(
 			`${statusChip(theme, breaker.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", breaker.engine)} ${theme.fg(
@@ -488,6 +497,7 @@ function journalRows(
 const NO_JOURNAL = "no journal open";
 
 export interface OpenHealthOverlayOptions {
+	getOutputStyle?: () => OutputStyle;
 	getBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Absent when this process has no System One. */
 	getSystemOneBreakers?: () => ReadonlyArray<SystemOneBreakerView>;
@@ -511,11 +521,26 @@ export function openHealthOverlay(
 					systemOne: options?.getSystemOneBreakers?.() ?? null,
 				},
 				width,
+				options?.getOutputStyle?.() ?? "standard",
 			),
 		() => tui.requestRender(),
 		18,
 	);
-	const handle = showClioOverlayFrame(tui, body, {
+	let renderedStyle: OutputStyle | undefined;
+	const panel = {
+		render(width: number): string[] {
+			const style = options?.getOutputStyle?.() ?? "standard";
+			if (renderedStyle !== style) {
+				renderedStyle = style;
+				body.touch();
+			}
+			return body.render(width);
+		},
+		setBodyRows: (rows: number) => body.setBodyRows(rows),
+		handleInput: (data: string) => body.handleInput(data),
+		invalidate: () => body.invalidate(),
+	};
+	const handle = showClioOverlayFrame(tui, panel, {
 		anchor: "center",
 		width: HEALTH_OVERLAY_WIDTH,
 		markerId: "health",

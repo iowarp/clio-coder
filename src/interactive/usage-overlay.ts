@@ -1,3 +1,4 @@
+import type { OutputStyle } from "../core/defaults.js";
 import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
@@ -84,6 +85,14 @@ const REASONING_NOTE = "provider-reported only";
 
 function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>, contentWidth: number): string[] {
 	const theme = clioTheme();
+	if (contentWidth < 32)
+		return entries.flatMap(([key, value, annotation]) => [
+			...wrapTextWithAnsi(theme.fg("fieldName", key), contentWidth),
+			...wrapTextWithAnsi(
+				`${theme.fg("counter", value)}${annotation ? ` ${theme.fg("annotation", annotation)}` : ""}`,
+				contentWidth,
+			),
+		]);
 	const keyWidth = entries.reduce((max, [key]) => Math.max(max, visibleWidth(key)), 0);
 	const columnLimit = Math.min(12, Math.max(0, contentWidth - keyWidth - 2));
 	const valueWidth = entries.reduce((max, [, value]) => {
@@ -115,7 +124,11 @@ function tokensText(display: string): string {
 }
 
 /** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
-function tokenRows(view: TelemetryView, model?: string): Array<readonly [string, string, string?]> {
+function tokenRows(
+	view: TelemetryView,
+	model?: string,
+	style: OutputStyle = "standard",
+): Array<readonly [string, string, string?]> {
 	// Each row is the figure alone; the coverage row above the table says once how many calls reported nothing (F4).
 	// One mark at most: `≥~27,252` stacked two qualifiers; the usage data row says once which calls Clio estimated.
 	const display = (metric: FactMetric) =>
@@ -129,12 +142,14 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
 				}),
 			),
 		);
+	if (style === "compact") return [["processed", tokensText(display("total"))]];
 	return [
 		["input", display("input")],
 		["output", display("output")],
-		["reasoning", display("reasoning"), REASONING_NOTE],
 		["cache read", display("cacheRead")],
-		["cache write", display("cacheWrite")],
+		...(style === "detailed"
+			? [["reasoning", display("reasoning"), REASONING_NOTE] as const, ["cache write", display("cacheWrite")] as const]
+			: []),
 		["processed", tokensText(display("total"))],
 	];
 }
@@ -217,6 +232,7 @@ function summaryBlock(
 	recall: RecallTelemetry | null,
 	verified: VerifiedOutcomeCount | null,
 	contentWidth: number,
+	style: OutputStyle,
 ): string[] {
 	const session = view.session();
 	const byRole = view.cost("role");
@@ -228,10 +244,11 @@ function summaryBlock(
 	// A measured zero read is a cache that served nothing, which the rows say; only a session no call fed hides them.
 	const cached = contributed(cache.cacheRead) || contributed(cache.cacheWrite) || contributed(cache.rePrefilled);
 	const v = cache.verdicts;
+	const calls = callRows(view, groups);
 	return kvBlock(
 		[
-			...callRows(view, groups),
-			["harness overhead", session.overhead.share.display],
+			...(style === "compact" ? calls.slice(-1) : calls),
+			...(style !== "compact" ? [["harness overhead", session.overhead.share.display] as const] : []),
 			...(sessionUsageNotes(view).length > 0 ? [["usage data", sessionUsageNotes(view).join(" · ")] as const] : []),
 			// The calls rows carry their never-sent count beside them; a separate row is needed only when they could not.
 			...(nonZero(neverSent) && Number.isNaN(sentCallCount(view))
@@ -239,8 +256,8 @@ function summaryBlock(
 				: []),
 			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 			...(verified !== null ? verifiedRows(view, verified) : []),
-			...tokenRows(view),
-			...(cached
+			...tokenRows(view, undefined, style),
+			...(cached && style === "detailed"
 				? [
 						["uncached prefill", usageFigure(cache.uncachedPrefill)] as const,
 						["re-prefilled", usageFigure(cache.rePrefilled), `${cache.breaks.length} breaks`] as const,
@@ -277,7 +294,7 @@ function verifiedRows(view: TelemetryView, outcomes: VerifiedOutcomeCount): Arra
 }
 
 /** The Models tab: one block per `target/model`, the reported model where the provider named one. */
-function modelLines(view: TelemetryView, contentWidth: number): string[] {
+function modelLines(view: TelemetryView, contentWidth: number, style: OutputStyle): string[] {
 	const theme = clioTheme();
 	const groups = view.cost("model").groups;
 	if (groups.length === 0) return [theme.fg("menuDescription", "no model calls recorded for this session")];
@@ -290,7 +307,7 @@ function modelLines(view: TelemetryView, contentWidth: number): string[] {
 				[
 					["model calls", group.calls.display],
 					...(contributed(group.usd) ? [["cost", group.usd.display] as const] : []),
-					...tokenRows(view, group.key),
+					...tokenRows(view, group.key, style),
 				],
 				contentWidth,
 			),
@@ -310,6 +327,7 @@ interface UsageData {
 }
 
 export interface OpenUsageOverlayOptions {
+	getOutputStyle?: () => OutputStyle;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
@@ -373,23 +391,30 @@ function renderActivity(
 	startedAt: string | null,
 	now: number,
 	contentWidth: number,
+	style: OutputStyle,
 ): string[] {
 	const theme = clioTheme();
 	const label = (text: string): string => padAnsi(theme.fg("fieldName", text), 12);
 	// A value that wraps continues under its own column, not under the label, so a narrow Session row still reads
 	// as one row.
 	const row = (name: string, value: string): string[] =>
-		wrapTextWithAnsi(value, Math.max(1, contentWidth - 12)).map(
-			(line, index) => `${index === 0 ? label(name) : " ".repeat(12)}${line}`,
-		);
+		contentWidth < 32
+			? kvBlock([[name, value]], contentWidth)
+			: wrapTextWithAnsi(value, Math.max(1, contentWidth - 12)).map(
+					(line, index) => `${index === 0 ? label(name) : " ".repeat(12)}${line}`,
+				);
 	const lines = [
-		...renderActivityHeatmap(
-			days,
-			now,
-			contentWidth,
-			`last ${ACTIVITY_SPAN_DAYS} days · ${sessions} session${sessions === 1 ? "" : "s"} in this workspace`,
-		),
-		"",
+		...(style === "detailed" || (style === "standard" && sessions > 0)
+			? [
+					...renderActivityHeatmap(
+						days,
+						now,
+						contentWidth,
+						`last ${ACTIVITY_SPAN_DAYS} days · ${sessions} session${sessions === 1 ? "" : "s"} in this workspace`,
+					),
+					"",
+				]
+			: []),
 	];
 	const changesValue =
 		changes === null
@@ -417,9 +442,17 @@ function renderActivity(
 	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
-		const pct = Math.max(0, Math.min(100, factKnownValue(window.item.usedPct.fact)));
+		const reported = factKnownValue(window.item.usedPct.fact);
+		const pct = Math.max(0, Math.min(100, reported));
+		const meter =
+			Number.isFinite(reported) && style !== "compact"
+				? `${quotaMeter(pct, Math.min(28, Math.max(1, contentWidth - 30)))} `
+				: "";
 		lines.push(
-			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${window.item.usedPct.display} used ${theme.fg("annotation", `· ${window.entry.provider} ${window.item.label}`)}`,
+			...row(
+				"Plan",
+				`${meter}${window.item.usedPct.display} used ${theme.fg("annotation", `· ${window.entry.provider} ${window.item.label}`)}`,
+			),
 		);
 	} else lines.push(...row("Plan", theme.fg("annotation", "no subscription window reported")));
 	return lines;
@@ -469,6 +502,7 @@ class UsageOverlayBody implements Component {
 			startedAt: string | null;
 			now: () => number;
 		},
+		private readonly getOutputStyle: () => OutputStyle,
 	) {}
 
 	/** Whether the open view has more than it shows, so the scroll keys move something. */
@@ -503,6 +537,7 @@ class UsageOverlayBody implements Component {
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
+		const style = this.getOutputStyle();
 		const data = this.getData();
 		const quota = this.getQuotaSnapshots();
 		const theme = clioTheme();
@@ -526,14 +561,16 @@ class UsageOverlayBody implements Component {
 				this.activity.startedAt,
 				this.activity.now(),
 				contentWidth,
+				style,
 			);
 		else if (this.tab === 1)
 			body = [
-				theme.fg("annotation", "Account-wide limits · filled = used · shared across sessions and devices"),
-				"",
+				...(style === "compact"
+					? []
+					: [theme.fg("annotation", "Account-wide limits · filled = used · shared across sessions and devices"), ""]),
 				// An empty tab said only that nothing was journaled; it now says what would fill it.
 				...(quota.length > 0
-					? renderQuotaAccounts(quota, contentWidth)
+					? renderQuotaAccounts(quota, contentWidth, { compact: style === "compact" })
 					: wrapTextWithAnsi(
 							theme.fg(
 								"annotation",
@@ -545,24 +582,37 @@ class UsageOverlayBody implements Component {
 		else if (this.tab === 2)
 			body = [
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
-				theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
-				"",
+				...(style === "detailed"
+					? [
+							theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
+							"",
+						]
+					: []),
 				...(data.view
-					? summaryBlock(data.view, data.recall, data.verified, contentWidth)
+					? summaryBlock(data.view, data.recall, data.verified, contentWidth, style)
 					: [theme.fg("annotation", data.missing)]),
 				"",
 				rule(theme, contentWidth),
-				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
+				...(style === "detailed"
+					? [theme.fg("annotation", "Session tokens cannot be converted to subscription percentages.")]
+					: []),
 				...(data.view && !nonZero(data.view.cost("role").total.calls) ? ["no calls recorded for this session"] : []),
 			];
 		else if (this.tab === 3) {
 			body = [
 				theme.style("sectionHeading", "Model activity · this session", { bold: true }),
-				theme.fg("annotation", "Recorded calls per model across every branch, including cache traffic; not account quota."),
-				"",
-				...(data.view ? modelLines(data.view, contentWidth) : [theme.fg("annotation", data.missing)]),
+				...(style === "detailed"
+					? [
+							theme.fg(
+								"annotation",
+								"Recorded calls per model across every branch, including cache traffic; not account quota.",
+							),
+							"",
+						]
+					: []),
+				...(data.view ? modelLines(data.view, contentWidth, style) : [theme.fg("annotation", data.missing)]),
 			];
-		} else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth);
+		} else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth, style);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
 		// One row stays free for the `n–m / N` indicator a scrolled page carries.
@@ -623,6 +673,7 @@ export function openUsageOverlay(
 			startedAt: options?.sessionStartedAt ?? null,
 			now,
 		},
+		options?.getOutputStyle ?? (() => "standard"),
 	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",

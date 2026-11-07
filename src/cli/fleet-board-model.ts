@@ -1,3 +1,4 @@
+import type { OutputStyle } from "../core/defaults.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import { runTelemetry } from "../domains/telemetry/read-model.js";
@@ -59,6 +60,7 @@ export const ANSWER_PREVIEW_LINES = 12;
  * A viewer from before this format reads only the first line and keeps working.
  */
 export interface WatchRequest {
+	outputDetail?: OutputStyle;
 	runId: string | null;
 	seq: string;
 	sessionId: string | null;
@@ -75,7 +77,9 @@ function parseWatchRequest(raw: string): WatchRequest {
 	}
 	const since = Date.parse(fields.get("since") ?? "");
 	const session = fields.get("session") ?? "";
+	const detail = fields.get("outputDetail");
 	return {
+		outputDetail: detail === "compact" || detail === "detailed" ? detail : "standard",
 		runId: first.length > 0 && first.length <= 128 ? first : null,
 		// Without a counter the run id itself is the request, which is how the
 		// one-line format behaved.

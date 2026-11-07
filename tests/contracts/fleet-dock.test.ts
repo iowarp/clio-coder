@@ -49,7 +49,7 @@ test("live Fleet runs reserve normal-flow rows and leave transcript words intact
 	ok(fixture);
 	let live = true;
 	const getRows = () => (live ? [{ ...fixture, agentAudience: "base" as const }] : []);
-	const fleet = createFleetDock({ getRows });
+	const fleet = createFleetDock({ getRows, getOutputStyle: () => "detailed" });
 	const text = (line: string): Component => ({ render: () => [line], invalidate() {} });
 	for (const mode of ["regular", "fullscreen"] as const) {
 		for (const width of [40, 60, 80, 120, 144, 200]) {

@@ -183,6 +183,8 @@ export interface PanesWatchController {
 	watch(runId: string): Promise<PanesWatchResult>;
 	/** Retarget only; false when no watch pane is open or the write failed. */
 	follow(runId: string): boolean;
+	/** Update the viewer's presentation without changing its selected run or scroll position. */
+	refreshPresentation?(): boolean;
 	/**
 	 * The workers key's single tap: open the dock on the board or show a parked
 	 * one, and move the keyboard into it; park a visible one.

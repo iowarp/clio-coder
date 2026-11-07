@@ -258,7 +258,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			return { hide: () => hidden++ };
 		},
 	} as unknown as TUI;
-	const handle = openUsageOverlay(tui, telemetry);
+	const handle = openUsageOverlay(tui, telemetry, { getOutputStyle: () => "detailed" });
 	// The engine overlay is a zero-row focus proxy; the composer draws the
 	// docked frame, so the test renders the dock's top entry at the terminal height.
 	const frame = dockTop(tui)?.frame as unknown as Component | undefined;

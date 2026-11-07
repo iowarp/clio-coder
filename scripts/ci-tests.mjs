@@ -87,6 +87,7 @@ export const coreTests = [
 	"cli-leaf-help",
 	"mux-platform-win32",
 	"keyboard-model",
+	"background-surfaces",
 ].map((name) => `tests/contracts/${name}.test.ts`);
 
 export const guiTests = [

@@ -931,6 +931,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					notify: (level, text, key) => notify(level, text, key),
 					afterCommit: () => {
 						presentation.announceSettingChanges();
+						if (watchPane?.refreshPresentation?.() === false)
+							notify("warning", "Could not update the workers pane's output detail; reopen it to retry.");
 						footer.refresh();
 						tui.requestRender();
 					},
@@ -1786,6 +1788,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		mux && mux.mode !== "none" && deps.createWatchPane
 			? deps.createWatchPane({
 					mux,
+					getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 					getCwd: () => process.cwd(),
 					getWorkersRatio: () => deps.getSettings?.().interface.panes.workers.ratio ?? 0.34,
 					getSessionId: () => deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
@@ -2145,6 +2148,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				followBoardSelection();
 			},
 			toggleDetail: () => dispatchBoard.toggleDetail(),
+			scrollDetail: (direction) => dispatchBoard.scrollDetail(direction),
 			// Without this the Esc router read every detail as closed, so the rail's `[Esc] hide` closed the whole board.
 			detailExpanded: () => dispatchBoard.detailExpanded(),
 		},

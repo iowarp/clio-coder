@@ -593,7 +593,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			void deps.shutdown();
 		},
 		showDoctor: (findings) => {
-			deps.chatPanel.appendReplayBlock((width) => renderDoctorReport(findings, width));
+			deps.chatPanel.appendReplayBlock((width) =>
+				renderDoctorReport(findings, width, deps.getSettings?.().interface.outputDetail ?? "standard"),
+			);
 			deps.requestRender();
 		},
 		runDoctor: async ({ deep }) => {
