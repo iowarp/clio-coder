@@ -473,7 +473,7 @@ own acknowledgement. No inference path widens an explicit choice.
 
 ## Claims ledger
 
-The claims ledger is an append-only per-project log of judged check results ([store.ts](../../src/domains/claims/store.ts), [record.ts](../../src/domains/claims/record.ts)). It lives at `<stateDir>/claims/<sha256 of project root>.jsonl`, where the project root is the real path of the enclosing repository root, so every subdirectory of a checkout shares one log. It is kept in the state directory so a cloned repository cannot ship claims. Each line is one JSON record, appended under a state lock and fsynced. A line torn by a crash is skipped on read and closed off by the next append. The line types are `claim`, `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test`.
+The claims ledger is an append-only per-project log of judged check results ([store.ts](../../src/domains/claims/store.ts), [record.ts](../../src/domains/claims/record.ts)). It lives at `<stateDir>/claims/<sha256 of project root>.jsonl`, where the project root is the real path of the enclosing repository root, so every subdirectory of a checkout shares one log. It is kept in the state directory so a cloned repository cannot ship claims. Each line is one JSON record, appended under a state lock and fsynced. A line torn by a crash is skipped on read and closed off by the next append. Record ids hash their content, so a claim, edge or regression line repeated by a retried append is read once, at its first position, and `clio-coder claims` counts the repeats. The line types are `claim`, `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test`.
 
 ### What a claim records
 

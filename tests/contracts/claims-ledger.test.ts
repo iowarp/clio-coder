@@ -197,6 +197,55 @@ describe("claims ledger (#406)", () => {
 		}
 	});
 
+	it("reads a repeated claim, edge or regression line once", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const claim = (passed: boolean, at: string) => {
+				const details = {
+					...numericDetails(passed, passed ? "passed" : "failed"),
+					checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+				};
+				const built = claimFromVerifyResult({ details, project, at, source });
+				assert.ok(built);
+				return built;
+			};
+			const agreed = claim(true, "2026-11-06T00:00:01.000Z");
+			const disagreed = claim(false, "2026-11-06T00:00:02.000Z");
+			await appendClaims([agreed]);
+			const edges = await appendClaims([disagreed]);
+			assert.equal(edges.length, 1);
+			const log = claimsLogPath(project);
+			const regressionBody = {
+				v: agreed.v,
+				type: "regression",
+				at: "2026-11-06T00:00:03.000Z",
+				project,
+				edge: edges[0]?.id,
+				from: agreed.id,
+				backing: [],
+				memory: [],
+			};
+			appendFileSync(log, `${JSON.stringify({ ...regressionBody, id: claimLogRecordId(regressionBody) })}\n`);
+			// Every line appended a second time, as a retried append whose first write did land leaves it.
+			appendFileSync(log, readFileSync(log, "utf8"));
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.records.map((record) => record.id),
+				[agreed.id, disagreed.id],
+			);
+			assert.equal(read.edges.length, 1);
+			assert.equal(read.regressions.length, 1);
+			assert.equal(read.duplicates, 4);
+			assert.equal(read.mismatched, 0);
+			assert.equal(claimStatuses(read.records, read.edges).get(agreed.id), "contested");
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("offers a contested check once per session, and nothing to a task that does not touch it", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {

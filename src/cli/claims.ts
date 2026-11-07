@@ -241,6 +241,7 @@ function skippedNote(read: ClaimsLogRead): string | null {
 		read.unlinked > 0
 			? `${read.unlinked} hypothesis record${read.unlinked === 1 ? "" : "s"} that do not follow from earlier records`
 			: null,
+		read.duplicates > 0 ? `${read.duplicates} repeated line${read.duplicates === 1 ? "" : "s"}` : null,
 	].filter((part): part is string => part !== null);
 	return parts.length > 0 ? `skipped ${parts.join(", ")}` : null;
 }
@@ -261,6 +262,7 @@ function readJsonSummary(
 			mismatched: read.mismatched,
 			unknownVersion: read.unknownVersion,
 			unlinked: read.unlinked,
+			duplicates: read.duplicates,
 		},
 	};
 }

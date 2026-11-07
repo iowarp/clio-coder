@@ -227,6 +227,11 @@ export interface ClaimsLogRead {
 	 * record of its check, run and verdict. The ledger never writes one; it was added to the log by something else.
 	 */
 	unlinked: number;
+	/**
+	 * Claim, edge and regression lines repeating the id of an earlier one, such as an append retried after a write that
+	 * did land. Ids hash the record's content, so the repeat is the same record; the first is kept where it was appended.
+	 */
+	duplicates: number;
 }
 
 function isClaimRecord(value: Record<string, unknown>): boolean {
@@ -480,6 +485,7 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		mismatched: 0,
 		unknownVersion: 0,
 		unlinked: 0,
+		duplicates: 0,
 	};
 	const links: LinkState = {
 		ids: new Set(),
@@ -489,6 +495,7 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		starts: new Map(),
 		tested: new Set(),
 	};
+	const seen = new Set<string>();
 	let index = -1;
 	for (const line of text.split("\n")) {
 		index += 1;
@@ -519,16 +526,22 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 				claimRecordId(claim) !== claim.id
 			)
 				read.mismatched += 1;
+			else if (links.claims.has(claim.id)) read.duplicates += 1;
 			else {
 				read.records.push(claim);
-				if (!links.claims.has(claim.id)) links.claims.set(claim.id, { claim, line: index });
+				links.claims.set(claim.id, { claim, line: index });
 			}
 			continue;
 		}
 		if (isEdgeRecord(record) || isRegressionRecord(record)) {
-			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
-			else if (record.type === "edge") read.edges.push(record as unknown as ClaimEdgeRecord);
-			else read.regressions.push(record as unknown as ClaimRegressionRecord);
+			const id = record.id as string;
+			if (record.project !== projectRoot || claimLogRecordId(record) !== id) read.mismatched += 1;
+			else if (seen.has(id)) read.duplicates += 1;
+			else {
+				seen.add(id);
+				if (record.type === "edge") read.edges.push(record as unknown as ClaimEdgeRecord);
+				else read.regressions.push(record as unknown as ClaimRegressionRecord);
+			}
 			continue;
 		}
 		if (isHypothesisRecord(record) || isCheckStartRecord(record) || isHypothesisTestRecord(record)) {
