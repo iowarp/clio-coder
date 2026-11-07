@@ -18,6 +18,7 @@ import { clioTheme, fitUnits, GLYPH, padAnsi } from "./theme/index.js";
  */
 
 export interface QuickHelpKeys {
+	readonly generation?: number;
 	getKeys?(id: Keybinding): ReadonlyArray<string>;
 	getDescription?(id: Keybinding): string;
 	getLabel?(id: Keybinding): string;
@@ -104,14 +105,15 @@ export interface QuickHelp {
 
 export function createQuickHelp(tui: TUI, bindings: QuickHelpKeys): QuickHelp {
 	let handle: OverlayHandle | null = null;
-	let cached: { width: number; lines: string[] } | null = null;
+	let cached: { width: number; generation: number | undefined; lines: string[] } | null = null;
 	let bodyRows = 0;
 	const component: Component & { setBodyRows(rows: number): void } = {
 		setBodyRows(rows: number) {
 			bodyRows = Math.max(0, Math.floor(rows));
 		},
 		render(width) {
-			if (cached?.width !== width) cached = { width, lines: quickHelpRows(width, bindings) };
+			if (cached?.width !== width || cached.generation !== bindings.generation)
+				cached = { width, generation: bindings.generation, lines: quickHelpRows(width, bindings) };
 			const lines = cached.lines;
 			if (bodyRows <= 1 || lines.length <= bodyRows) return lines;
 			// Any key closes this card, so rows it cannot show are named with where they live, not offered as a scroll.
