@@ -175,20 +175,16 @@ export interface FleetRouteSettings {
  *   - systemPrompt: optional path to a prompt-override file; resolved to
  *     text at call time, not at settings load.
  */
-export interface CompactionSettings {
+export interface DurableCompactionSettings {
 	/** Opt-in opaque Codex checkpoints; portable summaries remain the default (#423). */
 	provider?: "off" | "native";
 	auto: boolean;
 	threshold: number;
 	/** C1 / #422: economic input ceiling, independent of the serving window. */
 	maxTokens?: number;
-	excludeLastTurns: number;
 	model?: string;
 	systemPrompt?: string;
 }
-
-/** Durable v2 compaction settings. The legacy mask keeps its own compiled recent-turn fallback. */
-export type DurableCompactionSettings = Omit<CompactionSettings, "excludeLastTurns">;
 
 /**
  * Working-set layer settings (`context.workingSet`). The layer decides which

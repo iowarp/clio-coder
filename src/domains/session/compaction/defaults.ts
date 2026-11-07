@@ -1,14 +1,8 @@
 /**
- * Compaction settings: user-visible defaults.
- *
- * The public settings block is a single pressure threshold plus the recent-turn
- * protection horizon. The structural type lives in `src/core/defaults.ts`
- * alongside the rest of the settings tree so core code stays free of a
- * backward domain dependency; this module pairs that type with the value the
- * DEFAULT_SETTINGS tree and the chat-loop read at runtime.
+ * Compaction engine constants. The settings type, `DurableCompactionSettings`,
+ * lives in `src/core/defaults.ts` alongside the rest of the settings tree so
+ * core code stays free of a backward domain dependency.
  */
-
-export type { CompactionSettings } from "../../../core/defaults.js";
 
 /**
  * Tokens held in reserve for the summary response. Ported from
