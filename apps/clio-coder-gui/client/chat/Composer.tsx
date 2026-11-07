@@ -48,6 +48,7 @@ import {
 	capabilityRefusal,
 	composerDelivery,
 	composerKeyAction,
+	draftEstimate,
 	draftStore,
 	noticeForError,
 	noticeForQueueEdit,
@@ -78,6 +79,7 @@ import {
 	resolveSteerTarget,
 	steerCandidates,
 } from "./mention-model.js";
+import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
 import { RoutePicker } from "./RoutePicker.js";
@@ -94,6 +96,7 @@ import {
 	slashEntries,
 	slashQuery,
 } from "./slash-model.js";
+import { useOutputDetail } from "./use-output-detail.js";
 import { VisualActions } from "./VisualActions.js";
 import "./composer-box.css";
 import "./composer.css";
@@ -204,6 +207,15 @@ export const Composer = memo(function Composer({
 		return () => window.removeEventListener("resize", fit);
 	}, []);
 	useEffect(() => rememberEnterSends(enterSends), [enterSends]);
+	const [outputDetail, setOutputDetail] = useOutputDetail();
+	const estimate = useMemo(
+		() =>
+			draftEstimate(draft.text, {
+				files: attachments.filter((item): item is FileAttachment => item.kind === "file"),
+				images: attachments.filter((item) => item.kind === "image").length,
+			}),
+		[draft.text, attachments],
+	);
 
 	// Read once per session and keep. Every steering route answers 409 when the
 	// agent announced nothing, so this decides what is rendered at all.
@@ -1147,6 +1159,11 @@ export const Composer = memo(function Composer({
 					id={hintId}
 					{...(attachments.length > 0 ? { "data-pinned": true } : {})}
 				>
+					{estimate ? (
+						<span className="composer__estimate" title={estimate.title}>
+							{estimate.text}
+						</span>
+					) : null}
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
 					recalls earlier messages
 					{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
@@ -1224,6 +1241,22 @@ export const Composer = memo(function Composer({
 										{interrupt.isPending ? "Interrupting…" : "Interrupt"}
 									</button>
 								) : null}
+								<fieldset className="composer__detail">
+									<legend>Transcript detail</legend>
+									<div className="composer__detail-options">
+										{OUTPUT_DETAILS.map((tier) => (
+											<button
+												key={tier.value}
+												type="button"
+												aria-pressed={outputDetail === tier.value}
+												title={tier.summary}
+												onClick={() => setOutputDetail(tier.value)}
+											>
+												{tier.label}
+											</button>
+										))}
+									</div>
+								</fieldset>
 								<label className="composer__enter-mode">
 									<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
 									Enter sends

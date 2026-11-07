@@ -7,6 +7,7 @@ import {
 	DEFAULT_STEER_MODE,
 	type Draft,
 	DraftStore,
+	draftEstimate,
 	draftStore,
 	MAX_DRAFT_STORES,
 	messageActionOffers,
@@ -560,4 +561,21 @@ test("only the idle composer's note is quiet; anything the reader must know stay
 		[situation(), false, true],
 	] as const)
 		assert.equal(composerDelivery(state, DEFAULT_STEER_MODE, context, reading).quiet, undefined);
+});
+
+test("a draft's size is a labelled estimate that names what it leaves out", () => {
+	const none = { files: [], images: 0 };
+	assert.equal(draftEstimate("   ", none), null);
+	assert.deepEqual(
+		{ ...draftEstimate("fix the tests", none), title: undefined },
+		{ text: "~4 tokens", tokens: 4, title: undefined },
+	);
+	assert.equal(draftEstimate("x".repeat(16_800), none)?.text, "~4.2k tokens");
+	assert.equal(draftEstimate("x".repeat(8_000), none)?.text, "~2k tokens");
+	assert.equal(draftEstimate("x".repeat(600_000), none)?.text, "~150k tokens");
+	const attached = draftEstimate("see @src/a.ts", { files: [{ text: "y".repeat(400) }], images: 2 });
+	assert.equal(attached?.tokens, 104);
+	assert.match(attached?.title ?? "", /typed text and attached files/u);
+	assert.match(attached?.title ?? "", /Not counted: @ files, read when sent and the images\./u);
+	assert.doesNotMatch(draftEstimate("mail me at a@b.c", none)?.title ?? "", /Not counted/u);
 });

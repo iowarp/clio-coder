@@ -1021,3 +1021,47 @@ function controlMessage(stage: "sending" | "unresolved"): string {
 		? "A session control is being sent. Your draft is kept until it settles."
 		: "Check the session request above before sending more work. Your draft is kept.";
 }
+
+/** The estimate's rule of thumb: English prose and code run near four characters a token. */
+export const ESTIMATE_CHARACTERS_PER_TOKEN = 4;
+
+export interface DraftEstimate {
+	/** `~312 tokens`, `~4.2k tokens`. */
+	readonly text: string;
+	readonly tokens: number;
+	/** What the figure covers and what it leaves out, for the pointer tooltip. */
+	readonly title: string;
+}
+
+function approximateCount(tokens: number): string {
+	if (tokens < 1000) return String(tokens);
+	if (tokens < 100_000) return `${(tokens / 1000).toFixed(1).replace(/\.0$/u, "")}k`;
+	return `${Math.round(tokens / 1000)}k`;
+}
+
+/**
+ * A rough size for what Send would carry, so a long paste is noticed before it costs a turn. It is an
+ * estimate by character count, never a measured figure: the model's tokenizer decides the real one.
+ * `@` mentions are read on the server when the message is sent, and images are sized by the provider,
+ * so both are named as left out rather than guessed.
+ */
+export function draftEstimate(
+	text: string,
+	attached: { readonly files: readonly { readonly text: string }[]; readonly images: number },
+): DraftEstimate | null {
+	const characters = text.trim().length + attached.files.reduce((total, file) => total + file.text.length, 0);
+	if (characters === 0) return null;
+	const tokens = Math.max(1, Math.ceil(characters / ESTIMATE_CHARACTERS_PER_TOKEN));
+	const left = [
+		...(/(?:^|\s)@\S/u.test(text) ? ["@ files, read when sent"] : []),
+		...(attached.images > 0 ? [attached.images === 1 ? "the image" : "the images"] : []),
+	];
+	return {
+		text: `~${approximateCount(tokens)} tokens`,
+		tokens,
+		title:
+			`Estimated at about ${ESTIMATE_CHARACTERS_PER_TOKEN} characters a token for the typed text` +
+			`${attached.files.length > 0 ? " and attached files" : ""}; the model counts the real figure.` +
+			(left.length > 0 ? ` Not counted: ${left.join(" and ")}.` : ""),
+	};
+}
