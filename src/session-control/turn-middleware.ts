@@ -6,6 +6,8 @@
  */
 
 import { systemReminderBlock } from "../core/reminder-framing.js";
+import { ownerTelemetryContext } from "../core/telemetry/context.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
@@ -47,6 +49,8 @@ export interface TurnMiddlewareDeps {
 	 * joins the reminder buffer, so the model does not see it.
 	 */
 	emitOperatorTip?: (message: string, key: string) => void;
+	/** Journals a middleware failure that escaped the runtime, as `middleware.hook_failed`. */
+	bus?: TelemetryHub | undefined;
 }
 
 export interface TurnMiddleware {
@@ -150,14 +154,31 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		pendingReminders.push({ message, severity, deferred, isCurrent });
 	};
 
+	// Per-registration throws are already isolated inside the runtime; anything escaping it is a runtime bug that
+	// must not break the turn, so the turn continues without the hook's effects and the failure is reported the way
+	// an isolated registration failure is: a journaled middleware.hook_failed and a warning notice.
+	const reportHookFailure = (hook: MiddlewareHookInput["hook"], error: unknown): void => {
+		const registrationId = "middleware.runtime";
+		const message = error instanceof Error ? error.message : String(error);
+		const sessionId = deps.session?.current()?.id;
+		deps.bus?.emit(
+			"middleware.hook_failed",
+			{ kind: "hook_failed", registrationId, hook, at: Date.now(), message },
+			...(sessionId === undefined ? [] : [ownerTelemetryContext({ sessionId })]),
+		);
+		deps.emitFooterNotice(
+			"warning",
+			`[middleware] Hook evaluation failed on ${hook}: ${message}. Its effects were skipped; the turn continued.`,
+			`middleware:${registrationId}:${hook}:hook_failed`,
+		);
+	};
+
 	const runMiddlewareTurnHook = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
 		try {
 			return deps.middleware.runHook(input).effects;
-		} catch {
-			// Per-registration throws are already isolated inside the runtime;
-			// anything escaping runHook is a runtime bug and must not break the
-			// turn.
+		} catch (error) {
+			reportHookFailure(input.hook, error);
 			return [];
 		}
 	};
@@ -169,7 +190,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		if (!deps.middleware?.runAsyncHook) return [];
 		try {
 			return (await deps.middleware.runAsyncHook(input, priorEffects)).effects;
-		} catch {
+		} catch (error) {
+			reportHookFailure(input.hook, error);
 			return [];
 		}
 	};
@@ -391,9 +413,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false);
 			try {
 				applyTurnStartEffects((await deps.middleware.runAwaitedHook(input)).effects);
-			} catch {
-				// Registrations isolate their own failures; anything escaping is a
-				// runtime bug and must not stop the turn.
+			} catch (error) {
+				reportHookFailure(input.hook, error);
 			}
 		},
 
