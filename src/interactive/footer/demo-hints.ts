@@ -12,6 +12,8 @@ export const FOOTER_TIP_LIFETIME = 3;
 
 export function createDemoHints() {
 	const seen = new Set<string>();
+	// Tips counted toward their lifetime in this session; the persisted count already includes them.
+	const counted = new Set<string>();
 	let current: { id: string; until: number } | null = null;
 	let nextAt = 0;
 	return (input: {
@@ -45,15 +47,18 @@ export function createDemoHints() {
 			return null;
 		}
 		const learned = input.learned ?? (() => false);
-		const retired = (id: string): boolean => (input.shownBefore?.(id) ?? 0) >= FOOTER_TIP_LIFETIME;
+		const retired = (id: string): boolean => !counted.has(id) && (input.shownBefore?.(id) ?? 0) >= FOOTER_TIP_LIFETIME;
+		const count = (id: string): void => {
+			if (counted.has(id)) return;
+			counted.add(id);
+			input.onShown?.(id);
+		};
 		const welcome = `Ask Clio how it works ${GLYPH.dot} ? keys ${GLYPH.dot} ${input.menuKey ?? "Ctrl+G"} every action ${GLYPH.dot} /help`;
 		if (input.launchpad !== undefined) {
 			// Before the first prompt only the welcome tip speaks, and only where the launchpad has no hint column.
 			if (input.launchpad === "hints" || learned("/help") || retired("welcome")) return null;
-			if (!seen.has("welcome")) {
-				seen.add("welcome");
-				input.onShown?.("welcome");
-			}
+			seen.add("welcome");
+			count("welcome");
 			return welcome;
 		}
 		const command = input.lastCommand ?? null;
@@ -74,7 +79,7 @@ export function createDemoHints() {
 		const choice = choices.find(([id, eligible]) => eligible && !seen.has(id) && !retired(id));
 		if (!choice) return null;
 		seen.add(choice[0]);
-		input.onShown?.(choice[0]);
+		count(choice[0]);
 		// Do not introduce the welcome tip after a more specific lesson.
 		seen.add("welcome");
 		current = { id: choice[0], until: input.now + 10_000 };

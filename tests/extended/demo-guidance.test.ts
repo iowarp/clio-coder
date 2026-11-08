@@ -120,6 +120,30 @@ test("the launchpad shows only the welcome tip, and none where its own hint colu
 	strictEqual(createDemoHints()({ ...input, learned: (feature) => feature === "/help" }), null);
 });
 
+test("a tip counted in its last session stays up when a notice interrupts it", () => {
+	const shown: Record<string, number> = { welcome: FOOTER_TIP_LIFETIME - 1 };
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: false,
+		toolsUsed: false,
+		contextBusy: false,
+		dashboardKey: "Alt+U",
+		launchpad: "plain" as const,
+		shownBefore: (id: string) => shown[id] ?? 0,
+		onShown: (id: string) => {
+			shown[id] = (shown[id] ?? 0) + 1;
+		},
+	};
+	const hints = createDemoHints();
+	match(hints(input) ?? "", /Ask Clio how it works/);
+	strictEqual(hints({ ...input, now: 1_000, quiet: true }), null);
+	match(hints({ ...input, now: 20_000 }) ?? "", /Ask Clio how it works/);
+	strictEqual(shown.welcome, FOOTER_TIP_LIFETIME);
+	strictEqual(createDemoHints()(input), null);
+});
+
 test("a slash command with a key earns one nudge naming the key, until the key is used", () => {
 	const hints = createDemoHints();
 	const input = {
