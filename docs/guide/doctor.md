@@ -208,9 +208,14 @@ not load. The row is `WARN` when the secret-file search stopped at its limit or
 sockets fall back to masks, since abstract sockets then stay reachable.
 Without a backend it is `WARN` and reads
 `default-autonomy shell commands run uncontained and keep the approval rails (<reason>)`.
-The row also says how yolo treats commands: `yolo runs unsandboxed`,
-`yolo commands run sandboxed too` under `safety.sandbox: required`, or a `WARN`
-that yolo refuses commands because `required` has no backend. Each configured `safety.scratchRoots` entry that this
+The row also says how yolo treats commands, read from the same confinement a
+yolo run resolves to. Contained yolo, the default, reads
+`yolo runs contained in the same sandbox`, or
+`contained yolo runs commands as default does and refuses what would ask` without
+a backend. Unconfined yolo (`safety.yoloConfinement: unconfined` with
+`safety.yoloUnconfinedAccepted: true`) reads `unconfined yolo runs unsandboxed`,
+`unconfined yolo commands run sandboxed too` under `safety.sandbox: required`, or
+a `WARN` that unconfined yolo refuses commands because `required` has no backend. Each configured `safety.scratchRoots` entry that this
 workspace leaves out gets a `WARN` `safety.scratchRoots` row with the reason,
 such as a root that contains the workspace. See
 [Containment at default](../architecture/safety-model.md#containment-at-default).
