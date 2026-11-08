@@ -18,7 +18,7 @@ import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
-import { copilotAuthState, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
+import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
@@ -468,6 +468,18 @@ test("auth status names the account and host; a sign-in run by auth login is rea
 		strictEqual(declined.ok, false);
 	} finally {
 		fake().auth = signedIn;
+	}
+});
+
+test("onboarding picks the curated Copilot model when the account lists it, else the listing's first", async () => {
+	strictEqual((await detectCopilotLogin(5_000))?.model, "fake-model");
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({ ...original[0], id: "gpt-6-luna", name: "GPT-6 Luna" });
+	try {
+		strictEqual((await detectCopilotLogin(5_000))?.model, "gpt-6-luna");
+	} finally {
+		models.splice(0, models.length, ...original);
 	}
 });
 

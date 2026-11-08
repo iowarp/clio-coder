@@ -9,6 +9,12 @@ import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 export const COPILOT_SDK_RUNTIME_ID = "copilot-sdk";
 
+/**
+ * The model setup and onboarding pick when the account lists it, as `openai-codex` does. The listing's own first
+ * entry is often `auto`, which lets Copilot choose a model per request and so a different premium rate.
+ */
+export const COPILOT_SDK_DEFAULT_MODEL = "gpt-6-luna";
+
 export const COPILOT_SDK_AUTH_NOTICE =
 	"Uses your GitHub Copilot subscription through the official Copilot SDK, as the account signed in with `copilot login`; your organization's Copilot policies apply. Clio stores no Copilot token.";
 
@@ -122,6 +128,7 @@ const copilotSdkRuntime = {
 	defaultCapabilities: copilotCapabilities,
 	// The runtime's listing omits models the account can call (Gemini 3.8 Flash on runtime 1.0.26).
 	servesUnlistedModels: true,
+	defaultModel: COPILOT_SDK_DEFAULT_MODEL,
 	probe: probeCopilotSdk,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		const discovered = listed.get(wireModelId);

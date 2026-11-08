@@ -96,6 +96,7 @@ import {
 	type WireModelInventory,
 	warnUndiscoveredContextWindow,
 } from "./configure-target.js";
+import { offerCopilotSignIn } from "./copilot-sign-in.js";
 import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect } from "./select.js";
 import { credentialWriteFailed, printError, printNote, printOk, printPlaintextCredentialWarning } from "./shared.js";
@@ -801,7 +802,10 @@ async function runTargetSetupInteractive(
 	if (runtime.id === "copilot-sdk") {
 		const ready = await prepareCopilotSdk({
 			...((rl.input as { isTTY?: boolean }).isTTY === true
-				? { confirm: (question: string) => askYesNo(rl, question, false) }
+				? {
+						confirm: (question: string) => askYesNo(rl, question, false),
+						signIn: () => offerCopilotSignIn(rl),
+					}
 				: {}),
 			print: (text) => process.stdout.write(`${text}\n`),
 		});
