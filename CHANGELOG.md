@@ -92,6 +92,8 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 - A failed settings watcher, such as EMFILE, prints one line instead of a stack.
 - Sibling sweep runs no longer supersede each other's claims.
 - A claude-code or claude-sdk worker no longer fails attestation with "tool surface drift" (#449).
+- claude-code workers run again on Claude Code 2.1.x, which refuses streamed print output without `--verbose`.
+- When a task asks for a check this host cannot run, such as a GPU or multi-node run, the agent records it with `limitation` instead of hedging in its reply.
 - MCP servers see the installed Clio Coder version in the `clientInfo` Clio sends when it connects.
 - The TUI redraws only the rows a streaming frame changed, which keeps long replies smooth.
 - A tool called through `gateway` gets the same argument normalization as a direct call before its arguments are checked. A `limitation` with a prose reason is filed under `other` or `blocked` instead of being rejected, and `run_script` accepts an array argument sent as a JSON string or as a single string.
