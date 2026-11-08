@@ -41,8 +41,7 @@ export const verifyToolSurface: ToolSurface = {
 		cwd: Type.Optional(Type.String({ description: "Package script cwd." })),
 		unsandboxed: Type.Optional(
 			Type.Boolean({
-				description:
-					"Leave the sandbox only after it failed a check (credentials, unwritable paths); reviewed.",
+				description: "Leave the sandbox only after it failed a check (credentials, unwritable paths); reviewed.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (not declared checks)." })),
