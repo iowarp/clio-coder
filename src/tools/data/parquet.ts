@@ -491,7 +491,11 @@ export async function statsParquet(lib: ParquetLibrary, request: ScientificReque
 				} catch (error) {
 					refuse("read-error", `cannot read ${column} rows ${first} to ${last}: ${errorText(error)}`);
 				}
-				accumulator.add(objects.map((row) => row[column] as number | bigint | null) as NumericBlock);
+				accumulator.add(objects.map((row) => row[column] as number | bigint | null) as NumericBlock, {
+					start: [first],
+					count: [last - first],
+					stride: [1],
+				});
 				scanned += last - first;
 				bytesDecoded += stepBytes;
 			}

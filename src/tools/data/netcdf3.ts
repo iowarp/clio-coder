@@ -664,7 +664,7 @@ export function statsNetcdf3(request: ScientificRequest): ScientificResult {
 				stoppedBy = "deadline";
 				break;
 			}
-			accumulator.add(file.read(variable, part) as Float64Array);
+			accumulator.add(file.read(variable, part) as Float64Array, part);
 			scanned += elements;
 		}
 		const scale = sentinelOf(attributeOf(variable, "scale_factor"));

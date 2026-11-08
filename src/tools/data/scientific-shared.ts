@@ -394,7 +394,8 @@ function sentinelMatch(value: number | bigint, sentinel: Sentinel | null): boole
  * (two-pass mean and M2) and merged with Chan's pairwise update, so the
  * result does not drift with the number of blocks. Integers wider than 2^53
  * keep exact extrema; their mean and deviation are computed in doubles and the
- * result says so.
+ * result says so. Each extremum keeps the dataset index of its first
+ * occurrence in traversal order, mapped through the block's hyperslab.
  */
 export class StatsAccumulator {
 	valid = 0;
@@ -407,6 +408,8 @@ export class StatsAccumulator {
 	private m2 = 0;
 	private min: number | bigint | null = null;
 	private max: number | bigint | null = null;
+	private argmin: number[] | null = null;
+	private argmax: number[] | null = null;
 	private wideIntegers = false;
 	/**
 	 * Integers are accumulated as exact offsets from the first one seen, so a
@@ -423,11 +426,14 @@ export class StatsAccumulator {
 	/** Valid values of the current block, reused across blocks so a pass allocates once. */
 	private scratch = new Float64Array(0);
 
-	add(block: NumericBlock): void {
+	/** `place` is the block's hyperslab in dataset coordinates; the block is its row-major flattening. */
+	add(block: NumericBlock, place: Hyperslab): void {
 		if (this.scratch.length < block.length) this.scratch = new Float64Array(block.length);
 		const valid = this.scratch;
 		let kept = 0;
 		let blockSum = 0;
+		let minAt = -1;
+		let maxAt = -1;
 		for (let index = 0; index < block.length; index += 1) {
 			const value = block[index];
 			if (value === null || value === undefined) {
@@ -445,8 +451,14 @@ export class StatsAccumulator {
 			}
 			if (typeof value === "bigint") {
 				if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) this.wideIntegers = true;
-				if (this.min === null || value < this.min) this.min = value;
-				if (this.max === null || value > this.max) this.max = value;
+				if (this.min === null || value < this.min) {
+					this.min = value;
+					minAt = index;
+				}
+				if (this.max === null || value > this.max) {
+					this.max = value;
+					maxAt = index;
+				}
 				this.pivot ??= value;
 				const offset = Number(value - this.pivot);
 				valid[kept++] = offset;
@@ -461,11 +473,19 @@ export class StatsAccumulator {
 				this.inf += 1;
 				continue;
 			}
-			if (this.min === null || value < this.min) this.min = value;
-			if (this.max === null || value > this.max) this.max = value;
+			if (this.min === null || value < this.min) {
+				this.min = value;
+				minAt = index;
+			}
+			if (this.max === null || value > this.max) {
+				this.max = value;
+				maxAt = index;
+			}
 			valid[kept++] = value;
 			blockSum += value;
 		}
+		if (minAt >= 0) this.argmin = coordinatesOf(minAt, place);
+		if (maxAt >= 0) this.argmax = coordinatesOf(maxAt, place);
 		if (kept === 0) return;
 		const blockMean = blockSum / kept;
 		let blockM2 = 0;
@@ -493,7 +513,9 @@ export class StatsAccumulator {
 			fillCount: this.fill,
 			missingValueCount: this.missing,
 			min: this.min === null ? null : encodeValue(this.min, float32),
+			argmin: this.argmin,
 			max: this.max === null ? null : encodeValue(this.max, float32),
+			argmax: this.argmax,
 			mean: this.valid > 0 ? this.center() : null,
 			std: this.valid > 0 ? Math.sqrt(this.m2 / this.valid) : null,
 		};
@@ -517,6 +539,18 @@ export class StatsAccumulator {
 			std: Math.sqrt(this.m2 / this.valid) * Math.abs(scale),
 		};
 	}
+}
+
+/** The dataset index of element `flat` of a row-major block read from `place`. */
+function coordinatesOf(flat: number, place: Hyperslab): number[] {
+	const out = new Array<number>(place.count.length);
+	let rest = flat;
+	for (let dim = place.count.length - 1; dim >= 0; dim -= 1) {
+		const extent = place.count[dim] as number;
+		out[dim] = (place.start[dim] as number) + (rest % extent) * (place.stride[dim] as number);
+		rest = Math.floor(rest / extent);
+	}
+	return out;
 }
 
 /** A scalar number or bigint out of an encoded attribute, for use as a sentinel. */

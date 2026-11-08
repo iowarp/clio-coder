@@ -709,7 +709,7 @@ export function statsHdf5(lib: H5Library, request: ScientificRequest): Scientifi
 			} catch (error) {
 				readError(path, filters, error);
 			}
-			accumulator.add((typeof raw === "number" || typeof raw === "bigint" ? [raw] : raw) as NumericBlock);
+			accumulator.add((typeof raw === "number" || typeof raw === "bigint" ? [raw] : raw) as NumericBlock, part);
 			scanned += elements;
 		}
 		const float32 = meta.type === H5T.FLOAT && meta.size === 4;

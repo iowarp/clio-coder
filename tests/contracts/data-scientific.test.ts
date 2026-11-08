@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { gzipSync } from "node:zlib";
 import { isDataRefusal, selectData, statsData } from "../../src/tools/data/index.js";
-import { chunkTiles } from "../../src/tools/data/scientific-shared.js";
+import { chunkTiles, StatsAccumulator } from "../../src/tools/data/scientific-shared.js";
 import { extractPackageTarball } from "../../src/tools/data/tar-extract.js";
 
 /**
@@ -210,6 +210,103 @@ describe("contracts/data-scientific", () => {
 		throws(() => extractPackageTarball(gzipSync(entry("package/../../evil", "0")), target), /escapes the target/u);
 		throws(() => extractPackageTarball(gzipSync(entry("package/link", "2")), target), /only files and directories/u);
 		ok(!existsSync(join(dir, "evil")));
+	});
+
+	it("reports where stats found min and max, in absolute indexes, skipping fill and missing values", async () => {
+		// 3x4x5 int16 grid: value = 100*i + 10*j + k, with fill (9999) and missing (-9999) at the extremes.
+		const grid: number[] = [];
+		for (let i = 0; i < 3; i += 1)
+			for (let j = 0; j < 4; j += 1) for (let k = 0; k < 5; k += 1) grid.push(100 * i + 10 * j + k);
+		const at = (i: number, j: number, k: number): number => i * 20 + j * 5 + k;
+		grid[at(2, 3, 4)] = 9999;
+		grid[at(0, 0, 0)] = -9999;
+		grid[at(1, 1, 3)] = 500;
+		grid[at(2, 1, 1)] = 500;
+		grid[at(0, 3, 4)] = -5;
+		grid[at(2, 3, 3)] = -5;
+		const path = join(dir, "grid.nc");
+		writeFileSync(
+			path,
+			cdf(
+				1,
+				0,
+				[
+					["t", 3],
+					["y", 4],
+					["x", 5],
+				],
+				[
+					{
+						name: "v",
+						dims: [0, 1, 2],
+						type: 3,
+						attrs: [
+							["_FillValue", 3, [9999]],
+							["missing_value", 3, [-9999]],
+						],
+						data: i16(grid),
+						record: false,
+					},
+					{
+						name: "blank",
+						dims: [2],
+						type: 3,
+						attrs: [["_FillValue", 3, [7]]],
+						data: i16([7, 7, 7, 7, 7]),
+						record: false,
+					},
+				],
+			),
+		);
+		const whole = (await statsData(path, { variable: "v" })) as Record<string, unknown>;
+		ok(!isDataRefusal(whole));
+		strictEqual(whole.max, 500);
+		deepStrictEqual(whole.argmax, [1, 1, 3]);
+		strictEqual(whole.min, -5);
+		deepStrictEqual(whole.argmin, [0, 3, 4]);
+		const window = (await statsData(path, {
+			variable: "v",
+			start: [1, 1, 1],
+			count: [2, 2, 2],
+			stride: [1, 2, 2],
+		})) as Record<string, unknown>;
+		ok(!isDataRefusal(window));
+		strictEqual(window.max, 500);
+		deepStrictEqual(window.argmax, [1, 1, 3]);
+		strictEqual(window.min, -5);
+		deepStrictEqual(window.argmin, [2, 3, 3]);
+		const blank = (await statsData(path, { variable: "blank" })) as Record<string, unknown>;
+		ok(!isDataRefusal(blank));
+		strictEqual(blank.validCount, 0);
+		strictEqual(blank.argmin, null);
+		strictEqual(blank.argmax, null);
+	});
+
+	it("keeps the first extremum across blocks, past NaN, infinities, nulls and wide integers", () => {
+		const floats = new StatsAccumulator(Number.NaN, []);
+		floats.add(Float64Array.from([Number.NaN, 4, Number.POSITIVE_INFINITY, 1]), {
+			start: [10, 0],
+			count: [2, 2],
+			stride: [3, 1],
+		});
+		floats.add([null, 4, 1, Number.NEGATIVE_INFINITY], { start: [16, 0], count: [2, 2], stride: [3, 1] });
+		const flat = floats.summary(false);
+		deepStrictEqual(
+			[flat.argmin, flat.argmax],
+			[
+				[13, 1],
+				[10, 1],
+			],
+		);
+		const wide = new StatsAccumulator(null, []);
+		const top = 2n ** 62n;
+		wide.add(BigInt64Array.from([top, top + 1n, -top]), { start: [5], count: [3], stride: [2] });
+		wide.add(BigInt64Array.from([top + 1n, -top - 1n]), { start: [100], count: [2], stride: [1] });
+		const summary = wide.summary(false);
+		deepStrictEqual([summary.argmin, summary.argmax], [[101], [7]]);
+		const none = new StatsAccumulator(null, []);
+		none.add(Float64Array.from([Number.NaN, Number.POSITIVE_INFINITY]), { start: [0], count: [2], stride: [1] });
+		deepStrictEqual([none.summary(false).argmin, none.summary(false).argmax], [null, null]);
 	});
 
 	it("walks chunk tiles that cover an unaligned selection exactly once", () => {
