@@ -12,8 +12,8 @@ on:
         default: false
         type: boolean
       version_branch:
-        description: Version branch for the release plan
-        default: v062
+        description: Version branch for the release plan (empty means the dispatched branch)
+        required: false
         type: string
       platforms:
         description: Also boot the same package on Windows and macOS
@@ -191,7 +191,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.sha }}
-          VERSION_BRANCH: ${{ inputs.version_branch }}
+          VERSION_BRANCH: ${{ inputs.version_branch || github.ref_name }}
         run: node scripts/release-publish.mjs rehearse-preflight --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$GITHUB_RUN_ID" --branch "$VERSION_BRANCH"
 
   rehearsal:
@@ -218,5 +218,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ inputs.sha }}
-          VERSION_BRANCH: ${{ inputs.version_branch }}
+          VERSION_BRANCH: ${{ inputs.version_branch || github.ref_name }}
         run: node scripts/release-publish.mjs rehearse --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$GITHUB_RUN_ID" --branch "$VERSION_BRANCH"
