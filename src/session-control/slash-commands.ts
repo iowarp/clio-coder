@@ -221,6 +221,7 @@ type SlashCommandVariant =
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
+	| { kind: "research" }
 	| { kind: "tasks-add"; text: string; expectedOutputs?: string[]; verification?: string[] }
 	| { kind: "tasks-hand"; id: string }
 	| { kind: "tasks-done"; id: string }
@@ -1102,6 +1103,8 @@ export interface SessionCommandContext {
 	openTasks?: () => void;
 	/** Open the settled, branch-local interview decision board. */
 	openDecisions?: () => void;
+	/** Open the read-only `/research` overlay: this project's research campaigns and their timelines. */
+	openResearch?: () => void;
 	/** Project-scoped operator task inbox backing `/tasks` mutations. */
 	userTasks?: {
 		add(title: string, acceptance?: UserTaskAcceptance): UserTask;
@@ -2621,6 +2624,24 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "research",
+		acp: false,
+		description: "Show this project's research campaigns and their iteration timelines",
+		group: "Inspect",
+		kinds: ["research"],
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "research", reason: parsed.error };
+			return { kind: "research" };
+		},
+		handle(_command, ctx) {
+			if (!ctx.openResearch) {
+				ctx.notice("info", "/research is not wired in this session; run clio-coder research status");
+				return;
+			}
+			ctx.openResearch();
+		},
+	},
+	{
 		name: "tasks",
 		acp: {
 			subcommands: ["add", "hand", "done", "drop"],
@@ -3773,6 +3794,7 @@ const COMMAND_ORDER = [
 	"doctor",
 	"upgrade",
 	"decisions",
+	"research",
 	"library",
 	"skills",
 	"prompts",

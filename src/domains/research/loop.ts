@@ -20,6 +20,7 @@ import {
 import { claimsProjectRoot } from "../claims/index.js";
 import { type AgentRunner, hypothesisFromSummary, iterationPrompt } from "./agent.js";
 import { budgetStop, nextRunLimits } from "./budget.js";
+import { describeGrade } from "./format.js";
 import {
 	addResearchWorktree,
 	casResearchRef,
@@ -467,15 +468,4 @@ export async function runResearchCampaign(
 				}
 			}
 	}
-}
-
-export function describeGrade(result: {
-	verdict: string;
-	delta: number | null;
-	ci: { low: number; high: number } | null;
-}): string {
-	const pct = (value: number): string => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
-	const delta = result.delta === null ? "delta n/a" : `median delta ${pct(result.delta)}`;
-	const ci = result.ci === null ? "CI n/a" : `95% CI [${pct(result.ci.low)}, ${pct(result.ci.high)}]`;
-	return `${result.verdict}, ${delta}, ${ci}`;
 }

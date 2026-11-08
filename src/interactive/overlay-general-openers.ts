@@ -64,6 +64,7 @@ import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/d
 import { openDraftOverlay, type TakenDraft } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openQueueNavigatorOverlay } from "./overlays/queue-navigator.js";
+import { openResearchOverlay, readResearchCampaigns } from "./overlays/research.js";
 import {
 	formatRewindOutcome,
 	openRewindConfirmOverlay,
@@ -210,6 +211,8 @@ export interface OverlayGeneralOpeners {
 	toggleFooter(): void;
 	openTasks(): void;
 	openDecisions(): void;
+	/** `/research`: the project's research campaigns, read-only. */
+	openResearch(): void;
 	openMemory(): void;
 	/** `/rewind`: this session's workspace snapshots, a preview, then a confirmed restore. */
 	openRewind(): void;
@@ -385,6 +388,16 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				deps.closeOverlay();
 				deps.submitChat(formatDecisionCorrectionTurn(selection, correction));
 			},
+			onClose: deps.closeOverlay,
+		});
+		deps.requestRender();
+	};
+
+	const openResearch = (): void => {
+		if (deps.transitions.state !== "closed") return;
+		const cwd = deps.getSessionMeta()?.cwd ?? process.cwd();
+		deps.transitions.state = "research";
+		deps.transitions.handle = openResearchOverlay(deps.tui, () => readResearchCampaigns(cwd), {
 			onClose: deps.closeOverlay,
 		});
 		deps.requestRender();
@@ -905,6 +918,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		toggleFooter,
 		openTasks,
 		openDecisions,
+		openResearch,
 		openMemory,
 		openRewind,
 		openView,
