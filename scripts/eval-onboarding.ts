@@ -62,6 +62,13 @@ interface EvalCase {
 	stopOn?: (tool: ToolCall) => boolean;
 	/** Ends the run once a matching call has returned, for cases scored on the call's result. */
 	stopAfter?: (tool: ToolCall) => boolean;
+	/**
+	 * Plays the operator who approves the multi-task dispatch plan the prompt asked
+	 * for; default autonomy parks every plan-scale dispatch for one approval. ACP
+	 * approves only the dispatch permission. A headless run has no approval path,
+	 * so it runs the main agent at yolo; workers keep their own default.
+	 */
+	approvesDispatchPlan?: true;
 	score: (obs: Observation) => Record<string, boolean>;
 }
 
@@ -189,6 +196,7 @@ const CASES: EvalCase[] = [
 		prompt:
 			"Do a thorough bug review of each of the three modules in tinystats (core.py, io.py, cli.py). The reviews are independent of each other. Do not edit anything.",
 		stopAfter: (t) => t.name === "dispatch",
+		approvesDispatchPlan: true,
 		score: (o) => ({
 			dispatched: o.tools.some((t) => t.name === "dispatch"),
 			succeeded: o.tools.some(dispatchSucceeded),
@@ -450,6 +458,7 @@ async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 	const args = [opts.clio, "run", "--json", "--timeout", String(opts.timeoutSec)];
 	if (opts.target !== null) args.push("--target", opts.target);
 	if (opts.model !== null) args.push("--model", opts.model);
+	if (evalCase.approvesDispatchPlan === true) args.push("--autonomy", "yolo");
 	args.push(evalCase.prompt);
 	const child = spawn(process.execPath, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 	const driven: Driven = {
@@ -595,9 +604,12 @@ async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 			return;
 		}
 		if (msg.method === "session/request_permission" && msg.id !== undefined) {
-			// No operator answers in the eval, matching a headless run's denial.
-			driven.raw.push({ permission: asRecord(msg.params).toolCall });
-			send({ id: msg.id, result: { outcome: { outcome: "selected", optionId: "reject-once" } } });
+			// No operator answers in the eval, matching a headless run's denial, except
+			// the dispatch plan a dispatch case asked for.
+			const toolCall = asRecord(asRecord(msg.params).toolCall);
+			driven.raw.push({ permission: toolCall });
+			const approve = evalCase.approvesDispatchPlan === true && toolCall.title === "dispatch";
+			send({ id: msg.id, result: { outcome: { outcome: "selected", optionId: approve ? "allow-once" : "reject-once" } } });
 			return;
 		}
 		if (msg.id !== undefined && msg.method !== undefined) {
