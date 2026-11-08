@@ -6,14 +6,47 @@
  * settings dependencies, so every controlled commit seam shares one policy.
  */
 
-export const CLIO_COMMIT_IDENTITY = "Clio Coder <clio-coder@iowarp.ai>";
+/**
+ * PLACEHOLDER: slug of the IOWarp-owned GitHub App whose bot account would be
+ * Clio's commit identity. `clio-coder` is an unrelated user's login, and an
+ * App may not take an existing account's name, so confirm the registered slug.
+ */
+const CLIO_GITHUB_APP_SLUG = "clio-coder-agent";
 
-export const CLIO_COMMIT_TRAILERS = {
-	assisted: `Assisted-by: ${CLIO_COMMIT_IDENTITY}`,
-	tested: `Tested-by: ${CLIO_COMMIT_IDENTITY}`,
-	reviewed: `Reviewed-by: ${CLIO_COMMIT_IDENTITY}`,
-	coAuthored: `Co-authored-by: ${CLIO_COMMIT_IDENTITY}`,
-} as const;
+/**
+ * PLACEHOLDER until the IOWarp org creates the App: the account id of the
+ * App's bot user, read with `gh api users/<slug>%5Bbot%5D --jq .id`. It is not
+ * the App id. GitHub links a trailer to an account only by email, and a bot
+ * account answers to `<id>+<slug>[bot]@users.noreply.github.com`. While this
+ * is null, trailers name `clio-coder@iowarp.ai`, which renders once a GitHub
+ * account verifies it. Setting it changes the managed hook script, so bump
+ * `MANAGED_HOOK_VERSION` (`src/core/git-commit-attribution.ts`) in the same
+ * commit.
+ */
+const CLIO_GITHUB_BOT_USER_ID: number | null = null;
+
+const IOWARP_COMMIT_EMAIL = "clio-coder@iowarp.ai";
+
+function githubBotNoreplyEmail(userId: number | null, slug: string): string | null {
+	if (userId === null || !Number.isSafeInteger(userId) || userId <= 0) return null;
+	return `${userId}+${slug}[bot]@users.noreply.github.com`;
+}
+
+/** The one email every Clio commit trailer names. */
+const CLIO_COMMIT_EMAIL = githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? IOWARP_COMMIT_EMAIL;
+
+export const CLIO_COMMIT_IDENTITY = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
+
+function roleTrailers(identity: string) {
+	return {
+		assisted: `Assisted-by: ${identity}`,
+		tested: `Tested-by: ${identity}`,
+		reviewed: `Reviewed-by: ${identity}`,
+		coAuthored: `Co-authored-by: ${identity}`,
+	} as const;
+}
+
+export const CLIO_COMMIT_TRAILERS = roleTrailers(CLIO_COMMIT_IDENTITY);
 
 export const CLIO_DECISION_TRAILER_KEY = "Clio-Decision";
 
@@ -78,6 +111,20 @@ const KNOWN_CLIO_TRAILERS = new Set(
 		.map((line) => normalizedTrailer(line))
 		.filter((line): line is string => line !== null),
 );
+
+/**
+ * A role trailer naming clio-coder@iowarp.ai, keyed by its normalized form,
+ * mapped to the same role under the bot identity. Empty while no bot id is set.
+ */
+const IOWARP_ROLE_TRAILER_UPGRADES: ReadonlyMap<string, string> = (() => {
+	const legacy = roleTrailers(`Clio Coder <${IOWARP_COMMIT_EMAIL}>`);
+	const upgrades = new Map<string, string>();
+	for (const role of Object.keys(legacy) as Array<keyof typeof legacy>) {
+		const key = normalizedTrailer(legacy[role]);
+		if (key !== null && !KNOWN_CLIO_TRAILERS.has(key)) upgrades.set(key, CLIO_COMMIT_TRAILERS[role]);
+	}
+	return upgrades;
+})();
 
 function isClioTrailer(key: string): boolean {
 	return (
@@ -144,8 +191,10 @@ function runTrailer(run: CommitRunEvidence | undefined): string | null {
  *
  * Disabled attribution is the one byte-preserving path. When enabled, CRLF and
  * lone CR are normalized to LF, the message ends with one newline, existing
- * subject/body and human trailers remain in order, repeated Clio trailers are
- * removed case-insensitively, and processing the result again is idempotent.
+ * subject/body and human trailers remain in order, a role trailer naming the
+ * clio-coder@iowarp.ai address is rewritten to the bot identity, repeated Clio
+ * trailers are removed case-insensitively, and processing the result again is
+ * idempotent.
  */
 export function attributeCommitMessage(
 	originalMessage: string,
@@ -157,6 +206,14 @@ export function attributeCommitMessage(
 	const normalized = originalMessage.replace(/\r\n?/gu, "\n");
 	const lines = normalized.replace(/\n+$/u, "").split("\n");
 	const blockStart = trailerBlockStart(lines);
+	// Once the bot identity is set, a clio-coder@iowarp.ai role trailer is the
+	// same Clio claim: rewrite it so the commit names one Clio account.
+	if (blockStart !== null) {
+		for (let index = blockStart; index < lines.length; index += 1) {
+			const upgraded = IOWARP_ROLE_TRAILER_UPGRADES.get(normalizedTrailer(lines[index] ?? "") ?? "");
+			if (upgraded !== undefined) lines[index] = upgraded;
+		}
+	}
 	const seenClio = new Set<string>();
 	const retained = lines.filter((line, index) => {
 		if (blockStart === null || index < blockStart) return true;
