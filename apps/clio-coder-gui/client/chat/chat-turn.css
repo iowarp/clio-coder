@@ -100,6 +100,12 @@
 	overflow-wrap: anywhere;
 	min-width: 0;
 }
+/* A mark in the top bar is a short state, not a sentence: it keeps its width and the title truncates. */
+:is(.conversation, .projects) .wb-bar > .status-mark {
+	flex: none;
+	white-space: nowrap;
+	overflow-wrap: normal;
+}
 :is(.conversation, .projects) .status-mark__glyph {
 	font-family: var(--font-mono);
 }
