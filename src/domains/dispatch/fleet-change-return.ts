@@ -1,9 +1,16 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { attributeCommitMessage, CLIO_COMMIT_EMAIL, CLIO_COMMIT_NAME } from "../../core/commit-attribution.js";
+import { autonomousLandAuthorship } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { shellQuote } from "../../core/shell-quote.js";
-import { LEFT_UNCOMMITTED_LIST_LIMIT, type TaskWorktree } from "../../tools/task-worktree.js";
+import {
+	COMMIT_IDENTITY,
+	hostCommitter,
+	LEFT_UNCOMMITTED_LIST_LIMIT,
+	type TaskWorktree,
+} from "../../tools/task-worktree.js";
 import type { SshNodeEndpoint } from "./transport.js";
 import { buildSshArgs } from "./transport.js";
 
@@ -19,7 +26,8 @@ import { buildSshArgs } from "./transport.js";
 const REMOTE_OPERATION = `
 const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'),crypto=require('node:crypto');
 const input=JSON.parse(fs.readFileSync(0,'utf8')),w=input.worktree,NUL=String.fromCharCode(0);
-function raw(cwd,...args){const r=cp.spawnSync('git',['-C',cwd,'-c','core.hooksPath=/dev/null',...args],{encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024});if(r.status!==0)throw Error(r.stderr||'remote git failed');return r.stdout;}
+function run(env,cwd,args){const r=cp.spawnSync('git',['-C',cwd,'-c','core.hooksPath=/dev/null',...args],{env,encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024});if(r.status!==0)throw Error(r.stderr||'remote git failed');return r.stdout;}
+function raw(cwd,...args){return run(process.env,cwd,args);}
 function git(cwd,...args){return raw(cwd,...args).trim();}
 function untracked(){return raw(w.path,'ls-files','--others','--exclude-standard','-z').split(NUL).filter(Boolean);}
 function untrackedState(){const paths=untracked(),h=crypto.createHash('sha256');let directory=null;for(const p of paths){let s='gone';try{const t=fs.lstatSync(path.join(w.path,p),{bigint:true});if(t.isDirectory())directory??=p;s=[t.mode,t.ino,t.size,t.mtimeNs,t.ctimeNs].join(':');}catch{}h.update(p+NUL+s+NUL);}return {paths,digest:h.digest('hex'),directory};}
@@ -44,7 +52,7 @@ try {
    git(w.path,'add','-u','--','.');
    const authored=authoredSet(),take=untracked().filter((p)=>authored===null||authored.has(p));
    for(let i=0;i<take.length;i+=256)git(w.path,'add','--',...take.slice(i,i+256).map((p)=>':(top,literal)'+p));
-   if(git(w.path,'diff','--cached','--name-only'))git(w.path,'-c','user.name=Clio Coder','-c','user.email=clio-coder-task@local','commit','-m','Clio Coder remote task '+w.runId);
+   const id=input.identity;if(git(w.path,'diff','--cached','--name-only'))run({...process.env,GIT_AUTHOR_NAME:id.author.name,GIT_AUTHOR_EMAIL:id.author.email,GIT_COMMITTER_NAME:id.committer.name,GIT_COMMITTER_EMAIL:id.committer.email},w.path,['commit','-m',input.message]);
    const remaining=untrackedState();
    out={commit:git(w.path,'rev-parse','HEAD'),untracked:remaining.digest,left:remaining.paths.slice(0,input.listLimit),leftCount:remaining.paths.length};
   }else if(input.op==='cleanup'){
@@ -73,9 +81,35 @@ export interface FleetChangeImport {
 	leftUncommitted?: { count: number; paths: string[] };
 }
 
+interface GitIdent {
+	name: string;
+	email: string;
+}
+
+interface RemoteCommitIdentity {
+	author: GitIdent;
+	committer: GitIdent;
+}
+
+/**
+ * Who the remote commit names, decided on the host because the commit lands
+ * here: the checkout's committer, and Clio as author with that committer as
+ * co-author when `commitAuthor` is `auto`, as for `commitWorktreePath`.
+ */
+function remoteCommitAttribution(w: TaskWorktree): { identity: RemoteCommitIdentity; message: string } {
+	const committer = hostCommitter(w.root, COMMIT_IDENTITY);
+	const message = `Clio Coder remote task ${w.runId}`;
+	const authorship = autonomousLandAuthorship(w.root);
+	if (authorship === null) return { identity: { author: committer, committer }, message };
+	return {
+		identity: { author: { name: CLIO_COMMIT_NAME, email: CLIO_COMMIT_EMAIL }, committer },
+		message: attributeCommitMessage(message, {}, true, { clioAuthorFor: authorship.human }),
+	};
+}
+
 type RemoteRequest =
 	| { op: "prepare" }
-	| { op: "commit"; authored: string[] | null; listLimit: number }
+	| { op: "commit"; authored: string[] | null; listLimit: number; identity: RemoteCommitIdentity; message: string }
 	| { op: "cleanup"; commit: string; untracked: string };
 
 interface RemoteResponse {
@@ -110,6 +144,7 @@ async function remoteCommit(
 		op: "commit",
 		authored: authoredPaths === null ? null : [...authoredPaths],
 		listLimit: LEFT_UNCOMMITTED_LIST_LIMIT,
+		...remoteCommitAttribution(input.worktree),
 	});
 	const { untracked, left, leftCount } = value;
 	if (

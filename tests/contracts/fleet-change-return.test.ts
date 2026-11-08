@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { CLIO_COMMIT_IDENTITY } from "../../src/core/commit-attribution.js";
+import { setGitCommitAttributionEnabled, setGitCommitAuthorSetting } from "../../src/core/git-commit-attribution.js";
 import {
 	cleanupFleetChangeReturn,
 	importFleetChanges,
@@ -11,6 +13,8 @@ import {
 import { applyTaskWorktree, createTaskWorktree, previewTaskWorktree } from "../../src/tools/task-worktree.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+const HUMAN = "Contract <contract@example.invalid>";
 
 function git(root: string, ...args: string[]): string {
 	return execFileSync("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...args], {
@@ -87,8 +91,14 @@ process.exit(result.status??1);
 `,
 			{ mode: 0o755 },
 		);
+		setGitCommitAttributionEnabled(true);
+		setGitCommitAuthorSetting("auto");
 		const imported = await importFleetChanges(remote, [join(worktree.path, "sum.js")], [worktree.path], []);
 		const { commit } = imported;
+		strictEqual(
+			git(worktree.path, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%(trailers:only)", commit),
+			`${CLIO_COMMIT_IDENTITY}|${HUMAN}|Co-authored-by: ${HUMAN}`,
+		);
 		strictEqual(git(worktree.path, "show", "--name-only", "--format=", commit), "math.js\nsum.js");
 		deepStrictEqual(imported.leftUncommitted, { count: 2, paths: ["__pycache__/x.pyc", "late.txt"] });
 		strictEqual(readFileSync(join(remotePath, "late.txt"), "utf8"), "created after commit\n");

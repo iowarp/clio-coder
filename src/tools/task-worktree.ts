@@ -221,6 +221,17 @@ export function hostCommitIdentity(cwd: string, identity: string): string[] {
 	return config;
 }
 
+/**
+ * The committer `hostCommitIdentity` gives a commit at `cwd`, spelled out for a
+ * commit made elsewhere (an SSH node's worktree) that lands in this checkout.
+ */
+export function hostCommitter(cwd: string, identity: string): { name: string; email: string } {
+	return {
+		name: configuredGitValue(cwd, "user.name") ?? identity,
+		email: configuredGitValue(cwd, "user.email") ?? `${identity}@local`,
+	};
+}
+
 /** What a host commit of a worker's worktree took, and the new files it left out. */
 export interface WorktreeCommit {
 	committed: boolean;
