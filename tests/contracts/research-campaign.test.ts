@@ -28,6 +28,7 @@ import {
 	aaIsNoisy,
 	budgetStop,
 	costFromPricing,
+	describeGrade,
 	grade,
 	type ObjectiveValue,
 	openResearchCampaign,
@@ -87,6 +88,24 @@ describe("research grading", () => {
 	it("does not call a delta past the threshold improved when the interval straddles zero", () => {
 		const verdict = grade({ ...base, base: [100, 100, 100, 100], candidate: [10, 200, 10, 200] }).verdict;
 		ok(verdict === "inconclusive" || verdict === "regressed", verdict);
+	});
+
+	it("labels a sure move inside the threshold below threshold or a small regression, and still unchanged", () => {
+		const before = [100, 100.2, 99.8, 100.1, 99.9];
+		const lower = grade({ ...base, base: before, candidate: [96, 96.2, 95.8, 96.1, 95.9] });
+		strictEqual(lower.verdict, "unchanged");
+		ok(lower.ci !== null && lower.ci.high < 0);
+		ok(
+			describeGrade(lower, base).startsWith("below threshold (-4.00% vs required -5.00%), "),
+			describeGrade(lower, base),
+		);
+		const higher = grade({ ...base, base: before, candidate: [103, 103.2, 102.8, 103.1, 102.9] });
+		strictEqual(higher.verdict, "unchanged");
+		ok(
+			describeGrade(higher, base).startsWith("small regression (+3.00%, inside the ±5.00% threshold), "),
+			describeGrade(higher, base),
+		);
+		strictEqual(describeGrade(grade({ ...base, base: before, candidate: before }), base).split(",")[0], "unchanged");
 	});
 });
 

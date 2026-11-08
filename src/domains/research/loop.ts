@@ -313,11 +313,11 @@ export async function runResearchCampaign(
 		});
 		const noisy = aaIsNoisy(aaGrade);
 		journal({ type: "aa", at: at(), samples: aaSamples, grade: aaGrade, noisy, allowed: !noisy || campaign.allowNoisy });
-		log(`A/A: ${noisy ? "noisy" : "quiet"} (${describeGrade(aaGrade)})`);
+		log(`A/A: ${noisy ? "noisy" : "quiet"} (${describeGrade(aaGrade, campaign.objective)})`);
 		if (noisy && !campaign.allowNoisy)
 			return finish(
 				"noisy",
-				`the A/A check already calls a change (${describeGrade(aaGrade)}); raise --trials, quiet the machine, or pass --allow-noisy`,
+				`the A/A check already calls a change (${describeGrade(aaGrade, campaign.objective)}); raise --trials, quiet the machine, or pass --allow-noisy`,
 			);
 		// Each gate runs once on the base too, so what it creates is known before the first iteration commits.
 		for (const check of gateChecks) if (check.id !== objectiveCheck.id) await gate(baseWorktree, check, signal);
@@ -526,7 +526,7 @@ export async function runResearchCampaign(
 				verdict: researchHypothesisVerdict(result),
 				claims: [...recorded.claims.values()].map((claim) => claim.id),
 			});
-			log(`iteration ${iteration}: ${describeGrade(result)}`);
+			log(`iteration ${iteration}: ${describeGrade(result, campaign.objective)}`);
 
 			// RATCHET, only before the deadline and only with every gate, the judged objective included, passing.
 			const gradeHalt = halt();
@@ -542,9 +542,15 @@ export async function runResearchCampaign(
 					failedGates.map((entry) => `${entry.check}: ${entry.summary || entry.execution}`).join("; "),
 				);
 			} else if (result.verdict !== "improved") {
-				archive("not-improved", describeGrade(result));
+				archive("not-improved", describeGrade(result, campaign.objective));
 			} else if (
-				casResearchRef(root, campaign.ref, commit, best, `clio-coder research: ${name} ${describeGrade(result)}`)
+				casResearchRef(
+					root,
+					campaign.ref,
+					commit,
+					best,
+					`clio-coder research: ${name} ${describeGrade(result, campaign.objective)}`,
+				)
 			) {
 				journal({ type: "ratcheted", at: at(), iteration, from: best, to: commit });
 				log(`iteration ${iteration}: ratcheted ${campaign.ref} ${best.slice(0, 12)} -> ${commit.slice(0, 12)}`);

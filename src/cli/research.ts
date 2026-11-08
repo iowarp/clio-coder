@@ -369,7 +369,7 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 			lines.push("", "recomputed from raw samples with the recorded seeds:");
 			for (const entry of report.grades)
 				lines.push(
-					`  ${entry.of === "aa" ? "A/A    " : `it-${String(entry.of).padStart(4, "0")}`}  ${describeGrade(entry.recomputed)}  ${entry.agrees ? "agrees with the journal" : "DISAGREES with the journal"}`,
+					`  ${entry.of === "aa" ? "A/A    " : `it-${String(entry.of).padStart(4, "0")}`}  ${describeGrade(entry.recomputed, report.view.campaign.objective)}  ${entry.agrees ? "agrees with the journal" : "DISAGREES with the journal"}`,
 				);
 			if (report.grades.length === 0) lines.push("  nothing measured yet");
 			console.log(lines.join("\n"));

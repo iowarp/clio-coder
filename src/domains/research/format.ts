@@ -1,16 +1,37 @@
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import type { ResearchCampaignView } from "./report.js";
-import type { ResearchCost } from "./types.js";
+import type { ResearchCost, ResearchDirection } from "./types.js";
 
-export function describeGrade(result: {
-	verdict: string;
-	delta: number | null;
-	ci: { low: number; high: number } | null;
-}): string {
-	const pct = (value: number): string => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
+/**
+ * One line for a grade. Given the objective, an `unchanged` verdict whose interval excludes zero is named for what
+ * it is: a real move smaller than the minimum improvement, toward better or worse. The verdict itself, and so the
+ * archiving, stays `unchanged`.
+ */
+export function describeGrade(
+	result: {
+		verdict: string;
+		delta: number | null;
+		ci: { low: number; high: number } | null;
+	},
+	objective?: { direction: ResearchDirection; minImprovement: number },
+): string {
 	const delta = result.delta === null ? "delta n/a" : `median delta ${pct(result.delta)}`;
 	const ci = result.ci === null ? "CI n/a" : `95% CI [${pct(result.ci.low)}, ${pct(result.ci.high)}]`;
-	return `${result.verdict}, ${delta}, ${ci}`;
+	return `${gradeLabel(result, objective)}, ${delta}, ${ci}`;
+}
+
+function gradeLabel(
+	result: { verdict: string; delta: number | null; ci: { low: number; high: number } | null },
+	objective: { direction: ResearchDirection; minImprovement: number } | undefined,
+): string {
+	const { ci, delta } = result;
+	if (result.verdict !== "unchanged" || objective === undefined || ci === null || delta === null) return result.verdict;
+	if (ci.low <= 0 && ci.high >= 0) return result.verdict;
+	const better = objective.direction === "min" ? ci.high < 0 : ci.low > 0;
+	const required = objective.direction === "min" ? -objective.minImprovement : objective.minImprovement;
+	return better
+		? `below threshold (${pct(delta)} vs required ${pct(required)})`
+		: `small regression (${pct(delta)}, inside the ±${(objective.minImprovement * 100).toFixed(2)}% threshold)`;
 }
 
 function pct(value: number | null): string {
@@ -43,10 +64,10 @@ export function campaignStatusLines(view: ResearchCampaignView): string[] {
 	];
 	if (view.aa !== null)
 		lines.push(
-			`A/A: ${view.aa.noisy ? "noisy" : "quiet"}${view.aa.noisy && view.aa.allowed ? " (allowed)" : ""}; ${describeGrade(view.aa.grade)}`,
+			`A/A: ${view.aa.noisy ? "noisy" : "quiet"}${view.aa.noisy && view.aa.allowed ? " (allowed)" : ""}; ${describeGrade(view.aa.grade, objective)}`,
 		);
 	for (const iteration of view.iterations) {
-		const graded = iteration.grade !== null ? `; ${describeGrade(iteration.grade)}` : "";
+		const graded = iteration.grade !== null ? `; ${describeGrade(iteration.grade, objective)}` : "";
 		const gates =
 			iteration.gates.length > 0
 				? `; gates ${iteration.gates.map((gate) => `${gate.check} ${gate.passed ? "pass" : "fail"}`).join(", ")}`
