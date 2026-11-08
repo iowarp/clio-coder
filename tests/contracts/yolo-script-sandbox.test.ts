@@ -90,6 +90,23 @@ test("the main-session sandbox writes the workspace and scratch roots only, keep
 	assert.equal(mainSandboxWriteHint("no such file", policy), null);
 });
 
+test("the sandbox write hint points a read-only tool cache at the run's writable temp directory", () => {
+	const temp = realpathSync(tmpdir());
+	const roots = (writableRoots: string[]) =>
+		resolveMainSandboxPolicy({
+			workspace: "/w",
+			scratchRoots: writableRoots,
+			cacheRoots: [],
+			codeCaches: [],
+			clioDirs: [],
+		});
+	const withTemp = mainSandboxWriteHint("uv: Read-only file system (os error 30)", roots([temp])) ?? "";
+	assert.ok(withTemp.includes(`stays read-only because the tool later runs code from it outside the sandbox`), withTemp);
+	assert.ok(withTemp.includes(`UV_CACHE_DIR=${join(temp, "uv-cache")}`), withTemp);
+	const noTemp = mainSandboxWriteHint("uv: Read-only file system (os error 30)", roots([])) ?? "";
+	assert.equal(noTemp.includes("UV_CACHE_DIR"), false, noTemp);
+});
+
 test("under bwrap a yolo script writes its workspace and scratch roots, sees the host's /tmp and writes nothing else", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {

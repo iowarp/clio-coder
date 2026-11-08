@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { canonicalizePath } from "../path-canonical.js";
 import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioStatePath } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
@@ -731,7 +732,19 @@ export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy):
 	if (policy.readOnly === true) {
 		return `sandbox: this run is read-only, so this command could write only to its scratch directory ${displayWritableRoots(policy.writableRoots)} and a private /tmp; the workspace and every other file outside Clio's home stay unchanged, and a read-only run has no unsandboxed commands.`;
 	}
-	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (Clio's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+	const temp = writableTempDir(policy.writableRoots);
+	const cache =
+		temp === null
+			? ""
+			: ` A tool cache outside these roots, such as uv's ~/.cache/uv or a UV_CACHE_DIR set elsewhere, stays read-only because the tool later runs code from it outside the sandbox: point it at a new directory under ${temp} for this command (UV_CACHE_DIR=${path.join(temp, "uv-cache")}).`;
+	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden).${cache} If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (Clio's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+}
+
+/** The run's own temp directory when it is a writable root, else /tmp when that is one, else null. */
+function writableTempDir(roots: ReadonlyArray<string>): string | null {
+	const temp = canonicalizePath(tmpdir()) ?? tmpdir();
+	if (roots.includes(temp)) return temp;
+	return roots.includes("/tmp") ? "/tmp" : null;
 }
 
 /** One line for doctor: how the main session's shell calls run on this host, and where a contained one can write. */
