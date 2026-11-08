@@ -13,6 +13,7 @@
 
 import { formatFooterTokens } from "../../core/display-units.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import { describeCallTarget } from "./call-target.js";
 import type { SafetyDecision } from "./contract.js";
@@ -335,7 +336,7 @@ export function settledCallTokens(usage: unknown): number {
 	return total > 0 ? total : value("input") + value("cacheRead") + value("cacheWrite") + value("output");
 }
 
-/** Name a refused call for the operator: clipped to 200 characters with credentials scrubbed, like a worker refusal. */
+/** Name a refused call for the operator: credentials scrubbed by key and by value shape, then clipped to 200 characters. */
 export function describeOpenDecision(
 	call: ClassifierCall,
 	decision: SafetyDecision,
@@ -343,7 +344,7 @@ export function describeOpenDecision(
 	rule?: string,
 ): Omit<OpenDecision, "seq"> {
 	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
-	const scrubbed = redactSecretString(raw.trim());
+	const scrubbed = redactSecretsText(redactSecretString(raw.trim()), createRedactionTally());
 	const clipped =
 		scrubbed.length <= OPEN_DECISION_COMMAND_MAX_CHARS
 			? scrubbed

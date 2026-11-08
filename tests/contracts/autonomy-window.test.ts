@@ -256,6 +256,29 @@ test("open decisions are bounded, scrubbed and clipped, and a judge-streak end l
 	match(autonomyHaltNotice({ kind: "calls", limit: 4, detail: "4-call cap", usage }, "headless"), /fresh window$/u);
 });
 
+test("an open decision's command hides Authorization headers and bare provider tokens", () => {
+	const ask = {
+		kind: "ask",
+		classification: { actionClass: "execute", reasons: [] },
+		rejection: { short: "", detail: "" },
+	} as unknown as SafetyDecision;
+	const github = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+	const anthropic = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+	const opaque = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA";
+	const entry = describeOpenDecision(
+		{
+			tool: "bash",
+			args: {
+				command: `curl -H 'Authorization: Bearer ${opaque}' -H "X-Token: ${github}" https://api.example.com && echo ${anthropic}`,
+			},
+		},
+		ask,
+		"judge-block",
+	);
+	for (const secret of [github, anthropic, opaque]) ok(!entry.command.includes(secret), entry.command);
+	match(entry.command, /^curl -H 'Authorization: Bearer /u);
+});
+
 test("the exit summary closes a yolo session with its window, its halt and the decisions it left", () => {
 	const fx = windowFixture({ toolCalls: 3, minutes: 0, tokens: 0 });
 	fx.window.openDecision({ tool: "bash", command: "git push origin main", kind: "operator-only", rule: "git-push" });
