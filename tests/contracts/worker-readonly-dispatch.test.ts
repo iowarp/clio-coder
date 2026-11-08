@@ -63,6 +63,43 @@ test("a yolo session dispatches a default worker as version 8 and rejects a wire
 	}
 });
 
+/** The worker allowance dispatch seals when the operator's live autonomy is `operatorAutonomy`, settings.yaml at unconfined yolo. */
+async function allowanceUnderYoloSettings(prefix: string, operatorAutonomy?: () => "default" | "yolo") {
+	const env = await isolateClioEnv(prefix);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.autonomy = "yolo";
+	settings.safety.yoloConfinement = "unconfined";
+	settings.safety.yoloUnconfinedAccepted = true;
+	let captured: WorkerSpec | undefined;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		...(operatorAutonomy !== undefined ? { operatorAutonomy } : {}),
+		spawnWorker(spec) {
+			captured = spec;
+			throw new Error("worker spec observed");
+		},
+	});
+	try {
+		await bundle.extension.start();
+		await rejects(
+			bundle.contract.dispatch({ agentId: "coder", task: "Inspect the task", executionRole: "builder", cwd: env.dir }),
+			/worker spec observed/u,
+		);
+		ok(captured);
+		return captured.permit.allowance;
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+}
+
+test("a dispatcher no one granted yolo never seals a yolo worker, whatever settings.yaml says", async () => {
+	// A headless fleet, bootstrap or wiki run has no live operator level; the settings file is not a grant.
+	strictEqual((await allowanceUnderYoloSettings("clio-ceiling-none-")).executeAutonomy, undefined);
+	strictEqual((await allowanceUnderYoloSettings("clio-ceiling-default-", () => "default")).executeAutonomy, undefined);
+	// The live level is the ceiling: a granted unconfined yolo operator still passes it on.
+	strictEqual((await allowanceUnderYoloSettings("clio-ceiling-yolo-", () => "yolo")).executeAutonomy, "yolo");
+});
+
 /** The JSON document production dispatch writes for a default coder run. */
 async function sealedCoderSpec(prefix: string) {
 	const env = await isolateClioEnv(prefix);

@@ -719,7 +719,8 @@ export interface DispatchBundleOptions {
 	/**
 	 * The operator's live autonomy level, an ACP session's mode included. Worker
 	 * permits, ask routing and the never-wait rule of contained yolo read it;
-	 * absent or undefined, they read `safety.autonomy` from the settings.
+	 * absent or undefined, they read default: it is the ceiling on every worker
+	 * this process dispatches, and `safety.autonomy` in settings is not a grant.
 	 */
 	operatorAutonomy?(): AutonomyLevel | undefined;
 	workerAskJudge?: {
@@ -3697,9 +3698,12 @@ export function createDispatchBundle(
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 	// The settings with the operator's live level in place of the configured one,
 	// for the autonomy reads alone: an ACP session's mode can differ from settings.
+	// The live level is the dispatch ceiling. A dispatcher with no live source (a
+	// headless fleet, bootstrap or wiki run) was never granted yolo, so it reads
+	// default; settings.yaml alone never lifts a worker above its dispatcher.
 	const withLiveAutonomy = <S extends EffectiveSettings | undefined | null>(settings: S): S => {
-		const live = options?.operatorAutonomy?.();
-		if (!settings || live === undefined || live === settings.safety.autonomy) return settings;
+		const live = options?.operatorAutonomy?.() ?? "default";
+		if (!settings || live === settings.safety.autonomy) return settings;
 		return { ...settings, safety: { ...settings.safety, autonomy: live } } as S;
 	};
 
