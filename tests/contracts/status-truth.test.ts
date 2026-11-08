@@ -771,7 +771,7 @@ test("a stated wait is sat out whole in attended mode, past maxDelayMs and witho
 	strictEqual(sent, 5);
 	strictEqual(last?.phase, "recovered");
 	strictEqual(last?.attempt, 5);
-	strictEqual(state.turnStop, null);
+	strictEqual(state.continuation.stop, null);
 });
 
 test("stated waits that add up past the hour stop before the wait that would cross it, with no partial wait", async (c) => {
@@ -781,7 +781,7 @@ test("stated waits that add up past the hour stop before the wait that would cro
 	strictEqual(last?.phase, "exhausted");
 	strictEqual(last?.waitBudgetMs, RATE_LIMIT_WAIT_BUDGET_MS);
 	strictEqual(last?.waitedMs, 2_400_000);
-	strictEqual(state.turnStop?.cause, "wait_past_budget");
+	strictEqual(state.continuation.stop?.cause, "wait_past_budget");
 	match(
 		formatRetryStatus(last as RetryStatusPayload),
 		/stopped without retrying: provider asked to wait 40m after waiting 40m/u,

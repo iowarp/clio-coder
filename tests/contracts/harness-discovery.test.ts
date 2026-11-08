@@ -178,14 +178,14 @@ describe("coordinator discovery and dependency composition", () => {
 			const reminder = middleware.flushPendingReminders();
 			match(reminder, /Check solver/u);
 			strictEqual(reminder.includes("batch finished"), false);
-			strictEqual(state.pendingRequestContinuation, true);
+			strictEqual(state.continuation.requested, true);
 			// Scope changes cannot be defeated by retaining a gateway schema.
 			state.currentTurnConstraints = { allowedTools: ["read"] };
-			state.pendingRequestContinuation = false;
+			state.continuation.dropRequest();
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "scoped", toolName: "read" });
 			strictEqual(observed.at(-1)?.metadata?.activeCapabilityNames, "read");
 			strictEqual(middleware.flushPendingReminders(), "");
-			strictEqual(state.pendingRequestContinuation, false);
+			strictEqual(state.continuation.requested, false);
 			state.currentTurnConstraints = undefined;
 			runtime.agent.state.tools = [];
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "no-tools", toolName: "read" });

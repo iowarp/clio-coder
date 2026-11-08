@@ -332,8 +332,9 @@ function finishGateTurn(contained: boolean) {
 		recordDecision: (input) => audits.push(input),
 	});
 	const state = createTurnState("off");
-	// Another producer already spent the one nudge this prompt shares.
-	state.stalledTurnNudgeSpent = true;
+	// Another producer already spent the one nudge this prompt shares, and its resubmit went out.
+	state.continuation.request();
+	state.continuation.takeRequest();
 	const footer: string[] = [];
 	const nudges: string[] = [];
 	const middleware = createTurnMiddleware({
@@ -365,13 +366,13 @@ function finishGateTurn(contained: boolean) {
 test("contained yolo's finish gate keeps its own nudge and records an exhausted check as unverified", async () => {
 	const turn = finishGateTurn(true);
 	await turn.finish();
-	strictEqual(turn.state.pendingRequestContinuation, true);
-	strictEqual(turn.state.verificationNudgeSpent, true);
+	strictEqual(turn.state.continuation.requested, true);
+	strictEqual(turn.state.continuation.verificationNudgeSpent, true);
 	// batch8: an operator who said "no need to run anything" gets an unverified change, not a limitation's exit 1.
 	ok(turn.nudges[0]?.endsWith(CONTAINED_YOLO_CHECK_WAIVER));
-	turn.state.pendingRequestContinuation = false;
+	turn.state.continuation.takeRequest();
 	await turn.finish();
-	strictEqual(turn.state.pendingRequestContinuation, false);
+	strictEqual(turn.state.continuation.requested, false);
 	strictEqual(turn.footer.at(-1), "nudge.verification.spent");
 	deepStrictEqual(
 		turn.audits.map((audit) => [audit.decision, audit.rigor]),
@@ -383,6 +384,6 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 
 	const attended = finishGateTurn(false);
 	await attended.finish();
-	strictEqual(attended.state.pendingRequestContinuation, false);
-	strictEqual(attended.state.verificationNudgeSpent, false);
+	strictEqual(attended.state.continuation.requested, false);
+	strictEqual(attended.state.continuation.verificationNudgeSpent, false);
 });

@@ -95,7 +95,7 @@ describe("rate limit ladder at yolo (#445)", () => {
 		);
 		ok(continues > DEFAULT_RETRY_SETTINGS.maxRetries);
 		strictEqual(phases.at(-1), "exhausted");
-		strictEqual(state.turnStop?.cause, "retries_exhausted");
+		strictEqual(state.continuation.stop?.cause, "retries_exhausted");
 	});
 
 	it("waits the provider's Retry-After instead of its own backoff", async (c) => {
@@ -109,7 +109,7 @@ describe("rate limit ladder at yolo (#445)", () => {
 		const { continues, delays, state } = await run(c, { yolo: true, retryAfterSeconds: 7200, failingContinues: 1000 });
 		deepStrictEqual(delays, []);
 		strictEqual(continues, 0);
-		strictEqual(state.turnStop?.cause, "wait_past_budget");
+		strictEqual(state.continuation.stop?.cause, "wait_past_budget");
 	});
 
 	it("leaves other autonomy levels on the short ladder", async (c) => {
@@ -126,7 +126,7 @@ describe("rate limit ladder at yolo (#445)", () => {
 		});
 		strictEqual(continues, 0);
 		deepStrictEqual(delays, []);
-		strictEqual(state.turnStop, null);
+		strictEqual(state.continuation.stop, null);
 	});
 
 	it("waits out a litellm rate limit only at yolo", async (c) => {
@@ -145,6 +145,6 @@ describe("rate limit ladder at yolo (#445)", () => {
 			failingContinues: 1000,
 		});
 		deepStrictEqual(delays, [2000, 4000, 8000]);
-		strictEqual(state.turnStop?.cause, "retries_exhausted");
+		strictEqual(state.continuation.stop?.cause, "retries_exhausted");
 	});
 });

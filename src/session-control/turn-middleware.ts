@@ -32,11 +32,11 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { NoticeSource } from "./notice-source.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, TurnMiddlewareState } from "./turn-state.js";
 
 export interface TurnMiddlewareDeps {
 	memoryContentGuard?: ((content?: string) => () => boolean) | undefined;
-	state: ChatTurnState;
+	state: TurnMiddlewareState;
 	middleware?: MiddlewareContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
 	session?: SessionContract | undefined;
@@ -281,8 +281,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	};
 
 	const applyRequestContinuation = (message: string, note?: string, reserved?: "verification"): void => {
-		if (reserved === "verification") {
-			if (state.verificationNudgeSpent) {
+		if (!state.continuation.request(reserved)) {
+			if (reserved === "verification") {
 				deps.emitFooterNotice(
 					"warning",
 					"the change has no validation evidence and this prompt's verification nudge is spent; it is recorded unverified",
@@ -290,16 +290,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				);
 				return;
 			}
-			state.verificationNudgeSpent = true;
-		} else if (state.stalledTurnNudgeSpent) {
 			// One continuation per user prompt, and that cap is all this branch
 			// knows. It cannot tell whether the model stalled, answered, or was
 			// carried here by a second producer entirely, so it reports the cap and
 			// leaves any claim about a stall to the watchdog that measures one.
 			deps.emitFooterNotice("warning", "turn still has open work; this turn's nudge is spent", "nudge.continuation.spent");
 			return;
-		} else state.stalledTurnNudgeSpent = true;
-		state.pendingRequestContinuation = true;
+		}
 		bufferReminder(message, "info");
 		// The nudge reaches the model as context inside the run, never as a
 		// persisted operator turn, so the ledger keeps it for inspection only.

@@ -119,7 +119,7 @@ test("empty failed and canceled turns reach memory observers without resuming fo
 			await memory.whenIdle();
 			strictEqual(rows.length > 0, true, stopReason);
 			strictEqual(calls, stopReason === "error" ? 1 : 0, stopReason);
-			strictEqual(state.pendingRequestContinuation, false);
+			strictEqual(state.continuation.requested, false);
 			strictEqual(turn.flushPendingReminders(), "");
 		} finally {
 			memory.dispose();
@@ -209,7 +209,7 @@ test("tool-batch cadence starts one detached step and delivers completed memory 
 		strictEqual(receipts.length, 1, "one middleware receipt, no fabricated operator turn");
 		strictEqual((receipts[0] as { customType: string }).customType, "middlewareReminder");
 		strictEqual(state.activeUserTurnId, "operator-turn");
-		strictEqual(state.pendingRequestContinuation, false);
+		strictEqual(state.continuation.requested, false);
 		strictEqual(finishes, 0);
 		const abort = new AbortController();
 		abort.abort();
@@ -252,8 +252,8 @@ test("paired task continuation and warning deliver one model reminder while pres
 	const message = buildOpenTasksMessage(board);
 	strictEqual(middleware.flushPendingReminders(), `<system-reminder>\n${message}\n</system-reminder>`);
 	strictEqual(middleware.flushPendingReminders(), "");
-	strictEqual(state.pendingRequestContinuation, true);
-	strictEqual(state.stalledTurnNudgeSpent, true);
+	strictEqual(state.continuation.requested, true);
+	strictEqual(state.continuation.nudgeSpent, true);
 	deepStrictEqual(notices, [message]);
 	deepStrictEqual(footer, ["nudge.continuation.sent"]);
 	strictEqual(board.tasks[0]?.status, "pending");

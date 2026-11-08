@@ -34,7 +34,7 @@ import {
 import { boundRefusedPrompt } from "./session-replay-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, StallAbortReadState, StallAbortState, TurnRecoveryState } from "./turn-state.js";
 
 export type RetryStatusPhase = "scheduled" | "waiting" | "retrying" | "moved" | "cancelled" | "exhausted" | "recovered";
 
@@ -88,7 +88,7 @@ export interface TurnRecoveryDeps {
 	auth?: ProvidersContract["auth"];
 	turnSignal?: () => AbortSignal | undefined;
 	turnIdentity?: () => unknown;
-	state: ChatTurnState;
+	state: TurnRecoveryState;
 	persistence: TurnPersistence;
 	context: TurnContext;
 	retrySettings: () => RetrySettings;
@@ -159,7 +159,7 @@ export interface TurnRecovery {
  * without emitting that event and consumes the watchdog reason in either case.
  */
 export function reclassifyStallAbort(
-	state: ChatTurnState,
+	state: StallAbortState,
 	failure: TerminalAssistantFailure,
 ): TerminalAssistantFailure {
 	const reason = state.streamStallReason;
@@ -178,7 +178,7 @@ export function reclassifyStallAbort(
 
 /** Rewrite the provider's terminal abort object before its event is emitted and persisted. */
 export function rewriteStallAbortMessage(
-	state: ChatTurnState,
+	state: StallAbortReadState,
 	message: AgentMessage,
 	reason = state.streamStallReason,
 	stage = state.streamStallStage,
@@ -402,10 +402,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
 			} catch (compactErr) {
 				if (cancelled()) return;
-				state.turnStop = {
+				state.continuation.recordStop({
 					cause: "compaction",
 					reason: compactErr instanceof Error ? compactErr.message : String(compactErr),
-				};
+				});
 				deps.emitNotice(
 					`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 				);
@@ -552,11 +552,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		const retryable = retryableFailure;
 		const recordRetriesExhausted = (errorMessage: string | null | undefined, message?: unknown): void => {
 			const retryAfterMs = failureRetryAfterMs(message, errorMessage);
-			state.turnStop = {
+			state.continuation.recordStop({
 				cause: "retries_exhausted",
 				reason: errorMessage ?? "provider retries ran out",
 				...(retryAfterMs === null ? {} : { retryAfterMs }),
-			};
+			});
 		};
 		if (!moving() && agentRuntime.runtimeId === "litellm" && !retryable(classified, initialFailure.message)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
@@ -593,11 +593,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						waitBudgetMs: RATE_LIMIT_WAIT_BUDGET_MS,
 						waitedMs: chainWaitedMs,
 					});
-					state.turnStop = {
+					state.continuation.recordStop({
 						cause: "wait_past_budget",
 						reason: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
 						retryAfterMs: statedMs,
-					};
+					});
 					return true;
 				}
 				chainAttempt += 1;
