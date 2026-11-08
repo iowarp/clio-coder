@@ -55,6 +55,10 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 		args: ["arena", leaf, "--help"],
 		usage: /clio-coder arena run --contender /,
 	})),
+	...["start", "status", "report", "list"].map((leaf) => ({
+		args: ["research", leaf, "--help"],
+		usage: new RegExp(`clio-coder research ${leaf} `),
+	})),
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {
