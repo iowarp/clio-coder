@@ -7,6 +7,7 @@ import { type SpendTotal, totalSpend } from "./budget.js";
 import { grade } from "./grader.js";
 import { listCampaignIds, readCampaign, readJournal, readSamples } from "./store.js";
 import type {
+	ResearchAgentAutonomy,
 	ResearchArchiveReason,
 	ResearchCampaign,
 	ResearchCost,
@@ -23,6 +24,8 @@ export interface ResearchIterationView {
 	commit: string | null;
 	changed: string[];
 	agent: { exitCode: number | null; sessionId: string | null; outcome: string | null; summary: string } | null;
+	/** The yolo run's audit: its pause, if any, and the calls it left for the operator. */
+	autonomy: ResearchAgentAutonomy | null;
 	cost: ResearchCost | null;
 	samples: string | null;
 	grade: ResearchGrade | null;
@@ -69,6 +72,7 @@ export function foldJournal(
 					commit: null,
 					changed: [],
 					agent: null,
+					autonomy: null,
 					cost: null,
 					samples: null,
 					grade: null,
@@ -90,6 +94,7 @@ export function foldJournal(
 					summary: event.summary,
 				};
 				view.cost = event.cost;
+				view.autonomy = event.autonomy ?? null;
 				break;
 			}
 			case "committed": {

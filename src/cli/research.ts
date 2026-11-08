@@ -7,6 +7,7 @@ import {
 	openResearchCampaign,
 	RESEARCH_DEFAULT_MIN_IMPROVEMENT,
 	RESEARCH_DEFAULT_TRIALS,
+	type ResearchAutonomy,
 	type ResearchCampaignView,
 	type ResearchDirection,
 	type ResearchRunOutcome,
@@ -16,6 +17,7 @@ import {
 	summarizeCampaign,
 } from "../domains/research/index.js";
 import { printError } from "./argv.js";
+import { containedYoloRefusal } from "./contained-yolo-gate.js";
 
 const HELP = `Usage:
   clio-coder research start --check <id> --metric <key> --direction min|max --max-iterations <N> [options]
@@ -26,7 +28,7 @@ const HELP = `Usage:
 Hill climbs an objective metric within a budget. The objective is one key of
 the JSON payload a check in .clio-coder/verifiers.yaml prints (a perf-budget
 check's wall_ms falls back to its measured duration). Each iteration runs
-Clio's own agent (clio-coder run, autonomy default, no dispatch) in a fresh
+Clio's own agent (clio-coder run, no dispatch) at --autonomy in a fresh
 worktree under .clio-coder/worktrees/ at the current best commit, measures the
 change against that commit with interleaved trials, and keeps it only when
 the median moves by at least --min-improvement and a bootstrap 95% interval
@@ -51,6 +53,7 @@ start options:
   --scope <glob>            files a change may touch; repeatable (default: any unprotected file)
   --gate <id>               check that must pass on every candidate; repeatable
   --goal <text>             extra direction for the agent
+  --autonomy default|yolo   the agent's autonomy (default: default); yolo is contained
   --max-wall-minutes <M>    campaign-wide deadline: ends the agent run, measurement or
                             gate in flight, and nothing after it is ratcheted
   --max-cost-usd <X>        hard stop on spend summed from each run's cost, passed down as run --max-cost-usd
@@ -59,6 +62,13 @@ start options:
   --target <id> --model <id>  target and model for the agent runs
   --keep                    keep every worktree after grading
   --json                    print the final status as JSON
+
+At --autonomy yolo each agent run is contained yolo inside its iteration
+worktree: the OS sandbox, the safety judge and your autonomous caps
+(safety.limits.autonomous*) stay on, and a call that would need you is refused
+back to the agent instead of waiting. Each refusal is kept as an open decision
+in the journal, and status and report list them. A run its caps or the judge
+paused is archived as agent-failed. Unconfined yolo is refused here.
 
 Unknown spend is never counted as zero: with --max-cost-usd and without
 --allow-unpriced, a run whose cost is unknown stops the campaign as
@@ -86,6 +96,7 @@ interface StartFlags {
 	scope: string[];
 	gates: string[];
 	goal?: string;
+	autonomy: ResearchAutonomy;
 	maxWallMinutes?: number;
 	maxCostUsd?: number;
 	allowUnpriced: boolean;
@@ -104,6 +115,7 @@ function parseStart(args: ReadonlyArray<string>): StartFlags | string {
 		allowUnpriced: false,
 		allowNoisy: false,
 		keep: false,
+		autonomy: "default",
 	};
 	const positive = (flag: string, raw: string, integer: boolean): number | string => {
 		const value = Number(raw);
@@ -147,8 +159,8 @@ function parseStart(args: ReadonlyArray<string>): StartFlags | string {
 					flags.model = value;
 					break;
 				case "--autonomy":
-					if (value !== "default")
-						return `research runs its agent at autonomy default only; '${value}' is refused until contained yolo exists`;
+					if (value !== "default" && value !== "yolo") return `--autonomy is default or yolo, got '${value}'`;
+					flags.autonomy = value;
 					break;
 				case "--max-iterations":
 				case "--trials":
@@ -240,6 +252,13 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 		printError(`research start: ${flags}`, HELP.split("\n")[1]);
 		return 2;
 	}
+	if (flags.autonomy === "yolo") {
+		const refusal = containedYoloRefusal("research");
+		if (refusal !== null) {
+			printError(`research start: ${refusal}`);
+			return 2;
+		}
+	}
 	let campaign: ReturnType<typeof openResearchCampaign>;
 	try {
 		campaign = openResearchCampaign({
@@ -265,6 +284,7 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 				...(flags.target !== undefined ? { target: flags.target } : {}),
 				...(flags.model !== undefined ? { model: flags.model } : {}),
 				...(flags.goal !== undefined ? { goal: flags.goal } : {}),
+				autonomy: flags.autonomy,
 			},
 		});
 	} catch (error) {
@@ -274,7 +294,9 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 	const log = (line: string): void => {
 		process.stderr.write(`research ${campaign.id}: ${line}\n`);
 	};
-	log(`opened at ${campaign.base.slice(0, 12)} on ${campaign.ref.replace("refs/heads/", "")}`);
+	log(
+		`opened at ${campaign.base.slice(0, 12)} on ${campaign.ref.replace("refs/heads/", "")}, agent autonomy ${campaign.agent.autonomy === "yolo" ? "yolo (contained)" : "default"}`,
+	);
 	const controller = new AbortController();
 	const stops = installResearchStopSignals(controller, log);
 	let outcome: ResearchRunOutcome;

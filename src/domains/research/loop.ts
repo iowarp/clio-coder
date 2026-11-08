@@ -70,6 +70,7 @@ import {
 	RESEARCH_CAMPAIGN_VERSION,
 	RESEARCH_REF_PREFIX,
 	type ResearchArchiveReason,
+	type ResearchAutonomy,
 	type ResearchBudget,
 	type ResearchCampaign,
 	type ResearchCost,
@@ -87,7 +88,8 @@ export interface OpenCampaignInput {
 	budget: ResearchBudget;
 	allowNoisy: boolean;
 	keep: boolean;
-	agent: { target?: string; model?: string; goal?: string };
+	/** Absent is `default`; `yolo` runs every iteration's agent at contained yolo. */
+	agent: { target?: string; model?: string; goal?: string; autonomy?: ResearchAutonomy };
 	seed?: number;
 	now?: Date;
 }
@@ -153,7 +155,7 @@ export function openResearchCampaign(input: OpenCampaignInput): ResearchCampaign
 		allowNoisy: input.allowNoisy,
 		keep: input.keep,
 		agent: {
-			autonomy: "default",
+			autonomy: input.agent.autonomy ?? "default",
 			...(input.agent.target !== undefined ? { target: input.agent.target } : {}),
 			...(input.agent.model !== undefined ? { model: input.agent.model } : {}),
 			...(input.agent.goal !== undefined ? { goal: input.agent.goal } : {}),
@@ -355,6 +357,8 @@ export async function runResearchCampaign(
 			const run = await deps.agent({
 				worktree,
 				prompt: iterationPrompt(campaign, iteration, readJournal(project, campaign.id).events),
+				// Campaigns written before yolo existed carry no other level.
+				autonomy: campaign.agent.autonomy === "yolo" ? "yolo" : "default",
 				...(campaign.agent.target !== undefined ? { target: campaign.agent.target } : {}),
 				...(campaign.agent.model !== undefined ? { model: campaign.agent.model } : {}),
 				...(limits.timeoutSeconds !== undefined ? { timeoutSeconds: limits.timeoutSeconds } : {}),
@@ -371,7 +375,12 @@ export async function runResearchCampaign(
 				outcome: run.outcome,
 				summary: run.summary,
 				cost: run.cost,
+				...(run.autonomy !== undefined ? { autonomy: run.autonomy } : {}),
 			});
+			if (run.autonomy !== undefined && (run.autonomy.halted !== null || run.autonomy.openDecisions.length > 0))
+				log(
+					`iteration ${iteration}: yolo ${run.autonomy.halted !== null ? `paused (${run.autonomy.halted.kind}), ` : ""}${run.autonomy.openDecisions.length + run.autonomy.openDecisionsOmitted} open decision(s)`,
+				);
 			const cleanup = (): void => {
 				if (campaign.keep) return;
 				removeResearchWorktree(root, worktree);

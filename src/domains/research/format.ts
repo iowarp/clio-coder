@@ -1,6 +1,6 @@
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import type { ResearchCampaignView } from "./report.js";
-import type { ResearchCost, ResearchDirection } from "./types.js";
+import type { ResearchAgentAutonomy, ResearchCost, ResearchDirection } from "./types.js";
 
 /**
  * One line for a grade. Given the objective, an `unchanged` verdict whose interval excludes zero is named for what
@@ -51,6 +51,17 @@ function spendText(view: ResearchCampaignView): string {
 	return spend.unknownRuns > 0 ? `${known}; ${spend.unknownRuns} run(s) had unknown spend` : known;
 }
 
+/** One clause naming a yolo run's pause and open decisions, or empty when there is nothing to say. */
+function autonomyText(audit: ResearchAgentAutonomy | null): string {
+	if (audit === null) return "";
+	const open = audit.openDecisions.length + audit.openDecisionsOmitted;
+	const parts = [
+		...(audit.halted !== null ? [`yolo paused (${audit.halted.kind})`] : []),
+		...(open > 0 ? [`${open} open decision${open === 1 ? "" : "s"}`] : []),
+	];
+	return parts.length > 0 ? `; ${parts.join(", ")}` : "";
+}
+
 export function campaignStatusLines(view: ResearchCampaignView): string[] {
 	const { campaign } = view;
 	const objective = campaign.objective;
@@ -59,6 +70,7 @@ export function campaignStatusLines(view: ResearchCampaignView): string[] {
 		`objective: ${objective.direction} ${objective.metric} from check ${objective.check}; min improvement ${pct(objective.minImprovement)}, ${objective.trials} pairs`,
 		`gates: ${campaign.gates.length > 0 ? campaign.gates.join(", ") : "none"}; scope: ${campaign.scope.length > 0 ? campaign.scope.join(", ") : "any unprotected file"}`,
 		`protected: ${campaign.protected.join(", ")}`,
+		`agent: autonomy ${campaign.agent.autonomy === "yolo" ? "yolo (contained: sandbox, safety judge and autonomous caps on; a call that needs you is refused and recorded as an open decision)" : "default"}`,
 		`branch: ${campaign.ref.replace("refs/heads/", "")} at ${view.best.slice(0, 12)} (base ${campaign.base.slice(0, 12)}, ${view.ratchets} ratchet${view.ratchets === 1 ? "" : "s"})`,
 		`budget: ${view.iterations.length}/${campaign.budget.maxIterations} iterations${campaign.budget.maxWallMinutes !== undefined ? `, ${campaign.budget.maxWallMinutes} min wall` : ""}${campaign.budget.maxCostUsd !== undefined ? `, ${renderUsdLimit(campaign.budget.maxCostUsd)} cap` : ""}; spend ${spendText(view)}`,
 	];
@@ -73,9 +85,16 @@ export function campaignStatusLines(view: ResearchCampaignView): string[] {
 				? `; gates ${iteration.gates.map((gate) => `${gate.check} ${gate.passed ? "pass" : "fail"}`).join(", ")}`
 				: "";
 		lines.push(
-			`  it-${String(iteration.iteration).padStart(4, "0")}  ${iteration.outcome}${graded}${gates}; cost ${costText(iteration.cost)}${iteration.outcome !== "ratcheted" && iteration.detail.length > 0 && iteration.grade === null ? `; ${iteration.detail}` : ""}`,
+			`  it-${String(iteration.iteration).padStart(4, "0")}  ${iteration.outcome}${graded}${gates}${autonomyText(iteration.autonomy)}; cost ${costText(iteration.cost)}${iteration.outcome !== "ratcheted" && iteration.detail.length > 0 && iteration.grade === null ? `; ${iteration.detail}` : ""}`,
 		);
 	}
+	const open = view.iterations.flatMap((iteration) =>
+		(iteration.autonomy?.openDecisions ?? []).map(
+			(decision) =>
+				`  it-${String(iteration.iteration).padStart(4, "0")}  ${decision.tool} \`${decision.command}\` (${decision.kind}${decision.rule !== undefined ? `, rule ${decision.rule}` : ""})`,
+		),
+	);
+	if (open.length > 0) lines.push("open decisions left for you:", ...open);
 	if (view.stop !== null) lines.push(`stopped: ${view.stop.reason}: ${view.stop.detail}`);
 	if (view.unreadableJournalLines > 0)
 		lines.push(`note: ${view.unreadableJournalLines} journal line(s) were unreadable`);

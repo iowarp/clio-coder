@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { installResearchStopSignals, runResearchCommand } from "../../src/cli/research.js";
+import { settingsPath } from "../../src/core/config.js";
 import {
 	appendHypotheses,
 	claimsProjectRoot,
@@ -28,12 +29,15 @@ import {
 	type AgentRunner,
 	type AgentRunResult,
 	aaIsNoisy,
+	agentRunArgv,
 	budgetStop,
+	campaignStatusLines,
 	costFromPricing,
 	describeGrade,
 	grade,
 	type ObjectiveValue,
 	openResearchCampaign,
+	parseAgentRunFrames,
 	parseJournal,
 	type ResearchCampaign,
 	recomputeCampaign,
@@ -265,7 +269,7 @@ describe("research campaign", () => {
 					"--max-iterations",
 					"1",
 					"--autonomy",
-					"yolo",
+					"bogus",
 				]),
 				2,
 			);
@@ -309,6 +313,94 @@ function openScore(repo: string, budget: ResearchCampaign["budget"], gates: stri
 		agent: {},
 	});
 }
+
+describe("research yolo", () => {
+	it("runs the agent at contained yolo, records its open decisions, and refuses unconfined yolo", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+		const campaign = openResearchCampaign({
+			cwd: repo,
+			objective: { check: "score", metric: "score", direction: "min", minImprovement: 0.05, trials: 3 },
+			gates: [],
+			scope: [],
+			budget: { maxIterations: 1, allowUnpriced: false },
+			allowNoisy: false,
+			keep: false,
+			agent: { autonomy: "yolo" },
+		});
+		strictEqual(campaign.agent.autonomy, "yolo");
+		const argv = agentRunArgv({ worktree: "/w", prompt: "p", autonomy: "yolo" });
+		strictEqual(argv[argv.indexOf("--autonomy") + 1], "yolo");
+		// The terminal frame a contained yolo `run --json --json-events terminal` writes.
+		const stream = [
+			JSON.stringify({ type: "session", id: "s1" }),
+			JSON.stringify({
+				type: "turn_end",
+				exitCode: 0,
+				outcome: "completed",
+				text: "Hypothesis: a smaller value lowers the score",
+				autonomy: {
+					confinement: "contained",
+					usage: { toolCalls: 4, activeMs: 10, tokens: 100 },
+					halted: null,
+					openDecisions: [{ seq: 3, tool: "bash", command: "git push origin main", kind: "ask", rule: "git-push" }],
+					openDecisionsOmitted: 0,
+				},
+			}),
+		].join("\n");
+		const runs: string[] = [];
+		const outcome = await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				runs.push(request.autonomy);
+				writeFileSync(join(request.worktree, "value.txt"), "50\n");
+				return parseAgentRunFrames(stream, 0, "");
+			},
+		});
+		strictEqual(outcome.reason, "max-iterations");
+		deepStrictEqual(runs, ["yolo"]);
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		strictEqual(view.iterations[0]?.outcome, "ratcheted");
+		deepStrictEqual(view.iterations[0]?.autonomy?.openDecisions, [
+			{ tool: "bash", kind: "ask", rule: "git-push", command: "git push origin main" },
+		]);
+		const lines = campaignStatusLines(view).join("\n");
+		ok(lines.includes("agent: autonomy yolo (contained"), lines);
+		ok(lines.includes("git push origin main"), lines);
+
+		writeFileSync(settingsPath(), "safety:\n  yoloConfinement: unconfined\n  yoloUnconfinedAccepted: true\n");
+		const errors: string[] = [];
+		t.mock.method(process.stderr, "write", (chunk: unknown) => {
+			errors.push(String(chunk));
+			return true;
+		});
+		const cwd = process.cwd();
+		process.chdir(repo);
+		try {
+			const args = [
+				"start",
+				"--check",
+				"score",
+				"--metric",
+				"score",
+				"--direction",
+				"min",
+				"--max-iterations",
+				"1",
+				"--autonomy",
+				"yolo",
+			];
+			strictEqual(await runResearchCommand(args), 2);
+		} finally {
+			process.chdir(cwd);
+		}
+		ok(errors.join("\n").includes("contained only"), errors.join("\n"));
+	});
+});
 
 describe("research review fixes", () => {
 	it("stops at the wall deadline inside the agent run and while measuring, and never ratchets after it", async (t) => {

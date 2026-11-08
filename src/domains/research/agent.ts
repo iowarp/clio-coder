@@ -1,16 +1,25 @@
 /**
  * PLAN+EDIT: one headless main-agent run of this same build in the iteration's worktree, through `run --json
  * --json-events terminal`. Clio's own agent both plans and edits. The run inherits the operator's environment so its
- * targets and credentials resolve as an interactive run's would; it runs at autonomy `default` with dispatch off, and
- * the campaign's remaining wall time and spend are passed down as `--timeout` and `--max-cost-usd`.
+ * targets and credentials resolve as an interactive run's would; it runs at the campaign's autonomy (`default`, or
+ * contained `yolo` with the operator's autonomous caps) with dispatch off, and the campaign's remaining wall time and
+ * spend are passed down as `--timeout` and `--max-cost-usd`. A yolo run's audit comes back on `turn_end.autonomy`.
  */
 import { spawn } from "node:child_process";
 import { costFromPricing } from "./budget.js";
-import type { ResearchCampaign, ResearchCost, ResearchJournalEvent } from "./types.js";
+import {
+	RESEARCH_OPEN_DECISION_LIMIT,
+	type ResearchAgentAutonomy,
+	type ResearchAutonomy,
+	type ResearchCampaign,
+	type ResearchCost,
+	type ResearchJournalEvent,
+} from "./types.js";
 
 export interface AgentRunRequest {
 	worktree: string;
 	prompt: string;
+	autonomy: ResearchAutonomy;
 	target?: string;
 	model?: string;
 	timeoutSeconds?: number;
@@ -25,6 +34,8 @@ export interface AgentRunResult {
 	/** The final answer text, or the error the run ended with. */
 	summary: string;
 	cost: ResearchCost;
+	/** The yolo run's audit, when it reported one. */
+	autonomy?: ResearchAgentAutonomy;
 }
 
 export type AgentRunner = (request: AgentRunRequest) => Promise<AgentRunResult>;
@@ -39,7 +50,7 @@ export function agentRunArgv(request: Omit<AgentRunRequest, "signal">): string[]
 		request.worktree,
 		"--no-delegate",
 		"--autonomy",
-		"default",
+		request.autonomy,
 		...(request.target !== undefined ? ["--target", request.target] : []),
 		...(request.model !== undefined ? ["--model", request.model] : []),
 		...(request.timeoutSeconds !== undefined ? ["--timeout", String(request.timeoutSeconds)] : []),
@@ -55,6 +66,7 @@ export function parseAgentRunFrames(stdout: string, exitCode: number | null, std
 	let text: string | null = null;
 	let error: string | null = null;
 	const costs: unknown[] = [];
+	let autonomy: ResearchAgentAutonomy | undefined;
 	for (const line of stdout.split("\n")) {
 		if (!line.startsWith("{")) continue;
 		let frame: Record<string, unknown>;
@@ -73,11 +85,49 @@ export function parseAgentRunFrames(stdout: string, exitCode: number | null, std
 			if (typeof frame.error === "string") error = frame.error;
 			if (typeof frame.outcome === "string")
 				outcome = typeof frame.outcomeDetail === "string" ? `${frame.outcome}:${frame.outcomeDetail}` : frame.outcome;
+			autonomy = readAutonomyAudit(frame.autonomy) ?? autonomy;
 		}
 	}
 	const stderrTail = stderr.trim().split("\n").slice(-3).join(" ").slice(0, 400);
 	const summary = (error ?? text ?? stderrTail).trim().slice(0, 2000);
-	return { exitCode, sessionId, outcome, summary, cost: costFromPricing(costs) };
+	return {
+		exitCode,
+		sessionId,
+		outcome,
+		summary,
+		cost: costFromPricing(costs),
+		...(autonomy !== undefined ? { autonomy } : {}),
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The parts of a `run --json` autonomy audit a campaign keeps; anything malformed reads as absent. */
+function readAutonomyAudit(value: unknown): ResearchAgentAutonomy | undefined {
+	if (!isRecord(value)) return undefined;
+	if (value.confinement !== "contained" && value.confinement !== "unconfined") return undefined;
+	const usage = isRecord(value.usage) ? value.usage : {};
+	const halted = isRecord(value.halted) && typeof value.halted.kind === "string" ? value.halted : null;
+	const decisions = (Array.isArray(value.openDecisions) ? value.openDecisions : []).filter(isRecord).map((entry) => ({
+		tool: typeof entry.tool === "string" ? entry.tool : "?",
+		kind: typeof entry.kind === "string" ? entry.kind : "?",
+		...(typeof entry.rule === "string" ? { rule: entry.rule } : {}),
+		command: typeof entry.command === "string" ? entry.command : "",
+	}));
+	const omitted = typeof value.openDecisionsOmitted === "number" ? value.openDecisionsOmitted : 0;
+	const kept = decisions.slice(-RESEARCH_OPEN_DECISION_LIMIT);
+	return {
+		confinement: value.confinement,
+		toolCalls: typeof usage.toolCalls === "number" ? usage.toolCalls : 0,
+		halted:
+			halted === null
+				? null
+				: { kind: halted.kind as string, detail: typeof halted.detail === "string" ? halted.detail : "" },
+		openDecisions: kept,
+		openDecisionsOmitted: omitted + decisions.length - kept.length,
+	};
 }
 
 /** Spawn this build's `run` for one iteration. `entry` is the CLI script; the current process's is the default. */

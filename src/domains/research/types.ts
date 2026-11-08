@@ -16,6 +16,25 @@ export const RESEARCH_COMMIT_IDENTITY = "clio-coder-research";
 
 export type ResearchDirection = "min" | "max";
 
+/** The autonomy each iteration's agent run takes; yolo runs contained, never unconfined. */
+export type ResearchAutonomy = "default" | "yolo";
+export const RESEARCH_AUTONOMIES: ReadonlyArray<ResearchAutonomy> = ["default", "yolo"];
+
+/** Open decisions an `agent-finished` event keeps; the rest are counted. */
+export const RESEARCH_OPEN_DECISION_LIMIT = 20;
+
+/**
+ * What a yolo agent run's audit (`run --json` `turn_end.autonomy`) said: whether its window paused it and the calls it
+ * refused back because they needed the operator. Commands arrive clipped and with credentials scrubbed.
+ */
+export interface ResearchAgentAutonomy {
+	confinement: "contained" | "unconfined";
+	toolCalls: number;
+	halted: { kind: string; detail: string } | null;
+	openDecisions: Array<{ tool: string; kind: string; rule?: string; command: string }>;
+	openDecisionsOmitted: number;
+}
+
 export interface ResearchObjective {
 	/** Verifier check id from `.clio-coder/verifiers.yaml`. */
 	check: string;
@@ -53,7 +72,8 @@ export interface ResearchCampaign {
 	budget: ResearchBudget;
 	allowNoisy: boolean;
 	keep: boolean;
-	agent: { target?: string; model?: string; autonomy: "default"; goal?: string };
+	/** `yolo` is always contained yolo: the run keeps default's sandbox, judge and caps and never waits for a person. */
+	agent: { target?: string; model?: string; autonomy: ResearchAutonomy; goal?: string };
 	/** Commit the campaign started from; the research branch is created here. */
 	base: string;
 	/** Full ref name of the research branch, `refs/heads/clio/research/<id>`. */
@@ -142,6 +162,8 @@ export type ResearchJournalEvent =
 			outcome: string | null;
 			summary: string;
 			cost: ResearchCost;
+			/** Present when the run was at yolo and reported its audit. */
+			autonomy?: ResearchAgentAutonomy;
 	  }
 	| { type: "committed"; at: string; iteration: number; commit: string; tree: string; changed: string[] }
 	| { type: "measured"; at: string; iteration: number; samples: string }
