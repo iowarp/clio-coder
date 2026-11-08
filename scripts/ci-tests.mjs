@@ -93,6 +93,7 @@ export const coreTests = [
 	"plugin-engine",
 	"claims-ledger",
 	"arena",
+	"research-campaign",
 	"cli-leaf-help",
 	"mux-platform-win32",
 	"keyboard-model",
