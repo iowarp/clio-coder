@@ -50,6 +50,7 @@ export const coreTests = [
 	"physical-dotdot",
 	"read-scope",
 	"session-durability",
+	"project-settings-save",
 	"state-file-lock",
 	"symlink-escape",
 	"turn-outcome-settlement",
