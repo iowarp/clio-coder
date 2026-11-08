@@ -2284,9 +2284,7 @@ export const MCP_EXECUTE_RULE_ID = "mcp-execute";
  * command says nothing about the tool call, so the call is never recognized
  * and carries the MCP trust rule rather than a bash rule.
  */
-function mcpExecutePolicy(
-	bash: ReturnType<typeof evaluateBashPolicy>,
-): ReturnType<typeof evaluateBashPolicy> {
+function mcpExecutePolicy(bash: ReturnType<typeof evaluateBashPolicy>): ReturnType<typeof evaluateBashPolicy> {
 	if (bash.policySource !== "builtin-command-allowlist") return bash;
 	return {
 		...bash,

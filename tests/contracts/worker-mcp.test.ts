@@ -444,15 +444,12 @@ describe("native worker MCP capabilities", () => {
 			notices.push(notice);
 		});
 		let spawned: WorkerSpec | undefined;
-		const bundle = makeDispatchBundle(
-			context,
-			{
-				spawnWorker: (spec) => {
-					spawned = spec;
-					throw new Error("fixture: admitted");
-				},
+		const bundle = makeDispatchBundle(context, {
+			spawnWorker: (spec) => {
+				spawned = spec;
+				throw new Error("fixture: admitted");
 			},
-		);
+		});
 		await bundle.extension.start();
 		try {
 			await rejects(
