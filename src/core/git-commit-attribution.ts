@@ -471,8 +471,12 @@ saved_ifs=$IFS
 set -f
 IFS=:
 for directory in $PATH; do
-  case "$directory" in '' | "$shim_directory") continue ;; esac
-  if [ -f "$directory/git" ] && [ -x "$directory/git" ]; then real_git=$directory/git; break; fi
+  # Skip this shim under any name (a symlink to it elsewhere on PATH) and
+  # every managed shim generation, so two shims never exec each other.
+  case "$directory" in '' | "$shim_directory" | */git-hooks/v*-shim) continue ;; esac
+  candidate=$directory/git
+  [ "$candidate" -ef "$0" ] && continue
+  if [ -f "$candidate" ] && [ -x "$candidate" ]; then real_git=$candidate; break; fi
 done
 IFS=$saved_ifs
 set +f
@@ -486,6 +490,7 @@ if [ "$${AUTHOR_MANAGED_ENV}" = '1' ] && [ "$GIT_AUTHOR_NAME" = '${CLIO_COMMIT_N
   subcommand=
   takes_value=
   message=
+  unsure=
   for argument do
     if [ -z "$subcommand" ]; then
       if [ -n "$takes_value" ]; then takes_value=; continue; fi
@@ -497,26 +502,46 @@ if [ "$${AUTHOR_MANAGED_ENV}" = '1' ] && [ "$GIT_AUTHOR_NAME" = '${CLIO_COMMIT_N
       continue
     fi
     [ "$subcommand" = commit ] || break
+    # Consume every option value, so a value spelled like -m is never read
+    # as a message flag. Anything that may start the editor or a template,
+    # or that cannot be parsed for sure, leaves the human author.
+    if [ -n "$takes_value" ]; then takes_value=; continue; fi
     case "$argument" in
       --) break ;;
-      --message | --message=* | --file | --file=*) message=1; break ;;
-      --*) ;;
+      --message=* | --file=*) message=1 ;;
+      --message | --file) message=1; takes_value=1 ;;
+      --author | --date | --cleanup | --trailer | --pathspec-from-file) takes_value=1 ;;
+      --author=* | --date=* | --cleanup=* | --trailer=* | --pathspec-from-file=* | --untracked-files=* | --gpg-sign=*) ;;
+      --template | --template=* | --reuse-message | --reuse-message=* | --reedit-message | --reedit-message=* | \
+        --fixup | --fixup=* | --squash | --squash=* | --edit) unsure=1; break ;;
+      --*=*) unsure=1; break ;;
+      --*)
+        # Git accepts unique abbreviations; one of a value-taking option is unsure.
+        for name in --message --file --author --date --cleanup --trailer --pathspec-from-file \
+          --template --reuse-message --reedit-message --fixup --squash --edit; do
+          case "$name" in "$argument"*) unsure=1; break 2 ;; esac
+        done
+        ;;
       -?*)
         cluster=\${argument#-}
         while [ -n "$cluster" ]; do
           rest=\${cluster#?}
           case "\${cluster%"$rest"}" in
-            m | F) message=1; break 2 ;;
-            C | c | t | S | u) break ;;
+            m | F) message=1; [ -n "$rest" ] || takes_value=1; break ;;
+            C | c | t | e) unsure=1; break 2 ;;
+            S | u) break ;;
+            [a-zA-Z0-9]) ;;
+            *) unsure=1; break 2 ;;
           esac
           cluster=$rest
         done
         ;;
     esac
   done
+  [ -z "$takes_value" ] || unsure=1
   case "$subcommand" in
     merge | pull | revert) ;;
-    commit) [ -n "$message" ] || unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL ${AUTHOR_MANAGED_ENV} ;;
+    commit) [ -n "$message" ] && [ -z "$unsure" ] || unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL ${AUTHOR_MANAGED_ENV} ;;
     *) unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL ${AUTHOR_MANAGED_ENV} ;;
   esac
 fi
@@ -587,7 +612,9 @@ function managedGitShimDirectory(): string {
 /**
  * `pathValue` without any managed shim directory, of this or an earlier hook
  * version. Matched by shape so stripping never resolves (and so creates) the
- * state directory.
+ * state directory. A symlink to the shim in another directory is left on
+ * PATH: that directory is the operator's and holds other programs, and the
+ * shim itself skips any candidate that is the same file, so it never loops.
  */
 function pathWithoutManagedShim(pathValue: string): string {
 	return pathValue

@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -272,6 +272,28 @@ describe("autonomous commit authorship", () => {
 			git(["add", "a.txt"]);
 			git(["stash", "-q"], env);
 			strictEqual(git(["log", "-1", "--format=%an <%ae>", "stash@{0}"]).trim(), HUMAN);
+		});
+	});
+
+	it("keeps the human author when a commit option takes -m as its value, and never loops through a shim symlink", async () => {
+		await withRepo((repo, git) => {
+			git(["commit", "-q", "--allow-empty", "-m", "init"]);
+			const env = autonomousSeam(repo);
+			writeFileSync(join(repo, "-m"), "template body\n");
+			for (const option of ["-t", "--template"]) {
+				git(["commit", "-q", "--allow-empty", option, "-m"], { ...env, GIT_EDITOR: 'printf "edited\\n" >>' });
+				strictEqual(git(["log", "-1", "--format=%an <%ae>"]).trim(), HUMAN, option);
+			}
+			const shimDirectory = (env.PATH ?? "").split(":")[0] ?? "";
+			const link = join(repo, "..", "link");
+			mkdirSync(link);
+			symlinkSync(join(shimDirectory, "git"), join(link, "git"));
+			const version = execFileSync("git", ["--version"], {
+				env: { ...env, PATH: `${link}:${env.PATH}` },
+				encoding: "utf8",
+				timeout: 10_000,
+			});
+			match(version, /^git version /u);
 		});
 	});
 
