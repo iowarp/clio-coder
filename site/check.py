@@ -323,6 +323,10 @@ for url in articles:
         errors.append(f'llms-full.txt is missing {url}')
 if re.search(r'^:::', full, re.M):
     errors.append('llms-full.txt contains an unconverted guide directive')
+for name, text in (('llms.txt', llms), ('llms-full.txt', full)):
+    prose = re.sub(r'^```.*?^```', '', text, flags=re.M | re.S)
+    if '<!--' in prose or re.search(r'<a\s', prose):
+        errors.append(f'{name} contains an unresolved template slot or HTML link')
 for path in pages:
     if re.search(r'<p>:::', (root / ('index.html' if path == '/' else path.lstrip('/'))).read_text()):
         errors.append(f'{path}: an unconverted guide directive reached the page')

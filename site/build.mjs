@@ -83,15 +83,25 @@ for (const item of articles)
 if (!social.images[social.default]) throw new Error("The default social preview is missing.");
 // Sitemap lastmod and article dateModified come from the last commit that
 // touched a page's sources. Without Git history (a deploy snapshot) they are omitted.
+// product.json counts only when its version changes, the one field page text shows.
+const productVersion = ["-G", '"version":', "--", "product.json"];
 function lastModified(files) {
+	const plain = files.filter((file) => file !== "product.json");
+	const queries = [
+		...(plain.length ? [["--", ...plain]] : []),
+		...(files.includes("product.json") ? [productVersion] : []),
+	];
 	try {
-		return (
-			execFileSync("git", ["log", "-1", "--format=%cI", "--", ...files], {
-				cwd: root,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			}).trim() || null
-		);
+		const dates = queries
+			.map((query) =>
+				execFileSync("git", ["log", "-1", "--format=%cI", ...query], {
+					cwd: root,
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "ignore"],
+				}).trim(),
+			)
+			.filter(Boolean);
+		return dates.length ? dates.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a)) : null;
 	} catch {
 		return null;
 	}
@@ -367,13 +377,22 @@ function shell(html, path, title, description, type, options) {
 		path,
 	);
 }
+// The code fence open after `line`, given the fence open before it, so
+// directive syntax shown inside a code example stays literal.
+function fence(line, open) {
+	const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+	if (!marker) return open;
+	if (!open) return marker;
+	return marker[0] === open[0] && marker.length >= open.length && line.trim() === marker ? null : open;
+}
 // The lines of the directive opened at `start`, up to its own closing `:::`.
 // A block such as steps may contain a nested directive, usually a capture.
 function directiveBody(lines, start) {
 	const inner = [];
-	for (let i = start + 1, depth = 0; i < lines.length; i++) {
-		if (/^:::\s*[a-z]+/.test(lines[i])) depth++;
-		else if (lines[i].trim() === ":::" && depth-- === 0) break;
+	for (let i = start + 1, depth = 0, code = null; i < lines.length; i++) {
+		if (!code && /^:::\s*[a-z]+/.test(lines[i])) depth++;
+		else if (!code && lines[i].trim() === ":::" && depth-- === 0) break;
+		code = fence(lines[i], code);
 		inner.push(lines[i]);
 	}
 	return inner;
@@ -389,9 +408,10 @@ function directives(markdown, render) {
 		if (buffer.join("").trim()) html += render(buffer.join("\n"));
 		buffer = [];
 	};
-	for (let i = 0; i < lines.length; i++) {
-		const open = lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
+	for (let i = 0, code = null; i < lines.length; i++) {
+		const open = !code && lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
 		if (!open) {
+			code = fence(lines[i], code);
 			buffer.push(lines[i]);
 			continue;
 		}
@@ -632,7 +652,7 @@ await writePage(
 	"Clio Coder — open-source coding agent for science and HPC",
 	product.description,
 	"WebPage",
-	{ sources: ["index.html"] },
+	{ sources: ["index.html", "product.json"] },
 );
 await writePage(
 	"/404.html",
@@ -710,6 +730,18 @@ const search = index.map(
 );
 await writeFile(join(out, "content/index.json"), `${JSON.stringify(search, null, 2)}\n`);
 
+// The files behind what a reader sees in the article body, so lastmod moves
+// when its text, a caption or diagram it shows, or the version it was written
+// for changes. Templates and registries are left out: adding a page to a
+// registry or restyling the chrome is not a change to every other article.
+function articleSources(item, markdown) {
+	return [
+		`${item.folder}/${item.source}`,
+		...(item.cover || /^:::\s*capture/m.test(markdown) ? ["content/captures.json"] : []),
+		...(/^:::\s*diagram/m.test(markdown) ? ["content/guide-diagrams.json"] : []),
+		...(item.versionScope ? [] : ["product.json"]),
+	];
+}
 const tutorialTemplate = await read("tutorial.html");
 for (const item of articles) {
 	const folder = item.folder;
@@ -768,7 +800,7 @@ for (const item of articles) {
 		item.title.includes("Clio Coder") ? item.title : `${item.title} — Clio Coder`,
 		item.description,
 		"Article",
-		{ sources: [`${folder}/${item.source}`], ...(item.cover ? { preview: item.cover } : {}) },
+		{ sources: articleSources(item, markdown), ...(item.cover ? { preview: item.cover } : {}) },
 	);
 }
 for (const collection of collections) {
@@ -812,9 +844,10 @@ const absolute = (href) => (href.startsWith("/") ? `${product.origin}${href}` : 
 function plainDirectives(markdown) {
 	const lines = markdown.split("\n");
 	const result = [];
-	for (let i = 0; i < lines.length; i++) {
-		const open = lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
+	for (let i = 0, code = null; i < lines.length; i++) {
+		const open = !code && lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
 		if (!open) {
+			code = fence(lines[i], code);
 			result.push(lines[i]);
 			continue;
 		}
@@ -857,10 +890,13 @@ function llmMarkdown(markdown, sourcePath, pageUrl) {
 		.map((part, i) =>
 			i % 2
 				? part
-				: part.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, bang, label, href, title) => {
-						const resolved = linkTarget(href, sourcePath, Boolean(bang));
-						return `${bang}[${label}](${resolved.startsWith("#") ? `${pageUrl}${resolved}` : absolute(resolved)}${title})`;
-					}),
+				: part
+						.replaceAll("<!-- source-blob -->", `${repository}/blob/${ref}`)
+						.replace(/<a href="([^"]+)">([^<]*)<\/a>/g, "[$2]($1)")
+						.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, bang, label, href, title) => {
+							const resolved = linkTarget(href, sourcePath, Boolean(bang));
+							return `${bang}[${label}](${resolved.startsWith("#") ? `${pageUrl}${resolved}` : absolute(resolved)}${title})`;
+						}),
 		)
 		.join("")
 		.trim();
