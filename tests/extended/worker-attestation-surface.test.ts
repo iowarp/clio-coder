@@ -53,3 +53,24 @@ describe("worker attestation: ledger on the signed surface", () => {
 		strictEqual(registry.get(ToolNames.Ledger), undefined);
 	});
 });
+
+/**
+ * #449: dispatch admission attaches `gateway` only where Clio runs the tool
+ * loop, so a claude-code run admitting `context` or `git` was approved without
+ * it while the worker signed it in, and every such dispatch was refused for
+ * tool surface drift before the CLI started.
+ */
+describe("worker attestation: gateway follows the runtime's tool loop", () => {
+	const admitted = [ToolNames.Read, ToolNames.Grep, ToolNames.Context, ToolNames.Git] as const;
+	const signed = (runtime: { kind: string; id: string }) =>
+		attestedToolSignature({ allowedTools: [...admitted], toolsSupported: true, agentId: "architect", runtime });
+
+	it("signs an external agent loop's admitted surface without gateway", () => {
+		strictEqual(signed({ kind: "subprocess", id: "claude-code" }), toolSignatureOf([...admitted]));
+		strictEqual(signed({ kind: "http", id: "claude-sdk" }), toolSignatureOf([...admitted]));
+	});
+
+	it("still signs gateway onto a native runtime's surface", () => {
+		strictEqual(signed({ kind: "http", id: "litellm" }), toolSignatureOf([...admitted, ToolNames.Gateway]));
+	});
+});

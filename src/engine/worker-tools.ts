@@ -9,7 +9,7 @@ import type { WorkerRecall } from "../domains/context/worker/recall.js";
  */
 
 import { workerReadOnlyTargetViolation, workerSandboxWritesNothing } from "../core/sandbox/worker-process.js";
-import type { ToolName } from "../core/tool-names.js";
+import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
 	createMiddlewareHostFromSnapshot,
 	type MiddlewareHookRegistration,
@@ -40,6 +40,7 @@ import type { McpCapabilitySource } from "../tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
+import { runtimeAttachesGateway } from "../tools/surface.js";
 import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
 
 export { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "./worker-runtime-capabilities.js";
@@ -261,6 +262,12 @@ export interface AttestedToolIdentityInput {
 	toolProfile?: ToolProfileName;
 	agentId?: string;
 	task?: string;
+	/**
+	 * The resolved runtime. Its tool loop decides whether `gateway` rides on
+	 * the surface, the same rule dispatch admission applies. Absent means a
+	 * native runtime, which attaches it.
+	 */
+	runtime?: { readonly kind: string; readonly id: string };
 }
 
 /**
@@ -293,15 +300,24 @@ export function attestedToolSignature(input: AttestedToolIdentityInput): string 
 			return resolveSafety().decisions;
 		},
 	});
+	const names = effectiveToolNames({
+		registry,
+		allowedTools: input.toolsSupported ? input.allowedTools : [],
+		includeInteractiveTools: false,
+		...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
+		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+		...(input.task !== undefined ? { task: input.task } : {}),
+	});
+	// The registry projection attaches `gateway` for any gateway-placed
+	// capability it admits. An external agent loop is never offered it, and
+	// dispatch admission leaves it off that surface, so the worker must too or
+	// every such run is refused for tool surface drift (#449).
+	const attachesGateway =
+		input.runtime === undefined ||
+		runtimeAttachesGateway(input.runtime) ||
+		input.allowedTools.includes(ToolNames.Gateway);
 	return toolSignatureOf([
-		...effectiveToolNames({
-			registry,
-			allowedTools: input.toolsSupported ? input.allowedTools : [],
-			includeInteractiveTools: false,
-			...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
-			...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-			...(input.task !== undefined ? { task: input.task } : {}),
-		}),
+		...(attachesGateway ? names : names.filter((name) => name !== ToolNames.Gateway)),
 		...(input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : []),
 	]);
 }

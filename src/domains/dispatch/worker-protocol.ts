@@ -145,6 +145,7 @@ export function approvedIdentityForSpec(spec: {
 	agentId?: string;
 	task?: string;
 	runtimeResolution?: { capabilities: { tools: boolean | null } };
+	runtime?: { kind: string; id: string };
 }): ApprovedWorkerIdentity {
 	return {
 		specVersion: spec.specVersion,
@@ -166,6 +167,7 @@ export function approvedIdentityForSpec(spec: {
 						...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 						...(spec.agentId !== undefined ? { agentId: spec.agentId } : {}),
 						...(spec.task !== undefined ? { task: spec.task } : {}),
+						...(spec.runtime !== undefined ? { runtime: spec.runtime } : {}),
 					})
 				: toolSignatureOf(spec.allowedTools),
 	};

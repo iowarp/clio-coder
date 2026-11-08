@@ -122,6 +122,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 				...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 				agentId: spec.agentId,
 				task: spec.task,
+				runtime: spec.runtime,
 			}),
 			resources: observeWorkerResourceFacts(configuredNodeLabels()),
 		},

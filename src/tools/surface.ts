@@ -146,6 +146,17 @@ export function gatewayCapabilityKind(name: string): GatewayCapabilityKind {
 }
 
 /**
+ * Whether a runtime's tool loop is Clio's own, so the `gateway` tool is
+ * attached to it. An external agent loop (a CLI subprocess, the Claude SDK)
+ * runs its own tools and never sees Clio's gateway. Dispatch admission and the
+ * worker's attested signature both read this one predicate, so the approved
+ * and the announced surfaces agree on whether `gateway` is on them (#449).
+ */
+export function runtimeAttachesGateway(runtime: { readonly kind: string; readonly id: string }): boolean {
+	return runtime.kind === "http" && runtime.id !== "claude-sdk";
+}
+
+/**
  * Add `gateway` to a capability list that names any gateway-placed capability.
  * The dispatch admission filter and the worker's `effectiveToolNames` both
  * apply this rule to the same admitted list, which is what keeps the

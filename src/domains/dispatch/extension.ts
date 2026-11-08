@@ -118,7 +118,12 @@ import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { changedCheckoutDiff, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
-import { effectiveToolCall, gatewayChainReceipts, withGatewayForCapabilities } from "../../tools/surface.js";
+import {
+	effectiveToolCall,
+	gatewayChainReceipts,
+	runtimeAttachesGateway,
+	withGatewayForCapabilities,
+} from "../../tools/surface.js";
 import type { TaskWorktreePreview } from "../../tools/task-worktree.js";
 import {
 	applyTaskWorktree,
@@ -2578,7 +2583,7 @@ function effectiveToolNames(
 		target.runtime.kind === "http" && !writeConfined && allowedTools.some(isHarnessExtensionToolName)
 			? enabledHarnessExtensionToolNames(cwd)
 			: new Set<string>();
-	const mediated = target.runtime.kind === "http" && target.runtime.id !== "claude-sdk";
+	const mediated = runtimeAttachesGateway(target.runtime);
 	const names = allowedTools.filter(
 		(tool): tool is ToolName =>
 			// Admission attested every MCP name and refused a runtime that cannot
