@@ -810,18 +810,23 @@ try {
 		);
 		await check("usage-explain");
 		await page.keyboard.press("Escape");
-		// A model's accounting splits into the sessions' own calls and the worker runs, each explained (#434 §11.3).
-		await page.locator("main .usage-model-row", { hasText: "fixture-model" }).click();
-		const audience = page.locator("main .usage-model-audience");
-		await audience.getByRole("heading", { name: "Sessions' own calls", exact: true }).waitFor();
-		const workerCalls = audience
-			.locator("div", { has: page.getByRole("heading", { name: "Worker runs", exact: true }) })
-			.locator("details.explain")
-			.first();
-		await workerCalls.locator("summary").click();
-		await workerCalls.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
-		await check("usage-audience");
-		await workerCalls.locator("summary").click();
+		// Each recorded route has a dense row whose figures explain themselves; the grouping switches to targets.
+		const usageModelRow = page
+			.getByRole("region", { name: "Recorded usage by model", exact: true })
+			.locator("tbody tr", { has: page.locator("th", { hasText: /fixture-model$/ }) });
+		const modelTokens = usageModelRow.locator("td").nth(5).locator("details.explain");
+		await modelTokens.locator("summary").click();
+		await modelTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+		await check("usage-model-row");
+		await modelTokens.locator("summary").click();
+		await page.locator("main").getByRole("button", { name: "Per target", exact: true }).click();
+		await page
+			.getByRole("region", { name: "Recorded usage by target", exact: true })
+			.locator("tbody tr", { has: page.locator("th", { hasText: /fixture/ }) })
+			.first()
+			.waitFor();
+		await check("usage-target-rows");
+		await page.locator("main").getByRole("button", { name: "Per model", exact: true }).click();
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");
