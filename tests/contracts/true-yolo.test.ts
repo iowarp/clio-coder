@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -6,13 +6,13 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
-import { scratchRootFindings } from "../../src/cli/doctor.js";
+import { scratchRootFindings, shellSandboxFinding } from "../../src/cli/doctor.js";
 import { runResearchCommand } from "../../src/cli/research.js";
 import { runClioRun } from "../../src/cli/run.js";
 import { AUTONOMY_CEILING_ENV, runBashCommand, setToolEnvAutonomy } from "../../src/core/bash-exec.js";
 import { readSettings, settingsPath } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
-import { mainSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
+import { mainSandboxPolicy, mainShellContained, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
@@ -551,6 +551,35 @@ test("doctor warns when a configured scratch root is dropped for containing the 
 	strictEqual(findings[0]?.level, "warn");
 	match(findings[0]?.detail ?? "", /contains the workspace/u);
 	deepStrictEqual(scratchRootFindings(workspace("clio-yolo-scratch-drop-elsewhere-")), []);
+});
+
+// TC-1 Q2: doctor said "yolo runs unsandboxed" while a contained yolo run on the same host wrote only inside the sandbox.
+test("doctor's shell sandbox row describes the yolo confinement a yolo run resolves to", async (t) => {
+	const home = await isolateClioEnv("clio-yolo-doctor-confinement-");
+	t.after(() => home.restore());
+	const cwd = workspace("clio-yolo-doctor-confinement-ws-");
+	const hostContains = mainShellContained("auto", sandboxAvailability());
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const cases: Array<[string, "contained" | "unconfined"]> = [
+		["  sandbox: auto\n", "contained"],
+		["  yoloConfinement: unconfined\n", "contained"],
+		["  yoloConfinement: unconfined\n  yoloUnconfinedAccepted: true\n", "unconfined"],
+	];
+	for (const [safety, expected] of cases) {
+		writeFileSync(join(home.dir, "config", "settings.yaml"), `version: 2\nsafety:\n${safety}`);
+		strictEqual(effectiveYoloConfinement(readSettings().safety), expected, safety);
+		const detail = shellSandboxFinding(cwd).detail ?? "";
+		if (expected === "unconfined") {
+			match(detail, /unconfined yolo runs unsandboxed/u, safety);
+			continue;
+		}
+		doesNotMatch(detail, /unsandboxed/u, safety);
+		match(
+			detail,
+			hostContains ? /yolo runs contained in the same sandbox/u : /contained yolo runs commands as default does/u,
+			safety,
+		);
+	}
 });
 
 /** A worker safety contract that records the operator scope each evaluation receives. */

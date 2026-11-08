@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import type { YoloConfinement } from "../../domains/safety/autonomy.js";
 import { canonicalizePath } from "../path-canonical.js";
 import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioStatePath } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
@@ -62,6 +63,25 @@ export function yoloScriptSandboxState(mode: SandboxMode, availability: SandboxA
 	if (mode !== "required") return "unsandboxed";
 	if (availability.available && availability.backend !== null && availability.executable !== null) return "sandboxed";
 	return "refused";
+}
+
+/**
+ * How the operator's yolo runs shell commands on this host. Contained yolo
+ * (the default, `effectiveYoloConfinement`) admits as default does, so its
+ * commands run wherever default's do; only unconfined yolo falls to the
+ * script sandbox state above. Doctor reads this so its row matches what a
+ * yolo run records and does (TC-1 Q2).
+ */
+type YoloShellState = "contained-sandbox" | "contained-rails" | YoloScriptSandboxState;
+
+export function yoloShellState(
+	confinement: YoloConfinement,
+	mode: SandboxMode,
+	availability: SandboxAvailability,
+): YoloShellState {
+	if (confinement === "contained")
+		return mainShellContained(mode, availability) ? "contained-sandbox" : "contained-rails";
+	return yoloScriptSandboxState(mode, availability);
 }
 
 export interface MainSandboxPolicyInput {
@@ -752,16 +772,21 @@ export function mainSandboxLine(
 	mode: SandboxMode,
 	availability: SandboxAvailability,
 	writableRoots: ReadonlyArray<string>,
+	confinement: YoloConfinement,
 	secretFiles?: { count: number; capped: boolean },
 	unixSockets: UnixSocketMode = "block",
 ): string {
-	const yolo = yoloScriptSandboxState(mode, availability);
+	const yolo = yoloShellState(confinement, mode, availability);
 	const yoloLine =
-		yolo === "sandboxed"
-			? "yolo commands run sandboxed too (safety.sandbox is required)"
-			: yolo === "refused"
-				? `yolo refuses commands: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
-				: "yolo runs unsandboxed";
+		yolo === "contained-sandbox"
+			? "yolo runs contained in the same sandbox"
+			: yolo === "contained-rails"
+				? "contained yolo runs commands as default does and refuses what would ask"
+				: yolo === "sandboxed"
+					? "unconfined yolo commands run sandboxed too (safety.sandbox is required)"
+					: yolo === "refused"
+						? `unconfined yolo refuses commands: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
+						: "unconfined yolo runs unsandboxed";
 	if (mainShellContained(mode, availability)) {
 		const warnings: string[] = [];
 		const details = [

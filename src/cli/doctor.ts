@@ -6,6 +6,7 @@ import {
 	mainSandboxPolicy,
 	mainShellContained,
 	yoloScriptSandboxState,
+	yoloShellState,
 } from "../core/sandbox/main-session.js";
 import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
 import type { SandboxMode, UnixSocketMode } from "../core/sandbox/types.js";
@@ -24,7 +25,12 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { withFrontmatterCacheReadOnly } from "../domains/resources/skills/frontmatter-cache.js";
-import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import {
+	type AutonomyLevel,
+	DEFAULT_AUTONOMY_LEVEL,
+	effectiveYoloConfinement,
+	type YoloConfinement,
+} from "../domains/safety/autonomy.js";
 import { droppedScratchRoots, effectiveScratchRoots } from "../domains/safety/scratch-roots.js";
 import {
 	describeHostCapacity,
@@ -122,9 +128,10 @@ export function scratchRootFindings(workspaceRoot: string): DoctorFinding[] {
  * main-session sandbox at autonomy default when a backend exists, and where a
  * contained call may write; and whether yolo sandboxes its commands (#419).
  */
-function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
+export function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 	const availability = sandboxAvailability();
 	const mode = configuredSandboxMode();
+	const confinement = configuredYoloConfinement();
 	const workspace = canonicalizePath(workspaceRoot) ?? workspaceRoot;
 	const scratchRoots = effectiveScratchRoots(configuredScratchRoots(), workspaceRoot);
 	const roots = mainSandboxPolicy({ workspace, scratchRoots }).writableRoots;
@@ -137,13 +144,17 @@ function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 		ok: true,
 		name: "shell sandbox",
 		level:
-			uncontained || secrets?.capped === true || socketFallback || yoloScriptSandboxState(mode, availability) === "refused"
+			uncontained ||
+			secrets?.capped === true ||
+			socketFallback ||
+			yoloShellState(confinement, mode, availability) === "refused"
 				? "warn"
 				: "ok",
 		detail: mainSandboxLine(
 			mode,
 			availability,
 			roots,
+			confinement,
 			secrets === null ? undefined : { count: secrets.masks.length, capped: secrets.capped },
 			unixSockets,
 		),
@@ -156,6 +167,16 @@ function configuredUnixSockets(): UnixSocketMode {
 	} catch {
 		// An unreadable settings file has its own doctor row; judge with the default.
 		return "block";
+	}
+}
+
+/** The confinement a yolo run here resolves to, through the same reader the runtime uses. */
+function configuredYoloConfinement(): YoloConfinement {
+	try {
+		return effectiveYoloConfinement(readSettings().safety);
+	} catch {
+		// An unreadable settings file has its own doctor row; the pin and the default still apply.
+		return effectiveYoloConfinement(undefined);
 	}
 }
 
