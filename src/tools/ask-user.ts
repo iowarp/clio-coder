@@ -145,6 +145,12 @@ export interface AskUserToolDeps {
 	 * tool schema stays the same at every level so a toggle never changes it.
 	 */
 	getAutonomy?: () => AutonomyLevel;
+	/**
+	 * True at contained yolo. An outward question is then answered no, as an
+	 * unanswered round is, because contained yolo publishes only what the
+	 * operator's own words name and the judge confirms on the call itself.
+	 */
+	containedYolo?: () => boolean;
 }
 
 export const askUserParameters: TSchema = Type.Object({
@@ -448,9 +454,9 @@ export function recommendedOptionIndex(question: Pick<AskUserQuestion, "options"
 
 /**
  * Answer every question of a round nobody is asked because the session runs
- * at yolo (#407). Each takes its recommended (first) option, an outward one
- * included, because yolo already admits the outward step itself; a free-text
- * question proceeds on the model's judgment.
+ * at unconfined yolo (#407). Each takes its recommended (first) option, an
+ * outward one included, because unconfined yolo already admits the outward
+ * step itself; a free-text question proceeds on the model's judgment.
  */
 function resolveAwayAnswers(questions: ReadonlyArray<AskUserQuestion>): AskUserAnswer[] {
 	return questions.map((question): AskUserAnswer => {
@@ -1094,7 +1100,10 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 				// reaches the surface, and Clio answers it at once the way an
 				// unanswered round is answered after the unattended window.
 				const answeredAt = new Date().toISOString();
-				const answers = resolveAwayAnswers(questions);
+				const answers =
+					deps.containedYolo?.() === true
+						? resolveUnattendedAnswers(questions, [], exposure)
+						: resolveAwayAnswers(questions);
 				policy.callCount += 1;
 				policy.askedQuestionKeys.add(key);
 				policy.answerCount += answers.length;

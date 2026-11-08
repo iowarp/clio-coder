@@ -213,7 +213,7 @@ import {
 } from "../providers/index.js";
 import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
-import type { AutonomyLevel } from "../safety/autonomy.js";
+import { type AutonomyLevel, admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
 import type { GitHookDriftGuard } from "../safety/hook-drift.js";
@@ -539,6 +539,18 @@ interface RunTokenMeter {
 /** How long after a long-lived surface asks for it route history warming begins. */
 const ROUTE_HISTORY_WARM_DELAY_MS = 1_500;
 
+/** The level a worker's permit and ask routing take from the operator's settings: contained yolo is default. */
+function operatorAdmissionAutonomy(
+	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined | null,
+): AutonomyLevel {
+	return admissionAutonomy(settings?.safety.autonomy ?? "default", effectiveYoloConfinement(settings?.safety));
+}
+
+/** Whether the operator runs contained yolo, which never waits for a person. */
+function operatorContainedYolo(settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined | null): boolean {
+	return containedYolo(settings?.safety.autonomy ?? "default", effectiveYoloConfinement(settings?.safety));
+}
+
 function meterSpend(meter: RunTokenMeter): RunUsageFacts {
 	return meter.usage?.facts ?? unobservedRunUsageFacts();
 }
@@ -699,6 +711,12 @@ export interface DispatchBundleOptions {
 	 * orchestrator. Under fleet.permissions.mode=judge it answers a native local
 	 * worker's main-authority asks in this process; without it judge runs as deny.
 	 */
+	/**
+	 * The operator's live autonomy level, an ACP session's mode included. Worker
+	 * permits, ask routing and the never-wait rule of contained yolo read it;
+	 * absent or undefined, they read `safety.autonomy` from the settings.
+	 */
+	operatorAutonomy?(): AutonomyLevel | undefined;
 	workerAskJudge?: {
 		seat(): SafetyJudgeSeat | undefined;
 		autonomy(): AutonomyLevel;
@@ -2296,10 +2314,11 @@ function resolveDispatchPermitOnce(
 		...(spec.permissions !== undefined ? { declared: spec.permissions } : {}),
 		...(req.permitNarrowing !== undefined ? { narrowing: req.permitNarrowing } : {}),
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
-		operatorAutonomy: settings?.safety.autonomy ?? "default",
+		// Contained yolo hands workers default's permit and routes (ob-yolo D1).
+		operatorAutonomy: operatorAdmissionAutonomy(settings),
 		mode: effectiveWorkerPermissionMode({
 			mode: settings?.fleet.permissions.mode ?? "deny",
-			autonomy: settings?.safety.autonomy ?? "default",
+			autonomy: operatorAdmissionAutonomy(settings),
 			judgeEnabled: settings?.safety.judge.enabled === true,
 			judgeSeated,
 			boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
@@ -3198,6 +3217,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		spec.trustProjectCompatRoots = settings.integrations.projectResources.trustProjectImports === true;
 	}
 	spec.gitCommitAttribution = settings?.integrations.git.commitAttribution ?? true;
+	spec.gitCommitAuthor = settings?.integrations.git.commitAuthor ?? "auto";
 	// This session's workers count as the owner of its dev extension folders; another session's do not.
 	spec.devRootOwner = devRootOwnerForWorkers();
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator
@@ -3656,6 +3676,13 @@ export function createDispatchBundle(
 	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
+	// The settings with the operator's live level in place of the configured one,
+	// for the autonomy reads alone: an ACP session's mode can differ from settings.
+	const withLiveAutonomy = <S extends EffectiveSettings | undefined | null>(settings: S): S => {
+		const live = options?.operatorAutonomy?.();
+		if (!settings || live === undefined || live === settings.safety.autonomy) return settings;
+		return { ...settings, safety: { ...settings.safety, autonomy: live } } as S;
+	};
 
 	const getProtectedArtifactState = (): ProtectedArtifactState =>
 		frozenProtectedArtifactState(options?.getProtectedArtifactState?.());
@@ -3704,7 +3731,10 @@ export function createDispatchBundle(
 	const active = new Map<string, ActiveRun>();
 	// Phase D: the trusted broker for worker asks routed to the main agent. It
 	// is process-local, like the workers it answers.
-	const grantAttended = options?.workerPermissionResponder === true;
+	// Contained yolo never waits for the operator, so its worker asks and
+	// operator rails are answered as unattended even where a person could be.
+	const grantAttended = (): boolean =>
+		options?.workerPermissionResponder === true && !operatorContainedYolo(withLiveAutonomy(getEffectiveSettings()));
 	// One merge card is on screen at a time. A batch can withhold several
 	// members, each waits its turn here while the members that merge cleanly
 	// have already landed.
@@ -3712,6 +3742,8 @@ export function createDispatchBundle(
 	const askWithheldMerge = async (run: ActiveRun, input: MergeCardInput): Promise<MergeCardOutcome | null> => {
 		const operator = options?.operatorAsk;
 		if (operator === undefined || !operator.available()) return null;
+		// Contained yolo never waits on a card: the merge stays withheld, its branch preserved, as headless.
+		if (operatorContainedYolo(withLiveAutonomy(getEffectiveSettings()))) return null;
 		// A run canceled before its turn never shows a card; the watch below polls
 		// once a second and would let one flash up first.
 		if (run.aborted) return null;
@@ -3844,7 +3876,7 @@ export function createDispatchBundle(
 			// An operator rail goes straight to the operator's card when this
 			// process has one; an ordinary ask waits for the main agent, whose
 			// dispatch call yields on it.
-			requested(record.approvalAuthority === "operator" && grantAttended);
+			requested(record.approvalAuthority === "operator" && grantAttended());
 			// The safety judge decides a judge-routed ask, so the main agent is not woken for it.
 			if (record.approvalAuthority === "main" && record.reviewer === undefined) {
 				const view = grantView(record);
@@ -5612,7 +5644,8 @@ export function createDispatchBundle(
 			const operator = options?.operatorAsk;
 			await ensureClaudeAgentSdk({
 				...(signal ? { signal } : {}),
-				...(operator?.available() === true
+				// Contained yolo never waits on the install question; the dispatch is refused as it is with no operator.
+				...(operator?.available() === true && !operatorContainedYolo(withLiveAutonomy(getEffectiveSettings()))
 					? {
 							confirm: async (question: string) => {
 								const result = await operator.ask(
@@ -5703,7 +5736,7 @@ export function createDispatchBundle(
 			effectiveTools,
 			readOnly,
 			pathScope,
-			settings,
+			withLiveAutonomy(settings),
 			target,
 			options?.workerAskJudge !== undefined,
 			admission.mcp,
@@ -7309,11 +7342,12 @@ export function createDispatchBundle(
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
-					workerPermissionResponder: options?.workerPermissionResponder === true,
+					workerPermissionResponder:
+						options?.workerPermissionResponder === true && !operatorContainedYolo(withLiveAutonomy(lifecycle.settings)),
 					permit: lifecycle.permit,
 					...(grantAttempt !== undefined ? { grantAttempt } : {}),
 					...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
-					mainAutonomy: lifecycle.settings?.safety.autonomy ?? "default",
+					mainAutonomy: operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)),
 					...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
 				},
 				config ?? undefined,
@@ -9929,7 +9963,7 @@ export function createDispatchBundle(
 			effectiveTools,
 			req.readOnly === true || agentSpec.capabilityClass === "read-only",
 			pathScope,
-			settings,
+			withLiveAutonomy(settings),
 			target,
 			options?.workerAskJudge !== undefined,
 			admission.mcp,
@@ -10903,7 +10937,7 @@ export function createDispatchBundle(
 			// Changed git hooks are the operator's call: attended, the request
 			// reaches the operator's card and an allow accepts the files it named;
 			// with nobody to ask it is denied.
-			if (!grantAttended) {
+			if (!grantAttended()) {
 				grantBroker.decide(record.requestId, { decision: "deny", issuer: "main", reason: verdict.reason });
 				return;
 			}
@@ -10985,7 +11019,7 @@ export function createDispatchBundle(
 		const verdict = evaluateMainGrant({
 			record,
 			autonomy: input.autonomy,
-			attended: grantAttended,
+			attended: grantAttended(),
 			safety,
 			...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 		});

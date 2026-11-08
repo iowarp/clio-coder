@@ -116,6 +116,8 @@ export interface EditorChrome {
 	getOutputStyle?: () => OutputStyle;
 	/** Effective session autonomy, including live overrides. */
 	getAutonomy?: () => string;
+	/** The operator's yolo confinement; the rail marks unconfined yolo. */
+	getYoloConfinement?: () => string;
 	/** Monotonic animation clock, injectable for deterministic rendering tests. */
 	getAnimationTime?: () => number;
 	/** Optional motion override; terminal accessibility preferences always apply. */
@@ -734,7 +736,7 @@ export class ClioEditor extends Editor {
 		labelRoom = this.railLabelRoom(width),
 	): string {
 		const left = rail.yolo
-			? `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${theme.style("yoloLabel", "YOLO", { bold: true })}`
+			? `${theme.fg(rail.tone ?? "composerRail", GLYPH.laneRule)} ${theme.style("yoloLabel", this.chrome.getYoloConfinement?.() === "unconfined" ? "YOLO!" : "YOLO", { bold: true })}`
 			: "";
 		const room = Math.max(0, labelRoom - (left ? visibleWidth(left) + 1 : 0));
 		const fitted = Math.max(0, room - visibleWidth(suffix) - (label && suffix ? 3 : 0));

@@ -7,6 +7,7 @@ import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
+import { effectiveYoloConfinement } from "../../domains/safety/autonomy.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -53,6 +54,7 @@ export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	return out.slice(0, 5);
 }
 
+import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import type { AgentWorkFacts, ContextEngineFacts, SessionFacts, ToolTallySnapshot, WorkspaceFacts } from "./widgets.js";
 import { fitDashboardLine, formatToolTally } from "./widgets.js";
 
@@ -115,6 +117,8 @@ export interface FooterDashboardDeps {
 	/** Skills whose tool surface is armed across turns; the compact line names them. */
 	getActiveEggs?: () => readonly string[];
 	getActiveSkillSurface?: () => ReadonlyArray<string>;
+	/** The autonomous window at yolo; null below it. */
+	getAutonomyStatus?: () => AutonomyStatus | null;
 	dismissKeyLabel?: string;
 	now?: () => number;
 	resolveCurrentBranch?: (cwd: string) => Promise<string | null>;
@@ -286,6 +290,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const contextUsage = deps.getContextUsage?.();
 		const contextLedger = deps.getContextLedger?.() ?? null;
 		const settings = deps.getSettings?.();
+		const autonomyWindow = deps.getAutonomyStatus?.() ?? null;
 		const taskMemory = deps.getTaskMemoryStatus?.() ?? null;
 		const contextState = deps.getContextState?.() ?? null;
 		const keyContext = deps.getKeyContext?.();
@@ -317,6 +322,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				name: deps.getSessionInfo?.().name ?? null,
 				target,
 				autonomy: settings?.safety.autonomy ?? "default",
+				yoloConfinement: effectiveYoloConfinement(settings?.safety),
+				...(autonomyWindow ? { autonomyWindow } : {}),
 				targetId: settings?.chat?.target ?? null,
 				modelId: settings?.chat?.model ?? null,
 				leaderArmed: deps.getLeaderArmed?.() ?? false,

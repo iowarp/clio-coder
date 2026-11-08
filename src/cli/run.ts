@@ -5,6 +5,7 @@ import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
+import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
 import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
@@ -86,7 +87,8 @@ Flags:
                             implies --json; refused with --agent
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
-  --continue                append this turn to the most recent session for this cwd
+  --continue                append this turn to the most recent session for this cwd; after a yolo
+                            autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
@@ -404,6 +406,8 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
+	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
+	setAutonomousCommitProcess(true);
 	return withRunFailureReporting(parsed.json, async () => {
 		try {
 			return await executeRunCommand(parsed, options);

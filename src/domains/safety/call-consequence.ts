@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
@@ -8,6 +8,7 @@ import { autonomyCallInputs } from "./autonomy-inputs.js";
 import { describeBashCallConsequences, type PathKind } from "./command-consequence.js";
 import { outwardShellReason } from "./containment.js";
 import type { SafetyDecision } from "./contract.js";
+import { shellCommandSteps } from "./protected-artifacts.js";
 
 /** What exists at `path` once resolved against `cwd`; null when it does not, or cannot be read. */
 function pathKindIn(cwd: string): (path: string) => PathKind {
@@ -39,6 +40,59 @@ export function describeMainCallConsequences(call: ClassifierCall): string[] {
 	// A step the sandbox refuses as outward says why, so a card titled outward names what reaches out.
 	const outward = shellOutwardReason(call);
 	return outward === null ? [] : [outward];
+}
+
+const PACKAGE_RUNNERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+const NPM_SCRIPT_ALIASES: Readonly<Record<string, string>> = {
+	t: "test",
+	tst: "test",
+	test: "test",
+	start: "start",
+	stop: "stop",
+	restart: "restart",
+};
+
+/**
+ * The package.json script bodies a shell call runs through npm, pnpm, yarn or
+ * bun, one line per script with its pre and post hooks. `npm run release` names
+ * a script, not what it does, so the judge reads the body that executes and
+ * judges that against the operator's words. Empty when no step runs a script
+ * the manifest defines; a manifest that cannot be read says so.
+ */
+export function projectScriptConsequences(call: ClassifierCall): string[] {
+	if (call.tool !== ToolNames.Bash && call.tool !== ToolNames.RunScript) return [];
+	const command = call.args?.command;
+	if (typeof command !== "string") return [];
+	const names: string[] = [];
+	for (const step of shellCommandSteps(command)) {
+		if (!PACKAGE_RUNNERS.has(step.executable)) continue;
+		const words = step.args.filter((word) => !word.startsWith("-"));
+		const verb = words[0];
+		if (verb === undefined) continue;
+		const name =
+			verb === "run" || verb === "run-script" ? words[1] : step.executable === "npm" ? NPM_SCRIPT_ALIASES[verb] : verb;
+		if (name !== undefined && !names.includes(name)) names.push(name);
+	}
+	if (names.length === 0) return [];
+	const cwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : process.cwd();
+	let scripts: Record<string, unknown> | undefined;
+	try {
+		const manifest = JSON.parse(readFileSync(resolve(process.cwd(), cwd, "package.json"), "utf8")) as {
+			scripts?: Record<string, unknown>;
+		};
+		scripts = manifest.scripts;
+	} catch {
+		return ["package.json could not be read, so the project script this runs is unknown repository code"];
+	}
+	const lines: string[] = [];
+	for (const name of names.slice(0, 4)) {
+		if (typeof scripts?.[name] !== "string") continue;
+		const bodies = [`pre${name}`, name, `post${name}`].flatMap((key) =>
+			typeof scripts?.[key] === "string" ? [`${key}: ${scripts[key]}`] : [],
+		);
+		lines.push(`runs package.json script "${name}", repository data that executes as written: ${bodies.join("; ")}`);
+	}
+	return lines;
 }
 
 /**

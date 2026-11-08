@@ -25,6 +25,7 @@ export type Rigor = "normal" | "high";
 /** Why rigor settled where it did, so a caller can print the reason. */
 export type RigorSource =
 	| "override"
+	| "contained-yolo"
 	| "validation-contract"
 	| "quality-policy"
 	| "invalid-quality-policy"
@@ -44,6 +45,8 @@ export interface RigorResolution {
 export interface RigorOptions {
 	cwd?: string;
 	override?: Rigor | null;
+	/** Contained yolo: nobody checks the work before it is reported, so rigor is high unless overridden. */
+	containedYolo?: boolean;
 }
 
 /**
@@ -55,6 +58,15 @@ export function rigorResolution(options: RigorOptions): RigorResolution {
 	if (options.override === "high" || options.override === "normal") {
 		return { rigor: options.override, source: "override" };
 	}
+	const resolution = repositoryRigor(options);
+	if (options.containedYolo !== true || resolution.rigor === "high") return resolution;
+	const raised: RigorResolution = { rigor: "high", source: "contained-yolo" };
+	if (resolution.diagnostic !== undefined) raised.diagnostic = resolution.diagnostic;
+	if (resolution.contractPath !== undefined) raised.contractPath = resolution.contractPath;
+	return raised;
+}
+
+function repositoryRigor(options: RigorOptions): RigorResolution {
 	const cwd = options.cwd ?? process.cwd();
 	const quality = loadQualityPolicy(cwd);
 	if (quality.ok && quality.policy !== null)

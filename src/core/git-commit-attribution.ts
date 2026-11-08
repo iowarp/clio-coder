@@ -13,11 +13,15 @@ import {
 import { join, resolve } from "node:path";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import {
+	CLIO_COMMIT_EMAIL,
+	CLIO_COMMIT_NAME,
 	CLIO_COMMIT_TRAILERS,
 	CLIO_DECISION_TRAILER_KEY,
 	type CommitAttributionEvidence,
 	decisionTrailerRefs,
+	humanCoAuthorTrailer,
 } from "./commit-attribution.js";
+import type { GitCommitAuthorSetting } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
 import { internalGitArgv } from "./internal-git.js";
 import { clioStateDir } from "./xdg.js";
@@ -28,10 +32,14 @@ const ASSISTED_ENV = "CLIO_CODER_COMMIT_ASSISTED";
 const AUTHORED_ENV = "CLIO_CODER_COMMIT_AUTHORED";
 /** Space-separated decision refs the spawn was made under; each becomes one `Clio-Decision:` trailer. */
 const DECISIONS_ENV = "CLIO_CODER_COMMIT_DECISIONS";
+/** Effective `integrations.git.commitAuthor` for child-process seams. Internal state, not an operator override. */
+export const CLIO_GIT_COMMIT_AUTHOR_ENV = "CLIO_CODER_GIT_COMMIT_AUTHOR";
+/** Present iff this environment's GIT_AUTHOR_NAME/EMAIL name Clio because a Clio seam set them, not the operator. */
+const AUTHOR_MANAGED_ENV = "CLIO_CODER_GIT_AUTHOR_MANAGED";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 5;
+const MANAGED_HOOK_VERSION = 6;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -52,6 +60,7 @@ type RepositoryProbe =
 	| { kind: "default"; declaredDefaultHooksPath: string | null };
 
 const probeCache = new Map<string, { at: number; probe: RepositoryProbe }>();
+const committerCache = new Map<string, { at: number; human: string | null }>();
 let installedHooksDirectory: string | null = null;
 
 const PER_SPAWN_ENV_NAMES = [
@@ -60,6 +69,7 @@ const PER_SPAWN_ENV_NAMES = [
 	DECISIONS_ENV,
 	CONFIG_BASE_COUNT_ENV,
 	DEFAULT_HOOKS_EQUIVALENT_ENV,
+	AUTHOR_MANAGED_ENV,
 ] as const;
 
 let decisionRefsProvider: (() => ReadonlyArray<string>) | null = null;
@@ -82,10 +92,38 @@ function providedDecisionRefs(): ReadonlyArray<string> {
 	}
 }
 
+/** Who authors a commit a seam's child process makes. */
+export type GitCommitAuthor = "clio" | "human";
+
+/**
+ * Clio as the author of one commit, with the human who still commits it.
+ * Only {@link resolveClioCommitAuthorship} builds one, so the human is always
+ * resolvable when Clio authors.
+ */
+export interface ClioCommitAuthorship {
+	env: { GIT_AUTHOR_NAME: string; GIT_AUTHOR_EMAIL: string };
+	/** The human committer's `Name <email>`, credited with one `Co-authored-by:` trailer. */
+	human: string;
+}
+
 export interface ManagedCommitAttributionOptions {
 	cwd?: string;
 	enabled?: boolean;
 	evidence?: Readonly<CommitAttributionEvidence>;
+	/**
+	 * Who authors commits made under this environment. Omitted follows the
+	 * process: Clio while an autonomous process or scope is active and the
+	 * setting is `auto`, the human otherwise. Clio authors only through the
+	 * managed hook, which credits the human, so a repository the hook cannot
+	 * reach keeps the human author.
+	 */
+	author?: GitCommitAuthor;
+	/**
+	 * A seam that writes the human's trailer into the message itself (a fleet
+	 * commit step) passes the authorship it credited, and Clio authors even
+	 * where the managed hook cannot run.
+	 */
+	authorship?: ClioCommitAuthorship;
 }
 
 export interface ManagedCommitAttributionEnvironment {
@@ -109,6 +147,60 @@ export function gitCommitAttributionEnabled(source: NodeJS.ProcessEnv = process.
 	return source[CLIO_GIT_COMMITS_ENABLED_ENV] !== "0";
 }
 
+export function setGitCommitAuthorSetting(setting: GitCommitAuthorSetting): void {
+	process.env[CLIO_GIT_COMMIT_AUTHOR_ENV] = setting;
+}
+
+export function gitCommitAuthorSetting(source: NodeJS.ProcessEnv = process.env): GitCommitAuthorSetting {
+	return source[CLIO_GIT_COMMIT_AUTHOR_ENV] === "human" ? "human" : "auto";
+}
+
+/** Apply `integrations.git` to this process's commit seams. */
+export function configureGitCommitAttribution(git: {
+	commitAttribution: boolean;
+	commitAuthor: GitCommitAuthorSetting;
+}): void {
+	setGitCommitAttributionEnabled(git.commitAttribution);
+	setGitCommitAuthorSetting(git.commitAuthor);
+}
+
+let autonomousProcess = false;
+let autonomousScopes = 0;
+
+/**
+ * Mark this whole process as autonomous: a dispatched worker or a headless
+ * `clio-coder run`. Interactive TUI, GUI and ACP sessions never are, at any
+ * autonomy level. Process state, so a child process decides for itself.
+ */
+export function setAutonomousCommitProcess(autonomous: boolean): void {
+	autonomousProcess = autonomous;
+}
+
+/**
+ * Open an autonomous scope inside an interactive process, such as a scheduled
+ * job's machine turn. Main-conversation turns are serial, so the scope covers
+ * exactly that turn's tool calls. The returned release is idempotent.
+ */
+export function enterAutonomousCommitScope(): () => void {
+	autonomousScopes += 1;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		autonomousScopes = Math.max(0, autonomousScopes - 1);
+	};
+}
+
+/** Who authors commits a seam spawns now: Clio for autonomous work under `auto`, else the human. */
+function autonomousCommitAuthor(source: NodeJS.ProcessEnv = process.env): GitCommitAuthor {
+	return (autonomousProcess || autonomousScopes > 0) && gitCommitAuthorSetting(source) === "auto" ? "clio" : "human";
+}
+
+/** Whether `env` names an author the operator or the command chose, which always wins over Clio. */
+function hasChosenAuthor(env: NodeJS.ProcessEnv): boolean {
+	return (env.GIT_AUTHOR_NAME ?? "").length > 0 || (env.GIT_AUTHOR_EMAIL ?? "").length > 0;
+}
+
 function boundedDiagnostic(message: string): string {
 	const folded = message.replace(/\s+/gu, " ").trim();
 	return folded.length <= DIAGNOSTIC_MAX_CHARS ? folded : `${folded.slice(0, DIAGNOSTIC_MAX_CHARS - 3)}...`;
@@ -130,6 +222,12 @@ function withoutManagedGitConfig(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 		}
 		if (base === 0) Reflect.deleteProperty(env, "GIT_CONFIG_COUNT");
 		else env.GIT_CONFIG_COUNT = String(base);
+	}
+	// Only the author a Clio seam set is Clio's to remove; one the operator or
+	// the model set afterwards is theirs and stays.
+	if (env[AUTHOR_MANAGED_ENV] === "1") {
+		if (env.GIT_AUTHOR_NAME === CLIO_COMMIT_NAME) Reflect.deleteProperty(env, "GIT_AUTHOR_NAME");
+		if (env.GIT_AUTHOR_EMAIL === CLIO_COMMIT_EMAIL) Reflect.deleteProperty(env, "GIT_AUTHOR_EMAIL");
 	}
 	for (const name of PER_SPAWN_ENV_NAMES) Reflect.deleteProperty(env, name);
 	return env;
@@ -184,7 +282,9 @@ const MANAGED_HOOK_NAMES = [
  * One script serves every hook name. It restores the Git configuration the
  * command would have had without Clio, chains the repository's own hook of the
  * same name with the original exit status, and, for prepare-commit-msg only,
- * appends the assistance and authorship trailers this spawn was given.
+ * appends the assistance and authorship trailers this spawn was given. When
+ * the commit's resolved author is Clio (an autonomous commit), it instead
+ * credits the human committer with one `Co-authored-by:` trailer.
  *
  * Testing, review, and receipt trailers never cross the environment. The fleet
  * seam writes them into the message in process from coordinator-owned facts;
@@ -279,10 +379,27 @@ append_trailer() {
     printf '%s\\n' '[clio-coder:attribution] git interpret-trailers failed; commit left as written' >&2
 }
 
-if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
-  append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
+# git commit exports the author it resolved, so --author and an amended
+# commit's author are seen here; git merge inherits it from the environment.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+author_email=$(lower "$GIT_AUTHOR_EMAIL")
+if [ "$author_email" = '${CLIO_COMMIT_EMAIL.toLowerCase()}' ]; then
+  # Clio authored this commit: its own Assisted-by and Co-authored-by would be
+  # redundant, and the human committer is credited instead. An unconfigured
+  # identity is never guessed into a trailer.
+  human=$(git -c user.useConfigOnly=true var GIT_COMMITTER_IDENT 2>/dev/null |
+    sed 's/ [0-9][0-9]* [-+][0-9][0-9]*$//')
+  human_email=$(lower "$(printf '%s' "$human" | sed -n 's/^.*<\\([^<>]*\\)>$/\\1/p')")
+  case "$human_email" in
+    '' | '${CLIO_COMMIT_EMAIL.toLowerCase()}' | 'clio-coder@iowarp.ai') ;;
+    *) append_trailer "Co-authored-by: $human" ;;
+  esac
+else
+  if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
+    append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
+  fi
+  if [ "$${AUTHORED_ENV}" = '1' ]; then append_trailer '${CLIO_COMMIT_TRAILERS.coAuthored}'; fi
 fi
-if [ "$${AUTHORED_ENV}" = '1' ]; then append_trailer '${CLIO_COMMIT_TRAILERS.coAuthored}'; fi
 # Decision refs are validated again here: only <id>/<key> shapes become
 # trailers, so a stray value cannot inject a second line into the message.
 for decision_ref in $${DECISIONS_ENV}; do
@@ -371,6 +488,67 @@ function probeRepository(cwd: string, env: NodeJS.ProcessEnv, now = Date.now()):
 	return probe;
 }
 
+function committerIdentUncached(cwd: string, env: NodeJS.ProcessEnv): string | null {
+	// Only an identity the operator configured counts; a guessed user@host is not a person to credit.
+	const raw = gitOutput(cwd, env, ["-c", "user.useConfigOnly=true", "var", "GIT_COMMITTER_IDENT"]);
+	if (raw === null) return null;
+	const human = raw.replace(/\s+\d+\s+[-+]\d{4}$/u, "");
+	return humanCoAuthorTrailer(human) === null ? null : human;
+}
+
+function committerIdent(cwd: string, env: NodeJS.ProcessEnv, now = Date.now()): string | null {
+	const key = `${cwd}\0${gitEnvironmentFingerprint(env)}`;
+	const cached = committerCache.get(key);
+	if (cached !== undefined && now - cached.at < PROBE_CACHE_TTL_MS && now >= cached.at) return cached.human;
+	const human = committerIdentUncached(cwd, env);
+	if (cached === undefined && committerCache.size >= PROBE_CACHE_MAX_ENTRIES) {
+		const oldest = committerCache.keys().next().value;
+		if (oldest !== undefined) committerCache.delete(oldest);
+	}
+	committerCache.delete(key);
+	committerCache.set(key, { at: now, human });
+	return human;
+}
+
+/**
+ * Clio as the author of a commit in `cwd`, or null when the human must stay
+ * the author: an author is already chosen in the environment, or no
+ * configured committer identity resolves (Clio never drops the human), or
+ * the committer is Clio itself. Does not consult the setting or the process
+ * mode; see {@link autonomousLandAuthorship}.
+ */
+export function resolveClioCommitAuthorship(
+	cwd: string,
+	source: NodeJS.ProcessEnv = process.env,
+): ClioCommitAuthorship | null {
+	const env = withoutManagedGitConfig(source);
+	if (hasChosenAuthor(env)) return null;
+	const human = committerIdent(resolve(cwd), env);
+	if (human === null) return null;
+	return { env: { GIT_AUTHOR_NAME: CLIO_COMMIT_NAME, GIT_AUTHOR_EMAIL: CLIO_COMMIT_EMAIL }, human };
+}
+
+/**
+ * Authorship for a commit Clio makes in process when it lands dispatched work
+ * (task worktree commits and merges, `fleet land`). Those commits are
+ * autonomous wherever the host runs, so only attribution being enabled and
+ * the setting being `auto` are consulted.
+ */
+export function autonomousLandAuthorship(
+	cwd: string,
+	source: NodeJS.ProcessEnv = process.env,
+): ClioCommitAuthorship | null {
+	if (!gitCommitAttributionEnabled(source) || gitCommitAuthorSetting(source) !== "auto") return null;
+	return resolveClioCommitAuthorship(cwd, source);
+}
+
+function applyClioAuthor(env: NodeJS.ProcessEnv, authorship: ClioCommitAuthorship): void {
+	if (hasChosenAuthor(env)) return;
+	env.GIT_AUTHOR_NAME = authorship.env.GIT_AUTHOR_NAME;
+	env.GIT_AUTHOR_EMAIL = authorship.env.GIT_AUTHOR_EMAIL;
+	env[AUTHOR_MANAGED_ENV] = "1";
+}
+
 /**
  * Build a child environment that selects Clio's managed hooks directory through
  * command-scope Git configuration. Repository and user configuration are never
@@ -396,6 +574,7 @@ export function withManagedGitCommitAttributionEnvironment(
 	env[AUTHORED_ENV] = evidence.materiallyAuthored === true ? "1" : "0";
 	const decisions = decisionTrailerRefs(evidence.decisions ?? providedDecisionRefs());
 	if (decisions.length > 0) env[DECISIONS_ENV] = decisions.join(" ");
+	if (options.authorship !== undefined) applyClioAuthor(env, options.authorship);
 
 	const countRaw = env.GIT_CONFIG_COUNT;
 	const count = countRaw === undefined ? 0 : COUNT.test(countRaw) ? Number(countRaw) : Number.NaN;
@@ -430,5 +609,9 @@ export function withManagedGitCommitAttributionEnvironment(
 	env.GIT_CONFIG_COUNT = String(count + 1);
 	env[`GIT_CONFIG_KEY_${count}`] = "core.hooksPath";
 	env[`GIT_CONFIG_VALUE_${count}`] = hooksDirectory;
+	if (options.authorship === undefined && (options.author ?? autonomousCommitAuthor(source)) === "clio") {
+		const authorship = resolveClioCommitAuthorship(cwd, env);
+		if (authorship !== null) applyClioAuthor(env, authorship);
+	}
 	return { env, diagnostic: null };
 }

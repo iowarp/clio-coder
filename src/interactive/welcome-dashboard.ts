@@ -4,6 +4,7 @@ import type { OutputStyle } from "../core/defaults.js";
 import { asciiOnly } from "../core/terminal-preferences.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
+import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import { type Component, type Keybinding, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -119,6 +120,8 @@ export interface WelcomeDashboardStats {
 	/** Null in session mode: the collapsed row prints no key hint. */
 	submitKeyLabel: string | null;
 	autonomy: string;
+	/** The operator's yolo confinement; read only at yolo, absent reads contained. */
+	yoloConfinement?: string;
 	targets: string;
 	fleet: string;
 	/** One line of connected subscription usage; null hides the row entirely. */
@@ -467,7 +470,10 @@ function gitSummary(stats: WelcomeDashboardStats): string {
 }
 
 function autonomySummary(stats: WelcomeDashboardStats): string {
-	return stats.autonomy === "yolo" ? `YOLO ${GLYPH.dot} no approval stops` : `Default ${GLYPH.dot} reviewed approvals`;
+	if (stats.autonomy !== "yolo") return `Default ${GLYPH.dot} reviewed approvals`;
+	return stats.yoloConfinement === "unconfined"
+		? `YOLO ${GLYPH.dot} UNCONFINED ${GLYPH.dot} never asks`
+		: `YOLO ${GLYPH.dot} contained ${GLYPH.dot} never waits`;
 }
 
 /** Under this height the art gives way and the brand moves into the frame title. */
@@ -738,6 +744,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.projectContext,
 		stats.projectPreload,
 		stats.autonomy,
+		stats.yoloConfinement,
 		stats.outputStyle,
 		stats.quota,
 	].join("\0");
@@ -891,6 +898,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			projectPreload: launchpad && this.context?.cwd === cwd ? this.context.preload : null,
 			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
+			yoloConfinement: effectiveYoloConfinement(settings?.safety),
 			quota:
 				launchpad && settings?.interface?.outputDetail === "detailed" ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			targets: "",
@@ -999,6 +1007,7 @@ export function createBootWelcome(
 		// Boot reserves the quota slots without making a provider read.
 		quota: null,
 		autonomy: settings.safety.autonomy,
+		yoloConfinement: effectiveYoloConfinement(settings.safety),
 		targets: "",
 		fleet: "",
 	};

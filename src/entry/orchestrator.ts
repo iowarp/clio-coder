@@ -12,7 +12,14 @@ import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
-import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
+import {
+	type ClioSettings,
+	readSettings,
+	recordYoloConfinementOnce,
+	type SettingsMutator,
+	updateSettings,
+	YOLO_CONTAINED_MIGRATION_NOTICE,
+} from "../core/config.js";
 import {
 	DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 	interfaceGuidanceEnabled,
@@ -21,7 +28,11 @@ import {
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
+import {
+	configureGitCommitAttribution,
+	setAutonomousCommitProcess,
+	setCommitDecisionRefsProvider,
+} from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { installInternalGitPolicy } from "../core/internal-git.js";
@@ -137,7 +148,7 @@ import {
 	MemoryRuntime,
 	markMemoryOffRecording,
 	memoryFlowSweepNotice,
-	memoryStatus,
+	memoryRecordStanding,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
@@ -255,6 +266,7 @@ import {
 	modelVisibleSkills,
 } from "../domains/resources/index.js";
 import { expandSubmitText } from "../domains/resources/submit-expansion.js";
+import { admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
@@ -282,7 +294,7 @@ import {
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
-import type { SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
+import { SAFETY_JUDGE_CONSECUTIVE_BLOCKS, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
@@ -404,6 +416,15 @@ export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 import { emitApproval } from "../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
+import {
+	AUTONOMOUS_CAP_REASON,
+	type AutonomyHalt,
+	autonomousCaps,
+	autonomyHaltNotice,
+	createAutonomyWindow,
+	JUDGE_STREAK_REASON,
+	settledCallTokens,
+} from "../domains/safety/autonomy-window.js";
 import {
 	actionKeyLabel,
 	detectPlatformKeybindingWarnings,
@@ -2020,6 +2041,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const { registerRunningBuild } = await import("../core/running-build.js");
 	const bootSurface = options.acp ? "acp" : options.headless ? "run" : "tui";
 	registerRunningBuild(bootSurface);
+	// Only a headless run commits autonomously; TUI and ACP sessions keep the human author at any autonomy.
+	setAutonomousCommitProcess(bootSurface === "run");
 	// Every session this boot opens names its surface in the live record (#439).
 	(await import("../domains/session/heartbeat.js")).configureSessionHeartbeat({
 		surface: bootSurface,
@@ -2203,6 +2226,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let workerAskJudgeForDispatch: {
 		seat: () => SafetyJudgeSeat;
 		autonomy: () => AutonomyLevel;
+		operatorAutonomy: () => AutonomyLevel;
 		hookDrift: () => GitHookDriftGuard;
 	} | null = null;
 
@@ -2312,6 +2336,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				workerSteering: !options.headless,
 				// Under fleet.permissions.mode=judge the main session's safety judge
 				// reviews native workers' ordinary asks in this process.
+				operatorAutonomy: () => workerAskJudgeForDispatch?.operatorAutonomy(),
 				workerAskJudge: {
 					seat: () => workerAskJudgeForDispatch?.seat(),
 					autonomy: () => workerAskJudgeForDispatch?.autonomy() ?? "default",
@@ -3164,6 +3189,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const level = activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 		return level === "yolo" && yoloRefusal !== null ? "default" : level;
 	};
+	// Contained yolo (ob-yolo D1) admits, judges and permits workers exactly as
+	// default does; only where a call would wait for a person does it differ,
+	// which `unattendedAsks` tells the registry. Prompts, auto-continuation and
+	// the footer keep the operator's level.
+	const resolveAdmissionAutonomy = (): AutonomyLevel =>
+		admissionAutonomy(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
+	const unattendedYolo = (): boolean =>
+		containedYolo(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {
@@ -3286,6 +3319,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
+	// The autonomous window (ob-yolo D6): at yolo, how far Clio runs on its own
+	// before it pauses for the operator. A halt cancels the turn and latches
+	// until the operator speaks; `chat` is built further down, and nothing
+	// halts before the first turn runs.
+	let lastAutonomyHalt: AutonomyHalt | null = null;
+	const autonomyWindow = createAutonomyWindow({
+		caps: () => autonomousCaps(resolveEffectiveAutonomy(), getCurrentSettings().safety.limits),
+		session: () => session?.current()?.id ?? null,
+		onHalt: (halt) => {
+			lastAutonomyHalt = halt;
+			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
+			chat.cancel({
+				reason: `[Clio Coder] ${autonomyHaltNotice(halt, options.headless !== undefined ? "headless" : "interactive")}`,
+				source: "autonomy",
+				auditReason: `${prefix}: ${halt.detail}`,
+			});
+		},
+	});
+	bus.subscribe("tool.settled", (_payload, context) => {
+		if (context?.agent.role === "main") autonomyWindow.toolCall();
+	});
+	bus.subscribe("call.settled", (payload, context) => {
+		if (context?.agent.role === "main") autonomyWindow.tokens(settledCallTokens(payload.usage));
+	});
 	// The safety judge reviews what autonomy default would park for the operator
 	// against the operator's own messages. Its round goes through System One's
 	// one-shot port and request admission, built further down; nothing calls the
@@ -3299,6 +3356,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
+		// Past either threshold every later review would refuse in silence, so contained yolo ends the run (D4).
+		onEscalation: (note) => {
+			if (!unattendedYolo()) return;
+			autonomyWindow.haltFor(
+				"judge",
+				note.consecutiveBlocks >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
+					? `${note.consecutiveBlocks} blocks in a row`
+					: `${note.totalBlocks} blocks this session`,
+			);
+		},
 		// `systemOne` and `chat` are built further down; nothing calls the judge before the first tool call.
 		screen: createJudgeScreen({
 			systemOne: () => systemOne,
@@ -3335,7 +3402,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		createInternalGitPolicy({
 			workspace: process.cwd(),
 			guard: hookDrift,
-			autonomy: resolveEffectiveAutonomy,
+			autonomy: resolveAdmissionAutonomy,
 			emptyHooksDir: join(clioStateDir(), "git", "no-hooks"),
 			onDrift: (record) =>
 				bus.emit("safety.internal_git_drifted", {
@@ -3356,7 +3423,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// blocks share one session's escalation counts.
 	workerAskJudgeForDispatch = {
 		seat: () => safetyJudge,
-		autonomy: resolveEffectiveAutonomy,
+		autonomy: resolveAdmissionAutonomy,
+		operatorAutonomy: resolveEffectiveAutonomy,
 		hookDrift: () => hookDrift,
 	};
 	// Sessions whose snapshot start-of-session prune has run in this process.
@@ -3367,7 +3435,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
 		// Awaited extension hooks return after the guard's own before_tool step.
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
-		autonomy: resolveEffectiveAutonomy,
+		autonomy: resolveAdmissionAutonomy,
+		unattendedAsks: unattendedYolo,
 		// Only this registry carries the operator's own scope (#419): its yolo,
 		// and its containment at default, where shell calls run in the
 		// main-session sandbox and a snapshot precedes a destructive call.
@@ -3650,6 +3719,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			yoloHeldAtBoot = true;
 		}
 	}
+	// Yolo became contained (ob-yolo D1). An operator who used yolo before
+	// hears it once: interactive after accepting yolo, headless on a yolo run.
+	if (
+		yoloRefusal === null &&
+		(interactive ? savedSafety.yoloAccepted === true : startupAutonomy === "yolo") &&
+		savedSafety.yoloConfinement !== "unconfined" &&
+		recordYoloConfinementOnce()
+	) {
+		if (interactive) initialNotices.push(YOLO_CONTAINED_MIGRATION_NOTICE);
+		else process.stderr.write(`clio-coder: ${YOLO_CONTAINED_MIGRATION_NOTICE}\n`);
+	}
 	const startupOverrides: SessionOverrides = new Map(
 		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],
 	);
@@ -3694,7 +3774,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const settings = getCurrentSettings();
 		configureGuardrails(guardrailValuesFromSettings(settings));
 		configureRunEventJournal(settings.fleet.history.journal);
-		setGitCommitAttributionEnabled(settings.integrations.git.commitAttribution);
+		configureGitCommitAttribution(settings.integrations.git);
 	};
 	const getCurrentSettings = (): ClioSettings => {
 		// AUD-3 finding 1: lazy creates and forks do not emit SessionResumed.
@@ -3813,6 +3893,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// System One: one instance for the process, fixed at startup in what it binds.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;
 	const sessionScheduling = result.getContract("scheduling");
+	sessionScheduling?.setNeverWaitForRaise?.(unattendedYolo);
 	const systemOneAdmissionDeps = {
 		providers,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
@@ -3912,6 +3993,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		attended: options.headless === undefined,
 		safety,
 		autonomy: resolveEffectiveAutonomy,
+		admissionAutonomy: resolveAdmissionAutonomy,
 		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
 		createSession: () => {
 			const settings = getCurrentSettings();
@@ -4028,9 +4110,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-		// Same effective-autonomy resolution the registry admission uses, so plan
-		// provenance and compete winner handling agree with the approval surface.
+		// ask_user and configure_clio read the operator's level; dispatch and
+		// steer read the level admission runs at, so plan provenance, compete
+		// winner handling and the main agent's grants agree with the approval
+		// surface (contained yolo reads as default there).
 		getAutonomy: resolveEffectiveAutonomy,
+		getAdmissionAutonomy: resolveAdmissionAutonomy,
 		...(interactive ? { dispatchBackground } : {}),
 		...(mux ? { competeMuxWorktrees: mux } : {}),
 		// Registered only when a pane host answered detection, so the tool is
@@ -4566,7 +4651,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return meta ? readRecentSessionEntriesForContract(meta.id) : null;
 				},
 				resolveRigor: () =>
-					resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }),
+					resolveRigor({
+						cwd: process.cwd(),
+						override: parseRigorOverride(process.env.CLIO_CODER_RIGOR),
+						containedYolo: unattendedYolo(),
+					}),
+				reserveVerificationNudge: unattendedYolo,
 				readActiveAcceptance: (window) =>
 					activeUserTaskAcceptance(userTasks.snapshot(), taskBoard.snapshot(), session.current()?.id ?? null, window),
 				recordDecision: (record) => {
@@ -4641,6 +4731,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getSettings: getCurrentSettings,
 		getAutonomy: resolveEffectiveAutonomy,
+		autonomy: {
+			halted: () => autonomyWindow.halted(),
+			operatorSpoke: () => {
+				const cleared = autonomyWindow.reopen();
+				if (cleared === null) return;
+				lastAutonomyHalt = null;
+				// Resuming after a block streak is the operator's approval to review again.
+				if (cleared.kind === "judge") safetyJudge.operatorApproved();
+			},
+			turnStarted: () => autonomyWindow.turnStarted(),
+			turnSettled: () => autonomyWindow.turnSettled(),
+			status: () => {
+				const caps = autonomyWindow.caps();
+				if (caps === null) return null;
+				return {
+					usage: autonomyWindow.usage(),
+					caps,
+					halted: autonomyWindow.halted(),
+					osSandbox: mainShellContained(getCurrentSettings().safety.sandbox, sandboxAvailability()),
+				};
+			},
+		},
 		providers,
 		middleware,
 		// The turn_start observation rides the prompt seam, so it names the line
@@ -4678,12 +4790,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemoryRecordStatuses: (ids) => {
 			try {
 				const records = new Map(readMemoryStoreSnapshot(clioDataDir()).records.map((record) => [record.id, record]));
-				return new Map(
-					ids.map((id) => {
-						const record = records.get(id);
-						return [id, record ? memoryStatus(record) : "deleted"] as const;
-					}),
-				);
+				return new Map(ids.map((id) => [id, memoryRecordStanding(records.get(id))] as const));
 			} catch {
 				// An unreadable store cannot establish a withdrawal (#423).
 				return new Map();
@@ -5802,6 +5909,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
+				autonomyHalt: () => lastAutonomyHalt,
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry
 					? {

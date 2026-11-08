@@ -46,6 +46,7 @@ import {
 } from "../domains/safety/admission.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import { mainCallExposure } from "../domains/safety/call-consequence.js";
 import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
@@ -62,7 +63,7 @@ import {
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { OperatorDefaultScope, OperatorYoloScope } from "../domains/safety/policy-engine.js";
 import { detectValidationCommand } from "../domains/safety/protected-artifacts.js";
-import type { SafetyJudgeOutcome, SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
+import { OPERATOR_NAMED_RULE, type SafetyJudgeOutcome, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import type { SessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "../domains/safety/session-code-consent.js";
 import { UNATTENDED_ALLOWED_BY } from "../domains/safety/unattended.js";
@@ -370,6 +371,15 @@ export interface RegistryDeps {
 	 * off); a read-only session's shell calls run in it at either level.
 	 */
 	containment?: () => { sandbox: boolean; snapshots: boolean; readOnlySandbox?: boolean };
+	/**
+	 * Whether nobody will answer a park, read per call: the operator's contained
+	 * yolo (ob-yolo D1). Admission and the safety judge run exactly as at
+	 * default; a call the judge neither allowed nor blocked is refused back to
+	 * the model instead of parking, and the refusal is remembered so an
+	 * identical repeat is refused at once. Only the main session's registry
+	 * wires it.
+	 */
+	unattendedAsks?: () => boolean;
 	/** The main session's id, which names a read-only run's scratch directory. */
 	currentSessionId?: () => string | undefined;
 	/**
@@ -1794,16 +1804,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		unattended = false,
 	): Extract<RegistryVerdict, { kind: "blocked" }> => {
 		const headless = reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER) || reason === NO_PARK_LISTENER_REASON;
-		const timedOut = denied && unattended;
-		if (!denied && !headless) return verdict;
+		const contained = reason === CONTAINED_YOLO_REASON;
+		const timedOut = (denied && unattended) || contained;
+		if (!denied && !headless && !contained) return verdict;
 		const refused = withDenial(
 			verdict,
 			"operator_approval",
 			headless
 				? "an operator must approve it, which a headless run cannot do: rerun interactively, or let an approved policy or autonomy level admit it."
-				: timedOut
-					? UNATTENDED_ALLOWED_BY
-					: "the operator must approve it; ask what to do instead of repeating it.",
+				: contained
+					? CONTAINED_YOLO_ALLOWED_BY
+					: timedOut
+						? UNATTENDED_ALLOWED_BY
+						: "the operator must approve it; ask what to do instead of repeating it.",
 			verdict.decision.policy?.ruleId,
 		);
 		if ((headless || timedOut) && refused.denial !== undefined) unattendedDenials.add(refused.denial);
@@ -2214,7 +2227,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const pendingJudgement = judgeParkedCall(call, outcome, options);
 		const judged = pendingJudgement instanceof Promise ? await pendingJudgement : pendingJudgement;
 		const judgedSpec = tools.get(admissionCall.tool as ToolName);
-		if (judged.kind === "allow" && judgedSpec !== undefined) {
+		const unattended = deps.principal !== "worker" && deps.unattendedAsks?.() === true;
+		// Contained yolo publishes only what the operator's own words name: an
+		// outward call the judge allowed under any other rule is refused.
+		const outwardUnnamed =
+			unattended &&
+			judged.kind === "allow" &&
+			judged.rule !== OPERATOR_NAMED_RULE &&
+			mainCallExposure(admissionCall, outcome.decision) === "outward";
+		if (judged.kind === "allow" && judgedSpec !== undefined && !outwardUnnamed) {
 			const allowed = safetyJudgeAllowedDecision(outcome.decision);
 			recordRegistryDisposition(admissionCall, allowed, "allowed", {
 				reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE,
@@ -2249,6 +2270,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
 		}
 		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
+		if (unattended) {
+			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
+			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
+				reasonCode: CONTAINED_YOLO_REASON_CODE,
+			});
+			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			return (
+				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
+				parkDenial(
+					parkAnsweredBlockedVerdict(
+						outcome.decision,
+						admissionCall.tool,
+						loopReason ?? CONTAINED_YOLO_REASON,
+						judged.kind === "park" ? judged.gateReason : outwardUnnamed ? containedOutwardReason(judged.rule) : undefined,
+					),
+					CONTAINED_YOLO_REASON,
+				)
+			);
+		}
 		// A park settles only through a listener's answer, so with no listener
 		// the promise would never resolve. Refuse the call instead, fail closed.
 		if (permissionListeners.size === 0) {
@@ -2438,7 +2478,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		},
 		async requestReadRootApproval(root, options) {
 			return withToolTelemetryContext(options ?? {}, async () => {
-				if ((deps.principal ?? "main") !== "main" || options?.signal?.aborted || permissionListeners.size === 0)
+				// Contained yolo never waits for a person, so the Scout run reports the approval it needed instead.
+				if (
+					(deps.principal ?? "main") !== "main" ||
+					options?.signal?.aborted ||
+					permissionListeners.size === 0 ||
+					deps.unattendedAsks?.() === true
+				)
 					return null;
 				const call: ClassifierCall = Object.freeze({ tool: ToolNames.Read, args: Object.freeze({ path: root }) });
 				const admission = evaluateAdmission({
@@ -2840,6 +2886,16 @@ function safetyJudgeAllowedDecision(ask: SafetyDecision): SafetyDecision {
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
 const NO_PARK_LISTENER_REASON =
 	"refused: this call needs operator confirmation and no permission listener is registered to ask for it";
+/** Audit code of a call contained yolo refused because it would have waited for the operator. */
+const CONTAINED_YOLO_REASON_CODE = "contained_yolo_unattended";
+const CONTAINED_YOLO_REASON =
+	"refused: contained yolo runs without the operator, and this call needs their decision. Do not retry it; continue with work that does not need it and name it in your report as left for the operator.";
+const CONTAINED_YOLO_ALLOWED_BY =
+	"only the operator can decide it, when they are back; contained yolo never waits for them.";
+/** Why contained yolo refused an outward call the judge allowed under a rule other than operator-named. */
+function containedOutwardReason(rule: string): string {
+	return `Clio's safety judge allowed this outward call under rule ${rule}, but contained yolo publishes only what an operator message explicitly names.`;
+}
 const PARK_ABORT_REASON = "run aborted before the operator decided";
 /** Audit and event code of an identical repeat refused from the turn's denial memory. */
 const DENIED_REPEAT_REASON_CODE = "denied_repeat";
@@ -3089,6 +3145,9 @@ function parkAnsweredBlockedVerdict(
 		if (gate !== "") detail.push(`why it needed a decision: "${gate}"`);
 		detail.push("This call was denied; no approval is pending.");
 		if (guidance !== null) detail.push(guidance);
+	} else if (reason === CONTAINED_YOLO_REASON) {
+		const gate = gateReasonText(gateReason);
+		if (gate !== "") detail.push(`why it needed the operator: "${gate}"`);
 	}
 	const blocked: SafetyDecision = {
 		kind: "block",

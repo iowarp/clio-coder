@@ -15,6 +15,7 @@ import {
 	createSafetyJudge,
 	resolveSafetyJudgeConfig,
 	type SafetyJudgeCompletion,
+	type SafetyJudgeNote,
 	type SafetyJudgeScreen,
 	type SafetyJudgeSeat,
 } from "../domains/safety/safety-judge.js";
@@ -190,6 +191,8 @@ export function createSafetyJudgeHost(deps: {
 	session: () => SessionContract | undefined;
 	safety: Pick<SafetyContract, "decisions"> | undefined;
 	screen?: SafetyJudgeScreen;
+	/** Either escalation threshold was reached; contained yolo ends its run on it (ob-yolo D4). */
+	onEscalation?: (note: SafetyJudgeNote) => void;
 }): SafetyJudgeSeat {
 	return createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
@@ -212,6 +215,7 @@ export function createSafetyJudgeHost(deps: {
 		},
 		record: (input) => deps.safety?.decisions.recordSafetyJudge?.(input),
 		note: (note) => {
+			if (note.kind === "escalation") deps.onEscalation?.(note);
 			const session = deps.session();
 			if (session === undefined || !session.current()) return;
 			session.appendEntry({

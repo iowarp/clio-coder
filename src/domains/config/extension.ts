@@ -1,7 +1,7 @@
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
+import { configureGitCommitAttribution } from "../../core/git-commit-attribution.js";
 import { formatSettingsLayerWarning } from "../../core/settings-layer-diagnostics.js";
 import {
 	readLayeredSettings,
@@ -135,7 +135,7 @@ export function createConfigBundle(
 		}
 		publishReloadFailure(null);
 		snapshot = retainSessionTargets(next);
-		setGitCommitAttributionEnabled(next.integrations.git.commitAttribution);
+		configureGitCommitAttribution(next.integrations.git);
 		if (!prev) return;
 		dispatchChange(prev, next, "file");
 	}
@@ -151,7 +151,7 @@ export function createConfigBundle(
 				if (projectWarning !== null) writeDiagnostic(projectWarning);
 				snapshot = layered.settings;
 			}
-			setGitCommitAttributionEnabled(snapshot.integrations.git.commitAttribution);
+			configureGitCommitAttribution(snapshot.integrations.git);
 			watcher = startConfigWatcher(() => onWatcherFire());
 		},
 		async stop() {
@@ -189,7 +189,7 @@ export function createConfigBundle(
 				return next;
 			});
 			snapshot = retainSessionTargets(normalized);
-			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
+			configureGitCommitAttribution(normalized.integrations.git);
 			dispatchChange(previous, normalized, source, "user");
 		},
 		updateProject(mutate, source) {
@@ -201,7 +201,7 @@ export function createConfigBundle(
 				return next;
 			});
 			snapshot = retainSessionTargets(normalized);
-			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
+			configureGitCommitAttribution(normalized.integrations.git);
 			dispatchChange(previous, normalized, source, "project");
 		},
 		onChange(kind, listener) {

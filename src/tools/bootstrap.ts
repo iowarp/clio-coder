@@ -50,6 +50,14 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	getAgentSpecs?: () => ReadonlyArray<AgentSpec>;
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	getAutonomy?: () => AutonomyLevel;
+	/**
+	 * The level admission runs at, where contained yolo reads as default.
+	 * Dispatch (plan provenance, compete winner handling) and the main agent's
+	 * grant of a worker ask follow it, so contained yolo never authorizes what
+	 * default would not. Absent reads `getAutonomy`; ask_user and
+	 * configure_clio keep the operator's level.
+	 */
+	getAdmissionAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
 	getWorkerRosters?: () => WorkerRosters;
 	/** Which optional `dispatch` schema blocks this session advertises; absent means every block. */
@@ -167,6 +175,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				...(ledger.metadata ? { metadata: { ...ledger.metadata, startupPrompt: false } } : {}),
 			});
 		}
+		const admissionAutonomy = deps.getAdmissionAutonomy ?? deps.getAutonomy;
 		// Display tail only. In a composed process the dispatch domain writes the
 		// durable journal off its own progress channel, which covers every run
 		// rather than only the ones the model dispatched through this tool, so a
@@ -183,7 +192,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.bus ? { bus: deps.bus } : {}),
 			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
 			...(deps.getAgentRoleFacts ? { getAgentRoleFacts: deps.getAgentRoleFacts } : {}),
-			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
+			...(admissionAutonomy ? { getAutonomy: admissionAutonomy } : {}),
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
 			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
 			...(deps.getDispatchSchemaComposition ? { getSchemaComposition: deps.getDispatchSchemaComposition } : {}),
@@ -217,7 +226,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				lazyTool(steerToolSurface, async () =>
 					(await import("./steer.js")).createSteerTool({
 						dispatch,
-						...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
+						...(admissionAutonomy ? { getAutonomy: admissionAutonomy } : {}),
 					}),
 				),
 				{

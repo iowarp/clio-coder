@@ -3,13 +3,14 @@ import type { ClioSettings } from "../../core/config.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
-import { describeMainCallConsequences } from "./call-consequence.js";
+import { describeMainCallConsequences, projectScriptConsequences } from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
 import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
+import { asksToLeaveSandbox, operatorMentionsSandbox } from "./sandbox-escape.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
 /**
@@ -88,7 +89,7 @@ const BLOCK_RULES: ReadonlyArray<readonly [string, string]> = [
 	["remote-code", "run code fetched from the network (such as curl piped to a shell) that the operator did not ask for"],
 ];
 
-const OPERATOR_NAMED_RULE = "operator-named";
+export const OPERATOR_NAMED_RULE = "operator-named";
 
 const ALLOW_RULES: ReadonlyArray<readonly [string, string]> = [
 	[OPERATOR_NAMED_RULE, "an action an operator message explicitly names"],
@@ -198,7 +199,7 @@ export type SafetyJudgeOutcome =
 	/** Falls back to today's operator path; `gateReason` is what the card says about why. */
 	| {
 			kind: "park";
-			cause: "escalated" | "screened" | SafetyJudgeNoVerdictCause;
+			cause: "escalated" | "screened" | "unnamed-escape" | SafetyJudgeNoVerdictCause;
 			gateReason: string;
 			build: string;
 			latencyMs: number;
@@ -364,6 +365,12 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				} catch {
 					// A consequence sentence is a feature for the judge, never a precondition.
 				}
+				try {
+					// What a named project script executes, so approving its name is not approving an unread body.
+					consequences = [...consequences, ...projectScriptConsequences(call)];
+				} catch {
+					// As above: a feature, never a precondition.
+				}
 				const system = safetyJudgeSystemPrompt(config);
 				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};
 				const operatorMessages = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
@@ -444,6 +451,14 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					after.consecutive = 0;
 					// The operator naming this action outranks what a page says: it is the one allow the judge read their words for.
 					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
+					// A sandbox escape runs as the operator, with their credentials: a repository file or
+					// the model's own reading cannot grant it, so any other allow goes to the operator.
+					// operator-named stands only when an operator message the judge read speaks of the sandbox.
+					const citedOperator = parsed.rule === OPERATOR_NAMED_RULE;
+					const unnamedEscape =
+						source === null &&
+						asksToLeaveSandbox(subject.decision) &&
+						!(citedOperator && operatorMentionsSandbox(operatorMessages));
 					record({
 						...base,
 						...prompted,
@@ -451,9 +466,21 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 						rule: parsed.rule,
 						latencyMs,
 						...(source !== null ? { screened: "parked" as const } : {}),
+						...(unnamedEscape ? { unnamedEscape: "parked" as const } : {}),
 					});
 					if (source !== null) {
 						return { kind: "park", cause: "screened", gateReason: screenedReason(source), build, latencyMs };
+					}
+					if (unnamedEscape) {
+						return {
+							kind: "park",
+							cause: "unnamed-escape",
+							gateReason: citedOperator
+								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message mentions the sandbox; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
+							build,
+							latencyMs,
+						};
 					}
 					return { kind: "allow", rule: parsed.rule, reason: parsed.reason, build, latencyMs };
 				}
@@ -609,7 +636,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 			...config.deny.map((line) => `- operator-deny: ${line}`),
 		].join("\n"),
 		["Allow:", ...bulletLines(ALLOW_RULES), ...config.allow.map((line) => `- operator-allow: ${line}`)].join("\n"),
-		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear.',
+		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear. A call with unsandboxed: true runs as the operator with their credentials and files, so allow it only as operator-named, and only when an operator message asks to run it outside the sandbox.',
 		[
 			"Reach ladder, lowest rung first. Calls on the first two rungs usually serve the task; calls on the last two need an operator message that names them unless an allow rule covers them.",
 			...TOOL_CALL_RUNGS.map((rung) => `- ${rung.label}: ${rung.criteria}`),
@@ -617,7 +644,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 		...(config.environment.length > 0
 			? [["The operator's environment, in their own words:", ...config.environment.map((line) => `- ${line}`)].join("\n")]
 			: []),
-		'Answer with exactly one JSON object and no other text: {"verdict":"allow" or "block","rule":"<one category name from above>","reason":"<one plain sentence naming what the call would do and why it is or is not authorized>"}',
+		'Answer with exactly one JSON object and no other text: {"verdict":"allow" or "block","rule":"<one category name from above: for an allow, the allow rule that covers the call, operator-named when an operator message names the action>","reason":"<one plain sentence naming what the call would do and why it is or is not authorized>"}',
 	];
 	return sections.join("\n\n");
 }
