@@ -34,7 +34,8 @@ installing.
   scratch directory. Jobs run from the server's working directory and write
   `logs/slurm_output/` there. Without `cwd`, a user entry runs in Clio's config
   directory, and the job logs land in it. Submitting and cancelling ask at
-  `default`, and a headless run at `default` denies them.
+  `default`, where the safety judge reviews them against the operator's
+  messages, and a headless run denies what the judge does not allow.
 - **ChronoLog.** Declare ChronoLog's MCP server in the same user file, with
   its connection settings in `env` and per-tool `toolActionClasses`;
   `hpc-chronolog` shows both entries. The released line is ChronoLog 3.x
