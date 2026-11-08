@@ -353,7 +353,7 @@ export const routes = {
 		params: operationParams,
 		query: ArenaStandingsQuery,
 		response: ArenaStandings,
-		summary: "Win, loss and tie counts from recorded votes, with a Bradley-Terry score once enough votes exist.",
+		summary: "Win, loss and tie counts from recorded votes, with an Elo rating once enough votes exist.",
 		...runtimeRoutes.arenaStandings,
 	}),
 	arenaStart: defineRoute({

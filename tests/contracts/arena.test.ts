@@ -324,8 +324,21 @@ describe("arena standings", () => {
 		assert.ok(few.standings.every((s) => s.score === null));
 		assert.equal(computeStandings(entries, "other").standings.length, 0);
 	});
-	it("fits to convergence, so a longer unbeaten record never scores lower", () => {
-		const record = (wins: number) =>
+	it("rates by Elo, replayed in match order whatever order the records arrive in", () => {
+		const duel = (n: number, choice: string) => ({
+			match: match(`20260101-00000${n}-0000`, [
+				["x", "strong"],
+				["y", "weak"],
+			]),
+			vote: vote(choice),
+		});
+		// x wins five, then y wins the sixth: 1067/933 after the streak, 1045/955 after the upset.
+		const entries = [duel(0, "A"), duel(1, "A"), duel(2, "A"), duel(3, "A"), duel(4, "A"), duel(5, "B")];
+		for (const order of [entries, [...entries].reverse()]) {
+			const scores = Object.fromEntries(computeStandings(order).standings.map((s) => [s.identity, s.score]));
+			assert.deepEqual(scores, { "x/strong": 1045, "y/weak": 955 });
+		}
+		const streak = (wins: number) =>
 			computeStandings(
 				Array.from({ length: wins }, (_, n) => ({
 					match: match(`20260101-000000-${String(n).padStart(4, "0")}`, [
@@ -334,14 +347,32 @@ describe("arena standings", () => {
 					]),
 					vote: vote("A"),
 				})),
-			).standings;
-		const scores = [10, 100, 1000].map((wins) => record(wins).map((s) => s.score as number));
-		for (const [winner = Number.NaN, loser = Number.NaN] of scores) {
-			assert.ok(Number.isFinite(winner) && Number.isFinite(loser));
-			assert.equal(winner + loser, 2000, "the anchored fit is symmetric about 1000");
-		}
-		assert.ok((scores[0]?.[0] as number) < (scores[1]?.[0] as number), `10-0 ${scores[0]} vs 100-0 ${scores[1]}`);
-		assert.ok((scores[1]?.[0] as number) < (scores[2]?.[0] as number), `100-0 ${scores[1]} vs 1000-0 ${scores[2]}`);
+			).standings.map((s) => s.score as number);
+		const [ten, hundred] = [streak(10), streak(100)];
+		assert.equal((ten[0] as number) + (ten[1] as number), 2000, "Elo moves points between the two, never creates them");
+		assert.ok((ten[0] as number) < (hundred[0] as number), `10-0 ${ten} vs 100-0 ${hundred}`);
+	});
+	it("splits K across a many-way match and leaves ratings alone on both-bad", () => {
+		const four = (n: number, choice: string) => ({
+			match: match(`20260101-00000${n}-0000`, [
+				["x", "a"],
+				["x", "b"],
+				["x", "c"],
+				["x", "d"],
+			]),
+			vote: vote(choice),
+		});
+		const won = computeStandings([0, 1, 2, 3, 4].map((n) => four(n, "A"))).standings;
+		assert.equal(won[0]?.identity, "x/a");
+		// K 32 is split three ways: the first win is +16 for x/a and -16/3 for each of the others.
+		assert.deepEqual(
+			won.map((s) => s.score),
+			[1071, 976, 976, 976],
+		);
+		const bad = computeStandings([0, 1, 2, 3, 4].map((n) => four(n, "both-bad"))).standings;
+		assert.ok(bad.every((s) => s.score === 1000 && s.bad === 5));
+		const tied = computeStandings([0, 1, 2, 3, 4].map((n) => four(n, "tie"))).standings;
+		assert.ok(tied.every((s) => s.score === 1000 && s.ties === 5));
 	});
 });
 

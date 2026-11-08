@@ -130,7 +130,7 @@ export function ArenaPage({ client }: { client: Client }) {
 												<th scope="col">Votes</th>
 												<th scope="col">Won-lost-tied</th>
 												<th scope="col">All bad</th>
-												<th scope="col">Score</th>
+												<th scope="col">Elo</th>
 											</tr>
 										</thead>
 										<tbody>
@@ -146,7 +146,7 @@ export function ArenaPage({ client }: { client: Client }) {
 										</tbody>
 									</table>
 									<p className="panel-note">
-										{standings.data.votedMatches} of {standings.data.matches} matches have a vote. A Bradley-Terry score appears
+										{standings.data.votedMatches} of {standings.data.matches} matches have a vote. An Elo rating appears
 										once a contender has {standings.data.minVotesForScore} votes.
 									</p>
 								</>

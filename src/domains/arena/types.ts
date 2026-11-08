@@ -14,7 +14,7 @@ export type ArenaChoice = ArenaLabel | "tie" | "both-bad";
 export const ARENA_MIN_CONTENDERS = 2;
 export const ARENA_MAX_CONTENDERS = 4;
 
-/** Votes an identity needs before its Bradley-Terry score is shown; fewer is noise. */
+/** Votes an identity needs before its Elo rating is shown; fewer is noise. */
 export const ARENA_SCORE_MIN_VOTES = 5;
 
 export interface ArenaContenderSpec {

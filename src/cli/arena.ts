@@ -48,8 +48,8 @@ worktrees are removed afterwards. Outside Git the contenders run read-only.
 show hides who each contender is, along with duration, tokens and cost, until
 the match has a vote; --reveal before voting is refused. vote records one
 choice per match, and --replace changes it; every vote stays in the journal.
-standings counts wins, losses, ties and both-bad per target/model, and shows a
-Bradley-Terry score once an identity has 5 or more votes.
+standings counts wins, losses, ties and both-bad per target/model, and shows an
+Elo rating once an identity has 5 or more votes.
 
 Matches live under <project>/.clio-coder/arena/<match-id>/.`;
 
@@ -356,7 +356,7 @@ function standingsCommand(args: string[]): number {
 		return 0;
 	}
 	const table = [
-		["TARGET/MODEL", "VOTES", "WINS", "LOSSES", "TIES", "BOTH-BAD", "SCORE"],
+		["TARGET/MODEL", "VOTES", "WINS", "LOSSES", "TIES", "BOTH-BAD", "ELO"],
 		...standings.standings.map((s) => [
 			s.identity,
 			String(s.votes),
