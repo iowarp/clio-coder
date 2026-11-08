@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import {
+	ArenaCheckError,
 	type ArenaMatch,
 	ArenaRevealRefused,
 	ArenaVoteError,
@@ -400,10 +401,15 @@ describe("arena standings", () => {
 });
 
 const FAKE_CLIO = `
-const { unlinkSync, writeFileSync } = require("node:fs");
+const { existsSync, readFileSync, unlinkSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
-if (args[0] === "verifiers") { console.log("check " + args[2] + ": pass"); process.exit(0); }
+if (args[0] === "verifiers") {
+  const catalog = join(".clio-coder", "verifiers.yaml");
+  const declared = existsSync(catalog) && readFileSync(catalog, "utf8").includes("id: " + args[2]);
+  console.log("check " + args[2] + (declared ? ": pass" : ": not declared"));
+  process.exit(declared ? 0 : 1);
+}
 const cwd = args[args.indexOf("--cwd") + 1];
 const model = args[args.indexOf("--model") + 1];
 const end = args.indexOf("--");
@@ -416,6 +422,17 @@ out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: 
 out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) + " in " + cwd }] } });
 if (model === "slow") setTimeout(() => {}, 60_000);
 if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
+`;
+
+const UNIT_CATALOG = `version: 2
+checks:
+  - id: unit
+    description: unit
+    kind: command
+    command: [node, -e, "0"]
+    cwd: .
+    timeoutMs: 30000
+    tags: []
 `;
 
 function scratchRepo(): { base: string; repo: string; fake: string; gitIn: (...args: string[]) => Buffer } {
@@ -457,6 +474,9 @@ describe("arena runner", () => {
 
 	it("runs contenders in separate worktrees, keeps their diffs, and cleans up", async () => {
 		const { repo, fake, gitIn } = scratchRepo();
+		// The catalog is never committed, so the worktrees cut from HEAD lack it unless the arena brings it.
+		mkdirSync(join(repo, ".clio-coder"));
+		writeFileSync(join(repo, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
 		const result = await runArenaMatch({
 			cwd: repo,
 			prompt: "write your model name",
@@ -494,6 +514,27 @@ describe("arena runner", () => {
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 		assert.equal(gitIn("branch", "--list", "clio-coder/compete/*").toString().trim(), "");
 	});
+	it("refuses a --check the source project does not declare before any contender starts", async () => {
+		const { repo, fake, gitIn } = scratchRepo();
+		await assert.rejects(
+			runArenaMatch({
+				cwd: repo,
+				prompt: "write your model name",
+				contenders: [
+					{ target: "t", model: "m1" },
+					{ target: "t", model: "m2" },
+				],
+				timeoutSeconds: 30,
+				check: "unit",
+				clio: { file: process.execPath, args: [fake] },
+				env: {},
+			}),
+			(error: unknown) => error instanceof ArenaCheckError && /^arena --check unit: /.test(error.message),
+		);
+		assert.deepEqual(listMatches(arenaRoot(repo)), []);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
 	it("stops the other contenders when one fails outright and cleans up only after both settle", async () => {
 		const { base, repo, fake, gitIn } = scratchRepo();
 		const pids = join(base, "pids");

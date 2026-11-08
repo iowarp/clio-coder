@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { closeSync, openSync, readFileSync, writeSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
@@ -16,6 +16,8 @@ import {
 	registerCompeteGroupRun,
 	settleCompeteGroupRun,
 } from "../../tools/compete-worktrees.js";
+import { PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
+import { resolveVerifyCall } from "../../tools/verify/resolve.js";
 import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
 import { contenderWrites, readArenaStream, readNumstat } from "./facts.js";
 import { arenaRoot, contenderDiffPath, contenderStreamPath, matchDir, newArenaMatchId, writeMatch } from "./store.js";
@@ -105,6 +107,27 @@ function captureDiff(worktree: string, baseline: string, diffPath: string): Aren
 	return readNumstat(git(worktree, ["diff", "--cached", "--numstat", baseline, ...pathspec]));
 }
 
+/** A `--check` id the source project does not declare, refused before any contender starts. */
+export class ArenaCheckError extends Error {}
+
+function refuseUndeclaredCheck(cwd: string, id: string): void {
+	const resolution = resolveVerifyCall(cwd, { check: id });
+	if (resolution.kind === "unresolved") throw new ArenaCheckError(`arena --check ${id}: ${resolution.message}`);
+}
+
+/**
+ * A contender's worktree is cut from HEAD, so a catalog the project keeps untracked or ignored is not in it, and a
+ * tracked one may be stale beside the operator's edits. The check is judged by the source project's catalog: it is
+ * copied in before the contender starts and again before the check runs, over anything the contender left there.
+ */
+function copySourceCatalog(sourceCwd: string, contenderCwd: string): void {
+	const source = join(sourceCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
+	if (!existsSync(source)) return;
+	const target = join(contenderCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
+	mkdirSync(dirname(target), { recursive: true });
+	copyFileSync(source, target);
+}
+
 async function runCheck(input: ArenaRunInput, cwd: string, id: string): Promise<ArenaCheckFact> {
 	const result = await runCommandVector(input.clio.file, [...input.clio.args, "verifiers", "dry-run", id], {
 		cwd,
@@ -182,6 +205,7 @@ async function runContender(
 	}
 	if (input.check) {
 		try {
+			if (place.worktree !== null) copySourceCatalog(resolve(input.cwd), place.cwd);
 			check = await runCheck(input, place.cwd, input.check);
 		} catch (caught) {
 			check = { id: input.check, exitCode: null, tail: errorText(caught) };
@@ -228,6 +252,7 @@ function blindSlot(match: ArenaMatch, index: number): number {
 export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 	validateArenaRunInput(input);
 	const cwd = resolve(input.cwd);
+	if (input.check) refuseUndeclaredCheck(cwd, input.check);
 	const base = input.readOnly === true || !isGitRepository(cwd) ? null : baselineOf(cwd);
 	const projectRoot = base?.root ?? cwd;
 	const root = arenaRoot(projectRoot);
@@ -270,6 +295,7 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 				const slot = blindSlot(match, contender.index);
 				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, slot, base.sha);
 				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path });
+				if (input.check) copySourceCatalog(cwd, join(worktree.path, sub));
 				registerCompeteGroupRun(ownership, { runId: `${id}-${slot}`, pid: null, runtimeKind: "subprocess" });
 			}
 		} else {
