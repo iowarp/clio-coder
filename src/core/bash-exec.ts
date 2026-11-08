@@ -63,6 +63,8 @@ export interface RunBashCommandOptions {
 	onUpdate?: (progress: BashCommandProgress) => void;
 	/** Set by the bash tool for a contained main-session call: it runs in the main-session sandbox with this policy. */
 	shellSandbox?: MainSandboxPolicy;
+	/** Called with the shell's pid once it is spawned; off Windows the pid is also its process group id. */
+	onSpawn?: (pid: number) => void;
 }
 
 const BASH_UPDATE_THROTTLE_MS = 100;
@@ -413,6 +415,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+		if (child.pid !== undefined) options.onSpawn?.(child.pid);
 
 		// The main-session sandbox removes git config and commondir files its command
 		// planted once the sandbox is gone, before the result resolves (#419).

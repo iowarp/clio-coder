@@ -95,7 +95,9 @@ export interface HeadlessSamplingOverrides {
  * shutdown will report. Defaults to the process termination coordinator.
  */
 export interface HeadlessShutdownHooks {
-	onDrain(hook: () => void | Promise<void>): void;
+	onDrain(hook: () => void | Promise<void>, options?: { timeoutMs: number }): void;
+	/** Hooks run synchronously when a second signal forces the exit; returns an unsubscribe. */
+	onForceExit?(hook: () => void): () => void;
 	getExitCode(): number;
 	/** True once a signal or quit started the coordinated shutdown. */
 	isShuttingDown(): boolean;
@@ -844,7 +846,8 @@ async function recordHeadlessMainAgentRun(input: {
 function defaultShutdownHooks(): HeadlessShutdownHooks {
 	const coordinator = getTerminationCoordinator();
 	return {
-		onDrain: (hook) => coordinator.onDrain(hook),
+		onDrain: (hook, drainOptions) => coordinator.onDrain(hook, drainOptions),
+		onForceExit: (hook) => coordinator.onForceExit(hook),
 		getExitCode: () => coordinator.getExitCode(),
 		isShuttingDown: () => coordinator.getPhase() !== "idle",
 	};
@@ -1149,7 +1152,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// An interrupted turn has nothing to accept, and a shutdown stops the checks.
 	const verify =
 		options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null
-			? await runHeadlessVerifyChecks(options.verify, (hook) => termination.onDrain(hook))
+			? await runHeadlessVerifyChecks(options.verify, termination)
 			: null;
 	if (verify !== null && mode === "text") {
 		for (const check of verify) process.stderr.write(`${formatHeadlessVerifyResult(check)}\n`);
