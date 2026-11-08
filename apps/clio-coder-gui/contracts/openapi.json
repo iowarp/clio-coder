@@ -4212,7 +4212,7 @@
 		"/api/workspaces/{id}/arena/standings": {
 			"get": {
 				"operationId": "arenaStandings",
-				"summary": "Win, loss and tie counts from recorded votes, with a Bradley-Terry score once enough votes exist.",
+				"summary": "Win, loss and tie counts from recorded votes, with an Elo rating once enough votes exist.",
 				"security": [
 					{
 						"bearer": []
