@@ -38,6 +38,11 @@ export function contenderForLabel(match: Pick<ArenaMatch, "order">, label: Arena
 	return contender === undefined ? null : contender;
 }
 
+/** The blind label a contender shows under; progress names this, never the contender's input position. */
+export function labelForContender(match: Pick<ArenaMatch, "order">, index: number): ArenaLabel {
+	return ARENA_LABELS[match.order.indexOf(index)] as ArenaLabel;
+}
+
 export function isArenaChoice(value: string): value is ArenaChoice {
 	return value === "tie" || value === "both-bad" || (ARENA_LABELS as ReadonlyArray<string>).includes(value);
 }

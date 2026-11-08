@@ -16,7 +16,7 @@ import {
 	registerCompeteGroupRun,
 	settleCompeteGroupRun,
 } from "../../tools/compete-worktrees.js";
-import { blindOrder, newArenaSeed } from "./blind.js";
+import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
 import { readArenaStream, readNumstat } from "./facts.js";
 import { arenaRoot, contenderDiffPath, contenderStreamPath, matchDir, newArenaMatchId, writeMatch } from "./store.js";
 import {
@@ -133,6 +133,7 @@ function contenderArgs(input: ArenaRunInput, spec: ArenaContenderSpec, cwd: stri
 		...(readOnly ? ["--read-only"] : []),
 		"--json-events",
 		"full",
+		"--",
 		input.prompt,
 	];
 }
@@ -209,7 +210,8 @@ async function runContender(
 	contender.facts = facts;
 	contender.status = timedOut ? "timed-out" : result?.exitCode === 0 ? "done" : "failed";
 	save();
-	input.onProgress?.(`contender ${contender.index + 1} ${contender.status}`);
+	// The input position would map labels to the --contender order; only the blind label is safe before a vote.
+	input.onProgress?.(`contender ${labelForContender(match, contender.index)} ${contender.status}`);
 }
 
 /**
@@ -267,12 +269,33 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null });
 		}
 		input.onProgress?.(`match ${id}: ${match.contenders.length} contenders, ${match.isolation}`);
-		await Promise.all(
+		// One contender failing outright (its stream or a save failing) stops the others, and
+		// cleanup waits until every contender has settled, so no worktree is removed under a live run.
+		const halt = new AbortController();
+		const signal = input.signal ? AbortSignal.any([input.signal, halt.signal]) : halt.signal;
+		const contenderInput: ArenaRunInput = { ...input, signal };
+		const settled = await Promise.allSettled(
 			match.contenders.map(async (contender) => {
-				await runContender(input, match, contender, dir, places[contender.index] as (typeof places)[number], save);
-				if (ownership !== null) settleCompeteGroupRun(ownership, `${id}-${contender.index + 1}`);
+				try {
+					await runContender(
+						contenderInput,
+						match,
+						contender,
+						dir,
+						places[contender.index] as (typeof places)[number],
+						save,
+					);
+				} catch (caught) {
+					if (contender.status === "pending" || contender.status === "running") contender.status = "failed";
+					halt.abort();
+					throw caught;
+				} finally {
+					if (ownership !== null) settleCompeteGroupRun(ownership, `${id}-${contender.index + 1}`);
+				}
 			}),
 		);
+		const failure = settled.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+		if (failure !== undefined) throw failure.reason;
 		if (input.signal?.aborted) {
 			match.status = "failed";
 			match.error = "canceled before every contender finished";
