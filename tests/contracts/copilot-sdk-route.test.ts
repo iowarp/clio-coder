@@ -798,6 +798,7 @@ test("cancelling while Copilot creates the session sends nothing and disposes th
 		open = resolve;
 	});
 	const creatingBefore = fake().creating;
+	const sessionsBefore = fake().sessions.length;
 	const controller = new AbortController();
 	const pending = step({ messages: [user("hello")] }, "cancel-session", controller.signal);
 	while (fake().creating === creatingBefore) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -807,8 +808,16 @@ test("cancelling while Copilot creates the session sends nothing and disposes th
 	strictEqual(settled.stopReason, "aborted");
 	fake().createGate = null;
 	open();
-	await new Promise((resolve) => setTimeout(resolve, 30));
-	const created = fake().sessions.at(-1);
+	// The earlier test's session also received "hello"; wait for this step's own session and its disposal.
+	ok(
+		await eventually(
+			() =>
+				fake().sessions.length > sessionsBefore &&
+				fake().disconnected.includes(fake().sessions[sessionsBefore]?.sessionId ?? ""),
+		),
+		"the session created after the cancel is disposed",
+	);
+	const created = fake().sessions[sessionsBefore];
 	ok(created);
 	deepStrictEqual(created.prompts, [], "nothing is sent after the cancel");
 	ok(fake().disconnected.includes(created.sessionId), "the session created after the cancel is disposed");
