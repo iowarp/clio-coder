@@ -29,6 +29,7 @@ import {
 } from "../../tools/compete-worktrees.js";
 import { PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
 import { resolveVerifyCall } from "../../tools/verify/resolve.js";
+import { withContainedYoloPin } from "../safety/autonomy.js";
 import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
 import { contenderWrites, readArenaStream, readNumstat } from "./facts.js";
 import { arenaRoot, contenderDiffPath, contenderStreamPath, matchDir, newArenaMatchId, writeMatch } from "./store.js";
@@ -247,7 +248,7 @@ async function runContender(
 			{
 				cwd: place.cwd,
 				workspaceRoot: place.workspaceRoot,
-				env: input.env,
+				env: input.autonomy === "yolo" ? withContainedYoloPin(input.env) : input.env,
 				timeoutMs: (input.timeoutSeconds + TIMEOUT_GRACE_SECONDS) * 1000,
 				output: { onStdout: (chunk) => void writeSync(fd, chunk), retainTailBytes: 4096 },
 				...(input.signal ? { signal: input.signal } : {}),

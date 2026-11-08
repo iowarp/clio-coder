@@ -422,7 +422,7 @@ const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
 out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) + " in " + cwd }] } });
-if (args[args.indexOf("--autonomy") + 1] === "yolo") out({ type: "autonomy", confinement: "contained", caps: {}, usage: { toolCalls: 1, activeMs: 1, tokens: 1 }, halted: model === "m2" ? { kind: "toolCalls", detail: "600 calls" } : null, openDecisions: [{ seq: 1, tool: "bash", command: "push-from-" + model, kind: "ask" }], openDecisionsOmitted: 2 });
+if (args[args.indexOf("--autonomy") + 1] === "yolo") out({ type: "autonomy", confinement: process.env.CLIO_CODER_YOLO_CONFINEMENT === "contained" ? "contained" : "unconfined", caps: {}, usage: { toolCalls: 1, activeMs: 1, tokens: 1 }, halted: model === "m2" ? { kind: "toolCalls", detail: "600 calls" } : null, openDecisions: [{ seq: 1, tool: "bash", command: "push-from-" + model, kind: "ask" }], openDecisionsOmitted: 2 });
 if (model === "slow") setTimeout(() => {}, 60_000);
 if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
 `;
@@ -738,6 +738,7 @@ describe("arena runner", () => {
 		assert.ok(plain.contenders.every((contender) => contender.facts?.autonomy === undefined));
 		assert.ok(arenaMatchView(arenaRoot(repo), plain, null).entries.every((entry) => entry.yolo === null));
 
+		// The fake reports contained only when the runner pinned its confinement in the contender env.
 		const yolo = await run("yolo");
 		assert.equal(yolo.status, "complete", yolo.error ?? "");
 		assert.equal(yolo.autonomy, "yolo");

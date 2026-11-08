@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { installResearchStopSignals, runResearchCommand } from "../../src/cli/research.js";
-import { settingsPath } from "../../src/core/config.js";
+import { readSettings, settingsPath } from "../../src/core/config.js";
 import {
 	appendHypotheses,
 	claimsProjectRoot,
@@ -33,6 +33,7 @@ import {
 	budgetStop,
 	campaignStatusLines,
 	costFromPricing,
+	createSpawnAgentRunner,
 	describeGrade,
 	grade,
 	type ObjectiveValue,
@@ -44,6 +45,7 @@ import {
 	runResearchCampaign,
 	summarizeCampaign,
 } from "../../src/domains/research/index.js";
+import { effectiveYoloConfinement, YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
@@ -315,6 +317,30 @@ function openScore(repo: string, budget: ResearchCampaign["budget"], gates: stri
 }
 
 describe("research yolo", () => {
+	it("pins each yolo agent run to contained, so settings turned unconfined mid-campaign cannot reach it", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-pin-");
+		t.after(() => env.restore());
+		writeFileSync(settingsPath(), "safety:\n  yoloConfinement: unconfined\n  yoloUnconfinedAccepted: true\n");
+		strictEqual(effectiveYoloConfinement(readSettings().safety), "unconfined");
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-research-pin-"));
+		const entry = join(dir, "fake-run.cjs");
+		writeFileSync(
+			entry,
+			`process.stdout.write(JSON.stringify({ type: "turn_end", exitCode: 0, text: process.env.${YOLO_CONFINEMENT_PIN_ENV} ?? "unpinned" }) + "\\n");\n`,
+		);
+		const runner = createSpawnAgentRunner(entry, []);
+		strictEqual((await runner({ worktree: dir, prompt: "p", autonomy: "yolo" })).summary, "contained");
+		strictEqual((await runner({ worktree: dir, prompt: "p", autonomy: "default" })).summary, "unpinned");
+		const saved = process.env[YOLO_CONFINEMENT_PIN_ENV];
+		process.env[YOLO_CONFINEMENT_PIN_ENV] = "contained";
+		try {
+			strictEqual(effectiveYoloConfinement(readSettings().safety), "contained", "the pinned run ignores settings");
+		} finally {
+			if (saved === undefined) delete process.env[YOLO_CONFINEMENT_PIN_ENV];
+			else process.env[YOLO_CONFINEMENT_PIN_ENV] = saved;
+		}
+	});
+
 	it("runs the agent at contained yolo, records its open decisions, and refuses unconfined yolo", async (t) => {
 		const env = await isolateClioEnv("clio-coder-research-home-");
 		t.after(() => env.restore());

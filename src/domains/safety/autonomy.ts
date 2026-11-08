@@ -50,14 +50,31 @@ export type YoloConfinement = (typeof YOLO_CONFINEMENTS)[number];
 export const DEFAULT_YOLO_CONFINEMENT: YoloConfinement = "contained";
 
 /**
+ * Pins a run, and every clio-coder its commands start, to contained yolo.
+ * `research` and `arena` promise contained yolo, so each child they launch at
+ * yolo carries it rather than reading the operator's settings, which could
+ * turn unconfined mid-campaign. Only `contained` is honored; nothing here can
+ * grant unconfined.
+ */
+export const YOLO_CONFINEMENT_PIN_ENV = "CLIO_CODER_YOLO_CONFINEMENT";
+
+/** The child environment for a run launched at yolo that must stay contained. */
+export function withContainedYoloPin<Env extends Record<string, string | undefined>>(env: Env): Env {
+	return { ...env, [YOLO_CONFINEMENT_PIN_ENV]: "contained" };
+}
+
+/**
  * The confinement the operator's yolo runs at. Unconfined takes effect only
  * once the operator accepted it (`safety.yoloUnconfinedAccepted`, recorded by
  * its own card or written by hand in user settings); until then yolo stays
- * contained. Every surface reads confinement through here.
+ * contained. A process launched with the contained pin stays contained
+ * whatever settings say, then or after a hot reload. Every surface reads
+ * confinement through here.
  */
 export function effectiveYoloConfinement(
 	safety: { yoloConfinement?: YoloConfinement; yoloUnconfinedAccepted?: boolean } | undefined | null,
 ): YoloConfinement {
+	if (process.env[YOLO_CONFINEMENT_PIN_ENV] === "contained") return DEFAULT_YOLO_CONFINEMENT;
 	return safety?.yoloConfinement === "unconfined" && safety.yoloUnconfinedAccepted === true
 		? "unconfined"
 		: DEFAULT_YOLO_CONFINEMENT;

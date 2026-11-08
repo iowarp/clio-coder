@@ -6,6 +6,7 @@
  * spend are passed down as `--timeout` and `--max-cost-usd`. A yolo run's audit comes back on `turn_end.autonomy`.
  */
 import { spawn } from "node:child_process";
+import { withContainedYoloPin } from "../safety/autonomy.js";
 import { costFromPricing } from "./budget.js";
 import {
 	RESEARCH_OPEN_DECISION_LIMIT,
@@ -143,7 +144,7 @@ export function createSpawnAgentRunner(
 			}
 			const child = spawn(process.execPath, [...execArgv, entry, ...agentRunArgv(request)], {
 				cwd: request.worktree,
-				env: process.env,
+				env: request.autonomy === "yolo" ? withContainedYoloPin(process.env) : process.env,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			let stdout = "";
