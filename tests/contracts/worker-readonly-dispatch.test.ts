@@ -156,6 +156,69 @@ test("an attempt queued for capacity launches at the dispatcher's live level, no
 	}
 });
 
+test("a dispatcher that leaves yolo during launch preparation spawns its worker without the yolo grant", async () => {
+	const env = await isolateClioEnv("clio-ceiling-prep-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.autonomy = "yolo";
+	settings.safety.yoloConfinement = "unconfined";
+	settings.safety.yoloUnconfinedAccepted = true;
+	let live: "default" | "yolo" = "yolo";
+	let prepared = false;
+	const stub = dispatchStubContext({ settings });
+	// Opening the owner's telemetry session is one of the waits between capacity admission and spawn.
+	const telemetry = {
+		acquireTelemetrySession: async () => {
+			live = "default";
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			prepared = true;
+			return undefined;
+		},
+	};
+	const getContract = ((name: string) =>
+		name === "telemetry" ? telemetry : stub.getContract(name as never)) as typeof stub.getContract;
+	const specs: WorkerSpec[] = [];
+	const bundle = makeDispatchBundle(
+		{ ...stub, getContract },
+		{
+			operatorAutonomy: () => live,
+			spawnWorker: (spec): SpawnedWorker => {
+				specs.push(spec);
+				return {
+					pid: null,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					heartbeatAt: { current: Date.now(), monotonic: 0 },
+					events: (async function* () {
+						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } };
+					})(),
+					abort() {},
+				};
+			},
+		},
+	);
+	try {
+		await bundle.extension.start();
+		const handle = await bundle.contract.dispatch({
+			agentId: "coder",
+			task: "Inspect the task",
+			executionRole: "builder",
+			cwd: env.dir,
+			ownerSessionId: "owner-session",
+			ownerSessionCwdHash: "owner-cwd",
+		});
+		const receipt = await handle.finalPromise;
+		ok(prepared, "the dispatcher dropped to default inside launch preparation");
+		const spec = specs[0];
+		ok(spec);
+		strictEqual(spec.permit.allowance.executeAutonomy, undefined);
+		strictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).permit.digest, spec.permit.digest);
+		strictEqual(receipt.safety?.permit?.executeAutonomy, undefined);
+		strictEqual(receipt.safety?.permit?.digest, spec.permit.digest);
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
 /** The JSON document production dispatch writes for a default coder run. */
 async function sealedCoderSpec(prefix: string) {
 	const env = await isolateClioEnv(prefix);

@@ -7277,15 +7277,21 @@ export function createDispatchBundle(
 			if (queuedIdentity !== null) pendingCapacity.delete(queuedIdentity.runId);
 		}
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
-		// The permit was resolved before capacity admission, which may have
-		// waited. A dispatcher that left yolo meanwhile launches its worker
-		// without the yolo grant, and every record from here on carries the
-		// narrowed permit.
-		if (
-			lifecycle.permit.allowance.executeAutonomy === "yolo" &&
-			operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)) !== "yolo"
-		)
+		// The permit was resolved before capacity admission and launch
+		// preparation, both of which may wait. A dispatcher that left yolo
+		// meanwhile launches its worker without the yolo grant, and every record
+		// from then on carries the narrowed permit. Checked here and again right
+		// before spawn, after the last wait.
+		const narrowPermitToLiveLevel = (): boolean => {
+			if (
+				lifecycle.permit.allowance.executeAutonomy !== "yolo" ||
+				operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)) === "yolo"
+			)
+				return false;
 			lifecycle.permit = withoutExecuteAutonomy(lifecycle.permit);
+			return true;
+		};
+		narrowPermitToLiveLevel();
 
 		const ledgerRef = (() => {
 			try {
@@ -7316,6 +7322,7 @@ export function createDispatchBundle(
 			options?.workerAskJudge !== undefined &&
 			(placement === null || (placement.node.kind === "local" && placement.spawn === undefined));
 		let spec: WorkerSpec;
+		let buildSpec: () => WorkerSpec;
 		try {
 			if (!judgeRouted) assertMainGrantRoutable(req, lifecycle.target.runtime, lifecycle.permit, placement?.node ?? null);
 			if (grantAttempt !== undefined && placement?.spawn !== undefined && !judgeRouted) {
@@ -7351,40 +7358,42 @@ export function createDispatchBundle(
 					? launchCredential.profile
 					: undefined
 				: lifecycle.authProfile;
-			spec = buildDispatchWorkerSpec(
-				{
-					req,
-					pathScope: lifecycle.pathScope,
-					target: lifecycle.target,
-					admission: lifecycle.admission,
-					recipe: lifecycle.recipe,
-					systemPrompt: lifecycle.systemPrompt,
-					dynamicPromptMessages: lifecycle.dynamicPromptMessages,
-					promptSignature: lifecycle.promptSignature,
-					toolSignature: lifecycle.toolSignature,
-					dynamicHash: lifecycle.dynamicHash,
-					middlewareSnapshot: middleware.snapshot(),
-					protectedArtifactState,
-					flowRestrictions: options?.getFlowRestrictions?.() ?? null,
-					...(options?.getFlowPolicy !== undefined ? { flowPolicy: options.getFlowPolicy() } : {}),
-					apiKey: claudeLaunch ? launchCredential?.apiKey : lifecycle.apiKey,
-					...((placement === null || placement.node.kind === "local") && launchAuthProfile
-						? { authProfile: launchAuthProfile }
-						: {}),
-					...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
-					readOnly: lifecycle.readOnly,
-					budget: lifecycle.budget,
-					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
-					workerPermissionResponder:
-						options?.workerPermissionResponder === true && !operatorContainedYolo(withLiveAutonomy(lifecycle.settings)),
-					permit: lifecycle.permit,
-					...(grantAttempt !== undefined ? { grantAttempt } : {}),
-					...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
-					mainAutonomy: operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)),
-					...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
-				},
-				config ?? undefined,
-			);
+			buildSpec = () =>
+				buildDispatchWorkerSpec(
+					{
+						req,
+						pathScope: lifecycle.pathScope,
+						target: lifecycle.target,
+						admission: lifecycle.admission,
+						recipe: lifecycle.recipe,
+						systemPrompt: lifecycle.systemPrompt,
+						dynamicPromptMessages: lifecycle.dynamicPromptMessages,
+						promptSignature: lifecycle.promptSignature,
+						toolSignature: lifecycle.toolSignature,
+						dynamicHash: lifecycle.dynamicHash,
+						middlewareSnapshot: middleware.snapshot(),
+						protectedArtifactState,
+						flowRestrictions: options?.getFlowRestrictions?.() ?? null,
+						...(options?.getFlowPolicy !== undefined ? { flowPolicy: options.getFlowPolicy() } : {}),
+						apiKey: claudeLaunch ? launchCredential?.apiKey : lifecycle.apiKey,
+						...((placement === null || placement.node.kind === "local") && launchAuthProfile
+							? { authProfile: launchAuthProfile }
+							: {}),
+						...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
+						readOnly: lifecycle.readOnly,
+						budget: lifecycle.budget,
+						...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
+						workerPermissionResponder:
+							options?.workerPermissionResponder === true && !operatorContainedYolo(withLiveAutonomy(lifecycle.settings)),
+						permit: lifecycle.permit,
+						...(grantAttempt !== undefined ? { grantAttempt } : {}),
+						...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
+						mainAutonomy: operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)),
+						...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
+					},
+					config ?? undefined,
+				);
+			spec = buildSpec();
 		} catch (error) {
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
@@ -7579,6 +7588,8 @@ export function createDispatchBundle(
 			};
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
 			preparation?.signal?.throwIfAborted();
+			// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
+			if (narrowPermitToLiveLevel()) spec = buildSpec();
 			worker = (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
 			await closeRunJournal();
