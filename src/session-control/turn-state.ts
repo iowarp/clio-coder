@@ -87,6 +87,102 @@ export type TurnStop =
 			retryAfterMs: number;
 	  };
 
+/**
+ * The single owner of whether, and how, a turn goes on past its own end.
+ *
+ * Two producers feed it: a middleware `request_continuation` (the stalled-turn
+ * nudge, one per operator prompt) and a stop recorded by recovery that a yolo
+ * continuation may get past (#445). Middleware, runtime, recovery, queues and
+ * the loop each call the one method for their step; every field is private,
+ * so no module can set a flag another module consumes behind the owner's back.
+ */
+export class ContinuationState {
+	/** A middleware request_continuation is waiting to resubmit after settle. */
+	#requested = false;
+	/** That request moved into the run still out, delivered by the runtime's prepareNextTurn. */
+	#inRun = false;
+	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
+	#nudgeSpent = false;
+	/** Continuations spent since the operator's last prompt (#445). */
+	#yoloContinuations = 0;
+	/** A way this turn ended that nobody asked for and another turn could get past (#445). */
+	#stop: TurnStop | null = null;
+
+	get requested(): boolean {
+		return this.#requested;
+	}
+
+	get nudgeSpent(): boolean {
+		return this.#nudgeSpent;
+	}
+
+	get yoloContinuations(): number {
+		return this.#yoloContinuations;
+	}
+
+	get stop(): TurnStop | null {
+		return this.#stop;
+	}
+
+	/** Prompt acceptance: a fresh operator prompt resets the caps its own continuations do not. */
+	beginPrompt(kind: { requestContinuation: boolean; yoloContinuation: boolean }): void {
+		this.#inRun = false;
+		this.#stop = null;
+		if (!kind.yoloContinuation) this.#yoloContinuations = 0;
+		if (!kind.requestContinuation) this.#nudgeSpent = false;
+	}
+
+	/** Middleware asks for one more request. False when this prompt's one nudge is already spent. */
+	request(): boolean {
+		if (this.#nudgeSpent) return false;
+		this.#nudgeSpent = true;
+		this.#requested = true;
+		return true;
+	}
+
+	/** The run is still out, so it carries the waiting request itself instead of a post-settle resubmit. */
+	carryIntoRun(): void {
+		if (!this.#requested) return;
+		this.#requested = false;
+		this.#inRun = true;
+	}
+
+	/** The runtime delivers the carried request; true exactly once per carry. */
+	takeInRun(): boolean {
+		if (!this.#inRun) return false;
+		this.#inRun = false;
+		return true;
+	}
+
+	/** A new run starts; nothing carried from an earlier one survives into it. */
+	clearInRun(): void {
+		this.#inRun = false;
+	}
+
+	/** The post-settle resubmit takes the waiting request; true exactly once per request. */
+	takeRequest(): boolean {
+		if (!this.#requested) return false;
+		this.#requested = false;
+		return true;
+	}
+
+	/** A stranded operator message goes out as the next prompt and supersedes the waiting request. */
+	dropRequest(): void {
+		this.#requested = false;
+	}
+
+	/** Recovery records why the turn stopped; the settle reads it to decide a yolo continuation. */
+	recordStop(stop: TurnStop): void {
+		this.#stop = stop;
+	}
+
+	/** Count one capped yolo continuation and return its attempt number. */
+	countYoloContinuation(): number {
+		this.#yoloContinuations += 1;
+		return this.#yoloContinuations;
+	}
+}
+
 export interface ChatTurnState {
 	/** Live agent runtime; built or hot-swapped by turn-runtime. */
 	runtime: AgentRuntime | null;
@@ -146,10 +242,8 @@ export interface ChatTurnState {
 	toolBudgetLock: boolean;
 	/** The operator turn that already spent its one re-prompt for a tool call the model only wrote out. */
 	toolMarkupRepromptTurnId: string | null;
-	/** Continuations spent since the operator's last prompt (#445). */
-	yoloContinuations: number;
-	/** A way this turn ended that nobody asked for and another turn could get past; a yolo continuation reads it (#445). */
-	turnStop: TurnStop | null;
+	/** Continuation requests, carries and stops; written only through its methods. */
+	readonly continuation: ContinuationState;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
@@ -172,12 +266,6 @@ export interface ChatTurnState {
 	turnToolNames: string[];
 	/** A `[worker result]` note the operator shared entered this turn, as the prompt or as a steer; feeds turn_end metadata. */
 	turnSharedWorkerNote: boolean;
-	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
-	stalledTurnNudgeSpent: boolean;
-	/** A middleware request_continuation is waiting to resubmit after settle. */
-	pendingRequestContinuation: boolean;
-	/** A middleware continuation carries the current run one more request, delivered by prepareNextTurn. */
-	pendingInRunContinuation: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/**
@@ -212,8 +300,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		synthesisToolLock: false,
 		toolBudgetLock: false,
 		toolMarkupRepromptTurnId: null,
-		turnStop: null,
-		yoloContinuations: 0,
+		continuation: new ContinuationState(),
 		toolProseAbortReason: null,
 		streamStallReason: null,
 		routeMove: null,
@@ -225,9 +312,6 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnToolCalls: 0,
 		turnToolNames: [],
 		turnSharedWorkerNote: false,
-		stalledTurnNudgeSpent: false,
-		pendingRequestContinuation: false,
-		pendingInRunContinuation: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		activeSkillSurface: undefined,

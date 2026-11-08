@@ -1974,7 +1974,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/** What a settled turn stopped on, when nobody asked for it and yolo has continuations left (#445). */
 	const yoloContinuationDue = (): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
-		const failed = state.turnStop;
+		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
 		if (failed?.cause === "wait_past_budget") return null;
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
@@ -1986,7 +1986,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
 					: null);
 		if (stop === null) return null;
-		return continuationCountsAgainstCap(stop.cause) && state.yoloContinuations >= TURN_CONTINUATION_CAP ? null : stop;
+		return continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP
+			? null
+			: stop;
 	};
 
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
@@ -1996,8 +1998,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		constraints: ChatSubmitOptions["constraints"],
 	): Promise<void> => {
 		const counted = continuationCountsAgainstCap(stop.cause);
-		if (counted) state.yoloContinuations += 1;
-		const attempt = state.yoloContinuations;
+		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
 			"turn.continued",
@@ -2966,11 +2967,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnToolCalls = 0;
 				state.turnToolNames = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
-				state.pendingInRunContinuation = false;
-				state.turnStop = null;
-				if (options.yoloContinuation !== true) state.yoloContinuations = 0;
+				state.continuation.beginPrompt({
+					requestContinuation: options.requestContinuation === true,
+					yoloContinuation: options.yoloContinuation === true,
+				});
 				middlewareToolChoice.reset();
-				if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 				const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
 				const pendingSkillRequests =
 					state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
@@ -3662,7 +3663,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const failure = detectTerminalFailureFromState(agentRuntime.agent);
 						const usage = sumRunUsage(messages);
 						// An exhausted ladder prunes its failure, so an earlier round's text must not read as success (#445).
-						const stop = state.turnStop as { reason: string; retryAfterMs?: number } | null;
+						const stop = state.continuation.stop as { reason: string; retryAfterMs?: number } | null;
 						// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
 						const guardStop =
 							stop !== null
@@ -3698,7 +3699,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.machineTurn === undefined &&
 						!(await queues.resubmitStranded())
 					) {
-						if (state.pendingRequestContinuation) await queues.resubmitRequestContinuation();
+						if (state.continuation.requested) await queues.resubmitRequestContinuation();
 						else if (continuation !== null) {
 							await continueStoppedTurn(continuation, generation, options.constraints);
 						}

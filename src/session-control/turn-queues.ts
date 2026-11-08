@@ -555,7 +555,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			const afterStop = heldFor === "operator";
 			const [first] = queue.splice(nextIndex, 1);
 			if (!first) return false;
-			state.pendingRequestContinuation = false;
+			state.continuation.dropRequest();
 			state.runtime?.agent.clearAllQueues();
 			flushNext = !afterStop && queue.length > 0;
 			emitQueueUpdate();
@@ -579,8 +579,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			return true;
 		},
 		async resubmitRequestContinuation(): Promise<void> {
-			if (!state.pendingRequestContinuation) return;
-			state.pendingRequestContinuation = false;
+			if (!state.continuation.takeRequest()) return;
 			await deps.submit("", { requestContinuation: true });
 		},
 		reset(options): void {

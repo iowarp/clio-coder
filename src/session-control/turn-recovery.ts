@@ -402,10 +402,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
 			} catch (compactErr) {
 				if (cancelled()) return;
-				state.turnStop = {
+				state.continuation.recordStop({
 					cause: "compaction",
 					reason: compactErr instanceof Error ? compactErr.message : String(compactErr),
-				};
+				});
 				deps.emitNotice(
 					`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 				);
@@ -552,11 +552,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		const retryable = retryableFailure;
 		const recordRetriesExhausted = (errorMessage: string | null | undefined, message?: unknown): void => {
 			const retryAfterMs = failureRetryAfterMs(message, errorMessage);
-			state.turnStop = {
+			state.continuation.recordStop({
 				cause: "retries_exhausted",
 				reason: errorMessage ?? "provider retries ran out",
 				...(retryAfterMs === null ? {} : { retryAfterMs }),
-			};
+			});
 		};
 		if (!moving() && agentRuntime.runtimeId === "litellm" && !retryable(classified, initialFailure.message)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
@@ -593,11 +593,11 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						waitBudgetMs: RATE_LIMIT_WAIT_BUDGET_MS,
 						waitedMs: chainWaitedMs,
 					});
-					state.turnStop = {
+					state.continuation.recordStop({
 						cause: "wait_past_budget",
 						reason: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
 						retryAfterMs: statedMs,
-					};
+					});
 					return true;
 				}
 				chainAttempt += 1;

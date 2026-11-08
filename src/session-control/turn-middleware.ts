@@ -259,7 +259,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	};
 
 	const applyRequestContinuation = (message: string, note?: string): void => {
-		if (state.stalledTurnNudgeSpent) {
+		if (!state.continuation.request()) {
 			// One continuation per user prompt, and that cap is all this branch
 			// knows. It cannot tell whether the model stalled, answered, or was
 			// carried here by a second producer entirely, so it reports the cap and
@@ -267,8 +267,6 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			deps.emitFooterNotice("warning", "turn still has open work; this turn's nudge is spent", "nudge.continuation.spent");
 			return;
 		}
-		state.stalledTurnNudgeSpent = true;
-		state.pendingRequestContinuation = true;
 		bufferReminder(message, "info");
 		// The nudge reaches the model as context inside the run, never as a
 		// persisted operator turn, so the ledger keeps it for inspection only.

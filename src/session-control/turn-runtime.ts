@@ -1528,10 +1528,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
 			}
-			if (!currentRun() || !state.pendingRequestContinuation || state.activeInterruptReason !== null) return undefined;
+			if (!currentRun() || !state.continuation.requested || state.activeInterruptReason !== null) return undefined;
 			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
-			state.pendingRequestContinuation = false;
-			state.pendingInRunContinuation = true;
+			state.continuation.carryIntoRun();
 			return { action: "continue" };
 		};
 		// What the post-settle resubmit did between runs, done inside this one:
@@ -1539,8 +1538,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// turn_start marked as a continuation, and the buffered continuation
 		// reminders as model-only context.
 		const deliverInRunContinuation = async (signal?: AbortSignal): Promise<boolean> => {
-			if (!state.pendingInRunContinuation) return false;
-			state.pendingInRunContinuation = false;
+			if (!state.continuation.takeInRun()) return false;
 			state.turnToolCalls = 0;
 			state.turnToolNames = [];
 			middlewareToolChoice.reset();
@@ -1784,7 +1782,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (publicEvent?.type === "agent_start") {
 				turnEndFiredFor = null;
-				state.pendingInRunContinuation = false;
+				state.continuation.clearInRun();
 				runStartMessageCount = localRuntime.agent.state.messages.length;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;

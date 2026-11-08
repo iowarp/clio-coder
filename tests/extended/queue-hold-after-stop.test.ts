@@ -5,7 +5,7 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createTurnQueues, type QueuedChatMessage } from "../../src/session-control/turn-queues.js";
-import type { ChatTurnState } from "../../src/session-control/turn-state.js";
+import { type ChatTurnState, ContinuationState } from "../../src/session-control/turn-state.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 function fixture() {
@@ -15,7 +15,7 @@ function fixture() {
 		followUp: (message: { content: string }) => steered.push(message.content),
 		clearAllQueues: () => {},
 	};
-	const state = { streaming: true, runtime: { agent }, pendingRequestContinuation: false };
+	const state = { streaming: true, runtime: { agent }, continuation: new ContinuationState() };
 	const held: number[] = [];
 	const notices: string[] = [];
 	const dropped: string[][] = [];
