@@ -131,7 +131,9 @@ a one-sentence caption, the interface, the version, the capture date, and how
 it was made. Capture the released package, not a development build, in an
 isolated profile with no credentials, private endpoints, conversations, or
 host names. Caption what the screen shows, including unwelcome results. Add new
-WebP images to `image-variants.py` and regenerate derivatives.
+WebP images to `image-variants.py` and regenerate derivatives. A capture used
+as a guide cover also needs a social preview: run
+`python3 site/image-variants.py --social`.
 
 ## Review builds
 

@@ -1,0 +1,68 @@
+{
+	"default": "gui-task",
+	"images": {
+		"gui-task": {
+			"source": "assets/gui-task.png",
+			"path": "assets/social/gui-task.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "5097e54b28a94e7e63e30570b91745e87e2f7ccae65256877b1f12a8c24464dd"
+		},
+		"tui-boot": {
+			"source": "assets/tui-boot.png",
+			"path": "assets/social/tui-boot.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "e3881748dddcf3764b6eacf72d0ebb1bb56bbe75127c2647cf5abe6222bc3c78"
+		},
+		"tui-configure-review": {
+			"source": "assets/guides/tui-configure-review.png",
+			"path": "assets/social/tui-configure-review.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "0e7a685ed6b315d46769e4c252fd50db034e2324ce5c4d53da4456f109eb2f0d"
+		},
+		"tui-context": {
+			"source": "assets/guides/tui-context.png",
+			"path": "assets/social/tui-context.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "81c4ef0c72de75381905cb24615f6046ae430a563638fd824a3b7c2aa6a54226"
+		},
+		"tui-interop": {
+			"source": "assets/guides/tui-interop.png",
+			"path": "assets/social/tui-interop.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "bc5e7d0b1015d7e2e7a2e936d72245fc7fcede1856885395d4fcb0e36b07053e"
+		},
+		"tui-library-installed": {
+			"source": "assets/guides/tui-library-installed.png",
+			"path": "assets/social/tui-library-installed.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "9fa624d6e16822219199e9f8055bbbb222e58ea7fd199ca6063fcfba845cc425"
+		},
+		"tui-settings-fleet": {
+			"source": "assets/guides/tui-settings-fleet.png",
+			"path": "assets/social/tui-settings-fleet.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "f69d77bd9f1232d9635693927564cb4f89ddfecc7b7b302541b404c7943a7931"
+		},
+		"tui-verify-result": {
+			"source": "assets/guides/tui-verify-result.png",
+			"path": "assets/social/tui-verify-result.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "2911d4d2f6a627418b12c9930246373aefd3e35067c21a7389497e9f03028174"
+		},
+		"tui-view-result": {
+			"source": "assets/guides/tui-view-result.png",
+			"path": "assets/social/tui-view-result.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "065fc0faeefa6b8ca887b574372e4ecd53ce2485bfc95c015929f164aee40c60"
+		}
+	}
+}
