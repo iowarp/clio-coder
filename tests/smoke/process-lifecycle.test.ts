@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readRunJournal } from "../harness/run-journal.js";
 
+const MARKER = "clio-lifecycle-marker";
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
 
@@ -115,17 +116,75 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<boo
 	return predicate();
 }
 
-function processExists(pid: number): boolean {
+interface HostProcess {
+	pid: number;
+	started: string;
+}
+
+/**
+ * The tool shell's `$$` is a PID inside the yolo sandbox's PID namespace
+ * (bwrap `--unshare-pid`), not a host PID: on the host it names an unrelated
+ * process, often a root-owned kernel thread, so probing or signalling it gave
+ * EPERM. The host PIDs come from the host process table instead: every process
+ * whose argv carries the tool command's marker. The start time guards against
+ * PID reuse.
+ */
+function hostToolProcesses(marker: string): HostProcess[] {
+	let table: string;
 	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+		table = execFileSync("ps", ["-A", "-o", "pid=,lstart=,args="], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {
+		return [];
+	}
+	const found: HostProcess[] = [];
+	for (const line of table.split("\n")) {
+		const match = /^\s*(\d+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(.*)$/u.exec(line);
+		if (match?.[1] && match[2] && match[3]?.includes(marker)) found.push({ pid: Number(match[1]), started: match[2] });
+	}
+	return found;
+}
+
+function hostProcessAlive(entry: HostProcess): boolean {
+	try {
+		const started = execFileSync("ps", ["-o", "lstart=", "-p", String(entry.pid)], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return started === entry.started;
+	} catch {
+		// ps exits non-zero when the pid is gone.
+		return false;
+	}
+}
+
+function survivors(entries: ReadonlyArray<HostProcess>): HostProcess[] {
+	return entries.filter(hostProcessAlive);
+}
+
+/** Rejects instead of waiting forever when the CLI never exits. */
+function bounded<T>(promise: Promise<T>, timeoutMs: number, what: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`${what} did not happen within ${timeoutMs} ms`)), timeoutMs);
+	});
+	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function killQuietly(pid: number): void {
+	try {
+		process.kill(pid, "SIGKILL");
+	} catch {
+		// Already gone or not ours; cleanup must not mask the test's own failure.
 	}
 }
 
 describe("smoke/process lifecycle", { concurrency: false, skip: process.platform === "win32" }, () => {
-	it("coordinates SIGINT through the real tool child and leaves no orphan", async () => {
+	const TEST_TIMEOUT_MS = 90_000;
+	const EXIT_TIMEOUT_MS = 30_000;
+	it("coordinates SIGINT through the real tool child and leaves no orphan", { timeout: TEST_TIMEOUT_MS }, async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-process-lifecycle-"));
 		const env = environment(root);
 		const project = join(root, "project");
@@ -133,10 +192,10 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 		const stoppedFile = join(project, ".tool-child.stopped");
 		const command =
 			"trap 'printf stopped > .tool-child.stopped; exit 0' TERM INT HUP; " +
-			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done";
+			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done # clio-lifecycle-marker";
 		const fixture = await provider(command);
 		let child: ReturnType<typeof spawn> | undefined;
-		let toolPid = 0;
+		let toolProcesses: HostProcess[] = [];
 		try {
 			mkdirSync(project);
 			execFileSync(process.execPath, [CLI, "doctor", "--fix"], { cwd: ROOT, env, stdio: "pipe" });
@@ -155,14 +214,21 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 				child?.once("close", (code, signal) => resolve({ code, signal })),
 			);
 			ok(await waitFor(() => existsSync(pidFile), 20_000), `tool child did not start; stderr=${stderr}`);
-			toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
-			ok(Number.isSafeInteger(toolPid) && toolPid > 1 && processExists(toolPid));
+			const toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+			ok(Number.isSafeInteger(toolPid) && toolPid > 0, `tool child wrote no pid: ${toolPid}`);
+			toolProcesses = hostToolProcesses(MARKER);
+			ok(toolProcesses.length > 0, "tool child has no host process");
 
 			child.kill("SIGINT");
-			const result = await exit;
+			const result = await bounded(exit, EXIT_TIMEOUT_MS, "CLI exit");
 			strictEqual(result.code, 130, `signal=${result.signal ?? "none"}; stderr=${stderr}`);
 			ok(await waitFor(() => existsSync(stoppedFile), 5_000), "tool child did not observe coordinated termination");
-			ok(await waitFor(() => !processExists(toolPid), 5_000), `orphaned tool pid ${toolPid}`);
+			ok(
+				await waitFor(() => survivors(toolProcesses).length === 0, 5_000),
+				`orphaned tool pids ${survivors(toolProcesses)
+					.map((entry) => entry.pid)
+					.join(", ")}`,
+			);
 
 			const journal = readRunJournal(join(root, "state"));
 			ok(journal);
@@ -174,14 +240,16 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			ok(receipt.sessionId);
 		} finally {
 			if (child?.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-			if (toolPid > 1 && processExists(toolPid)) process.kill(toolPid, "SIGKILL");
+			for (const entry of survivors(toolProcesses)) killQuietly(entry.pid);
 			fixture.server.closeAllConnections();
 			await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
 
-	it("ends a run --timeout through the same shutdown, stops the tool child, and seals timed_out", async () => {
+	it("ends a run --timeout through the same shutdown, stops the tool child, and seals timed_out", {
+		timeout: TEST_TIMEOUT_MS,
+	}, async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-process-timeout-"));
 		const env = environment(root);
 		const project = join(root, "project");
@@ -189,10 +257,10 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 		const stoppedFile = join(project, ".tool-child.stopped");
 		const command =
 			"trap 'printf stopped > .tool-child.stopped; exit 0' TERM INT HUP; " +
-			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done";
+			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done # clio-lifecycle-marker";
 		const fixture = await provider(command);
 		let child: ReturnType<typeof spawn> | undefined;
-		let toolPid = 0;
+		let toolProcesses: HostProcess[] = [];
 		try {
 			mkdirSync(project);
 			execFileSync(process.execPath, [CLI, "doctor", "--fix"], { cwd: ROOT, env, stdio: "pipe" });
@@ -211,13 +279,20 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 				child?.once("close", (code, signal) => resolve({ code, signal })),
 			);
 			ok(await waitFor(() => existsSync(pidFile), 20_000), `tool child did not start; stderr=${stderr}`);
-			toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
-			ok(Number.isSafeInteger(toolPid) && toolPid > 1 && processExists(toolPid));
+			const toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+			ok(Number.isSafeInteger(toolPid) && toolPid > 0, `tool child wrote no pid: ${toolPid}`);
+			toolProcesses = hostToolProcesses(MARKER);
+			ok(toolProcesses.length > 0, "tool child has no host process");
 
-			const result = await exit;
+			const result = await bounded(exit, EXIT_TIMEOUT_MS, "CLI exit");
 			strictEqual(result.code, 124, `signal=${result.signal ?? "none"}; stderr=${stderr}`);
 			ok(await waitFor(() => existsSync(stoppedFile), 5_000), "tool child did not observe coordinated termination");
-			ok(await waitFor(() => !processExists(toolPid), 5_000), `orphaned tool pid ${toolPid}`);
+			ok(
+				await waitFor(() => survivors(toolProcesses).length === 0, 5_000),
+				`orphaned tool pids ${survivors(toolProcesses)
+					.map((entry) => entry.pid)
+					.join(", ")}`,
+			);
 
 			const journal = readRunJournal(join(root, "state"));
 			ok(journal);
@@ -228,7 +303,7 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			strictEqual(receipt.exitCode, 124);
 		} finally {
 			if (child?.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-			if (toolPid > 1 && processExists(toolPid)) process.kill(toolPid, "SIGKILL");
+			for (const entry of survivors(toolProcesses)) killQuietly(entry.pid);
 			fixture.server.closeAllConnections();
 			await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });
