@@ -44,6 +44,7 @@ import {
 	AUTONOMOUS_CAP_REASON,
 	AUTONOMY_JUDGE_STREAK_EXIT_CODE,
 	type AutonomyHalt,
+	type AutonomyReport,
 	autonomyHaltNotice,
 	JUDGE_STREAK_REASON,
 } from "../../domains/safety/autonomy-window.js";
@@ -148,6 +149,8 @@ export interface HeadlessMainAgentOptions {
 	costCap?: RunResultCostCap;
 	/** The yolo pause that stopped the run, if any: exit 4 for a cap, 3 for a judge streak (ob-yolo D4, D6). */
 	autonomyHalt?: () => AutonomyHalt | null;
+	/** The yolo audit for `--json`: null when the run never ran at yolo (ob-yolo D7). */
+	autonomy?: () => AutonomyReport | null;
 }
 
 interface HeadlessMainAgentResult {
@@ -1257,7 +1260,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// A yolo pause ends the run on purpose, whatever the cancelled turn left behind; a signal still outranks it.
 	const halt = terminal.exitCode !== 0 && !termination.isShuttingDown() ? (options.autonomyHalt?.() ?? null) : null;
 	if (halt !== null) {
-		const failureMessage = `clio-coder run: ${autonomyHaltNotice(halt, "headless")}`;
+		const failureMessage = `clio-coder run: ${autonomyHaltNotice(halt, "headless", options.autonomy?.()?.openDecisions)}`;
 		terminal = {
 			exitCode: halt.kind === "judge" ? AUTONOMY_JUDGE_STREAK_EXIT_CODE : AUTONOMOUS_CAP_EXIT_CODE,
 			outcome: "failed",
@@ -1268,6 +1271,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = failureMessage;
 	}
 	const exitCode = terminal.exitCode;
+	const autonomy = mode === "json" ? (options.autonomy?.() ?? null) : null;
+	if (autonomy !== null && jsonEvents !== "terminal") {
+		writeJsonHeader(true);
+		writeMainFrame({ type: "autonomy", ...autonomy });
+	}
 
 	if (mode === "json" && jsonEvents === "terminal") {
 		writeJsonHeader(true);
@@ -1292,6 +1300,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				blockedAttempts: [...runStats.blockedAttempts],
 				...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
 			},
+			...(autonomy !== null ? { autonomy } : {}),
 		});
 	}
 

@@ -119,8 +119,8 @@ export interface AutonomyWindow {
 	openDecision(entry: Omit<OpenDecision, "seq">): void;
 	/** The session's open decisions; `sinceReopen` keeps those since the operator last spoke. */
 	openDecisions(sinceReopen?: boolean): OpenDecision[];
-	/** The audit so far, or null when yolo never ran in this session. */
-	report(): AutonomyReport | null;
+	/** The audit so far, or null when yolo never ran in this session; `sinceReopen` as for `openDecisions`. */
+	report(sinceReopen?: boolean): AutonomyReport | null;
 	/** The process is ending: journal how the yolo stretch ended. */
 	end(): void;
 }
@@ -294,7 +294,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			follow();
 			return decisions.filter((entry) => !sinceReopen || entry.seq > reopenedAt);
 		},
-		report() {
+		report(sinceReopen = false) {
 			follow();
 			const caps = deps.caps();
 			if (caps === null && !entered && seq === 0) return null;
@@ -303,8 +303,8 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 				caps: caps ?? { toolCalls: 0, minutes: 0, tokens: 0 },
 				usage: usage(),
 				halted: halt === null ? null : { kind: halt.kind, detail: halt.detail },
-				openDecisions: [...decisions],
-				openDecisionsOmitted: omitted,
+				openDecisions: decisions.filter((entry) => !sinceReopen || entry.seq > reopenedAt),
+				openDecisionsOmitted: sinceReopen ? Math.max(0, omitted - reopenedAt) : omitted,
 			};
 		},
 		end() {

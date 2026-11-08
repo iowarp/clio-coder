@@ -18,6 +18,7 @@ import type { DispatchScopeNoticeView } from "../../core/dispatch-scope-notice.j
 import type { FactSum } from "../../core/telemetry/fact.js";
 import type { PricingSum } from "../../core/telemetry/pricing.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
+import type { AutonomyReport } from "../../domains/safety/autonomy-window.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
 import type { VIA_GATEWAY } from "../../tools/gateway-display.js";
@@ -233,6 +234,13 @@ export interface RunJsonTerminalTurnEndFrame {
 	outcomeDetail?: string;
 	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
 	safety?: Pick<NonNullable<RunResult["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
+	/** A yolo run's window, its halt and the calls it left for the operator (ob-yolo D7). */
+	autonomy?: AutonomyReport;
+}
+
+/** The yolo audit a streamed `--json` run ends with: the window, its halt and the calls left for the operator. */
+export interface RunJsonAutonomyFrame extends AutonomyReport {
+	type: "autonomy";
 }
 
 export interface RunJsonDispatchScopeNoticeFrame extends DispatchScopeNoticeView {
@@ -299,7 +307,8 @@ export type RunJsonMainFrame =
 	| RunJsonTerminalTurnStartFrame
 	| RunJsonTerminalTurnEndFrame
 	| RunJsonDispatchScopeNoticeFrame
-	| RunJsonDispatchSettlementFrame;
+	| RunJsonDispatchSettlementFrame
+	| RunJsonAutonomyFrame;
 
 /**
  * Frames of a `run --agent --json` stream. `RunJsonWorkerEventFrame` is open,
