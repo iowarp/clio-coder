@@ -2280,12 +2280,13 @@ export const MCP_EXECUTE_RULE_ID = "mcp-execute";
 
 /**
  * An execute-class MCP tool call through its launch vector's shell scan. The
- * scan's rails still decide, but the allowlist's recognition of the launch
- * command says nothing about the tool call, so the call is never recognized
- * and carries the MCP trust rule rather than a bash rule.
+ * scan's rails still block or ask, but no recognition of the launch command,
+ * by the allowlist or an approved project policy, says anything about the
+ * tool call, so an allowed call is never recognized and carries the MCP trust
+ * rule rather than a bash or project rule.
  */
-function mcpExecutePolicy(bash: ReturnType<typeof evaluateBashPolicy>): ReturnType<typeof evaluateBashPolicy> {
-	if (bash.policySource !== "builtin-command-allowlist") return bash;
+function mcpExecutePolicy<T extends Pick<SafetyPolicyDecision, "kind">>(bash: T): T {
+	if (bash.kind !== "allow") return bash;
 	return {
 		...bash,
 		ruleId: MCP_EXECUTE_RULE_ID,
@@ -2798,7 +2799,9 @@ function yoloRequiredSandbox(
 	const state = scope.scriptSandbox;
 	if (state !== "sandboxed" && state !== "refused") return "free";
 	// The typed git tool runs a fixed argv, never through the sandbox; its hooks are the hooks guard's to judge.
-	if (call.projection === "typed-git" || !runsProjectCommand(call, verifyCommand)) return "free";
+	// Neither does an MCP tool call, which runs on its server's own process.
+	if (call.projection === "typed-git" || call.projection === "mcp-server" || !runsProjectCommand(call, verifyCommand))
+		return "free";
 	const script = runsScriptFile(rawCall);
 	if (!script && reachesOutward(call, classification, verifyCommand)) return "free";
 	if (call.args?.unsandboxed === true) return "unsandboxed";

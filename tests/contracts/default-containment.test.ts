@@ -9,7 +9,13 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
-import { createSafetyPolicyEngine, type OperatorDefaultScope } from "../../src/domains/safety/policy-engine.js";
+import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
+import {
+	createSafetyPolicyEngine,
+	type OperatorDefaultScope,
+	type OperatorYoloScope,
+} from "../../src/domains/safety/policy-engine.js";
 import { createSafetyJudge, operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
 import { asksToLeaveSandbox } from "../../src/domains/safety/sandbox-escape.js";
 import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js";
@@ -675,4 +681,97 @@ test("an execute-class MCP tool call is not contained by the sandbox and goes to
 		{ ruleId: decision?.policy?.ruleId, source: decision?.policy?.policySource, sandbox: decision?.policy?.shellSandbox },
 		{ ruleId: "mcp-execute", source: "mcp-trust", sandbox: undefined },
 	);
+});
+
+/** A trusted execute-class MCP tool whose server launches with `command`, registered on `session`. */
+function registerMcpExecute(session: ReturnType<typeof defaultSession>, command: string) {
+	const sent: unknown[] = [];
+	const name = "mcp_stub__send_message" as ToolSpec["name"];
+	session.registry.register({
+		name,
+		description: "Sends a message. Local MCP server stub (user), trusted with action class execute.",
+		parameters: bashTool.parameters,
+		baseActionClass: "execute",
+		safetyCall: () => ({ tool: ToolNames.Bash, args: { command }, projection: "mcp-server" }),
+		run: async (args) => {
+			sent.push(args);
+			return { kind: "ok", output: "sent" };
+		},
+	});
+	return { name, sent };
+}
+
+test("an execute-class MCP tool call asks at default even when a project policy approves its launch command", async () => {
+	const cwd = workspace("clio-mcp-execute-project-");
+	const command = "python3 stub_mcp.py";
+	// In-memory project policy; the named safety.yaml is never written.
+	const policy = createSafetyPolicyEngine({
+		cwd,
+		projectPolicy: {
+			trustVerdict: "trusted",
+			path: join(cwd, ".clio-coder", "safety.yaml"),
+			hash: null,
+			valid: true,
+			errors: [],
+			commands: [
+				{
+					id: "stub-server",
+					command,
+					actionClass: "execute",
+					shellOperators: "deny",
+					env: { mode: "none", allow: [] },
+					requireConfirmation: false,
+				},
+			],
+			pathPolicy: {},
+			disableDefaultPathPolicy: false,
+			informationFlow: EMPTY_INFORMATION_FLOW_INPUT,
+		},
+	});
+	const launch = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+	strictEqual(launch.policySource, "project-policy", "the launch command itself is the project's approved command");
+	const safety: SafetyContract = {
+		...createWorkerSafety({ cwd }),
+		evaluate(call, posture, scope) {
+			const decision = policy.evaluate(call, posture, scope);
+			strictEqual(decision.kind, "allow", call.tool);
+			return { kind: "allow", classification: decision.classification, policy: decision };
+		},
+	};
+	const session = defaultSession(cwd, { sandbox: true, snapshots: false }, { safety });
+	const { name, sent } = registerMcpExecute(session, command);
+	const result = await session.registry.invoke({ tool: name, args: { text: "hi" } });
+	strictEqual(result.kind, "blocked", JSON.stringify(result));
+	deepStrictEqual(sent, [], "an unjudged ask never reaches the server");
+	const decision = session.reviewed[0]?.decision;
+	strictEqual(decision?.kind, "ask");
+	deepStrictEqual(
+		{
+			ruleId: decision?.policy?.ruleId,
+			source: decision?.policy?.policySource,
+			recognition: decision?.policy?.execRecognition,
+		},
+		{ ruleId: "mcp-execute", source: "mcp-trust", recognition: "unrecognized" },
+	);
+});
+
+test("an MCP tool call keeps a rail's own ask or block, and at yolo is never refused as an unsandboxed script", () => {
+	const engine = createSafetyPolicyEngine({ cwd: workspace("clio-mcp-execute-yolo-") });
+	const mcp = (command: string): ClassifierCall => ({
+		tool: ToolNames.Bash,
+		args: { command },
+		projection: "mcp-server",
+	});
+	const floor = engine.evaluate(mcp("rm -rf ~"));
+	strictEqual(floor.kind, "block");
+	strictEqual(floor.ruleId === "mcp-execute", false, "a rail's block keeps its own rule");
+	for (const scriptSandbox of ["refused", "sandboxed"] as const) {
+		const scope: OperatorYoloScope = { scratchRoots: [], scriptSandbox };
+		const decision = engine.evaluate(mcp("python3 ./stub_mcp.py"), "yolo", scope);
+		deepStrictEqual(
+			{ kind: decision.kind, ruleId: decision.ruleId, sandbox: decision.shellSandbox },
+			{ kind: "allow", ruleId: "mcp-execute", sandbox: undefined },
+			scriptSandbox,
+		);
+	}
 });
