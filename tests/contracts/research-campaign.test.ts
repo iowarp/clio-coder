@@ -785,6 +785,59 @@ describe("research review fixes", () => {
 		);
 	});
 
+	it("rejects a candidate whose agent changed the pre-agent environment, and ratchets one that left it alone", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const overridableScore =
+			"const fs=require('fs');if(fs.existsSync('build/override.json')){process.stdout.write(fs.readFileSync('build/override.json','utf8'));process.exit(0)}" +
+			scoreJs;
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": overridableScore,
+			".gitignore": "build/\n",
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					commandCheck("score", ["node", "score.js"]),
+					commandCheck("dep", ["node", "-e", "require('fs').readFileSync('build/dep.txt')"]),
+				],
+			}),
+		});
+		// A setup step: every worktree checkout installs an ignored build/ the gate needs.
+		const hook = join(repo, ".git/hooks/post-checkout");
+		writeFileSync(hook, "#!/bin/sh\nmkdir -p build && echo dep > build/dep.txt\n");
+		chmodSync(hook, 0o755);
+		const campaign = openScore(repo, { maxIterations: 3, allowUnpriced: false }, ["dep"]);
+		const edits: Array<(worktree: string) => void> = [
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "99\n");
+				writeFileSync(join(worktree, "build/override.json"), JSON.stringify({ score: 1 }));
+			},
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "98\n");
+				writeFileSync(join(worktree, "build/dep.txt"), "changed\n");
+			},
+			(worktree) => {
+				ok(existsSync(join(worktree, "build/dep.txt")), "the setup step ran before the agent");
+				writeFileSync(join(worktree, "value.txt"), "50\n");
+			},
+		];
+		let calls = 0;
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				edits[calls++]?.(request.worktree);
+				return done;
+			},
+		});
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["protected", "protected", "ratcheted"],
+		);
+		ok(view.iterations[0]?.detail?.includes("changed the pre-agent environment: build/override.json"));
+		ok(view.iterations[1]?.detail?.includes("changed the pre-agent environment: build/dep.txt"));
+	});
+
 	it("cleans a candidate back to its commit plus the environment it had before the agent ran", () => {
 		const repo = scratchRepo({ "value.txt": "1\n", ".gitignore": "node_modules/\nbuild/\n" });
 		mkdirSync(join(repo, "node_modules/dep"), { recursive: true });

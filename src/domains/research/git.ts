@@ -3,7 +3,7 @@
  * worktree per side, and the commit of an agent's change with the host identity a task worktree uses.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { hostCommitIdentity } from "../../tools/task-worktree.js";
@@ -104,6 +104,37 @@ export function environmentEntries(worktree: string): string[] {
 		.split("\0")
 		.filter((entry) => entry.startsWith("?? ") || entry.startsWith("!! "))
 		.map((entry) => entry.slice(3));
+}
+
+/**
+ * A fingerprint of every file under `entries` (relative path, type, size, mtime in nanoseconds and a link's target),
+ * read with lstat and never following a link. Taken before and after the agent run, it shows whether the agent touched
+ * the environment a candidate keeps.
+ */
+export function fingerprintEntries(worktree: string, entries: ReadonlyArray<string>): Map<string, string> {
+	const prints = new Map<string, string>();
+	const visit = (relativePath: string): void => {
+		const path = join(worktree, relativePath);
+		const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+		if (stat === undefined) return;
+		if (stat.isDirectory()) {
+			prints.set(`${relativePath}/`, "dir");
+			for (const name of readdirSync(path).sort()) visit(`${relativePath}/${name}`);
+			return;
+		}
+		const kind = stat.isSymbolicLink() ? `link:${readlinkSync(path)}` : stat.isFile() ? "file" : "other";
+		prints.set(relativePath, `${kind}:${stat.size}:${stat.mtimeNs}`);
+	};
+	for (const entry of entries) visit(entry.endsWith("/") ? entry.slice(0, -1) : entry);
+	return prints;
+}
+
+/** Paths added, removed or changed between two fingerprints, sorted. */
+export function fingerprintChanges(before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>): string[] {
+	const changed = new Set<string>();
+	for (const [path, print] of before) if (after.get(path) !== print) changed.add(path);
+	for (const path of after.keys()) if (!before.has(path)) changed.add(path);
+	return [...changed].sort();
 }
 
 /** An exclude pattern that matches exactly one repository-relative entry. */

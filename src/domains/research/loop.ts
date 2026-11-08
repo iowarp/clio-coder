@@ -30,6 +30,8 @@ import {
 	commitWorktree,
 	createResearchRef,
 	environmentEntries,
+	fingerprintChanges,
+	fingerprintEntries,
 	gitFailure,
 	removeResearchWorktree,
 	researchWorktreeParent,
@@ -342,6 +344,7 @@ export async function runResearchCampaign(
 			addResearchWorktree(root, worktree, best);
 			openWorktrees.add(worktree);
 			const environment = environmentEntries(worktree);
+			const environmentPrint = fingerprintEntries(worktree, environment);
 			journal({ type: "iteration-started", at: at(), iteration, parent: best, worktree });
 			log(`iteration ${iteration}: agent run in ${worktree}`);
 			const archive = (reason: ResearchArchiveReason, detail: string): void => {
@@ -386,7 +389,16 @@ export async function runResearchCampaign(
 				continue;
 			}
 
-			// VERIFY
+			// VERIFY. The environment the worktree had before the agent ran (installed dependencies, build output) is
+			// kept for measurement, so the agent may not change it; a change rejects the candidate unmeasured.
+			const environmentChanged = fingerprintChanges(environmentPrint, fingerprintEntries(worktree, environment));
+			if (environmentChanged.length > 0) {
+				const shown = environmentChanged.slice(0, 5).join(", ");
+				const more = environmentChanged.length > 5 ? ` and ${environmentChanged.length - 5} more` : "";
+				archive("protected", `changed the pre-agent environment: ${shown}${more}`);
+				cleanup();
+				continue;
+			}
 			let commit: string;
 			try {
 				const committed = commitWorktree(
