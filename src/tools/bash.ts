@@ -309,7 +309,7 @@ function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | n
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Run bash in a fresh child at the workspace root (or cwd); shell state does not persist. Not for what verify or gateway grep, find, git, run_script, data cover. Output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. Default timeout 300s; use panes for long-lived processes or an explicit timeout_ms. Networking follows the host and OS isolation; disabling web_fetch does not isolate bash networking. At autonomy default it runs unasked in an OS sandbox when available (workspace and scratch roots writable, secrets hidden); otherwise read-only inspection runs and other commands are reviewed.",
+		"Run bash in a fresh child at the workspace root (or cwd); shell state does not persist. Not for what verify, grep, find, git, run_script or data cover. Output has a 16 MiB hard cap that stops the child; run_script streams unbounded output. Default timeout 300s; use panes for long-lived processes or an explicit timeout_ms. Networking follows the host and OS isolation; disabling web_fetch does not isolate bash networking. At autonomy default it runs unasked in an OS sandbox when available (workspace and scratch roots writable, secrets hidden); otherwise read-only inspection runs and other commands are reviewed.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
