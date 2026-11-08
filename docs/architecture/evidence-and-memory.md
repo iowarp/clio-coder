@@ -502,7 +502,7 @@ Edges are derived under the lock at append time and compare no text ([edges.ts](
 - `contradicts` the latest earlier claim with equal pins when the two verdicts differ. Only a flip adds an edge, so several agreements followed by one disagreement add one edge. The working tree of a `numeric-compare` claim is not pinned, so an uncommitted edit at the same commit can still contradict, and the edge sentence says how the trees differed.
 - `supersedes` every earlier claim of the same check, run and kind whose pins differ, such as a new commit or new input digests, unless it is already superseded.
 
-A claim with no recorded commit has no pins, so it can be superseded but never contradicted. A claim's status is `superseded` when any supersedes edge targets it, otherwise `contested` when it sits on either end of a contradicts edge, otherwise `standing`.
+A sweep claim recorded before runs were keyed has no run of its own; for edges only, it takes the run its command names when the command names exactly one directory under the runs directory that later claims of the check recorded, and otherwise stays keyed by its check alone. A claim with no recorded commit has no pins, so it can be superseded but never contradicted. A claim's status is `superseded` when any supersedes edge targets it, otherwise `contested` when it sits on either end of a contradicts edge, otherwise `standing`.
 
 ### Memory regressions
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
 import { canonicalClaimJson } from "./capture.js";
 import {
 	CLAIM_RECORD_VERSION,
@@ -60,12 +61,62 @@ function pinnedConditions(claim: ClaimRecord): Record<string, unknown> | null {
 	};
 }
 
+/** Where a sweep check's runs sit, both as its argv names them and as the repository-relative runs directory. */
+interface SweepRunLayout {
+	argumentDir: string;
+	runsDir: string;
+}
+
+const RUN_NAME = /^[A-Za-z0-9._-]+$/u;
+
+/**
+ * Each sweep check's run layout, learned from claims that recorded their run: verify appends the run directory,
+ * relative to the check's cwd, as the last argument. Null when the claims disagree or the argument has no directory
+ * part, because then a run cannot be told from any other argument.
+ */
+function sweepRunLayouts(claims: ReadonlyArray<ClaimRecord>): Map<string, SweepRunLayout | null> {
+	const layouts = new Map<string, SweepRunLayout | null>();
+	for (const claim of claims) {
+		const run = claim.keys.run;
+		const last = claim.keys.command.at(-1);
+		const known = layouts.get(claim.keys.check);
+		if (run === undefined || last === undefined || known === null) continue;
+		const argument = posix.normalize(last);
+		const layout = { argumentDir: posix.dirname(argument), runsDir: posix.dirname(run) };
+		const usable = layout.argumentDir !== "." && posix.basename(argument) === posix.basename(run);
+		const agrees = known === undefined || (known.argumentDir === layout.argumentDir && known.runsDir === layout.runsDir);
+		layouts.set(claim.keys.check, usable && agrees ? layout : null);
+	}
+	return layouts;
+}
+
+/**
+ * The run a claim judged. A claim recorded before runs were keyed has none, but its argv still names the run: take it
+ * when the command names exactly one directory under the check's runs directory. Used for edges only; the stored claim
+ * and its id are unchanged. Any other run-less claim stays keyed by its check alone.
+ */
+function claimRun(claim: ClaimRecord, layouts: ReadonlyMap<string, SweepRunLayout | null>): string | undefined {
+	if (claim.keys.run !== undefined) return claim.keys.run;
+	const layout = layouts.get(claim.keys.check);
+	if (!layout) return undefined;
+	const named = new Set<string>();
+	for (const value of claim.keys.command) {
+		const argument = posix.normalize(value);
+		const name = posix.basename(argument);
+		if (posix.dirname(argument) === layout.argumentDir && RUN_NAME.test(name) && name !== "." && name !== "..")
+			named.add(name);
+	}
+	const [only] = named;
+	return named.size === 1 && only !== undefined ? posix.join(layout.runsDir, only) : undefined;
+}
+
 /**
  * What edges treat as one check: the check id, and for a sweep check the run it judged. Sibling runs of one sweep are
  * separate subjects, so they never supersede or contradict each other; a rerun of the same run still does (Q7).
  */
-function edgeIdentity(claim: ClaimRecord): string {
-	return claim.keys.run === undefined ? claim.keys.check : `${claim.keys.check}\0${claim.keys.run}`;
+function edgeIdentity(claim: ClaimRecord, layouts: ReadonlyMap<string, SweepRunLayout | null>): string {
+	const run = claimRun(claim, layouts);
+	return run === undefined ? claim.keys.check : `${claim.keys.check}\0${run}`;
 }
 
 /** The digest of a claim's pinned conditions; equal keys mean opposite verdicts contradict. Null when unpinned. */
@@ -160,14 +211,17 @@ export function deriveClaimEdges(
 	incoming: ReadonlyArray<ClaimRecord>,
 ): ClaimEdgeRecordV1[] {
 	const claims = [...history.claims];
+	const layouts = sweepRunLayouts([...history.claims, ...incoming]);
 	const known = new Set(claims.map((claim) => claim.id));
 	const superseded = new Set(history.edges.filter((item) => item.kind === "supersedes").map((item) => item.to));
 	const added: ClaimEdgeRecordV1[] = [];
 	for (const claim of incoming) {
 		if (known.has(claim.id)) continue;
 		const key = claimConditionsKey(claim);
-		const identity = edgeIdentity(claim);
-		const sameCheck = claims.filter((earlier) => earlier.kind === claim.kind && edgeIdentity(earlier) === identity);
+		const identity = edgeIdentity(claim, layouts);
+		const sameCheck = claims.filter(
+			(earlier) => earlier.kind === claim.kind && edgeIdentity(earlier, layouts) === identity,
+		);
 		const sameConditions = key === null ? [] : sameCheck.filter((earlier) => claimConditionsKey(earlier) === key);
 		const latest = sameConditions.at(-1);
 		if (latest !== undefined && latest.verdict !== claim.verdict) added.push(edge("contradicts", claim, latest));
@@ -215,13 +269,14 @@ export function overturnedAgreements(
 	const key = claimConditionsKey(later);
 	const superseded = new Set(edges.filter((item) => item.kind === "supersedes").map((item) => item.to));
 	const laterIndex = claims.indexOf(later);
+	const layouts = sweepRunLayouts(claims);
 	return claims
 		.slice(0, laterIndex < 0 ? claims.length : laterIndex)
 		.filter(
 			(claim) =>
 				claim.verdict === "agrees" &&
 				claim.kind === later.kind &&
-				edgeIdentity(claim) === edgeIdentity(later) &&
+				edgeIdentity(claim, layouts) === edgeIdentity(later, layouts) &&
 				!superseded.has(claim.id) &&
 				claimConditionsKey(claim) === key,
 		);

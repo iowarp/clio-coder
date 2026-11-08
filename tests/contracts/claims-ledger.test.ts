@@ -211,6 +211,54 @@ describe("claims ledger (#406)", () => {
 		);
 	});
 
+	it("relates a sweep claim recorded before runs were keyed to later claims of its own run only", () => {
+		const sweepClaim = (command: string[], run: string | undefined, passed: boolean, at: string) => {
+			const details = {
+				...numericDetails(passed, passed ? "passed" : "failed"),
+				check: "decay-error",
+				...(run !== undefined ? { run } : {}),
+				declaredCommand: command,
+				checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+			};
+			const built = claimFromVerifyResult({ details, project: "/p", at, source });
+			assert.ok(built);
+			return built;
+		};
+		const argv = (...runs: string[]) => [
+			"python3",
+			"checks/decay_error.py",
+			...runs.map((r) => `sweeps/decay/runs/${r}`),
+		];
+		const old = sweepClaim(argv("0"), undefined, true, "2026-11-06T00:00:00.000Z");
+		assert.equal(old.keys.run, undefined, "the stored claim keeps its pre-upgrade keys and id");
+		const history = { claims: [old], edges: [] };
+		const sibling = sweepClaim(argv("1"), "sweeps/decay/runs/1", false, "2026-11-06T00:00:02.000Z");
+		const rerun = sweepClaim(argv("0"), "sweeps/decay/runs/0", false, "2026-11-06T00:00:03.000Z");
+		const edges = deriveClaimEdges(history, [sibling, rerun]);
+		assert.deepEqual(
+			edges.map((edge) => [edge.kind, edge.from, edge.to]),
+			[["contradicts", rerun.id, old.id]],
+		);
+		const all = [old, sibling, rerun];
+		const contradiction = edges[0];
+		assert.ok(contradiction);
+		assert.deepEqual(
+			overturnedAgreements(contradiction, all, edges).map((claim) => claim.id),
+			[old.id],
+		);
+		const statuses = claimStatuses(all, edges);
+		assert.deepEqual(
+			all.map((claim) => statuses.get(claim.id)),
+			["contested", "standing", "contested"],
+		);
+		const ambiguous = sweepClaim(argv("0", "1"), undefined, true, "2026-11-06T00:00:00.000Z");
+		assert.deepEqual(
+			deriveClaimEdges({ claims: [ambiguous], edges: [] }, [rerun]),
+			[],
+			"an old command naming two runs keeps its check-only identity",
+		);
+	});
+
 	it("keys the log by the repository root and drops a line edited after capture", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {
