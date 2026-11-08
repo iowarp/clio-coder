@@ -17,7 +17,8 @@ a request to use it. Command side effects count: use `python3 -B` for Python
 inspection, and run a check that writes artifacts only when those writes are
 authorized.
 Use bash only when no structured tool (read, grep, find, edit, verify, git,
-run_script, data) fits. For an approach or design
+run_script, data) fits; a check that cannot run here goes to limitation. For an
+approach or design
 question, stop once you can explain the relevant entry point and a concrete
 implementation path.
 
