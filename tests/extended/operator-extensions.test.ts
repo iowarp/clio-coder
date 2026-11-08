@@ -930,7 +930,8 @@ test("a served plugin's prompt is a plain prompt until its extension is installe
 			turns++;
 		},
 		runLocalOperation: (operation: () => Promise<void>) => void operation(),
-		showExtensionOutput: (command: string) => shown.push(command),
+		showExtensionOutput: (command: string, _output: unknown, extensionId: string) =>
+			shown.push(`${command} ${extensionId}`),
 		render: () => {},
 		notice: () => {},
 	} as unknown as SlashCommandContext;
@@ -967,7 +968,7 @@ test("a served plugin's prompt is a plain prompt until its extension is installe
 	equal(dispatchSlashCommand(parseSlashCommand("/materio:status"), ctx), "accepted");
 	for (let waited = 0; shown.length === 0 && waited < 10_000; waited += 50) await delay(50);
 	equal(turns, 1, "the takeover must not also send the prompt to the model");
-	deepStrictEqual(shown, ["materio:status"]);
+	deepStrictEqual(shown, ["materio:status materio"], "the alias carries its extension id, not a token segment");
 });
 
 test("a net:false runtime cannot reach loopback, reports its backend, and gets exactly its declared write root", {

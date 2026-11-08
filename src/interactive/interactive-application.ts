@@ -1254,8 +1254,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
 		...(devSession ? { extensionDev: devSession.command } : {}),
-		showExtensionOutput: (invocation, output) => {
-			const id = invocation.split(":")[1];
+		showExtensionOutput: (invocation, output, id) => {
 			const generation = operatorExtensions?.entries().find((entry) => entry.id === id)?.generation;
 			const valid = () =>
 				operatorExtensions
@@ -1264,7 +1263,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			if (!valid()) {
 				slashRuntime.context.notice(
 					"warn",
-					`/${invocation}: extension ${id ?? invocation} reloaded before its result arrived, so nothing was shown. Run it again.`,
+					`/${invocation}: extension ${id} reloaded before its result arrived, so nothing was shown. Run it again.`,
 				);
 				return;
 			}
@@ -1276,7 +1275,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				if (output.text && !opensOwnSurface(output))
 					slashRuntime.context.showReference?.({
 						command: invocation,
-						source: extensionOwnerLabel(id ?? invocation),
+						source: extensionOwnerLabel(id),
 						kind: "result",
 						text: output.text,
 					});
@@ -1286,16 +1285,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					slashRuntime.context.notice("info", `/${invocation} ran; its result is in ${ambientDrawingPlace(output)}.`);
 				return;
 			}
-			if (
-				output.panel &&
-				!deps.chat.isStreaming() &&
-				overlayLifecycle.openExtensionPanelState(id ?? invocation, output.panel, valid)
-			)
+			if (output.panel && !deps.chat.isStreaming() && overlayLifecycle.openExtensionPanelState(id, output.panel, valid))
 				operatorPanelValid = valid;
 			else
 				slashRuntime.context.showReference?.({
 					command: invocation,
-					source: extensionOwnerLabel(id ?? invocation),
+					source: extensionOwnerLabel(id),
 					kind: "result",
 					text: output.text,
 				});

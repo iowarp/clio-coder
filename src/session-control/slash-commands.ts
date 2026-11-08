@@ -924,7 +924,8 @@ export interface SessionCommandContext {
 	operatorExtensions?: OperatorExtensions;
 	/** The terminal's dev scope: `/extensions dev [folder]`, `mute <id>`, `unmute <id>`. */
 	extensionDev?: (action: "dev" | "mute" | "unmute", argument: string | undefined) => void;
-	showExtensionOutput?: (invocation: string, output: OperatorCommandOutput) => void;
+	/** `extensionId` comes from the command row: an alias such as a prompt takeover carries no `ext:<id>:` prefix. */
+	showExtensionOutput?: (invocation: string, output: OperatorCommandOutput, extensionId: string) => void;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
@@ -3706,7 +3707,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			runLocal(async () => {
 				try {
 					const output = await runtime.invoke(command.token, args, promptRefs(ctx.listPrompts?.().items ?? []));
-					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
+					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output, row.extensionId);
 					else ctx.io.stdout(`${output.text}\n`);
 				} catch (error) {
 					// A deferred runtime can become unavailable while starting on first use.
