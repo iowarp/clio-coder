@@ -522,7 +522,13 @@ async function loginCopilotSdk(): Promise<number> {
 			...(rl
 				? {
 						confirm: (question: string) => askYesNo(rl, question, false),
-						signIn: () => offerCopilotSignIn(rl),
+						signIn: () =>
+							offerCopilotSignIn({
+								confirm: (question) => askYesNo(rl, question, true),
+								pause: () => rl.pause(),
+								resume: () => rl.resume(),
+								print: (text) => process.stdout.write(`${text}\n`),
+							}),
 					}
 				: {}),
 			print: (text) => process.stdout.write(`${text}\n`),

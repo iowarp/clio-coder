@@ -91,6 +91,7 @@ import {
 	targetApiKeyRef,
 	targetUrlProblem,
 } from "./configure-target.js";
+import { offerCopilotSignIn } from "./copilot-sign-in.js";
 import type { DetectedChatRoute } from "./detect-chat-routes.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
@@ -426,14 +427,14 @@ const COPILOT_STEP: Step = {
 	id: "copilot-sdk",
 	applies: (answers) => answers.runtime?.id === "copilot-sdk",
 	run: async (wizard) => {
-		const ask = async (question: string) => {
+		const ask = async (question: string, yes = false) => {
 			const result = await wizard.select<boolean>({
 				heading: ["", question],
 				choices: [
 					{ value: true, label: "Yes" },
 					{ value: false, label: "No" },
 				],
-				initialIndex: 1,
+				initialIndex: yes ? 0 : 1,
 				railPrefix: wizard.rail,
 				backLabel: "back",
 				clearOnExit: true,
@@ -442,7 +443,15 @@ const COPILOT_STEP: Step = {
 			});
 			return result.kind === "selected" && result.value;
 		};
-		const ready = await prepareCopilotSdk({ confirm: ask, print: (text) => wizard.output.write(`${text}\n`) });
+		const print = (text: string) => wizard.output.write(`${text}\n`);
+		const ready = await prepareCopilotSdk({
+			confirm: (question) => ask(question),
+			// A terminal can run the official sign-in in place; a hosted wizard (the GUI) has no terminal for it.
+			...(!wizard.host && wizard.input.isTTY
+				? { signIn: () => offerCopilotSignIn({ confirm: (q) => ask(q, true), print }) }
+				: {}),
+			print,
+		});
 		if (ready.ok) return "next";
 		wizard.presenter.fail(ready.message);
 		return "cancel";

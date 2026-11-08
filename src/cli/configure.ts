@@ -804,7 +804,11 @@ async function runTargetSetupInteractive(
 			...((rl.input as { isTTY?: boolean }).isTTY === true
 				? {
 						confirm: (question: string) => askYesNo(rl, question, false),
-						signIn: () => offerCopilotSignIn(rl),
+						signIn: () =>
+							offerCopilotSignIn({
+								confirm: (question) => askYesNo(rl, question, true),
+								print: (text) => process.stdout.write(`${text}\n`),
+							}),
 					}
 				: {}),
 			print: (text) => process.stdout.write(`${text}\n`),
