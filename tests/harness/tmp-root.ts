@@ -19,8 +19,18 @@
  * the environment, so the run has exactly one root and only the process that
  * created it removes it.
  */
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isMainThread } from "node:worker_threads";
 
@@ -153,6 +163,30 @@ function trustedInheritedRoot(value: string | undefined): string | null {
 	return real === systemTmp || real.startsWith(`${systemTmp}${sep}`) ? real : null;
 }
 
+/**
+ * Point the run root's tsx transform cache at the one in the real temp dir.
+ *
+ * tsx 4.22.4 fixes its cache at `join(os.tmpdir(), "tsx-<euid>")` when it loads
+ * (dist/temporary-directory-*.mjs) and offers no variable to move it. The runner
+ * loads tsx before this file, so it already uses `<systemTmp>/tsx-<euid>`, but
+ * every test child, GUI worker thread and source CLI inherits TMPDIR as the run
+ * root and found an empty cache there: each recompiled `src/**` cold, 6.7-7.5 s
+ * per CLI against 2.2 s warm under load, which put a cold GUI worker lane past
+ * its 30 s queue deadline. A link named as tsx names its cache sends all of
+ * them to the shared one. The exit cleanup removes the link, not its target.
+ */
+function shareTsxCache(root: string): void {
+	const name = `tsx-${process.geteuid ? process.geteuid() : userInfo().username}`;
+	const shared = join(systemTmp, name);
+	try {
+		mkdirSync(shared, { recursive: true });
+		// "junction" lets Windows link a directory without the symlink privilege; elsewhere it is ignored.
+		symlinkSync(shared, join(root, name), "junction");
+	} catch {
+		// A run without the link compiles cold, as every run did before it.
+	}
+}
+
 // A root that is not physically inside the scratch boundary is not one to write
 // into, so a stale or hostile value from the environment is replaced by a fresh
 // root rather than trusted.
@@ -168,6 +202,7 @@ if (inherited !== null) {
 	sweepStaleRoots();
 	const root = mkdtempSync(join(systemTmp, TEST_TMP_ROOT_PREFIX));
 	writeFileSync(join(root, ".owner.json"), JSON.stringify({ pid: process.pid }));
+	shareTsxCache(root);
 	process.env[ROOT_ENV] = root;
 	process.env.TMPDIR = root;
 	// Same worker constraint as the git guard below; a worker never creates a root anyway.
