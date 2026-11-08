@@ -44,6 +44,20 @@ test("worker exit fails pending reads and the next call restarts the worker", as
 	assert.equal((await worker.call("tools.list", {})).rows.length, PINNED_TOOLS.length);
 });
 
+test("ready settles once a lane listens, and a host closed while booting rejects it", async (t) => {
+	const home = await scratchHome();
+	t.after(home.close);
+	const warm = new WorkerHost("reads", { fixture: true }, home.env);
+	t.after(() => warm.close());
+	await warm.ready();
+	assert.equal(warm.laneCount, 1);
+	assert.equal((await warm.call("tools.list", {})).rows.length, PINNED_TOOLS.length);
+	const cold = new WorkerHost("ops", { fixture: true }, home.env);
+	const ready = cold.ready();
+	await cold.close();
+	await assert.rejects(ready, /closed before it was ready/);
+});
+
 test("warm read lanes overlap, so one slow adapter no longer holds the next read", async (t) => {
 	const home = await scratchHome();
 	t.after(home.close);

@@ -1,11 +1,20 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
+/**
+ * A hang guard for one source CLI, not a performance budget. With the run's tsx
+ * cache shared (tests/harness/tmp-root.ts) the slowest oracle CLI took 2.5 s and
+ * the seed 0.4 s at load ~19; on a cold cache, as on a fresh CI host, 7.6 s and
+ * 0.8 s. Before the cache was shared every run paid the cold cost. 30 s is 4x the
+ * cold worst case and 12x the warm one.
+ */
+const CLI_HANG_GUARD_MS = 30_000;
 export async function seedLibrary(cwd: string, env: NodeJS.ProcessEnv) {
 	await promisify(execFile)(
 		process.execPath,
 		["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../fixtures/library-seed.ts", import.meta.url)), cwd],
-		{ env, timeout: 30_000, maxBuffer: 1024 * 1024 },
+		{ env, timeout: CLI_HANG_GUARD_MS, maxBuffer: 1024 * 1024 },
 	);
 }
 /**
@@ -24,7 +33,7 @@ export async function libraryOracle(cwd: string, env: NodeJS.ProcessEnv) {
 				await promisify(execFile)(process.execPath, [cli, ...argv], {
 					cwd,
 					env,
-					timeout: 30_000,
+					timeout: CLI_HANG_GUARD_MS,
 					maxBuffer: 8 * 1024 * 1024,
 				})
 			).stdout,

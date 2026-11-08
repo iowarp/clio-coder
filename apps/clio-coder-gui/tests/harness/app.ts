@@ -160,6 +160,21 @@ export async function harness(
 		if (!issued) throw new Error("The test server refused the launch token exchange.");
 		return { ...issued, ...as(async () => issued.credential) };
 	};
+	const close = async () => {
+		await Promise.all([supervisor.shutdown(), research.close(), cli.close(), setup.close(), attachments.stopAll()]);
+		await Promise.all([reads.close(), ops.close()]);
+		await home.close();
+	};
+	// A test's own budgets start once both domain lanes listen. A cold lane spends
+	// seconds evaluating root src/** first, and a request that waited out that boot
+	// was charged for it against WorkerHost's 30 s queue deadline. Tests of cold
+	// lanes construct a WorkerHost themselves.
+	try {
+		await Promise.all([reads.ready(), ops.ready()]);
+	} catch (error) {
+		await close();
+		throw error;
+	}
 	return {
 		home,
 		files,
@@ -178,11 +193,7 @@ export async function harness(
 		post,
 		exchange,
 		client,
-		close: async () => {
-			await Promise.all([supervisor.shutdown(), research.close(), cli.close(), setup.close(), attachments.stopAll()]);
-			await Promise.all([reads.close(), ops.close()]);
-			await home.close();
-		},
+		close,
 	};
 }
 export async function json<S extends TSchema>(response: Response, schema: S): Promise<Static<S>> {

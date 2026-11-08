@@ -43,6 +43,10 @@ export class WorkerHost {
 	private pending = new Map<string, Pending>();
 	private closed = false;
 	private readonly limit: number;
+	private settleReady!: (error?: Error) => void;
+	private readonly firstReady = new Promise<void>((resolve, reject) => {
+		this.settleReady = (error) => (error ? reject(error) : resolve());
+	});
 	constructor(
 		private kind: WorkerKind,
 		private settings: WorkerSettings = {},
@@ -51,7 +55,18 @@ export class WorkerHost {
 	) {
 		// Mutations stay strictly serial: one ops lane is the ordering guarantee.
 		this.limit = kind === "reads" ? Math.max(1, settings.readLanes ?? READ_LANES) : 1;
+		// Nobody need ask; a host that closes or loses its lanes before one listens must not report that unhandled.
+		this.firstReady.catch(() => {});
 		this.spawn();
+	}
+	/**
+	 * Settles when the first lane has evaluated its entry and listens, and rejects
+	 * if the host closes or every lane exits first. Calls never need this, since
+	 * they queue for a booting lane; it lets a caller that budgets its own time
+	 * separate a cold boot from the work it is timing.
+	 */
+	ready(): Promise<void> {
+		return this.firstReady;
 	}
 	get threadId() {
 		return this.lanes[0]?.worker.threadId;
@@ -124,6 +139,7 @@ export class WorkerHost {
 		worker.on("message", (reply: Reply | Ready) => {
 			if ("ready" in reply) {
 				lane.ready = true;
+				this.settleReady();
 				this.start(lane);
 				this.dispatch();
 				return;
@@ -150,6 +166,8 @@ export class WorkerHost {
 			const index = this.lanes.indexOf(lane);
 			if (index < 0) return;
 			this.lanes.splice(index, 1);
+			if (!this.lanes.some((other) => other.ready))
+				this.settleReady(new Error(`The ${this.kind} domain worker exited before it was ready.`));
 			// Only the call this lane was executing is lost; still-queued calls keep
 			// their place and are re-dispatched onto a fresh lane below.
 			const pending = lane.active ? this.pending.get(lane.active) : undefined;
@@ -207,6 +225,7 @@ export class WorkerHost {
 	}
 	async close() {
 		this.closed = true;
+		this.settleReady(new Error(`The ${this.kind} domain worker host closed before it was ready.`));
 		for (const pending of this.pending.values()) {
 			clearTimeout(pending.timer);
 			pending.reject(new AppProblem("unavailable", "Server is stopping."));
