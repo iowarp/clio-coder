@@ -279,6 +279,7 @@ export function replayTrace(trace: Trace, policy: WorkingSetPolicy, config: Repl
 						contextWindow: config.budgetTokens,
 						threshold: config.threshold,
 						target: config.target,
+						...(overflow ? { forced: true } : {}),
 					},
 					estimateTokens,
 				};

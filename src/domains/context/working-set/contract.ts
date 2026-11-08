@@ -110,6 +110,8 @@ export interface PressureInput {
 	threshold: number;
 	/** `context.workingSet.target`: the ratio an applied event batches down to. */
 	target: number;
+	/** The request must shrink to fit (overflow): selection skips prefix-cache pricing. */
+	forced?: boolean;
 }
 
 /**

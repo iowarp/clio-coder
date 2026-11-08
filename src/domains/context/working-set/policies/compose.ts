@@ -24,6 +24,7 @@ import { tokensFreedByEviction } from "../engine.js";
 import { protectionCutoffIndex } from "../horizon.js";
 import { buildPathIndex, type ChainMember, callPathsByToolCallId, type PathObservation } from "../path-index.js";
 import { isProtected } from "../protect.js";
+import { dropUnpricedHead } from "./cache-price.js";
 import { profilePins, resolveWorkingSetProfile, settingsUnderProfile, type WorkingSetProfile } from "./profiles.js";
 import { isRungId, RUNGS, type RungEmitter, type RungId } from "./rungs.js";
 
@@ -191,7 +192,7 @@ export function composePolicy(
 			const newestFirst = [...index.observations].reverse();
 			const rungInput = { input, index, cutoffIndex, newestFirst, ageOrder: profile.ageOrder };
 			for (const rung of rungs) rung.run(rungInput, emit);
-			return candidates;
+			return dropUnpricedHead(candidates, input, callPaths);
 		},
 	};
 }

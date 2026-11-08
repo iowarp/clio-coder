@@ -227,7 +227,7 @@ describe("working-set ledger boundary", () => {
 
 describe("failed command rerun", () => {
 	/** One bash step that failed as turn-runtime persists it: the registry's error reason rides `blockReason`. */
-	function failedRun(id: string, parent: string): SessionEntry[] {
+	function failedRun(id: string, parent: string, bodyChars = 2000): SessionEntry[] {
 		const args = { command: "pnpm test" };
 		return [
 			{
@@ -247,7 +247,7 @@ describe("failed command rerun", () => {
 				payload: {
 					toolCallId: id,
 					toolName: "bash",
-					result: { content: [{ type: "text", text: "x".repeat(2000) }] },
+					result: { content: [{ type: "text", text: "x".repeat(bodyChars) }] },
 					isError: true,
 					outcome: "error",
 					blockReason: "exit 1",
@@ -271,5 +271,41 @@ describe("failed command rerun", () => {
 			plan.items.map((item) => [item.ref.entry, item.reason]),
 			[["test1", "superseded_call"]],
 		);
+	});
+
+	it("keeps a cheap stale unit whose eviction would re-write a long cached span, unless the fit is forced", () => {
+		const history: SessionEntry[] = [];
+		let parent = "old2";
+		for (let i = 0; i < 20; i += 1) {
+			const turn = message(`h${i}`, parent, i % 2 === 0 ? "user" : "assistant");
+			turn.payload = { text: "y".repeat(2000) };
+			history.push(turn);
+			parent = turn.turnId;
+		}
+		const entries = [
+			message("u1", null, "user"),
+			...failedRun("old1", "u1", 1200),
+			...failedRun("old2", "old1", 1200),
+			...history,
+			...failedRun("new1", parent),
+			...failedRun("new2", "new1"),
+		];
+		const input = {
+			entries,
+			view: EMPTY_WORKING_SET_VIEW,
+			cwd: "/repo",
+			settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns: 1, protectLastSteps: 1 },
+			pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
+			estimateTokens: (entry: SessionEntry) => Math.ceil(JSON.stringify(entry).length / 4),
+		};
+		const priced = planEviction(structuralV2Policy, input);
+		ok(priced);
+		deepStrictEqual(
+			priced.items.map((item) => item.ref.entry),
+			["new1"],
+		);
+		const forced = planEviction(structuralV2Policy, { ...input, pressure: { ...input.pressure, forced: true } });
+		ok(forced);
+		deepStrictEqual(forced.items.map((item) => item.ref.entry).sort(), ["new1", "old1", "old2"]);
 	});
 });

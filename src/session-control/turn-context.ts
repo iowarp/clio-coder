@@ -1901,6 +1901,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
 										)
 									: workingSetTarget,
+								...(requiredFit ? { forced: true } : {}),
 							},
 							estimateTokens: estimator.estimateEntry,
 						});
