@@ -7,7 +7,8 @@ import { runCommandVector } from "../../core/safe-exec.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import {
 	COMMIT_IDENTITY,
-	hostCommitter,
+	type GitIdent,
+	hostCommitIdents,
 	LEFT_UNCOMMITTED_LIST_LIMIT,
 	type TaskWorktree,
 } from "../../tools/task-worktree.js";
@@ -81,11 +82,6 @@ export interface FleetChangeImport {
 	leftUncommitted?: { count: number; paths: string[] };
 }
 
-interface GitIdent {
-	name: string;
-	email: string;
-}
-
 interface RemoteCommitIdentity {
 	author: GitIdent;
 	committer: GitIdent;
@@ -93,14 +89,16 @@ interface RemoteCommitIdentity {
 
 /**
  * Who the remote commit names, decided on the host because the commit lands
- * here: the checkout's committer, and Clio as author with that committer as
- * co-author when `commitAuthor` is `auto`, as for `commitWorktreePath`.
+ * here: the author and committer a local task commit would record, and Clio as
+ * author with that committer as co-author when `commitAuthor` is `auto`, as
+ * for `commitWorktreePath`. The identity travels in the JSON on stdin and
+ * reaches git as environment values, so no shell ever parses a name.
  */
 function remoteCommitAttribution(w: TaskWorktree): { identity: RemoteCommitIdentity; message: string } {
-	const committer = hostCommitter(w.root, COMMIT_IDENTITY);
+	const { author, committer } = hostCommitIdents(w.root, COMMIT_IDENTITY);
 	const message = `Clio Coder remote task ${w.runId}`;
 	const authorship = autonomousLandAuthorship(w.root);
-	if (authorship === null) return { identity: { author: committer, committer }, message };
+	if (authorship === null) return { identity: { author, committer }, message };
 	return {
 		identity: { author: { name: CLIO_COMMIT_NAME, email: CLIO_COMMIT_EMAIL }, committer },
 		message: attributeCommitMessage(message, {}, true, { clioAuthorFor: authorship.human }),

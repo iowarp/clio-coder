@@ -118,6 +118,31 @@ process.exit(result.status??1);
 		strictEqual(git(server, "branch", "--list", "--format=%(refname:short)", worktree.branch), "");
 	});
 
+	it("names the identities a local commit would record, quoting nothing through a shell", async () => {
+		const committer = `O'Brien "Q" Op <ob@example.invalid>`;
+		git(client, "config", "committer.name", `O'Brien "Q" Op`);
+		git(client, "config", "committer.email", "ob@example.invalid");
+		setGitCommitAttributionEnabled(true);
+		const importOne = async (label: string) => {
+			const worktree = createTaskWorktree(client, label);
+			const remote = await prepareFleetChangeReturn(node, worktree);
+			writeFileSync(join(worktree.path.replace(client, server), `${label}.txt`), `${label}\n`);
+			const { commit } = await importFleetChanges(remote, null, [worktree.path], []);
+			return git(worktree.path, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%(trailers:only)", commit);
+		};
+		setGitCommitAuthorSetting("auto");
+		strictEqual(await importOne("auto"), `${CLIO_COMMIT_IDENTITY}|${committer}|Co-authored-by: ${committer}`);
+		setGitCommitAuthorSetting("human");
+		process.env.GIT_AUTHOR_NAME = "Env Author";
+		process.env.GIT_AUTHOR_EMAIL = "env@example.invalid";
+		try {
+			strictEqual(await importOne("human"), `Env Author <env@example.invalid>|${committer}|`);
+		} finally {
+			delete process.env.GIT_AUTHOR_NAME;
+			delete process.env.GIT_AUTHOR_EMAIL;
+		}
+	});
+
 	it("refuses a changed node baseline before creating a remote branch", async () => {
 		const worktree = createTaskWorktree(client, "wrong-base");
 		writeFileSync(join(server, "math.js"), "export const add = () => 0;\n");

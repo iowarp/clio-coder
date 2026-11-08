@@ -221,15 +221,30 @@ export function hostCommitIdentity(cwd: string, identity: string): string[] {
 	return config;
 }
 
+export interface GitIdent {
+	name: string;
+	email: string;
+}
+
 /**
- * The committer `hostCommitIdentity` gives a commit at `cwd`, spelled out for a
- * commit made elsewhere (an SSH node's worktree) that lands in this checkout.
+ * The author and committer a host commit at `cwd` would record, spelled out for
+ * a commit made elsewhere (an SSH node's worktree) that lands in this
+ * checkout. Git resolves them with the `hostCommitIdentity` fill-ins, so
+ * GIT_AUTHOR_* and GIT_COMMITTER_* environment, author.* and committer.*
+ * config, and user.* config win exactly as they would for a local commit.
  */
-export function hostCommitter(cwd: string, identity: string): { name: string; email: string } {
-	return {
-		name: configuredGitValue(cwd, "user.name") ?? identity,
-		email: configuredGitValue(cwd, "user.email") ?? `${identity}@local`,
+export function hostCommitIdents(cwd: string, identity: string): { author: GitIdent; committer: GitIdent } {
+	const fallback = { name: identity, email: `${identity}@local` };
+	const resolveIdent = (kind: "GIT_AUTHOR_IDENT" | "GIT_COMMITTER_IDENT"): GitIdent => {
+		try {
+			const raw = git(cwd, [...hostCommitIdentity(cwd, identity), "-c", "user.useConfigOnly=true", "var", kind]);
+			const match = /^(.+?) <([^<>]*)> \d+ [-+]\d{4}$/u.exec(raw);
+			return match?.[1] !== undefined && match[2] !== undefined ? { name: match[1], email: match[2] } : fallback;
+		} catch {
+			return fallback;
+		}
 	};
+	return { author: resolveIdent("GIT_AUTHOR_IDENT"), committer: resolveIdent("GIT_COMMITTER_IDENT") };
 }
 
 /** What a host commit of a worker's worktree took, and the new files it left out. */
