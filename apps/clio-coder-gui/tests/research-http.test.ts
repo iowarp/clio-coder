@@ -136,14 +136,18 @@ test("research routes list, read and regrade campaigns, and run a start as a can
 		])
 			assert.equal((await h.post(base, bad)).status, 422);
 
-		const done = await h.post(base, request);
+		const doneKey = crypto.randomUUID();
+		const done = await h.post(base, request, doneKey);
 		assert.equal(done.status, 202);
-		const finished = await terminal(h.operations, (await json(done, Accepted)).operationId, 10_000);
+		const doneId = (await json(done, Accepted)).operationId;
+		const finished = await terminal(h.operations, doneId, 10_000);
 		assert.equal(finished.status, "succeeded");
 		assert.ok(finished.status === "succeeded" && "id" in finished.result);
 		assert.equal(finished.result.id, "r20261108-120739-d20d");
 		assert.ok(finished.progress.some((row) => row.message === "research r20261108-123902-22f8: A/A unchanged"));
 
+		// Replaying a settled start returns its terminal operation and must not lock the workspace again.
+		assert.equal((await json(await h.post(base, request, doneKey), Accepted)).operationId, doneId);
 		assert.equal((await json(await h.request(base), ResearchCampaigns)).runningOperationId, undefined);
 		const waitKey = crypto.randomUUID();
 		const waiting = await h.post(base, { ...request, goal: "wait for a stop" }, waitKey);
@@ -162,6 +166,10 @@ test("research routes list, read and regrade campaigns, and run a start as a can
 			await setTimeout(20);
 		assert.equal((await h.post(`/api/operations/${operationId}/cancel`)).status, 200);
 		assert.equal((await terminal(h.operations, operationId, 10_000)).status, "cancelled");
+		assert.equal(
+			(await json(await h.post(base, { ...request, goal: "wait for a stop" }, waitKey), Accepted)).operationId,
+			operationId,
+		);
 		assert.equal((await json(await h.request(base), ResearchCampaigns)).runningOperationId, undefined);
 
 		const closing = await json(await h.post(base, { ...request, goal: "wait for a stop" }), Accepted);

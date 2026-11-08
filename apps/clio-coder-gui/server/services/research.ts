@@ -147,7 +147,9 @@ export class ResearchService {
 					if (this.active.get(workspaceId)?.operationId === operationId) this.active.delete(workspaceId);
 				}),
 		});
-		if (!running) this.active.set(workspaceId, { operationId, key });
+		// A replayed key can return a settled operation whose run never comes back to clear the entry.
+		const { status } = this.operations.get(operationId);
+		if (!running && (status === "queued" || status === "running")) this.active.set(workspaceId, { operationId, key });
 		return operationId;
 	}
 	private execute(
