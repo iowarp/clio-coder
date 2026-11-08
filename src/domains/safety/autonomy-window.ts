@@ -107,8 +107,12 @@ export interface AutonomyWindow {
 	tokens(count: number): void;
 	turnStarted(): void;
 	turnSettled(): void;
-	/** Halt for a reason outside the caps, the judge's escalation today. */
-	haltFor(kind: "judge", detail: string): void;
+	/**
+	 * Halt for a reason outside the caps, the judge's escalation today. With `afterBlock` the halt waits for the
+	 * block that crossed the line to be recorded as an open decision, or for that call to settle, so the notice names it;
+	 * the turn settling, the operator speaking or a new session drops it.
+	 */
+	haltFor(kind: "judge", detail: string, afterBlock?: boolean): void;
 	halted(): AutonomyHalt | null;
 	/** The operator spoke or resumed: a fresh window, and the halt it cleared if any. */
 	reopen(): AutonomyHalt | null;
@@ -122,7 +126,7 @@ export interface AutonomyWindow {
 	openDecisions(sinceReopen?: boolean): OpenDecision[];
 	/** The audit so far, or null when yolo never ran in this session; `sinceReopen` as for `openDecisions`. */
 	report(sinceReopen?: boolean): AutonomyReport | null;
-	/** The process is ending: journal how the yolo stretch ended. */
+	/** The process is ending, its turns settled: journal how the yolo stretch ended. Nothing reopens it after. */
 	end(): void;
 }
 
@@ -151,8 +155,12 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	let seq = 0;
 	let reopenedAt = 0;
 	let omitted = 0;
+	let pendingJudge: string | null = null;
+	let closed = false;
 	const decisions: OpenDecision[] = [];
-	const emit: AutonomyEmit = (name, payload, sessionId) => deps.emit?.(name, payload, sessionId);
+	const emit: AutonomyEmit = (name, payload, sessionId) => {
+		if (!closed) deps.emit?.(name, payload, sessionId);
+	};
 	const confinement = (): "contained" | "unconfined" => deps.confinement?.() ?? "contained";
 	const ended = (reason: EventPayload<"autonomy.ended">["reason"], sessionId: string | null): void => {
 		if (!entered) return;
@@ -166,6 +174,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		activeMs = 0;
 		turnStart = turnStart === null ? null : now();
 		halt = null;
+		pendingJudge = null;
 	};
 	const follow = (): void => {
 		if (deps.session === undefined) return;
@@ -213,7 +222,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		const caps = deps.caps();
 		if (caps === null) ended("left-yolo", session);
 		// Session-scoped events need their session; the first turn opens one.
-		else if (!entered && session !== null) {
+		else if (!entered && !closed && session !== null) {
 			entered = true;
 			emit(
 				"autonomy.entered",
@@ -223,12 +232,19 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		}
 		return caps;
 	};
+	const flushJudge = (): void => {
+		if (pendingJudge === null) return;
+		const detail = pendingJudge;
+		pendingJudge = null;
+		latch({ kind: "judge", detail, usage: usage() });
+	};
 
 	return {
 		toolCall() {
 			const caps = counting();
 			if (caps === null) return;
 			toolCalls += 1;
+			flushJudge();
 			check(caps);
 		},
 		tokens(count) {
@@ -245,13 +261,15 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		// always cancels a running turn and never lands between turns.
 		turnSettled() {
 			follow();
+			pendingJudge = null;
 			if (turnStart === null) return;
 			if (deps.caps() !== null) activeMs += Math.max(0, now() - turnStart);
 			turnStart = null;
 		},
-		haltFor(kind, detail) {
-			if (counting() === null) return;
-			latch({ kind, detail, usage: usage() });
+		haltFor(kind, detail, afterBlock = false) {
+			if (counting() === null || halt !== null) return;
+			if (afterBlock) pendingJudge = detail;
+			else latch({ kind, detail, usage: usage() });
 		},
 		halted() {
 			follow();
@@ -290,6 +308,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 				},
 				session,
 			);
+			if (recorded.kind === "judge-block") flushJudge();
 		},
 		openDecisions(sinceReopen = false) {
 			follow();
@@ -310,7 +329,9 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		},
 		end() {
 			follow();
+			pendingJudge = null;
 			ended(halt === null ? "shutdown" : halt.kind === "judge" ? "judge-streak" : "autonomous-cap", session);
+			closed = true;
 		},
 	};
 }

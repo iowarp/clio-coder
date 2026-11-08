@@ -16,6 +16,11 @@ import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/
 import { renderSessionPostureUpdate } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { admissionAutonomy, effectiveYoloConfinement } from "../../src/domains/safety/autonomy.js";
+import {
+	createAutonomyWindow,
+	describeOpenDecision,
+	type OpenDecision,
+} from "../../src/domains/safety/autonomy-window.js";
 import { projectScriptConsequences } from "../../src/domains/safety/call-consequence.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
@@ -138,6 +143,40 @@ test("contained yolo refuses a call the judge left without a verdict instead of 
 	strictEqual(repeat.kind, "blocked");
 	if (repeat.kind === "blocked") strictEqual(repeat.decision.policy?.reasonCode, "denied_repeat");
 	deepStrictEqual([ran, parks.length, judged()], [[], 0, 1]);
+});
+
+test("a judge streak halts yolo only once the crossing block is recorded, inside the call that crossed it", async () => {
+	// Wired as the orchestrator wires it: the registry records the refusal, the judge's escalation halts the window.
+	const seen: OpenDecision[][] = [];
+	let inCall = false;
+	const window = createAutonomyWindow({
+		caps: () => ({ toolCalls: 0, minutes: 0, tokens: 0 }),
+		session: () => "session-1",
+		onHalt: () => {
+			ok(inCall, "the halt lands while the crossing call is still running, so it cancels that turn");
+			seen.push(window.openDecisions(true));
+		},
+	});
+	const { registry } = containedRegistry(
+		() => JSON.stringify({ verdict: "block", rule: "publish", reason: "uploads" }),
+		{
+			onUnattendedRefusal: (call, decision, kind, rule) =>
+				window.openDecision(describeOpenDecision(call, decision, kind, rule)),
+			note: (note) => {
+				if (note.kind === "escalation") window.haltFor("judge", "3 blocks in a row", note.workerRunId === undefined);
+			},
+		},
+	);
+	for (let i = 0; i < 3; i += 1) {
+		inCall = true;
+		const pending = registry.invoke({ tool: ToolNames.Bash, args: { command: `${UNRECOGNIZED} ${i}` } });
+		const verdict = await pending;
+		inCall = false;
+		strictEqual(verdict.kind, "blocked");
+	}
+	strictEqual(seen.length, 1);
+	strictEqual(seen[0]?.length, 3, "the notice names the block that crossed the line");
+	strictEqual(window.halted()?.kind, "judge");
 });
 
 test("a throwing refusal observer never changes contained yolo's denial or its bookkeeping", async () => {

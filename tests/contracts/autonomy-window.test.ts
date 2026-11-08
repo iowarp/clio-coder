@@ -193,19 +193,28 @@ test("yolo journals entering, open decisions without their command, the halt, th
 	strictEqual(events[2]?.payload.openDecisions, 1);
 	deepStrictEqual(events[4]?.payload, { reason: "shutdown", toolCalls: 0, tokens: 0, activeMs: 0, openDecisions: 1 });
 	// Leaving yolo ends the stretch once; below yolo nothing is recorded.
-	window.turnStarted();
+	const later = createAutonomyWindow({
+		caps: () => caps,
+		onHalt: () => {},
+		session: () => "s1",
+		now: () => 0,
+		emit: (name, payload, session) => events.push({ name, payload: payload as Record<string, unknown>, session }),
+	});
+	later.turnStarted();
+	later.openDecision({ tool: "bash", command: "git push", kind: "operator-only" });
 	caps = null;
-	window.turnStarted();
-	window.openDecision({ tool: "bash", command: "ls", kind: "operator-only" });
-	window.end();
+	later.turnStarted();
+	later.openDecision({ tool: "bash", command: "ls", kind: "operator-only" });
+	later.end();
 	deepStrictEqual(
 		events.slice(5).map((e) => [e.name, e.payload.reason]),
 		[
 			["autonomy.entered", undefined],
+			["autonomy.open_decision", undefined],
 			["autonomy.ended", "left-yolo"],
 		],
 	);
-	strictEqual(window.report()?.openDecisions.length, 1);
+	strictEqual(later.report()?.openDecisions.length, 1);
 });
 
 test("open decisions are bounded, scrubbed and clipped, and a judge-streak end lists them", () => {
@@ -277,6 +286,62 @@ test("an open decision's command hides Authorization headers and bare provider t
 	);
 	for (const secret of [github, anthropic, opaque]) ok(!entry.command.includes(secret), entry.command);
 	match(entry.command, /^curl -H 'Authorization: Bearer /u);
+});
+
+test("an ended yolo audit stays ended: late settlements never reopen it", () => {
+	const names: string[] = [];
+	let ended: Record<string, unknown> | undefined;
+	const window = createAutonomyWindow({
+		caps: () => ({ toolCalls: 0, minutes: 0, tokens: 0 }),
+		onHalt: () => {},
+		session: () => "s1",
+		now: () => 0,
+		emit: (name, payload) => {
+			names.push(name);
+			if (name === "autonomy.ended") ended = payload as Record<string, unknown>;
+		},
+	});
+	window.turnStarted();
+	window.toolCall();
+	window.end();
+	window.toolCall();
+	window.tokens(10);
+	window.turnStarted();
+	window.openDecision({ tool: "bash", command: "ls", kind: "operator-only" });
+	window.end();
+	deepStrictEqual(names, ["autonomy.entered", "autonomy.ended"]);
+	strictEqual(ended?.toolCalls, 1);
+});
+
+test("a pending judge halt is dropped when its turn settles, the operator speaks or the session changes", () => {
+	const fx = windowFixture({ toolCalls: 0, minutes: 0, tokens: 0 });
+	const block = { tool: "bash", command: "git push", kind: "judge-block" as const };
+	fx.window.turnStarted();
+	fx.window.haltFor("judge", "3 blocks in a row", true);
+	strictEqual(fx.halts.length, 0, "nothing halts before the crossing block is recorded");
+	fx.window.turnSettled();
+	fx.window.reopen();
+	fx.window.turnStarted();
+	fx.window.openDecision(block);
+	fx.window.toolCall();
+	strictEqual(fx.halts.length, 0, "a settled turn's escalation never cancels the operator's next prompt");
+
+	fx.window.haltFor("judge", "3 blocks in a row", true);
+	fx.window.reopen();
+	fx.window.openDecision(block);
+	strictEqual(fx.halts.length, 0);
+
+	fx.window.haltFor("judge", "3 blocks in a row", true);
+	fx.setSession("s2");
+	fx.window.openDecision(block);
+	strictEqual(fx.halts.length, 0);
+
+	fx.window.haltFor("judge", "3 blocks in a row", true);
+	fx.window.toolCall();
+	strictEqual(fx.halts.length, 1, "a block the registry never recorded still halts at the call's settlement");
+	fx.window.reopen();
+	fx.window.haltFor("judge", "4 blocks this session");
+	strictEqual(fx.halts.length, 2, "a worker's escalation halts at once");
 });
 
 test("the exit summary closes a yolo session with its window, its halt and the decisions it left", () => {

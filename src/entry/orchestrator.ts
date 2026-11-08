@@ -1826,23 +1826,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onHalt: (halt) => {
 			lastAutonomyHalt = halt;
 			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
-			const cancel = (): void =>
-				chat.cancel({
-					reason: `[Clio Coder] ${autonomyHaltNotice(
-						halt,
-						options.headless !== undefined ? "headless" : "interactive",
-						autonomyWindow.openDecisions(true),
-					)}`,
-					source: "autonomy",
-					auditReason: `${prefix}: ${halt.detail}`,
-				});
-			// The judge escalates inside the review of the block that crossed the line, before the
-			// registry records it as an open decision; the latch already holds, so the notice can wait a tick.
-			if (halt.kind === "judge") setImmediate(cancel);
-			else cancel();
+			// Synchronous, inside the call that crossed the line: the cancel can only reach the turn that halted.
+			chat.cancel({
+				reason: `[Clio Coder] ${autonomyHaltNotice(
+					halt,
+					options.headless !== undefined ? "headless" : "interactive",
+					autonomyWindow.openDecisions(true),
+				)}`,
+				source: "autonomy",
+				auditReason: `${prefix}: ${halt.detail}`,
+			});
 		},
 	});
-	bus.subscribe("shutdown.requested", () => autonomyWindow.end());
+	// After the drain hooks settled the chat, before persist closes the journal: the end carries the final usage.
+	bus.subscribe("shutdown.drained", () => autonomyWindow.end());
 	bus.subscribe("tool.settled", (_payload, context) => {
 		if (context?.agent.role === "main") autonomyWindow.toolCall();
 	});
@@ -1863,6 +1860,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		session: () => session,
 		safety,
 		// Past either threshold every later review would refuse in silence, so contained yolo ends the run (D4).
+		// A main-session escalation fires inside the review of the block that crossed the line; the window halts once the
+		// registry records that block, still inside the call. A worker's block has no such record and halts at once.
 		onEscalation: (note) => {
 			if (!unattendedYolo()) return;
 			autonomyWindow.haltFor(
@@ -1870,6 +1869,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				note.consecutiveBlocks >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
 					? `${note.consecutiveBlocks} blocks in a row`
 					: `${note.totalBlocks} blocks this session`,
+				note.workerRunId === undefined,
 			);
 		},
 		// `systemOne` and `chat` are built further down; nothing calls the judge before the first tool call.
