@@ -2,11 +2,13 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { protectedArtifactMutationBlockReason } from "../../src/domains/safety/protected-artifacts.js";
+import { writeToolOffload } from "../../src/tools/result-shaping.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
  * A bash write target is resolved from every directory the shell can be in
@@ -183,6 +185,24 @@ describe("bash write targets after cd, and links made in the same command", () =
 			assertExecute(command);
 		}
 		strictEqual(existsSync(join(deep, "out.txt")), false);
+	});
+
+	it("lets a read pipeline cd into the offload scratch a spilled result names (K7)", async () => {
+		let env: IsolatedClioEnv | undefined;
+		try {
+			env = await isolateClioEnv("clio-coder-bash-cd-spill-");
+			const spill = writeToolOffload("spilled result\n".repeat(64), { sessionId: "k7" });
+			ok(spill);
+			const dir = realpathSync(dirname(spill));
+			const file = basename(spill);
+			assertExecute(`cd ${dir} && ls -l && head -c 300 ${file}; tail -c 200 ${file}`);
+			assertExecute(`cd ${dir} && ls -l ${file} | head`);
+			assertEscalated(`cd ${dir} && echo x > out.txt`, [`write-path-outside-cwd: ${join(dir, "out.txt")}`]);
+			// Anywhere else outside the workspace is still an escape.
+			assertEscalated(`cd ${join(base, "elsewhere")} && ls`, [`bash-cd-outside-workspace: ${join(base, "elsewhere")}`]);
+		} finally {
+			env?.restore();
+		}
 	});
 
 	it("escalates, as the parent did, a `..` that leaves the workspace from the call's cwd", () => {

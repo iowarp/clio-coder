@@ -402,6 +402,71 @@ describe("MCP catalog source", () => {
 		strictEqual(source.catalog().servers.find((server) => server.id === "fake")?.catalog, "live");
 	});
 
+	it("tells the next failed call when the live listing changed since the recorded catalog (K9)", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const first = wire(scene);
+		open.push(first.source);
+		await first.source.refresh("fake");
+		await first.source.close();
+
+		// The same declaration now runs an upgraded server whose echo takes one more parameter.
+		const upgraded = (spec: McpServerSpec, clientOptions: McpClientOptions): McpClient => {
+			const client = createMcpStdioClient(spec, clientOptions);
+			const listTools = client.listTools.bind(client);
+			client.listTools = async (signal) => {
+				const listing = await listTools(signal);
+				return {
+					...listing,
+					tools: listing.tools.map((tool) =>
+						tool.name !== "echo"
+							? tool
+							: {
+									...tool,
+									inputSchema: {
+										...tool.inputSchema,
+										properties: {
+											...((tool.inputSchema.properties as Record<string, unknown> | undefined) ?? {}),
+											group_by: { type: "string" },
+										},
+									},
+								},
+					),
+				};
+			};
+			return client;
+		};
+		const groupBy = (parameters: unknown): boolean =>
+			"group_by" in ((parameters as { properties?: Record<string, unknown> }).properties ?? {});
+		const second = wire(scene, upgraded);
+		open.push(second.source);
+		strictEqual(groupBy(second.source.metadata(ECHO).metadata?.parameters), false, "the session first sees A");
+		const ensured = await second.source.ensure(ECHO);
+		ok(ensured.spec, ensured.reason);
+		const result = await ensured.spec.run({ text: "hi" });
+		strictEqual(result.kind, "ok");
+		strictEqual(result.output, JSON.stringify({ text: "hi" }), "a successful output stays the server's bytes");
+		const fail = await second.source.ensure("mcp_fake__fail");
+		ok(fail.spec, fail.reason);
+		const failed = await fail.spec.run({});
+		strictEqual(failed.kind, "error");
+		strictEqual(
+			failed.message.split("\n")[0],
+			"fake catalog changed since recorded: echo schema changed; describe it again",
+		);
+		const again = await fail.spec.run({});
+		strictEqual(again.kind === "error" && again.message.includes("catalog changed"), false, "the line is said once");
+		ok(groupBy(second.source.metadata(ECHO).metadata?.parameters), "describe shows B");
+
+		// Recorded at launch, while the upgraded server is still running.
+		const third = wire(scene);
+		open.push(third.source);
+		const cached = third.source.metadata(ECHO).metadata;
+		strictEqual(cached?.provenance, "cached");
+		ok(groupBy(cached.parameters), "a later session's find and describe read B");
+		strictEqual(third.clients.length, 0);
+	});
+
 	it("routes a cached name by the longest declared server prefix", async () => {
 		const scene = scenario();
 		writeFileSync(

@@ -244,6 +244,11 @@ export interface McpCapabilitySource {
 	 * registered spec. With `readOnly`, only a server trusted as read is launched.
 	 */
 	ensure(name: string, options?: McpLaunchOptions): Promise<McpEnsureResult>;
+	/**
+	 * The pending line naming what the owning server's live listing changed since
+	 * its recorded catalog, handed out once, or null.
+	 */
+	takeCatalogChange(name: string): string | null;
 	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
 	authorityNote(name: string): string | null;
 	/**
@@ -316,6 +321,71 @@ interface ServerState {
 	 * or relaunched server starts with a clean slate.
 	 */
 	refused: Map<string, string>;
+	/**
+	 * What the first live listing changed against the recorded catalog this
+	 * session may already have shown, until the server's next result carries it.
+	 */
+	catalogChange?: string;
+}
+
+const CATALOG_HINT_KEYS = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const;
+
+/** A tool in the shape a recorded catalog keeps, so a live and a cached descriptor compare like for like. */
+function recordedShape(tool: { description: string; annotations?: Record<string, unknown> | null }): string {
+	const hints = CATALOG_HINT_KEYS.flatMap((key) =>
+		typeof tool.annotations?.[key] === "boolean" ? [[key, tool.annotations[key]]] : [],
+	);
+	return JSON.stringify([tool.description, hints]);
+}
+
+/**
+ * One line naming what a server's live listing changed since the catalog it
+ * recorded, or null when nothing did. The recorded catalog is keyed on the
+ * declaration, which a server upgrade leaves unchanged (K9), so a find or
+ * describe earlier in the session may have shown the model the old schema.
+ */
+function catalogChangeLine(id: string, recorded: McpServerCatalog, live: McpToolListing): string | null {
+	const before = new Map(recorded.tools.map((tool) => [tool.name, tool]));
+	const after = new Map(live.tools.map((tool) => [tool.name, tool]));
+	const schema: string[] = [];
+	const other: string[] = [];
+	const added: string[] = [];
+	for (const [name, tool] of after) {
+		const old = before.get(name);
+		if (old === undefined) {
+			// A partial recording cannot say a tool beyond its cut is new.
+			if (!recorded.truncated) added.push(name);
+		} else if (JSON.stringify(old.inputSchema) !== JSON.stringify(tool.inputSchema)) schema.push(name);
+		else if (recordedShape(old) !== recordedShape(tool)) other.push(name);
+	}
+	const removed = live.truncated ? [] : [...before.keys()].filter((name) => !after.has(name));
+	const named = (names: string[], what: string): string[] => {
+		if (names.length === 0) return [];
+		const shown = names.slice(0, 3).join(", ");
+		return [`${shown}${names.length > 3 ? ` and ${names.length - 3} more` : ""} ${what}`];
+	};
+	const parts = [
+		...named(schema, "schema changed"),
+		...named(other, "changed"),
+		...named(added, "added"),
+		...named(removed, "removed"),
+	];
+	if (parts.length === 0) return null;
+	const describable = schema.length + other.length + added.length;
+	const again = describable === 0 ? "" : `; describe ${describable === 1 ? "it" : "them"} again`;
+	return `${id} catalog changed since recorded: ${parts.join("; ")}${again}`;
+}
+
+/**
+ * Put a pending catalog change line ahead of an error message, where a bounded
+ * result never cuts it. A successful output stays the server's bytes, because a
+ * chain binds it as data; the line waits for the call that a stale schema fails.
+ */
+function withCatalogChange(state: ServerState, result: ToolResult): ToolResult {
+	const line = state.catalogChange;
+	if (line === undefined || result.kind !== "error") return result;
+	delete state.catalogChange;
+	return { ...result, message: `${line}\n${result.message}` };
 }
 
 /** The one call that fills a missing catalog, named so the model does not guess at a broader one. */
@@ -631,10 +701,10 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				}
 				const currentTool = state.tools.find((entry) => entry.name === tool.name);
 				if (currentTool === undefined || JSON.stringify(currentTool) !== JSON.stringify(tool)) {
-					return {
+					return withCatalogChange(state, {
 						kind: "error",
 						message: `${name}: live tool metadata changed; describe the capability and retry under its current schema and authority`,
-					};
+					});
 				}
 				try {
 					const result = await client.callTool(tool.name, args, {
@@ -652,10 +722,15 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					if (result.isError) {
 						const refusal = serverPolicyRefusalResult(state, tool, name, trustClass, result);
 						if (refusal !== null) return refusal;
-						return { kind: "error", message: `${name}: ${result.text || "tool error"}`, details };
+						return withCatalogChange(state, { kind: "error", message: `${name}: ${result.text || "tool error"}`, details });
 					}
 					const images = imageBlocks(result);
-					return { kind: "ok", output: result.text, details, ...(images.length > 0 ? { images } : {}) };
+					return {
+						kind: "ok",
+						output: result.text,
+						details,
+						...(images.length > 0 ? { images } : {}),
+					};
 				} catch (error) {
 					if (client.state().status === "failed" || client.state().status === "closed") {
 						state.failure = errorMessage(error);
@@ -665,11 +740,11 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					// server, so it carries the server id like any other answer; only a
 					// request that got no answer goes without it.
 					if (error instanceof McpError && error.code === "server")
-						return {
+						return withCatalogChange(state, {
 							kind: "error",
 							message: `${name}: ${errorMessage(error)}`,
 							details: { server: declaration.id, tool: tool.name },
-						};
+						});
 					return { kind: "error", message: `${name}: ${errorMessage(error)}` };
 				}
 			},
@@ -693,6 +768,17 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		for (const name of state.registered) registry.unregister?.(name);
 		state.registered = [];
 		state.unregistrable = [];
+		// Only the first listing is compared with the recording; a later change
+		// on a live server already fails the stale spec's call with its own reason.
+		if (state.listed !== true) {
+			try {
+				const recorded = cachedCatalog(state);
+				const change = recorded === null ? null : catalogChangeLine(state.declaration.id, recorded, listing);
+				if (change !== null) state.catalogChange = change;
+			} catch {
+				// An unreadable cache has no recording to compare; the listing still installs.
+			}
+		}
 		state.tools = listing.tools;
 		state.truncated = listing.truncated;
 		state.listed = true;
@@ -1161,6 +1247,13 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						? `mcp server ${owner.declaration.id} failed: ${owner.failure}`
 						: `mcp server ${owner.declaration.id} offers no tool named ${name.slice(`mcp_${owner.declaration.id}__`.length)}`,
 			};
+		},
+		takeCatalogChange(name) {
+			const owner = ownerOf(name);
+			const line = owner?.catalogChange;
+			if (owner === null || line === undefined) return null;
+			delete owner.catalogChange;
+			return line;
 		},
 		authorityNote(name) {
 			const owner = ownerOf(name);

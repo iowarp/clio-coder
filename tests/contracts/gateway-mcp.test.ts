@@ -814,6 +814,43 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(source.teardownReports()[0]?.outcome.complete, true);
 	});
 
+	it("lists a declared server with no recorded catalog live on the find that names it (K10)", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "marker", actionClass: "read" }).ok);
+		const { registry, source, clients } = wire(scene);
+		open.push(source);
+		const scoped = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake" } }));
+		ok((scoped.capabilities as Array<Record<string, unknown>>).some((entry) => entry.name === ECHO));
+		strictEqual(scoped.missingCatalogs, undefined);
+		strictEqual(clients.length, 1, "only the named server launched");
+		await source.close();
+
+		const named = wire(scene);
+		open.push(named.source);
+		rmSync(join(env.dir, "cache"), { recursive: true, force: true });
+		const unscoped = payloadOf(
+			await named.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "fake echo" } }),
+		);
+		ok((unscoped.capabilities as Array<Record<string, unknown>>).some((entry) => entry.name === ECHO));
+		strictEqual(named.clients.length, 1);
+		// A capability name routes to its owner alone, though its tool part reads like another server id.
+		await named.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "find", query: 'schema for "mcp_fake__echo.marker"?' },
+		});
+		strictEqual(named.clients.length, 1);
+		strictEqual(existsSync(scene.markerPath), false);
+
+		// A server that cannot list its tools answers as an explicit refresh of it would.
+		const failed = payloadOf(
+			await named.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "marker" } }),
+		);
+		const marker = (failed.servers as Array<Record<string, unknown>>).find((entry) => entry.id === "marker");
+		strictEqual(marker?.status, "failed");
+		ok(typeof failed.refresh === "string" && failed.refresh.includes("mcp server marker failed"), String(failed.refresh));
+	});
+
 	it("starts for a read-only turn only servers trusted as read or called for a tool the operator classes read", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "marker", actionClass: "execute" }).ok);
@@ -933,6 +970,10 @@ describe("gateway MCP capabilities", () => {
 		});
 		ok(stale.kind === "ok" && stale.result.kind === "error", JSON.stringify(stale));
 		ok(stale.result.message.includes("arguments rejected"), stale.result.message);
+		strictEqual(
+			stale.result.message.split("\n")[0],
+			"shift catalog changed since recorded: probe schema changed; gone removed; describe it again",
+		);
 		strictEqual(second.clients.length, 1, "the call launched exactly the owning server");
 
 		const live = await second.registry.invoke({
@@ -948,6 +989,24 @@ describe("gateway MCP capabilities", () => {
 		});
 		ok(removed.kind === "ok" && removed.result.kind === "error", JSON.stringify(removed));
 		ok(removed.result.message.includes("offers no tool named gone"), removed.result.message);
+		ok(!removed.result.message.includes("catalog changed"), "the change line is said once");
+
+		// A first call to the tool the upgrade dropped carries the change line too (K9).
+		writeFileSync(generation, "1");
+		const third = wire(scene);
+		open.push(third.source);
+		await third.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "shift", refresh: true } });
+		await third.source.close();
+		writeFileSync(generation, "2");
+		const fourth = wire(scene);
+		open.push(fourth.source);
+		const dropped = await fourth.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: "mcp_shift__gone", args: {} },
+		});
+		ok(dropped.kind === "ok" && dropped.result.kind === "error", JSON.stringify(dropped));
+		ok(dropped.result.message.startsWith("shift catalog changed since recorded:"), dropped.result.message);
+		ok(dropped.result.message.includes("offers no tool named gone"), dropped.result.message);
 	});
 
 	it("carries a filled catalog across sessions and connects only the owner on the first call", async () => {

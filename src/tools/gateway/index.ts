@@ -322,6 +322,21 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		}
 	};
 
+	/**
+	 * An unscoped find names a server by one of its capability names, or by its
+	 * id as a whole word elsewhere in the query. Capability names come out first,
+	 * punctuation and all, so a dotted tool part never reads as another server id.
+	 */
+	const queryNamesServer = (query: string, id: string, mcp: McpCapabilitySource): boolean => {
+		let named = false;
+		const rest = query.replace(/mcp_[a-z0-9][a-z0-9_-]*__[a-z0-9][a-z0-9_.-]*/g, (match) => {
+			const name = match.replace(/\.+$/, "");
+			if (isMcpToolName(name) && mcp.ownerIdOf(name) === id) named = true;
+			return " ";
+		});
+		return named || rest.split(/[^a-z0-9_-]+/).includes(id.toLowerCase());
+	};
+
 	const runFind = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
 		if (args.args !== undefined) {
 			return { kind: "error", message: `gateway: op="find" takes no args; ${envelopeHint(args)}` };
@@ -395,6 +410,21 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				if (refresh) {
 					const result = await deps.mcp.refresh(server, mcpLaunchOptions(options));
 					if (result.reason !== undefined) refreshNote = result.reason;
+				} else {
+					// A declared, trusted server with no recorded catalog would answer
+					// nothing and cost the model a second find with refresh=true (K10).
+					// When this find names it, list it live now; a launch that fails
+					// leaves the missing catalog and its remedy as before.
+					const mcp = deps.mcp;
+					const named = mcp
+						.catalog()
+						.missing.filter((id) => (scoped ? id === server : shownServer(id) && queryNamesServer(query, id, mcp)));
+					const notes: string[] = [];
+					for (const id of named) {
+						const result = await mcp.refresh(id, mcpLaunchOptions(options));
+						if (result.reason !== undefined) notes.push(result.reason);
+					}
+					if (notes.length > 0) refreshNote = notes.join("; ");
 				}
 				const catalog = deps.mcp.catalog();
 				// A restricted surface lists only the servers it names a capability
@@ -778,7 +808,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				details: { refusal: { kind: "unknown_capability" } },
 			};
 		const resolved = await resolveCapability(name, options, allowDirect);
-		if (resolved.spec === null) return { kind: "error", message: resolved.message };
+		if (resolved.spec === null) {
+			// A recorded tool the upgraded server dropped fails here, before any run (K9).
+			const changed = isMcpToolName(name) ? (deps.mcp?.takeCatalogChange(name) ?? null) : null;
+			return { kind: "error", message: changed === null ? resolved.message : `${changed}\n${resolved.message}` };
+		}
 		const spec = resolved.spec;
 		try {
 			deps.onCapabilityCalled?.(spec.name);
@@ -804,9 +838,13 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			) as Record<string, unknown>;
 		} catch (error) {
 			const examples = gatewayExamples(spec, "", 1, allowedSet(options));
+			// A schema the model read from an outdated recording is the likeliest
+			// reason for the rejection, so the catalog change line belongs here (K9).
+			const changed = isMcpToolName(spec.name) ? (deps.mcp?.takeCatalogChange(spec.name) ?? null) : null;
 			return {
 				kind: "error",
 				message:
+					(changed !== null ? `${changed}\n` : "") +
 					`gateway: ${spec.name} arguments rejected: ${error instanceof Error ? error.message : String(error)}. Use gateway(op="describe", capability="${spec.name}") for the schema.` +
 					(examples.length > 0 ? ` Example to adapt, not retry verbatim: ${JSON.stringify(examples[0])}` : ""),
 			};

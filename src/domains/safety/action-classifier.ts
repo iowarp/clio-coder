@@ -4,6 +4,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
+import { resolveClioDirs } from "../../core/xdg.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
@@ -136,6 +137,22 @@ const SYSTEM_WRITE_EXEMPT_PREFIXES: ReadonlyArray<string> = [
 
 function isUnderPrefix(abs: string, prefix: string): boolean {
 	return abs === prefix || abs.startsWith(`${prefix}/`);
+}
+
+/**
+ * Trees outside the workspace that Clio writes and tells the model to read:
+ * the offload scratch `writeToolOffload` (src/tools/result-shaping.ts) spills
+ * an oversized result into. Resolved without creating anything, and an
+ * unresolvable Clio home names none.
+ */
+function harnessReadRoots(): string[] {
+	try {
+		const root = canonicalizePath(path.join(resolveClioDirs().state, "scratch"));
+		return root === null ? [] : [root];
+	} catch {
+		// An unresolvable Clio home permits no extra cd target.
+		return [];
+	}
 }
 
 function baseClassify(tool: string): ActionClass | null {
@@ -524,6 +541,13 @@ function walkPathReasons(
 			for (const landing of resolveCdCandidates(target, base)) {
 				// Inside means inside under the logical and the physical reading.
 				if (landing === null || !isInsideCwd(landing)) {
+					// The offload scratch is where Clio itself points the model to
+					// read a spilled result, so a cd there is not an escape; what
+					// follows is judged from it like any base (K7).
+					if (landing !== null && harnessReadRoots().some((root) => isUnderPrefix(landing, root))) {
+						landed.push(landing);
+						continue;
+					}
 					cdReasons.add(`bash-cd-outside-workspace: ${landing ?? target}`);
 					// Under the operator's yolo a cd into a scratch root becomes a base,
 					// so `cd /tmp/run && rm -rf out` is judged where it lands (#419).
