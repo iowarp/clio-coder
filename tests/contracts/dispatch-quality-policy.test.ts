@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -46,7 +46,7 @@ async function project(body: (root: string) => Promise<void>): Promise<void> {
 
 function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionEvaluationInput[]) {
 	const base = dispatchStubContext({ settings });
-	const baseSafety = base.getContract<SafetyContract>("safety");
+	const baseSafety = base.getContract("safety");
 	ok(baseSafety);
 	const safety: SafetyContract = {
 		...baseSafety,
@@ -57,8 +57,8 @@ function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionEva
 	};
 	return {
 		bus: base.bus,
-		getContract<T extends object>(name: string): T | undefined {
-			return name === "safety" ? (safety as T) : base.getContract<T>(name);
+		getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+			return name === "safety" ? (safety as DomainContractMap[N]) : base.getContract(name);
 		},
 	};
 }

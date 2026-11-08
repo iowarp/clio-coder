@@ -1,9 +1,8 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import type { ExtensionsContract } from "./contract.js";
 import { createExtensionsBundle } from "./extension.js";
 import { ExtensionsManifest } from "./manifest.js";
 
-export const ExtensionsDomainModule: DomainModule<ExtensionsContract> = {
+export const ExtensionsDomainModule: DomainModule<"extensions"> = {
 	manifest: ExtensionsManifest,
 	createExtension: createExtensionsBundle,
 };

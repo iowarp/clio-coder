@@ -1,5 +1,4 @@
 import { loadDomains } from "../core/domain-loader.js";
-import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { type AgentSpec, isUserVisibleAgent } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -38,7 +37,7 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 	}
 	ensureClioState();
 	const result = await loadDomains([ConfigDomainModule, SafetyDomainModule, AgentsDomainModule]);
-	const agents = result.getContract<AgentsContract>("agents");
+	const agents = result.getContract("agents");
 	if (!agents) {
 		process.stderr.write("agents: domain not loaded\n");
 		await result.stop();

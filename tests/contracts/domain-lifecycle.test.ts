@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { type DomainContext, type DomainModule, loadDomains } from "../../src/core/domain-loader.js";
+import { type DomainContext, loadDomains, type NamedDomainModule } from "../../src/core/domain-loader.js";
 import { safeResourceWrite } from "../../src/core/safe-resource-write.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import {
@@ -11,6 +11,10 @@ import {
 	resolveShutdownHookBudgetMs,
 	ShutdownBudgetExceeded,
 } from "../../src/core/termination.js";
+
+/** These fixtures name their own domains, so they type the loader by their own map. */
+type FixtureMap = Record<string, Record<string, unknown>>;
+type DomainModule = NamedDomainModule<string, FixtureMap>;
 
 test("failed domain startup releases its listeners and earlier dependencies in reverse order", async () => {
 	const bus = telemetryHub();
@@ -33,14 +37,14 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 						stop() {
 							unsubscribe?.();
 							stopped.push(name);
-							if (name === "consumer") dependencyDuringStop = context.getContract<{ name: string }>("dependency")?.name;
+							if (name === "consumer") dependencyDuringStop = context.getContract("dependency")?.name as string | undefined;
 						},
 					},
 				};
 			},
 		}),
 	);
-	await rejects(loadDomains(modules, { diagnostic() {} }), { cause: failure });
+	await rejects(loadDomains<FixtureMap>(modules, { diagnostic() {} }), { cause: failure });
 	deepStrictEqual(stopped, ["consumer", "dependency"]);
 	strictEqual(dependencyDuringStop, "dependency");
 	strictEqual(bus.listeners("session.started").length, before);
@@ -49,7 +53,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 test("a rejected domain factory unwinds started dependencies", async () => {
 	let stopped = false;
 	await rejects(
-		loadDomains(
+		loadDomains<FixtureMap>(
 			[
 				{
 					manifest: { name: "dependency", dependsOn: [] },
@@ -83,8 +87,8 @@ test("concurrent shutdown callers await one cleanup and stopped contracts are wi
 		release = resolve;
 	});
 	let stops = 0;
-	let context!: DomainContext;
-	const loaded = await loadDomains([
+	let context!: DomainContext<FixtureMap>;
+	const loaded = await loadDomains<FixtureMap>([
 		{
 			manifest: { name: "owned", dependsOn: [] },
 			createExtension(ctx) {
@@ -122,7 +126,7 @@ test("duplicate domain names reject the composition before either implementation
 			return { contract: {}, extension: { start() {} } };
 		},
 	};
-	await rejects(loadDomains([module, module]), /Duplicate domain: duplicate/);
+	await rejects(loadDomains<FixtureMap>([module, module]), /Duplicate domain: duplicate/);
 	strictEqual(created, false);
 });
 
@@ -155,7 +159,7 @@ test("a cancelled load stops the started domains and propagates the cancellation
 	);
 	let boundaries = 0;
 	try {
-		const load = loadDomains(modules, {
+		const load = loadDomains<FixtureMap>(modules, {
 			diagnostic: (text) => diagnostics.push(text),
 			async beforeEach() {
 				boundaries += 1;
@@ -182,7 +186,7 @@ test("budget expiry aborts the stop signal and does not rerun the domain stop", 
 		started = resolve;
 	});
 	let stops = 0;
-	const loaded = await loadDomains([
+	const loaded = await loadDomains<FixtureMap>([
 		{
 			manifest: { name: "pending", dependsOn: [] },
 			createExtension: () => ({
@@ -223,7 +227,7 @@ test("accepted persistence runs after observed resource settlement", async (t) =
 	const stopStarted = new Promise<void>((resolve) => {
 		started = resolve;
 	});
-	const loaded = await loadDomains([
+	const loaded = await loadDomains<FixtureMap>([
 		{
 			manifest: { name: "resource", dependsOn: [] },
 			createExtension: () => ({

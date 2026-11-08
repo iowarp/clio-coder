@@ -48,7 +48,7 @@ function limitedChatLoop(sessionToolLimits: SessionToolLimits) {
 	} as unknown as SessionContract;
 	return createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		sessionToolLimits,

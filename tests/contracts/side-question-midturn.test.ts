@@ -41,7 +41,7 @@ test("/btw answers while a turn is streaming and leaves the turn's history alone
 	let sent: ReadonlyArray<AgentMessage> | null = null;
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 			const state = options?.initialState as { messages: AgentMessage[] };

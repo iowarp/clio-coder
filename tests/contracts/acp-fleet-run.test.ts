@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { Playbook } from "../../src/domains/agents/index.js";
 import { cancelStoredAssignment, registerAssignment } from "../../src/domains/dispatch/assignment-store.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
@@ -52,7 +51,7 @@ async function peer() {
 	const scratch = await isolateClioEnv("clio-coder-acp-fleet-");
 	const root = realpathSync(scratch.dir);
 	const context = dispatchStubContext({ settings: DEFAULT_SETTINGS });
-	const agents = context.getContract<AgentsContract>("agents");
+	const agents = context.getContract("agents");
 	ok(agents);
 	const state = {
 		steps: ["survey", "report"],
@@ -169,7 +168,7 @@ test("fleet approval changes when the resolved model changes on the same endpoin
 	const scratch = await isolateClioEnv("clio-coder-fleet-route-seal-");
 	try {
 		const root = realpathSync(scratch.dir);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const compile = (model: string) =>
 			compileFleetRunPreview({
@@ -205,7 +204,7 @@ test("fleet approval changes when a registered command's argv changes under the 
 	const scratch = await isolateClioEnv("clio-coder-fleet-command-seal-");
 	try {
 		const root = realpathSync(scratch.dir);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const compile = (argv: string[], args?: string[]) =>
 			compileFleetRunPreview({
@@ -267,7 +266,7 @@ test("a resume id compiles the replayed prefix into every surface's approval", a
 	const scratch = await isolateClioEnv("clio-coder-fleet-resume-preview-");
 	try {
 		const root = realpathSync(scratch.dir);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const records = new Map<string, FleetRunRecord>();
 		const compile = (vars: Record<string, string>, resume?: string) =>
@@ -341,7 +340,7 @@ test("a resume refuses a root another workspace launched", async () => {
 		const root = realpathSync(scratch.dir);
 		const other = join(root, "other-project");
 		mkdirSync(other);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const records = new Map<string, FleetRunRecord>();
 		const compile = (workspaceRoot: string, resume?: string) =>
@@ -391,7 +390,7 @@ test("a resume refuses a root whose process still runs it", async () => {
 	const scratch = await isolateClioEnv("clio-coder-fleet-resume-running-");
 	try {
 		const root = realpathSync(scratch.dir);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const records = new Map<string, FleetRunRecord>();
 		const compile = (resume?: string) =>

@@ -151,7 +151,7 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): M
 
 /** A middleware domain module plus the registration capability of the instance it creates. */
 export interface MiddlewareDomain {
-	readonly module: DomainModule<MiddlewareContract>;
+	readonly module: DomainModule<"middleware">;
 	/** Undefined until the loader has created the domain. */
 	registrar(): MiddlewareRegistrar | undefined;
 }

@@ -303,7 +303,7 @@ test("Stop fences deferred preparation and compaction before model calls or late
 				});
 				const loop = createChatLoop({
 					getSettings: () => settings,
-					providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+					providers: context.getContract("providers") as ProvidersContract,
 					knownTargets: () => new Set([target.id]),
 					session,
 					bus: context.bus,

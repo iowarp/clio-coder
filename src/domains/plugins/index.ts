@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createPluginsBundle } from "./extension.js";
 import { PluginsManifest } from "./manifest.js";
 
-export const PluginsDomainModule: DomainModule = {
+export const PluginsDomainModule: DomainModule<"plugins"> = {
 	manifest: PluginsManifest,
 	createExtension: createPluginsBundle,
 };

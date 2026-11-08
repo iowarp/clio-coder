@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, statSync, symlinkSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
@@ -180,7 +181,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		});
 		const context = {
 			bus: base.bus,
-			getContract: ((name: string) =>
+			getContract: ((name: DomainName) =>
 				name === "telemetry"
 					? { acquireTelemetrySession: journals.acquire }
 					: base.getContract(name)) as typeof base.getContract,

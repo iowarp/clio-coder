@@ -208,7 +208,7 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 
 	ensureClioState();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
-	const providers = loaded.getContract<ProvidersContract>("providers");
+	const providers = loaded.getContract("providers");
 	if (!providers) {
 		process.stderr.write("targets: provider domain not loaded\n");
 		await loaded.stop();

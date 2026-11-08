@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import {
 	parseResultContract,
 	parseWorkerResultContract,
@@ -284,7 +283,7 @@ function setup(outputs: readonly string[]) {
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "yolo";
 	const context = dispatchStubContext({ settings });
-	const agents = context.getContract<AgentsContract>("agents");
+	const agents = context.getContract("agents");
 	ok(agents);
 	const specs: WorkerSpec[] = [];
 	const bundle = makeDispatchBundle(context, {

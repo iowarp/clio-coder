@@ -12,13 +12,11 @@ import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import { yoloRootRefusal } from "../core/yolo-host.js";
-import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import { SHADOW_AGENT_OPERATOR_STAND_IN, userOriginAudienceRefusal } from "../domains/agents/spec.js";
-import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
@@ -27,7 +25,6 @@ import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
@@ -35,7 +32,6 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
@@ -675,11 +671,11 @@ async function runDispatch(
 	]);
 	// The process journal records the status this command returns, which no shutdown coordinator sets here (#434).
 	const stopDomains = async (code: number): Promise<number> => {
-		loaded.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(code);
+		loaded.getContract("telemetry")?.setExitStatus?.(code);
 		await loaded.stop();
 		return code;
 	};
-	const config = loaded.getContract<ConfigContract>("config");
+	const config = loaded.getContract("config");
 	const baseSettings = config?.get() ?? readSettings();
 	// Install `fleet.history.journal` the same way the interactive composition root
 	// does. The journal never reads settings.yaml itself: it sits on the
@@ -691,14 +687,14 @@ async function runDispatch(
 	// parser rejects --autonomy with --agent, so this path never takes it. Pin
 	// the clone to default so a settings-file yolo cannot reach it either.
 	effectiveSettings.safety.autonomy = "default";
-	const dispatch = loaded.getContract<DispatchContract>("dispatch");
+	const dispatch = loaded.getContract("dispatch");
 	if (!dispatch) {
 		writeRunDiagnostic("dispatch domain unavailable\n");
 		return await stopDomains(1);
 	}
 
 	if (options.apiKey) {
-		const providers = loaded.getContract<ProvidersContract>("providers");
+		const providers = loaded.getContract("providers");
 		if (!providers) {
 			writeRunDiagnostic("clio-coder run: --api-key supplied but providers domain unavailable\n");
 			return await stopDomains(1);
@@ -734,7 +730,7 @@ async function runDispatch(
 	const noSkills = options.noSkills === true || parsed.noSkills === true;
 	const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
 
-	const runAgents = loaded.getContract<AgentsContract>("agents");
+	const runAgents = loaded.getContract("agents");
 	const dispatchReq: DispatchRequest = {
 		agentId: parsed.agentId,
 		executionRole: requestExecutionRole({

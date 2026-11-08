@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
 import { workerMcpNoNetworkNotice } from "../../src/core/sandbox/worker-policy.js";
@@ -18,7 +19,6 @@ import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
-
 import type { RunResultSafetySummary } from "../../src/domains/dispatch/types.js";
 import {
 	resolveWorkerMcpAdmission,
@@ -158,8 +158,8 @@ describe("native worker MCP capabilities", () => {
 		const safety = createWorkerSafety({ cwd: project });
 		const bundle = makeDispatchBundle({
 			...context,
-			getContract<T extends object>(name: string): T | undefined {
-				return name === "safety" ? (safety as T) : context.getContract<T>(name);
+			getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+				return name === "safety" ? (safety as DomainContractMap[N]) : context.getContract(name);
 			},
 		});
 		await bundle.extension.start();
@@ -260,8 +260,8 @@ describe("native worker MCP capabilities", () => {
 		};
 		const bundle = makeDispatchBundle({
 			...context,
-			getContract<T extends object>(name: string): T | undefined {
-				const contract = context.getContract<T>(name);
+			getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+				const contract = context.getContract(name);
 				if (name !== "agents" || contract === undefined) return contract;
 				const agents = contract as unknown as AgentsContract;
 				return {
@@ -271,7 +271,7 @@ describe("native worker MCP capabilities", () => {
 						const recipe = readOnly(agents.get(id));
 						return recipe ? normalizeAgentSpec(recipe) : null;
 					},
-				} as unknown as T;
+				} as unknown as DomainContractMap[N];
 			},
 		});
 		await bundle.extension.start();
@@ -421,8 +421,8 @@ describe("native worker MCP capabilities", () => {
 			const { permissions: _git, ...rest } = recipe;
 			return rest;
 		};
-		const getContract = <T extends object>(name: string): T | undefined => {
-			const contract = context.getContract<T>(name);
+		const getContract = <N extends DomainName>(name: N): DomainContractMap[N] | undefined => {
+			const contract = context.getContract(name);
 			if (name !== "agents" || contract === undefined) return contract;
 			const agents = contract as unknown as AgentsContract;
 			return {
@@ -432,7 +432,7 @@ describe("native worker MCP capabilities", () => {
 					const recipe = withoutGit(agents.get(id));
 					return recipe ? normalizeAgentSpec(recipe) : null;
 				},
-			} as unknown as T;
+			} as unknown as DomainContractMap[N];
 		};
 		const notices: Array<{ code: string; message: string }> = [];
 		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
@@ -591,7 +591,7 @@ describe("native worker MCP capabilities", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.safety.sandbox = "off";
 		const context = dispatchStubContext({ settings, agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write] });
-		const stub = context.getContract<SafetyContract>("safety");
+		const stub = context.getContract("safety");
 		ok(stub);
 		// The stub's workspace write root is the test process cwd; this run's is the project.
 		const safety: SafetyContract = {
@@ -600,8 +600,8 @@ describe("native worker MCP capabilities", () => {
 		};
 		const bundle = makeDispatchBundle({
 			...context,
-			getContract<T extends object>(name: string): T | undefined {
-				return name === "safety" ? (safety as T) : context.getContract<T>(name);
+			getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+				return name === "safety" ? (safety as DomainContractMap[N]) : context.getContract(name);
 			},
 		});
 		await bundle.extension.start();

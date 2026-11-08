@@ -91,7 +91,7 @@ if (mode === "editor") {
 	);
 } else if (mode === "domains") {
 	const { loadDomains } = await import("../../../src/core/domain-loader.js");
-	const loaded = await loadDomains(
+	const loaded = await loadDomains<Record<string, object>>(
 		["persist", "slow"].map((name) => ({
 			manifest: { name, dependsOn: name === "slow" ? ["persist"] : [] },
 			createExtension: () => ({

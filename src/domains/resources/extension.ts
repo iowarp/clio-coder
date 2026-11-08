@@ -7,7 +7,7 @@ export function createResourcesBundle(
 	context: DomainContext,
 	options: ResourceLoaderOptions = {},
 ): DomainBundle<ResourcesContract> {
-	const config = (): ConfigContract | undefined => context.getContract<ConfigContract>("config");
+	const config = (): ConfigContract | undefined => context.getContract("config");
 	const loader = createResourcesLoader({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.reservedPromptNames !== undefined ? { reservedPromptNames: options.reservedPromptNames } : {}),

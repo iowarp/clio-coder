@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 
 import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
@@ -56,7 +55,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 				settings.safety.autonomy = "yolo";
 				settings.fleet.retry.maxRetries = 0;
 				const context = dispatchStubContext({ settings });
-				const agents = context.getContract<AgentsContract>("agents");
+				const agents = context.getContract("agents");
 				ok(agents);
 				const project = join(clioStateDir(), "project");
 				mkdirSync(project, { recursive: true });

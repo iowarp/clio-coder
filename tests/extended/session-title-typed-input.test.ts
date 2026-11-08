@@ -60,7 +60,7 @@ it("titles a session from the typed input when a prompt template expanded it", a
 	};
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		readSessionEntries: entries,
@@ -223,7 +223,7 @@ it("persists and replays machine origin after the real engine injects a busy fol
 	};
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set(["peer-target"]),
 		session,
 		readSessionEntries: entries,

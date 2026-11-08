@@ -5,7 +5,6 @@ import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
 import { releaseModelsLoadedDuring, releaseScopeFor } from "../../engine/apis/residency.js";
 import { registerClioOAuthProviders } from "../../engine/oauth.js";
-import type { ConfigContract } from "../config/contract.js";
 
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
@@ -373,7 +372,7 @@ export function createProvidersBundle(
 	}
 
 	function readConfig(): ClioSettings {
-		const config = context.getContract<ConfigContract>("config");
+		const config = context.getContract("config");
 		if (config) return config.get();
 		return readSettings();
 	}
@@ -846,7 +845,7 @@ export function createProvidersBundle(
 			setGlobalDefaultMaxOutputTokens(settings.chat.maxOutputTokens);
 			await loadPluginRuntimes(registry, settings);
 			await probeAll();
-			const config = context.getContract<ConfigContract>("config");
+			const config = context.getContract("config");
 			if (config) {
 				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const) {
 					unsubscribeConfigListeners.push(

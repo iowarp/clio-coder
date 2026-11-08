@@ -25,8 +25,6 @@ import type { ResourcesContract } from "../resources/contract.js";
 import { modelVisibleSkills } from "../resources/skills/loader.js";
 import { isAutonomyLevel } from "../safety/autonomy.js";
 import { parseRigorOverride, rigorResolution } from "../safety/rigor.js";
-import type { SchedulingContract } from "../scheduling/contract.js";
-import type { SessionContract } from "../session/contract.js";
 import { latestPriorSession } from "../session/history.js";
 import { probeWorkspaceAsync, WORKSPACE_PROBE_REUSE_MS, type WorkspaceSnapshot } from "../session/workspace/index.js";
 import {
@@ -86,19 +84,19 @@ export function createPromptsBundle(
 	const suppressContextFiles = options.noContextFiles === true;
 
 	function config(): ConfigContract | undefined {
-		return context.getContract<ConfigContract>("config");
+		return context.getContract("config");
 	}
 
 	function contextDomain(): ContextContract | undefined {
-		return context.getContract<ContextContract>("context");
+		return context.getContract("context");
 	}
 
 	function agentsDomain(): AgentsContract | undefined {
-		return context.getContract<AgentsContract>("agents");
+		return context.getContract("agents");
 	}
 
 	function resourcesDomain(): ResourcesContract | undefined {
-		return context.getContract<ResourcesContract>("resources");
+		return context.getContract("resources");
 	}
 
 	/** Names and purposes only; every route below re-checks readiness and admission when used. */
@@ -250,12 +248,12 @@ export function createPromptsBundle(
 
 	const contract: PromptsContract = {
 		inputEpoch() {
-			const session = context.getContract<SessionContract>("session")?.current();
+			const session = context.getContract("session")?.current();
 			const settings = config()?.get();
 			const inventory = settings?.fleet.nodes.length
 				? renderFleetInventory(
 						settings,
-						context.getContract<SchedulingContract>("scheduling"),
+						context.getContract("scheduling"),
 						session?.cwd ?? process.cwd(),
 						session?.id ?? "",
 					)
@@ -303,12 +301,7 @@ export function createPromptsBundle(
 					...sources.workspaceRoot,
 					...(sessionInputs.hasFleetNodes && sessionInputs.toolNames?.includes("dispatch")
 						? (() => {
-								const body = renderFleetInventory(
-									settings,
-									context.getContract<SchedulingContract>("scheduling"),
-									cwd,
-									input.sessionId,
-								);
+								const body = renderFleetInventory(settings, context.getContract("scheduling"), cwd, input.sessionId);
 								return [{ id: "context.fleet", relPath: "inline/fleet", body, contentHash: sha256(body), dynamic: true }];
 							})()
 						: []),

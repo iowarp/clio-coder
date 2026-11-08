@@ -817,7 +817,7 @@ describe("provider transport boundary", () => {
 			// A live list judges the default model too, where the catalog used to excuse it.
 			const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 			try {
-				const providers = loaded.getContract<ProvidersContract>("providers");
+				const providers = loaded.getContract("providers");
 				await providers?.probeAllLive();
 				const status = providers?.list().find((entry) => entry.target.id === "gem");
 				strictEqual(status?.health.status, "degraded");

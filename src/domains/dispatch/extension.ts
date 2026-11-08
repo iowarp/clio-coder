@@ -248,7 +248,6 @@ import {
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
-import type { TelemetryContract } from "../telemetry/contract.js";
 import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
 import {
@@ -3637,12 +3636,12 @@ export function createDispatchBundle(
 	context: DomainContext,
 	options?: DispatchBundleOptions,
 ): DomainBundle<DispatchContract> {
-	const maybeSafety = context.getContract<SafetyContract>("safety");
-	const maybeAgents = context.getContract<AgentsContract>("agents");
-	const maybeProviders = context.getContract<ProvidersContract>("providers");
-	const maybeMiddleware = context.getContract<MiddlewareContract>("middleware");
-	const maybeScheduling = context.getContract<SchedulingContract>("scheduling");
-	const maybePrompts = context.getContract<PromptsContract>("prompts");
+	const maybeSafety = context.getContract("safety");
+	const maybeAgents = context.getContract("agents");
+	const maybeProviders = context.getContract("providers");
+	const maybeMiddleware = context.getContract("middleware");
+	const maybeScheduling = context.getContract("scheduling");
+	const maybePrompts = context.getContract("prompts");
 	if (!maybeSafety) throw new Error("dispatch domain requires 'safety' contract");
 	if (!maybeAgents) throw new Error("dispatch domain requires 'agents' contract");
 	if (!maybeProviders) throw new Error("dispatch domain requires 'providers' contract");
@@ -3655,14 +3654,14 @@ export function createDispatchBundle(
 	const middleware: MiddlewareContract = maybeMiddleware;
 	const scheduling: SchedulingContract = maybeScheduling;
 	const prompts: PromptsContract = maybePrompts;
-	const config = context.getContract<ConfigContract>("config");
+	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
 
 	const getProtectedArtifactState = (): ProtectedArtifactState =>
 		frozenProtectedArtifactState(options?.getProtectedArtifactState?.());
 	// Optional: absent in minimal test bundles. Workers just get no project
 	// message when the context domain is not loaded.
-	const projectContext = context.getContract<ContextContract>("context");
+	const projectContext = context.getContract("context");
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	// Each unhooked-runtime notice once per process, however many workers it covers.
 	const unhookedNotices = new Set<string>();
@@ -4140,7 +4139,7 @@ export function createDispatchBundle(
 	 * settled into a running worker's journal would count twice, once spent and once projected (#434).
 	 */
 	function inFlightSpendUsd(): number {
-		const telemetry = context.getContract<TelemetryContract>("telemetry");
+		const telemetry = context.getContract("telemetry");
 		let usd = 0;
 		for (const [runId, run] of active)
 			usd += Math.max(0, meterKnownUsd(run.meter) - (telemetry?.journaledRunUsd(runId) ?? 0));
@@ -6071,7 +6070,7 @@ export function createDispatchBundle(
 				);
 				if (req.ownerSessionId && req.ownerSessionCwdHash) {
 					parentJournal = await context
-						.getContract<TelemetryContract>("telemetry")
+						.getContract("telemetry")
 						?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, telemetryContext.agent);
 					if (parentJournal) runJournal.linkSession(parentJournal.context);
 				}
@@ -7489,7 +7488,7 @@ export function createDispatchBundle(
 					);
 					if (req.ownerSessionId && req.ownerSessionCwdHash) {
 						parentJournal = await context
-							.getContract<TelemetryContract>("telemetry")
+							.getContract("telemetry")
 							?.acquireTelemetrySession?.(
 								{ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash },
 								spec.telemetryContext.agent,

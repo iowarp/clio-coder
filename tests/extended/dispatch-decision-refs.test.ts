@@ -1,7 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { routeValidationProjection } from "../../src/domains/dispatch/active-route-planner.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
@@ -131,7 +130,7 @@ describe("decision refs are sealed from the board", () => {
 							throw new Error("fixture: captured batch");
 						},
 					},
-					getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+					getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 					getAutonomy: () => "yolo",
 					getDecisionBoard: () => board,
 				});

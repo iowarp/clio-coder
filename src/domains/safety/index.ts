@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createSafetyBundle } from "./extension.js";
 import { SafetyManifest } from "./manifest.js";
 
-export const SafetyDomainModule: DomainModule = {
+export const SafetyDomainModule: DomainModule<"safety"> = {
 	manifest: SafetyManifest,
 	createExtension: createSafetyBundle,
 };

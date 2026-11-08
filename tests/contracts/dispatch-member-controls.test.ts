@@ -6,7 +6,6 @@ import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -14,7 +13,6 @@ import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { getDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
-import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -593,7 +591,7 @@ describe("dispatch member controls", () => {
 			})),
 		});
 		try {
-			const agents = f.ctx.getContract<AgentsContract>("agents");
+			const agents = f.ctx.getContract("agents");
 			ok(agents);
 			const outcome = await executeFleetRun({
 				plan,
@@ -659,7 +657,7 @@ describe("dispatch member controls", () => {
 			started[count - 1]?.resolve();
 			if (spec.resultContract?.kind === "delegation-plan") worker.finish({ exitCode: 1, signal: null });
 		});
-		const scheduling = f.ctx.getContract<SchedulingContract>("scheduling");
+		const scheduling = f.ctx.getContract("scheduling");
 		ok(scheduling);
 		scheduling.maxWorkers = () => 2;
 		const roster = ["verifier", "architect", "tester"];
@@ -696,7 +694,7 @@ describe("dispatch member controls", () => {
 			},
 		};
 		try {
-			const agents = f.ctx.getContract<AgentsContract>("agents");
+			const agents = f.ctx.getContract("agents");
 			ok(agents);
 			const pending = executeFleetRun({
 				plan,
@@ -860,7 +858,7 @@ describe("dispatch member controls", () => {
 				})),
 			});
 			try {
-				const agents = f.ctx.getContract<AgentsContract>("agents");
+				const agents = f.ctx.getContract("agents");
 				ok(agents);
 				const pending = executeFleetRun({
 					plan,

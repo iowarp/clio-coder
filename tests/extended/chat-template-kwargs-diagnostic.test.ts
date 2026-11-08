@@ -48,7 +48,7 @@ function providersFor(runtimeId: "lmstudio" | "llamacpp"): ProvidersContract {
 		synthesizeModel: () => ({ id: "nvidia-nemotron-3.5-lightning-30b-a3b", provider: runtimeId }) as never,
 	};
 	const stub = dispatchStubContext({ settings, runtime });
-	const base = stub.getContract<ProvidersContract>("providers");
+	const base = stub.getContract("providers");
 	if (!base) throw new Error("stub has no providers contract");
 	return { ...base, knowledgeBase: new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models")) };
 }

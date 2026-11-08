@@ -216,7 +216,7 @@ async function deepFindings(
 			]);
 			const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 			try {
-				const providers = loaded.getContract<ProvidersContract>("providers");
+				const providers = loaded.getContract("providers");
 				if (providers) toolRows = await deepToolProbeFindings(providers, probeOptions);
 			} finally {
 				await loaded.stop();

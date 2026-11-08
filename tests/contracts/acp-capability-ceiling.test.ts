@@ -64,7 +64,7 @@ test("an ACP client's session and prompt ceilings narrow the operator's limits a
 	let inTurn: TurnConstraints | undefined;
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		// The operator started `clio-coder acp --allow-tools read,write,bash`.

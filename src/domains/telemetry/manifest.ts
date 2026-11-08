@@ -1,6 +1,6 @@
 import type { DomainManifest } from "../../core/domain-loader.js";
 
-export const TelemetryManifest: DomainManifest = {
+export const TelemetryManifest: DomainManifest<"telemetry"> = {
 	// telemetry listens to dispatch + safety bus channels but never reads
 	// their contracts. Keeping dispatch out of dependsOn lets scheduling sit
 	// between telemetry and dispatch (scheduling -> telemetry, dispatch

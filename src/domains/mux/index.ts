@@ -1,10 +1,9 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import type { MuxContract } from "./contract.js";
 import { createMuxBundle, type MuxDomainOptions } from "./extension.js";
 import { MuxManifest } from "./manifest.js";
 
 /** Parameterized module for callers that gate panes off or on explicitly. */
-export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<MuxContract> {
+export function createMuxDomainModule(options: MuxDomainOptions): DomainModule<"mux"> {
 	return {
 		manifest: MuxManifest,
 		createExtension: (context) => createMuxBundle(context, options),

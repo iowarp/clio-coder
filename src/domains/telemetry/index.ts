@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createTelemetryBundle } from "./extension.js";
 import { TelemetryManifest } from "./manifest.js";
 
-export const TelemetryDomainModule: DomainModule = {
+export const TelemetryDomainModule: DomainModule<"telemetry"> = {
 	manifest: TelemetryManifest,
 	createExtension: createTelemetryBundle,
 };

@@ -8,19 +8,25 @@
  *   1. Performs a topological sort on manifest dependencies.
  *   2. Instantiates each module in order, calling createExtension(ctx).
  *   3. Calls extension.start() and stores the contract under the domain name.
- *   4. Passes a DomainContext to each subsequent module that exposes getContract<T>(name),
- *      which returns ONLY the query-only contract, never the full extension.
+ *   4. Passes a DomainContext to each subsequent module that exposes getContract(name),
+ *      which returns ONLY the published contract, never the full extension.
  *
- * Extensions are process-local. Contracts are the cross-domain surface.
+ * Extensions are process-local. Contracts are the cross-domain surface. The
+ * type of each contract comes from `DomainContractMap`, never from the caller.
  */
+
+import type { DomainContractMap, DomainName } from "./domain-contracts.js";
 
 import type { TelemetryHub } from "./telemetry/hub.js";
 import { telemetryHub } from "./telemetry/hub.js";
 import { resolveShutdownHookBudgetMs, runWithBudget, writeShutdownNotice } from "./termination.js";
 
-export interface DomainManifest {
-	name: string;
-	dependsOn: ReadonlyArray<string>;
+export type { DomainContractMap, DomainName } from "./domain-contracts.js";
+
+/** `D` is the name space `dependsOn` may cite; tests type a loader by their own map. */
+export interface DomainManifest<N extends string = DomainName, D extends string = DomainName> {
+	name: N;
+	dependsOn: ReadonlyArray<D>;
 }
 
 /**
@@ -39,30 +45,41 @@ export interface DomainExtension {
 }
 
 /**
- * Query-only surface exposed to other domains. Each domain's index.ts defines its
- * own concrete contract type and exports it alongside the module.
+ * The surface a domain publishes to other domains. Each domain defines its own
+ * concrete contract type and `DomainContractMap` names it.
  */
 export type DomainContract = object;
 
-export interface DomainBundle<TContract extends DomainContract = DomainContract> {
+export interface DomainBundle<TContract = DomainContract> {
 	extension: DomainExtension;
 	contract: TContract;
 }
 
-export interface DomainContext {
+type NameIn<M> = keyof M & string;
+
+export interface DomainContext<M = DomainContractMap> {
 	bus: TelemetryHub;
-	getContract<T extends DomainContract = DomainContract>(name: string): T | undefined;
+	getContract<N extends NameIn<M>>(name: N): M[N] | undefined;
 }
 
-export interface DomainModule<TContract extends DomainContract = DomainContract> {
-	manifest: DomainManifest;
-	createExtension(context: DomainContext): DomainBundle<TContract> | Promise<DomainBundle<TContract>>;
+/** A module whose manifest name is `N` and whose bundle publishes `M[N]`. */
+export interface NamedDomainModule<N extends NameIn<M>, M = DomainContractMap> {
+	manifest: DomainManifest<N, NameIn<M>>;
+	createExtension(context: DomainContext<M>): DomainBundle<M[N]> | Promise<DomainBundle<M[N]>>;
 }
 
-export interface LoadResult {
+/**
+ * Any module of the map, as a union discriminated by manifest name, so a list
+ * entry is checked against the contract its own name declares.
+ */
+export type DomainModule<N extends DomainName = DomainName> = { [K in N]: NamedDomainModule<K> }[N];
+
+type AnyDomainModule<M> = { [K in NameIn<M>]: NamedDomainModule<K, M> }[NameIn<M>];
+
+export interface LoadResult<M = DomainContractMap> {
 	loaded: ReadonlyArray<string>;
 	failed: ReadonlyArray<{ name: string; error: unknown }>;
-	getContract<T extends DomainContract = DomainContract>(name: string): T | undefined;
+	getContract<N extends NameIn<M>>(name: N): M[N] | undefined;
 	stop(signal?: AbortSignal): Promise<void>;
 }
 
@@ -77,23 +94,21 @@ export interface LoadDomainsOptions {
 	beforeEach?: () => Promise<void>;
 }
 
-export async function loadDomains(
-	modules: ReadonlyArray<DomainModule>,
+export async function loadDomains<M extends object = DomainContractMap>(
+	modules: ReadonlyArray<AnyDomainModule<NoInfer<M>>>,
 	options: LoadDomainsOptions = {},
-): Promise<LoadResult> {
+): Promise<LoadResult<M>> {
 	const order = topoSort(modules);
-	const contracts = new Map<string, DomainContract>();
+	// Written only under the module's own manifest name with the bundle its
+	// NamedDomainModule type fixes to M[name], which is what makes the read cast sound.
+	const contracts = new Map<string, unknown>();
+	const lookup = <N extends NameIn<M>>(name: N): M[N] | undefined => contracts.get(name) as M[N] | undefined;
 	const extensions = new Map<string, DomainExtension>();
 	const loaded: string[] = [];
 	const failed: Array<{ name: string; error: unknown }> = [];
 	const bus = telemetryHub();
 
-	const context: DomainContext = {
-		bus,
-		getContract<T extends DomainContract>(dep: string): T | undefined {
-			return contracts.get(dep) as T | undefined;
-		},
-	};
+	const context: DomainContext<M> = { bus, getContract: lookup };
 
 	const stopAll = async (signal?: AbortSignal): Promise<void> => {
 		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
@@ -160,14 +175,10 @@ export async function loadDomains(
 		}
 	}
 
-	const getContract = <T extends DomainContract = DomainContract>(name: string): T | undefined => {
-		return contracts.get(name) as T | undefined;
-	};
-
-	return { loaded, failed, getContract, stop };
+	return { loaded, failed, getContract: lookup, stop };
 }
 
-function topoSort(modules: ReadonlyArray<DomainModule>): string[] {
+function topoSort(modules: ReadonlyArray<{ manifest: DomainManifest<string, string> }>): string[] {
 	const names = new Set<string>();
 	for (const { manifest } of modules) {
 		if (names.has(manifest.name)) {

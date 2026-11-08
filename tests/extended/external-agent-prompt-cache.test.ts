@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { loadDomains } from "../../src/core/domain-loader.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { type AgentsContract, AgentsDomainModule } from "../../src/domains/agents/index.js";
-import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
+import { ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
-import { createPromptsDomainModule, type PromptsContract } from "../../src/domains/prompts/index.js";
+import { createPromptsDomainModule } from "../../src/domains/prompts/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { ResourcesDomainModule } from "../../src/domains/resources/index.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
@@ -41,9 +41,9 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 			createPromptsDomainModule({ noContextFiles: true }),
 		]);
 		try {
-			const config = loaded.getContract<ConfigContract>("config");
-			const agents = loaded.getContract<AgentsContract>("agents");
-			const prompts = loaded.getContract<PromptsContract>("prompts");
+			const config = loaded.getContract("config");
+			const agents = loaded.getContract("agents");
+			const prompts = loaded.getContract("prompts");
 			ok(config?.update && agents && prompts);
 			const turn = createTurnContext({
 				state: createTurnState("off"),
@@ -118,7 +118,7 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 	it("stops observing config when the agents lifecycle ends", async () => {
 		const loaded = await loadDomains([ConfigDomainModule]);
 		try {
-			const config = loaded.getContract<ConfigContract>("config");
+			const config = loaded.getContract("config");
 			ok(config?.update);
 			const agents = await AgentsDomainModule.createExtension({ bus: telemetryHub(), getContract: loaded.getContract });
 			const contract = agents.contract as AgentsContract;

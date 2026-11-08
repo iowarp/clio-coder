@@ -13,7 +13,6 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { VisionSidecar } from "../../src/domains/providers/vision-sidecar.js";
-import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
@@ -250,7 +249,7 @@ function fixture(
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const session = createSessionBundle(context).contract;
-	const safety = context.getContract<SafetyContract>("safety");
+	const safety = context.getContract("safety");
 	ok(safety);
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	let toolStarted!: () => void;
@@ -285,7 +284,7 @@ function fixture(
 		...(visionSidecar ? { visionSidecar } : {}),
 		...(refuseHandoffSkill ? { refuseHandoffSkill } : {}),
 		...(labelReferencedPaths ? { labelReferencedPaths } : {}),
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		...(initialMode === "tool" || initialMode === "guard" ? { toolRegistry: registry } : {}),

@@ -10,7 +10,7 @@ import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { AgentsDomainModule } from "../../src/domains/agents/index.js";
 import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
-import { createDispatchDomainModule, type DispatchContract } from "../../src/domains/dispatch/index.js";
+import { createDispatchDomainModule } from "../../src/domains/dispatch/index.js";
 import { type Ledger, openLedger } from "../../src/domains/dispatch/state.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { createMiddlewareDomain } from "../../src/domains/middleware/index.js";
@@ -85,8 +85,8 @@ test("an open dispatch ledger follows config updates and effective session overr
 		createDispatchDomainModule({ getSettings: () => override }),
 	]);
 	try {
-		const config = loaded.getContract<ConfigContract>("config");
-		const dispatch = loaded.getContract<DispatchContract>("dispatch");
+		const config = loaded.getContract("config");
+		const dispatch = loaded.getContract("dispatch");
 		ok(config?.update && dispatch);
 		const seed = openLedger({ maxRuns: 10 });
 		for (const id of ["first", "second", "third"]) addRun(seed, id);

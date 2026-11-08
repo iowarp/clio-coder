@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import type { AgentSpec } from "../../src/domains/agents/spec.js";
 import {
 	admit,
@@ -220,7 +220,7 @@ describe("dispatch admission boundary", () => {
 
 	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
 		const context = dispatchStubContext();
-		const agents = context.getContract<AgentsContract>("agents");
+		const agents = context.getContract("agents");
 		ok(agents);
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
@@ -815,7 +815,7 @@ describe("dispatch admission boundary", () => {
 			synthesizeModel: () => ({ id: "m", provider: "llama.cpp" }) as never,
 		};
 		const stub = dispatchStubContext({ settings, runtime });
-		const providers = stub.getContract<ProvidersContract>("providers");
+		const providers = stub.getContract("providers");
 		if (!providers) throw new Error("stub providers missing");
 		const probed: Array<[string, unknown]> = [];
 		const wrapped: ProvidersContract = {
@@ -827,7 +827,7 @@ describe("dispatch admission boundary", () => {
 		};
 		const bundle = makeDispatchBundle({
 			bus: stub.bus,
-			getContract: ((name: string) =>
+			getContract: ((name: DomainName) =>
 				name === "providers" ? wrapped : stub.getContract(name)) as typeof stub.getContract,
 		});
 		await bundle.extension.start?.();

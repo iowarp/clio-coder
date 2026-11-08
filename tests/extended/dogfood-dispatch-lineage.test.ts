@@ -7,14 +7,12 @@ import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { readRunResultFacts } from "../../src/domains/dispatch/run-result-facts.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
-import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -136,10 +134,10 @@ async function fixture(
 				return bundle.contract.dispatchBatch(requests, ...args);
 			},
 		},
-		getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+		getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 		getAutonomy: () => "yolo",
 	});
-	const safety = context.getContract<SafetyContract>("safety");
+	const safety = context.getContract("safety");
 	ok(safety);
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	registry.register(tool);
@@ -160,7 +158,7 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 	let duringSubmit: (() => Promise<void>) | undefined;
 	const loop = createChatLoop({
 		getSettings: () => f.settings,
-		providers: f.context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: f.context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set(["fixture"]),
 		toolRegistry: f.registry,
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
@@ -552,7 +550,7 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 	try {
 		const tool = createDispatchTool({
 			dispatch: bundle.contract,
-			getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 			getAutonomy: () => "yolo",
 		});
 		const result = await tool.run(

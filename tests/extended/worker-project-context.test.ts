@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import type { ContextContract } from "../../src/domains/context/contract.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
@@ -43,7 +44,8 @@ for (const scenario of [
 		const bundle = makeDispatchBundle(
 			{
 				bus: base.bus,
-				getContract: ((name: string) => (name === "context" ? context : base.getContract(name))) as typeof base.getContract,
+				getContract: ((name: DomainName) =>
+					name === "context" ? context : base.getContract(name)) as typeof base.getContract,
 			},
 			{
 				spawnWorker(spec) {

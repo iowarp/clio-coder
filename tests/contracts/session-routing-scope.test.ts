@@ -223,7 +223,7 @@ test("a thinking change is recorded in the session it took effect in", async () 
 	} as unknown as SessionContract;
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
@@ -282,9 +282,9 @@ test("a live probe exercises the session's chat model, not the one another sessi
 		let session: ClioSettings | undefined;
 		const loaded = await loadDomains([ConfigDomainModule, createProvidersDomainModule({ getSettings: () => session })]);
 		try {
-			const providers = loaded.getContract<ProvidersContract>("providers");
+			const providers = loaded.getContract("providers");
 			assert.ok(providers);
-			session = structuredClone(loaded.getContract<{ get(): ClioSettings }>("config")?.get());
+			session = structuredClone(loaded.getContract("config")?.get());
 			assert.ok(session);
 			session.chat.model = "this-session-model";
 			await providers.probeTarget("probe", { reasoning: true });

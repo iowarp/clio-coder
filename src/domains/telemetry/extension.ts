@@ -30,7 +30,6 @@ import {
 } from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
-import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournalHealth } from "./call-journal.js";
@@ -85,7 +84,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const preparing = new Set<string>();
 	const sessionCapture: SessionCapture = {
 		async prepare(origin) {
-			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+			const settings = context.getContract("config")?.get().telemetry;
 			// The workspace comes from the session's own meta.json, a path built from its cwd hash (#434).
 			if (settings?.mode !== "research" || !settings.research.content || !/^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
 				consented.set(origin.id, false);
@@ -96,7 +95,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			consented.set(origin.id, consent.covers(await consent.sessionWorkspace(store)));
 		},
 		current(origin) {
-			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+			const settings = context.getContract("config")?.get().telemetry;
 			if (!settings) return STANDARD_CAPTURE;
 			const granted = consented.get(origin.id) ?? false;
 			const cached = captures.get(origin.id);
@@ -106,7 +105,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			return capture;
 		},
 	};
-	const config = () => context.getContract<ConfigContract>("config");
+	const config = () => context.getContract("config");
 	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, agent: mainAgent(sessionId) });
 	const settingsUnavailable = () =>
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");

@@ -178,7 +178,7 @@ it("a queued entry refused for its task constraints returns to the head of the q
 	});
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		hasAttachedDispatch: () => true,
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({

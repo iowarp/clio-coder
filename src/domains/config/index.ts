@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { type ConfigBundleOptions, createConfigBundle } from "./extension.js";
 import { ConfigManifest } from "./manifest.js";
 
-export const ConfigDomainModule: DomainModule = {
+export const ConfigDomainModule: DomainModule<"config"> = {
 	manifest: ConfigManifest,
 	createExtension: (context) => createConfigBundle(context),
 };
@@ -11,7 +11,7 @@ export const ConfigDomainModule: DomainModule = {
 export function createConfigDomainModule(
 	initialSettings: Readonly<import("../../core/config.js").ClioSettings>,
 	options: ConfigBundleOptions = {},
-): DomainModule {
+): DomainModule<"config"> {
 	return {
 		manifest: ConfigManifest,
 		createExtension: (context) => createConfigBundle(context, initialSettings, options),

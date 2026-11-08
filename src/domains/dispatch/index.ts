@@ -2,12 +2,12 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createDispatchBundle, type DispatchBundleOptions } from "./extension.js";
 import { DispatchManifest } from "./manifest.js";
 
-export const DispatchDomainModule: DomainModule = {
+export const DispatchDomainModule: DomainModule<"dispatch"> = {
 	manifest: DispatchManifest,
 	createExtension: createDispatchBundle,
 };
 
-export function createDispatchDomainModule(options: DispatchBundleOptions = {}): DomainModule {
+export function createDispatchDomainModule(options: DispatchBundleOptions = {}): DomainModule<"dispatch"> {
 	return {
 		manifest: DispatchManifest,
 		createExtension: (context) => createDispatchBundle(context, options),

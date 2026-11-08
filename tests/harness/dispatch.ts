@@ -17,6 +17,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { RunResultReproducibility } from "../../src/domains/dispatch/types.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
@@ -58,9 +59,9 @@ export function makeDispatchBundle(
 	};
 	const context = {
 		bus: ctx.bus,
-		getContract<T extends object>(name: string): T | undefined {
-			if (name === "prompts") return prompts as T;
-			return ctx.getContract<T>(name);
+		getContract<N extends DomainName>(name: N): DomainContractMap[N] | undefined {
+			if (name === "prompts") return prompts as DomainContractMap[N];
+			return ctx.getContract(name);
 		},
 	};
 	return createDispatchBundle(context, { collectReproducibility: fastReproducibility, ...options });

@@ -33,7 +33,6 @@ import {
 	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
 import { isShadowAgent, userOriginAudienceRefusal } from "../domains/agents/spec.js";
-import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
 import {
@@ -44,7 +43,7 @@ import {
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
@@ -74,7 +73,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
-import { type TelemetryContract, TelemetryDomainModule } from "../domains/telemetry/index.js";
+import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
@@ -305,14 +304,14 @@ async function runFleet(
 		createDispatchDomainModule({ journalRunEvents: true, workerSteering: false, workerHooks: workerHooks.workerHooks }),
 		SessionDomainModule,
 	]);
-	const dispatch = loaded.getContract<DispatchContract>("dispatch");
-	const agents = loaded.getContract<AgentsContract>("agents");
-	const config = loaded.getContract<ConfigContract>("config");
-	const safety = loaded.getContract<SafetyContract>("safety");
-	const scheduling = loaded.getContract<SchedulingContract>("scheduling");
+	const dispatch = loaded.getContract("dispatch");
+	const agents = loaded.getContract("agents");
+	const config = loaded.getContract("config");
+	const safety = loaded.getContract("safety");
+	const scheduling = loaded.getContract("scheduling");
 	// The process journal records the status an early exit returns, as the settled run's exit does (#434).
 	const exitWith = async (code: number, stop: () => Promise<void>): Promise<number> => {
-		loaded.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(code);
+		loaded.getContract("telemetry")?.setExitStatus?.(code);
 		await stop();
 		return code;
 	};
@@ -550,7 +549,7 @@ async function runFleet(
 				await workerHooks.dispose();
 				// The process journal records the status this command returns (#434).
 				loaded
-					.getContract<TelemetryContract>("telemetry")
+					.getContract("telemetry")
 					?.setExitStatus?.(
 						runSignal?.aborted
 							? getTerminationCoordinator().getExitCode()

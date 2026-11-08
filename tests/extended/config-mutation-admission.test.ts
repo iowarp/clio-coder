@@ -7,7 +7,7 @@ import { loadDomains } from "../../src/core/domain-loader.js";
 import { readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { AgentsDomainModule } from "../../src/domains/agents/index.js";
-import { type ConfigContract, ConfigDomainModule, createConfigDomainModule } from "../../src/domains/config/index.js";
+import { ConfigDomainModule, createConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -21,7 +21,7 @@ test("config validates the actual mutation result before publishing or writing i
 		ensureClioState();
 		const loaded = await loadDomains([ConfigDomainModule, AgentsDomainModule]);
 		try {
-			const config = loaded.getContract<ConfigContract>("config");
+			const config = loaded.getContract("config");
 			ok(config?.update);
 			const initial = structuredClone(config.get());
 			const initialDocument = readFileSync(settingsPath(), "utf8");
@@ -102,7 +102,7 @@ test("a boot-time hold keeps a watched settings write until the agents namespace
 			},
 		});
 		try {
-			const config = loaded.getContract<ConfigContract>("config");
+			const config = loaded.getContract("config");
 			ok(config?.releaseReloads);
 			deepStrictEqual(config.get().integrations.externalAgents.entries, [], "a held write is not applied");
 			deepStrictEqual(failures, []);

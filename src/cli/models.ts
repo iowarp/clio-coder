@@ -92,7 +92,7 @@ export async function runModelsCommand(args: ReadonlyArray<string>): Promise<num
 
 	ensureClioState();
 	const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
-	const providers = loaded.getContract<ProvidersContract>("providers");
+	const providers = loaded.getContract("providers");
 	if (!providers) {
 		process.stderr.write("models: provider domain not loaded\n");
 		await loaded.stop();

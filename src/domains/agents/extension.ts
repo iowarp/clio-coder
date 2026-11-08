@@ -1,7 +1,6 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
-import type { ConfigContract } from "../config/contract.js";
 import { pluginSnapshotFor, withPluginDiscoveryPass } from "../plugins/index.js";
 import type { AgentsContract } from "./contract.js";
 import type { AgentRecipe } from "./recipe.js";
@@ -27,7 +26,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 			pluginDigest: pluginSnapshotFor(process.cwd()).digest,
 		}));
 		attemptedRecipes = merged;
-		const config = _context.getContract<ConfigContract>("config");
+		const config = _context.getContract("config");
 		assertAgentIdNamespace(merged, config?.get()?.integrations.externalAgents?.entries ?? []);
 		recipes = merged;
 		specs = recipes.map(normalizeAgentSpec);
@@ -42,7 +41,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		async start() {
 			discover();
 			unsubscribeConfigChange =
-				_context.getContract<ConfigContract>("config")?.onChange("nextTurn", ({ diff }) => {
+				_context.getContract("config")?.onChange("nextTurn", ({ diff }) => {
 					if (
 						diff.nextTurn.some(
 							(path) =>
@@ -69,7 +68,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					recipes = attemptedRecipes ?? recipes.filter((recipe) => recipe.source === "builtin");
 					let conflictingIds = new Set<string>();
 					try {
-						const config = _context.getContract<ConfigContract>("config");
+						const config = _context.getContract("config");
 						conflictingIds = new Set((config?.get()?.integrations.externalAgents?.entries ?? []).map((agent) => agent.id));
 					} catch {
 						// If even current operator configuration is unreadable, no custom
@@ -105,7 +104,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 			return recipes.find((r) => r.id === id) ?? null;
 		},
 		listSpecs() {
-			const config = _context.getContract<ConfigContract>("config");
+			const config = _context.getContract("config");
 			const delegationAgents = config?.get()?.integrations.externalAgents?.entries ?? [];
 			const delegationSpecs = delegationAgents.map((agent) => ({
 				version: 1 as const,
@@ -132,7 +131,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		getSpec(id: string): AgentSpec | null {
 			const found = specs.find((r) => r.id === id);
 			if (found) return found;
-			const config = _context.getContract<ConfigContract>("config");
+			const config = _context.getContract("config");
 			const agent = config?.get()?.integrations.externalAgents?.entries?.find((entry) => entry.id === id);
 			if (agent) {
 				return {

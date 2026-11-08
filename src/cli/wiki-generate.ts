@@ -20,7 +20,6 @@ import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
-import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
 import { pageSourceIndex } from "../domains/context/wiki/assemble.js";
@@ -48,7 +47,7 @@ import { callLevelUpstreamResponses, type RunResult } from "../domains/dispatch/
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
+import { canonicalizeWireModelId, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
@@ -1085,7 +1084,7 @@ async function loadWikiDispatch(): Promise<{
 			await loaded.stop();
 		}
 	};
-	const dispatch = loaded.getContract<DispatchContract>("dispatch");
+	const dispatch = loaded.getContract("dispatch");
 	if (!dispatch) {
 		await stop();
 		throw new Error("wiki writer dispatch unavailable");
@@ -1101,7 +1100,7 @@ async function loadWikiDispatch(): Promise<{
 		await stop();
 		throw new Error(`clio-coder context wiki: ${refusal}`);
 	}
-	const workerProfile = loaded.getContract<ConfigContract>("config")?.get().fleet?.agentProfiles?.[WIKI_AGENT_ID];
+	const workerProfile = loaded.getContract("config")?.get().fleet?.agentProfiles?.[WIKI_AGENT_ID];
 	return { dispatch, stop, ...(workerProfile ? { workerProfile } : {}) };
 }
 
@@ -1118,8 +1117,8 @@ async function loadWikiDispatch(): Promise<{
 export async function resolveDocumenterModelId(route: WikiModelRoute = {}): Promise<string> {
 	const loaded = await loadDomains([ConfigDomainModule, ResourcesDomainModule, ProvidersDomainModule]);
 	try {
-		const config = loaded.getContract<ConfigContract>("config");
-		const providers = loaded.getContract<ProvidersContract>("providers");
+		const config = loaded.getContract("config");
+		const providers = loaded.getContract("providers");
 		if (!config || !providers) return UNRESOLVED_DOCUMENTER_MODEL;
 		const settings = config.get();
 		const workers = settings.fleet;

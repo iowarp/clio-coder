@@ -576,7 +576,7 @@ describe("skill tool surface lifetime", () => {
 		const events: ChatLoopEvent[] = [];
 		const loop = createChatLoop({
 			getSettings: () => settings,
-			providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+			providers: context.getContract("providers") as ProvidersContract,
 			knownTargets: () => new Set([target.id]),
 			session,
 			readSessionEntries: entries,

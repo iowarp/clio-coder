@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import type { ContextContract } from "../../src/domains/context/contract.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
@@ -48,7 +49,8 @@ test("a worker in a task worktree receives the source checkout's untracked handb
 	const bundle = makeDispatchBundle(
 		{
 			bus: base.bus,
-			getContract: ((name: string) => (name === "context" ? context : base.getContract(name))) as typeof base.getContract,
+			getContract: ((name: DomainName) =>
+				name === "context" ? context : base.getContract(name)) as typeof base.getContract,
 		},
 		{
 			spawnWorker(spec, opts) {

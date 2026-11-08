@@ -5,12 +5,10 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
-import type { ConfigContract } from "../config/contract.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
 import { describeValidationContract, loadValidationContract } from "../safety/index.js";
 import { createSemanticBackgroundRefresh } from "../semantic-app/background.js";
 import { readSessionEntriesForId } from "../session/archive-readers.js";
-import type { SessionContract } from "../session/contract.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { detectProjectTypeHint, type ProjectType } from "../session/workspace/project-type.js";
@@ -216,9 +214,7 @@ export function createContextBundle(
 	let stopping = false;
 	let startupHints: StartupHint[] = [];
 	const contextState = createContextStateReader();
-	const semanticBackground = createSemanticBackgroundRefresh(() =>
-		_context.getContract<ConfigContract>("config")?.get(),
-	);
+	const semanticBackground = createSemanticBackgroundRefresh(() => _context.getContract("config")?.get());
 	const onStart = (): void => {
 		lastCwd = process.cwd();
 		void ensureCodewikiFresh(lastCwd)
@@ -356,7 +352,7 @@ export function createContextBundle(
 		signal?: AbortSignal,
 	) {
 		if (activeOperation !== null) throw new Error("Another project context operation is still running.");
-		const session = _context.getContract<SessionContract>("session");
+		const session = _context.getContract("session");
 		if (session && !session.current()) session.create({ cwd });
 		const sessionId = session?.current()?.id ?? null;
 		const controller = new AbortController();
@@ -601,7 +597,7 @@ export function createContextBundle(
 }
 
 async function currentDecisions(context: DomainContext) {
-	const session = context.getContract<SessionContract>("session");
+	const session = context.getContract("session");
 	const current = session?.current();
 	if (!session || !current) return [];
 	session.flushAppends?.();

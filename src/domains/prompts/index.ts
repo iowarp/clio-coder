@@ -8,7 +8,7 @@ import { PromptsManifest } from "./manifest.js";
  * `--no-context-files` startup flag into the prompts domain without
  * restructuring the domain loader.
  */
-export function createPromptsDomainModule(options: PromptsBundleOptions = {}): DomainModule {
+export function createPromptsDomainModule(options: PromptsBundleOptions = {}): DomainModule<"prompts"> {
 	return {
 		manifest:
 			options.noContextFiles === true

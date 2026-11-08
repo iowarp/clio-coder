@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sumPricing } from "../../src/core/telemetry/pricing.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { FleetRunOutcome } from "../../src/domains/dispatch/fleet-run.js";
 import {
@@ -20,7 +19,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 	const scratch = await isolateClioEnv("clio-coder-fleet-overlay-");
 	try {
 		const root = realpathSync(scratch.dir);
-		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 		ok(agents);
 		const notices: Array<[string, string]> = [];
 		let opened = 0;
@@ -121,7 +120,7 @@ for (const outside of ["bash", "ledger"]) {
 	test(`fleet approval refuses ${outside} outside the standing delegation ceiling`, async () => {
 		const scratch = await isolateClioEnv("clio-coder-fleet-preview-scope-");
 		try {
-			const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract<AgentsContract>("agents");
+			const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
 			ok(agents);
 			let refused = false;
 			const constraints = { delegatedTools: ["read", "grep"] };

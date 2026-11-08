@@ -84,7 +84,7 @@ for (const continuation of [false, true])
 			});
 			const loop = createChatLoop({
 				getSettings: () => settings,
-				providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+				providers: context.getContract("providers") as ProvidersContract,
 				knownTargets: () => new Set([target.id]),
 				session,
 				readSessionEntries: () => entries,
@@ -234,7 +234,7 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 	const loop = createChatLoop({
 		outcomeDispatch: { getRun: () => ({ id: "scout-1" }) as unknown as ReturnType<DispatchContract["getRun"]> },
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		readSessionEntries: () => entries,

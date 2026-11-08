@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createAgentsBundle } from "./extension.js";
 import { AgentsManifest } from "./manifest.js";
 
-export const AgentsDomainModule: DomainModule = {
+export const AgentsDomainModule: DomainModule<"agents"> = {
 	manifest: AgentsManifest,
 	createExtension: createAgentsBundle,
 };

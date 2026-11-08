@@ -346,7 +346,7 @@ describe("runtime resolution with a tool probe result", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [{ id: "local", runtime: "openai-compat", url: "http://127.0.0.1:1", defaultModel: MODEL }];
 		const stub = dispatchStubContext({ settings, runtime: openAICompatRuntime });
-		const providers = stub.getContract<ProvidersContract>("providers");
+		const providers = stub.getContract("providers");
 		if (!providers) throw new Error("stub has no providers contract");
 		const status = providers.list()[0] as TargetStatus;
 		status.toolProbe = toolProbe;

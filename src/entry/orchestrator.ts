@@ -19,7 +19,7 @@ import {
 	type OutputStyle,
 } from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
-import { loadDomains } from "../core/domain-loader.js";
+import { type LoadResult, loadDomains } from "../core/domain-loader.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
@@ -89,17 +89,14 @@ import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/worksp
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
-import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import {
 	createClaimCaptureRegistration,
 	createClaimsDeliveryRegistrations,
 	createHypothesisCaptureRegistration,
 } from "../domains/claims/index.js";
-import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
-import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
@@ -121,11 +118,10 @@ import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import {
 	createExtensionRuntimeHookBridge,
-	type ExtensionsContract,
 	ExtensionsDomainModule,
 	isLoadableExtension,
 } from "../domains/extensions/index.js";
-import { type InteropContract, InteropDomainModule } from "../domains/interop/index.js";
+import { InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
 import type { BackgroundRouteFacts } from "../domains/memory/background-budget.js";
 import { decideBackgroundStep } from "../domains/memory/background-budget.js";
@@ -187,7 +183,6 @@ import {
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
 	formatRegistrationConflict,
-	type MiddlewareContract,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
@@ -197,9 +192,7 @@ import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
-import type { MuxContract } from "../domains/mux/index.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
-import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
@@ -260,7 +253,6 @@ import {
 	installedSkillNames,
 	installSkill,
 	modelVisibleSkills,
-	type ResourcesContract,
 } from "../domains/resources/index.js";
 import { expandSubmitText } from "../domains/resources/submit-expansion.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
@@ -268,7 +260,7 @@ import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
 import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
-import type { AutonomyLevel, FlowRestrictionSet, SafetyContract } from "../domains/safety/index.js";
+import type { AutonomyLevel, FlowRestrictionSet } from "../domains/safety/index.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
 	flowTransferRefusal,
@@ -330,7 +322,7 @@ import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
-import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
+import { archiveCommandHost, ShareDomainModule } from "../domains/share/index.js";
 import type { SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne, parseRouteList } from "../domains/system-one/index.js";
 import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
@@ -2241,7 +2233,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryOwner = new MemoryRuntime();
 	// The loader publishes only the query contract; this root keeps the right to register hooks.
 	const middlewareDomain = createMiddlewareDomain();
-	const result = await loadDomains(
+	// Annotated: the module options close over contracts read from this result.
+	const result: LoadResult = await loadDomains(
 		[
 			options.startupSettings
 				? createConfigDomainModule(options.startupSettings, { holdReloads: bootPhaseBoundary !== undefined })
@@ -2354,9 +2347,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
-	const dispatch = withDispatchMemory(result.getContract<DispatchContract>("dispatch"), () =>
-		effectiveSettingsForDispatch?.(),
-	);
+	const dispatch = withDispatchMemory(result.getContract("dispatch"), () => effectiveSettingsForDispatch?.());
 	let unsubscribeDispatchShutdown: (() => void) | undefined;
 	if (dispatch) {
 		let dispatchDrain: Promise<void> | undefined;
@@ -2384,7 +2375,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		(signal) => {
 			// The coordinator's status is set before any hook runs (130 on SIGINT, 143 on SIGTERM); process.exited
 			// records it (#434).
-			result.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(termination.getExitCode());
+			result.getContract("telemetry")?.setExitStatus?.(termination.getExitCode());
 			return result.stop(signal);
 		},
 		{
@@ -2406,8 +2397,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (process.env.CLIO_CODER_TIMING === "1") bootStdout(`${timer.report()}\n`);
 	}
 
-	const config = result.getContract<ConfigContract>("config");
-	const providers = result.getContract<ProvidersContract>("providers");
+	const config = result.getContract("config");
+	const providers = result.getContract("providers");
 	timer.mark("providers resolved");
 
 	if (!interactive && !options.headless && !acpMode) {
@@ -2416,11 +2407,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 	}
 
-	const middleware = result.getContract<MiddlewareContract>("middleware");
+	const middleware = result.getContract("middleware");
 	const middlewareRegistrar = middlewareDomain.registrar();
-	const telemetry = result.getContract<TelemetryContract>("telemetry");
-	const safety = result.getContract<SafetyContract>("safety");
-	const session = result.getContract<SessionContract>("session");
+	const telemetry = result.getContract("telemetry");
+	const safety = result.getContract("safety");
+	const session = result.getContract("session");
 	telemetry?.resetSession(session?.current()?.id ?? null);
 	// Memory and compaction traces run outside any call; they journal into the session current when they fire,
 	// the same session background memory calls are journaled under (#434).
@@ -2485,14 +2476,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const admitRuntimeFlow = (runtime: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
 		admitModelFlow({ targetId: runtime.targetId, runtimeId: runtime.runtimeId, wireModelId: runtime.wireModelId });
 	sessionOriginForDispatch = () => session?.current() ?? null;
-	const prompts = result.getContract<PromptsContract>("prompts");
-	const agents = result.getContract<AgentsContract>("agents");
-	const resources = result.getContract<ResourcesContract>("resources");
-	const extensions = result.getContract<ExtensionsContract>("extensions");
-	const share = result.getContract<ShareContract>("share");
-	const mux = result.getContract<MuxContract>("mux");
-	const contextDomain = result.getContract<ContextContract>("context");
-	const interop = result.getContract<InteropContract>("interop");
+	const prompts = result.getContract("prompts");
+	const agents = result.getContract("agents");
+	const resources = result.getContract("resources");
+	const extensions = result.getContract("extensions");
+	const share = result.getContract("share");
+	const mux = result.getContract("mux");
+	const contextDomain = result.getContract("context");
+	const interop = result.getContract("interop");
 	const initialNotices = interactive
 		? [...heldTrustNotices, ...(contextDomain?.startupHints() ?? []).map((hint) => hint.text)]
 		: [];
@@ -2734,7 +2725,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The spend the scheduling gate admits paid requests against, so a memory
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
-		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? telemetry?.sessionSpend().usd ?? 0;
+		result.getContract("scheduling")?.preflight().currentUsd ?? telemetry?.sessionSpend().usd ?? 0;
 	const backgroundCallJournal = (targetId: string, modelId: string): CallJournalOptions | undefined => {
 		const origin = session?.current();
 		const acquire = telemetry?.acquireTelemetrySession;
@@ -3819,7 +3810,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	// System One: one instance for the process, fixed at startup in what it binds.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;
-	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
+	const sessionScheduling = result.getContract("scheduling");
 	const systemOneAdmissionDeps = {
 		providers,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
@@ -4050,7 +4041,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(music && getCurrentSettings().integrations.music.agentControl && music.unavailableReason() === null
 			? { music }
 			: {}),
-		getCostCeilingUsd: () => result.getContract<SchedulingContract>("scheduling")?.ceilingUsd() ?? 0,
+		getCostCeilingUsd: () => result.getContract("scheduling")?.ceilingUsd() ?? 0,
 		...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
 		...(config ? { getDispatchSchemaComposition: () => dispatchSchemaCompositionFor(config.get().fleet) } : {}),
 		getSkillLoaderOptions: () => ({
@@ -5086,7 +5077,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							fleet: {
 								preview: (name: string, vars: Readonly<Record<string, string>>, resume?: string) => {
 									const roleFacts = agentRoleFactsResolver((id: string) => agents.getSpec(id));
-									const budget = result.getContract<SchedulingContract>("scheduling")?.preflight();
+									const budget = result.getContract("scheduling")?.preflight();
 									return compileFleetRunPreview({
 										workspaceRoot: process.cwd(),
 										name,
@@ -5695,7 +5686,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			);
 			bumpSessionState();
-			result.getContract<SchedulingContract>("scheduling")?.setRunCostCap?.(runCostCap);
+			result.getContract("scheduling")?.setRunCostCap?.(runCostCap);
 		}
 		const unpricedRoutes = runCostCap === null ? [] : unpricedRunRoutes(getCurrentSettings(), providers);
 		if (unpricedRoutes.length > 0) {
@@ -5880,7 +5871,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		...(agents ? { agents } : {}),
 		...(() => {
-			const scheduling = result.getContract<SchedulingContract>("scheduling");
+			const scheduling = result.getContract("scheduling");
 			return scheduling ? { scheduling } : {};
 		})(),
 		systemOne,
@@ -6031,8 +6022,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const route = getCurrentSettings().chat;
 			return `Setup saved. Active route: ${route.target ?? "(none)"}/${route.model ?? "(no model)"}.`;
 		},
-		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
-		getRouteBreakers: () => result.getContract<DispatchContract>("dispatch")?.routeBreakers?.() ?? [],
+		getFleetNodes: () => result.getContract("scheduling")?.fleet?.list() ?? [],
+		getRouteBreakers: () => result.getContract("dispatch")?.routeBreakers?.() ?? [],
 		onBackgroundDispatch: () => dispatchBackground.backgroundNewest(),
 		// A boot-time resume opens onto an existing conversation, so the welcome
 		// header starts collapsed rather than offering fresh-start onboarding.

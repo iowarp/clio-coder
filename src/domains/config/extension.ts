@@ -18,10 +18,6 @@ import { type ConfigWatcher, startConfigWatcher } from "./watcher.js";
 
 type ChangeListener = (payload: ConfigChangePayload) => void;
 
-interface NativeAgentNamespace {
-	list(): ReadonlyArray<{ id: string }>;
-}
-
 export interface ConfigBundleOptions {
 	/**
 	 * Interactive boot turns the event loop between its phases, so a settings
@@ -58,7 +54,7 @@ export function createConfigBundle(
 	]);
 
 	function assertAgentNamespace(settings: Readonly<ClioSettings>): void {
-		const agents = context.getContract<NativeAgentNamespace>("agents");
+		const agents = context.getContract("agents");
 		if (agents) assertAgentIdNamespace(agents.list(), settings.integrations.externalAgents.entries);
 	}
 

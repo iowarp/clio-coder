@@ -11,7 +11,7 @@ import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { BudgetAlertPayload, ConfigChangePayload, ConfigChangeSource } from "../../core/telemetry/live-events.js";
 import type { ConfigContract } from "../config/contract.js";
-import type { SessionSpend, TelemetryContract } from "../telemetry/contract.js";
+import type { SessionSpend } from "../telemetry/contract.js";
 import {
 	type BudgetSpendPricing,
 	combineBudgetPricing,
@@ -51,10 +51,10 @@ export function createSchedulingBundle(
 	context: DomainContext,
 	options: SchedulingBundleOptions = {},
 ): DomainBundle<SchedulingContract> {
-	const maybeConfig = context.getContract<ConfigContract>("config");
+	const maybeConfig = context.getContract("config");
 	if (!maybeConfig) throw new Error("scheduling domain requires 'config' contract");
 	const config: ConfigContract = maybeConfig;
-	const telemetry = context.getContract<TelemetryContract>("telemetry");
+	const telemetry = context.getContract("telemetry");
 
 	const settings = config.get();
 	let budget = createBudgetState(settings.safety.limits.sessionCostUsd);

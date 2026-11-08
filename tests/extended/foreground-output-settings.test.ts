@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { type LoadResult, loadDomains } from "../../src/core/domain-loader.js";
 import { createConfigDomainModule } from "../../src/domains/config/index.js";
-import { type ProvidersContract, ProvidersDomainModule } from "../../src/domains/providers/index.js";
+import { ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import { resolveReservedOutputTokens, setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
 import { type ChatLoop, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
@@ -32,7 +32,7 @@ test("foreground requests use the effective output budget when the existing sess
 		settings.chat.maxOutputTokens = 32768;
 		settings.chat.prewarm = false;
 		loaded = await loadDomains([createConfigDomainModule(settings), ProvidersDomainModule]);
-		const providers = loaded.getContract<ProvidersContract>("providers");
+		const providers = loaded.getContract("providers");
 		ok(providers);
 		loop = createChatLoop({ getSettings: () => settings, providers, knownTargets: () => new Set(["fixture"]) });
 		const notices: string[] = [];

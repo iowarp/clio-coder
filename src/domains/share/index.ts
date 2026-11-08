@@ -2,7 +2,7 @@ import type { DomainModule } from "../../core/domain-loader.js";
 import { createShareBundle } from "./extension.js";
 import { ShareManifest } from "./manifest.js";
 
-export const ShareDomainModule: DomainModule = {
+export const ShareDomainModule: DomainModule<"share"> = {
 	manifest: ShareManifest,
 	createExtension: createShareBundle,
 };

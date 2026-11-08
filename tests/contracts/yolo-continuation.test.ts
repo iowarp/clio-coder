@@ -70,7 +70,7 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		getAutonomy: () => options.autonomy ?? "yolo",
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		bus: context.bus,

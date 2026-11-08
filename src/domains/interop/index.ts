@@ -1,9 +1,8 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import type { InteropContract } from "./contract.js";
 import { createInteropBundle } from "./extension.js";
 import { InteropManifest } from "./manifest.js";
 
-export const InteropDomainModule: DomainModule<InteropContract> = {
+export const InteropDomainModule: DomainModule<"interop"> = {
 	manifest: InteropManifest,
 	createExtension: createInteropBundle,
 };

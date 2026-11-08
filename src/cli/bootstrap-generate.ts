@@ -599,8 +599,8 @@ async function loadBootstrapDispatch(): Promise<{
 			await loaded.stop();
 		}
 	};
-	const dispatch = loaded.getContract<DispatchContract>("dispatch");
-	const config = loaded.getContract<ConfigContract>("config");
+	const dispatch = loaded.getContract("dispatch");
+	const config = loaded.getContract("config");
 	if (!dispatch || !config) {
 		await stop();
 		throw new Error("bootstrap dispatch or configuration unavailable");

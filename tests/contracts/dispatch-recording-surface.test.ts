@@ -6,7 +6,6 @@ import { Value } from "typebox/value";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { runClioRun } from "../../src/cli/run.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readRunRecording } from "../../src/domains/dispatch/index.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -100,7 +99,7 @@ it("binds recording into approval plans and returns the manifest reference from 
 		const tool = createDispatchTool({
 			dispatch: bundle.contract,
 			getAutonomy: () => "yolo",
-			getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 		});
 		const args = {
 			tasks: ["Inspect isolated source evidence.", "Inspect isolated evidence again."],
@@ -200,7 +199,7 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 				approvals.push(root);
 				return { requestId: "approval-1", requestedBy: "operator" };
 			},
-			getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 		});
 		const scout = { agent: "scout", mode: "parallel", intent: { read_roots: [`${link}/`] } };
 		const writing = tool.prepareAdmissionArguments?.({

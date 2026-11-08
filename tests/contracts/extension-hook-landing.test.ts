@@ -5,7 +5,6 @@ import { type TestContext, test } from "node:test";
 import { Type } from "typebox";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ExtensionHookEvent } from "../../src/domains/extensions/public-api-v2.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
@@ -155,7 +154,7 @@ async function admissionOnlyDispatchTool(t: TestContext) {
 	isolateDispatchState();
 	t.after(() => restoreDispatchState());
 	const context = dispatchStubContext();
-	const agents = context.getContract<AgentsContract>("agents");
+	const agents = context.getContract("agents");
 	ok(agents);
 	const bundle = makeDispatchBundle(context, {
 		spawnWorker: () => {

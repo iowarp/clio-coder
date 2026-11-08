@@ -8,7 +8,6 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
@@ -91,7 +90,7 @@ for (const agent of ["scout", "coder"] as const) {
 				preflight: () => ({ verdict: "over", currentUsd: 100, ceilingUsd: 0.01 }),
 			},
 		});
-		const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
+		const specs = context.getContract("agents")?.listSpecs() ?? [];
 		strictEqual(specs.find((spec) => spec.id === "scout")?.capabilityClass, "read-only");
 		strictEqual(specs.find((spec) => spec.id === "coder")?.capabilityClass, "workspace-edit");
 		const bundle = makeDispatchBundle(context, {
@@ -415,7 +414,7 @@ for (const phase of ["candidates", "judge"] as const) {
 			const settings = structuredClone(DEFAULT_SETTINGS);
 			settings.fleet.retry.maxRetries = 0;
 			const context = dispatchStubContext({ settings });
-			const specs = context.getContract<AgentsContract>("agents")?.listSpecs() ?? [];
+			const specs = context.getContract("agents")?.listSpecs() ?? [];
 			let blockedCount = 0;
 			let abortCount = 0;
 			const bundle = makeDispatchBundle(context, {

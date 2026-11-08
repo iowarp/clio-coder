@@ -1,9 +1,8 @@
 import type { DomainModule, LoadResult } from "../core/domain-loader.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import type { ConfigContract } from "../domains/config/contract.js";
 import type { DispatchBundleOptions } from "../domains/dispatch/extension.js";
 import { type ExtensionsContract, isLoadableExtension } from "../domains/extensions/index.js";
-import { createMiddlewareDomain, type MiddlewareContract } from "../domains/middleware/index.js";
+import { createMiddlewareDomain } from "../domains/middleware/index.js";
 import type { WorkerHookHost } from "../entry/worker-hook-host.js";
 import type { WorkerExtensionHook } from "../worker/protocol.js";
 
@@ -24,7 +23,7 @@ import type { WorkerExtensionHook } from "../worker/protocol.js";
  */
 export function createCliWorkerHooks(command: string): {
 	workerHooks: NonNullable<DispatchBundleOptions["workerHooks"]>;
-	middlewareModule: DomainModule<MiddlewareContract>;
+	middlewareModule: DomainModule<"middleware">;
 	start(loaded: LoadResult): Promise<string | null>;
 	/** Settles once every hook query already handed to the host is answered. */
 	drain(): Promise<void>;
@@ -61,9 +60,9 @@ export function createCliWorkerHooks(command: string): {
 		},
 		middlewareModule: middlewareDomain.module,
 		async start(loaded) {
-			const extensions = loaded.getContract<ExtensionsContract>("extensions");
-			const middleware = loaded.getContract<MiddlewareContract>("middleware") && middlewareDomain.registrar();
-			const config = loaded.getContract<ConfigContract>("config");
+			const extensions = loaded.getContract("extensions");
+			const middleware = loaded.getContract("middleware") && middlewareDomain.registrar();
+			const config = loaded.getContract("config");
 			if (!extensions || !middleware) return null;
 			const list = (cwd: string) =>
 				extensions.list(cwd, { all: true }).filter((entry) => isLoadableExtension(entry) && entry.runtimeV2 !== undefined);

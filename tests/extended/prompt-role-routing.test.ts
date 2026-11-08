@@ -63,7 +63,7 @@ describe("production prompt role routing", { concurrency: false }, () => {
 		};
 		const turn = createTurnContext({
 			state: createTurnState("off"),
-			getSettings: () => base.getContract<{ get(): unknown }>("config")?.get() as never,
+			getSettings: () => base.getContract("config")?.get() as never,
 			providers: base.getContract("providers") as ProvidersContract,
 			prompts,
 			middleware: {} as TurnMiddleware,

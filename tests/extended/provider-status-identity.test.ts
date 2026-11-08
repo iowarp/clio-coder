@@ -5,10 +5,10 @@ import { test } from "node:test";
 import { updateSettings } from "../../src/core/config.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
-import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
+import { ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import type { TargetStatus } from "../../src/domains/providers/contract.js";
-import { type ProvidersContract, ProvidersDomainModule } from "../../src/domains/providers/index.js";
+import { ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import {
 	readTargetModelSnapshot,
 	recordTargetModelSnapshot,
@@ -44,8 +44,8 @@ test("changing a target's probe identity drops the previous endpoint's health an
 		});
 		const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 		try {
-			const config = loaded.getContract<ConfigContract>("config");
-			const providers = loaded.getContract<ProvidersContract>("providers");
+			const config = loaded.getContract("config");
+			const providers = loaded.getContract("providers");
 			ok(config?.update && providers);
 			const runtime = providers.getRuntime(target.runtime);
 			ok(runtime);
@@ -136,8 +136,8 @@ for (const ending of ["retargeted", "removed", "stopped", "overridden"] as const
 				publications++;
 			});
 			try {
-				const config = loaded.getContract<ConfigContract>("config");
-				const providers = loaded.getContract<ProvidersContract>("providers");
+				const config = loaded.getContract("config");
+				const providers = loaded.getContract("providers");
 				ok(config?.update && providers);
 				const runtime = providers.getRuntime(target.runtime);
 				ok(runtime);

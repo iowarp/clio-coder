@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
-import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -37,7 +36,7 @@ async function retryFleet(
 	settings.fleet.default.model = "gpt-4o";
 	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
 	const context = dispatchStubContext({ settings });
-	const providers = context.getContract<ProvidersContract>("providers");
+	const providers = context.getContract("providers");
 	for (const status of providers?.list() ?? []) {
 		status.capabilities.vision = vision.has(status.target.id);
 		const window = options.windows?.[status.target.id];

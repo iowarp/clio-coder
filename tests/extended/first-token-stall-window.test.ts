@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { DomainContext, DomainName } from "../../src/core/domain-loader.js";
 import type { BudgetAlertPayload } from "../../src/core/telemetry/live-events.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -135,7 +135,7 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 		? createSchedulingBundle(
 				{
 					bus: context.bus,
-					getContract: ((name: string) =>
+					getContract: ((name: DomainName) =>
 						name === "telemetry" ? spent : context.getContract(name)) as DomainContext["getContract"],
 				},
 				{ getSettings: () => settings },
@@ -143,7 +143,7 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 		: undefined;
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		bus: context.bus,
 		...(scheduling ? { scheduling } : {}),

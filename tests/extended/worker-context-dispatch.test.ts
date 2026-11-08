@@ -1,13 +1,12 @@
 import { deepStrictEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import { readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { selectWorkerContext } from "../../src/domains/context/worker/select.js";
 import { captureWorkerContext } from "../../src/domains/context/worker/snapshot.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
-
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -45,7 +44,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 		const bundle = makeDispatchBundle(
 			{
 				bus: context.bus,
-				getContract: ((name: string) =>
+				getContract: ((name: DomainName) =>
 					name === "providers" ? providers.contract : context.getContract(name)) as typeof context.getContract,
 			},
 			{
@@ -61,7 +60,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const tool = createDispatchTool({
 				getWorkspaceRoot: () => env.dir,
 				dispatch: bundle.contract,
-				getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+				getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 				getAutonomy: () => "yolo",
 				captureWorkerContext: () => {
 					captures++;

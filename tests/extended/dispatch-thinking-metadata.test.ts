@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
@@ -40,7 +40,7 @@ async function setup(beforeMetadata?: () => Promise<void>) {
 	const dispatch = makeDispatchBundle(
 		{
 			bus: context.bus,
-			getContract: ((name: string) =>
+			getContract: ((name: DomainName) =>
 				name === "providers" ? workerProviders : context.getContract(name)) as typeof context.getContract,
 		},
 		{
@@ -67,7 +67,7 @@ async function setup(beforeMetadata?: () => Promise<void>) {
 				},
 			},
 		},
-		getAgentSpecs: () => context.getContract<AgentsContract>("agents")?.listSpecs() ?? [],
+		getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
 		getAutonomy: () => "yolo",
 	});
 	return {

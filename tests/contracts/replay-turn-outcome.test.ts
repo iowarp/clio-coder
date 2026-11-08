@@ -929,7 +929,7 @@ test("a collected block is persisted before the first model call while operator 
 	let submitted = "";
 	const loop = createChatLoop({
 		getSettings: () => settings,
-		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
 		readSessionEntries: () => entries,

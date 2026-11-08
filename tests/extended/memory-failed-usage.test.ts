@@ -23,7 +23,7 @@ import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory
 import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
-import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/providers/index.js";
+import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
@@ -152,7 +152,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, contextWindow: 32768, maxTokens: 4096 },
 					synthesizeModel: () => model,
 				},
-			}).getContract<ProvidersContract>("providers");
+			}).getContract("providers");
 			assert.ok(providers);
 			const route = createBackgroundMemoryModelClient(providers, settings, 1000, null);
 			assert.ok(route);
@@ -298,7 +298,7 @@ for (const unavailable of ["available", "down", "missing-model", "missing-creden
 					return model;
 				},
 			},
-		}).getContract<ProvidersContract>("providers");
+		}).getContract("providers");
 		assert.ok(providers);
 		const status = providers.list()[0];
 		assert.ok(status);
@@ -364,7 +364,7 @@ function routingFixture() {
 				return model;
 			},
 		},
-	}).getContract<ProvidersContract>("providers");
+	}).getContract("providers");
 	assert.ok(providers);
 	return { settings, providers, faux };
 }
