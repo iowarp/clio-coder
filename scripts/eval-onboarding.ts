@@ -65,9 +65,18 @@ const WRITE_TOOLS = new Set(["write", "edit"]);
 const usedObserve = (o: Observation): boolean => o.tools.some((t) => OBSERVE_TOOLS.has(t.name));
 const usedDocs = (o: Observation): boolean => o.tools.some((t) => t.name === "clio_docs");
 const lower = (o: Observation): string => o.finalText.toLowerCase();
-/** A docs page by path, or a labeled source list naming pages by title. */
+/**
+ * A docs page by path, a labeled source list, a "See <title>" pointer, a
+ * titled guide, or a line-range citation.
+ */
 const cites = (o: Observation): boolean =>
-	/docs\/(?:guide|architecture)\/|\.md\b/u.test(o.finalText) || /\b(?:sources?|docs|see)\s*:/iu.test(o.finalText);
+	[
+		/docs\/(?:guide|architecture)\/|\.md\b/u,
+		/\b(?:sources?|references?|docs|see)\s*:/iu,
+		/\bsee\s+(?:\*|\[|")/iu,
+		/\b[A-Z][\w-]*(?:\s+[A-Z][\w-]*)*\s+guides?\b/u,
+		/\blines?\s+\d+\s*[–-]\s*\d+/u,
+	].some((re) => re.test(o.finalText));
 
 /** A skills lookup, a skill load, or a library package lookup. */
 function isSkillLookup(t: ToolCall): boolean {
