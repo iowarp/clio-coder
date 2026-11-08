@@ -36,8 +36,7 @@ Recognized steps joined by `&&`, `||`, `;` or `|`, redirected only to
 /dev/null or `2>&1`, run too. Other commands, `$(...)`, variables, scripts and
 paths outside the workspace need approval there, as do system_modify actions
 and outward actions (an ask_user gate marked exposure=outward, a web_fetch
-request other than a bodiless GET or HEAD). Prefer a typed tool over raw shell
-where one is admitted.
+request other than a bodiless GET or HEAD).
 Every level refuses deleting /, the home directory or a system tree, mkfs,
 writes to a block device, fork bombs, writes into Clio's own config and state,
 reads of Clio's credential store, secret paths and rules the operator wrote in

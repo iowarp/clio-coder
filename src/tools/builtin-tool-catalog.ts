@@ -276,7 +276,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective: "Run declared verification checks (scripts or frontend artifacts).",
 		discoveryHint:
 			'verify({check:"<id>"}) runs one declared check; an undeclared id runs nothing and its error names the declared ids, so no listing is needed first. verify({}) only lists them. Report actual pass, fail, or unrun status; do not treat a plan to verify as evidence.',
-		examples: [{ goal: "Run the project's typecheck", args: { check: "typecheck" }, startup: true }],
+		examples: [{ goal: "Run the project's tests", args: { check: "test" }, startup: true }],
 		uiLabel: "Verify",
 		retrySafety: "retry_safe",
 		resultSizePolicy: summaryPolicy(
