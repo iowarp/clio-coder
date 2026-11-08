@@ -94,6 +94,7 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 - A claude-code or claude-sdk worker no longer fails attestation with "tool surface drift" (#449).
 - MCP servers see the installed Clio Coder version in the `clientInfo` Clio sends when it connects.
 - The TUI redraws only the rows a streaming frame changed, which keeps long replies smooth.
+- A tool called through `gateway` gets the same argument normalization as a direct call before its arguments are checked. A `limitation` with a prose reason is filed under `other` or `blocked` instead of being rejected, and `run_script` accepts an array argument sent as a JSON string or as a single string.
 - A passing `reproduce`, `numeric-compare` or perf-budget check now satisfies a quality-policy requirement: judged checks are classified by their verdict, not a shell exit code. Before, a successful reproduction left the requirement outstanding.
 - A memory record contradicted during a session is withdrawn from that session's prompt, as it already was from fresh selection.
 - A middleware failure that escapes the runtime is journaled as `middleware.hook_failed` and shown as a warning; the turn continues without that hook's effects instead of hiding the failure.
