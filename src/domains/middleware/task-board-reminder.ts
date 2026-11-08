@@ -84,9 +84,10 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 
 			const steps = countEnumeratedSteps(input.text);
 			if (steps < 3) return NO_EFFECTS;
-			// A turn that cannot call tasks would spend its steps hunting for it.
-			// The shot is kept for a later enumerated turn that can.
-			if (!turnCanCallTool(input, ToolNames.Tasks)) return NO_EFFECTS;
+			// The reminder names tasks and gateway op=chain; a turn that cannot call
+			// both would spend its steps hunting. The shot is kept for a later
+			// enumerated turn that can.
+			if (!turnCanCallTool(input, ToolNames.Tasks) || !turnCanCallTool(input, ToolNames.Gateway)) return NO_EFFECTS;
 			spentForActiveSession = true;
 
 			// A turn already carrying an operator-chosen skill flows through that
