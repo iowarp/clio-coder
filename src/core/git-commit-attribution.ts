@@ -382,6 +382,7 @@ message_source=$2
 if [ "$AI_AGENT" != '${AI_AGENT_NAME}' ] || [ "$${CLIO_GIT_COMMITS_ENABLED_ENV}" != '1' ]; then exit 0; fi
 git_path() { git rev-parse --git-path "$1" 2>/dev/null || true; }
 
+trailer_comment_char=
 if [ "$hook_name" = commit-msg ]; then
   for marker in CHERRY_PICK_HEAD rebase-apply rebase-merge; do
     marker_path=$(git_path "$marker")
@@ -389,9 +390,22 @@ if [ "$hook_name" = commit-msg ]; then
   done
   # Git strips comment lines after this hook, and a message with nothing
   # else aborts the commit; a trailer added to it would commit an abandoned
-  # editor. With core.commentChar=auto the comment character is unknown here.
+  # editor. With core.commentChar=auto, git commented with the first of
+  # '#;@!$%^&|:' that started no line of the message it prepared, so every
+  # earlier candidate on a line here is message text and the latest one that
+  # starts a line is the comment character. Lines of any other candidate stay
+  # content, so a message git would commit is never mistaken for comments.
   comment_char=$(git config --get core.commentChar 2>/dev/null || true)
-  case "$comment_char" in '') comment_char='#' ;; auto) exit 0 ;; esac
+  case "$comment_char" in
+    '') comment_char='#' ;;
+    auto)
+      comment_char=$(awk '
+        BEGIN { candidates = "#;@!$%^&|:" }
+        { at = index(candidates, substr($0, 1, 1)); if (substr($0, 1, 1) != "" && at > last) last = at }
+        END { print (last ? substr(candidates, last, 1) : "#") }' "$message_file")
+      trailer_comment_char=$comment_char
+      ;;
+  esac
   awk -v c="$comment_char" '
     $0 == c " ------------------------ >8 ------------------------" { exit }
     index($0, c) != 1 && $0 ~ /[^[:space:]]/ { found = 1; exit }
@@ -442,9 +456,18 @@ if [ -s "$message_file" ] && [ -n "$(tail -c 1 "$message_file")" ]; then
   printf '\\n' >> "$message_file"
 fi
 
+# interpret-trailers reads core.commentChar=auto as '#', so commit-msg passes
+# the character it resolved to keep the trailer above the comment block.
 append_trailer() {
   if has_trailer "$1"; then return 0; fi
-  git interpret-trailers --in-place --if-exists=addIfDifferent --trailer "$1" "$message_file" ||
+  if [ -n "$trailer_comment_char" ]; then
+    set -- "$1" -c "core.commentChar=$trailer_comment_char"
+  else
+    set -- "$1"
+  fi
+  trailer=$1
+  shift
+  git "$@" interpret-trailers --in-place --if-exists=addIfDifferent --trailer "$trailer" "$message_file" ||
     printf '%s\\n' '[clio-coder:attribution] git interpret-trailers failed; commit left as written' >&2
 }
 

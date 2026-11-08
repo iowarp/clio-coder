@@ -325,6 +325,20 @@ describe("autonomous commit authorship", () => {
 				// An all-comment message aborts the commit, as it must.
 			}
 			strictEqual(git(["rev-parse", "HEAD"]), head);
+			// core.commentChar=auto: a template line starting with '#' moves git's comment character to ';'.
+			git(["config", "core.commentChar", "auto"]);
+			writeFileSync(join(repo, "..", "template"), "#hashtag subject\n");
+			absolute(["commit", "-q", "--allow-empty", "-t", join(repo, "..", "template")], 'sed -i "1s/$/ edited/"');
+			deepStrictEqual(last(), { ident: `${CLIO}|${HUMAN}`, trailers: [`Co-authored-by: ${HUMAN}`] });
+			strictEqual(git(["log", "-1", "--format=%s"]).trim(), "#hashtag subject edited");
+			const autoHead = git(["rev-parse", "HEAD"]);
+			try {
+				absolute(["commit", "-q", "--allow-empty"], "true");
+			} catch {
+				// Still aborted under auto.
+			}
+			strictEqual(git(["rev-parse", "HEAD"]), autoHead);
+			git(["config", "--unset", "core.commentChar"]);
 			// Through the shim on PATH the same editor commit is the human's.
 			git(["commit", "-q", "--allow-empty"], { ...env, GIT_EDITOR: 'sed -i "1s/^/feat: shim/"' });
 			strictEqual(last().ident, `${HUMAN}|${HUMAN}`);
