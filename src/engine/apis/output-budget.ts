@@ -147,9 +147,14 @@ const MIN_ADMITTED_OUTPUT_SHARE = 1 / 8;
 function admissionReserve(ceiling: number, request: { contextWindow: number; inputTokens: number }): number {
 	const window = request.contextWindow;
 	if (!(window > 0) || !Number.isFinite(window)) return ceiling;
-	const floor = Math.min(ceiling, Math.max(1, Math.floor(window * MIN_ADMITTED_OUTPUT_SHARE)));
+	const floor = usableOutputFloor(ceiling, window);
 	const wire = clampOutputToRemainingContext(ceiling, window, request.inputTokens);
 	return Math.max(floor + CONTEXT_BUDGET_SAFETY_TOKENS, wire);
+}
+
+/** The smallest response a request is worth sending with: a share of the window, never above what was asked for. */
+function usableOutputFloor(ceiling: number, contextWindow: number): number {
+	return Math.min(ceiling, Math.max(1, Math.floor(contextWindow * MIN_ADMITTED_OUTPUT_SHARE)));
 }
 
 function clampOutputToRemainingContext(ceiling: number, contextWindow: number, inputTokens: number): number {
@@ -175,6 +180,15 @@ export function remainingContextMaxTokens(
 ): number {
 	const inputTokens = estimateInputTokensFromContext(context);
 	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
+	const resolved = clampOutputToRemainingContext(requestedOutputCeiling(model, options), contextWindow, inputTokens);
+	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+function requestedOutputCeiling(
+	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
+	options: Pick<StreamOptions, "maxTokens"> | undefined,
+): number {
+	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
 	// maxTokens: the global default, then the profile's recommendation, then the
@@ -187,8 +201,33 @@ export function remainingContextMaxTokens(
 			? globalDefaultMaxOutputTokens
 			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
 	const requested = options?.maxTokens ?? defaultLimit;
-	const resolved = clampOutputToRemainingContext(Math.min(requested, modelLimit), contextWindow, inputTokens);
-	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
+	return Math.min(requested, modelLimit);
+}
+
+/**
+ * Why a request must not go out: the output budget it would actually carry
+ * falls below the usable floor preflight admission reserves. `sentMaxTokens`
+ * is the final wire value, after Pi's own clamp of the provider-bound
+ * `context`, and `options` are the caller's options before
+ * {@link remainingContextMaxTokens} filled them in. A request with a token or
+ * two of output budget ends at `stopReason=length` having said nothing, so it
+ * is refused before the call as a context overflow, which the session answers
+ * with a forced fit and one retry. Null when the request may be sent.
+ */
+export function outputBudgetShortfall(
+	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
+	context: Context,
+	options: Pick<StreamOptions, "maxTokens"> | undefined,
+): string | null {
+	const contextWindow = model.contextWindow;
+	if (!(contextWindow > 0) || !Number.isFinite(contextWindow)) return null;
+	const ceiling = requestedOutputCeiling(model, options);
+	if (!Number.isFinite(ceiling)) return null;
+	const clio = remainingContextMaxTokens(model, context, options);
+	const sent = clampMaxTokensToContext(model as Model<Api>, normalizeContext(context), clio);
+	const floor = usableOutputFloor(ceiling, contextWindow);
+	if (sent >= floor) return null;
+	return `Context window exceeded before the provider call: the request would leave ${sent} output tokens of a ${contextWindow}-token window (estimated input ${estimateInputTokensFromContext(context)}), below the usable minimum of ${floor}.`;
 }
 
 /** Reasoning tokens inferred from visible thinking text, for servers that report none. */

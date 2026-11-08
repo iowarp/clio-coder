@@ -64,7 +64,7 @@ import {
 	listGatewayLmStudioResidentModels,
 	listLmStudioResidentModels,
 } from "./lmstudio.js";
-import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
+import { estimateReasoningTokens, outputBudgetShortfall, remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
@@ -1200,14 +1200,17 @@ function streamCompletions<TOptions extends StreamOptions>(
 	const attempt = (): AssistantMessageEventStream => {
 		const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
 			withLocalResidency(model, options ?? {}, (requestModel) => {
+				const sampled = withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion);
+				const shortfall = outputBudgetShortfall(requestModel, effectiveContext, sampled);
+				if (shortfall !== null) {
+					const refused = createAssistantMessageEventStream();
+					failStream(refused, requestModel, new Error(shortfall));
+					return refused;
+				}
 				return start(
 					requestModel,
 					normalizeContext(preserveInterruptedReasoning(effectiveContext, requestModel, resolved)),
-					withRemainingContextBudget(
-						requestModel,
-						effectiveContext,
-						withSamplingOverrides(requestModel, capturedOptions, resolved, diffusion),
-					),
+					withRemainingContextBudget(requestModel, effectiveContext, sampled),
 				);
 			}),
 		);

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { it } from "node:test";
-import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
+import { type AssistantMessageEvent, type Context, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { asDirectoryPathBoundary } from "../../src/core/path-boundary.js";
@@ -90,6 +90,57 @@ for (const finishReason of ["length", "tool_calls"] as const) {
 		}
 	});
 }
+
+it("refuses as a context overflow, before the call, a request the wire would send with a one-token output budget", async () => {
+	const model = {
+		...(litellm.synthesizeModel(
+			{ id: "fixture", runtime: "litellm", url: "http://fixture.invalid" },
+			modelId,
+			null,
+		) as Model<"openai-completions">),
+		contextWindow: 28000,
+	};
+	// A usage anchor that fills the window: Pi's request-time clamp would send max_tokens 1.
+	const full = {
+		input: 27000,
+		output: 20,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 27020,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+	const nearlyFull: Context = {
+		messages: [
+			{ role: "user", content: "Read the files.", timestamp: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Done." }],
+				api: "openai-completions",
+				provider: "litellm",
+				model: modelId,
+				usage: full,
+				stopReason: "stop",
+				timestamp: 2,
+			},
+			{ role: "user", content: "List them.", timestamp: 3 },
+		],
+	};
+	let calls = 0;
+	const events: AssistantMessageEvent[] = [];
+	for await (const event of openAICompletionsApiProvider.streamSimple(model, nearlyFull, {
+		apiKey: "fixture",
+		fetch: async () => {
+			calls += 1;
+			return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
+		},
+	}))
+		events.push(event);
+	strictEqual(calls, 0, "no request leaves with a token or two of output budget");
+	const terminal = events.at(-1);
+	ok(terminal?.type === "error");
+	ok(isContextOverflow(terminal.error), "the session answers it with a forced fit and one retry");
+	match(terminal.error.errorMessage ?? "", /would leave 1 output tokens of a 28000-token window/u);
+});
 
 for (const abortRecovery of [false, true]) {
 	it(`real worker refuses every truncated write and ${abortRecovery ? "honors explicit abort" : "continues to a grounded artifact result"}`, {
