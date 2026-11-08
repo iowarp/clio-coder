@@ -32,31 +32,91 @@ interface Pairwise {
 	wins: number[][];
 }
 
+const sigmoid = (x: number): number => (x >= 0 ? 1 / (1 + Math.exp(-x)) : Math.exp(x) / (1 + Math.exp(x)));
+/** log(1 + e^x) without overflow. */
+const softplus = (x: number): number => (x > 0 ? x + Math.log1p(Math.exp(-x)) : Math.log1p(Math.exp(x)));
+
+/** Solve A x = b for a small symmetric positive definite A by Gaussian elimination with partial pivoting. */
+function solve(a: number[][], b: number[]): number[] | null {
+	const n = b.length;
+	const m = a.map((row, i) => [...row, b[i] as number]);
+	for (let col = 0; col < n; col++) {
+		let pivot = col;
+		for (let r = col + 1; r < n; r++) if (Math.abs(m[r]?.[col] ?? 0) > Math.abs(m[pivot]?.[col] ?? 0)) pivot = r;
+		if (Math.abs(m[pivot]?.[col] ?? 0) < 1e-300) return null;
+		[m[col], m[pivot]] = [m[pivot] as number[], m[col] as number[]];
+		const head = m[col] as number[];
+		for (let r = 0; r < n; r++) {
+			if (r === col) continue;
+			const row = m[r] as number[];
+			const factor = (row[col] as number) / (head[col] as number);
+			if (factor === 0) continue;
+			for (let c = col; c <= n; c++) row[c] = (row[c] as number) - factor * (head[c] as number);
+		}
+	}
+	return m.map((row, i) => (row[n] as number) / (row[i] as number));
+}
+
 /**
- * Bradley-Terry by minorization-maximization (Hunter 2004). Each identity also
- * plays one virtual drawn game against a fixed unit-strength anchor, which keeps
- * an unbeaten or winless identity finite and pins the scale without normalising.
+ * Bradley-Terry strengths as log-strengths theta. Each identity also plays one
+ * virtual drawn game against a fixed unit-strength anchor (theta 0): a weak
+ * prior that keeps an unbeaten or winless record finite and pins the scale. The
+ * resulting log-likelihood is strictly concave, so damped Newton steps reach its
+ * one maximum; the fit is used only when the gradient is at zero within
+ * tolerance, and otherwise no score is published.
  */
-function bradleyTerry({ ids, wins }: Pairwise): number[] {
+function bradleyTerry({ ids, wins }: Pairwise): number[] | null {
 	const n = ids.length;
-	let strength = new Array<number>(n).fill(1);
-	for (let iteration = 0; iteration < 500; iteration++) {
-		const next = strength.map((p, i) => {
-			let won = 0.5;
-			let denominator = 1 / (p + 1);
+	if (n === 0) return [];
+	const w = (i: number, j: number) => wins[i]?.[j] ?? 0;
+	const objective = (theta: number[]): number => {
+		let total = 0;
+		for (let i = 0; i < n; i++) {
+			const ti = theta[i] as number;
+			total += 0.5 * ti - softplus(ti);
+			for (let j = 0; j < n; j++) {
+				if (j === i || w(i, j) === 0) continue;
+				// log(e^ti / (e^ti + e^tj)) = -softplus(tj - ti)
+				total -= w(i, j) * softplus((theta[j] as number) - ti);
+			}
+		}
+		return total;
+	};
+	let theta = new Array<number>(n).fill(0);
+	for (let iteration = 0; iteration < 200; iteration++) {
+		const gradient = new Array<number>(n).fill(0);
+		const curvature = Array.from({ length: n }, () => new Array<number>(n).fill(0));
+		for (let i = 0; i < n; i++) {
+			const ti = theta[i] as number;
+			const pa = sigmoid(ti);
+			gradient[i] = (gradient[i] as number) + 0.5 - pa;
+			(curvature[i] as number[])[i] = ((curvature[i] as number[])[i] as number) + pa * (1 - pa);
 			for (let j = 0; j < n; j++) {
 				if (j === i) continue;
-				won += wins[i]?.[j] ?? 0;
-				const games = (wins[i]?.[j] ?? 0) + (wins[j]?.[i] ?? 0);
-				if (games > 0) denominator += games / (p + (strength[j] as number));
+				const games = w(i, j) + w(j, i);
+				if (games === 0) continue;
+				const p = sigmoid(ti - (theta[j] as number));
+				gradient[i] = (gradient[i] as number) + w(i, j) - games * p;
+				const h = games * p * (1 - p);
+				(curvature[i] as number[])[i] = ((curvature[i] as number[])[i] as number) + h;
+				(curvature[i] as number[])[j] = ((curvature[i] as number[])[j] as number) - h;
 			}
-			return won / denominator;
-		});
-		const delta = Math.max(...next.map((p, i) => Math.abs(p - (strength[i] as number))));
-		strength = next;
-		if (delta < 1e-9) break;
+		}
+		if (Math.max(...gradient.map(Math.abs)) < 1e-9) {
+			return theta.map((t) => Math.round(1000 + (400 * t) / Math.LN10));
+		}
+		const step = solve(curvature, gradient);
+		if (step === null) return null;
+		const before = objective(theta);
+		let scale = 1;
+		let next = theta.map((t, i) => t + (step[i] as number));
+		while (objective(next) < before && scale > 1e-12) {
+			scale /= 2;
+			next = theta.map((t, i) => t + scale * (step[i] as number));
+		}
+		theta = next;
 	}
-	return strength.map((p) => Math.round(1000 + 400 * Math.log10(p)));
+	return null;
 }
 
 /**
@@ -112,7 +172,7 @@ export function computeStandings(
 	const wins = ids.map((a) => ids.map((b) => pairs.get(`${a}\u0000${b}`) ?? 0));
 	const scores = bradleyTerry({ ids, wins });
 	for (const [i, standing] of standings.entries()) {
-		standing.score = standing.votes >= ARENA_SCORE_MIN_VOTES ? (scores[i] as number) : null;
+		standing.score = scores !== null && standing.votes >= ARENA_SCORE_MIN_VOTES ? (scores[i] as number) : null;
 	}
 	standings.sort(
 		(a, b) =>
