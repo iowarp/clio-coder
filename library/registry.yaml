@@ -811,16 +811,16 @@ entries:
       pandas MCP servers with per-tool action classes for analysis beyond it.
       Read tools run without asking; file-writing tools ask first; each server
       needs one online launch to build its environment before it runs offline."
-    version: 0.1.0
+    version: 0.1.1
     sourceUrl: plugins/science-data
-    sha256: befdbe0a5193f61b3e9b97f19c39db5dd71337720933bbe5331111a348f97f5f
+    sha256: f7cdae20f0a4a4a2839144ef5216262aa17a00dd6360b0042d1898d1dedb210d
     provides:
       - kind: skill
         name: science-data
         description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data
           tool for structure, slices and summary statistics, then the clio-kit
-          parquet and pandas servers for aggregation, group-by and statistical
-          tests, and the hdf5 server or h5py only for what th"
+          parquet and pandas servers for aggregation, correlations and
+          statistical tests, and the hdf5 server or h5py only for wha"
   - kind: skill
     name: scientific-debugging
     description: Diagnoses stalled or cross-system failures and wrong, NaN,

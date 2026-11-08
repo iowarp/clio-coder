@@ -18,21 +18,21 @@
 			"args": ["mcp-server", "pandas"],
 			"timeoutMs": 120000,
 			"toolActionClasses": {
-				"clean_data": "read",
+				"clean_data": "destructive",
 				"correlation_analysis": "read",
 				"filter_data": "destructive",
-				"groupby_operations": "read",
-				"handle_missing_data": "read",
+				"groupby_operations": "destructive",
+				"handle_missing_data": "destructive",
 				"hypothesis_testing": "read",
 				"load_data": "read",
-				"merge_datasets": "read",
-				"optimize_memory": "read",
-				"pivot_table": "read",
+				"merge_datasets": "destructive",
+				"optimize_memory": "destructive",
+				"pivot_table": "destructive",
 				"profile_csv": "read",
 				"profile_data": "read",
 				"save_data": "destructive",
 				"statistical_summary": "read",
-				"time_series_operations": "read",
+				"time_series_operations": "destructive",
 				"validate_data": "read"
 			}
 		}

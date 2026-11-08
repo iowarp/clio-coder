@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "science-data",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Read tools run without asking; file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
 	"license": "Apache-2.0",
 	"author": {

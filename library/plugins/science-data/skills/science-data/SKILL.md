@@ -1,6 +1,6 @@
 ---
 name: science-data
-description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, group-by and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for writing or converting data files."
+description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, correlations and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for writing or converting data files."
 ---
 
 # Scientific data, one tool at a time
@@ -43,13 +43,16 @@ the remedy the listing prints.
 
 - `mcp_parquet__aggregate_column_tool` (min, max, mean and so on over a row
   range, with `filter_json`) and `read_slice_tool` with a filter.
-- `mcp_pandas__groupby_operations`, `correlation_analysis`,
-  `hypothesis_testing`, `pivot_table`, `profile_data` and
-  `statistical_summary`, each on a `file_path`.
+- `mcp_pandas__correlation_analysis`, `hypothesis_testing`, `profile_data`
+  and `statistical_summary`, each on a `file_path`.
 
-These are `read` and run without asking. `mcp_pandas__save_data`, and
-`filter_data` given an `output_file`, write files, so they ask first. Use them
-only when the user asks for a file.
+These are `read` and run without asking. Every other pandas tool writes a file,
+so it asks first: `save_data`, and `clean_data`, `filter_data`,
+`groupby_operations`, `handle_missing_data`, `merge_datasets`,
+`optimize_memory`, `pivot_table` and `time_series_operations`, which each write
+a CSV beside the input on every call and replace one of the same name. Use them
+only when the user asks for a file; for a grouped aggregate without one, use
+`mcp_parquet__aggregate_column_tool`.
 
 ## 3. The operator's `hdf5` server, rarely
 

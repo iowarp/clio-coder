@@ -27,7 +27,7 @@ pack makes the server untrusted again.
 | Server | Asks first (`destructive`) | Everything else |
 | --- | --- | --- |
 | `hdf5` (operator entry below) | `open_file` (its `mode` can be `w`, `r+` or `a`), `export_dataset` (writes a file) | `read` |
-| `pandas` | `save_data`, `filter_data` (writes `output_file` when given) | `read` |
+| `pandas` | `save_data`, and every tool that writes a CSV beside its input on each call: `clean_data`, `filter_data`, `groupby_operations`, `handle_missing_data`, `merge_datasets`, `optimize_memory`, `pivot_table`, `time_series_operations` | `read` |
 | `parquet` | none | `read` |
 
 A `read` tool runs without asking at `default` and `yolo`. A `destructive` tool
