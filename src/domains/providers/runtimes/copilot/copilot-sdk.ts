@@ -125,6 +125,7 @@ const copilotSdkRuntime = {
 	// The credential belongs to the official Copilot runtime, not to Clio's store.
 	auth: "none",
 	authNotice: COPILOT_SDK_AUTH_NOTICE,
+	externalLogin: "copilot login",
 	defaultCapabilities: copilotCapabilities,
 	// The runtime's listing omits models the account can call (Gemini 3.8 Flash on runtime 1.0.26).
 	servesUnlistedModels: true,

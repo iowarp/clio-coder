@@ -361,7 +361,7 @@ function printRuntimeList(includeHidden: boolean): void {
 						: targetRequiresAuth({ id: entry.runtimeId, runtime: entry.runtimeId }, runtime)
 							? "needs-key"
 							: "key-optional"
-					: (runtime?.auth ?? "none");
+					: (runtime?.externalLogin ?? runtime?.auth ?? "none");
 		rows.push({
 			group: supportGroupLabel(entry.group),
 			runtimeId: entry.runtimeId,

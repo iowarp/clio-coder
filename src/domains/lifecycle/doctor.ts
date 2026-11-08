@@ -1185,7 +1185,9 @@ export async function runDoctorModelChecks(
 				? "required credential not found"
 				: ["aws-sdk", "vertex-adc", "claude-cli"].includes(runtime.auth)
 					? "credentials managed by the SDK or installed app; availability not checked"
-					: "no credential required";
+					: runtime.externalLogin
+						? `sign-in is the \`${runtime.externalLogin}\` the runtime reads; Clio stores no credential`
+						: "no credential required";
 			try {
 				const status = openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), {
 					includeFallback: false,

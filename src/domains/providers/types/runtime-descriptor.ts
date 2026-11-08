@@ -204,6 +204,11 @@ export interface RuntimeDescriptor {
 	 */
 	authNotice?: string;
 	/**
+	 * Display name of a sign-in another program owns and the runtime reads itself, for a runtime with
+	 * `auth: "none"` (Copilot: `copilot login`). Target and doctor listings show it in place of `none`.
+	 */
+	externalLogin?: string;
+	/**
 	 * Set by a runtime that reaches a remote gateway whose URL the operator has
 	 * to supply. Configure then offers no localhost default and asks for this URL
 	 * by name, with an example: a local default looks usable, lets setup finish,
