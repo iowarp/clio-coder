@@ -30,7 +30,7 @@ import {
 import { campaignDir, samplesName } from "./store.js";
 import type { ResearchCampaign } from "./types.js";
 
-export function researchRunIdentity(campaign: ResearchCampaign, iteration: number): CheckRunIdentity {
+function researchRunIdentity(campaign: ResearchCampaign, iteration: number): CheckRunIdentity {
 	return { channel: "verify", sessionId: null, toolCallId: `research:${campaign.id}:${samplesName(iteration)}` };
 }
 

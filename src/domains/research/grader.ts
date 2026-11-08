@@ -51,7 +51,7 @@ export function classify(
 }
 
 /** mulberry32: a small, well-mixed 32-bit generator, reproducible on every platform for an integer seed. */
-export function seededRandom(seed: number): () => number {
+function seededRandom(seed: number): () => number {
 	let state = seed >>> 0;
 	return () => {
 		state = (state + 0x6d2b79f5) >>> 0;
@@ -91,7 +91,7 @@ function intervalSupports(direction: ResearchDirection, ci: { low: number; high:
 }
 
 /** Whether an interval excludes zero on either side. */
-export function intervalExcludesZero(ci: { low: number; high: number } | null): boolean {
+function intervalExcludesZero(ci: { low: number; high: number } | null): boolean {
 	return ci !== null && (ci.high < 0 || ci.low > 0);
 }
 

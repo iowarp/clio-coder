@@ -36,7 +36,7 @@ function entryId(entry: ResearchCampaignEntry): string {
 }
 
 /** One list row per campaign: id, state, objective and how far the budget went. */
-export function formatResearchListRow(entry: ResearchCampaignEntry): string {
+function formatResearchListRow(entry: ResearchCampaignEntry): string {
 	if ("error" in entry) return `${entry.id}  unreadable: ${entry.error}`;
 	const objective = entry.campaign.objective;
 	const state = entry.state === "stopped" ? (entry.stop?.reason ?? "stopped") : "running";

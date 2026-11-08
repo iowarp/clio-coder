@@ -5,6 +5,7 @@
  * never counted as zero, and a report says when spend was not measured.
  */
 import type { FactSum } from "../../core/telemetry/fact.js";
+import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import type { ResearchBudget, ResearchCost, ResearchStopReason } from "./types.js";
 
 /** The `usage.cost` a `run --json` `agent_end` frame carries, as far as this reader trusts it. */
@@ -90,10 +91,13 @@ export function budgetStop(budget: ResearchBudget, state: BudgetState): BudgetSt
 		if (spend.unknownRuns > 0 && !budget.allowUnpriced)
 			return {
 				reason: "budget-unenforceable",
-				detail: `${spend.unknownRuns} agent run(s) reported unknown spend, so the $${budget.maxCostUsd} cap cannot be enforced; pass --allow-unpriced to continue on the iteration and wall caps`,
+				detail: `${spend.unknownRuns} agent run(s) reported unknown spend, so the ${renderUsdLimit(budget.maxCostUsd)} cap cannot be enforced; pass --allow-unpriced to continue on the iteration and wall caps`,
 			};
 		if (spend.usd >= budget.maxCostUsd)
-			return { reason: "max-cost-usd", detail: `spent $${spend.usd.toFixed(4)} of $${budget.maxCostUsd}` };
+			return {
+				reason: "max-cost-usd",
+				detail: `spent ${renderUsdSpend(spend.usd, { estimated: spend.estimated, unpriced: false })} of ${renderUsdLimit(budget.maxCostUsd)}`,
+			};
 	}
 	return null;
 }

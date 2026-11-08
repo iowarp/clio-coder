@@ -1,3 +1,4 @@
+import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import type { ResearchCampaignView } from "./report.js";
 import type { ResearchCost } from "./types.js";
 
@@ -20,13 +21,13 @@ function costText(cost: ResearchCost | null): string {
 	if (cost === null) return "-";
 	if (cost.kind === "free") return "free";
 	if (cost.kind === "unknown") return "unknown";
-	return `$${cost.usd.toFixed(4)}${cost.kind === "estimated" ? " (est.)" : ""}`;
+	return renderUsdSpend(cost.usd, { estimated: cost.kind === "estimated", unpriced: false });
 }
 
 function spendText(view: ResearchCampaignView): string {
 	const spend = view.spend;
-	const known = `$${spend.usd.toFixed(4)}${spend.estimated ? " (partly estimated)" : ""}`;
-	return spend.unknownRuns > 0 ? `at least ${known}; ${spend.unknownRuns} run(s) had unknown spend` : known;
+	const known = renderUsdSpend(spend.usd, { estimated: spend.estimated, unpriced: spend.unknownRuns > 0 });
+	return spend.unknownRuns > 0 ? `${known}; ${spend.unknownRuns} run(s) had unknown spend` : known;
 }
 
 export function campaignStatusLines(view: ResearchCampaignView): string[] {
@@ -38,7 +39,7 @@ export function campaignStatusLines(view: ResearchCampaignView): string[] {
 		`gates: ${campaign.gates.length > 0 ? campaign.gates.join(", ") : "none"}; scope: ${campaign.scope.length > 0 ? campaign.scope.join(", ") : "any unprotected file"}`,
 		`protected: ${campaign.protected.join(", ")}`,
 		`branch: ${campaign.ref.replace("refs/heads/", "")} at ${view.best.slice(0, 12)} (base ${campaign.base.slice(0, 12)}, ${view.ratchets} ratchet${view.ratchets === 1 ? "" : "s"})`,
-		`budget: ${view.iterations.length}/${campaign.budget.maxIterations} iterations${campaign.budget.maxWallMinutes !== undefined ? `, ${campaign.budget.maxWallMinutes} min wall` : ""}${campaign.budget.maxCostUsd !== undefined ? `, $${campaign.budget.maxCostUsd} cap` : ""}; spend ${spendText(view)}`,
+		`budget: ${view.iterations.length}/${campaign.budget.maxIterations} iterations${campaign.budget.maxWallMinutes !== undefined ? `, ${campaign.budget.maxWallMinutes} min wall` : ""}${campaign.budget.maxCostUsd !== undefined ? `, ${renderUsdLimit(campaign.budget.maxCostUsd)} cap` : ""}; spend ${spendText(view)}`,
 	];
 	if (view.aa !== null)
 		lines.push(

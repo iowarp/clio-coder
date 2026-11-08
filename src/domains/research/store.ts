@@ -44,7 +44,7 @@ export function researchProjectRoot(cwd: string): string {
 	return clioProjectRoot(cwd, "research");
 }
 
-export function researchRoot(project: string): string {
+function researchRoot(project: string): string {
 	return join(project, ".clio-coder", "research");
 }
 

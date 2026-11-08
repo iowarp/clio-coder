@@ -41,15 +41,6 @@ export function createResearchRef(root: string, ref: string, base: string): void
 	git(root, ["update-ref", "-m", "clio-coder research: open", ref, base, ""]);
 }
 
-/** The research branch's tip, or null when it does not exist. */
-export function readResearchRef(root: string, ref: string): string | null {
-	try {
-		return git(root, ["rev-parse", "--verify", "--quiet", ref]);
-	} catch {
-		return null;
-	}
-}
-
 /** Move the research branch from `from` to `to` only if it still points at `from`. */
 export function casResearchRef(root: string, ref: string, to: string, from: string, message: string): boolean {
 	try {
