@@ -352,6 +352,18 @@ describe("arena standings", () => {
 		assert.equal((ten[0] as number) + (ten[1] as number), 2000, "Elo moves points between the two, never creates them");
 		assert.ok((ten[0] as number) < (hundred[0] as number), `10-0 ${ten} vs 100-0 ${hundred}`);
 	});
+	it("does not count a vote whose label names no contender", () => {
+		const duel = (n: number, choice: string) => ({
+			match: match(`20260101-00000${n}-0000`, [
+				["x", "strong"],
+				["y", "weak"],
+			]),
+			vote: vote(choice),
+		});
+		const result = computeStandings([duel(0, "A"), ...[1, 2, 3, 4].map((n) => duel(n, "D"))]);
+		assert.equal(result.votedMatches, 1);
+		assert.ok(result.standings.every((s) => s.votes === 1 && s.score === null));
+	});
 	it("splits K across a many-way match and leaves ratings alone on both-bad", () => {
 		const four = (n: number, choice: string) => ({
 			match: match(`20260101-00000${n}-0000`, [

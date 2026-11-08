@@ -1,5 +1,5 @@
 import { contenderForLabel } from "./blind.js";
-import { ARENA_SCORE_MIN_VOTES, type ArenaChoice, type ArenaMatch, type ArenaVote } from "./types.js";
+import { ARENA_SCORE_MIN_VOTES, type ArenaChoice, type ArenaLabel, type ArenaMatch, type ArenaVote } from "./types.js";
 
 export interface ArenaStanding {
 	identity: string;
@@ -102,6 +102,8 @@ export function computeStandings(
 		const identities = new Set(match.contenders.map(contenderIdentity));
 		// A match that pits an identity against itself says nothing about either side.
 		if (identities.size < 2) continue;
+		// A label naming no contender (a hand-edited or foreign record) is no vote at all.
+		if (vote.choice !== "tie" && vote.choice !== "both-bad" && winnerOf(match, vote.choice) === undefined) continue;
 		votedMatches += 1;
 		for (const contender of uniqueContenders(match)) row(contender).votes += 1;
 		const results = applyVote(match, vote.choice, row);
@@ -132,6 +134,11 @@ function uniqueContenders(match: ArenaMatch): ArenaMatch["contenders"] {
 	return [...new Map(match.contenders.map((c) => [contenderIdentity(c), c])).values()];
 }
 
+function winnerOf(match: ArenaMatch, label: ArenaLabel): ArenaMatch["contenders"][number] | undefined {
+	const index = contenderForLabel(match, label);
+	return index === null ? undefined : match.contenders.find((c) => c.index === index);
+}
+
 function applyVote(
 	match: ArenaMatch,
 	choice: ArenaChoice,
@@ -149,8 +156,7 @@ function applyVote(
 		for (const [i, a] of ids.entries()) for (const b of ids.slice(i + 1)) results.push({ a, b, score: 0.5 });
 		return results;
 	}
-	const winnerIndex = contenderForLabel(match, choice);
-	const winner = match.contenders.find((c) => c.index === winnerIndex);
+	const winner = winnerOf(match, choice);
 	if (winner === undefined) return results;
 	const winnerId = contenderIdentity(winner);
 	let beatSomeone = false;
