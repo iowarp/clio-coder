@@ -275,14 +275,19 @@ describe("autonomous commit authorship", () => {
 		});
 	});
 
-	it("keeps the human author when a commit option takes -m as its value, and never loops through a shim symlink", async () => {
+	it("keeps the human author when a commit option takes -m as its value or cancels the message, and never loops through a shim symlink", async () => {
 		await withRepo((repo, git) => {
 			git(["commit", "-q", "--allow-empty", "-m", "init"]);
 			const env = autonomousSeam(repo);
 			writeFileSync(join(repo, "-m"), "template body\n");
-			for (const option of ["-t", "--template"]) {
-				git(["commit", "-q", "--allow-empty", option, "-m"], { ...env, GIT_EDITOR: 'printf "edited\\n" >>' });
-				strictEqual(git(["log", "-1", "--format=%an <%ae>"]).trim(), HUMAN, option);
+			for (const options of [
+				["-t", "-m"],
+				["--template", "-m"],
+				["-m", "subject", "--no-message"],
+				["-F", "-m", "--no-fil"],
+			]) {
+				git(["commit", "-q", "--allow-empty", ...options], { ...env, GIT_EDITOR: 'printf "edited\\n" >>' });
+				strictEqual(git(["log", "-1", "--format=%an <%ae>"]).trim(), HUMAN, options.join(" "));
 			}
 			const shimDirectory = (env.PATH ?? "").split(":")[0] ?? "";
 			const link = join(repo, "..", "link");

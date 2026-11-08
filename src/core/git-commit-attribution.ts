@@ -514,14 +514,13 @@ if [ "$${AUTHOR_MANAGED_ENV}" = '1' ] && [ "$GIT_AUTHOR_NAME" = '${CLIO_COMMIT_N
       --author=* | --date=* | --cleanup=* | --trailer=* | --pathspec-from-file=* | --untracked-files=* | --gpg-sign=*) ;;
       --template | --template=* | --reuse-message | --reuse-message=* | --reedit-message | --reedit-message=* | \
         --fixup | --fixup=* | --squash | --squash=* | --edit) unsure=1; break ;;
-      --*=*) unsure=1; break ;;
-      --*)
-        # Git accepts unique abbreviations; one of a value-taking option is unsure.
-        for name in --message --file --author --date --cleanup --trailer --pathspec-from-file \
-          --template --reuse-message --reedit-message --fixup --squash --edit; do
-          case "$name" in "$argument"*) unsure=1; break 2 ;; esac
-        done
-        ;;
+      --all | --quiet | --verbose | --amend | --no-edit | --no-verify | --verify | --allow-empty | \
+        --allow-empty-message | --signoff | --no-signoff | --reset-author | --include | --only | \
+        --no-post-rewrite | --status | --no-status | --untracked-files | --gpg-sign | --no-gpg-sign | \
+        --pathspec-file-nul) ;;
+      # Anything else, such as --no-message or an abbreviation git expands,
+      # may cancel the message or start the editor.
+      --*) unsure=1; break ;;
       -?*)
         cluster=\${argument#-}
         while [ -n "$cluster" ]; do
