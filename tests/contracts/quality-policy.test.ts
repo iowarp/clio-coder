@@ -423,11 +423,11 @@ it("classifies a reproduce check by its judged verdict, not a shell exit code", 
 		};
 		policy(root, false, ["solver-repro"]);
 		const entries = mutation();
-		declare('console.log(JSON.stringify({ residual: { value: 1 } }));\n');
+		declare("console.log(JSON.stringify({ residual: { value: 1 } }));\n");
 		const passed = await verify(entries, { check: "solver-repro" });
 		strictEqual(passed.kind, "ok", JSON.stringify(passed));
 		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "passed");
-		declare('console.log(JSON.stringify({ residual: { value: Math.random() } }));\n');
+		declare("console.log(JSON.stringify({ residual: { value: Math.random() } }));\n");
 		const failed = await verify(entries, { check: "solver-repro" });
 		strictEqual((failed.details?.judgement as { validation?: string } | undefined)?.validation, "failed");
 		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "failed");

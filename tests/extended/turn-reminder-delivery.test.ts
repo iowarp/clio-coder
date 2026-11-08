@@ -314,7 +314,9 @@ test("a Pi system baseline does not make the first substantive turn look like ex
 test("a middleware failure that escapes the runtime is reported and the turn continues without its effects", async () => {
 	const bus = createTelemetryHub();
 	const journaled: unknown[] = [];
-	bus.subscribe("middleware.hook_failed", (payload) => journaled.push(payload));
+	bus.subscribe("middleware.hook_failed", (payload) => {
+		journaled.push(payload);
+	});
 	const footer: Array<[string, string, string]> = [];
 	const runtime = {
 		wireModelId: "fixture",

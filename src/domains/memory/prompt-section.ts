@@ -188,10 +188,7 @@ export function memorySectionDelta(
 		.map((id) => `- [${id}] withdrawn. Do not use this memory record.`)
 		.filter((line) => !framed.some((text) => text.includes(line)));
 	const fresh = memorySectionBlocks(live).filter(
-		(block) =>
-			!lapsed(block.id) &&
-			!known.includes(block.text) &&
-			!framed.some((text) => text.includes(block.text)),
+		(block) => !lapsed(block.id) && !known.includes(block.text) && !framed.some((text) => text.includes(block.text)),
 	);
 	if (fresh.length === 0 && withdrawn.length === 0) return "";
 	return [
