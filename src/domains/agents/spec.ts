@@ -334,11 +334,33 @@ export function isUserVisibleAgent(spec: AgentSpec): boolean {
  */
 export const SHADOW_AGENT_OPERATOR_STAND_IN = "coder";
 
-/** The refusal a user-origin request for a non-visible agent gets; shadow ones name their stand-in. */
-export function userOriginAudienceRefusal(spec: AgentSpec): string {
-	const refusal = `dispatch: agent '${spec.id}' is a ${spec.audience} agent reserved for Clio internal orchestration`;
-	if (spec.audience !== "shadow") return refusal;
-	return `${refusal}; for the same read-only work use the user-facing agent '${SHADOW_AGENT_OPERATOR_STAND_IN}' with --read-only`;
+function audienceRefusalHead(spec: Pick<AgentSpec, "id" | "audience">): string {
+	return `dispatch: agent '${spec.id}' is a ${spec.audience} agent reserved for Clio internal orchestration`;
+}
+
+/**
+ * The refusal a user-origin request for a non-visible agent gets. A shadow
+ * one names `standIn` only when the caller's own admission check found that
+ * recipe admissible read-only on the same route; null names nothing, so the
+ * refusal never sends the operator to a command that is refused in turn.
+ */
+export function userOriginAudienceRefusal(spec: AgentSpec, standIn: string | null): string {
+	const refusal = audienceRefusalHead(spec);
+	if (spec.audience !== "shadow" || standIn === null) return refusal;
+	return `${refusal}; for the same read-only work use the user-facing agent '${standIn}' with --read-only`;
+}
+
+/** Whether `message` is the audience refusal for `spec`, with or without a stand-in. */
+export function isUserOriginAudienceRefusal(spec: AgentSpec, message: string): boolean {
+	const head = audienceRefusalHead(spec);
+	return message === head || message.startsWith(`${head}; `);
+}
+
+/** The stand-in a shadow refusal named, or null when it named none. */
+export function audienceRefusalStandIn(message: string): string | null {
+	return (
+		/; for the same read-only work use the user-facing agent '([^']+)' with --read-only$/u.exec(message)?.[1] ?? null
+	);
 }
 
 export function isShadowAgent(spec: AgentSpec): boolean {

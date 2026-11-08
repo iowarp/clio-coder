@@ -14,7 +14,7 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
-import { SHADOW_AGENT_OPERATOR_STAND_IN, userOriginAudienceRefusal } from "../domains/agents/spec.js";
+import { audienceRefusalStandIn, isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
@@ -951,14 +951,16 @@ async function runDispatch(
 		const msg = err instanceof Error ? err.message : String(err);
 		writeRunDiagnostic(`clio-coder run failed: ${msg}\n`);
 		const failedSpec = runAgents?.getSpec(parsed.agentId);
-		if (failedSpec?.audience === "shadow") {
-			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed)}\n`);
+		// Name the stand-in only when dispatch's admission check named it for this route.
+		const standIn = failedSpec?.audience === "shadow" ? audienceRefusalStandIn(msg) : null;
+		if (standIn !== null) {
+			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed, standIn)}\n`);
 		}
 		const refused =
 			// Asking for an agent reserved for internal orchestration is an admission
 			// refusal like any other, and no model was called. Matched against the
 			// refusal the spec's own audience produces, not against failure text at large.
-			(failedSpec && msg === userOriginAudienceRefusal(failedSpec)) ||
+			(failedSpec && isUserOriginAudienceRefusal(failedSpec, msg)) ||
 			/target '.+' not found/.test(msg) ||
 			msg.includes("unknown agent recipe") ||
 			msg.includes("admission") ||
@@ -969,9 +971,9 @@ async function runDispatch(
 }
 
 /** The refused shadow run as the user-facing command that covers it, keeping the route flags (DF-3). */
-function shadowStandInCommand(parsed: RunCliArgs): string {
+function shadowStandInCommand(parsed: RunCliArgs, standIn: string): string {
 	const quote = (value: string): string => (/^[\w./@:=+-]+$/u.test(value) ? value : JSON.stringify(value));
-	const parts = ["clio-coder run", "--agent", SHADOW_AGENT_OPERATOR_STAND_IN, "--read-only"];
+	const parts = ["clio-coder run", "--agent", standIn, "--read-only"];
 	if (parsed.cwd !== undefined) parts.push("--cwd", quote(parsed.cwd));
 	if (parsed.target !== undefined) parts.push("--target", quote(parsed.target));
 	if (parsed.model !== undefined) parts.push("--model", quote(parsed.model));

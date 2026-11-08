@@ -16,9 +16,11 @@ import type {
 import { withClaudeCredential } from "../../core/claude-environment.js";
 import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { agentSkillToolPolicy, type PendingSkillToolPolicy } from "../../core/skill-activation.js";
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { withTelemetryContext } from "../../core/telemetry/context.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
+import { ToolNames } from "../../core/tool-names.js";
 import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
 import { getCatalogModelForRuntime } from "../../domains/providers/catalog.js";
 import { resolveModelRuntimeCapabilitiesForModel } from "../../domains/providers/model-runtime-capabilities.js";
@@ -34,9 +36,11 @@ import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerRefusal } from "../worker-refusals.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
 import { createWorkerSafety } from "../worker-tools.js";
+import { claudeSdkBridgedTools, createClioToolBridge } from "./clio-tool-bridge.js";
 import { loadClaudeAgentSdk } from "./sdk-module.js";
 import { isClaudeCodeSessionId } from "./session-id.js";
 import {
+	CLAUDE_SDK_CLIO_SERVER,
 	type ClaudeToolPermissionDecision,
 	claudeToolsOutsideProfile,
 	coerceToolInput,
@@ -409,6 +413,7 @@ interface PermissionGateInput {
 	/** Admitted tool surface (Clio builtin names) narrowed by any tool_profile. */
 	allowedTools: ReadonlySet<string>;
 	budgetGate?: ClaudeWorkerBudgetGate;
+	pendingSkillPolicy?: PendingSkillToolPolicy;
 }
 
 export interface ClaudeWorkerBudgetGate {
@@ -564,6 +569,7 @@ function decideToolUse(
 			executeRefusals: input.executeRefusals,
 			allowedTools: input.allowedTools,
 			...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
+			...(input.pendingSkillPolicy ? { pendingSkillPolicy: input.pendingSkillPolicy } : {}),
 		});
 	// SDK callbacks run outside the native worker's async scope; bind the actual tool use before recording it (#434).
 	return input.telemetryContext
@@ -576,6 +582,8 @@ function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback 
 		if (hookInput.hook_event_name !== "PostToolUse" && hookInput.hook_event_name !== "PostToolUseFailure")
 			return { continue: true };
 		const mapped = mapClaudeToolCall(hookInput.tool_name, coerceToolInput(hookInput.tool_input), cwd);
+		// The bridge already reported this call's outcome from Clio's own result.
+		if (mapped.bridged === true) return { continue: true };
 		const callFacts = toolCallFacts(mapped.clioToolName, mapped.args);
 		const failed = hookInput.hook_event_name === "PostToolUseFailure";
 		if (!failed && callFacts) {
@@ -702,6 +710,12 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 	}
 
 	const safety = createWorkerSafety({
+		// The bridged artifact tool writes the admitted architect plan, as on a native worker.
+		...(input.readOnly !== true &&
+		input.resultContract?.kind === "architect-plan" &&
+		input.allowedTools.includes(ToolNames.Artifact)
+			? { requiredArtifactPath: input.resultContract.path }
+			: {}),
 		...(input.flowPolicy !== undefined ? { flowPolicy: input.flowPolicy } : {}),
 		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),
@@ -729,6 +743,18 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 				resolveDeliveryTools(allowedToolSet, input.product),
 			)
 		: undefined;
+	// The recipe-bound skills context(scope=skills) may load, as on a native
+	// worker. One policy object: a skill the bridged context loads narrows the
+	// gate's admission of every later call, preset tool or bridged.
+	const skillPolicy =
+		input.allowedTools.includes(ToolNames.Context) && input.noSkills !== true
+			? agentSkillToolPolicy(
+					input.agentSkills ?? [],
+					input.resultContract?.kind === "architect-plan" && input.allowedTools.includes(ToolNames.Artifact)
+						? [ToolNames.Artifact]
+						: [],
+				)
+			: undefined;
 	const permissionGate: PermissionGateInput = {
 		...(input.telemetryContext !== undefined ? { telemetryContext: input.telemetryContext } : {}),
 		...(input.permitAllowance?.executeAutonomy !== undefined
@@ -750,6 +776,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		},
 		allowedTools: allowedToolSet,
 		...(budgetGate ? { budgetGate } : {}),
+		...(skillPolicy !== undefined ? { pendingSkillPolicy: skillPolicy } : {}),
 	};
 	const canUseTool = buildCanUseTool(permissionGate);
 	const preToolUseHook = buildPreToolUseHook(permissionGate);
@@ -868,7 +895,49 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			// First touch of the optional SDK. An install that omitted it fails
 			// here with a typed diagnostic naming the package and the install
 			// command, and lands in the catch below as an ordinary run failure.
-			const { query } = await loadClaudeAgentSdk();
+			const { query, createSdkMcpServer } = await loadClaudeAgentSdk();
+			const bridgedTools = claudeSdkBridgedTools(allowedToolSet);
+			if (bridgedTools.length > 0) {
+				if (typeof createSdkMcpServer !== "function") {
+					throw new Error(
+						`Claude SDK does not export createSdkMcpServer, so this worker cannot carry ${bridgedTools.join(", ")}.`,
+					);
+				}
+				const bridge = createClioToolBridge(createSdkMcpServer, {
+					allowedTools: allowedToolSet,
+					safety,
+					emit,
+					agentId: input.agentId,
+					task: input.task,
+					...(skillPolicy !== undefined ? { pendingSkillPolicy: skillPolicy } : {}),
+					...(input.telemetryContext !== undefined
+						? {
+								invokeOptions: {
+									runId: input.telemetryContext.runId,
+									...(input.telemetryContext.sessionId === null ? {} : { sessionId: input.telemetryContext.sessionId }),
+									...(input.telemetryContext.turnId === undefined ? {} : { turnId: input.telemetryContext.turnId }),
+								},
+							}
+						: {}),
+					...(input.readOnly === true ? { readOnly: true } : {}),
+					...(input.permitAllowance?.executeAutonomy !== undefined
+						? { executeAutonomy: input.permitAllowance.executeAutonomy }
+						: {}),
+					skillLoaderOptions: {
+						...(input.noSkills !== undefined ? { noSkills: input.noSkills } : {}),
+						...(input.skillPaths !== undefined ? { skillPaths: [...input.skillPaths] } : {}),
+						...(input.trustProjectCompatRoots !== undefined
+							? { trustProjectCompatRoots: input.trustProjectCompatRoots }
+							: {}),
+					},
+					signal: abortController.signal,
+				});
+				if (bridge !== null) {
+					options.mcpServers = { [CLAUDE_SDK_CLIO_SERVER]: bridge };
+					// Only the bridge: no user, project or plugin MCP server can claim its tool names.
+					options.strictMcpConfig = true;
+				}
+			}
 			const credential = input.authProfile
 				? await resolveClaudeLaunchCredential(
 						input.target.auth ?? { oauthProfile: input.authProfile },

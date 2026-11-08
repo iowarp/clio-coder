@@ -8,6 +8,7 @@ sources:
   - "src/engine/claude/sdk-models.ts"
   - "src/engine/claude/sdk-module.ts"
   - "src/engine/claude/session-id.ts"
+  - "src/engine/claude/clio-tool-bridge.ts"
 symbols:
   - "startClaudeSdkWorkerRun"
   - "startClaudeCodeWorkerRun"
@@ -20,9 +21,11 @@ symbols:
   - "listClaudeSdkModels"
   - "loadClaudeAgentSdk"
   - "isClaudeCodeSessionId"
+  - "createClioToolBridge"
 tests:
   - "tests/extended/claude-subprocess.test.ts"
   - "tests/contracts/claude-sdk-install.test.ts"
+  - "tests/contracts/claude-sdk-clio-tools.test.ts"
 invariants:
   - "The SDK module is imported only at run time through loadClaudeAgentSdk, so installs without the optional package still load this code."
   - "A worker run with onPermission set to escalate is refused by startClaudeSdkWorkerRun with an error; only deny and fail reach the SDK permission gate."
@@ -30,10 +33,12 @@ invariants:
   - "In the CLI path, the user prompt is written to stdin and never placed in argv; the system prompt is passed with --append-system-prompt."
   - "In read-only runs the CLI path passes --permission-mode plan and --tools limited to Read, Grep, Glob, LS, WebFetch, WebSearch."
   - "A mapped Claude tool whose Clio builtin is outside the admitted allowedTools set is denied before the safety net runs, when the caller supplies allowedTools."
+  - "The clio SDK MCP server registers only the bridged tools (context, artifact, verify) in the admitted surface, and each of its calls passes the same permission gate as a preset tool."
   - "Usage and cost from Claude runs are recorded as peer-report estimates, not billed amounts."
 validate:
   - "pnpm run test:file -- tests/extended/claude-subprocess.test.ts"
   - "pnpm run test:file -- tests/contracts/claude-sdk-install.test.ts"
+  - "pnpm run test:file -- tests/contracts/claude-sdk-clio-tools.test.ts"
 ---
 
 # Claude worker runtimes: SDK and CLI subprocess
@@ -44,7 +49,8 @@ This area is the Claude-specific engine code for dispatched workers. A reader ne
 
 - `src/engine/claude/sdk-runtime.ts`: `startClaudeSdkWorkerRun` is the SDK entry point. It also exports `createClaudeWorkerBudgetGate` and the `ClaudeWorkerBudgetGate` interface. The file keeps the streaming prompt iterator (`ClaudeSdkInput`), the permission and hook builders (`buildCanUseTool`, `buildPreToolUseHook`, `buildPostToolUseHook`), and the message normalizers.
 - `src/engine/claude/subprocess-runtime.ts`: `startClaudeCodeWorkerRun` is the CLI entry point. It exports `buildClaudeCodeArgs`, `buildClaudeCodePrompt`, `ClaudeRuntimeDependencies`, `ClaudeSubprocessPermissionConfig`, and the stream byte limits `CLAUDE_MAX_STREAM_LINE_BYTES` and `CLAUDE_MAX_STREAM_BYTES`.
-- `src/engine/claude/tool-safety.ts`: `mapClaudeToolCall`, `claudeToolsOutsideProfile`, `isClaudeCanonicalTool`, `emitClaudeToolPermissionDecision`, and `coerceToolInput`. It holds the static map from Claude preset tool names to Clio builtins (`CLAUDE_TOOL_TO_CLIO`).
+- `src/engine/claude/tool-safety.ts`: `mapClaudeToolCall`, `claudeToolsOutsideProfile`, `isClaudeSdkTool`, `emitClaudeToolPermissionDecision`, and `coerceToolInput`. It holds the static map from Claude preset tool names to Clio builtins (`CLAUDE_TOOL_TO_CLIO`) and the bridged tool set (`CLAUDE_SDK_BRIDGED_TOOLS`: `context`, `artifact`, `verify`) with the bridge server name (`CLAUDE_SDK_CLIO_SERVER`). `mapClaudeToolCall` maps `mcp__clio__<tool>` back to the Clio tool for those three only.
+- `src/engine/claude/clio-tool-bridge.ts`: `createClioToolBridge` builds the in-process SDK MCP server named `clio` that carries the bridged tools a claude-sdk worker's admitted surface holds. Each handler invokes Clio's own implementation through a worker tool registry built with the run's safety contract and read-only flag, so the registry's admission is a second seam behind the SDK permission gate. Every bridged capability is attached under its own name, including gateway-placed `artifact`, because the SDK has no Clio gateway. The handler emits `tool_execution_start`/`tool_execution_end` and the registry emits `clio_coder_tool_start`/`clio_coder_tool_finish` with the real outcome, all keyed by the SDK tool-use id, so a failed `verify` never records as ok.
 - `src/engine/claude/sdk-module.ts`: `loadClaudeAgentSdk` performs the dynamic import of the SDK entry. `ClaudeAgentSdkUnavailableError` and the install constants are re-exported from `src/domains/lifecycle/claude-sdk-install.ts`.
 - `src/engine/claude/sdk-models.ts`: `listClaudeSdkModels` asks the SDK for its supported models without submitting a prompt.
 - `src/engine/claude/session-id.ts`: `isClaudeCodeSessionId` accepts only RFC 4122-shaped UUIDs (versions 1 to 5) before they are passed as `--session-id` or as the SDK `sessionId` option.
@@ -68,6 +74,8 @@ Downstream, both runtimes depend on:
 `startClaudeSdkWorkerRun(input, emit)` begins by refusing `onPermission: "escalate"`, because the SDK permission callback cannot park a call. It then builds the first user message from `buildClaudeSdkPrompt`, which joins dynamic prompt messages with the task. The streaming prompt is a `ClaudeSdkInput` queue, so later `steer` calls can push more user turns while the query is open.
 
 The run builds a `PermissionGateInput` and a `ClaudeWorkerBudgetGate` when `input.budget` is set. The gate is created by `createClaudeWorkerBudgetGate(budget, onBoundary, onHardCap, deliveryTools)`. Its `attempt` method counts every logical tool attempt and denies once `attempts > budget.hardCap` for non-advisory budgets, calling `onHardCap` and aborting the run. Its `admit` method runs after a call passes profile, autonomy and safety evaluation, increments the admitted count, and locks the phase when the soft `toolCalls` limit is reached. Advisory budgets use `ceiling` instead. Delivery tools (`resolveDeliveryTools`) can continue past the soft limit; the read reserve window admits only `read` plus delivery tools.
+
+Clio tools with no Claude preset alias (`context`, `artifact`, `verify`) reach the worker through the `clio` SDK MCP server, which is set as `options.mcpServers` after the SDK loads and only when the admitted surface holds one of them. The SDK names those calls `mcp__clio__<tool>`; they take the same permission path below as preset tools, so read-only runs deny `artifact` and `verify` there. Dispatch admission counts them as carried (`isClaudeSdkTool`), which lets `architect`, `coder --read-only`, `debugger` and `verifier` run on `claude-sdk`. With the bridge attached the run sets `strictMcpConfig`, so user, project and plugin MCP configs never join a worker's surface. The gate emits no telemetry for an allowed bridged call (the bridge reports it), and the `PostToolUse` hook skips bridged calls. The run's recipe-bound skill policy is one object shared by the bridge and the permission gate: a skill the bridged `context` loads narrows every later call, preset tool or bridged.
 
 Each SDK tool use reaches `decideToolUseOnce`, which caches the decision by tool-use id in `handledToolDecisions`, so the `PreToolUse` hook and the `canUseTool` callback see one decision. `decideToolUse` calls `emitClaudeToolPermissionDecision`, which in order:
 

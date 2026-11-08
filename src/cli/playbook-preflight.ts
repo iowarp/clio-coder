@@ -69,7 +69,7 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 				);
 			}
 			if (isShadowAgent(spec)) {
-				throw new Error(`${userOriginAudienceRefusal(spec)} (step '${context.stepId}')`);
+				throw new Error(`${userOriginAudienceRefusal(spec, null)} (step '${context.stepId}')`);
 			}
 			if (spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 				throw new Error(`playbook step '${context.stepId}' has no automatable agent authority`);

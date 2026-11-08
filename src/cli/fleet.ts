@@ -219,7 +219,7 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 		}
 		const spec = deps.agents.getSpec(step.agent);
 		if (spec !== null && isShadowAgent(spec)) {
-			return `${userOriginAudienceRefusal(spec)} (step '${step.id}')`;
+			return `${userOriginAudienceRefusal(spec, null)} (step '${step.id}')`;
 		}
 		const requested = step.scope === "readonly" ? deps.safety.scopes.readonly : deps.safety.scopes.workspace;
 		if (!deps.safety.isSubset(requested, deps.safety.scopes.workspace)) {

@@ -111,7 +111,7 @@ import {
 } from "../../engine/acp/adapter.js";
 import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../../engine/acp/transport.js";
 import { engineRetryDelayMs } from "../../engine/ai.js";
-import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
+import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
@@ -178,6 +178,7 @@ import {
 	isUserVisibleAgent,
 	normalizeAgentSpec,
 	resolveAgentToolCompatibility,
+	SHADOW_AGENT_OPERATOR_STAND_IN,
 	userOriginAudienceRefusal,
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -2614,7 +2615,7 @@ function effectiveToolNames(
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			!writeEscapingMcp.has(tool) &&
-			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
+			(target.runtime.id !== "claude-sdk" || isClaudeSdkTool(tool)),
 	);
 	// A native worker reaches a gateway-placed capability (git, web_fetch, an
 	// extension command) through the attached `gateway` tool, so the admitted
@@ -5600,6 +5601,27 @@ export function createDispatchBundle(
 		context.bus.emit("run.scope_notice_raised", { code: "mcp_sandbox_no_network", level: "warning", message });
 	}
 
+	/**
+	 * The user-facing stand-in a shadow refusal may name, or null. The stand-in
+	 * is named only when the fixed-route admission preview admits its read-only
+	 * run on the same request, so the refusal never suggests a command that is
+	 * refused in turn.
+	 */
+	function admissibleShadowStandIn(req: DispatchRequest, settings: EffectiveSettings): string | null {
+		const recipe = agents.get(SHADOW_AGENT_OPERATOR_STAND_IN);
+		if (!recipe) return null;
+		try {
+			if (!isUserVisibleAgent(normalizeAgentSpec(recipe))) return null;
+			// The fixed-route admission preview, run for the stand-in on the
+			// operator's own request, so the hint can never name a refused route.
+			const { delegationAgentId: _delegation, ...rest } = req;
+			previewFixed({ ...rest, agentId: recipe.id, readOnly: true }, settings);
+			return recipe.id;
+		} catch {
+			return null;
+		}
+	}
+
 	async function resolveLifecycle(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
@@ -5615,7 +5637,7 @@ export function createDispatchBundle(
 		dispatchResultContract(req, recipe);
 		const spec = normalizeAgentSpec(recipe);
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(spec)) {
-			throw new Error(userOriginAudienceRefusal(spec));
+			throw new Error(userOriginAudienceRefusal(spec, admissibleShadowStandIn(req, settings)));
 		}
 		if (req.requestOrigin === "harness" && spec.capabilityClass !== "read-only") {
 			throw new Error(
@@ -9952,7 +9974,7 @@ export function createDispatchBundle(
 		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
 		const agentSpec = normalizeAgentSpec(recipe);
 		if (req.requestOrigin === "user" && !isUserVisibleAgent(agentSpec)) {
-			throw new Error(userOriginAudienceRefusal(agentSpec));
+			throw new Error(userOriginAudienceRefusal(agentSpec, admissibleShadowStandIn(req, settings)));
 		}
 		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);

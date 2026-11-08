@@ -207,6 +207,12 @@ export interface ResolveAgentToolsInput {
 	telemetry?: ToolTelemetry;
 	invokeOptions?: (toolCallId?: string) => Partial<ToolInvokeOptions>;
 	includeInteractiveTools?: boolean;
+	/**
+	 * Attach every admitted capability under its own name and never `gateway`.
+	 * For an external tool loop that carries Clio tools without Clio's gateway
+	 * (the Claude SDK bridge), so a gateway-placed capability stays callable.
+	 */
+	attachCapabilitiesDirectly?: boolean;
 }
 
 export interface InvokeWorkerToolOptions {
@@ -683,7 +689,12 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	const surface = new Set<string>(names);
 	for (const name of names) {
 		const spec = input.registry.get(name);
-		if (spec && surfaceSpecPlacement(spec, surface) === "direct") specs.push(spec);
+		if (spec === undefined) continue;
+		const direct =
+			input.attachCapabilitiesDirectly === true
+				? spec.name !== ToolNames.Gateway
+				: surfaceSpecPlacement(spec, surface) === "direct";
+		if (direct) specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
 	// Bind the same immutable ceiling to execution as to schema selection.

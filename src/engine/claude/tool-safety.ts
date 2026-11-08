@@ -1,5 +1,6 @@
 import nodePath from "node:path";
 import { performance } from "node:perf_hooks";
+import type { PendingSkillToolPolicy } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { AdmissionDisposition, ApprovalAuthority } from "../../domains/safety/admission.js";
@@ -24,6 +25,8 @@ export interface MappedClaudeToolCall {
 	clioToolName: string;
 	args: Record<string, unknown>;
 	known: boolean;
+	/** Runs through the `clio` SDK MCP server, which reports the call's start and real outcome itself. */
+	bridged?: true;
 }
 
 export type ClaudeToolPermissionDecision =
@@ -69,6 +72,8 @@ export interface EvaluateClaudeToolPermissionInput {
 	 * SDK/CLI allow options. Absent means no surface check (legacy callers).
 	 */
 	allowedTools?: ReadonlySet<string>;
+	/** The run's skill policy, shared with the bridged context that loads skills into it. */
+	pendingSkillPolicy?: PendingSkillToolPolicy;
 	/** Optional canonical per-call budget gate used by mediated SDK workers. */
 	budgetGate?: {
 		attempt(canonicalToolName: string): { kind: "allow" } | { kind: "deny"; reason: string };
@@ -165,9 +170,32 @@ const CLAUDE_TOOL_TO_CLIO: Readonly<Record<string, string>> = {
 
 const CLAUDE_CANONICAL_TOOLS = new Set(Object.values(CLAUDE_TOOL_TO_CLIO));
 
-/** Whether the Claude preset exposes at least one vendor alias for this canonical Clio tool. */
-export function isClaudeCanonicalTool(name: string): boolean {
-	return CLAUDE_CANONICAL_TOOLS.has(name);
+/** Name of the in-process SDK MCP server that carries Clio's own tools to a claude-sdk worker. */
+export const CLAUDE_SDK_CLIO_SERVER = "clio";
+
+/**
+ * Clio tools with no Claude preset alias that a claude-sdk worker still
+ * reaches: each runs Clio's own implementation through the in-process
+ * `clio` MCP server (./clio-tool-bridge.ts), and every call is mediated by
+ * the same permission gate as a preset tool.
+ */
+export const CLAUDE_SDK_BRIDGED_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Context,
+	ToolNames.Artifact,
+	ToolNames.Verify,
+]);
+
+const BRIDGED_TOOL_PREFIX = `mcp__${CLAUDE_SDK_CLIO_SERVER}__`;
+
+function bridgedClioToolName(claudeToolName: string): string | null {
+	if (!claudeToolName.startsWith(BRIDGED_TOOL_PREFIX)) return null;
+	const name = claudeToolName.slice(BRIDGED_TOOL_PREFIX.length);
+	return CLAUDE_SDK_BRIDGED_TOOLS.has(name) ? name : null;
+}
+
+/** Whether a claude-sdk worker can carry this Clio tool: a preset alias or the Clio bridge. */
+export function isClaudeSdkTool(name: string): boolean {
+	return CLAUDE_CANONICAL_TOOLS.has(name) || CLAUDE_SDK_BRIDGED_TOOLS.has(name);
 }
 
 /**
@@ -208,8 +236,12 @@ export function mapClaudeToolCall(toolName: string, input: Record<string, unknow
 			return { claudeToolName: toolName, clioToolName: ToolNames.Dispatch, args: { ...input }, known: true };
 		case "TodoWrite":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Tasks, args: { ...input }, known: true };
-		default:
+		default: {
+			const bridged = bridgedClioToolName(toolName);
+			if (bridged !== null)
+				return { claudeToolName: toolName, clioToolName: bridged, args: { ...input }, known: true, bridged: true };
 			return { claudeToolName: toolName, clioToolName: dynamicToolName(toolName), args: { ...input }, known: false };
+		}
 	}
 }
 
@@ -272,6 +304,7 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 		constraints: {
 			...(input.readOnly === true ? { readOnly: true } : {}),
 			...(input.allowedTools !== undefined && mapped.known ? { allowedTools: input.allowedTools } : {}),
+			...(input.pendingSkillPolicy !== undefined && mapped.known ? { pendingSkillPolicy: input.pendingSkillPolicy } : {}),
 		},
 	});
 	if (admission.kind === "allow") {
@@ -410,6 +443,10 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 		startedAt,
 		...(action !== null ? { action } : {}),
 	};
+	// An allowed bridged call has not run yet; the bridge emits its start and
+	// its finish with the real outcome, so a pre-execution "ok" never stands
+	// in for a check that then fails.
+	if (decision.kind === "allow" && decision.mapped.bridged === true) return decision;
 	input.emit({ type: "clio_coder_tool_start", payload: start });
 	if (decision.kind === "allow") {
 		emitToolFinish(
