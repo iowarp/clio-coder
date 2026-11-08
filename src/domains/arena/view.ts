@@ -64,29 +64,42 @@ const HIDDEN = "[hidden]";
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * Diagnostics are raw child output, which can name a contender: an unknown
- * target, a model the route does not list, a session id, or a compete worktree
- * or branch whose slot number is the --contender position. Before a vote those
- * are replaced; the raw text returns with the reveal.
+ * Everything a contender wrote is shown before the vote: its answer, its diff,
+ * its check output and any error. Any of it can name the contender, by target
+ * or model id, by session id (often inside a session file path), or by a compete
+ * worktree or branch path. Worktrees are numbered by blind slot, so such a path
+ * only repeats the label, but the absolute prefix and branch are still replaced.
+ * The raw text returns with the reveal.
  */
 function blindRedactor(match: ArenaMatch): (text: string) => string {
-	const terms = new Set<string>();
+	const names = new Set<string>();
+	const sessions = new Set<string>();
 	for (const contender of match.contenders) {
-		terms.add(`${contender.target}/${contender.model}`);
-		terms.add(contender.target);
-		terms.add(contender.model);
-		if (contender.facts?.sessionId) terms.add(contender.facts.sessionId);
+		names.add(`${contender.target}/${contender.model}`);
+		names.add(contender.target);
+		names.add(contender.model);
+		if (contender.facts?.sessionId) sessions.add(contender.facts.sessionId);
 	}
-	const ordered = [...terms].filter((term) => term.length > 0).sort((a, b) => b.length - a.length);
+	const alternation = (terms: Set<string>) =>
+		[...terms]
+			.filter((term) => term.length > 0)
+			.sort((a, b) => b.length - a.length)
+			.map(escapeRegExp)
+			.join("|");
+	// Session ids are unique tokens: replaced wherever they appear, path or not.
+	const session = sessions.size === 0 ? null : new RegExp(alternation(sessions), "g");
+	// Target and model ids are replaced as whole path segments or words, not inside longer words.
 	const named =
-		ordered.length === 0
+		names.size === 0
 			? null
-			: new RegExp(`(?<![A-Za-z0-9._/-])(?:${ordered.map(escapeRegExp).join("|")})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, "g");
+			: new RegExp(`(?<![A-Za-z0-9_.-])(?:${alternation(names)})(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, "g");
 	return (text) => {
 		let out = text
+			.replace(/[^\s'"`]*?\.clio-coder[\\/]worktrees[\\/](?:[^\s'"`\\/]+[\\/])+?candidate-\d+/g, "[worktree]")
 			.replace(/\.clio-coder[\\/]worktrees[\\/][^\s'"`]*/g, `.clio-coder/worktrees/${HIDDEN}`)
 			.replace(/clio-coder\/compete\/[^\s'"`]*/g, `clio-coder/compete/${HIDDEN}`)
 			.replace(/\b(candidate|contender)[- ]\d+/gi, `$1 ${HIDDEN}`);
+		if (session !== null) out = out.replace(session, HIDDEN);
 		if (named !== null) out = out.replace(named, HIDDEN);
 		return out;
 	};
@@ -125,8 +138,8 @@ export function arenaMatchView(
 			blocks: facts?.blocks ?? null,
 			diffStat: facts?.diff ?? null,
 			check: facts?.check ? { ...facts.check, tail: blind(facts.check.tail) } : null,
-			finalText: facts?.finalText ?? "",
-			diff: diff?.text ?? null,
+			finalText: blind(facts?.finalText ?? ""),
+			diff: diff === null ? null : blind(diff.text),
 			diffTruncated: diff?.truncated ?? false,
 			error: facts?.error ? blind(facts.error) : null,
 			reveal:

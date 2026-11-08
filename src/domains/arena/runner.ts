@@ -214,6 +214,10 @@ async function runContender(
 	input.onProgress?.(`contender ${labelForContender(match, contender.index)} ${contender.status}`);
 }
 
+function blindSlot(match: ArenaMatch, index: number): number {
+	return match.order.indexOf(index) + 1;
+}
+
 /**
  * Run one match: every contender gets the same prompt, the same baseline and
  * the same limits, at the same time. Inside Git each works in its own compete
@@ -261,9 +265,12 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 			ownership = claimCompeteGroup(base.root, `arena-${id}`);
 			const sub = relative(base.root, cwd);
 			for (const contender of match.contenders) {
-				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, contender.index + 1, base.sha);
+				// Worktree, branch and run are numbered by blind slot (A is 1), never by --contender
+				// position, so a path an agent quotes back says nothing the label does not.
+				const slot = blindSlot(match, contender.index);
+				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, slot, base.sha);
 				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path });
-				registerCompeteGroupRun(ownership, { runId: `${id}-${contender.index + 1}`, pid: null, runtimeKind: "subprocess" });
+				registerCompeteGroupRun(ownership, { runId: `${id}-${slot}`, pid: null, runtimeKind: "subprocess" });
 			}
 		} else {
 			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null });
@@ -290,7 +297,7 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 					halt.abort();
 					throw caught;
 				} finally {
-					if (ownership !== null) settleCompeteGroupRun(ownership, `${id}-${contender.index + 1}`);
+					if (ownership !== null) settleCompeteGroupRun(ownership, `${id}-${blindSlot(match, contender.index)}`);
 				}
 			}),
 		);

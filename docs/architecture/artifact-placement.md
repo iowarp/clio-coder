@@ -40,7 +40,7 @@ Markdown.
 | `CLIO-CODER.md` proposals from `context init` | `.clio-coder/proposals/CLIO-CODER-<timestamp>-<uuid>.md` with a `.json` provenance sidecar | Human transient |
 | Task worktrees | `.clio-coder/worktrees/<runId>/` by default; `fleet.worktrees.root` can move the working tree to tmpfs or another directory, except when fleet nodes are configured | Agent-to-agent |
 | Compete worktrees | `.clio-coder/worktrees/<group>/candidate-<n>/`, always under the project root | Agent-to-agent |
-| Arena matches | `.clio-coder/arena/<matchId>/` (`match.json`, `contender-<n>.ndjson`, `contender-<n>.diff`, `vote.json`, and `vote.json.lock` only while a vote is being written) and the append-only `.clio-coder/arena/votes.jsonl`; contender worktrees use the compete layout and are removed after the match | Human transient |
+| Arena matches | `.clio-coder/arena/<matchId>/` (`match.json`, `contender-<n>.ndjson`, `contender-<n>.diff`, `vote.json`, and `vote.json.lock` only while a vote is being written) and the append-only `.clio-coder/arena/votes.jsonl`; contender worktrees use the compete layout, numbered by blind slot (A is `candidate-1`), and are removed after the match | Human transient |
 | Script runs | `.clio-coder/runs/<runId>/` | Human transient and provenance |
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Run evidence | XDG state `telemetry/runs/<runId>/`, the run's sealed telemetry scope | Human transient (`clio-coder evidence`) |
