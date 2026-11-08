@@ -432,6 +432,11 @@ export class StatsAccumulator {
 		const valid = this.scratch;
 		let kept = 0;
 		let blockSum = 0;
+		// Extremes of this block alone, merged below: blocks need not arrive in
+		// dataset row-major order (chunk tiles narrower than a row do not), so a
+		// tie across blocks is settled by dataset position, not by arrival.
+		let blockMin: number | bigint | null = null;
+		let blockMax: number | bigint | null = null;
 		let minAt = -1;
 		let maxAt = -1;
 		for (let index = 0; index < block.length; index += 1) {
@@ -451,12 +456,12 @@ export class StatsAccumulator {
 			}
 			if (typeof value === "bigint") {
 				if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) this.wideIntegers = true;
-				if (this.min === null || value < this.min) {
-					this.min = value;
+				if (blockMin === null || value < blockMin) {
+					blockMin = value;
 					minAt = index;
 				}
-				if (this.max === null || value > this.max) {
-					this.max = value;
+				if (blockMax === null || value > blockMax) {
+					blockMax = value;
 					maxAt = index;
 				}
 				this.pivot ??= value;
@@ -473,19 +478,33 @@ export class StatsAccumulator {
 				this.inf += 1;
 				continue;
 			}
-			if (this.min === null || value < this.min) {
-				this.min = value;
+			if (blockMin === null || value < blockMin) {
+				blockMin = value;
 				minAt = index;
 			}
-			if (this.max === null || value > this.max) {
-				this.max = value;
+			if (blockMax === null || value > blockMax) {
+				blockMax = value;
 				maxAt = index;
 			}
 			valid[kept++] = value;
 			blockSum += value;
 		}
-		if (minAt >= 0) this.argmin = coordinatesOf(minAt, place);
-		if (maxAt >= 0) this.argmax = coordinatesOf(maxAt, place);
+		if (blockMin !== null) {
+			const at = coordinatesOf(minAt, place);
+			// biome-ignore lint/suspicious/noDoubleEquals: number and bigint compare by value only with ==
+			if (this.min === null || blockMin < this.min || (blockMin == this.min && precedes(at, this.argmin))) {
+				this.min = blockMin;
+				this.argmin = at;
+			}
+		}
+		if (blockMax !== null) {
+			const at = coordinatesOf(maxAt, place);
+			// biome-ignore lint/suspicious/noDoubleEquals: number and bigint compare by value only with ==
+			if (this.max === null || blockMax > this.max || (blockMax == this.max && precedes(at, this.argmax))) {
+				this.max = blockMax;
+				this.argmax = at;
+			}
+		}
 		if (kept === 0) return;
 		const blockMean = blockSum / kept;
 		let blockM2 = 0;
@@ -539,6 +558,15 @@ export class StatsAccumulator {
 			std: Math.sqrt(this.m2 / this.valid) * Math.abs(scale),
 		};
 	}
+}
+
+/** Whether dataset index `a` comes before `b` in row-major order. */
+function precedes(a: number[], b: number[] | null): boolean {
+	if (b === null) return true;
+	for (let dim = 0; dim < a.length; dim += 1) {
+		if ((a[dim] as number) !== (b[dim] as number)) return (a[dim] as number) < (b[dim] as number);
+	}
+	return false;
 }
 
 /** The dataset index of element `flat` of a row-major block read from `place`. */

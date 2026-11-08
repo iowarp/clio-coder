@@ -309,6 +309,31 @@ describe("contracts/data-scientific", () => {
 		deepStrictEqual([none.summary(false).argmin, none.summary(false).argmax], [null, null]);
 	});
 
+	it("settles a tie across chunk tiles by dataset position, not arrival order", () => {
+		// Tiles narrower than a row deliver row 1 of the left tile before row 0 of the right one.
+		const stats = new StatsAccumulator(null, []);
+		stats.add(Float64Array.from([5, 0, 9, -3]), { start: [0, 0], count: [2, 2], stride: [1, 1] });
+		stats.add(Float64Array.from([9, -3, 1, 1]), { start: [0, 2], count: [2, 2], stride: [1, 1] });
+		const summary = stats.summary(false);
+		deepStrictEqual(
+			[summary.argmin, summary.argmax],
+			[
+				[0, 3],
+				[0, 2],
+			],
+		);
+		const wide = new StatsAccumulator(null, []);
+		wide.add(BigInt64Array.from([1n, 2n ** 62n]), { start: [1, 0], count: [1, 2], stride: [1, 1] });
+		wide.add(BigInt64Array.from([2n ** 62n, 1n]), { start: [0, 4], count: [1, 2], stride: [1, 1] });
+		deepStrictEqual(
+			[wide.summary(false).argmin, wide.summary(false).argmax],
+			[
+				[0, 5],
+				[0, 4],
+			],
+		);
+	});
+
 	it("walks chunk tiles that cover an unaligned selection exactly once", () => {
 		const selection = { start: [3, 5], count: [17, 40], stride: [1, 1] };
 		const tiles = chunkTiles(selection, [4, 8], 64);
