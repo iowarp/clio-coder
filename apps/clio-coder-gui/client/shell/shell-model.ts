@@ -233,6 +233,8 @@ const SETTINGS_SEGMENTS = new Set([
 	"traces",
 	"fleet",
 	"evidence",
+	"research",
+	"arena",
 	"docs",
 	"machines",
 ]);

@@ -20,6 +20,7 @@ const { LibraryCatalog } = await import("../client/pages/library-catalog.js");
 const { SettingsControlsView } = await import("../client/pages/settings-controls.js");
 const { ModelsSettings } = await import("../client/pages/settings-sections.js");
 const { SettingsSidebar } = await import("../client/shell/SettingsSidebar.js");
+const { isSettingsPath } = await import("../client/shell/shell-model.js");
 const { ShellContext } = await import("../client/shell/shell-context.js");
 const { SettingsPage } = await import("../client/pages/settings.js");
 const { SystemPage } = await import("../client/pages/system.js");
@@ -392,5 +393,6 @@ for (const path of ["/research", "/arena"]) {
 		const activity = html.slice(html.indexOf(">Activity<"));
 		assert.match(activity, link);
 		assert.match(activity.match(link)?.[0] ?? "", /aria-current="page"/);
+		assert.ok(isSettingsPath(path), "the Settings rail stays up on the page its entry opens");
 	});
 }
