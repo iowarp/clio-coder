@@ -214,6 +214,9 @@ export function createBashOutputProgressController(
  */
 export const AUTONOMY_CEILING_ENV = "CLIO_CODER_AUTONOMY_CEILING";
 
+/** The keys Clio writes into a command's environment from its live state; only `process.env` may carry inherited ones. */
+const GENERATED_TOOL_ENV_KEYS = [AUTONOMY_CEILING_ENV, YOLO_CONFINEMENT_PIN_ENV] as const;
+
 let toolEnvAutonomy: (() => string) | null = null;
 let toolEnvContainedYolo: (() => boolean) | null = null;
 
@@ -245,8 +248,8 @@ function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
-	// Set last from the live level, so a login snapshot taken at another level cannot carry a stale ceiling.
-	Reflect.deleteProperty(env, AUTONOMY_CEILING_ENV);
+	// Set last from the live state, never from the source, so an env captured in another mode cannot carry a stale key.
+	for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
 	const ceiling = toolEnvAutonomyCeiling();
 	if (ceiling !== undefined) env[AUTONOMY_CEILING_ENV] = ceiling;
 	// A contained-yolo session, or one launched pinned, holds every clio-coder its commands start to contained yolo.
@@ -347,6 +350,8 @@ interface BashSpawnPlan {
 
 function captureLoginEnvOnce(): Promise<NodeJS.ProcessEnv | null> {
 	loginEnvCapture ??= captureLoginEnv().then((env) => {
+		// The capture ran with this moment's generated keys; the snapshot outlives that moment.
+		if (env !== null) for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
 		loginEnvSnapshot = env;
 		loginEnvSettled = true;
 		return env;

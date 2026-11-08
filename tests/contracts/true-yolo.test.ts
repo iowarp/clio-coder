@@ -962,8 +962,30 @@ test("a contained-yolo session's bash pins every clio-coder it starts, and a nes
 	strictEqual(await pin(), "unset", "an unconfined session sets no pin");
 	contained = true;
 
-	// A real nested process that overwrites the pin still reads contained through the one confinement reader.
+	// A fresh process, so its first command captures the login env while the session is contained whatever ran here
+	// before; a later switch out of contained must still drop the pin.
 	const root = process.cwd();
+	const fresh = join(mkdtempSync(join(tmpdir(), "clio-yolo-pin-cache-")), "fresh.mts");
+	writeFileSync(
+		fresh,
+		[
+			`import { runBashCommand, setToolEnvAutonomy } from ${JSON.stringify(join(root, "src/core/bash-exec.ts"))};`,
+			"let contained = true;",
+			'setToolEnvAutonomy(() => "yolo", () => contained);',
+			`const probe = async () => (await runBashCommand('printf %s "\${${YOLO_CONFINEMENT_PIN_ENV}-unset}"')).stdout;`,
+			"const first = await probe();",
+			"contained = false;",
+			'process.stdout.write([first, await probe()].join(","));',
+		].join("\n"),
+	);
+	const childEnv = { ...process.env };
+	delete childEnv[YOLO_CONFINEMENT_PIN_ENV];
+	strictEqual(
+		execFileSync(process.execPath, ["--import", "tsx", fresh], { cwd: root, env: childEnv, encoding: "utf8" }),
+		"contained,unset",
+	);
+
+	// A real nested process that overwrites the pin still reads contained through the one confinement reader.
 	const child = join(mkdtempSync(join(tmpdir(), "clio-yolo-pin-child-")), "child.mts");
 	writeFileSync(
 		child,
