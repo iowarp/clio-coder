@@ -7,6 +7,7 @@ import {
 	SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 	type SafeCommandResult,
 } from "../core/safe-exec.js";
+import { type MainSandboxPolicy, mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { gitArgvCommand } from "../domains/safety/git-policy.js";
 import { StringEnum } from "../engine/ai.js";
@@ -63,7 +64,13 @@ export async function runVectorTool(
 	file: string,
 	vectorArgs: ReadonlyArray<string>,
 	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal; env?: Record<string, string>; typedGitWritablePaths?: ReadonlyArray<string> },
+	options?: {
+		signal?: AbortSignal;
+		env?: Record<string, string>;
+		typedGitWritablePaths?: ReadonlyArray<string>;
+		/** The main-session sandbox a contained call runs in (verify's checks). */
+		shellSandbox?: MainSandboxPolicy;
+	},
 ): Promise<ToolResult> {
 	const timeoutMs = timeoutArg(args);
 	const maxOutputBytes = maxOutputArg(args);
@@ -74,6 +81,7 @@ export async function runVectorTool(
 		if (options?.signal !== undefined) runOptions.signal = options.signal;
 		if (options?.env !== undefined) runOptions.env = options.env;
 		if (options?.typedGitWritablePaths !== undefined) runOptions.typedGitWritablePaths = options.typedGitWritablePaths;
+		if (options?.shellSandbox !== undefined) runOptions.shellSandbox = options.shellSandbox;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
 		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
@@ -92,9 +100,10 @@ export async function runVectorTool(
 				details,
 			};
 		if (result.exitCode !== 0) {
+			const sandboxHint = options?.shellSandbox === undefined ? null : mainSandboxWriteHint(output, options.shellSandbox);
 			return {
 				kind: "error",
-				message: `${action}: exited with code ${result.exitCode ?? "?"}: ${output.trim()}`,
+				message: `${action}: exited with code ${result.exitCode ?? "?"}: ${output.trim()}${sandboxHint === null ? "" : `\n${sandboxHint}`}`,
 				details,
 			};
 		}

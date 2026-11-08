@@ -20,7 +20,8 @@ import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
 
 /**
  * The main session's shell sandbox. At autonomy default every bash and
- * run_script call of the operator's own session runs inside the OS sandbox the
+ * run_script call of the operator's own session, and every verify check that
+ * runs a project command, runs inside the OS sandbox the
  * dispatched workers use, whenever a backend exists and `safety.sandbox` is
  * not off: the filesystem stays readable, writes land only in the workspace,
  * the effective scratch roots, the package caches and the repository's git
@@ -31,8 +32,9 @@ import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
  * session. Unlike a worker the command sees the real /tmp, where operators
  * expect benchmark outputs. Containment is what lets such a call run without
  * an approval ask; a call that asks to leave it (`unsandboxed: true`) or that
- * publishes is judged instead. Under the operator's yolo only a script under
- * `safety.sandbox: required` runs here (#419, #407).
+ * publishes is judged instead. Under the operator's yolo nothing runs here
+ * unless `safety.sandbox` is required: then every command default would
+ * contain, and every script, runs here (#419, #407).
  */
 
 /**
@@ -743,9 +745,9 @@ export function mainSandboxLine(
 	const yolo = yoloScriptSandboxState(mode, availability);
 	const yoloLine =
 		yolo === "sandboxed"
-			? "yolo scripts run sandboxed too (safety.sandbox is required)"
+			? "yolo commands run sandboxed too (safety.sandbox is required)"
 			: yolo === "refused"
-				? `yolo refuses scripts: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
+				? `yolo refuses commands: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
 				: "yolo runs unsandboxed";
 	if (mainShellContained(mode, availability)) {
 		const warnings: string[] = [];

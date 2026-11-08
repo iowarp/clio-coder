@@ -32,6 +32,7 @@ export const coreTests = [
 	"true-yolo",
 	"transcript-operator-grant",
 	"yolo-script-sandbox",
+	"verify-sandbox-trojan",
 	"search-completeness",
 	"tool-boundaries",
 	"engine-utilities",

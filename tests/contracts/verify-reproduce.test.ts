@@ -14,6 +14,10 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { mainSandboxPolicy } from "../../src/core/sandbox/main-session.js";
+import { clioConfigDir, clioStateDir } from "../../src/core/xdg.js";
+import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js";
 import { currentProcessLease } from "../../src/tools/process-lease.js";
 import {
 	type DeclaredReproduce,
@@ -22,6 +26,7 @@ import {
 	type ReproduceConditions,
 } from "../../src/tools/verify/reproduce.js";
 import { runReproduce } from "../../src/tools/verify/reproduce-run.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -134,6 +139,50 @@ describe("reproduce runner", () => {
 		deepStrictEqual(outcome.report.conditions.seed, { env: "SEED", value: "7" });
 		strictEqual(outcome.report.runs.length, 2);
 		deepStrictEqual(readdirSync(join(root, "envs")), []);
+	});
+
+	// A contained verify call: the check runs in the main-session sandbox, where Clio's state is read-only.
+	it("runs a sandboxed check in a clean environment it can write, outside Clio's state, and removes it", async (t) => {
+		const availability = sandboxAvailability();
+		if (!availability.available || availability.backend !== "bwrap") {
+			t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+			return;
+		}
+		const env = await isolateClioEnv("clio-coder-verify-reproduce-home-");
+		t.after(() => env.restore());
+		const root = scratch();
+		const probe = join(clioConfigDir(), "probe.txt");
+		const script = [
+			"const fs=require('fs');",
+			"fs.writeFileSync('out.txt','1');",
+			`let reached=1;try{fs.writeFileSync(${JSON.stringify(probe)},'1')}catch{reached=0}`,
+			"console.log(JSON.stringify({reached:{value:reached}}))",
+			"",
+		].join("\n");
+		writeFileSync(join(root, "a.js"), script);
+		const shellSandbox = mainSandboxPolicy({ workspace: root, scratchRoots: effectiveScratchRoots([], root) });
+		const base = shellSandbox.secretRoots.scratchRoots[0] ?? tmpdir();
+		const leftovers = () => readdirSync(base).filter((name) => name.startsWith("clio-reproduce-"));
+		const before = leftovers();
+		const outcome = await runReproduce({
+			command: ["node", "a.js"],
+			cwd: ".",
+			timeoutMs: 10_000,
+			spec: {
+				inputs: [{ path: "a.js", sha256: sha256(script) }],
+				environment: "copy",
+				compare: { mode: "twice" },
+				tolerance: { absolute: 0 },
+			},
+			workspaceRoot: root,
+			shellSandbox,
+		});
+		strictEqual(outcome.kind, "judged", JSON.stringify(outcome));
+		if (outcome.kind !== "judged") return;
+		strictEqual(outcome.report.passed, true);
+		strictEqual(existsSync(probe), false);
+		strictEqual(existsSync(join(clioStateDir(), "scratch", "reproduce")), false);
+		deepStrictEqual(leftovers(), before);
 	});
 
 	it("sweeps the worktrees a dead run left before the next run, keeping a live run's and a fresh unowned one", async () => {

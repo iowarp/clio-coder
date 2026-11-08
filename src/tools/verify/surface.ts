@@ -39,6 +39,12 @@ export const verifyToolSurface: ToolSurface = {
 		),
 		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: browser mode." })),
 		cwd: Type.Optional(Type.String({ description: "Package script working directory." })),
+		unsandboxed: Type.Optional(
+			Type.Boolean({
+				description:
+					"Leave the sandbox, only after a check failed because of it (credentials, a path outside the writable roots); the call is reviewed.",
+			}),
+		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (not declared checks)." })),
 		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes." })),
 	}),

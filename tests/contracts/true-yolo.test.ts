@@ -641,7 +641,7 @@ test("the registry strips a caller's operatorYolo and never sets it for a worker
 	}
 });
 
-test("only safety.sandbox required sandboxes a yolo script, and without a backend the script is refused", (t) => {
+test("only safety.sandbox required sandboxes yolo commands, and without a backend they are refused", (t) => {
 	const backend = { available: true, backend: "bwrap" as const, executable: "/usr/bin/bwrap", reason: null };
 	const none = { available: false, backend: null, executable: null, reason: "absent" };
 	deepStrictEqual(
@@ -660,6 +660,7 @@ test("only safety.sandbox required sandboxes a yolo script, and without a backen
 	mkdirSync(join(cwd, ".git"));
 	writeFileSync(join(cwd, "clean.sh"), "echo hi\n");
 	writeFileSync(join(cwd, "git.sh"), "rm -rf .git\n");
+	writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
 	const engine = engineFor(cwd);
 	const sandboxed: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "sandboxed" };
 	const refused: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "refused" };
@@ -675,8 +676,26 @@ test("only safety.sandbox required sandboxes a yolo script, and without a backen
 	const runScript = { tool: ToolNames.RunScript, args: { script: "clean.sh" } };
 	strictEqual(engine.evaluate(runScript, "yolo", sandboxed).shellSandbox?.workspace, cwd);
 	strictEqual(engine.evaluate(runScript, "yolo", refused).kind, "block");
-	// A plain command is never wrapped, and a worker grant's yolo keeps the rails.
-	strictEqual(engine.evaluate(bash("ls"), "yolo", sandboxed).shellSandbox, undefined);
+	// A test runner runs project code as surely as a script does, through bash or verify.
+	const verify = (args: Record<string, unknown>) => ({ tool: ToolNames.Verify, args });
+	for (const call of [bash("ls"), bash("npm test"), verify({ check: "test" })]) {
+		const label = JSON.stringify(call.args);
+		strictEqual(engine.evaluate(call, "yolo", sandboxed).shellSandbox?.workspace, cwd, label);
+		strictEqual(engine.evaluate(call, "yolo", refused).reasonCode, "yolo-sandbox-required", label);
+		strictEqual(engine.evaluate(call, "yolo", OPERATOR_YOLO).shellSandbox, undefined, label);
+		// required means required: a call cannot ask its way out of the sandbox.
+		const leaving = { tool: call.tool, args: { ...call.args, unsandboxed: true } };
+		const left = engine.evaluate(leaving, "yolo", sandboxed);
+		strictEqual(left.reasonCode, "yolo-sandbox-required", label);
+		match(left.reasons.join("\n"), /unsandboxed/u, label);
+		strictEqual(engine.evaluate(leaving, "yolo", OPERATOR_YOLO).kind, "allow", label);
+	}
+	// Listing runs nothing; an outward call needs the credentials the sandbox hides; a worker grant's yolo keeps the rails.
+	strictEqual(engine.evaluate(verify({}), "yolo", sandboxed).shellSandbox, undefined);
+	strictEqual(engine.evaluate(verify({}), "yolo", refused).kind, "allow");
+	const push = engine.evaluate(bash("git push origin main"), "yolo", refused);
+	strictEqual(push.kind, "allow");
+	strictEqual(push.shellSandbox, undefined);
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 

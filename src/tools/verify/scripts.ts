@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
+import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { ToolResult } from "../registry.js";
 import { runVectorTool } from "../safe-exec.js";
@@ -177,6 +178,23 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 }
 
 /**
+ * How the verify tool runs a check's command. `shellSandbox` is the
+ * main-session sandbox the registry hands a contained call (Phase 2c): the
+ * check's project code then runs with the writable roots, network and secret
+ * masking a contained bash command gets.
+ */
+export interface VerifyRunOptions {
+	signal?: AbortSignal;
+	shellSandbox?: MainSandboxPolicy;
+}
+
+/** The main-session sandbox's write hint for a contained check's failed output, on its own line, or "". */
+function sandboxHint(output: string, options: VerifyRunOptions | undefined): string {
+	const hint = options?.shellSandbox === undefined ? null : mainSandboxWriteHint(output, options.shellSandbox);
+	return hint === null ? "" : `\n${hint}`;
+}
+
+/**
  * Run a check derived from the repository's toolchain or CI files. The argv
  * was resolved by resolveVerifyCall, the same resolution the safety policy
  * engine scanned, and runs from the workspace root.
@@ -185,7 +203,7 @@ export async function runToolchainCheck(
 	check: ToolchainCheck,
 	argv: ReadonlyArray<string>,
 	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal },
+	options?: VerifyRunOptions,
 ): Promise<ToolResult> {
 	if (check.availability) return unavailableCheck(check);
 	const [file, ...vector] = argv;
@@ -462,7 +480,7 @@ async function runJudgedCheck(
 	file: string,
 	vector: ReadonlyArray<string>,
 	cwd: string,
-	options?: { signal?: AbortSignal },
+	options?: VerifyRunOptions,
 ): Promise<ToolResult> {
 	// Read before the command runs, so it names the tree the command saw rather than one the command left behind.
 	const checkout = check.kind === "numeric-compare" ? await checkoutState(cwd) : null;
@@ -473,6 +491,7 @@ async function runJudgedCheck(
 			timeoutMs: check.timeoutMs,
 			maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
 			...(options?.signal !== undefined ? { signal: options.signal } : {}),
+			...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 		});
 	} catch (error) {
 		return { kind: "error", message: `verify: ${error instanceof Error ? error.message : String(error)}` };
@@ -490,9 +509,10 @@ async function runJudgedCheck(
 	}
 	if (result.exitCode !== 0) {
 		const tail = `${result.stdout}${result.stderr}`.trim().slice(-2_000);
+		const hint = sandboxHint(`${result.stdout}\n${result.stderr}`, options);
 		return {
 			kind: "error",
-			message: `verify: ${check.kind} command exited with code ${result.exitCode ?? "?"} before judgement: ${tail}`,
+			message: `verify: ${check.kind} command exited with code ${result.exitCode ?? "?"} before judgement: ${tail}${hint}`,
 			details: facts,
 		};
 	}
@@ -556,7 +576,7 @@ function reproduceToolResult(outcome: ReproduceOutcome): ToolResult {
 	}
 }
 
-async function runReproduceCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
+async function runReproduceCheck(check: DeclaredCheck, options?: VerifyRunOptions): Promise<ToolResult> {
 	if (check.reproduce === undefined) {
 		return { kind: "error", message: `verify: declared check '${check.id}' has kind reproduce without its parameters` };
 	}
@@ -567,11 +587,12 @@ async function runReproduceCheck(check: DeclaredCheck, options?: { signal?: Abor
 		spec: check.reproduce,
 		workspaceRoot: process.cwd(),
 		...(options?.signal !== undefined ? { signal: options.signal } : {}),
+		...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 	});
 	return reproduceToolResult(outcome);
 }
 
-export async function runProjectCheck(check: DeclaredCheck, options?: { signal?: AbortSignal }): Promise<ToolResult> {
+export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunOptions): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
 	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
@@ -653,7 +674,7 @@ export async function recordPerfBaseline(
 export async function runScriptCheck(
 	check: string,
 	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal },
+	options?: VerifyRunOptions,
 ): Promise<ToolResult> {
 	let cwd: string;
 	try {

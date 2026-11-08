@@ -120,7 +120,7 @@ export function scratchRootFindings(workspaceRoot: string): DoctorFinding[] {
 /**
  * How the main session's shell calls run on this host: contained in the
  * main-session sandbox at autonomy default when a backend exists, and where a
- * contained call may write; and whether yolo sandboxes its scripts (#419).
+ * contained call may write; and whether yolo sandboxes its commands (#419).
  */
 function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 	const availability = sandboxAvailability();

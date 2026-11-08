@@ -254,7 +254,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |
-| `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash and run_script at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo scripts; `off` never sandboxes |
+| `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash, run_script and command-running verify checks at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo commands; `off` never sandboxes |
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get |
 | `safety.scratchRoots` | `[]` | immediately; user layer only; extra directories the main session's sandboxed commands and typed `write` and `edit` calls may write at autonomy `default` without asking, where its deletes run as they do in the workspace |
 | `safety.sandboxPassEnv` | `[]` | immediately for the main session, next dispatch for workers; user layer only; environment variable names a sandboxed command keeps although they look like credentials, which the sandbox otherwise removes before the command starts |

@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, type Dirent } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { release } from "node:os";
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { release, tmpdir } from "node:os";
 import path from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
+import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
 import { extractNumericPayloadText, type NumericReferenceProvenance } from "./numeric.js";
@@ -111,6 +112,13 @@ export interface ReproduceRunInput {
 	signal?: AbortSignal;
 	/** Parent for clean environments; defaults to `<state>/scratch/reproduce`. */
 	scratchRoot?: string;
+	/**
+	 * The main-session sandbox of a contained verify call. The check, and the
+	 * interpreter's version probe, run inside it, and with no `scratchRoot` the
+	 * clean environments go to a fresh directory under a root the sandbox can
+	 * write, because Clio's state directory is read-only inside it.
+	 */
+	shellSandbox?: MainSandboxPolicy;
 }
 
 async function sha256File(filePath: string): Promise<{ sha256: string; sizeBytes: number }> {
@@ -177,12 +185,18 @@ async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<stri
 	return { toplevel, commit, trackedTreeClean: status !== null && status.trim().length === 0, tracked };
 }
 
-async function pythonVersion(interpreter: string, workspaceRoot: string): Promise<string | undefined> {
+async function pythonVersion(
+	interpreter: string,
+	workspaceRoot: string,
+	shellSandbox: MainSandboxPolicy | undefined,
+): Promise<string | undefined> {
 	try {
+		// The interpreter may be the workspace's own .venv, so it runs where the check does.
 		const result = await runCommandVector(interpreter, ["--version"], {
 			cwd: workspaceRoot,
 			workspaceRoot,
 			timeoutMs: PYTHON_VERSION_TIMEOUT_MS,
+			...(shellSandbox !== undefined ? { shellSandbox } : {}),
 		});
 		const text = `${result.stdout}${result.stderr}`.trim();
 		return result.exitCode === 0 && text.length > 0 ? text.split("\n")[0] : undefined;
@@ -392,7 +406,7 @@ function notLaunchedFacts(argv: ReadonlyArray<string>, cwd: string): ReproduceRu
 	};
 }
 
-function runFailure(result: SafeCommandResult, timeoutMs: number): string | null {
+function runFailure(result: SafeCommandResult, timeoutMs: number, shellSandbox?: MainSandboxPolicy): string | null {
 	if (result.launched !== true)
 		return `could not start: ${(result.stderr || result.failure || "no process was created").trim()}`;
 	if (result.aborted) return "aborted";
@@ -400,12 +414,42 @@ function runFailure(result: SafeCommandResult, timeoutMs: number): string | null
 	if (result.outputCapped) return `output exceeded ${REPRODUCE_MAX_OUTPUT_BYTES} bytes before judgement`;
 	if (result.exitCode !== 0) {
 		const tail = `${result.stdout}${result.stderr}`.trim().slice(-2_000);
-		return `exited with code ${result.exitCode ?? "?"} before judgement${tail.length > 0 ? `: ${tail}` : ""}`;
+		const hint =
+			shellSandbox === undefined ? null : mainSandboxWriteHint(`${result.stdout}\n${result.stderr}`, shellSandbox);
+		return `exited with code ${result.exitCode ?? "?"} before judgement${tail.length > 0 ? `: ${tail}` : ""}${hint === null ? "" : `\n${hint}`}`;
 	}
 	return null;
 }
 
 export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceOutcome> {
+	if (input.shellSandbox === undefined || input.scratchRoot !== undefined) {
+		return runReproduceIn(input, input.scratchRoot ?? path.join(clioStateDir(), "scratch", "reproduce"));
+	}
+	// A fresh directory per check: nothing in it is another run's to sweep, and it goes when the check ends.
+	const policy = input.shellSandbox;
+	const base = policy.readOnly === true ? policy.writableRoots[0] : (policy.secretRoots.scratchRoots[0] ?? tmpdir());
+	if (base === undefined) return runReproduceIn(input, path.join(clioStateDir(), "scratch", "reproduce"));
+	let scratchRoot: string;
+	try {
+		await mkdir(base, { recursive: true });
+		scratchRoot = await mkdtemp(path.join(base, "clio-reproduce-"));
+	} catch (error) {
+		return {
+			kind: "refused",
+			refusal: {
+				reason: "environment-setup-failed",
+				message: `no clean environment directory could be created under ${base} (${errorText(error)}); nothing ran`,
+			},
+		};
+	}
+	try {
+		return await runReproduceIn(input, scratchRoot);
+	} finally {
+		await rm(scratchRoot, { recursive: true, force: true }).catch(() => undefined);
+	}
+}
+
+async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Promise<ReproduceOutcome> {
 	const { spec, workspaceRoot } = input;
 	const argvResolution = resolveCleanRunArgv(input.command, workspaceRoot);
 	if (!argvResolution.ok) {
@@ -476,7 +520,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 	};
 	if (argvResolution.interpreter !== undefined) {
 		platform.interpreter = argvResolution.interpreter;
-		const version = await pythonVersion(argvResolution.interpreter, workspaceRoot);
+		const version = await pythonVersion(argvResolution.interpreter, workspaceRoot, input.shellSandbox);
 		if (version !== undefined) platform.pythonVersion = version;
 	}
 	const conditions: ReproduceConditions = {
@@ -495,7 +539,6 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 		cwd: input.cwd,
 	};
 
-	const scratchRoot = input.scratchRoot ?? path.join(clioStateDir(), "scratch", "reproduce");
 	await sweepAbandonedEnvironments(scratchRoot);
 	const runCount = spec.compare.mode === "twice" ? 2 : 1;
 	const facts: ReproduceRunFacts[] = [];
@@ -535,6 +578,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 				maxOutputBytes: REPRODUCE_MAX_OUTPUT_BYTES,
 				...(spec.seed !== undefined ? { env: { [spec.seed.env]: spec.seed.value } } : {}),
 				...(input.signal !== undefined ? { signal: input.signal } : {}),
+				...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
 			});
 		} catch (error) {
 			return {
@@ -548,7 +592,7 @@ export async function runReproduce(input: ReproduceRunInput): Promise<ReproduceO
 			await environment.dispose();
 		}
 		const fact = runFacts(result, [...argv], input.cwd);
-		const failure = runFailure(result, input.timeoutMs);
+		const failure = runFailure(result, input.timeoutMs, input.shellSandbox);
 		if (failure !== null)
 			return { kind: "run-failed", run, facts: fact, completed: [...facts], message: `run ${run} ${failure}` };
 		facts.push(fact);

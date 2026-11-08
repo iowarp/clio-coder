@@ -549,8 +549,9 @@ Projects can declare [quality policies](quality-policy.md) in `.clio-coder/quali
 | `cwd` | Package scripts only. Sets package discovery/working directory; the catalog is always loaded at the session workspace root and uses its declared `cwd`. |
 | `timeout_ms` | Package scripts, derived checks and frontend; default 120000 ms. Catalog checks use `timeoutMs`. |
 | `max_output_bytes` | Package scripts and frontend; default 600000 bytes. Catalog checks retain the safe-exec cap. |
+| `unsandboxed` | Optional boolean. At `default`, run the check outside the main-session sandbox, only after it failed because of the sandbox; the call is reviewed like `bash` with `unsandboxed: true`. |
 
-Listing groups package and catalog providers under `{id, description, command, cwd, timeoutMs, tags, source}`. Package scripts must match `test`, `lint`, `build`, `typecheck`, `check`, `format`, or `ci`, optionally followed by `:`, `.`, or `-` plus a suffix. They run as `npm run <script>` without a shell. Script execution follows the [bash safety policy](#bash-run-a-shell-command).
+Listing groups package and catalog providers under `{id, description, command, cwd, timeoutMs, tags, source}`. Package scripts must match `test`, `lint`, `build`, `typecheck`, `check`, `format`, or `ci`, optionally followed by `:`, `.`, or `-` plus a suffix. They run as `npm run <script>` without a shell. Script execution follows the [bash safety policy](#bash-run-a-shell-command). A check's command runs project code, so at `default` the main session runs every check that runs a command inside the main-session sandbox when the host has a backend, exactly as it runs `bash`; see [Containment at default](../architecture/safety-model.md#containment-at-default).
 
 ### Derived checks
 

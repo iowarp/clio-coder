@@ -250,7 +250,11 @@ export interface OperatorYoloScope {
 	level?: "yolo";
 	/** `safety.scratchRoots` from the operator's own settings, unvalidated here. */
 	scratchRoots: ReadonlyArray<string>;
-	/** How a script runs on this host; absent reads as `unsandboxed`. */
+	/**
+	 * How a command runs on this host under the operator's yolo; absent reads
+	 * as `unsandboxed`. `sandboxed` and `refused` come from `safety.sandbox:
+	 * required` and cover every command the default contains plus every script.
+	 */
 	scriptSandbox?: YoloScriptSandboxState;
 }
 
@@ -259,7 +263,7 @@ export interface OperatorYoloScope {
  * judgment second, asking last. Only the main session's registry passes it,
  * so workers, grants and scheduled command jobs keep today's rails. Under it
  * the yolo floor blocks first, then the path, authority and ceiling rails
- * still block; a contained bash or run_script call needs no ask for what its
+ * still block; a contained bash, run_script or verify call needs no ask for what its
  * command text hides; a damage-control hit a workspace snapshot can undo
  * runs; every other former damage-control block asks, so the safety judge
  * decides it with the operator's intent; a typed write or edit inside a
@@ -270,7 +274,7 @@ export interface OperatorDefaultScope {
 	level: "default";
 	/** `safety.scratchRoots` from the operator's own settings, unvalidated here. */
 	scratchRoots: ReadonlyArray<string>;
-	/** True when this session's bash and run_script calls run in the main-session sandbox on this host. */
+	/** True when this session's bash, run_script and verify commands run in the main-session sandbox on this host. */
 	sandbox: boolean;
 	/** True when a workspace snapshot is taken before a destructive call runs (a git work tree, `safety.snapshots` on). */
 	snapshots: boolean;
@@ -1660,11 +1664,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
 		const floor = floorBlock(call, callCwd, judgedCommand);
 		if (floor !== null) return blockDecision(base, floor);
-		if (scope.scriptSandbox === "refused" && runsScriptFile(rawCall)) {
+		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope);
+		if (required === "refused" || required === "unsandboxed") {
 			return blockDecision(base, {
 				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
 				reasonCode: YOLO_SANDBOX_REQUIRED_RULE_ID,
-				reasons: [YOLO_SCRIPT_SANDBOX_REFUSED],
+				reasons: [required === "refused" ? YOLO_SANDBOX_REFUSED : YOLO_SANDBOX_NOT_LEFT],
 				policySource: "builtin-classifier",
 			});
 		}
@@ -1705,7 +1710,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (floor !== null) return blockDecision(baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
 		return evaluateCall(rawCall, posture, {
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
-			contained: scope.sandbox && containedShellCall(call, classification),
+			contained: scope.sandbox && containedShellCall(call, classification, judgedCommand),
 			snapshots: scope.snapshots,
 			...(scope.readOnly === true ? { readOnly: true as const } : {}),
 		});
@@ -1718,9 +1723,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	): SafetyPolicyDecision => {
 		if (scope?.level === "default") return evaluateOperatorDefault(rawCall, posture, scope);
 		const decision = scope === undefined ? evaluateCall(rawCall, posture) : evaluateTrueYolo(rawCall, posture, scope);
-		// A script the operator's yolo admitted under `safety.sandbox: required`
+		// A command the operator's yolo admitted under `safety.sandbox: required`
 		// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
-		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed" || !runsScriptFile(rawCall)) return decision;
+		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed") return decision;
+		const call = normalizeCallPaths(rawCall);
+		const { judgedCommand } = commandUnderJudgment(call);
+		if (yoloRequiredSandbox(rawCall, call, classify(call), judgedCommand, scope) !== "sandboxed") return decision;
 		const shellSandbox = {
 			workspace: canonicalizePath(cwd) ?? cwd,
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
@@ -2347,9 +2355,13 @@ function runsUnderShell(args: Record<string, unknown> | undefined): boolean {
 	return typeof interpreter === "string" && RUN_SCRIPT_SHELLS.has(interpreter.trim());
 }
 
-/** Why yolo refuses a script when `safety.sandbox` is `required` and the host has no backend. */
-const YOLO_SCRIPT_SANDBOX_REFUSED =
-	'safety.sandbox is "required" and no OS sandbox is available, so yolo does not run a script; run its commands directly or set safety.sandbox to auto';
+/** Why yolo refuses a command when `safety.sandbox` is `required` and the host has no backend. */
+const YOLO_SANDBOX_REFUSED =
+	'safety.sandbox is "required" and no OS sandbox is available, so yolo does not run this command; use a typed tool, or have the operator set safety.sandbox to auto';
+
+/** Why yolo refuses `unsandboxed: true` when `safety.sandbox` is `required`. */
+const YOLO_SANDBOX_NOT_LEFT =
+	'safety.sandbox is "required", so yolo does not run this command outside the sandbox; drop unsandboxed: true, or have the operator set safety.sandbox to auto';
 
 /** Rule id of that refusal, a ceiling the operator set (#407). */
 const YOLO_SANDBOX_REQUIRED_RULE_ID = "yolo-sandbox-required";
@@ -2687,17 +2699,64 @@ function deletesNeedingSnapshot(command: string, workspace: string): string[] {
 const LONE_DELETE = /^(?:rm|rmdir|unlink)\s/u;
 
 /**
- * True when the operator's default runs this call in the main-session sandbox
- * (Phase 2c): bash and run_script, unless the call asks to leave it with
- * `unsandboxed: true` or reaches outward (a push, a publish, a code host or
- * cloud CLI, a network write), which needs the credentials the sandbox hides.
+ * True for a call that runs a project command: bash, run_script, and a verify
+ * call whose check resolves to an argv (`verifyCommand`). A verify call that
+ * lists checks, names an unknown one or validates a frontend artifact runs no
+ * project code.
  */
-function containedShellCall(call: ClassifierCall, classification: Classification): boolean {
-	if (call.tool !== ToolNames.Bash && call.tool !== ToolNames.RunScript) return false;
+function runsProjectCommand(call: ClassifierCall, verifyCommand: string | null): boolean {
+	if (call.tool === ToolNames.Bash || call.tool === ToolNames.RunScript) return true;
+	return call.tool === ToolNames.Verify && verifyCommand !== null;
+}
+
+/** True when the call reaches outward (a push, a publish, a code host or cloud CLI, a network write). */
+function reachesOutward(call: ClassifierCall, classification: Classification, verifyCommand: string | null): boolean {
+	if (classification.exposure === "outward") return true;
+	const command = call.tool === ToolNames.Verify ? verifyCommand : commandArg(call.args);
+	return command !== null && outwardShellReason(command) !== null;
+}
+
+/**
+ * True when the operator's default runs this call in the main-session sandbox
+ * (Phase 2c): bash, run_script and a verify check that runs a command, unless
+ * the call asks to leave it with `unsandboxed: true` or reaches outward, which
+ * needs the credentials the sandbox hides. `verifyCommand` is the argv a
+ * verify call resolves to, joined, or null.
+ */
+function containedShellCall(
+	call: ClassifierCall,
+	classification: Classification,
+	verifyCommand: string | null,
+): boolean {
+	if (!runsProjectCommand(call, verifyCommand)) return false;
 	if (call.args?.unsandboxed === true) return false;
-	if (classification.exposure === "outward") return false;
-	const command = commandArg(call.args);
-	return command === null || outwardShellReason(command) === null;
+	return !reachesOutward(call, classification, verifyCommand);
+}
+
+/**
+ * How `safety.sandbox: required` holds one call of the operator's yolo: a
+ * script, and every call the default would contain, runs `sandboxed`, or is
+ * `refused` when the host has no backend; such a call that asks to leave the
+ * sandbox with `unsandboxed: true` is refused as `unsandboxed`. An outward call
+ * that names no script keeps the credentials it needs and runs `free`, as it
+ * would at default; so does every call when the operator did not require the
+ * sandbox.
+ */
+function yoloRequiredSandbox(
+	rawCall: ClassifierCall,
+	call: ClassifierCall,
+	classification: Classification,
+	verifyCommand: string | null,
+	scope: OperatorYoloScope,
+): "sandboxed" | "refused" | "unsandboxed" | "free" {
+	const state = scope.scriptSandbox;
+	if (state !== "sandboxed" && state !== "refused") return "free";
+	// The typed git tool runs a fixed argv, never through the sandbox; its hooks are the hooks guard's to judge.
+	if (call.projection === "typed-git" || !runsProjectCommand(call, verifyCommand)) return "free";
+	const script = runsScriptFile(rawCall);
+	if (!script && reachesOutward(call, classification, verifyCommand)) return "free";
+	if (call.args?.unsandboxed === true) return "unsandboxed";
+	return state;
 }
 
 /** A hard rule blocks; an `ask: true` rule asks. The same test matchSourcedRule ranks by. */

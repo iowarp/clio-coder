@@ -124,7 +124,7 @@ export interface RunCommandVectorOptions {
 	env?: Record<string, string>;
 	/** Trusted typed Git metadata writes for this invocation only (v060 review F1). */
 	typedGitWritablePaths?: ReadonlyArray<string>;
-	/** Set by run_script for a contained main-session call: it runs in the main-session sandbox with this policy. */
+	/** Set for a contained main-session call (run_script, verify): it runs in the main-session sandbox with this policy. */
 	shellSandbox?: MainSandboxPolicy;
 	output?: SafeCommandOutputSink;
 	/**

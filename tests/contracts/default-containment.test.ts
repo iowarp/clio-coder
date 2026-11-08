@@ -20,6 +20,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
 import { createRegistry, type RegistryDeps } from "../../src/tools/registry.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -96,6 +97,33 @@ test("unsandboxed: true and an outward call leave containment and reach the safe
 	deepStrictEqual(session.ran, []);
 	deepStrictEqual(reviewedCommands(session.reviewed), ["make bench", "git push origin main", "gh pr create"]);
 	for (const subject of session.reviewed) strictEqual(operatorOnlyAsk(subject), null, String(subject.args?.command));
+});
+
+test("a verify check that runs a command is contained at default like bash; listing runs nothing and is not", async (t) => {
+	const cwd = workspace("clio-contained-verify-");
+	writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+	// verify resolves its checks in the process's working directory, as the main session runs it.
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const session = defaultSession(cwd, { sandbox: true, snapshots: false });
+	const checks: Array<{ check: unknown; sandboxed: boolean }> = [];
+	session.registry.register({
+		...verifyTool,
+		run: async (args, options) => {
+			checks.push({ check: args.check, sandboxed: options?.shellSandbox !== undefined });
+			return { kind: "ok", output: "" };
+		},
+	});
+	for (const args of [{ check: "test" }, {}]) {
+		const verdict = await session.registry.invoke({ tool: ToolNames.Verify, args });
+		strictEqual(verdict.kind, "ok", JSON.stringify(args));
+	}
+	deepStrictEqual(checks, [
+		{ check: "test", sandboxed: true },
+		{ check: undefined, sandboxed: false },
+	]);
+	deepStrictEqual(session.reviewed, []);
 });
 
 test("with no sandbox backend the default rails still ask", async () => {

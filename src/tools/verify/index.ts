@@ -2,7 +2,14 @@ import type { ToolResult, ToolSpec } from "../registry.js";
 import { runFrontendCheck } from "./frontend.js";
 import { captureQualitySnapshot, loadQualityPolicy, type QualitySnapshot } from "./quality-policy.js";
 import { resolveVerifyCall } from "./resolve.js";
-import { listChecks, runProjectCheck, runScriptCheck, runToolchainCheck, unavailableCheck } from "./scripts.js";
+import {
+	listChecks,
+	runProjectCheck,
+	runScriptCheck,
+	runToolchainCheck,
+	unavailableCheck,
+	type VerifyRunOptions,
+} from "./scripts.js";
 import { prepareVerifyArguments, verifyToolSurface } from "./surface.js";
 
 /**
@@ -12,7 +19,9 @@ import { prepareVerifyArguments, verifyToolSurface } from "./surface.js";
  * toolchain and CI files via safe-exec, and verify(check="frontend",
  * path=<file>) validates an HTML/CSS/JS artifact without shell access.
  * resolveVerifyCall is shared with the safety policy engine, so the command
- * admitted is the command run.
+ * admitted is the command run. A check's command runs project code, so a
+ * contained call runs it in the main-session sandbox the registry hands over,
+ * exactly as a contained bash command runs.
  */
 
 export const verifyTool: ToolSpec = {
@@ -48,7 +57,10 @@ export const verifyTool: ToolSpec = {
 				snapshotError = error instanceof Error ? error.message : String(error);
 			}
 		}
-		const result = await runResolvedVerify(args, options);
+		const result = await runResolvedVerify(args, {
+			...(options?.signal !== undefined ? { signal: options.signal } : {}),
+			...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+		});
 		if (!applies || !policy) return result;
 		let stable = false;
 		if (before) {
@@ -72,16 +84,13 @@ export const verifyTool: ToolSpec = {
 	},
 };
 
-async function runResolvedVerify(
-	args: Record<string, unknown>,
-	options?: { signal?: AbortSignal },
-): Promise<ToolResult> {
+async function runResolvedVerify(args: Record<string, unknown>, options: VerifyRunOptions): Promise<ToolResult> {
 	const resolution = resolveVerifyCall(process.cwd(), args);
 	switch (resolution.kind) {
 		case "list":
 			return listChecks(typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined);
 		case "frontend":
-			return runFrontendCheck(args, options);
+			return runFrontendCheck(args, options.signal !== undefined ? { signal: options.signal } : {});
 		case "catalog": {
 			// The declared kind rides on the result as a typed field, so telemetry records it without reading the report.
 			const result = await runProjectCheck(resolution.check, options);
