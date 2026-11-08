@@ -4,8 +4,8 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.7.0",
-    "ref": "db67e389890da15ba63ac8345185532626369e08",
-    "commit": "db67e389890da15ba63ac8345185532626369e08",
+    "ref": "011324e828788e33a48dc8a7400f8bb815a5beb3",
+    "commit": "011324e828788e33a48dc8a7400f8bb815a5beb3",
     "mode": "repository"
   },
   "files": [
@@ -31,7 +31,7 @@
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "061eec3a7cc09c06cb5159e7b80df832650b72e2937fd430898f614177cf5466",
-      "sourceSha256": "0c6f81d1054d21ade33450a10aa2f9dc06d0b58bc14d827ac87c9fc266083aa2"
+      "sourceSha256": "a0de660ee652d3eb2185e797dacc449b8e0a6955922b5c38466693b67857c02b"
     },
     {
       "path": "guide/tool-usage.md",
@@ -61,7 +61,7 @@
       "path": "guide/gui.md",
       "source": "docs/guide/gui.md",
       "sha256": "11ac762deec6e1ebbb369d21054c942909241e89fc4e9419aef747eae73e6a7d",
-      "sourceSha256": "16c8f61a766ed9514776a2265c13969e17d570dc038fa77731c77ae5e1f33d79"
+      "sourceSha256": "ca34f11ad5001c5c63234df0cc0260968bce038af88f3d2f8d5fc3d97935c274"
     },
     {
       "path": "guide/fleet-dispatch.md",
@@ -120,8 +120,8 @@
     {
       "path": "guide/research-and-arena.md",
       "source": "docs/guide/research-and-arena.md",
-      "sha256": "afe5117419360d6ad986eae1ab1ce2f51eec68a1b2f4b0cc6ddccff2fe14cff4",
-      "sourceSha256": "4958427de9943e70db02ea616e9e0d30a476cac875e56ca1ff83ba8a081a28ec"
+      "sha256": "4c02b9a27124044d4cddcd63c5646d78997969f063369f859fa53b10bfc27aaa",
+      "sourceSha256": "e4b54bd1cb48fecb47b9a2bf99a28c3c4e99b78c881a483fb97b8ad6af231b1e"
     },
     {
       "path": "guide/configuration-reference.md",
