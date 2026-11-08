@@ -18,9 +18,10 @@ import {
 } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
+import { showPage } from "./local-server.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
-import { autoOpenBrowser, openApp, openBrowser } from "./process-policy.js";
+import { autoOpenBrowser, focusAppWindow, openApp, openBrowser } from "./process-policy.js";
 import { ArenaService } from "./services/arena.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { EventHub } from "./services/event-hub.js";
@@ -142,7 +143,18 @@ export async function main(args = process.argv.slice(2)) {
 				console.error(
 					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
 				);
-			if (open) await openLink(url.href);
+			// A window already showing the app is brought forward, still on its own page; a launch that named a
+			// page asks the app to show it there. Without a window a tool can raise, a tab opens as before.
+			if (open && (await focusAppWindow())) {
+				hint("Brought the open Clio Coder window forward.");
+				if (values.path !== "/") {
+					const token = new URLSearchParams(url.hash.slice(1)).get("token") ?? "";
+					if (!(await showPage(Number(url.port), token, values.path).catch(() => false)))
+						console.error(
+							"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
+						);
+				}
+			} else if (open) await openLink(url.href);
 			return;
 		}
 		// The flag's promise is that no second server starts. With no background app there is nothing to reuse.

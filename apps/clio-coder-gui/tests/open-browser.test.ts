@@ -3,8 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { isAppWindowTitle, wmctrlAppWindow } from "../server/launcher/window-focus.js";
 import { serverOptions } from "../server/options.js";
-import { browserCommand, openBrowser } from "../server/process-policy.js";
+import { browserCommand, focusAppWindow, openBrowser } from "../server/process-policy.js";
 import { lifecycleLog } from "../server/services/log.js";
 import { serverProcess } from "./harness/server.js";
 
@@ -34,6 +35,33 @@ test("browser opener accepts only the loopback app and treats URL as one literal
 	await openBrowser(url, { PATH: dir, OPENER_LOG: log });
 	assert.equal(await readFile(log, "utf8"), `1\n${url}\n`);
 	await assert.rejects(openBrowser(url, { PATH: "" }));
+});
+
+test("a launch on a Linux desktop raises an open app window and otherwise reports none", async (t) => {
+	for (const title of ["Clio Coder", "Tasks · Clio Coder - Google Chrome", "● Approval needed — Chat · Clio Coder"])
+		assert.ok(isAppWindowTitle(title), title);
+	for (const title of ["Clio Coder notes.md - Visual Studio Code", "Not Clio Coder at all", "Clio Coder docs - GitHub"])
+		assert.ok(!isAppWindowTitle(title), title);
+	const dir = await mkdtemp(join(tmpdir(), "clio-web-focus-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const log = join(dir, "argv");
+	const listing = "0x01 0 host Clio Coder docs - GitHub\n0x02 -1 host Settings · Clio Coder\n";
+	assert.equal(wmctrlAppWindow(listing), "0x02");
+	await writeFile(
+		join(dir, "wmctrl"),
+		`#!/bin/sh\nif [ "$1" = "-l" ]; then printf '${listing}'; else printf "%s " "$@" > "$FOCUS_LOG"; fi\n`,
+	);
+	await chmod(join(dir, "wmctrl"), 0o700);
+	const env = { PATH: dir, DISPLAY: ":0", FOCUS_LOG: log };
+	assert.equal(await focusAppWindow(env, "linux"), true);
+	assert.equal(await readFile(log, "utf8"), "-i -a 0x02 ");
+	// No display, another platform, or a desktop without a usable tool: the launch opens a tab instead.
+	assert.equal(await focusAppWindow({ PATH: dir }, "linux"), false);
+	assert.equal(await focusAppWindow(env, "darwin"), false);
+	assert.equal(
+		await focusAppWindow({ PATH: join(dir, "missing"), DISPLAY: ":0", SWAYSOCK: "/nowhere" }, "linux"),
+		false,
+	);
 });
 
 test("--open uses the actual bound URL with its explicit token; invalid flags and unsafe log paths fail", {

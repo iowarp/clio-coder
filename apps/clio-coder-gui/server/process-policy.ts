@@ -4,6 +4,7 @@ import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, win32 } from "node:path";
 import { Worker } from "node:worker_threads";
+import { APP_TITLE } from "../contracts/meta.js";
 import { type CliCommand, commandPlan } from "./cli-commands.js";
 import {
 	createStdioTransport,
@@ -12,6 +13,13 @@ import {
 	resolveClioDirs,
 	resolvePackageRoot,
 } from "./clio/http-shims.js";
+import {
+	type FocusTool,
+	focusTools,
+	isAppWindowTitle,
+	SWAY_APP_CRITERIA,
+	wmctrlAppWindow,
+} from "./launcher/window-focus.js";
 import { AppProblem } from "./services/problem.js";
 import { type SshEndpoint, sshCommandArgs, sshForwardArgs } from "./ssh-model.js";
 import type { WorkerKind, WorkerSettings } from "./worker/protocol.js";
@@ -236,6 +244,62 @@ export function windowsAppCommand(
 	if (!isWsl(env, "linux", exists)) return null;
 	const file = WINDOWS_APP_BROWSERS.find((candidate) => exists(candidate));
 	return file ? { file, argv: [`--app=${url}`] } : null;
+}
+
+/** One short window-tool call: its exit code and stdout, bounded in time and size. Rejects when the tool is missing. */
+function runWindowTool(file: string, argv: string[], env: NodeJS.ProcessEnv) {
+	const child = spawn(file, argv, { env, shell: false, stdio: ["ignore", "pipe", "ignore"] });
+	return new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
+		let stdout = "";
+		const timer = setTimeout(() => child.kill("SIGKILL"), 3_000);
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString("utf8");
+			if (stdout.length > 262_144) child.kill("SIGKILL");
+		});
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			resolve({ code, stdout });
+		});
+	});
+}
+async function focusWith(tool: FocusTool, env: NodeJS.ProcessEnv) {
+	if (tool === "swaymsg") return (await runWindowTool("swaymsg", [SWAY_APP_CRITERIA, "focus"], env)).code === 0;
+	if (tool === "wmctrl") {
+		const listing = await runWindowTool("wmctrl", ["-l"], env);
+		const id = listing.code === 0 ? wmctrlAppWindow(listing.stdout) : null;
+		return id !== null && (await runWindowTool("wmctrl", ["-i", "-a", id], env)).code === 0;
+	}
+	const found = await runWindowTool("xdotool", ["search", "--onlyvisible", "--name", APP_TITLE], env);
+	for (const id of found.stdout.split("\n").filter((line) => /^\d+$/.test(line))) {
+		const name = await runWindowTool("xdotool", ["getwindowname", id], env);
+		if (name.code === 0 && isAppWindowTitle(name.stdout.trim()))
+			return (await runWindowTool("xdotool", ["windowactivate", id], env)).code === 0;
+	}
+	return false;
+}
+
+/**
+ * Brings an open app window forward on a native Linux desktop and says whether one was found. A missing
+ * tool, no matching window or a tool that fails counts as none, so the launch opens a tab instead. WSL is
+ * excluded because its managed Windows launcher already focuses the app window it owns.
+ */
+export async function focusAppWindow(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+) {
+	if (platform !== "linux" || isWsl(env, platform)) return false;
+	for (const tool of focusTools(env)) {
+		try {
+			if (await focusWith(tool, env)) return true;
+		} catch {
+			// The tool is not installed or could not start; the next one, or a new tab, still serves the launch.
+		}
+	}
+	return false;
 }
 
 /**
