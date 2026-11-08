@@ -321,10 +321,24 @@ site_links(full, 'llms-full.txt')
 for url in articles:
     if f'\nSource: {url}\n' not in full:
         errors.append(f'llms-full.txt is missing {url}')
-if re.search(r'^:::', full, re.M):
+def outside_code(text):
+    # Markdown lines outside backtick or tilde code fences.
+    lines, fence = [], None
+    for line in text.split('\n'):
+        marker = re.match(r'\s*(`{3,}|~{3,})', line)
+        marker = marker and marker.group(1)
+        if fence:
+            if marker and marker[0] == fence[0] and len(marker) >= len(fence) and line.strip() == marker:
+                fence = None
+        elif marker:
+            fence = marker
+        else:
+            lines.append(line)
+    return '\n'.join(lines)
+if re.search(r'^:::', outside_code(full), re.M):
     errors.append('llms-full.txt contains an unconverted guide directive')
 for name, text in (('llms.txt', llms), ('llms-full.txt', full)):
-    prose = re.sub(r'^```.*?^```', '', text, flags=re.M | re.S)
+    prose = outside_code(text)
     if '<!--' in prose or re.search(r'<a\s', prose):
         errors.append(f'{name} contains an unresolved template slot or HTML link')
 for path in pages:

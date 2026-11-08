@@ -884,22 +884,36 @@ function plainDirectives(markdown) {
 	}
 	return result.join("\n").replace(/\n{3,}/g, "\n\n");
 }
+// Applies `transform` to the Markdown outside code fences, leaving examples as written.
+function outsideCode(markdown, transform) {
+	const parts = [];
+	let prose = [];
+	let code = null;
+	const flush = () => {
+		if (prose.length) parts.push(transform(prose.join("\n")));
+		prose = [];
+	};
+	for (const line of markdown.split("\n")) {
+		const next = fence(line, code);
+		if (code || next) {
+			flush();
+			parts.push(line);
+		} else prose.push(line);
+		code = next;
+	}
+	flush();
+	return parts.join("\n");
+}
 function llmMarkdown(markdown, sourcePath, pageUrl) {
-	return plainDirectives(markdown)
-		.split(/(^```[\s\S]*?^```)/m)
-		.map((part, i) =>
-			i % 2
-				? part
-				: part
-						.replaceAll("<!-- source-blob -->", `${repository}/blob/${ref}`)
-						.replace(/<a href="([^"]+)">([^<]*)<\/a>/g, "[$2]($1)")
-						.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, bang, label, href, title) => {
-							const resolved = linkTarget(href, sourcePath, Boolean(bang));
-							return `${bang}[${label}](${resolved.startsWith("#") ? `${pageUrl}${resolved}` : absolute(resolved)}${title})`;
-						}),
-		)
-		.join("")
-		.trim();
+	return outsideCode(plainDirectives(markdown), (part) =>
+		part
+			.replaceAll("<!-- source-blob -->", `${repository}/blob/${ref}`)
+			.replace(/<a href="([^"]+)">([^<]*)<\/a>/g, "[$2]($1)")
+			.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, bang, label, href, title) => {
+				const resolved = linkTarget(href, sourcePath, Boolean(bang));
+				return `${bang}[${label}](${resolved.startsWith("#") ? `${pageUrl}${resolved}` : absolute(resolved)}${title})`;
+			}),
+	).trim();
 }
 const published = articles.filter((item) => !item.draft);
 const llmsSummary = `# Clio Coder
