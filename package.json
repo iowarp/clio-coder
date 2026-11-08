@@ -123,6 +123,7 @@
 		"test:package": "node scripts/ci-tests.mjs package",
 		"release:preflight": "node scripts/release-candidate.mjs preflight",
 		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
+		"eval:onboarding": "node --import tsx scripts/eval-onboarding.ts",
 		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts"
 	},
 	"dependencies": {
