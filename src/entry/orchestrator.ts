@@ -61,7 +61,6 @@ import {
 	getAtPath,
 	isRoutingPath,
 	mergeRoutingPatchIntoSettings,
-	planResumedRouting,
 	type RoutingPatch,
 	resolveMemoryRoute,
 	restoreRoutingFields,
@@ -266,7 +265,7 @@ import {
 	protectedArtifactStateForCurrentSession,
 } from "../domains/session/protected-artifact-recording.js";
 import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
-import { resumedSessionRoute } from "../domains/session/resumed-route.js";
+import { restoreResumedSessionRoute, resumedSessionRoute } from "../domains/session/resumed-route.js";
 import {
 	appendSkillActivationRegistryEvent,
 	foldDispatchSkillActivations,
@@ -461,11 +460,6 @@ function applyHeadlessSettingsOverlay(
 	if (overrides.thinking !== undefined) next.chat.thinkingLevel = overrides.thinking;
 	if (overrides.autonomy !== undefined) next.safety.autonomy = overrides.autonomy;
 	return next;
-}
-
-function settingsTargetRuntime(settings: Readonly<ClioSettings>, targetId: string | null | undefined): string | null {
-	if (!targetId) return null;
-	return settings.targets.find((entry) => entry.id === targetId)?.runtime ?? null;
 }
 
 function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
@@ -2920,71 +2914,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		nextScopedTarget: (direction) => advanceScopedTarget(getCurrentSettings(), direction),
 		apply: (patch, scope) => applyRoutingAtScope(patch, scope, "keybinding"),
 	});
-	/**
-	 * Put the live route back on the one the current, just-resumed session last
-	 * ran on (planResumedRouting), at session scope: settings.yaml keeps
-	 * whatever default some session saved, possibly in another project. When
-	 * the session is going to run on a different route anyway (an explicit CLI
-	 * flag, a recorded target that is gone), record that route immediately so
-	 * the next resume keeps the accepted choice (AUD-3 findings 2 and 3).
-	 * Returns the operator notice, if any; the caller knows where it can go.
-	 */
-	const restoreResumedSessionRoute = (pinned?: { route?: boolean; thinking?: boolean }): string | null => {
-		const meta = session?.current();
-		if (!session || !meta) return null;
-		let recorded: ReturnType<typeof resumedSessionRoute>;
-		try {
-			recorded = resumedSessionRoute(meta, session.readEntries());
-		} catch {
-			// An unreadable ledger has no route to offer; the session keeps the
-			// current one, which is what resume did before it looked.
-			return null;
-		}
-		const plan = planResumedRouting(
-			recorded,
-			getCurrentSettings(),
+	const restoreResumedRoute = (pinned?: { route?: boolean; thinking?: boolean }): string | null =>
+		restoreResumedSessionRoute(
+			{
+				session: session ?? null,
+				currentSettings: getCurrentSettings,
+				defaultThinkingLevel: () => (config?.get() ?? readSettings()).chat.thinkingLevel ?? "off",
+				applyPatch: (patch) => {
+					applyRoutingPatch(sessionRouting, patch);
+					bumpSessionState();
+				},
+				persistThinkingLevel: persistCurrentThinkingLevel,
+			},
 			pinned,
-			(config?.get() ?? readSettings()).chat.thinkingLevel ?? "off",
 		);
-		if (plan.patch) {
-			applyRoutingPatch(sessionRouting, plan.patch);
-			bumpSessionState();
-		}
-		const effective = getCurrentSettings().chat;
-		const parentTurnId = (() => {
-			try {
-				return session.tree(meta.id).leafId;
-			} catch {
-				return null;
-			}
-		})();
-		try {
-			const runtimeId = settingsTargetRuntime(getCurrentSettings(), effective.target);
-			if (
-				effective.target &&
-				effective.model &&
-				runtimeId &&
-				(effective.target !== recorded.target || effective.model !== recorded.model)
-			) {
-				session.appendEntry({
-					kind: "modelChange",
-					parentTurnId,
-					provider: runtimeId,
-					modelId: effective.model,
-					target: effective.target,
-				});
-			}
-			persistCurrentThinkingLevel();
-		} catch {
-			// Best effort, like the chat loop's own markers: a lost row only means
-			// the next resume restores the older route.
-		}
-		return plan.notice;
-	};
 	// A headless `--session`/`--continue` resumed before the route was seeded;
 	// restore it now, letting an explicit --target/--model/--thinking win.
 	if (resumedSessionAtBoot) {
-		const notice = restoreResumedSessionRoute({
+		const notice = restoreResumedRoute({
 			route: options.headless?.target !== undefined || options.headless?.model !== undefined,
 			thinking: options.headless?.thinking !== undefined,
 		});
@@ -3007,7 +2954,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const unsubscribeResumedRoute = bus.subscribe("session.reattached", (payload) => {
 		const event = payload as { sessionId?: unknown; via?: unknown } | null | undefined;
 		if (event?.via !== "resume" || session?.current()?.id !== event.sessionId) return;
-		const notice = restoreResumedSessionRoute();
+		const notice = restoreResumedRoute();
 		if (notice === null) return;
 		if (interactive && deferredWatchdogNoticeSink) {
 			deferredWatchdogNoticeSink(notice);

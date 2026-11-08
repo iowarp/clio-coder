@@ -1,5 +1,7 @@
+import type { ClioSettings } from "../../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../../core/defaults.js";
-import type { ResumedRoute } from "../../core/session-routing.js";
+import { planResumedRouting, type ResumedRoute, type RoutingPatch } from "../../core/session-routing.js";
+import type { SessionContract } from "./contract.js";
 import type { SessionEntry } from "./entries.js";
 
 /**
@@ -35,4 +37,78 @@ export function resumedSessionRoute(
 		}
 	}
 	return thinkingLevel === undefined ? { target, model } : { target, model, thinkingLevel };
+}
+
+/** What restoring a resumed session's route reads and writes; the composition root supplies each. */
+export interface ResumedRouteRestorePorts {
+	session: Pick<SessionContract, "current" | "readEntries" | "tree" | "appendEntry"> | null;
+	/** The live effective settings, re-read after `applyPatch`. */
+	currentSettings(): Readonly<ClioSettings>;
+	/** The configured thinking level a legacy ledger without a thinking row falls back to. */
+	defaultThinkingLevel(): ThinkingLevel;
+	/** Apply a session-scoped routing patch to the live route. */
+	applyPatch(patch: RoutingPatch): void;
+	/** Record the live thinking level on the session ledger. */
+	persistThinkingLevel(): void;
+}
+
+/**
+ * Put the live route back on the one the current, just-resumed session last
+ * ran on (planResumedRouting), at session scope: settings.yaml keeps
+ * whatever default some session saved, possibly in another project. When
+ * the session is going to run on a different route anyway (an explicit CLI
+ * flag, a recorded target that is gone), record that route immediately so
+ * the next resume keeps the accepted choice (AUD-3 findings 2 and 3).
+ * Returns the operator notice, if any; the caller knows where it can go.
+ */
+export function restoreResumedSessionRoute(
+	ports: ResumedRouteRestorePorts,
+	pinned?: { route?: boolean; thinking?: boolean },
+): string | null {
+	const session = ports.session;
+	const meta = session?.current();
+	if (!session || !meta) return null;
+	let recorded: ResumedRoute;
+	try {
+		recorded = resumedSessionRoute(meta, session.readEntries());
+	} catch {
+		// An unreadable ledger has no route to offer; the session keeps the
+		// current one, which is what resume did before it looked.
+		return null;
+	}
+	const plan = planResumedRouting(recorded, ports.currentSettings(), pinned, ports.defaultThinkingLevel());
+	if (plan.patch) ports.applyPatch(plan.patch);
+	const settings = ports.currentSettings();
+	const effective = settings.chat;
+	const parentTurnId = (() => {
+		try {
+			return session.tree(meta.id).leafId;
+		} catch {
+			return null;
+		}
+	})();
+	try {
+		const runtimeId = effective.target
+			? (settings.targets.find((entry) => entry.id === effective.target)?.runtime ?? null)
+			: null;
+		if (
+			effective.target &&
+			effective.model &&
+			runtimeId &&
+			(effective.target !== recorded.target || effective.model !== recorded.model)
+		) {
+			session.appendEntry({
+				kind: "modelChange",
+				parentTurnId,
+				provider: runtimeId,
+				modelId: effective.model,
+				target: effective.target,
+			});
+		}
+		ports.persistThinkingLevel();
+	} catch {
+		// Best effort, like the chat loop's own markers: a lost row only means
+		// the next resume restores the older route.
+	}
+	return plan.notice;
 }

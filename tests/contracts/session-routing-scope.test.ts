@@ -17,7 +17,7 @@ import { createProvidersDomainModule, type ProvidersContract } from "../../src/d
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { resumedSessionRoute } from "../../src/domains/session/resumed-route.js";
+import { restoreResumedSessionRoute, resumedSessionRoute } from "../../src/domains/session/resumed-route.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -181,6 +181,75 @@ test("resume plans a session-only route change and names a target that is gone",
 			thinking: true,
 		}),
 		{ patch: { orchestrator: { target: "beta", model: "beta-default" } }, notice: null },
+	);
+});
+
+test("restoring a resumed route patches the session and records a route the session did not run on", () => {
+	const restore = (recorded: SessionEntry[], pinned?: { route?: boolean }) => {
+		const live = twoTargetSettings();
+		const appended: Array<Record<string, unknown>> = [];
+		let thinkingPersisted = 0;
+		const notice = restoreResumedSessionRoute(
+			{
+				session: {
+					current: () => ({ id: "s1", target: "alpha", model: "alpha-default" }) as SessionMeta,
+					readEntries: () => recorded,
+					tree: () => ({ leafId: "leaf-1" }) as never,
+					appendEntry: (row) => {
+						appended.push(row as never);
+						return row as never;
+					},
+				},
+				currentSettings: () => live,
+				defaultThinkingLevel: () => "off",
+				applyPatch: (patch) => {
+					Object.assign(live.chat, patch.orchestrator);
+				},
+				persistThinkingLevel: () => {
+					thinkingPersisted += 1;
+				},
+			},
+			pinned,
+		);
+		return { notice, chat: live.chat, appended, thinkingPersisted };
+	};
+	const moved = restore([
+		entry({ kind: "modelChange", provider: "openai-compat", modelId: "beta-default", target: "beta" }),
+	]);
+	assert.equal(moved.notice, null);
+	assert.equal(moved.chat.target, "beta");
+	assert.deepEqual(moved.appended, []);
+	assert.equal(moved.thinkingPersisted, 1);
+
+	const gone = restore([
+		entry({ kind: "modelChange", provider: "openai-compat", modelId: "gamma-model", target: "gamma" }),
+	]);
+	assert.equal(
+		gone.notice,
+		"resumed session ran on gamma/gamma-model, which is no longer configured; continuing on alpha/alpha-default.",
+	);
+	assert.deepEqual(gone.appended, [
+		{ kind: "modelChange", parentTurnId: "leaf-1", provider: "openai-compat", modelId: "alpha-default", target: "alpha" },
+	]);
+
+	const pinned = restore(
+		[entry({ kind: "modelChange", provider: "openai-compat", modelId: "beta-default", target: "beta" })],
+		{
+			route: true,
+		},
+	);
+	assert.equal(pinned.chat.target, "alpha");
+	assert.equal(pinned.appended.length, 1);
+
+	assert.equal(
+		restoreResumedSessionRoute({
+			session: null,
+			currentSettings: twoTargetSettings,
+			defaultThinkingLevel: () => "off",
+			applyPatch: () => assert.fail("no session, no patch"),
+			persistThinkingLevel: () => assert.fail("no session, nothing persisted"),
+		}),
+		null,
 	);
 });
 
