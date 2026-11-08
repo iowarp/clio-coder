@@ -77,13 +77,17 @@ describe("global startup flags before a subcommand", () => {
 		for (const [args, refusal] of [
 			[["paths", "-v"], /unknown flag: -v/u],
 			[["paths", "--bogus", "--version"], /unknown flag: --bogus/u],
-			[["run", "--", "-v"], /unknown clio-coder run option: -v/u],
+			[["run", "-v"], /unknown clio-coder run option: -v/u],
 		] as const) {
 			const result = cli(args);
 			equal(result.status, 2, `${args.join(" ")}: ${result.stdout}`);
 			doesNotMatch(result.stdout, /Clio Coder /u);
 			match(result.stderr, refusal);
 		}
+		// After "--" a -v is the task text: neither the version nor a refused option.
+		const task = cli(["run", "--", "-v"]);
+		doesNotMatch(task.stdout, /^Clio Coder /u);
+		doesNotMatch(task.stderr, /unknown clio-coder run option/u);
 	});
 
 	it("still hands the boot options run honors to run", () => {
