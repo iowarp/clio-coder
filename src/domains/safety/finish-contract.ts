@@ -145,6 +145,11 @@ interface ToolCallEvidenceCandidate {
 	execution?: ValidationExecutionEvidence;
 }
 
+interface DeclaredRunCandidate extends ToolCallEvidenceCandidate {
+	/** A later segment of the same call writes or deletes a file, so the call's own edits do not all precede the check. */
+	editsAfter: boolean;
+}
+
 interface MutationCandidate {
 	toolCallId: string;
 	paths: string[];
@@ -448,6 +453,16 @@ function changesShellState(segment: ReadonlyArray<string>): boolean {
 	return word === undefined || SHELL_STATE_WORDS.has(word);
 }
 
+function shellWord(word: string): string {
+	return `'${word.replaceAll("'", "'\\''")}'`;
+}
+
+/** A declared check a shell command ran whole, and whether a later segment of the same command writes or deletes a file. */
+interface DeclaredVerifierMatch {
+	check: DeclaredVerifierCommand;
+	editsAfter: boolean;
+}
+
 /**
  * Every declared check a successful shell command ran whole, each as a
  * contiguous run of its `&&` segments that no earlier segment could have
@@ -458,7 +473,7 @@ function declaredVerifierRuns(
 	cwd: unknown,
 	workspaceRoot: string | undefined,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
-): DeclaredVerifierCommand[] {
+): DeclaredVerifierMatch[] {
 	if (declared.length === 0 || workspaceRoot === undefined) return [];
 	const segments = shellAndSegments(command);
 	if (segments === null) return [];
@@ -467,15 +482,23 @@ function declaredVerifierRuns(
 		left.length === right.length && left.every((word, index) => word === right[index]);
 	const firstStateChange = segments.findIndex(changesShellState);
 	const reachable = firstStateChange === -1 ? segments.length : firstStateChange + 1;
-	const matches: DeclaredVerifierCommand[] = [];
+	const matches: DeclaredVerifierMatch[] = [];
 	for (const check of declared) {
 		if (check.cwd !== ranIn) continue;
+		// The last run of a check is the one the fewest later segments can undo.
+		let end = -1;
 		for (let start = 0; start < reachable && start + check.segments.length <= segments.length; start += 1) {
-			if (check.segments.every((segment, offset) => same(segment, segments[start + offset] as string[]))) {
-				matches.push(check);
-				break;
-			}
+			if (check.segments.every((segment, offset) => same(segment, segments[start + offset] as string[])))
+				end = start + check.segments.length;
 		}
+		if (end === -1) continue;
+		const rest = segments
+			.slice(end)
+			.map((segment) => segment.map(shellWord).join(" "))
+			.join(" && ");
+		const editsAfter =
+			rest.length > 0 && extractCommandWriteTargets(rest).length + extractCommandDeleteTargets(rest).length > 0;
+		matches.push({ check, editsAfter });
 	}
 	return matches;
 }
@@ -704,14 +727,17 @@ function collectValidationEvidence(
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
-	const declaredRuns = new Map<string, ToolCallEvidenceCandidate[]>();
+	const declaredRuns = new Map<string, DeclaredRunCandidate[]>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 	const entries = capabilityEntries(recent);
 	const mutations = declared.length > 0 ? mutationPositions(entries) : [];
-	// A declared check run through the shell counts only after the last edit by any other call.
-	const afterLastEdit = (index: number, toolCallId: string | null) =>
-		mutations.every((mutation) => mutation.index < index || mutation.toolCallId === toolCallId);
+	// A declared check run through the shell counts only after the last edit by any other call,
+	// and after every edit its own call makes.
+	const afterLastEdit = (index: number, run: DeclaredRunCandidate | null) =>
+		mutations.every(
+			(mutation) => mutation.index < index || (run !== null && mutation.toolCallId === run.toolCallId && !run.editsAfter),
+		);
 
 	for (const [index, entry] of entries.entries()) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
@@ -757,7 +783,10 @@ function collectValidationEvidence(
 				pushEvidence(evidence, seen, validationEvidence(candidate, entry));
 			}
 			for (const declaredCandidate of declaredRuns.get(resultId) ?? []) {
-				if (afterLastEdit(index, resultId)) pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
+				if (afterLastEdit(index, declaredCandidate)) {
+					const { editsAfter: _editsAfter, ...candidate } = declaredCandidate;
+					pushEvidence(evidence, seen, validationEvidence(candidate, entry));
+				}
 			}
 			continue;
 		}
@@ -829,7 +858,7 @@ function bashDeclaredVerifierCalls(
 	entry: unknown,
 	workspaceRoot: string | undefined,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
-): ToolCallEvidenceCandidate[] {
+): DeclaredRunCandidate[] {
 	if (declared.length === 0) return [];
 	const record = asRecord(entry);
 	if (record?.kind !== "message" || record.role !== "tool_call") return [];
@@ -842,12 +871,15 @@ function bashDeclaredVerifierCalls(
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return [];
 	const turnId = turnIdOf(entry);
-	return declaredVerifierRuns(execution.command, execution.cwd, workspaceRoot, declared).map((check) => ({
-		toolCallId,
-		command: `${execution.command.trim()} (declared check ${check.id})`,
-		check: check.id,
-		...(turnId !== null ? { turnId } : {}),
-	}));
+	return declaredVerifierRuns(execution.command, execution.cwd, workspaceRoot, declared).map(
+		({ check, editsAfter }) => ({
+			toolCallId,
+			command: `${execution.command.trim()} (declared check ${check.id})`,
+			check: check.id,
+			editsAfter,
+			...(turnId !== null ? { turnId } : {}),
+		}),
+	);
 }
 
 /** An operator `!` run's declared checks; the run carries its own exit code. */
@@ -863,7 +895,7 @@ function bashExecutionDeclaredEvidence(
 	const execution = workspaceValidationCommand(record.command, record.cwd, workspaceRoot);
 	if (execution === null) return [];
 	const turnId = turnIdOf(entry);
-	return declaredVerifierRuns(execution.command, execution.cwd, workspaceRoot, declared).map((check) => ({
+	return declaredVerifierRuns(execution.command, execution.cwd, workspaceRoot, declared).map(({ check }) => ({
 		kind: "validation_command",
 		summary: `validation command passed: ${execution.command.trim()} (declared check ${check.id})`,
 		check: check.id,

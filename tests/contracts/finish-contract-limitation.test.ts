@@ -332,7 +332,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
-	it("credits every declared check a chain runs, unless an earlier segment can skip or move it", (t) => {
+	it("credits every declared check a chain runs, unless an earlier segment can skip or move it or a later one edits", (t) => {
 		const root = mkdtempSync(join(tmpdir(), "finish-declared-chain-"));
 		t.after(() => rmSync(root, { recursive: true, force: true }));
 		const sessionVerifiers = [
@@ -358,12 +358,15 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(passedChecks("./acceptance.sh && ./second.sh"), ["run-acceptance", "run-second"]);
 		deepStrictEqual(passedChecks("true && pwd"), ["run-pwd"]);
 		deepStrictEqual(passedChecks("cp before.ts src/thing.ts && ./acceptance.sh"), ["run-acceptance"]);
+		deepStrictEqual(passedChecks("./acceptance.sh && cp before.ts src/thing.ts && ./second.sh"), ["run-second"]);
 		for (const command of [
 			"exit 0 && false",
 			"exec true && false",
 			"true && cd / && pwd",
 			"pushd / && pwd",
 			"PATH=/nowhere && pwd",
+			"./acceptance.sh && cp before.ts src/thing.ts",
+			"./acceptance.sh && rm src/thing.ts",
 		]) {
 			strictEqual(assess(command).reason, "unvalidated_mutation", command);
 		}
