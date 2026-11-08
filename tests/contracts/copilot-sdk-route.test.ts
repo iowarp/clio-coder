@@ -162,6 +162,8 @@ class FakeSession {
 		if (prompt.includes("op:hang")) { this.emit("assistant.message_delta", { messageId: "h1", deltaContent: "partial" }); return; }
 		if (prompt.includes("op:usage-wait")) {
 			this.usage({ model: "fake-model", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0 });
+			// The report has been delivered to every subscriber; the test interrupts only after this point.
+			globalThis.__clioCopilotUsageReported?.();
 			return;
 		}
 		if (prompt.includes("op:drop")) {
@@ -871,9 +873,17 @@ test("billing boundaries are per quantity, and a gap is attributed to no call", 
 });
 
 test("an interrupted call keeps the positive counts its provider reported", async () => {
+	const hook = globalThis as { __clioCopilotUsageReported?: () => void };
+	const reported = new Promise<void>((resolve) => {
+		hook.__clioCopilotUsageReported = resolve;
+	});
 	const controller = new AbortController();
 	const pending = step({ messages: [user("op:usage-wait")] }, "interrupt-session", controller.signal);
-	await new Promise((resolve) => setTimeout(resolve, 30));
+	// Interrupt once the provider's report has been delivered, not after a guessed delay: under load a fixed
+	// sleep can fire before the session exists, and an interrupt with no report is rightly unmeasured.
+	const first = await Promise.race([reported.then(() => "reported"), pending.then(() => "settled")]);
+	delete hook.__clioCopilotUsageReported;
+	strictEqual(first, "reported", "the provider reported usage while the call was still open");
 	controller.abort();
 	const interrupted = await pending;
 	strictEqual(interrupted.stopReason, "aborted");
