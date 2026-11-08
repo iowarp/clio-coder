@@ -1,5 +1,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { keptRows } from "../../src/interactive/kept-rows.js";
@@ -97,4 +99,29 @@ test("the rows a stream tick vouches for are last tick's rows, even when a late 
 		fresh.applyEvent({ type: "text_delta", contentIndex: 0, delta: text } as never);
 		strictEqual(panel.render(80).join("\n"), fresh.render(80).join("\n"));
 	}
+});
+
+/**
+ * A kept-rows record names the rows it was taken against without holding them: when it held them, the latest frame
+ * held the one before, which held the one before that, and a 500 KB reply kept every frame's rows alive (#428).
+ */
+test("a streamed frame's rows do not keep earlier frames' rows alive", async () => {
+	setFlagsFromString("--expose-gc");
+	const gc = runInNewContext("gc") as () => void;
+	const panel = createChatPanel({ now: () => 0 });
+	panel.appendUser("Write the guide.");
+	panel.applyEvent({ type: "agent_start" } as never);
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	const paragraph = "A paragraph of the answer, with prose that wraps.\n\n";
+	panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: paragraph.repeat(20) } as never);
+	panel.renderRegions(80);
+	panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: "More " } as never);
+	const first = new WeakRef(panel.renderRegions(80).tail);
+	for (let frame = 0; frame < 20; frame += 1) {
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: frame % 4 === 3 ? paragraph : "words " } as never);
+		panel.renderRegions(80);
+	}
+	await new Promise((resolve) => setImmediate(resolve));
+	gc();
+	strictEqual(first.deref(), undefined, "the first frame's tail was collected");
 });

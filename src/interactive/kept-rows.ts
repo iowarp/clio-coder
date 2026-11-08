@@ -5,8 +5,24 @@
  *
  * A record names the array it was taken against, so a consumer only trusts it against the array it holds itself:
  * a producer called again in between (another width, a prerender) leaves a record no consumer matches.
+ *
+ * A record names its base by an opaque id, never by the array: holding a frame's rows must not hold the frame before
+ * it, whose record would hold the one before that, back to the first frame of the reply.
  */
-type KeptRecord = { base: readonly string[]; count: number };
+type KeptRecord = { base: number; count: number };
+const ids = new WeakMap<readonly string[], number>();
+let nextId = 1;
+
+function idOf(rows: readonly string[]): number {
+	let id = ids.get(rows);
+	if (id === undefined) {
+		id = nextId;
+		nextId += 1;
+		ids.set(rows, id);
+	}
+	return id;
+}
+
 /** Two layers may hand on the same array, each against the array it returned before, so a list holds both records. */
 const kept = new WeakMap<readonly string[], KeptRecord[]>();
 const RECORDS_PER_ROWS = 2;
@@ -15,8 +31,9 @@ const RECORDS_PER_ROWS = 2;
 export function keepRows(rows: readonly string[], base: readonly string[] | undefined, count: number): void {
 	if (base === undefined || rows === base) return;
 	const bounded = Math.min(count, rows.length, base.length);
-	const records = (kept.get(rows) ?? []).filter((record) => record.base !== base);
-	if (bounded > 0) records.unshift({ base, count: bounded });
+	const id = idOf(base);
+	const records = (kept.get(rows) ?? []).filter((record) => record.base !== id);
+	if (bounded > 0) records.unshift({ base: id, count: bounded });
 	if (records.length > RECORDS_PER_ROWS) records.length = RECORDS_PER_ROWS;
 	kept.set(rows, records);
 }
@@ -25,7 +42,9 @@ export function keepRows(rows: readonly string[], base: readonly string[] | unde
 export function keptRows(rows: readonly string[], base: readonly string[] | undefined): number {
 	if (base === undefined) return 0;
 	if (rows === base) return rows.length;
-	return kept.get(rows)?.find((record) => record.base === base)?.count ?? 0;
+	const id = ids.get(base);
+	if (id === undefined) return 0;
+	return kept.get(rows)?.find((record) => record.base === id)?.count ?? 0;
 }
 
 /** One stretch of a joined row list: `rows[start, end)`. */
