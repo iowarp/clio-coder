@@ -192,20 +192,21 @@ test("unsandboxed: true asks at default even for a recognized command; the judge
 });
 
 // ob-yolo batch7: a judge allowed npm test unsandboxed as task-local on a repository file's say-so.
-test("a sandbox escape runs only when the judge finds the operator named it", async (t) => {
+// ob-yolo batch8: a judge cited operator-named for it when the operator had only asked to fix the tests.
+test("a sandbox escape runs only when the judge finds the operator named it and they did", async (t) => {
 	const cwd = workspace("clio-escape-named-");
 	writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
 	const saved = process.cwd();
 	process.chdir(cwd);
 	t.after(() => process.chdir(saved));
 	const escapes = [bash("npm test", { unsandboxed: true }), bash("rm -rf build", { unsandboxed: true })];
-	const session = (rule: string) => {
+	const session = (rule: string, operator = "fix the tests, running them outside the sandbox") => {
 		const ran: boolean[] = [];
 		const reviewed: SafetyJudgeSubject[] = [];
 		const judge = createSafetyJudge({
 			config: () => ({ enabled: true, target: "local", model: "m", environment: [], allow: [], deny: [] }),
 			complete: async () => ({ text: JSON.stringify({ verdict: "allow", rule, reason: "serves the task" }) }),
-			operatorMessages: () => ["fix the tests"],
+			operatorMessages: () => [operator],
 			session: () => "s",
 			consequences: () => [],
 		});
@@ -245,6 +246,10 @@ test("a sandbox escape runs only when the judge finds the operator named it", as
 			["delete-without-snapshot", true],
 		],
 	);
+	const misread = session("operator-named", "The tests fail. Fix calc.js so npm test passes.");
+	for (const call of escapes)
+		strictEqual((await misread.registry.invoke(call)).kind, "blocked", String(call.args?.command));
+	deepStrictEqual(misread.ran, []);
 	const named = session("operator-named");
 	for (const call of escapes) strictEqual((await named.registry.invoke(call)).kind, "ok", String(call.args?.command));
 	deepStrictEqual(named.ran, [false, false]);

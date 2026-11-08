@@ -15,3 +15,12 @@ export function asksToLeaveSandbox(decision: SafetyDecision): boolean {
 	if (policy === undefined) return false;
 	return policy.ruleId === SANDBOX_ESCAPE_RULE_ID || policy.reasons.includes(SANDBOX_ESCAPE_REASON);
 }
+
+/**
+ * True when an operator message mentions the sandbox. The judge's `operator-named`
+ * citation is the model's word; an escape it allows also needs the operator's own
+ * text to speak of the sandbox, so a judge that misreads a request cannot grant one.
+ */
+export function operatorMentionsSandbox(messages: ReadonlyArray<string>): boolean {
+	return messages.some((text) => /sandbox|unconfined/i.test(text));
+}
