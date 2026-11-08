@@ -74,7 +74,7 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 
 ### Data
 
-- `data op=stats` reports `argmin` and `argmax`, the absolute index of the first minimum and maximum, for HDF5, NetCDF and Parquet. They respect strided windows and skip fill, missing and non-finite values.
+- `data op=stats` reports `argmin` and `argmax`, the absolute index of the first occurrence of the minimum and of the maximum, for HDF5, NetCDF and Parquet. They respect strided windows and skip fill, missing and non-finite values.
 
 ### Fixes
 
