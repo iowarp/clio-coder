@@ -99,7 +99,6 @@ test("settings controls derive from the engine registry, write only the user lay
 		assert.equal(byPath.get("interface.guiTurnCapacity")?.value, "4");
 		assert.equal(h.supervisor.turnCapacity, 4);
 		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "1" })).status, 200);
-		await h.capacityApplied();
 		assert.equal(h.supervisor.turnCapacity, 1);
 		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "17" })).status, 422);
 		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "0" })).status, 422);
@@ -121,4 +120,25 @@ test("settings controls derive from the engine registry, write only the user lay
 	} finally {
 		await h.close();
 	}
+});
+
+test("a lowered turn limit holds the next turn as soon as the write is acknowledged", { timeout: 30000 }, async (t) => {
+	const h = await harness({}, { scenario: "steer" });
+	t.after(h.close);
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), Workspace);
+	assert.equal(h.supervisor.turnCapacity, 4);
+	const written = await h.request(`/api/workspaces/${workspace.id}/settings/controls`, {
+		method: "PATCH",
+		headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+		body: JSON.stringify({ path: "interface.guiTurnCapacity", value: "1" }),
+	});
+	assert.equal(written.status, 200);
+	const first = await h.supervisor.open(workspace.id);
+	const second = await h.supervisor.open(workspace.id);
+	const a = h.supervisor.startTurn(first.id, "[hold] First");
+	const b = h.supervisor.startTurn(second.id, "[hold] Second");
+	assert.equal(h.supervisor.get(first.id).turns.at(-1)?.queued, undefined);
+	assert.equal(h.supervisor.get(second.id).turns.at(-1)?.queued, true);
+	await h.supervisor.cancel(second.id, b.turnId);
+	await h.supervisor.cancel(first.id, a.turnId);
 });

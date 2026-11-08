@@ -18,8 +18,8 @@ export class SettingsService {
 		private readonly reads: WorkerHost,
 		private readonly workspaces: WorkspaceService,
 		private readonly ops?: WorkerHost,
-		/** Told when a write changes the turn limit, so the app applies it without a restart. */
-		private readonly turnCapacityChanged?: () => void,
+		/** Told when a write changes the turn limit; the write is acknowledged only after it settles. */
+		private readonly turnCapacityChanged?: () => Promise<void>,
 	) {}
 	/** Controls as they resolve for `cwd`, which the app server uses for its own settings at startup. */
 	async controlsAt(cwd: string) {
@@ -39,7 +39,8 @@ export class SettingsService {
 		const result = await this.ops.call("settings.write", { cwd: workspace.path, write });
 		if (!Value.Check(SettingWritten, result))
 			throw new AppProblem("unavailable", "Settings write returned an invalid projection.");
-		if (result.changed.some((row) => row.path === TURN_CAPACITY_SETTING)) this.turnCapacityChanged?.();
+		// The next turn after a 200 must already see the new limit, so the supervisor is updated first.
+		if (result.changed.some((row) => row.path === TURN_CAPACITY_SETTING)) await this.turnCapacityChanged?.();
 		return result;
 	}
 	async settings(workspaceId: string) {

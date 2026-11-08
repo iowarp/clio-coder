@@ -212,7 +212,7 @@ export async function main(args = process.argv.slice(2)) {
 	// The user's limit, resolved where no project layer applies, since one server runs turns for every
 	// workspace. Read at startup and after the app writes it; until the first read the default holds.
 	const applyTurnCapacity = () =>
-		void realpath(stateRoot)
+		realpath(stateRoot)
 			.then((cwd) => settingsService.controlsAt(cwd))
 			.then((controls) => {
 				const capacity = turnCapacitySetting(controls);
@@ -224,7 +224,7 @@ export async function main(args = process.argv.slice(2)) {
 				),
 			);
 	const settingsService = new SettingsService(reads, workspaces, ops, applyTurnCapacity);
-	applyTurnCapacity();
+	void applyTurnCapacity();
 	const setup = new SetupService(reads, env, workspaces);
 	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;

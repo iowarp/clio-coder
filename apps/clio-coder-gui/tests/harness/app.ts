@@ -73,15 +73,14 @@ export async function harness(
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
 	// Wired as the server wires it: a written turn limit is re-read from the user layer and applied.
-	let capacityApplied = Promise.resolve();
-	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () => {
-		capacityApplied = realpath(join(home.path, "state"))
+	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () =>
+		realpath(join(home.path, "state"))
 			.then((cwd) => settingsService.controlsAt(cwd))
 			.then((controls) => {
 				const capacity = turnCapacitySetting(controls);
 				if (capacity !== undefined) supervisor.setTurnCapacity(capacity);
-			});
-	});
+			}),
+	);
 	const setup = new SetupService(reads, env, workspaces);
 	// Wired as the server wires it, so the machine switcher reads the scratch home's (empty) node registry.
 	const attachments = new MachineAttachments({
@@ -165,7 +164,6 @@ export async function harness(
 		sessions,
 		supervisor,
 		/** Settles once the turn limit a settings write changed has been applied. */
-		capacityApplied: () => capacityApplied,
 		reads,
 		ops,
 		cli,
