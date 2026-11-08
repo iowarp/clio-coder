@@ -20,7 +20,8 @@ import { AI_AGENT_NAME } from "../core/agent-environment.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
 import { adoptDevRootOwner } from "../core/dev-roots.js";
 import {
-	setGitCommitAttributionEnabled,
+	configureGitCommitAttribution,
+	setAutonomousCommitProcess,
 	withManagedGitCommitAttributionEnvironment,
 } from "../core/git-commit-attribution.js";
 import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
@@ -158,7 +159,9 @@ async function main(): Promise<number> {
 	const spec = await demux.readSpec();
 	process.title = `clio-coder-worker:${spec.agentId}`;
 	const attributionEnabled = spec.gitCommitAttribution ?? true;
-	setGitCommitAttributionEnabled(attributionEnabled);
+	configureGitCommitAttribution({ commitAttribution: attributionEnabled, commitAuthor: spec.gitCommitAuthor ?? "auto" });
+	// A dispatched worker is autonomous: under `auto` its commits name Clio as author.
+	setAutonomousCommitProcess(true);
 	// Every child this worker spawns through bash-exec or safe-exec runs under
 	// the dispatch-chosen OS sandbox from here on (decision Q8).
 	configureWorkerProcessSandbox(spec.sandbox);

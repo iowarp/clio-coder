@@ -42,6 +42,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"delegation.defaults.toolGovernance": "External agent permissions",
 	"skills.trustProjectCompatRoots": "Trust project imports",
 	"attribution.gitCommits": "Credit in Git commits",
+	"attribution.commitAuthor": "Author of autonomous commits",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
 	"orchestrator.target": "Chat connection",
@@ -138,6 +139,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"skills.trustProjectCompatRoots": "Allow explicitly imported foreign skills and prompts to run.",
 	"attribution.gitCommits":
 		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
+	"attribution.commitAuthor":
+		"Who authors commits Clio makes on its own: dispatched workers and their landing, headless runs, and scheduled jobs.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
 	"orchestrator.thinkingLevel": "How much reasoning the chat model uses before answering.",
 	"orchestrator.target": "Connection that answers in chat.",
@@ -288,6 +291,8 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 		"Applies to foreign packages explicitly imported into Clio, at user or project scope. Loose skills/prompts in other agents' folders stay discovery-only; this setting never imports them.",
 	"attribution.gitCommits":
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
+	"attribution.commitAuthor":
+		"Automatic makes Clio Coder the author of autonomous commits, with you as committer and a Co-authored-by trailer naming you. Interactive sessions always keep you as the author. Needs commit credit on and a configured user.name and user.email; an author you or the command chose always wins.",
 	"workers.onPermission":
 		"Safety judge reviews the call against your own messages while Clio runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"workers.escalation.timeoutMs":
@@ -382,6 +387,10 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		enabled: "add only the Clio role trailers justified by trusted evidence",
 		disabled: "leave every subsequent commit message byte-for-byte unchanged",
 	},
+	"attribution.commitAuthor": {
+		auto: "Clio authors autonomous commits and credits you as co-author",
+		human: "you author every commit; Clio is credited only by trailers",
+	},
 	"terminal.showTerminalProgress": {
 		true: "show progress in a supported terminal tab or taskbar",
 		false: "no terminal progress badges",
@@ -416,6 +425,7 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 };
 
 const SETTINGS_CENTER_V2_PATH_OVERRIDES: Readonly<Record<string, string>> = {
+	"attribution.commitAuthor": "integrations.git.commitAuthor",
 	"retry.firstTokenStallMs": "chat.retry.firstTokenStallMs",
 	"workers.profiles": "fleet.profiles",
 	"workers.agentBindings": "fleet.agentProfiles",
@@ -459,6 +469,7 @@ export interface SettingControl {
 }
 
 const CHOICES: Record<string, readonly string[]> = {
+	"integrations.git.commitAuthor": ["auto", "human"],
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"telemetry.mode": ["standard", "research"],
 	"safety.autonomy": ["default", "yolo"],

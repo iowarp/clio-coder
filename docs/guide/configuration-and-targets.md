@@ -315,6 +315,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `integrations.library.confirmedRemote` | `null` | next turn |
 | `integrations.library.sync` | `false` | next turn |
 | `integrations.git.commitAttribution` | `true` | immediately for subsequent commits |
+| `integrations.git.commitAuthor` | `auto` | immediately for subsequent commits |
 | `integrations.music.enabled` | `false` | immediately, at the next `/music` |
 | `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | immediately, at the next `/music` |
 | `integrations.music.agentControl` | `false` | restart |

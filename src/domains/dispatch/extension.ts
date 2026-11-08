@@ -3218,6 +3218,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 		spec.trustProjectCompatRoots = settings.integrations.projectResources.trustProjectImports === true;
 	}
 	spec.gitCommitAttribution = settings?.integrations.git.commitAttribution ?? true;
+	spec.gitCommitAuthor = settings?.integrations.git.commitAuthor ?? "auto";
 	// This session's workers count as the owner of its dev extension folders; another session's do not.
 	spec.devRootOwner = devRootOwnerForWorkers();
 	// Non-stall posture (Symphony §10.5): a dispatched worker has no operator

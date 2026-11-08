@@ -2609,10 +2609,17 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (!isPlainObject(integrations.git))
 					issues.add("integrations.git", `expected a map, got ${describe(integrations.git)}`);
 				else {
-					issues.unknownKeys("integrations.git", integrations.git, ["commitAttribution"]);
+					issues.unknownKeys("integrations.git", integrations.git, ["commitAttribution", "commitAuthor"]);
 					if ("commitAttribution" in integrations.git) {
 						const parsed = expectBoolean(issues, "integrations.git.commitAttribution", integrations.git.commitAttribution);
 						if (parsed !== undefined) settings.integrations.git.commitAttribution = parsed;
+					}
+					if ("commitAuthor" in integrations.git) {
+						const parsed = expectEnum(issues, "integrations.git.commitAuthor", integrations.git.commitAuthor, [
+							"auto",
+							"human",
+						] as const);
+						if (parsed !== undefined) settings.integrations.git.commitAuthor = parsed;
 					}
 				}
 			}

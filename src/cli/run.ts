@@ -5,6 +5,7 @@ import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
+import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
 import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
@@ -410,6 +411,8 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
+	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
+	setAutonomousCommitProcess(true);
 	return withRunFailureReporting(parsed.json, async () => {
 		try {
 			return await executeRunCommand(parsed, options);

@@ -399,7 +399,16 @@ export interface ProjectResourcesSettings {
 export interface GitIntegrationSettings {
 	/** Evidence-aware role trailers on commits created through Clio. */
 	commitAttribution: boolean;
+	/**
+	 * Who authors autonomous commits (dispatched workers and their landing,
+	 * headless `run`, scheduled job turns). `auto` makes Clio the author with
+	 * the human committer credited as co-author; `human` keeps the human the
+	 * author everywhere. Interactive sessions always keep the human author.
+	 */
+	commitAuthor: GitCommitAuthorSetting;
 }
+
+export type GitCommitAuthorSetting = "auto" | "human";
 
 /** The music pane: cliamp in a herdr dock. Off until the operator turns it on. */
 export interface MusicIntegrationSettings {
@@ -923,7 +932,7 @@ export const DEFAULT_SETTINGS = {
 			confirmedRemote: null as string | null,
 			sync: false,
 		},
-		git: { commitAttribution: true },
+		git: { commitAttribution: true, commitAuthor: "auto" as GitCommitAuthorSetting },
 		music: { enabled: false, station: DEFAULT_MUSIC_STATION, agentControl: false },
 	} as IntegrationsSettings,
 	telemetry: {
@@ -1167,6 +1176,7 @@ integrations:
     sync: false
   git:
     commitAttribution: true
+    commitAuthor: auto
   music:
     enabled: false
     station: http://radio.cliamp.stream/lofi/stream

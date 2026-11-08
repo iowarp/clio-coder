@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
+import { attributeCommitMessage } from "../core/commit-attribution.js";
+import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
 import { internalGitArgv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
 import {
@@ -326,6 +328,9 @@ export function executeTaskLand(
 			const parents = plan.mode === "merge" ? ["-p", plan.destinationHead, "-p", source] : ["-p", plan.destinationHead];
 			const commit =
 				plan.mode === "squash" ? squashCommit(plan, source, options.message) : { message: options.message, env: {} };
+			// A single-commit squash keeps that commit's author; any other landing commit is Clio's under `auto`.
+			const authorship = Object.keys(commit.env).length === 0 ? autonomousLandAuthorship(plan.root) : null;
+			const landingMessage = commit.message ?? `Merge branch '${plan.branch}'`;
 			landing = git(
 				plan.root,
 				[
@@ -334,9 +339,11 @@ export function executeTaskLand(
 					plan.tree,
 					...parents,
 					"-m",
-					commit.message ?? `Merge branch '${plan.branch}'`,
+					authorship === null
+						? landingMessage
+						: attributeCommitMessage(landingMessage, {}, true, { clioAuthorFor: authorship.human }),
 				],
-				commit.env,
+				authorship === null ? commit.env : { ...commit.env, ...authorship.env },
 			);
 		}
 		if (git(plan.root, ["rev-parse", "HEAD"]) !== plan.destinationHead)

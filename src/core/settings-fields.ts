@@ -49,6 +49,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"color",
 	"command",
 	"commitAttribution",
+	"commitAuthor",
 	"compaction",
 	"concurrency",
 	"confirmedRemote",

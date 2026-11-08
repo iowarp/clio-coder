@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { enterAutonomousCommitScope } from "../core/git-commit-attribution.js";
 import {
 	continuationCountsAgainstCap,
 	JobClockExpired,
@@ -4545,6 +4546,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		let ownedUserTurnId: string | null = null;
 		let ownedRuntime: AgentRuntime | null = null;
 		let projectionLease: Extract<MachineTurnProjectionAdmission, { status: "ready" }> | null = null;
+		// A scheduled job's turn is autonomous: its commits name Clio as author under `auto`.
+		const autonomousCommits: { release: (() => void) | null } = { release: null };
 		const cancel = (): void => {
 			if (
 				machineTurnOwner === token &&
@@ -4617,6 +4620,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				onAdmitted: () => {
 					if (machinePreparation?.token === token) machinePreparation = null;
 					machineTurnRunning = token;
+					autonomousCommits.release ??= enterAutonomousCommitScope();
 					ownedUserTurnId = state.activeUserTurnId;
 					ownedRuntime = state.runtime;
 					emit({
@@ -4645,6 +4649,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 		} finally {
 			request.signal.removeEventListener("abort", cancel);
+			autonomousCommits.release?.();
 			if (machineTurnRunning === token) machineTurnRunning = null;
 			try {
 				projectionLease?.release();

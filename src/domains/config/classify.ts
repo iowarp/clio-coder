@@ -39,6 +39,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"interface.autoUpdate",
 	"interface.panes.notifications",
 	"integrations.git.commitAttribution",
+	"integrations.git.commitAuthor",
 	// `/music` reads both on every invocation.
 	"integrations.music.enabled",
 	"integrations.music.station",

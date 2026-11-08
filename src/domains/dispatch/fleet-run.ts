@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
+import { gitCommitAuthorSetting, resolveClioCommitAuthorship } from "../../core/git-commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
@@ -1142,6 +1143,10 @@ async function runFleetHoldingWorkspace(
 					}
 				}
 				const codeRunId = newCodeRunId();
+				const commitAuthorship =
+					isCommit && input.attributionEnabled && gitCommitAuthorSetting() === "auto"
+						? resolveClioCommitAuthorship(workspaceRoot)
+						: null;
 				const runInput: CodeStepRunInput = {
 					runId: codeRunId,
 					...(mutatedPaths.size > 0 ? { mutatedPaths: [...mutatedPaths] } : {}),
@@ -1156,11 +1161,20 @@ async function runFleetHoldingWorkspace(
 					...(isCommit && evidence !== null && originalMessage !== null
 						? {
 								substitutions: {
-									commitMessage: attributeCommitMessage(originalMessage, evidence, input.attributionEnabled),
+									commitMessage: attributeCommitMessage(
+										originalMessage,
+										evidence,
+										input.attributionEnabled,
+										commitAuthorship === null ? {} : { clioAuthorFor: commitAuthorship.human },
+									),
 								},
 								requireWorkspaceChanges: true,
 								stage: { baseline: commitBaseline, artifacts: commitArtifactsFor(step, priorResults) },
-								commitAttribution: { enabled: input.attributionEnabled, evidence },
+								commitAttribution: {
+									enabled: input.attributionEnabled,
+									evidence,
+									...(commitAuthorship === null ? {} : { authorship: commitAuthorship }),
+								},
 							}
 						: {}),
 				};

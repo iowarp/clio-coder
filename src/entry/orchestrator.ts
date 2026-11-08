@@ -28,7 +28,11 @@ import {
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
-import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
+import {
+	configureGitCommitAttribution,
+	setAutonomousCommitProcess,
+	setCommitDecisionRefsProvider,
+} from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { installInternalGitPolicy } from "../core/internal-git.js";
@@ -2045,6 +2049,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const { registerRunningBuild } = await import("../core/running-build.js");
 	const bootSurface = options.acp ? "acp" : options.headless ? "run" : "tui";
 	registerRunningBuild(bootSurface);
+	// Only a headless run commits autonomously; TUI and ACP sessions keep the human author at any autonomy.
+	setAutonomousCommitProcess(bootSurface === "run");
 	// Every session this boot opens names its surface in the live record (#439).
 	(await import("../domains/session/heartbeat.js")).configureSessionHeartbeat({
 		surface: bootSurface,
@@ -3772,7 +3778,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const settings = getCurrentSettings();
 		configureGuardrails(guardrailValuesFromSettings(settings));
 		configureRunEventJournal(settings.fleet.history.journal);
-		setGitCommitAttributionEnabled(settings.integrations.git.commitAttribution);
+		configureGitCommitAttribution(settings.integrations.git);
 	};
 	const getCurrentSettings = (): ClioSettings => {
 		// AUD-3 finding 1: lazy creates and forks do not emit SessionResumed.

@@ -174,6 +174,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `integrations.library.confirmedRemote` | `null` | The remote the operator approved. Written by Clio Coder, read-only in the UI. | next turn |
 | `integrations.library.sync` | `false` | Boolean. Whether library sync and push may contact the remote. | next turn |
 | `integrations.git.commitAttribution` | `true` | Boolean. Evidence-backed role trailers on commits created through Clio Coder. | hot reload |
+| `integrations.git.commitAuthor` | `"auto"` | `auto` or `human`. Who authors an autonomous commit; see [Commit authorship](#commit-authorship). Ignored when `commitAttribution` is `false`. | hot reload |
 | `integrations.music.enabled` | `false` | Boolean. Allows `/music` to open cliamp in a Herdr dock. Needs Herdr panes and cliamp. | hot reload |
 | `integrations.music.station` | `"http://radio.cliamp.stream/lofi/stream"` | Non-empty string, a stream URL or a station name. What `/music on` plays. | hot reload |
 | `integrations.music.agentControl` | `false` | Boolean. Registers the `music` tool at startup so the model can drive the pane; off, the tool does not exist and costs no prompt bytes. | restart required |
@@ -186,6 +187,16 @@ Default chat settings control interactive conversation routing, reasoning effort
 `systemOne.*` is experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field (`generic`, `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`), which has no default. A decision engine's window is the `capabilities.contextWindow` of its `systemone` target (480 when unset), bounded by the profile's ceiling. There is no placement setting: which processor an engine runs on is decided by the server behind its target.
 
 The music keys are documented in the [music guide](music.md). The exit summary is part of [commands and modes](commands-and-modes.md).
+
+### Commit authorship
+
+With `integrations.git.commitAuthor: auto`, a commit Clio Coder makes with nobody attending names Clio as the Git author (`Clio Coder <…clio-coder[bot]@users.noreply.github.com>`). Your configured identity stays the committer and gets a `Co-authored-by:` trailer, so GitHub credits both and nobody is dropped. Clio's own `Assisted-by:` and `Co-authored-by:` lines are left off such a commit because the author field already says it. `Tested-by:`, `Reviewed-by:`, receipt and `Clio-Decision:` trailers are kept.
+
+Autonomous means a dispatched worker or fleet run, the host commits and merges that land a worker's worktree (`fleet land` included), a fleet commit step, a headless `clio-coder run`, and a scheduled job's turn. An interactive TUI or ACP session keeps you as author with Clio's trailers at every autonomy level, as does every commit under `commitAuthor: human`.
+
+You stay author when an explicit `--author` or `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` chose someone else, when Git has no configured `user.name`/`user.email` (so the human co-author cannot be named), for operator hooks and delegated external harnesses, and when a repository uses its own `core.hooksPath`. With `commitAttribution: false` Clio Coder changes neither author nor message.
+
+This follows the split other agents use: an agent that works on its own authors its commits (Copilot coding agent, Claude Code on the web), while one you drive in your terminal leaves you as author and adds a trailer (Copilot CLI, Claude Code CLI).
 
 ### Optional keys with no default
 

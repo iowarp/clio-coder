@@ -20,6 +20,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
 import {
+	type ClioCommitAuthorship,
 	gitCommitAttributionEnabled,
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
@@ -111,6 +112,8 @@ export interface CodeStepRunInput {
 	commitAttribution?: {
 		enabled: boolean;
 		evidence: Readonly<CommitAttributionEvidence>;
+		/** Clio as author with the human as co-author; a fleet commit step is autonomous. */
+		authorship?: ClioCommitAuthorship;
 	};
 	/**
 	 * Run the command, and every changed test it adds, inside the main-session
@@ -490,6 +493,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 				cwd,
 				enabled: input.commitAttribution?.enabled ?? gitCommitAttributionEnabled(process.env),
 				...(input.commitAttribution?.evidence === undefined ? {} : { evidence: input.commitAttribution.evidence }),
+				...(input.commitAttribution?.authorship === undefined ? {} : { authorship: input.commitAttribution.authorship }),
 			},
 		);
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
