@@ -1,6 +1,7 @@
 import { type FSWatcher, realpathSync, statSync, watch } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { settingsPath } from "../../core/config.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 
 export type WatcherCallback = (raw: { at: number }) => void;
 
@@ -9,6 +10,36 @@ export interface ConfigWatcher {
 }
 
 const PROJECT_DIR_POLL_MS = 250;
+
+const SETUP_FAILURE_REASONS: Record<string, string> = {
+	EMFILE: "too many open files",
+	ENOSPC: "file watch limit reached",
+	EACCES: "permission denied",
+	EPERM: "permission denied",
+};
+
+let setupFailureReported = false;
+
+/**
+ * Q5: a raw `console.error` here printed a full Node stack over the TUI frame
+ * and onto `run`/`acp` stderr. The trigger is environmental (an inotify-exhausted
+ * host), so the operator gets one line per process through the diagnostic
+ * channel, which the TUI renders as a notice; the stack stays behind
+ * CLIO_CODER_CONFIG_DEBUG=1.
+ */
+function reportSetupFailure(err: unknown): void {
+	if (process.env.CLIO_CODER_CONFIG_DEBUG === "1") {
+		const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+		writeDiagnostic(`[clio-coder:config] watcher setup failed: ${detail}`);
+	}
+	if (setupFailureReported) return;
+	setupFailureReported = true;
+	const code = (err as NodeJS.ErrnoException | null)?.code;
+	const known = code !== undefined ? SETUP_FAILURE_REASONS[code] : undefined;
+	const firstLine = (err instanceof Error ? err.message : String(err)).split("\n", 1)[0] ?? "";
+	const reason = known !== undefined ? `${known} (${code})` : firstLine.slice(0, 200) || "unknown error";
+	writeDiagnostic(`[clio-coder:config] settings hot reload unavailable: ${reason}; restart to apply settings changes`);
+}
 
 // FSEvents reports paths in their resolved form, so watch the resolved path.
 // A path that does not exist yet (or cannot be resolved) is watched as given.
@@ -87,7 +118,7 @@ export function startConfigWatcher(cb: WatcherCallback, workspaceRoot = process.
 			schedule();
 		});
 	} catch (err) {
-		console.error("[clio-coder:config] watcher setup failed:", err);
+		reportSetupFailure(err);
 	}
 	attachProjectWatcher(false);
 	// Y7: a directory watch follows its inode after rename. Keep the parent

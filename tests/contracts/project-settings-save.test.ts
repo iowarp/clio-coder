@@ -1,9 +1,12 @@
 import { match, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { test } from "node:test";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
+import { dirname, join } from "node:path";
+import { mock, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
+import { settingsPath } from "../../src/core/config.js";
+import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { readLayeredSettings, updateProjectLocalSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { startConfigWatcher } from "../../src/domains/config/watcher.js";
@@ -106,6 +109,40 @@ test("a project save notifies other sessions even when the project settings dire
 			watcher.stop();
 		}
 	} finally {
+		home.restore();
+	}
+});
+
+test("a watcher that cannot start reports one line once per process, never a stack", async () => {
+	const home = await isolateClioEnv("clio-config-watch-emfile-");
+	const fs = createRequire(import.meta.url)("node:fs") as typeof import("node:fs");
+	const realWatch = fs.watch;
+	const configDir = existsSync(dirname(settingsPath()))
+		? realpathSync(dirname(settingsPath()))
+		: dirname(settingsPath());
+	const watchMock = mock.method(fs, "watch", (...args: Parameters<typeof fs.watch>) => {
+		if (String(args[0]) === configDir) {
+			throw Object.assign(new Error(`EMFILE: too many open files, watch '${String(args[0])}'`), { code: "EMFILE" });
+		}
+		return realWatch(...args);
+	});
+	syncBuiltinESMExports();
+	const lines: string[] = [];
+	const removeSink = installDiagnosticSink((text) => lines.push(text));
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(workspace);
+		startConfigWatcher(() => {}, workspace).stop();
+		startConfigWatcher(() => {}, workspace).stop();
+		strictEqual(lines.length, 1);
+		strictEqual(
+			lines[0],
+			"[clio-coder:config] settings hot reload unavailable: too many open files (EMFILE); restart to apply settings changes",
+		);
+	} finally {
+		removeSink();
+		watchMock.mock.restore();
+		syncBuiltinESMExports();
 		home.restore();
 	}
 });

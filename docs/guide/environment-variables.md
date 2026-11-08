@@ -96,6 +96,7 @@ All default off; enable with `1`.
 | `CLIO_CODER_TIMING` | Startup timing report, printed only on the bannered non-interactive boot ([orchestrator.ts](../../src/entry/orchestrator.ts)). |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | Shutdown-path diagnostics ([termination.ts](../../src/core/termination.ts)). |
 | `CLIO_CODER_HOOK_BUDGET_DEBUG` | Per-overrun hook-budget diagnostics ([runtime.ts](../../src/domains/middleware/runtime.ts)). |
+| `CLIO_CODER_CONFIG_DEBUG` | Full error and stack when the settings hot-reload watcher cannot start; without it Clio prints one line per process ([watcher.ts](../../src/domains/config/watcher.ts)). |
 
 ### File-writing traces
 
