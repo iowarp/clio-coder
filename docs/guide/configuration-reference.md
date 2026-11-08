@@ -457,7 +457,7 @@ Clio connects to each server by first sending `server/discover`. A server that l
 
 Interrupting an MCP call sends `notifications/cancelled` with its request id, or `tasks/cancel` for a task. Clio checks responsiveness with a bounded `ping` (`server/discover` on a `2026-07-28` server, which has no `ping`) or the `tasks/cancel` acknowledgement, retains responsive connections, and tears down unresponsive connections. The next gateway call lazily reconnects the same trusted declaration after cleanup. Clio never automatically replays the cancelled call. Read-only, idempotent tools may repeat identical polling arguments within the turn's tool-call budget.
 
-The `2026-07-28` client is new in 0.7.0. Its `tasks/cancel` path has been exercised against a fake test server; for this release it has not been run against a live clio-kit web server.
+The `2026-07-28` client is new in 0.7.0. Its timeout path has been run against a live clio-kit web server: on a fetch held open past the call's timeout, the server acknowledged `tasks/cancel`, reported the task `cancelled` and closed its upstream connection, and the model received the timeout error. The interruption, `ttlMs` and input-request paths are exercised against a fake test server only.
 
 Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust.ts`](../../src/domains/gateway/mcp/trust.ts). The model-facing discovery and call contract is in [gateway tool usage](tool-usage.md).
 
