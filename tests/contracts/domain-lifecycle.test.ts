@@ -269,7 +269,7 @@ test("accepted persistence runs after observed resource settlement", async (t) =
 	}
 });
 
-test("rule15 keeps owner capabilities with the owning composition and contract types in the map", () => {
+test("rule17 keeps owner capabilities with the owning composition and contract types in the map", () => {
 	const registrar = 'import type { MiddlewareRegistrar } from "../domains/middleware/index.js";\n';
 	strictEqual(checkDomainContractAccess("src/domains/dispatch/extension.ts", registrar).length, 1);
 	strictEqual(checkDomainContractAccess("src/tools/registry.ts", "createMiddlewareDomain();").length, 1);

@@ -25,7 +25,7 @@ import {
 import type { SessionContract } from "../domains/session/contract.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
 import type { TurnContext } from "./turn-context.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, TurnPrewarmState } from "./turn-state.js";
 
 /** Why a pre-warm did not run. Returned for contracts; never shown to the operator. */
 export type PrewarmSkipReason =
@@ -46,7 +46,7 @@ export type PrewarmOutcome =
 	| { ran: false; reason: PrewarmSkipReason; detail?: string };
 
 export interface TurnPrewarmDeps {
-	state: ChatTurnState;
+	state: TurnPrewarmState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	session?: SessionContract | undefined;

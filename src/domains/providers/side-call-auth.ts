@@ -4,6 +4,15 @@ import type { ProvidersContract } from "./contract.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
+/**
+ * pi-ai's openai-completions provider refuses to stream without an apiKey even
+ * when the target is a local server that ignores the Authorization header
+ * entirely. The chat loop, the dispatch workers, and the background memory
+ * model all send this placeholder so a local llama.cpp or LM Studio endpoint
+ * works without the user inventing a credential.
+ */
+export const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
+
 /** Bind side-call refresh to the credential actually sent, never an API key (#427). */
 export async function resolveSideCallAuth(
 	auth: ProvidersContract["auth"],

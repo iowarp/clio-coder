@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
@@ -10,8 +10,6 @@ import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import { classifyCallFailure } from "../core/call-failure.js";
-import { codexAccountScope } from "../core/codex-account.js";
 import {
 	type ClioSettings,
 	readSettings,
@@ -36,12 +34,9 @@ import {
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { installInternalGitPolicy } from "../core/internal-git.js";
-import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import type { CatalogRanker } from "../core/precomputed-rank.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
-import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
-import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
@@ -77,21 +72,11 @@ import {
 	setAtPath,
 } from "../core/session-routing.js";
 import { type SettingsOrigin, settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
-import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits } from "../core/telemetry/capture.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
-import type { EventPayload } from "../core/telemetry/events.js";
-import type { Fact } from "../core/telemetry/fact.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import {
-	noCallRunUsageFacts,
-	pricesCalls,
-	pricingBasisFields,
-	unobservedRunUsageFacts,
-} from "../core/telemetry/pricing.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
-import type { CallUsage } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -111,10 +96,7 @@ import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybind
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
-import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
-import { createRereadRecallPort } from "../domains/context/working-set/reread.js";
-import { endpointCapacityUsage } from "../domains/dispatch/capacity-lease.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import { createSessionRereadPort } from "../domains/context/working-set/session-reread.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
@@ -134,29 +116,31 @@ import {
 } from "../domains/extensions/index.js";
 import { InteropDomainModule } from "../domains/interop/index.js";
 import { describeUpgradeNotice, ensureClioState, takeUpgradeNotice } from "../domains/lifecycle/index.js";
-import type { BackgroundRouteFacts } from "../domains/memory/background-budget.js";
-import { decideBackgroundStep } from "../domains/memory/background-budget.js";
+import {
+	createBackgroundCallJournal,
+	createBackgroundMemoryRouting,
+	createMemoryFlowAdmission,
+	memoryObservationCapacity,
+	memoryRouteConfigured,
+	prepareBackgroundMemoryModel,
+} from "../domains/memory/background-route.js";
+import { withDispatchMemory } from "../domains/memory/dispatch-section.js";
+import { createGuardianStatePublisher } from "../domains/memory/guardian-state.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
-	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
-	completedLessonSource,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
-	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
 	MemoryRuntime,
 	markMemoryOffRecording,
 	memoryFlowSweepNotice,
 	memoryRecordStanding,
-	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
 	sweepRestrictedMemory,
 	type TaskMemoryHandoffSnapshot,
-	type TaskMemoryModelClient,
-	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
 } from "../domains/memory/index.js";
@@ -166,18 +150,13 @@ import {
 	demotedMemoryIds,
 	readRecallUseLedger,
 } from "../domains/memory/recall-use.js";
+import { createMemorySessionProjection } from "../domains/memory/session-projection.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
 	deleteTaskBankSnapshot,
 	loadTaskBankSnapshot,
 	saveTaskBankSnapshot,
 } from "../domains/memory/task-bank-store.js";
-import type { TaskMemoryModelRequest } from "../domains/memory/task-memory-policy.js";
-import {
-	TaskMemoryBudgetSkipError,
-	TaskMemoryEndpointBusyError,
-	TaskMemoryInformationFlowBlockedError,
-} from "../domains/memory/task-memory-policy.js";
 import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
 import { type CapabilityMatch, createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import {
@@ -196,49 +175,26 @@ import {
 	formatRegistrationConflict,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
-import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
+import type { MemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
-import { announceMemoryStepEndpoint } from "../domains/middleware/memory-step-endpoint.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { agentRoleToolWarnings } from "../domains/providers/agent-role-warnings.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
-import type {
-	ProvidersContract,
-	ResolvedRuntimeTarget,
-	TargetDescriptor,
-	ThinkingLevel,
-} from "../domains/providers/index.js";
+import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	AGENT_ROLE_TOOLS_REQUIRED_REASON,
-	applyModelCapabilityPatch,
-	backgroundMemoryAdmissionLimit,
-	backgroundSlotKey,
-	canonicalEndpointKey,
 	createProvidersDomainModule,
-	endpointThroughput,
-	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
 	modelEndpointKey,
-	modelStreamUsage,
-	probeCapabilitiesForModel,
-	recordEndpointThroughput,
-	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
-	resolveEndpointCapacities,
-	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveRuntimeTarget,
-	supportsAgentRoleTools,
-	targetRequiresAuth,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
-import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
-import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
 import {
 	type LlmRequestAdmission,
 	type OneShotPort,
@@ -248,16 +204,10 @@ import {
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
-import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
+import { LOCAL_API_KEY_FALLBACK, resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
+import { resolveTarget, unpricedRunRoutes } from "../domains/providers/unpriced-routes.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
-import {
-	anthropicQuotaNotice,
-	observedAnthropicQuota,
-	observedCodexQuota,
-	onAnthropicQuotaChange,
-} from "../domains/quota/index.js";
-import { observedQuota } from "../domains/quota/observed.js";
-import { quotaProviderIdForRuntime } from "../domains/quota/registry.js";
+import { anthropicQuotaNotice, onAnthropicQuotaChange } from "../domains/quota/index.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -289,45 +239,37 @@ import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
 import { standingChecks } from "../domains/safety/observed-checks.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
-import {
-	createProtectedArtifactsRegistration,
-	type ProtectedArtifactProtectEvent,
-} from "../domains/safety/protected-artifacts-registration.js";
-import { redactSecretString } from "../domains/safety/redaction.js";
+import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { SAFETY_JUDGE_CONSECUTIVE_BLOCKS, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
-import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { createSchedulingDomainModule } from "../domains/scheduling/index.js";
-import { serializeConversation } from "../domains/session/compaction/branch-summary.js";
-import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
-import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
+import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
+import {
+	type CompactionFlowAdmission,
+	type CompactionFlowBudget,
+	type CompactionReplay,
+	type CompactionTelemetry,
+	runCompactionFlow,
+} from "../domains/session/compaction/flow.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { createStaleEditGuardRegistration } from "../domains/session/compaction/stale-edit-guard.js";
-import {
-	ceilChars,
-	estimateAgentContextBreakdown,
-	estimateAgentContextTokens,
-} from "../domains/session/context-accounting.js";
-import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
-import { continuityProjectionTokens, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
-import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
-import { withProviderCheckpointMeasurements } from "../domains/session/entries.js";
+import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
+import { SessionDomainModule } from "../domains/session/index.js";
+import { reconcilePendingProtectedArtifacts } from "../domains/session/protected-artifact-journal.js";
 import {
-	clearPendingProtectedArtifact,
-	reconcilePendingProtectedArtifacts,
-	stagePendingProtectedArtifact,
-} from "../domains/session/protected-artifact-journal.js";
-import {
-	protectedArtifactEntryFromArtifact,
-	protectedArtifactStateFromSessionEntries,
-} from "../domains/session/protected-artifacts.js";
+	appendProtectedArtifactRegistryEvent,
+	protectedArtifactStateForCurrentSession,
+} from "../domains/session/protected-artifact-recording.js";
 import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
+import {
+	appendSkillActivationRegistryEvent,
+	foldDispatchSkillActivations,
+} from "../domains/session/skill-activation-recording.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
@@ -337,10 +279,6 @@ import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, ShareDomainModule } from "../domains/share/index.js";
 import type { SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne, parseRouteList } from "../domains/system-one/index.js";
-import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
-import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
-import { openCallScope } from "../domains/telemetry/call-scope.js";
-import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { createTelemetryDomain, READ_MODEL_FOLD } from "../domains/telemetry/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -366,7 +304,6 @@ import {
 	serveClioAcpAgent,
 } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
-import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
 import {
 	declareRuntimeNoticeProducer,
 	EXIT_RELEASE_MS,
@@ -379,7 +316,6 @@ import {
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
 import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
-import type { EngineModel } from "../engine/types.js";
 import type { RunIo } from "../interactive/index.js";
 import { createChatLoop, createTurnControlRunner, runOutOfTurnRound } from "../session-control/chat-loop.js";
 import { clampThinkingLevel, replayCurrentSession, resolvePermission, selectModel } from "../session-control/index.js";
@@ -391,9 +327,7 @@ import { createTurnOutcomeCollector } from "../session-control/turn-outcome-coll
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { surfaceSpecPlacement } from "../tools/surface.js";
 import { resizeImage } from "../utils/image-resize.js";
-import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
-import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
 import {
 	admitHandoffSeedFlow,
@@ -414,7 +348,6 @@ import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
 import { emitApproval } from "../core/telemetry/approvals.js";
-import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
 	AUTONOMOUS_CAP_REASON,
@@ -529,102 +462,6 @@ function applyHeadlessSettingsOverlay(
 	return next;
 }
 
-interface CompactionResolution extends SideCallAuth {
-	model: EngineModel;
-	pricedBy: ResolvedRuntimeTarget["pricedBy"];
-	freeRule?: ResolvedRuntimeTarget["freeRule"];
-	targetId: string;
-	runtimeId: string;
-	endpointKey: string | null;
-	wireModelId: string;
-	headers?: Record<string, string>;
-	apiKey?: string;
-}
-
-function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
-	if (!targetId) return null;
-	return providers.getTarget(targetId);
-}
-
-/**
- * The routes a `clio-coder run --max-cost-usd` run can reach whose cost is
- * unknown: the chat route, the compaction route, the default worker route,
- * every fleet profile (recipe pins in `fleet.agentProfiles` and coordinator
- * profile picks resolve to one), every roster member, and each configured
- * target at its default model, which a coordinator pin naming only a target
- * takes. Paid-request admission checks only known or estimated pricing, so
- * the cap cannot bound these; LiteLLM stays unknown until its target declares
- * `pricing`. A model a coordinator names one-off is not known at boot.
- */
-function unpricedRunRoutes(settings: Readonly<ClioSettings>, providers: ProvidersContract | undefined): string[] {
-	if (!providers) return [];
-	const routes: Array<{ target: string | null | undefined; model?: string | null | undefined }> = [
-		settings.chat,
-		settings.fleet.default,
-		...Object.values(settings.fleet.profiles),
-		...Object.values(settings.fleet.rosters).flatMap((roster) => roster.members),
-		...settings.targets.map((target) => ({ target: target.id })),
-	];
-	const compaction = settings.context.compaction.model;
-	if (compaction) {
-		try {
-			const selected = resolveModelReference(compaction, providers, { use: "chat" });
-			if (selected.ref && !selected.warning) routes.push(selected.ref);
-		} catch {
-			// An invalid compaction pattern fails compaction itself with its own message.
-		}
-	}
-	const unpriced = new Set<string>();
-	for (const route of routes) {
-		const target = resolveTarget(providers, route.target);
-		const runtime = target ? providers.getRuntime(target.runtime) : null;
-		const model = route.model ?? target?.defaultModel;
-		if (!target || !runtime || !model) continue;
-		if (resolveEffectivePricing(target, runtime, model).pricedBy === "none") unpriced.add(`${target.id}/${model}`);
-	}
-	return [...unpriced];
-}
-
-/**
- * Every attended dispatch path (the dispatch tool, slash commands, turn control)
- * receives this one contract, so the durable memory section headless `run`
- * builds is sealed here once rather than at each request builder. A request
- * that already carries a section keeps it; an unreadable store sends none.
- */
-function withDispatchMemory(
-	contract: DispatchContract | undefined,
-	getSettings: () => Readonly<ClioSettings> | undefined,
-): DispatchContract | undefined {
-	if (contract === undefined) return undefined;
-	const withMemory = (request: DispatchRequest): DispatchRequest => {
-		if (request.memorySection !== undefined) return request;
-		const settings = getSettings() ?? readSettings();
-		let section = "";
-		try {
-			section = buildDispatchMemorySection({
-				dataDir: clioDataDir(),
-				cwd: process.cwd(),
-				...(request.cwd !== undefined ? { workerCwd: request.cwd } : {}),
-				settings,
-				route: {
-					agentId: request.agentId,
-					...(request.target !== undefined ? { target: request.target } : {}),
-					...(request.workerProfile !== undefined ? { workerProfile: request.workerProfile } : {}),
-					...(request.workerRuntime !== undefined ? { workerRuntime: request.workerRuntime } : {}),
-				},
-			});
-		} catch {
-			// Memory is advisory; a store that cannot be read must not block the dispatch.
-		}
-		return section.length > 0 ? { ...request, memorySection: section } : request;
-	};
-	return {
-		...contract,
-		dispatch: (request, observer, preparation) => contract.dispatch(withMemory(request), observer, preparation),
-		dispatchBatch: (requests, preparation) => contract.dispatchBatch(requests.map(withMemory), preparation),
-	};
-}
-
 function settingsTargetRuntime(settings: Readonly<ClioSettings>, targetId: string | null | undefined): string | null {
 	if (!targetId) return null;
 	return settings.targets.find((entry) => entry.id === targetId)?.runtime ?? null;
@@ -636,187 +473,6 @@ function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<T
 	const normalized = current;
 	const idx = levels.indexOf(normalized);
 	return levels[(idx + 1) % levels.length] ?? "off";
-}
-
-/**
- * pi-ai's openai-completions provider refuses to stream without an apiKey even
- * when the target is a local server that ignores the Authorization header
- * entirely. The chat loop, the dispatch workers, and the background memory
- * model all send this placeholder so a local llama.cpp or LM Studio endpoint
- * works without the user inventing a credential.
- */
-const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
-
-/**
- * The background memory role, resolved to the endpoint it would call.
- *
- * The endpoint key joins the existing dispatch capacity evidence and local
- * request holds. A gateway key does not identify one physical model server or
- * imply a one-slot limit; the configured protocol owns downstream routing.
- */
-interface BackgroundMemoryRoute {
-	client: TaskMemoryModelClient;
-	selection: "dedicated" | "chat-default" | "chat-fallback";
-	fallbackReason?: string;
-	targetId: string;
-	wireModelId: string;
-	endpointKey: string | null;
-	modelMaxTokens(configuredMaxTokens: number): number;
-}
-
-/**
- * What the background budget reads beside the route itself. Settings are the
- * snapshot the route was resolved from; spend is read when a step asks.
- */
-interface BackgroundBudgetInputs {
-	settings: Readonly<ClioSettings>;
-	/** Priced session spend; absent where no session ledger exists, which reads as none. */
-	sessionSpendUsd?: () => number;
-}
-
-function backgroundRouteFacts(
-	refined: ReturnType<typeof prepareBackgroundMemoryModel>["refined"],
-): BackgroundRouteFacts {
-	const pricing = resolveEffectivePricing(refined.target, refined.runtime, refined.wireModelId);
-	return {
-		pricedBy: pricing.pricedBy,
-		rates: pricing.rates,
-		runtime: refined.runtime,
-		quotaProviderId: quotaProviderIdForRuntime(refined.runtimeId),
-	};
-}
-
-type AdmitBackgroundModelFlow = (destination: {
-	targetId: string;
-	runtimeId: string;
-	wireModelId: string;
-}) => string | null;
-
-export function createBackgroundMemoryModelClient(
-	providers: ProvidersContract,
-	settings: Readonly<ClioSettings>,
-	timeoutMs: number,
-	bus: Pick<TelemetryHub, "emit"> | null,
-	fallbackOnly = false,
-	admitModelFlow?: AdmitBackgroundModelFlow,
-	sessionSpendUsd?: () => number,
-): BackgroundMemoryRoute | null {
-	if (!settings.context.memory.enabled) return null;
-	const budget: BackgroundBudgetInputs = { settings, ...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }) };
-	const memoryRoute = resolveMemoryRoute(settings);
-	const configuredTarget = memoryRoute.target?.trim();
-	const configuredModel = memoryRoute.model?.trim();
-	if (!configuredTarget || !configuredModel) return null;
-	if (memoryRoute.source === "chat") {
-		if (fallbackOnly) return null;
-		return prepareBackgroundMemoryRoute(
-			providers,
-			configuredTarget,
-			configuredModel,
-			timeoutMs,
-			bus,
-			"chat-default",
-			settings.targets,
-			admitModelFlow,
-			budget,
-		);
-	}
-	const chatTarget = settings.chat.target?.trim();
-	const chatModel = settings.chat.model?.trim();
-	const sameRoute = configuredTarget === chatTarget && configuredModel === chatModel;
-	if (fallbackOnly && sameRoute) return null;
-	let fallbackReason: string | undefined;
-	if (!fallbackOnly) {
-		try {
-			return prepareBackgroundMemoryRoute(
-				providers,
-				configuredTarget,
-				configuredModel,
-				timeoutMs,
-				bus,
-				"dedicated",
-				settings.targets,
-				admitModelFlow,
-				budget,
-			);
-		} catch (error) {
-			fallbackReason = `configured route unavailable: ${memoryRouteFailureCause(error)}`;
-		}
-	} else fallbackReason = "configured route client error";
-	if (!chatTarget || !chatModel || sameRoute) {
-		if (fallbackOnly) return null;
-		throw new Error("configured memory route is unavailable and no distinct chat fallback can run");
-	}
-	try {
-		return {
-			...prepareBackgroundMemoryRoute(
-				providers,
-				chatTarget,
-				chatModel,
-				timeoutMs,
-				bus,
-				"chat-fallback",
-				settings.targets,
-				admitModelFlow,
-				budget,
-			),
-			fallbackReason,
-		};
-	} catch {
-		if (fallbackOnly) return null;
-		throw new Error("neither the configured memory route nor the active chat fallback is available");
-	}
-}
-
-function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: string, wireModelId: string) {
-	const status = providers.list().find((entry) => entry.target.id === targetId);
-	if (status) {
-		if (!status.available) throw new Error(status.reason || "configured target unavailable");
-		if (status.health.status === "down") throw new Error(status.health.lastError || "endpoint unreachable");
-		if (hasLiveModelCatalog(status) && !status.discoveredModels.includes(wireModelId)) {
-			throw new Error(`unknown model: ${wireModelId}`);
-		}
-		const residency = modelResidencyForStatus(status, wireModelId);
-		if (residency === "absent" || residency === "loading") throw new Error(`model ${wireModelId} is ${residency}`);
-	}
-	const resolved = resolveRuntimeTarget(providers, {
-		targetId,
-		wireModelId,
-		// Memory reads a trajectory and writes a fixed envelope. Reasoning adds
-		// latency and, on a small local model, routinely consumes the entire
-		// output budget before the envelope is ever written.
-		requestedThinkingLevel: "off",
-		use: "orchestrator",
-		requireTools: false,
-		requireOutputBudget: true,
-	});
-	if (!resolved.ok) {
-		const detail = firstRuntimeResolutionError(resolved.diagnostics) ?? "background target resolution failed";
-		throw new Error(detail);
-	}
-	const kbHit = providers.knowledgeBase?.lookup(resolved.target.wireModelId, resolved.target.runtime.id) ?? null;
-	const model = resolved.target.runtime.synthesizeModel(resolved.target.target, resolved.target.wireModelId, kbHit);
-	const refined = refineRuntimeTargetWithModelHints(resolved.target, model, providers.knowledgeBase);
-	applyModelCapabilityPatch(model, refined.capabilities);
-	return { model, refined };
-}
-
-/** A bounded preparation capacity when no foreground actor budget exists. Never activates actor context. */
-function memoryObservationCapacity(providers: ProvidersContract, settings: Readonly<ClioSettings>): number {
-	const route = resolveMemoryRoute(settings);
-	if (!route.target || !route.model) return 0;
-	try {
-		const { model } = prepareBackgroundMemoryModel(providers, route.target, route.model);
-		return Math.max(
-			0,
-			model.contextWindow -
-				estimateAgentContextTokens({ systemPrompt: OBSERVATION_PROMPT, messages: [] }) -
-				settings.context.memory.maxOutputTokens -
-				64,
-		);
-	} catch {
-		return 0; /* An unknown route preserves raw-history fallback. */
-	}
 }
 
 /**
@@ -876,574 +532,7 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 	};
 }
 
-/**
- * The slot bound background memory admits against on the route's endpoint.
- * Unlike dispatch, an endpoint whose capacity nothing proves is one slot here;
- * see `backgroundMemoryAdmissionLimit`. The middleware's pre-check and the
- * reservation in the client both read this one function over the same target
- * set, so route selection, capacity and reservation cannot disagree.
- */
-function memoryAdmissionLimitFor(
-	providers: ProvidersContract,
-	endpointKey: string,
-	targets: ReadonlyArray<TargetDescriptor>,
-): number {
-	const capacity = resolveEndpointCapacities({
-		statuses: providers.list(),
-		targets,
-		runtimeFor: (id) => providers.getRuntime(id),
-	})[endpointKey];
-	return backgroundMemoryAdmissionLimit(capacity);
-}
-
-/**
- * The slot key a background memory step admits against. Behind a model-routed
- * gateway that nothing bounds (no override, no discovered slots), the step's
- * own model is the scheduler it competes with, so it counts only that model's
- * streams; another model's turn through the same gateway no longer reads as
- * busy. Once the gateway carries a bound, the step admits against the
- * gateway total exactly as before, so optional work never exceeds what the
- * operator declared.
- */
-function backgroundMemoryEndpointKey(
-	providers: ProvidersContract,
-	target: TargetDescriptor,
-	wireModelId: string,
-	targets: ReadonlyArray<TargetDescriptor>,
-): string | null {
-	return backgroundSlotKey(
-		target,
-		wireModelId,
-		(gateway) =>
-			resolveEndpointCapacities({
-				statuses: providers.list(),
-				targets,
-				runtimeFor: (id) => providers.getRuntime(id),
-			})[gateway] !== undefined,
-	);
-}
-
-function backgroundMemoryEndpointBusy(
-	providers: ProvidersContract,
-	endpointKey: string | null,
-	targets: ReadonlyArray<TargetDescriptor>,
-): boolean {
-	if (endpointKey === null) return false;
-	const limit = memoryAdmissionLimitFor(providers, endpointKey, targets);
-	return modelStreamUsage(endpointCapacityUsage(), endpointKey) >= limit;
-}
-
-function prepareBackgroundMemoryRoute(
-	providers: ProvidersContract,
-	targetId: string,
-	wireModelId: string,
-	timeoutMs: number,
-	bus: Pick<TelemetryHub, "emit"> | null,
-	selection: BackgroundMemoryRoute["selection"],
-	targets: ReadonlyArray<TargetDescriptor>,
-	admitModelFlow?: AdmitBackgroundModelFlow,
-	budget?: BackgroundBudgetInputs,
-): BackgroundMemoryRoute {
-	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
-	const { refined } = initial;
-	const gatewayKey = canonicalEndpointKey(refined.target);
-	const endpointKey = backgroundMemoryEndpointKey(providers, refined.target, refined.wireModelId, targets);
-	const routeFacts = backgroundRouteFacts(refined);
-	return {
-		selection,
-		targetId,
-		wireModelId: refined.wireModelId,
-		endpointKey,
-		modelMaxTokens: (configuredMaxTokens) =>
-			memoryInterventionModelMaxTokens({
-				configuredMaxTokens,
-				thinkingMechanism: refined.modelRuntime.thinking.mechanism,
-				modelMaxTokens: refined.capabilityDecisions.maxTokens,
-			}),
-		client: {
-			// The route this client is bound to. The middleware reads it for the
-			// telemetry row, so a fallback client names the target that served the step.
-			route: { targetId, modelId: refined.wireModelId },
-			// Wrapped at the layer that knows a request left the process: the step
-			// holds endpoint capacity while it is out and publishes the cache
-			// disturbance even when a timeout means the usage sink never sees it.
-			complete: async (request) => {
-				let usageObserved = false;
-				try {
-					// Decided before the metadata probe, auth or any byte leaves, so a
-					// skipped step costs nothing; the next cadence tick decides again.
-					const nowMs = Date.now();
-					const throughput = endpointThroughput(endpointKey);
-					let routeQuota = routeFacts.quotaProviderId === null ? null : observedQuota(routeFacts.quotaProviderId, nowMs);
-					if (initial.refined.runtimeId === "openai-codex") {
-						const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
-						const stored = providers.auth.getStored(status.providerId);
-						const scope =
-							status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
-						// #434: the `codex` poll reads Clio's default openai-codex login and stands in for no other profile.
-						if (status.source !== "stored-oauth" || status.providerId !== "openai-codex") routeQuota = null;
-						const streamed = observedCodexQuota(targetId, scope, nowMs);
-						if (streamed !== null && !streamed.stale) routeQuota = streamed;
-					} else if (initial.refined.runtimeId === "anthropic-max") {
-						const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
-						const profile = status.source === "stored-oauth" ? status.providerId : null;
-						// #423: the provider-wide poll belongs only to Clio's default OAuth profile.
-						if (profile !== "anthropic-max") routeQuota = null;
-						const streamed = observedAnthropicQuota(targetId, nowMs, profile);
-						if (streamed !== null && !streamed.stale) routeQuota = streamed;
-					}
-					const decision = decideBackgroundStep({
-						route: routeFacts,
-						inputTokens: ceilChars(request.systemPrompt.length + request.userPrompt.length),
-						maxOutputTokens: budget?.settings.context.memory.maxOutputTokens ?? request.maxTokens,
-						timeoutCapMs: timeoutMs,
-						nowMs,
-						session: {
-							spendUsd: budget?.sessionSpendUsd?.() ?? 0,
-							ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
-						},
-						quota: routeQuota,
-						endpoint: {
-							occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
-							admissionLimit:
-								endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets),
-							prefillTokensPerSecond: throughput?.prefillTokensPerSecond ?? null,
-							generationTokensPerSecond: throughput?.generationTokensPerSecond ?? null,
-						},
-					});
-					if (!decision.admit) {
-						if (decision.reason === "endpoint_busy") {
-							throw new TaskMemoryEndpointBusyError("endpoint occupancy exhausts the background memory slot bound");
-						}
-						throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
-					}
-					await prepareBackgroundModelMetadata(providers, targetId, request.signal);
-					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
-					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
-						throw new Error("background memory target changed during preparation");
-					}
-					if (request.purpose) {
-						const inputTokens = estimateAgentContextTokens({
-							systemPrompt: request.systemPrompt,
-							messages: [{ role: "user", content: [{ type: "text", text: request.userPrompt }], timestamp: Date.now() }],
-						});
-						if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
-							throw new TaskMemoryBudgetSkipError("time_budget");
-					}
-					const sideAuth = await resolveSideCallAuth(
-						providers.auth,
-						refined.target,
-						refined.runtime,
-						LOCAL_API_KEY_FALLBACK,
-						request.signal,
-					);
-					request.signal.throwIfAborted();
-					const refusal =
-						admitModelFlow?.({ targetId, runtimeId: refined.runtimeId, wireModelId: refined.wireModelId }) ?? null;
-					if (refusal !== null) throw new TaskMemoryInformationFlowBlockedError(refusal);
-					// Preparation yielded after the middleware's first check. The wrapper
-					// rechecks occupancy and registers the preemptible hold in one
-					// synchronous step, so no local request can take the last slot between.
-					const admissionLimit =
-						endpointKey === null ? Number.POSITIVE_INFINITY : memoryAdmissionLimitFor(providers, endpointKey, targets);
-					return await announceMemoryStepEndpoint(
-						{
-							bus,
-							endpointKey,
-							targetId,
-							admissionLimit,
-							admit: () => endpointKey === null || modelStreamUsage(endpointCapacityUsage(), endpointKey) < admissionLimit,
-						},
-						async (request: TaskMemoryModelRequest) => {
-							const startedAt = performance.now();
-							let observedUsage: TaskMemoryStepUsage | undefined;
-							let facts = unobservedRunUsageFacts();
-							const observer = request.callTelemetry;
-							const callTelemetry = {
-								startAttempt: () => observer?.startAttempt(),
-								withContext: <T>(work: () => T): T => (observer ? observer.withContext(work) : work()),
-								settle(message: unknown) {
-									const settled = callSettlementFromMessage(message, refined);
-									facts =
-										settled.usage === null
-											? noCallRunUsageFacts()
-											: {
-													usage: settled.usage,
-													totalTokens: memoryTotalTokens(settled.usage),
-													apiCalls: { kind: "measured", value: 1, source: "local-count" },
-													pricing: settled.pricing,
-												};
-									observer?.settle(message);
-								},
-							};
-							const mapUsage = (
-								completion: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">,
-							): TaskMemoryStepUsage => ({
-								...facts.usage,
-								totalTokens: facts.totalTokens,
-								pricing: facts.pricing,
-								...(completion.failure === undefined ? {} : { failure: completion.failure }),
-								targetId,
-								attributedModelId: refined.wireModelId,
-								durationMs: performance.now() - startedAt,
-								backend: completion.backend,
-							});
-							const completion = await completeEngineText({
-								callTelemetry,
-								model,
-								systemPrompt: request.systemPrompt,
-								userPrompt: request.userPrompt,
-								maxTokens:
-									refined.capabilityDecisions.maxTokens > 0
-										? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
-										: request.maxTokens,
-								// Always off, never the operator's chat thinking level. A model that
-								// reasons anyway still works: `completeEngineText` keeps only text
-								// blocks, and the memory output budget leaves room for the preamble.
-								thinkingLevel: "off",
-								// Memory decides what to keep; the same completed task must get the same answer.
-								// A live Ornith review retained a validator recipe in one run and abstained on
-								// the identical trajectory in the next, at the server's default temperature.
-								deterministicRuntimeId: refined.runtimeId,
-								signal: request.signal,
-								timeoutMs: decision.timeoutMs,
-								onUsage: (observation) => {
-									usageObserved = true;
-									observedUsage = mapUsage(observation);
-									request.onUsage?.(observedUsage);
-								},
-								...sideAuth,
-								...(refined.target.auth?.headers ? { headers: refined.target.auth.headers } : {}),
-							});
-							recordEndpointThroughput(endpointKey, completion.backend);
-							// The step is billed here whatever the policy later decides about the
-							// answer. A model that read a trajectory and chose silence spent the
-							// same prefill as one that produced a reminder.
-							return {
-								text: completion.text,
-								inputTokens: facts.usage.input,
-								outputTokens: facts.usage.output,
-								usage: observedUsage ?? mapUsage(completion),
-							};
-						},
-					)(request);
-				} catch (error) {
-					if (
-						!usageObserved &&
-						!(error instanceof TaskMemoryBudgetSkipError) &&
-						!(error instanceof TaskMemoryEndpointBusyError) &&
-						!(error instanceof TaskMemoryInformationFlowBlockedError)
-					)
-						request.onUsage?.({
-							targetId,
-							attributedModelId: initial.refined.wireModelId,
-							...noCallRunUsageFacts().usage,
-							totalTokens: noCallRunUsageFacts().totalTokens,
-							pricing: noCallRunUsageFacts().pricing,
-							durationMs: 0,
-							backend: null,
-							failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
-						});
-					throw error;
-				}
-			},
-		},
-	};
-}
-
-function memoryTotalTokens(usage: CallUsage): Fact<number> {
-	if (usage.total) return usage.total;
-	const fields = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
-	const unknown = fields.find((fact) => fact.kind === "unknown" || fact.kind === "absent");
-	if (unknown) return unknown;
-	const estimated = fields.find((fact) => fact.kind === "estimated");
-	const value = fields.reduce((sum, fact) => sum + ("value" in fact ? fact.value : 0), 0);
-	return estimated?.kind === "estimated"
-		? { kind: "estimated", value, method: estimated.method }
-		: { kind: "measured", value, source: "provider" };
-}
-
-const emitMemoryFlowNotice = declareRuntimeNoticeProducer("background-memory-flow", ["memory-flow-blocked"]);
 const emitQuotaNotice = declareRuntimeNoticeProducer("anthropic-quota", ["stress"]);
-
-const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
-
-function memoryRouteFailureCause(error: unknown): string {
-	return (
-		redactSecretString(error instanceof Error ? error.message : String(error))
-			.split("\n", 1)[0]
-			?.slice(0, 180) || "unknown route error"
-	);
-}
-
-/** Production callback composition shared with routing/capacity contracts. */
-export function createBackgroundMemoryRouting(
-	providers: ProvidersContract,
-	getSettings: () => Readonly<ClioSettings> | undefined,
-	bus: Pick<TelemetryHub, "emit"> | null,
-	admitModelFlow?: AdmitBackgroundModelFlow,
-	/** False for a second routing instance whose fallback the first already announces. */
-	announceFallback = true,
-	/** Priced session spend the metered budget adds a step's projected cost to. */
-	sessionSpendUsd?: () => number,
-	callJournal?: (targetId: string, modelId: string) => CallJournalOptions | undefined,
-) {
-	let route: BackgroundMemoryRoute | null = null;
-	let snapshot: Readonly<ClioSettings> | undefined;
-	let lastNotice: string | null = null;
-	let clientFailure: string | null = null;
-	const observeClient = (client: TaskMemoryModelClient | null): TaskMemoryModelClient | null => {
-		if (!client) return null;
-		return {
-			...client,
-			async complete(request) {
-				const destination = client.route;
-				const options = destination ? callJournal?.(destination.targetId, destination.modelId) : undefined;
-				const scope = await openCallScope(options, {
-					api: options ? (providers.getRuntime(options.runtimeId)?.apiFamily ?? "unknown") : "unknown",
-					id: destination?.modelId ?? "unknown",
-				});
-				const callTelemetry = {
-					...scope,
-					startAttempt() {
-						const identity = scope.startAttempt();
-						if (identity && options?.origin) {
-							try {
-								request.onCall?.({ ...identity, sessionId: options.origin.id, repoIdentity: options.origin.cwdHash });
-							} catch {
-								writeDiagnostic("[clio-coder:telemetry] memory call reference was not recorded\n");
-							}
-						}
-					},
-				};
-				callTelemetry.startAttempt();
-				try {
-					const result = await scope.withContext(() =>
-						client.complete({
-							...request,
-							callTelemetry,
-							onUsage: (usage) => {
-								if (!scope.identity() && usage.failure)
-									scope.settle({ stopReason: request.signal.aborted ? "aborted" : "error", failure: usage.failure });
-								request.onUsage?.({ ...usage, ...scope.identity() });
-							},
-						}),
-					);
-					return { ...result, ...(result.usage ? { usage: { ...result.usage, ...scope.identity() } } : {}) };
-				} catch (error) {
-					// Engine attempts settle first; only failures in preparation reach this fallback (#434).
-					scope.settle({
-						stopReason: request.signal.aborted ? "aborted" : "error",
-						failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
-					});
-					throw error;
-				} finally {
-					await scope.close();
-				}
-			},
-		};
-	};
-	const noteFallback = (): void => {
-		if (route?.selection !== "chat-fallback") {
-			lastNotice = null;
-			return;
-		}
-		const message = `Memory: ${route.fallbackReason}; selected chat fallback ${route.targetId}/${route.wireModelId} for this step, subject to available endpoint capacity.`;
-		if (message === lastNotice) return;
-		lastNotice = message;
-		if (!bus || !announceFallback) return;
-		emitRouteFallbackNotice(
-			{
-				kind: "route-fallback",
-				level: "info",
-				message,
-				targetId: route.targetId,
-				runtimeId: providers.getTarget(route.targetId)?.runtime ?? "unknown",
-				model: route.wireModelId,
-			},
-			bus,
-		);
-	};
-	return {
-		getModelClient: (): TaskMemoryModelClient | null => {
-			const current = getSettings();
-			snapshot = current === undefined ? undefined : structuredClone(current);
-			route =
-				snapshot === undefined
-					? null
-					: createBackgroundMemoryModelClient(
-							providers,
-							snapshot,
-							snapshot.context.memory.timeoutMs,
-							bus,
-							false,
-							admitModelFlow,
-							sessionSpendUsd,
-						);
-			noteFallback();
-			clientFailure = null;
-			const client = observeClient(route?.client ?? null);
-			return client
-				? {
-						...client,
-						complete: async (request) => {
-							try {
-								return await client.complete(request);
-							} catch (error) {
-								clientFailure = memoryRouteFailureCause(error);
-								throw error;
-							}
-						},
-					}
-				: null;
-		},
-		getFallbackModelClient: (): TaskMemoryModelClient | null => {
-			if (route?.selection !== "dedicated" || snapshot === undefined) return null;
-			route = createBackgroundMemoryModelClient(
-				providers,
-				snapshot,
-				snapshot.context.memory.timeoutMs,
-				bus,
-				true,
-				admitModelFlow,
-				sessionSpendUsd,
-			);
-			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
-			noteFallback();
-			return observeClient(route?.client ?? null);
-		},
-		getModelMaxTokens: (configured: number): number => route?.modelMaxTokens(configured) ?? configured,
-		backgroundEndpointBusy: (): boolean => {
-			if (route?.endpointKey == null || snapshot === undefined) return false;
-			return backgroundMemoryEndpointBusy(providers, route.endpointKey, snapshot.targets);
-		},
-	};
-}
-
-/**
- * Warn about a configured agent-role model the provider reports cannot call
- * tools. Selection already refuses these, so reaching here means the config
- * predates the check or was hand-edited; a run would otherwise fail later at
- * dispatch admission with a message that names a missing tool rather than the
- * model that cannot use any.
- */
-function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<ClioSettings>): string[] {
-	const roles: ReadonlyArray<{ label: string; target: string | null; model: string | null }> = [
-		{ label: "orchestrator", target: settings.chat.target, model: settings.chat.model },
-		{ label: "workers.default", target: settings.fleet.default.target, model: settings.fleet.default.model },
-	];
-	const warnings: string[] = [];
-	for (const role of roles) {
-		const targetId = role.target?.trim();
-		const wireModelId = role.model?.trim();
-		if (!targetId || !wireModelId) continue;
-		try {
-			const status = providers.list().find((entry) => entry.target.id === targetId);
-			if (!status) continue;
-			const capabilities = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase);
-			if (supportsAgentRoleTools(capabilities)) continue;
-			// A target that was never probed has reported nothing about this model:
-			// the flag is only the runtime's conservative floor. Dispatch admission
-			// probes the route itself before it refuses a worker.
-			const declared =
-				status.target.capabilities?.tools ??
-				providers.knowledgeBase?.lookup(wireModelId, status.runtime?.id ?? status.target.runtime)?.entry.capabilities
-					?.tools;
-			if (
-				declared === undefined &&
-				status.health.lastCheckAt === null &&
-				probeCapabilitiesForModel(status, wireModelId) === null
-			)
-				continue;
-			warnings.push(
-				`${role.label} model '${wireModelId}' on target '${targetId}' ${AGENT_ROLE_TOOLS_REQUIRED_REASON}. ` +
-					`Pick another model, or state the correction in a model-catalog.d entry if the provider's flag is wrong.`,
-			);
-		} catch {
-			// An unresolvable capability is not evidence of a missing one.
-		}
-	}
-	return warnings;
-}
-
-async function resolveCompactionModel(
-	settings: ClioSettings,
-	providers: ProvidersContract,
-	signal?: AbortSignal,
-): Promise<CompactionResolution | null> {
-	const override = settings.context.compaction.model;
-	let targetId = settings.chat.target;
-	let wireModelId = settings.chat.model;
-	if (override !== undefined && override !== null) {
-		let selected: ReturnType<typeof resolveModelReference>;
-		try {
-			selected = resolveModelReference(override, providers, { use: "chat" });
-		} catch {
-			throw new Error("context.compaction.model is an invalid pattern; set a unique target/model reference");
-		}
-		if (!selected.ref || selected.warning) {
-			throw new Error(
-				"context.compaction.model must match exactly one chat-eligible configured model; set a unique target/model reference on a loaded HTTP target with chat enabled",
-			);
-		}
-		targetId = selected.ref.target;
-		wireModelId = selected.ref.model;
-	}
-	if (!targetId || !wireModelId) return null;
-	await prepareBackgroundModelMetadata(providers, targetId, signal);
-	const status = providers.list().find((entry) => entry.target.id === targetId);
-	if (!status?.available) {
-		throw new Error("context.compaction.model target is unavailable; check the selected target with clio-coder targets");
-	}
-	const resolved = resolveRuntimeTarget(providers, {
-		targetId,
-		wireModelId,
-		use: "orchestrator",
-		requestedThinkingLevel: "off",
-		requireTools: false,
-		requireStreaming: true,
-	});
-	if (!resolved.ok) {
-		// Configured identifiers and provider diagnostics can contain terminal controls.
-		// Keep the failure actionable without echoing arbitrary provider/config text.
-		throw new Error("context.compaction.model cannot run as a summarizer; select an available HTTP chat model");
-	}
-	const route = resolved.target;
-	let model: EngineModel;
-	try {
-		model = route.runtime.synthesizeModel(
-			route.target,
-			route.wireModelId,
-			providers.knowledgeBase?.lookup(route.wireModelId, route.runtime.id) ?? null,
-		);
-	} catch {
-		throw new Error("context.compaction.model could not be prepared; check the selected target/model configuration");
-	}
-	const refined = refineRuntimeTargetWithModelHints(route, model, providers.knowledgeBase);
-	applyModelCapabilityPatch(model, refined.capabilities);
-	const sideAuth = await resolveSideCallAuth(
-		providers.auth,
-		route.target,
-		route.runtime,
-		LOCAL_API_KEY_FALLBACK,
-		signal,
-	);
-	if (targetRequiresAuth(route.target, route.runtime) && !sideAuth.apiKey) {
-		throw new Error(
-			"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
-		);
-	}
-	return {
-		model,
-		...pricingBasisFields(route),
-		targetId: route.targetId,
-		runtimeId: route.runtime.id,
-		wireModelId: route.wireModelId,
-		endpointKey: modelEndpointKey(route.target, route.wireModelId),
-		...sideAuth,
-		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
-	};
-}
 
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
@@ -1464,30 +553,6 @@ function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
 }
 
 /**
- * The read tool's reread port over the live session. The hash index it keeps
- * is rebuilt only when an eviction event lands (`ContextPruned`) or the
- * session changes, so an ordinary read never re-parses the ledger.
- */
-function createSessionRereadPort(session: SessionContract, bus: TelemetryHub): ReadRecallPort {
-	const port = createRereadRecallPort({
-		sessionId: () => session.current()?.id ?? null,
-		readEntries: () => {
-			const meta = session.current();
-			return meta ? session.readEntries() : [];
-		},
-		activeLeafTurnId: () => {
-			const meta = session.current();
-			return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
-		},
-		cwd: () => session.current()?.cwd ?? null,
-		appendEntry: (entry) => session.appendEntry(entry),
-		onRecalled: (payload) => bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
-	});
-	bus.subscribe("context.pruned", () => port.invalidate());
-	return port;
-}
-
-/**
  * The finish-contract only inspects the window since the last user message
  * (`recentEntries`, capped at 80), so it reads a bounded tail of the ledger
  * instead of parsing the whole file every turn_end. 160 = twice the 80-entry cap
@@ -1505,451 +570,6 @@ function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] 
 	);
 }
 
-function protectedArtifactStateForCurrentSession(
-	session: SessionContract,
-): ReturnType<typeof protectedArtifactStateFromSessionEntries> {
-	const meta = session.current();
-	if (!meta) return { artifacts: [] };
-	reconcilePendingProtectedArtifacts(session);
-	return protectedArtifactStateFromSessionEntries(session.readEntries());
-}
-
-function appendProtectedArtifactRegistryEvent(
-	session: SessionContract | undefined,
-	event: ProtectedArtifactProtectEvent,
-): void {
-	const current = session?.current();
-	if (session === undefined || current === null || current === undefined) {
-		throw new Error("no active session is available for protected artifact persistence");
-	}
-	const pending = stagePendingProtectedArtifact(current.id, event);
-	session.appendEntry(
-		protectedArtifactEntryFromArtifact(event.artifact, {
-			parentTurnId: event.turnId ?? null,
-			toolName: event.toolName,
-			...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
-			...(event.runId !== undefined ? { runId: event.runId } : {}),
-			...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
-		}),
-	);
-	if (session.flushAppends === undefined) {
-		throw new Error("session does not expose the durable append flush required by protected artifact persistence");
-	}
-	session.flushAppends();
-	clearPendingProtectedArtifact(pending);
-}
-
-/**
- * Fold a terminal dispatch payload's worker skill activations into the session
- * ledger, tagged with the runId, so worker skill provenance sits next to
- * main-agent activations.
- *
- * Both terminal channels carry them and the run finalizer emits exactly one of
- * the two, so this cannot double-record. The orchestrator never observes worker
- * tool calls directly, because a worker runs its own registry in its own
- * subprocess, which makes this the only recording path there is. Returns how
- * many were folded.
- */
-function foldDispatchSkillActivations(
-	session: SessionContract | undefined,
-	payload: { runId?: unknown; skillActivations?: ReadonlyArray<unknown> } | undefined,
-): number {
-	const runId = payload?.runId;
-	if (typeof runId !== "string") return 0;
-	let folded = 0;
-	for (const activation of payload?.skillActivations ?? []) {
-		if (!isSkillActivation(activation)) continue;
-		appendSkillActivationRegistryEvent(session, { ...activation, runId });
-		folded += 1;
-	}
-	return folded;
-}
-
-function appendSkillActivationRegistryEvent(
-	session: SessionContract | undefined,
-	activation: Parameters<SessionContract["recordSkillActivation"]>[0],
-): void {
-	if (!session?.current()) return;
-	try {
-		session.recordSkillActivation(activation);
-	} catch {
-		// Activation metadata should never alter the result of a completed
-		// context(scope=skills) call. Missing ledger data is visible in diagnostics.
-	}
-}
-
-/** What a compaction needs of telemetry: its session's journal. */
-type CompactionTelemetry = Pick<TelemetryContract, "acquireTelemetrySession">;
-
-async function runCompactionFlow(
-	session: SessionContract,
-	settings: ClioSettings,
-	providers: ProvidersContract,
-	instructions?: string,
-	trigger?: CompactionTrigger,
-	telemetry?: CompactionTelemetry,
-	budget?: Pick<
-		CompactInput,
-		| "providerCompaction"
-		| "livePrefix"
-		| "providerFallbackReason"
-		| "providerReplayFallback"
-		| "keepRecentTokens"
-		| "requireFit"
-		| "preserveUserTurnId"
-		| "pendingOperatorTurn"
-		| "skillContextState"
-		| "signal"
-		| "beforeSummaryCall"
-		| "onSummaryOutput"
-		| "checkpointForSummary"
-		| "checkpointTokenFigures"
-		| "skipSummaryDigest"
-	>,
-	summarize?: CompactInput["summarize"],
-	admission?: {
-		scheduling?: SchedulingContract;
-		headless?: boolean;
-		getCeilingUsd?: () => number;
-		/** Information-flow admission of the summarizer request; the block reason or null. */
-		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
-		memory?: MemoryRuntime;
-		summaryAdmitted?: boolean;
-	},
-): Promise<CompactResult | null> {
-	const meta = session.current();
-	if (!meta) {
-		throw new Error("no current session to compact; start one with /new or /resume first");
-	}
-	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
-	const isOriginCurrent = () =>
-		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
-	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
-	if (entries.length === 0) return null;
-	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
-	const lease = await telemetry?.acquireTelemetrySession?.(meta, { role: "compaction", id: meta.id });
-	const callIds = new Set<string>();
-	const closure: EventPayload<"compaction.settled"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
-	try {
-		// Folded over the full applicable ledger before this compaction cuts it, so
-		// the carry written below reflects every durable transition, including ones
-		// older than the cut. Resolved once and used for three things: the payload
-		// the summary carries, the note's one-time price on both sides of the
-		// before/after comparison, and nothing else. Inspection never executes the
-		// action it proposes.
-		const continuity = resolveContinuityProjection({
-			entries,
-			sessionId: meta.id,
-			...(meta.parentSessionId && meta.parentTurnId
-				? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
-				: {}),
-		});
-		// Only this session's own validated fold is carried forward. An inherited
-		// note is recall: writing it into this session's summary would republish
-		// another branch's transaction under this one's compaction.
-		const continuityNote = {
-			tokens: continuityProjectionTokens(continuity),
-			anchorTurnId: continuity.noteAnchorTurnId,
-		};
-		budget?.signal?.throwIfAborted();
-		const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
-		budget?.signal?.throwIfAborted();
-		const resolved = await resolveCompactionModel(settings, providers, budget?.signal);
-		budget?.signal?.throwIfAborted();
-		if (!resolved) {
-			throw new Error("no model configured; set chat.target + chat.model");
-		}
-		// Summarize only the active branch: after a /tree switch the raw file
-		// still holds abandoned sibling turns, and a summary that folds them in
-		// would persist abandoned content back into the active context. The full
-		// file read stays in place for protected artifacts and the masking
-		// rewrite, which are session-global. The task board is not: it used to
-		// read the full file too (last taskLedger entry in file order, with no
-		// branch filter at all), which was a second, independent instance of this
-		// same bug. See the taskBoard wiring below for the fix.
-		if (!isOriginCurrent()) throw new Error("compaction session or branch changed before summarization");
-		const calls: CompactionCallObservation[] = [];
-		// A compaction summary is a full streamed request against its resolved target.
-		// The whole transcript goes to it, so the session's restrictions decide first.
-		const flowViolation = admission?.admitFlow?.({
-			targetId: resolved.targetId,
-			runtimeId: resolved.runtimeId,
-			wireModelId: resolved.wireModelId,
-		});
-
-		// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
-		// pre-warm so dispatch admission and background memory see its real usage.
-		const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
-		const { providerCompaction, ...compactionBudget } = budget ?? {};
-		const nativeEnabled =
-			settings.context.compaction.provider === "native" &&
-			!settings.context.compaction.model &&
-			resolved.runtimeId === "openai-codex";
-		let nativeAdmission: Promise<void> | undefined;
-		const admitSummary = async (hold: AdmissionHold): Promise<void> => {
-			if (admission?.summaryAdmitted) return;
-			await budget?.beforeSummaryCall?.(hold);
-			if (pricesCalls(resolved.pricedBy)) {
-				await admission?.scheduling?.admitPaidRequest?.({
-					waitForRaise: admission.headless !== true,
-					...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
-					// The ceiling held this summary call, so its admission stage reads as a budget wait (#424, #434).
-					onBlocked: () => {
-						hold.waitedOn = "budget";
-					},
-					...(budget?.signal ? { signal: budget.signal } : {}),
-				});
-			}
-		};
-
-		let result: CompactResult;
-		try {
-			result = await compact({
-				...(telemetry?.acquireTelemetrySession
-					? {
-							telemetry: {
-								origin: meta,
-								acquire: telemetry.acquireTelemetrySession,
-								role: "compaction",
-								targetId: resolved.targetId,
-								runtimeId: resolved.runtimeId,
-								...pricingBasisFields(resolved),
-								onSettled: (facts) => {
-									callIds.add(facts.callId);
-								},
-							},
-						}
-					: {}),
-				entries,
-				cwd: meta.cwd,
-				offerMemory: (slice, ordinary, projected) => {
-					const scope = admission?.memory?.observationStatus().scope;
-					if (!scope) return null;
-					// Units come from the raw ledger slice, the material the batches were
-					// prepared from; an uncovered unit is serialized from the projected
-					// entries so it costs what the ordinary summary would have paid for it.
-					return (
-						admission?.memory?.offerCompaction({
-							source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
-							ordinary,
-							serialize: (refs) => serializeConversation(projected.filter((entry) => refs.includes(entry.turnId))),
-						}) ?? null
-					);
-				},
-				continuityNote,
-				...compactionBudget,
-				...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
-				...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
-				...(settings.context.compaction.provider === "native" && !nativeEnabled
-					? { providerFallbackReason: "non-codex-or-compaction-override" }
-					: {}),
-				// Native rejection and its portable retry share one transaction admission (#423).
-				beforeSummaryCall: (hold) => {
-					if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
-					if (!nativeEnabled || !providerCompaction) return admitSummary(hold);
-					nativeAdmission ??= admitSummary(hold);
-					return nativeAdmission;
-				},
-				...(summarize ? { summarize } : {}),
-				onCall: (call) => calls.push(call),
-				model: resolved.model,
-				...(systemPrompt !== undefined ? { systemPrompt } : {}),
-				...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
-				...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
-				...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
-				...(instructions !== undefined ? { instructions } : {}),
-			});
-		} finally {
-			releaseEndpointSlot();
-		}
-		if (budget?.signal?.aborted) {
-			budget.signal.throwIfAborted();
-		}
-		if (!isOriginCurrent()) {
-			throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
-		}
-		if (result.messagesSummarized === 0 || result.summary.length === 0) {
-			closure.outcome = "discarded";
-			if (calls.length > 0)
-				throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
-			// The empty result carries why nothing was summarized, which the
-			// operation's conclusion names (#422).
-			return result;
-		}
-		if (result.usage) {
-			result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
-		}
-
-		// Refold before publishing the carry. The projection above was resolved
-		// before prompt loading, route resolution and the summary stream, and a
-		// transition appended during any of those awaits leaves the message leaf
-		// untouched, so the origin check just above passes while the carry in hand
-		// still says `ready`. §3 requires the summary to embed the *current*
-		// validated fold, so the ledger is re-read and refolded here. Only the carry
-		// is re-derived: `result` indexes the entry array the cut was computed
-		// against, which must not move under it.
-		const settledContinuity = resolveContinuityProjection({
-			entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
-			sessionId: meta.id,
-			...(meta.parentSessionId && meta.parentTurnId
-				? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
-				: {}),
-		});
-		// A suppressed projection publishes no authoritative carry: the adapter marks
-		// its own fold unvalidated, and `continuityPayloadFromFold` refuses one.
-		const continuityCarry =
-			settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
-
-		if (result.usage)
-			result.usage = {
-				...result.usage,
-				targetId: resolved.targetId,
-				modelId: resolved.wireModelId,
-			};
-		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
-			kind: "compactionSummary",
-			...(result.callIds === undefined ? {} : { callIds: result.callIds }),
-			turnId: randomUUID(),
-			parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
-			summary: result.summary,
-			...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
-			...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
-			...(result.skillContext ? { skillContext: result.skillContext } : {}),
-			...(result.userContext ? { userContext: result.userContext } : {}),
-			...(result.memoryReceipt ? { memoryReceipt: result.memoryReceipt } : {}),
-			tokensBefore: result.tokensBefore,
-			firstKeptTurnId: result.firstKeptTurnId ?? "",
-			messagesSummarized: result.messagesSummarized,
-			isSplitTurn: result.isSplitTurn,
-			// The latest validated fold, carried so the transaction survives the cut
-			// that is about to remove its earlier records from replay. It preserves
-			// the immutable identity, accepted note, original policy and commit; it
-			// never manufactures a commit and never turns an eviction-only outcome
-			// into a summarized one. A later ordinary compaction with no handoff of
-			// its own still carries the newest validated payload forward, which is
-			// what keeps an eviction-only commit's state alive across summary cycles.
-			...(continuityCarry === null ? {} : { continuity: continuityCarry }),
-			// The summarization call is a real model call. Persisting its provider
-			// usage on the entry is what puts it in front of `/usage` and `clio-coder usage
-			// report`, which folded the ledger and so counted every call but this one.
-			...(result.usage !== undefined ? { usage: result.usage } : {}),
-		};
-		const replayTokens = (history: ReadonlyArray<SessionEntry>): number =>
-			estimateAgentContextBreakdown({
-				messages: buildModelReplayAgentMessagesFromTurns(history, {
-					...(activeLeafTurnId === undefined ? {} : { activeLeafTurnId }),
-					continuity: continuityContextFromSession(session),
-				}).map((message) => {
-					const checkpoint = providerCheckpointFromMessage(message);
-					if (!checkpoint || checkpoint.replayInputTokens === undefined) return message;
-					// Replay input includes the static prefix and tail. Only native output
-					// prices the opaque contribution on this message-only basis (#422).
-					const { replayInputTokens: _inclusive, ...contribution } = checkpoint;
-					return { ...message, clioProviderCheckpoint: contribution };
-				}),
-			}).messageTokens;
-		// Raw rows include already summarized or evicted bodies. Price both live
-		// projections without stale provider usage anchors before publishing (#422).
-		// An unusable native handle is removed by destination replay before the cut (#422).
-		const comparisonEntries = budget?.providerReplayFallback
-			? entries.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint)
-			: entries;
-		const replayBefore = replayTokens(comparisonEntries);
-		const replayAfter = replayTokens([...comparisonEntries, { ...entry, timestamp: new Date().toISOString() }]);
-		if (replayAfter >= replayBefore) {
-			closure.outcome = "discarded";
-			return { ...result, noGain: true };
-		}
-		// Preserve an inclusive provider anchor's unchanged prefix when no runtime
-		// figures are available, applying only the current replay's reduction (#422).
-		entry.tokensBefore = Math.max(result.tokensBefore, replayBefore);
-		entry.tokensAfter = entry.tokensBefore + replayAfter - replayBefore;
-		if (budget?.checkpointTokenFigures) {
-			const figures = budget.checkpointTokenFigures(entry);
-			entry.tokensBefore = figures.tokensBefore;
-			entry.tokensAfter = figures.tokensAfter;
-		}
-		if (budget?.checkpointForSummary) {
-			entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
-		}
-		if (trigger !== undefined) entry.trigger = trigger;
-		// No asynchronous work may separate private publication from the owned ledger append (#423).
-		if (budget?.signal?.aborted) {
-			budget.signal.throwIfAborted();
-		}
-		if (!isOriginCurrent()) {
-			throw new Error("compaction ownership changed before publication");
-		}
-		try {
-			result.publishProviderCheckpoint?.();
-		} catch {
-			budget?.signal?.throwIfAborted();
-			const { providerCompaction: _native, ...portableBudget } = budget ?? {};
-			return runCompactionFlow(
-				session,
-				settings,
-				providers,
-				instructions,
-				trigger,
-				telemetry,
-				{ ...portableBudget, providerFallbackReason: "checkpoint-publication-failed" },
-				summarize,
-				{ ...admission, summaryAdmitted: true },
-			);
-		}
-		closure.checkpointTurnId = entry.turnId;
-		closure.outcome = "unresolved";
-		try {
-			session.appendEntry(entry);
-		} catch (error) {
-			// A write may have reached the ledger before its caller threw. Reconcile
-			// this exact checkpoint identity before choosing a second accounting store.
-			try {
-				if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
-					closure.outcome = "failed";
-					if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
-				} else closure.outcome = "committed";
-			} catch (recordingError) {
-				throw new AggregateError(
-					[error, recordingError],
-					"compaction checkpoint persistence is unresolved; usage was not duplicated",
-				);
-			}
-			throw error;
-		}
-		session.flushAppends?.();
-		closure.outcome = "committed";
-		return result;
-	} finally {
-		if (lease && callIds.size > 0)
-			telemetryHub().emit("compaction.settled", { ...closure, callIds: [...callIds] }, lease.context);
-		await lease?.release();
-	}
-}
-
-function compactionCheckpointWasWritten(path: string, turnId: string): boolean {
-	let malformed = false;
-	for (const line of readFileSync(path, "utf8").split("\n")) {
-		if (line.trim().length === 0) continue;
-		try {
-			const entry: unknown = JSON.parse(line);
-			if (
-				entry &&
-				typeof entry === "object" &&
-				"turnId" in entry &&
-				entry.turnId === turnId &&
-				"kind" in entry &&
-				entry.kind === "compactionSummary"
-			)
-				return true;
-		} catch {
-			malformed = true;
-		}
-	}
-	if (malformed) throw new Error("cannot prove checkpoint absence in a malformed session ledger");
-	return false;
-}
-
 /**
  * Compose the production chat-loop compaction callback. Errors intentionally
  * propagate: the chat loop owns activity failure reporting and distinguishes
@@ -1963,39 +583,33 @@ export function createProductionAutoCompact(
 	providers: ProvidersContract,
 	telemetry?: CompactionTelemetry,
 	summarize?: CompactInput["summarize"],
-	admission?: {
-		scheduling?: SchedulingContract;
-		headless?: boolean;
-		getCeilingUsd?: () => number;
-		/** Information-flow admission of the summarizer request; the block reason or null. */
-		admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
-		memory?: MemoryRuntime;
-	},
+	admission?: CompactionFlowAdmission,
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	budget?: Pick<
-		CompactInput,
-		| "providerCompaction"
-		| "livePrefix"
-		| "providerFallbackReason"
-		| "providerReplayFallback"
-		| "keepRecentTokens"
-		| "requireFit"
-		| "preserveUserTurnId"
-		| "pendingOperatorTurn"
-		| "skillContextState"
-		| "signal"
-		| "beforeSummaryCall"
-		| "onSummaryOutput"
-		| "checkpointForSummary"
-		| "checkpointTokenFigures"
-		| "skipSummaryDigest"
-	>,
+	budget?: CompactionFlowBudget,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
-		runCompactionFlow(session, getSettings(), providers, instructions, trigger, telemetry, budget, summarize, admission);
+		runCompactionFlow(
+			replayCompactionHistory,
+			session,
+			getSettings(),
+			providers,
+			instructions,
+			trigger,
+			telemetry,
+			budget,
+			summarize,
+			admission,
+		);
 }
+
+/** The session-control replay the compaction flow prices its before and after projections with. */
+const replayCompactionHistory: CompactionReplay = (session, history, activeLeafTurnId) =>
+	buildModelReplayAgentMessagesFromTurns(history, {
+		...(activeLeafTurnId === undefined ? {} : { activeLeafTurnId }),
+		continuity: continuityContextFromSession(session),
+	});
 
 /**
  * Scoped model cycle actions step the orchestrator through the `scope` list of target
@@ -2753,21 +1367,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
 		result.getContract("scheduling")?.preflight().currentUsd ?? telemetry?.sessionSpend().usd ?? 0;
-	const backgroundCallJournal = (targetId: string, modelId: string): CallJournalOptions | undefined => {
-		const origin = session?.current();
-		const acquire = telemetry?.acquireTelemetrySession;
-		const target = providers.getTarget(targetId);
-		const runtime = target ? providers.getRuntime(target.runtime) : null;
-		if (!acquire || !target || !runtime) return undefined;
-		return {
-			origin: origin ?? null,
-			acquire,
-			role: "memory",
-			targetId,
-			runtimeId: runtime.id,
-			...pricingBasisFields(resolveEffectivePricing(target, runtime, modelId)),
-		};
-	};
+	const backgroundCallJournal = createBackgroundCallJournal(
+		providers,
+		() => telemetry?.acquireTelemetrySession,
+		() => session?.current(),
+	);
 	// Lesson gate decisions reach the operator through the transcript notice
 	// path once the chat loop has bound it; before that, a diagnostic line.
 	const memoryNotice = (line: string): void => {
@@ -2799,26 +1403,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			`restricted lesson sweep did not finish and will run again next boot: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
-	const memoryFlowNoticedSessions = new Set<string | null>();
-	const admitMemoryFlow: AdmitBackgroundModelFlow = (destination) => {
-		const refusal = admitModelFlow(destination);
-		const sessionId = session?.current()?.id ?? null;
-		if (refusal !== null && !memoryFlowNoticedSessions.has(sessionId)) {
-			memoryFlowNoticedSessions.add(sessionId);
-			emitMemoryFlowNotice(
-				{
-					kind: "memory-flow-blocked",
-					level: "info",
-					message: `Memory skipped target ${destination.targetId}: ${refusal}`,
-					targetId: destination.targetId,
-					runtimeId: destination.runtimeId,
-					model: destination.wireModelId,
-				},
-				bus,
-			);
-		}
-		return refusal;
-	};
+	const admitMemoryFlow = createMemoryFlowAdmission(admitModelFlow, () => session?.current()?.id ?? null, bus);
 	const getCurrentMemoryEnabled = (): boolean =>
 		(effectiveSettingsForDispatch?.().context.memory ?? memorySettings).enabled;
 	const memoryTelemetry = createTaskMemoryTelemetrySink();
@@ -2832,33 +1417,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// reports turn boundaries and step activity to the guardian.
 	let memoryGuardian: MemoryGuardian | null = null;
 	let isChatStreaming: () => boolean = () => false;
-	let publishedGuardianState: MemoryGuardianState | null = null;
-	/**
-	 * The one guardian state every surface projects: a boundary step the
-	 * middleware launched counts as reviewing even though the guardian did not
-	 * start it.
-	 */
-	const currentGuardianState = (): MemoryGuardianState => {
-		const state = memoryOwner.contract.guardianState();
-		return state !== "off" && memoryOwner.contract.interventionStatus().stepInFlight ? "reviewing" : state;
-	};
-	const publishGuardianState = (): void => {
-		const state = currentGuardianState();
-		if (state === publishedGuardianState) return;
-		publishedGuardianState = state;
-		const sessionId = session?.current()?.id ?? null;
-		bus.emit(
-			"memory.guardian_changed",
-			{ sessionId, state },
-			sessionId ? { sessionId, agent: { role: "memory", id: sessionId } } : undefined,
-		);
-	};
+	const guardianState = createGuardianStatePublisher(memoryOwner.contract, bus, () => session?.current()?.id ?? null);
 	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
 		workspaceRoot: memoryWorkspaceRoot,
 		onTurnBoundary: (kind) => memoryGuardian?.wake(kind === "end" ? "turn-end" : "turn-start"),
 		onStepActivity: () => {
-			publishGuardianState();
+			guardianState.publish();
 			memoryGuardian?.wake("step-settled");
 		},
 		onEnvelope: (envelope) => memoryTrace.record(envelope),
@@ -2896,11 +1461,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			takeRecalled: () => memoryOwner.takeTurnRecalledMemory(),
 		}),
 	);
-	const memoryRouteAvailable = (): boolean => {
-		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
-		const route = resolveMemoryRoute(settings);
-		return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
-	};
+	const memoryRouteAvailable = (): boolean =>
+		memoryRouteConfigured(effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings());
 	memoryGuardian = memoryOwner.startGuardian({
 		// A headless run exits after its turn, so there is no idle time to use.
 		enabled: () => options.headless === undefined && memoryRouteAvailable(),
@@ -2928,19 +1490,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		workspaceRoot: memoryWorkspaceRoot,
 		telemetry: historyReviews.telemetry,
-		onStateChange: publishGuardianState,
+		onStateChange: guardianState.publish,
 	});
-	let memoryProjection: {
-		sessionId: string;
-		pinned: string | null;
-		entries: readonly SessionEntry[];
-		active: readonly SessionEntry[];
-		lesson: ReturnType<typeof completedLessonSource>;
-		observation: {
-			checkpoint: ReturnType<typeof observationCheckpoint>;
-			units: ReturnType<typeof observationSourceUnits>;
-		};
-	} | null = null;
 	const memoryEnabledNow = (): boolean =>
 		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
 	const beforeTurnRecorded = (target: SessionContract): void => {
@@ -2949,36 +1500,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const beforeShellEntryRecorded = (): void => {
 		if (session) beforeTurnRecorded(session);
 	};
-	const memoryActiveEntries = () => {
-		const meta = session?.current();
-		if (!meta || !session) return null;
-		const entries = session.readEntries();
-		const pinned = meta.pinnedLeafTurnId ?? null;
-		// Session's frozen snapshot changes on append, replacement or external writes. A /tree pin is separate authority.
-		if (
-			memoryProjection?.entries !== entries ||
-			memoryProjection.sessionId !== meta.id ||
-			memoryProjection.pinned !== pinned
-		) {
-			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined));
-			const checkpointIndex = active.reduce(
-				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
-				-1,
-			);
-			memoryProjection = {
-				sessionId: meta.id,
-				pinned,
-				entries,
-				active,
-				lesson: completedLessonSource(active, meta.cwd),
-				observation: {
-					checkpoint: observationCheckpoint(active),
-					units: observationSourceUnits(active.slice(checkpointIndex + 1)),
-				},
-			};
-		}
-		return memoryProjection;
-	};
+	const memoryActiveEntries = createMemorySessionProjection(() => session);
 	/**
 	 * The main route's live history capacity after fixed prompt and reserves,
 	 * and how much of it the conversation occupies. Null while the live budget
@@ -6067,7 +4589,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 				),
 				stepInFlight: memoryIntervention.stepInFlight(),
-				guardian: currentGuardianState(),
+				guardian: guardianState.current(),
 				observations: memoryOwner.contract.observationStatus(),
 				retention: memoryOwner.contract.retentionStatus(),
 				promptSelection: memoryOwner.contract.promptSelection?.() ?? null,

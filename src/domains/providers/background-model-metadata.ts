@@ -1,4 +1,4 @@
-import type { ProvidersContract } from "../domains/providers/contract.js";
+import type { ProvidersContract } from "./contract.js";
 
 /** Cold gateway roles need their own declared model controls before synthesis.
  * Read metadata only; an unknown/mixed successful probe remains authoritative.

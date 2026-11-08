@@ -17,7 +17,7 @@ import type { SessionSource } from "../../src/domains/telemetry/read-model.js";
 import { callsReport, timeline } from "../../src/domains/telemetry/read-model.js";
 import { createMessagePath } from "../../src/session-control/message-path.js";
 import { createTurnQueues } from "../../src/session-control/turn-queues.js";
-import type { ChatTurnState } from "../../src/session-control/turn-state.js";
+import { type ChatTurnState, ContinuationState } from "../../src/session-control/turn-state.js";
 
 type MessageEntry = Extract<TimelineV1["entries"][number], { kind: "message" }>;
 
@@ -32,7 +32,7 @@ function rig(sessionId: string) {
 		followUp: (message: { content: string }) => engine.push(message.content),
 		clearAllQueues: () => {},
 	};
-	const state = { streaming: true, runtime: { agent }, pendingRequestContinuation: false };
+	const state = { streaming: true, runtime: { agent }, continuation: new ContinuationState() };
 	const queues = createTurnQueues({
 		state: state as unknown as ChatTurnState,
 		emitQueueUpdateEvent: () => {},

@@ -46,13 +46,13 @@ import {
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import type { ExpectedColdReason } from "./turn-context.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
-import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, ChatLoopTarget, TurnPersistenceState } from "./turn-state.js";
 
 export interface TurnPersistenceDeps {
 	/** Runs before any turn is written, so a ledger fact can precede the text it describes. */
 	beforeTurnRecorded?: (session: SessionContract) => void;
 	getToolOwner?: (name: string) => PackageIdentity | undefined;
-	state: ChatTurnState;
+	state: TurnPersistenceState;
 	session?: SessionContract | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	getSettings: () => Readonly<ClioSettings>;

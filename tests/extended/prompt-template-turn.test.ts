@@ -67,6 +67,7 @@ test("the aside under an operator turn is one dim row in the prose gutter", () =
 
 test("streaming prompt injection and stranded resubmission retain presentation, text and monotonic queue age", async (t) => {
 	const { createTurnQueues } = await import("../../src/session-control/turn-queues.js");
+	const { ContinuationState } = await import("../../src/session-control/turn-state.js");
 	let wallClock = Date.parse("2026-10-07T00:00:00Z");
 	let elapsed = 0;
 	t.mock.method(performance, "now", () => elapsed);
@@ -77,7 +78,7 @@ test("streaming prompt injection and stranded resubmission retain presentation, 
 	const outcomes: QueueEvent[] = [];
 	const state = {
 		streaming: true,
-		pendingRequestContinuation: false,
+		continuation: new ContinuationState(),
 		runtime: {
 			agent: {
 				steer: (message: unknown) => model.push(message),
