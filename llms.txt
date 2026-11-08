@@ -1,0 +1,88 @@
+# Clio Coder
+
+> Clio Coder is an open-source coding agent for scientific computing and HPC. Work in the terminal or on the desktop (alpha) with local or cloud models. Apache 2.0.
+
+Clio Coder reads, edits, and runs checks in your repository. It records what passed, what failed, and what was never checked. Connect a local model server, an institutional endpoint, a subscription, or a cloud API, and switch models with one command. The installer needs no root and works on HPC login nodes.
+
+- Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
+- Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
+- Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
+- Current release: v0.7.0. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+
+## Start
+
+- [Install Clio Coder](https://coder.iowarp.ai/docs.html): Install, update, and launch Clio Coder on your machine.
+- [Install on a cluster](https://coder.iowarp.ai/docs/guide/hpc-clusters.html): Install Clio Coder on a login node with an old glibc, a proxy, or no internet.
+- [Connect a model](https://coder.iowarp.ai/docs/guide/configuration-and-targets.html): Set up local models, institutional endpoints, and cloud connections.
+
+## Everyday use
+
+- [Commands and shortcuts](https://coder.iowarp.ai/docs/guide/commands-and-modes.html): Navigate the terminal, choose models, and control a session.
+- [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html): Read, search, edit, and run commands with Clio Coder's repository tools.
+- [Save and resume work](https://coder.iowarp.ai/docs/guide/context-continuity.html): Resume conversations, manage context, and prepare a handoff.
+- [Memory and lessons](https://coder.iowarp.ai/docs/guide/proactive-memory.html): See what Clio Coder remembers, approve lessons, or turn memory off.
+- [Files and terminal panes](https://coder.iowarp.ai/docs/guide/panes-and-files.html): Attach files and open companion terminal panes.
+- [The desktop app](https://coder.iowarp.ai/docs/guide/gui.html): Open the desktop alpha, keep tasks in one window, and read the Session column.
+- [Require project checks](https://coder.iowarp.ai/docs/guide/quality-policy.html): Choose the declared checks a change requires and inspect verification freshness.
+- [Climb a metric, compare models](https://coder.iowarp.ai/docs/guide/research-and-arena.html): Improve a measured number with verified research campaigns, and compare models blind in the arena.
+- [Semantic context](https://coder.iowarp.ai/docs/guide/semantic-context.html): Search your project by meaning with a local embedding route.
+- [Agents](https://coder.iowarp.ai/docs/guide/built-in-agents.html): See the agents you can dispatch and add your own.
+
+## Extend Clio Coder
+
+- [Workers and fleets](https://coder.iowarp.ai/docs/guide/fleet-dispatch.html): Assign focused tasks and combine workers into a workflow.
+- [Skills and resources](https://coder.iowarp.ai/docs/guide/resource-library.html): Browse and use skills, prompts, agents, fleets, and plugins.
+- [Install plugins](https://coder.iowarp.ai/docs/guide/plugins.html): Add reusable resources to your Clio Coder installation.
+- [Extensions](https://coder.iowarp.ai/docs/guide/harness-extensions.html): Install and write extensions that declare what they may do.
+- [Editors and other agents](https://coder.iowarp.ai/docs/guide/interop.html): Use supported agent connections and editor integrations.
+- [Slurm workflows](https://coder.iowarp.ai/docs/guide/slurm.html): Connect Clio Coder to supported Slurm tools for cluster work.
+
+## Reference
+
+- [Check your installation](https://coder.iowarp.ai/docs/guide/doctor.html): Diagnose installation and connection problems with doctor.
+- [Troubleshooting](https://coder.iowarp.ai/docs/guide/troubleshooting.html): Resolve common connection, terminal, and runtime problems.
+- [Configuration essentials](https://coder.iowarp.ai/docs/guide/configuration-reference.html): Find settings layers, save scopes, and the full configuration reference.
+- [Environment essentials](https://coder.iowarp.ai/docs/guide/environment-variables.html): Use directory overrides and existing provider credentials when needed.
+- [System One](https://coder.iowarp.ai/docs/guide/system-one.html): Bring a decision model, name a route, and read its limits.
+- [Information flow](https://coder.iowarp.ai/docs/guide/information-flow.html): Keep named files away from destinations you did not choose.
+
+## Tutorials
+
+- [Your first session with Clio Coder](https://coder.iowarp.ai/tutorials/first-session.html): Connect a model, open a repository, and ask Clio Coder to explain how it builds and runs its tests.
+- [Desktop or terminal: find your workspace](https://coder.iowarp.ai/tutorials/desktop-and-terminal.html): See both interfaces, learn how to launch them, and choose where to start your next coding session.
+- [Let Clio Coder work without watching every call](https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html): Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.
+- [Run a playbook and land the result](https://coder.iowarp.ai/tutorials/run-a-playbook-and-land-it.html): Run the builtin sdlc playbook on one task, watch it work, and land the branch it keeps after you preview the change.
+- [Run it unattended within limits](https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html): Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one.
+- [See what a session cost and what a run did](https://coder.iowarp.ai/tutorials/see-what-a-session-cost-and-what-a-run-did.html): Read session cost and stop reasons from local journals, verify a sealed record, and prepare an archive that uploads nothing.
+- [A numerical change, checked with Clio Coder](https://coder.iowarp.ai/tutorials/temperature-calibration.html): Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.
+- [Choose a model for your project](https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html): Connect a local server, a cloud API, or a supported subscription route, then choose models separately for conversation and delegated work.
+- [Coordinate the coding agents you already use](https://coder.iowarp.ai/tutorials/coordinate-your-coding-agents.html): Use supported coding peers for bounded assignments, distinguish managed runs from interactive handoffs, and review the results before combining them.
+- [Keep a long coding task on track](https://coder.iowarp.ai/tutorials/keep-long-coding-tasks-on-track.html): Inspect context, preserve decisions through a handoff, and resume the correct branch without turning every past message into a current instruction.
+- [Check a change against your repository](https://coder.iowarp.ai/tutorials/check-a-change-against-your-repository.html): Declare which checks matter, run them through verification, and inspect whether passing results still match the files you are reviewing.
+- [Add skills and plugins deliberately](https://coder.iowarp.ai/tutorials/add-skills-and-plugins-deliberately.html): Preview a project-scoped skill or plugin, inspect its package pin, and load the resources your task needs without treating an installation as a permission grant.
+- [Work from a laptop with remote workers](https://coder.iowarp.ai/tutorials/work-from-a-laptop-with-remote-workers.html): Use a local Clio Coder session to coordinate SSH workers when your machines share the required project path, runtime version, and approved access.
+- [Write an extension with declared capabilities](https://coder.iowarp.ai/tutorials/write-an-extension-with-declared-capabilities.html): Scaffold, test, and install a small extension, and see exactly what approving its capabilities covers.
+- [Diffusion models in the terminal](https://coder.iowarp.ai/tutorials/diffusion-models.html): Connect Inception's Mercury models for chat and workers, and watch an answer refine as a whole instead of arriving token by token.
+- [Panes and docks: files, workers, and music](https://coder.iowarp.ai/tutorials/panes-and-docks.html): Inside Herdr, show and hide a file browser, a live worker dashboard, and a focus radio beside the conversation with one key each.
+- [Keep named files with the models you chose](https://coder.iowarp.ai/tutorials/information-flow-rules.html): Declare which paths and tool results may reach which model targets, approve the policy, and see a request to any other destination refused.
+- [Search your project by meaning and record worker runs](https://coder.iowarp.ai/tutorials/semantic-context-and-recordings.html): Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker's evidence.
+- [Run Clio Coder on a local model](https://coder.iowarp.ai/tutorials/run-on-a-local-model.html): Connect a local server with no account or key, check what Clio Coder learned about it, and see what else to check if code must stay on your machine.
+- [Submit a Slurm job through Clio Coder](https://coder.iowarp.ai/tutorials/submit-a-slurm-job.html): Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with your approval before it reaches the scheduler.
+- [Pre-register a benchmark before you measure](https://coder.iowarp.ai/tutorials/pre-register-a-benchmark.html): Use the experiment-protocol skill to lock thresholds, tolerances, and verdict conditions into a contract you commit before any result exists.
+
+## Research
+
+- [Can a small decision model improve an agent's work?](https://coder.iowarp.ai/research/system-one-decisions.html): System One's open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment.
+- [Can an agent run be a scientific record?](https://coder.iowarp.ai/research/sealed-run-records.html): What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder.
+- [Does agent memory change outcomes?](https://coder.iowarp.ai/research/proactive-memory.html): Whether lessons change what an agent does, whether self-approval is safe, and a first experiment on one repeated mistake.
+- [What does an agent lose when its context is reduced?](https://coder.iowarp.ai/research/context-and-retrieval.html): Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive.
+- [When do several agents or small models pay off?](https://coder.iowarp.ai/research/fleets-and-local-models.html): Compete, council, heterogeneous fleets and local models, with no comparative numbers yet and a first experiment on one seeded bug.
+- [What would make a scientist trust an agent's change?](https://coder.iowarp.ai/research/scientific-and-hpc-workflows.html): Pre-registered checks, validated modernization and scheduler use on scientific code, with a first experiment on catching a numerical error.
+
+## Optional
+
+- [Full text](https://coder.iowarp.ai/llms-full.txt): every guide, tutorial, and research page above as Markdown in one file
+- [Overview](https://coder.iowarp.ai/): capabilities, models, installation, and common questions
+- [Source repository](https://github.com/iowarp/clio-coder): code, issues, and the full upstream guides
+- [npm package](https://www.npmjs.com/package/@iowarp/clio-coder)
+- [License](https://github.com/iowarp/clio-coder/blob/main/LICENSE): Apache 2.0

@@ -232,6 +232,17 @@
     "url": "/docs/guide/quality-policy.html"
   },
   {
+    "path": "guide/research-and-arena.md",
+    "title": "Climb a metric, compare models",
+    "group": "Everyday use",
+    "excerpt": "Improve a measured number with verified research campaigns, and compare models blind in the arena.",
+    "headings": [
+      "Improve a number, and keep only real gains",
+      "Compare models blind"
+    ],
+    "url": "/docs/guide/research-and-arena.html"
+  },
+  {
     "path": "guide/configuration-reference.md",
     "title": "Configuration essentials",
     "group": "Reference",
