@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import { join } from "node:path";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { choiceFitsMatch } from "./blind.js";
 import { ARENA_SCHEMA_VERSION, type ArenaChoice, type ArenaMatch, type ArenaVote } from "./types.js";
 
@@ -111,7 +112,9 @@ export class ArenaVoteError extends Error {}
 
 /**
  * Record the human's preference. One vote per match: a second needs `replace`,
- * and every vote, replaced or not, stays in the append-only `votes.jsonl`.
+ * and every vote, replaced or not, stays in the append-only `votes.jsonl`. The
+ * check, the journal append and the snapshot run under one cross-process lock on
+ * the match's vote file, so two voters at once cannot both land a first vote.
  */
 export function recordVote(
 	root: string,
@@ -119,26 +122,30 @@ export function recordVote(
 	input: { choice: ArenaChoice; note: string | null; replace: boolean },
 	now = new Date(),
 ): ArenaVote {
-	const match = readMatch(root, id);
-	if (match === null) throw new ArenaVoteError(`no arena match ${id}`);
-	if (match.status !== "complete") throw new ArenaVoteError(`match ${id} is ${match.status}; vote once it completes`);
-	if (!choiceFitsMatch(match, input.choice)) {
-		throw new ArenaVoteError(`match ${id} has ${match.order.length} contenders; '${input.choice}' is not one of them`);
-	}
-	const existing = readVote(root, id);
-	if (existing !== null && !input.replace) {
-		throw new ArenaVoteError(`match ${id} already has a vote (${existing.choice}); pass --replace to change it`);
-	}
-	const vote: ArenaVote = {
-		schemaVersion: ARENA_SCHEMA_VERSION,
-		matchId: id,
-		choice: input.choice,
-		note: input.note,
-		votedAt: now.toISOString(),
-		replaced: existing !== null,
-	};
-	mkdirSync(root, { recursive: true });
-	appendFileSync(join(root, "votes.jsonl"), `${JSON.stringify(vote)}\n`);
-	writeJson(join(matchDir(root, id), "vote.json"), vote);
-	return vote;
+	const votePath = join(matchDir(root, id), "vote.json");
+	if (readMatch(root, id) === null) throw new ArenaVoteError(`no arena match ${id}`);
+	return withStateFileLockSync(votePath, () => {
+		const match = readMatch(root, id);
+		if (match === null) throw new ArenaVoteError(`no arena match ${id}`);
+		if (match.status !== "complete") throw new ArenaVoteError(`match ${id} is ${match.status}; vote once it completes`);
+		if (!choiceFitsMatch(match, input.choice)) {
+			throw new ArenaVoteError(`match ${id} has ${match.order.length} contenders; '${input.choice}' is not one of them`);
+		}
+		const existing = readVote(root, id);
+		if (existing !== null && !input.replace) {
+			throw new ArenaVoteError(`match ${id} already has a vote (${existing.choice}); pass --replace to change it`);
+		}
+		const vote: ArenaVote = {
+			schemaVersion: ARENA_SCHEMA_VERSION,
+			matchId: id,
+			choice: input.choice,
+			note: input.note,
+			votedAt: now.toISOString(),
+			replaced: existing !== null,
+		};
+		mkdirSync(root, { recursive: true });
+		appendFileSync(join(root, "votes.jsonl"), `${JSON.stringify(vote)}\n`);
+		writeJson(votePath, vote);
+		return vote;
+	});
 }
