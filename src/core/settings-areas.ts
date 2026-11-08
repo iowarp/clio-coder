@@ -179,6 +179,8 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 			return place("interface", "Guidance");
 		case "interface.autoUpdate":
 			return place("interface", "Updates");
+		case "interface.guiTurnCapacity":
+			return place("interface", "Graphical app");
 		case "fleet.worktrees.root":
 			return place("workspace", "Task copies");
 		case "fleet.concurrency":

@@ -35,7 +35,7 @@ import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
 import { SessionService } from "./services/sessions.js";
-import { SettingsService } from "./services/settings.js";
+import { SettingsService, turnCapacitySetting } from "./services/settings.js";
 import { SetupService } from "./services/setup.js";
 import { SystemService } from "./services/system.js";
 import { TargetsService } from "./services/targets-cli.js";
@@ -209,7 +209,22 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
 	const arena = new ArenaService(cli, workspaces, operations, env);
-	const settingsService = new SettingsService(reads, workspaces, ops);
+	// The user's limit, resolved where no project layer applies, since one server runs turns for every
+	// workspace. Read at startup and after the app writes it; until the first read the default holds.
+	const applyTurnCapacity = () =>
+		void realpath(stateRoot)
+			.then((cwd) => settingsService.controlsAt(cwd))
+			.then((controls) => {
+				const capacity = turnCapacitySetting(controls);
+				if (capacity !== undefined) supervisor.setTurnCapacity(capacity);
+			})
+			.catch((error: unknown) =>
+				console.error(
+					`[clio-coder:gui] Could not read interface.guiTurnCapacity; keeping ${supervisor.turnCapacity}: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			);
+	const settingsService = new SettingsService(reads, workspaces, ops, applyTurnCapacity);
+	applyTurnCapacity();
 	const setup = new SetupService(reads, env, workspaces);
 	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;

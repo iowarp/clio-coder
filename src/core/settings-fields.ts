@@ -100,6 +100,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"gatewayDeploymentId",
 	"git",
 	"guardrails",
+	"guiTurnCapacity",
 	"headers",
 	"history",
 	"host",

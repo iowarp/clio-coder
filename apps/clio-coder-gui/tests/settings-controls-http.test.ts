@@ -95,6 +95,16 @@ test("settings controls derive from the engine registry, write only the user lay
 		const cleared = await json(await patch({ path: "fleet.default.target", value: "" }), SettingWritten);
 		assert.deepEqual(cleared.changed.map((row) => row.path).sort(), ["fleet.default.model", "fleet.default.target"]);
 
+		// The app's own turn limit applies on write, bounded by the engine to 1..16.
+		assert.equal(byPath.get("interface.guiTurnCapacity")?.value, "4");
+		assert.equal(h.supervisor.turnCapacity, 4);
+		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "1" })).status, 200);
+		await h.capacityApplied();
+		assert.equal(h.supervisor.turnCapacity, 1);
+		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "17" })).status, 422);
+		assert.equal((await patch({ path: "interface.guiTurnCapacity", value: "0" })).status, 422);
+		assert.equal(h.supervisor.turnCapacity, 1);
+
 		assert.equal((await patch({ path: "interface.mode", value: "fullscreen" })).status, 404);
 		assert.equal((await patch({ path: "targets.0.url", value: "http://x" })).status, 422);
 		assert.equal((await patch({ path: "integrations.externalAgents.entries", value: "[]" })).status, 409);

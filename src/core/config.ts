@@ -2464,9 +2464,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"terminalProgress",
 				"desktopNotifications",
 				"autoUpdate",
+				"guiTurnCapacity",
 				"panes",
 				"keybindings",
 			]);
+			if ("guiTurnCapacity" in ui) {
+				const parsed = expectInteger(issues, "interface.guiTurnCapacity", ui.guiTurnCapacity, { min: 1, max: 16 });
+				if (parsed !== undefined) settings.interface.guiTurnCapacity = parsed;
+			}
 			for (const key of ["terminalProgress", "desktopNotifications", "demo", "autoUpdate"] as const) {
 				if (!(key in ui)) continue;
 				const parsed = expectBoolean(issues, `interface.${key}`, ui[key]);

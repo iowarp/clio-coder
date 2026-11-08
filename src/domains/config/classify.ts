@@ -106,6 +106,9 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"safety.sandboxNetwork",
 	"interface.terminalProgress",
 	"interface.desktopNotifications",
+	// The graphical app applies a change made in its settings to the next turn it admits; a change
+	// written elsewhere applies when the GUI server next starts.
+	"interface.guiTurnCapacity",
 	"integrations.projectResources",
 	"integrations.externalAgents",
 	"integrations.library",

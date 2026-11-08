@@ -633,6 +633,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Demo presentation and guidance",
 		"Welcome presentation and optional learning tips, bounded by output detail. Minimal stays quiet; Default shows a compact launchpad; Detailed adds artwork and shortcut hints. Off starts with an identity header, skips welcome-only reads, and stops tips and the guidance profile. Immediate controls and warnings remain. Stream pacing, motion preferences and permissions are independent.",
 	],
+	"interface.guiTurnCapacity": [
+		"Graphical app turns at once",
+		"How many tasks in the graphical app may run a turn at the same time, from 1 to 16. Further requests are recorded in their task and start in order as running turns finish. Open tasks are not limited. A change made in the app applies to its next turn; a change made elsewhere applies when the app's server restarts.",
+	],
 	"interface.autoUpdate": [
 		"Background updates",
 		"A native install fetches and activates a newer release in the background; running sessions keep their version until restart, and upgrade --rollback undoes it. Off keeps the update notice and leaves the install to clio-coder upgrade. Package-manager installs only ever show their upgrade command.",

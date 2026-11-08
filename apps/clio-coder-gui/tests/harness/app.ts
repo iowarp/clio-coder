@@ -20,7 +20,7 @@ import { MachineAttachments } from "../../server/services/machine-attach.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { ReportsService } from "../../server/services/reports.js";
 import { SessionService } from "../../server/services/sessions.js";
-import { SettingsService } from "../../server/services/settings.js";
+import { SettingsService, turnCapacitySetting } from "../../server/services/settings.js";
 import { SetupService } from "../../server/services/setup.js";
 import { SystemService } from "../../server/services/system.js";
 import { TargetsService } from "../../server/services/targets-cli.js";
@@ -72,7 +72,16 @@ export async function harness(
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
-	const settingsService = new SettingsService(reads, workspaces, ops);
+	// Wired as the server wires it: a written turn limit is re-read from the user layer and applied.
+	let capacityApplied = Promise.resolve();
+	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () => {
+		capacityApplied = realpath(join(home.path, "state"))
+			.then((cwd) => settingsService.controlsAt(cwd))
+			.then((controls) => {
+				const capacity = turnCapacitySetting(controls);
+				if (capacity !== undefined) supervisor.setTurnCapacity(capacity);
+			});
+	});
 	const setup = new SetupService(reads, env, workspaces);
 	// Wired as the server wires it, so the machine switcher reads the scratch home's (empty) node registry.
 	const attachments = new MachineAttachments({
@@ -155,6 +164,8 @@ export async function harness(
 		workspaces,
 		sessions,
 		supervisor,
+		/** Settles once the turn limit a settings write changed has been applied. */
+		capacityApplied: () => capacityApplied,
 		reads,
 		ops,
 		cli,

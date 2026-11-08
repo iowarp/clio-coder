@@ -289,6 +289,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
 | `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install and the after-quit npm, pnpm, Bun or Volta update to `clio-coder upgrade` |
+| `interface.guiTurnCapacity` | `4` | next graphical app turn when changed in the app's settings; a change made elsewhere applies when the GUI server restarts. Range 1 to 16 |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |
 | `interface.panes.workers.ratio` | `0.34` | immediately on the next workers dock open |

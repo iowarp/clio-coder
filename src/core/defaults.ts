@@ -362,6 +362,11 @@ export interface InterfaceSettings {
 	 * (#436). Off keeps the update notice and leaves the install to the operator.
 	 */
 	autoUpdate: boolean;
+	/**
+	 * Turns the graphical app runs at once across its tasks, 1 to 16; more wait their turn in order.
+	 * Open tasks are not limited.
+	 */
+	guiTurnCapacity: number;
 	panes: PanesSettings;
 	keybindings: Record<string, string | string[]>;
 }
@@ -900,6 +905,7 @@ export const DEFAULT_SETTINGS = {
 		smoothStreaming: "auto",
 		desktopNotifications: false,
 		autoUpdate: true,
+		guiTurnCapacity: 4,
 		panes: {
 			notifications: "failures",
 			layout: "off",
@@ -1145,6 +1151,8 @@ interface:
   desktopNotifications: false
   # Native installs update themselves in the background; false keeps only the notice.
   autoUpdate: true
+  # Turns the graphical app runs at once across its tasks (1-16); more wait in order.
+  guiTurnCapacity: 4
   panes:
     notifications: failures
     layout: off

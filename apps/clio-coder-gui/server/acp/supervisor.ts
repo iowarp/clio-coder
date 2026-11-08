@@ -211,6 +211,15 @@ const LOOP_FLAGS_NOT_SUBMITTABLE = new Set(["--until", "--on-match", "--follow-u
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
 /** How long a task with no turn and no window showing it keeps its agent process. */
 const PARK_AFTER_MS = 5 * 60_000;
+/** The `interface.guiTurnCapacity` default and bounds; Clio's settings validation enforces the same range. */
+export const DEFAULT_TURN_CAPACITY = 4;
+export const MAX_TURN_CAPACITY = 16;
+/** A value outside 1..16 or not a whole number keeps the default rather than unlimiting or stalling turns. */
+export function boundedTurnCapacity(value: unknown) {
+	return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_TURN_CAPACITY
+		? value
+		: DEFAULT_TURN_CAPACITY;
+}
 /** Parked snapshots kept in memory. An older one is closed and forgotten, and reloads from its ledger like any saved task. */
 const PARKED_KEPT = 32;
 
@@ -237,17 +246,27 @@ export class Supervisor {
 	private readonly configuring = new Set<string>();
 	private stopping = false;
 	private readonly monitor: ReturnType<typeof setInterval>;
+	private capacity: number;
+	get turnCapacity() {
+		return this.capacity;
+	}
+	/** A raised limit sends waiting turns at once; a lowered one lets running turns finish and holds new ones. */
+	setTurnCapacity(value: number) {
+		this.capacity = boundedTurnCapacity(value);
+		this.admit();
+	}
 	constructor(
 		private readonly workspaces: WorkspaceService,
 		files: AppFiles,
 		private readonly hub: EventHub,
 		private readonly env: NodeJS.ProcessEnv = process.env,
 		/** Turns that may run at once across every session. Open sessions are not limited. */
-		readonly turnCapacity = 4,
+		turnCapacity = DEFAULT_TURN_CAPACITY,
 		private readonly permissionTimers?: PermissionTimers,
 		private readonly recover?: (cwd: string, sessionId: string) => Promise<unknown>,
 		private readonly parkAfterMs = PARK_AFTER_MS,
 	) {
+		this.capacity = boundedTurnCapacity(turnCapacity);
 		this.children = new ChildrenFile(files);
 		this.monitor = setInterval(() => {
 			const now = performance.now();
