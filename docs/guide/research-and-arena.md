@@ -92,8 +92,9 @@ git diff HEAD clio/research/<id>
 1. **A/A check.** Before the first iteration, the base is measured against itself with the same number of trials. If
    that already looks like a change, the measurement is too noisy to trust, and the campaign stops unless you pass
    `--allow-noisy`.
-2. **Agent run.** Each iteration runs `clio-coder run` at autonomy `default`, with dispatch off, in a fresh worktree at
-   the current best commit. The agent is told the objective, the gates, the scope and what earlier iterations tried.
+2. **Agent run.** Each iteration runs `clio-coder run` at the campaign's `--autonomy` (`default` unless you choose
+   `yolo`), with dispatch off, in a fresh worktree at the current best commit. The agent is told the objective, the
+   gates, the scope and what earlier iterations tried.
 3. **Rules before measuring.** The change is archived without measuring when it:
    - is a no-op;
    - repeats an earlier tree;
@@ -117,6 +118,18 @@ git diff HEAD clio/research/<id>
   price are unpriced.
 - Ctrl-C, SIGTERM and SIGHUP stop the agent run, journal the stop and remove the worktrees. The exit codes are 130, 143
   and 129.
+
+### Unattended campaigns with contained yolo
+
+`--autonomy yolo` runs each agent as [contained yolo](../architecture/safety-model.md#contained-and-unconfined) inside
+its iteration worktree. The OS sandbox, the safety judge and your autonomous caps (`safety.limits.autonomous*`) stay on.
+A call that would need you is refused back to the agent instead of waiting, so a campaign never stalls on a prompt
+nobody is there to answer. Each refused call is kept in the journal as an open decision, and `research status` and
+`research report` list them under "open decisions left for you". A run that its caps or the judge paused is archived as
+`agent-failed`. The campaign records its autonomy in `campaign.json`.
+
+Research refuses `--autonomy yolo` when your settings choose unconfined yolo (`safety.yoloConfinement: unconfined`),
+and as root outside a container, the same as `clio-coder run`.
 
 ### Read and check a campaign
 
@@ -155,6 +168,12 @@ prompt that starts with `-`.
 refused before any contender starts. The project's `.clio-coder/verifiers.yaml` is copied into each worktree, committed or
 not, and replaces any copy a contender wrote. Files the check reads, such as reference outputs or inputs, are not copied,
 so commit them.
+
+`--autonomy yolo` runs every contender as contained yolo, with the same rules as a research campaign: the sandbox, the
+judge and your autonomous caps stay on, and a call that would need you is refused back to the contender. All
+contenders in a match share the autonomy, and `match.json` records it. Before a vote, `show` adds each contender's count
+of open decisions and the cap or judge that paused it, if any, next to its blocks. The refused commands themselves stay
+in the contender's own stream. Unconfined yolo is refused here too, and `--read-only` still applies at yolo.
 
 ### Vote blind, then reveal
 
@@ -196,7 +215,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
 - Research optimizes one metric of one check at a time and runs one candidate per iteration. Resuming a stopped campaign,
   parameter sweeps and parallel candidates are not in 0.7.0.
-- Autonomy `yolo` is not available to either command. Research agents always run at `default`.
+- `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo.
 - Arena contenders inherit the parent environment, the same as any `clio-coder run`.
 - A research measurement is only as good as its check. Run `research report` and look at the A/A line before you trust
   a gain.
