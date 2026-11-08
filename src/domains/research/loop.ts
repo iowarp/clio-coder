@@ -33,6 +33,8 @@ import {
 	researchWorktreeParent,
 	resolveCommit,
 	treeOf,
+	untrackedEntries,
+	withinEntries,
 } from "./git.js";
 import { aaIsNoisy, grade } from "./grader.js";
 import {
@@ -252,6 +254,13 @@ export async function runResearchCampaign(
 	let iterations = 0;
 	const baseWorktree = join(researchWorktreeParent(root), `research-${campaign.id}-base`);
 	const openWorktrees = new Set<string>();
+	// Untracked files the declared checks create when they run (interpreter caches, build output). An agent that runs
+	// the checks itself leaves them beside its edit; committing them archived a good change as out of scope.
+	const checkArtifacts = new Set<string>();
+	const learnArtifacts = (worktree: string, before: ReadonlyArray<string>): void => {
+		const known = new Set(before);
+		for (const entry of untrackedEntries(worktree)) if (!known.has(entry)) checkArtifacts.add(entry);
+	};
 
 	const finish = (reason: ResearchStopReason, detail: string): ResearchRunOutcome => {
 		journal({ type: "stopped", at: at(), reason, detail, best });
@@ -275,6 +284,7 @@ export async function runResearchCampaign(
 	try {
 		addResearchWorktree(root, baseWorktree, best);
 		openWorktrees.add(baseWorktree);
+		const baseUntracked = untrackedEntries(baseWorktree);
 
 		// A/A: base against base, the same number of pairs an iteration takes.
 		log(`A/A check: ${campaign.objective.trials} interleaved pairs of '${objectiveCheck.id}' on the base`);
@@ -309,6 +319,11 @@ export async function runResearchCampaign(
 				"noisy",
 				`the A/A check already calls a change (${describeGrade(aaGrade)}); raise --trials, quiet the machine, or pass --allow-noisy`,
 			);
+		// Each gate runs once on the base too, so what it creates is known before the first iteration commits.
+		for (const check of gateChecks) if (check.id !== objectiveCheck.id) await gate(baseWorktree, check, signal);
+		const learnHalt = halt();
+		if (learnHalt !== null) return finish(learnHalt.reason, haltDetail("while running the gates on the base"));
+		learnArtifacts(baseWorktree, baseUntracked);
 
 		const seenTrees = new Set([treeOf(root, best)]);
 		for (;;) {
@@ -371,7 +386,14 @@ export async function runResearchCampaign(
 			// VERIFY
 			let commit: string;
 			try {
-				commit = commitWorktree(worktree, `research ${campaign.id} ${name}\n\n${run.summary.slice(0, 2000)}`);
+				const committed = commitWorktree(
+					worktree,
+					`research ${campaign.id} ${name}\n\n${run.summary.slice(0, 2000)}`,
+					(path) => withinEntries(path, checkArtifacts),
+				);
+				commit = committed.head;
+				if (committed.leftOut.length > 0)
+					log(`iteration ${iteration}: left out check output ${committed.leftOut.join(", ")}`);
 			} catch (error) {
 				archive("agent-failed", `the change could not be committed: ${gitFailure(error)}`);
 				cleanup();
@@ -419,6 +441,7 @@ export async function runResearchCampaign(
 			});
 
 			// MEASURE
+			const candidateUntracked = untrackedEntries(worktree);
 			log(`iteration ${iteration}: measuring ${campaign.objective.trials} interleaved pairs`);
 			const pairs = await measurePairs(
 				campaign.objective.trials,
@@ -485,6 +508,8 @@ export async function runResearchCampaign(
 					summary: firstLine(judged.kind === "ok" ? judged.output : judged.message),
 				});
 			}
+
+			learnArtifacts(worktree, candidateUntracked);
 
 			// RECORD, second half: claims from the judged runs and the hypothesis test.
 			const recorded = await recorder.finish({ campaign, iteration, at: at(), bindings: begun.bindings, outcomes });

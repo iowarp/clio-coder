@@ -78,11 +78,38 @@ export function checkoutDetached(worktree: string, commit: string): void {
 }
 
 /**
- * Commit everything the agent left in the worktree, untracked files included, on top of whatever it committed
- * itself. Returns HEAD afterwards, which equals `parent` when nothing changed.
+ * Untracked, unignored entries of a worktree, repository-relative. A directory that holds only untracked files is one
+ * `dir/` entry, so a cache directory a check creates is named once whatever files land in it later.
  */
-export function commitWorktree(worktree: string, message: string): string {
+export function untrackedEntries(worktree: string): string[] {
+	return git(worktree, ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--no-renames"])
+		.split("\0")
+		.filter((entry) => entry.startsWith("?? "))
+		.map((entry) => entry.slice(3));
+}
+
+/** Whether an untracked file is one of `entries` or lies in a `dir/` entry. */
+export function withinEntries(path: string, entries: ReadonlySet<string>): boolean {
+	if (entries.has(path)) return true;
+	for (const entry of entries) if (entry.endsWith("/") && path.startsWith(entry)) return true;
+	return false;
+}
+
+/**
+ * Commit everything the agent left in the worktree, untracked files included, on top of whatever it committed
+ * itself, except untracked files `leaveOut` names. Returns HEAD afterwards, which equals `parent` when nothing
+ * changed, and the untracked files left out.
+ */
+export function commitWorktree(
+	worktree: string,
+	message: string,
+	leaveOut: (path: string) => boolean = () => false,
+): { head: string; leftOut: string[] } {
+	const leftOut = git(worktree, ["ls-files", "--others", "--exclude-standard", "-z"])
+		.split("\0")
+		.filter((path) => path.length > 0 && leaveOut(path));
 	git(worktree, ["add", "--all"]);
+	if (leftOut.length > 0) git(worktree, ["reset", "--quiet", "--", ...leftOut.map((path) => `:(literal)${path}`)]);
 	const staged = git(worktree, ["diff", "--cached", "--name-only"]);
 	if (staged.length > 0)
 		git(worktree, [
@@ -93,7 +120,7 @@ export function commitWorktree(worktree: string, message: string): string {
 			"-m",
 			message,
 		]);
-	return resolveCommit(worktree, "HEAD");
+	return { head: resolveCommit(worktree, "HEAD"), leftOut };
 }
 
 /** Repository-relative paths that differ between two commits. */

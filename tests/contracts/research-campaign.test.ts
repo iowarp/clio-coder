@@ -635,6 +635,54 @@ describe("research review fixes", () => {
 		);
 	});
 
+	// R1: an agent that ran the checks itself left their cache (Python's __pycache__) beside its edit, the
+	// iteration commit took it, and the scope test archived a good change as out of scope.
+	it("leaves files the checks create out of the commit and scope test, and still archives an agent's out-of-scope file", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const cachingScore = `require('fs').mkdirSync('.cache',{recursive:true});require('fs').writeFileSync('.cache/score.bin',String(Date.now()));${scoreJs}`;
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": cachingScore,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+		const campaign = openResearchCampaign({
+			cwd: repo,
+			objective: { check: "score", metric: "score", direction: "min", minImprovement: 0.05, trials: 3 },
+			gates: [],
+			scope: ["value.txt"],
+			budget: { maxIterations: 2, allowUnpriced: false },
+			allowNoisy: false,
+			keep: false,
+			agent: {},
+		});
+		const edits: Array<(worktree: string) => void> = [
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "50\n");
+				execFileSync(process.execPath, ["score.js"], { cwd: worktree, stdio: "ignore" });
+			},
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "20\n");
+				writeFileSync(join(worktree, "notes.txt"), "out of scope\n");
+			},
+		];
+		let calls = 0;
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				edits[calls++]?.(request.worktree);
+				return done;
+			},
+		});
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["ratcheted", "out-of-scope"],
+		);
+		deepStrictEqual(view.iterations[0]?.changed, ["value.txt"]);
+		strictEqual(git(repo, "ls-tree", "-r", "--name-only", campaign.ref).includes(".cache"), false);
+		ok(view.iterations[1]?.detail?.includes("notes.txt"), view.iterations[1]?.detail);
+	});
+
 	it("withholds reference-agreement claims from research hypotheses of earlier campaigns on the same check", async (t) => {
 		const env = await isolateClioEnv("clio-coder-research-home-");
 		t.after(() => env.restore());
