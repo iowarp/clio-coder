@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,10 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { admissionAutonomy, effectiveYoloConfinement } from "../../src/domains/safety/autonomy.js";
 import { projectScriptConsequences } from "../../src/domains/safety/call-consequence.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
-import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import {
+	CONTAINED_YOLO_CHECK_WAIVER,
+	createFinishContractRegistration,
+} from "../../src/domains/safety/finish-contract-registration.js";
 import { parseRigorOverride, rigorResolution } from "../../src/domains/safety/rigor.js";
 import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
 import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
@@ -332,9 +335,16 @@ function finishGateTurn(contained: boolean) {
 	// Another producer already spent the one nudge this prompt shares.
 	state.stalledTurnNudgeSpent = true;
 	const footer: string[] = [];
+	const nudges: string[] = [];
 	const middleware = createTurnMiddleware({
 		state,
-		middleware: { runHook: (input) => runMiddlewareRegistrations(input, [registration]) } as MiddlewareContract,
+		middleware: {
+			runHook: (input) => {
+				const result = runMiddlewareRegistrations(input, [registration]);
+				for (const effect of result.effects) if (effect.kind === "request_continuation") nudges.push(effect.message);
+				return result;
+			},
+		} as MiddlewareContract,
 		middlewareToolChoice: createMiddlewareToolChoiceControl(),
 		emitNotice: () => {},
 		emitFooterNotice: (_level, _text, key) => footer.push(key),
@@ -349,7 +359,7 @@ function finishGateTurn(contained: boolean) {
 		middleware.fireTurnEnd(runtime, [
 			{ role: "assistant", content: [{ type: "text", text: "Done." }], stopReason: "stop" },
 		] as never);
-	return { state, footer, audits, finish };
+	return { state, footer, audits, nudges, finish };
 }
 
 test("contained yolo's finish gate keeps its own nudge and records an exhausted check as unverified", async () => {
@@ -357,6 +367,8 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	await turn.finish();
 	strictEqual(turn.state.pendingRequestContinuation, true);
 	strictEqual(turn.state.verificationNudgeSpent, true);
+	// batch8: an operator who said "no need to run anything" gets an unverified change, not a limitation's exit 1.
+	ok(turn.nudges[0]?.endsWith(CONTAINED_YOLO_CHECK_WAIVER));
 	turn.state.pendingRequestContinuation = false;
 	await turn.finish();
 	strictEqual(turn.state.pendingRequestContinuation, false);
