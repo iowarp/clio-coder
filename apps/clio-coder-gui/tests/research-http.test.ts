@@ -144,12 +144,25 @@ test("research routes list, read and regrade campaigns, and run a start as a can
 		assert.equal(finished.result.id, "r20261108-120739-d20d");
 		assert.ok(finished.progress.some((row) => row.message === "research r20261108-123902-22f8: A/A unchanged"));
 
-		const waiting = await h.post(base, { ...request, goal: "wait for a stop" });
+		assert.equal((await json(await h.request(base), ResearchCampaigns)).runningOperationId, undefined);
+		const waitKey = crypto.randomUUID();
+		const waiting = await h.post(base, { ...request, goal: "wait for a stop" }, waitKey);
 		const { operationId } = await json(waiting, Accepted);
+		// One campaign per workspace: a second start conflicts until the first settles, its own replay does not.
+		const second = await h.post(base, request);
+		assert.equal(second.status, 409);
+		assert.match(((await second.json()) as { detail: string }).detail, /already running in this workspace/);
+		assert.equal(
+			(await json(await h.post(base, { ...request, goal: "wait for a stop" }, waitKey), Accepted)).operationId,
+			operationId,
+		);
+		// A page opened later learns the running operation from the list and can follow and stop it.
+		assert.equal((await json(await h.request(base), ResearchCampaigns)).runningOperationId, operationId);
 		for (let i = 0; i < 200 && !h.operations.get(operationId).progress.some((row) => /opened at/.test(row.message)); i++)
 			await setTimeout(20);
 		assert.equal((await h.post(`/api/operations/${operationId}/cancel`)).status, 200);
 		assert.equal((await terminal(h.operations, operationId, 10_000)).status, "cancelled");
+		assert.equal((await json(await h.request(base), ResearchCampaigns)).runningOperationId, undefined);
 
 		const closing = await json(await h.post(base, { ...request, goal: "wait for a stop" }), Accepted);
 		for (

@@ -41,12 +41,7 @@ export function ResearchPage({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const campaignId = search.get("campaign");
 	const [composing, setComposing] = useState(false);
-	const [operationId, setOperationId] = useState<string | null>(null);
-	const operation = useOperation(client, operationId);
-	const messages = operation.data?.progress.map((row) => row.message) ?? [];
-	const liveCampaign = campaignFromProgress(messages);
-	const status = operation.data?.status;
-	const running = operationUnsettled(operationId, status);
+	const [started, setStarted] = useState<string | null>(null);
 	const pick = (id: string | null) =>
 		setSearch((current) => {
 			const next = new URLSearchParams(current);
@@ -60,8 +55,15 @@ export function ResearchPage({ client }: { client: Client }) {
 		enabled: !!selection.id,
 		queryFn: ({ signal }) =>
 			client.call(routes.researchCampaigns, { params: { id: selection.id }, query: {}, body: {} }, undefined, signal),
-		refetchInterval: running ? 5000 : false,
+		refetchInterval: (query) => (query.state.data?.runningOperationId ? 5000 : false),
 	});
+	// A campaign started on an earlier visit or in another window keeps running on the server; follow it again.
+	const operationId = started ?? campaigns.data?.runningOperationId ?? null;
+	const operation = useOperation(client, operationId);
+	const messages = operation.data?.progress.map((row) => row.message) ?? [];
+	const liveCampaign = campaignFromProgress(messages);
+	const status = operation.data?.status;
+	const running = operationUnsettled(operationId, status);
 	// The first progress line names the campaign; open it so the timeline fills in as it runs.
 	useEffect(() => {
 		if (liveCampaign && running) {
@@ -113,7 +115,10 @@ export function ResearchPage({ client }: { client: Client }) {
 					client={client}
 					workspaceId={selection.id}
 					operationId={operationId}
-					onStarted={setOperationId}
+					onStarted={(id) => {
+						setStarted(id);
+						void queries.invalidateQueries({ queryKey: ["research-campaigns"] });
+					}}
 					onClose={() => setComposing(false)}
 				/>
 			)}

@@ -30,6 +30,7 @@ const { MissionControl } = await import("../client/pages/mission-control.js");
 const { SessionControlsProvider } = await import("../client/shell/SessionControls.js");
 const { useWorkspaceSelection, WorkspacePicker } = await import("../client/pages/workspace-selection.js");
 const { OperatorMetrics } = await import("../client/pages/operator-metrics.js");
+const { ResearchPage } = await import("../client/pages/research.js");
 const { sessionOperatorMetrics, goldenTelemetryRecords } = await import("./harness/telemetry-fixture.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -396,3 +397,23 @@ for (const path of ["/research", "/arena"]) {
 		assert.ok(isSettingsPath(path), "the Settings rail stays up on the page its entry opens");
 	});
 }
+
+test("research page follows a campaign the server still runs after the page was left and opened again", () => {
+	const cache = queries();
+	const campaign = "r20261108-135752-2f0f";
+	cache.setQueryData(["workspaces"], [{ id: "workspace-a", name: "Scratch", path: "/scratch" }]);
+	cache.setQueryData(["research-campaigns", "workspace-a"], { campaigns: [], runningOperationId: "op-running" });
+	cache.setQueryData(["operation", "op-running"], {
+		id: "op-running",
+		kind: "research.start",
+		revision: 2,
+		cancellable: true,
+		status: "running",
+		startedAt: "2026-11-08T13:57:52.000Z",
+		progress: [{ at: "2026-11-08T13:57:53.000Z", message: `research ${campaign}: iteration 1: agent run in it-0001` }],
+	});
+	const html = render(cache, `/research?workspace=workspace-a&campaign=${campaign}`, <ResearchPage client={client} />);
+	assert.match(html, /Stop campaign/);
+	assert.match(html, /iteration 1: agent run in it-0001/);
+	assert.match(html, /<button[^>]*class="primary"[^>]*disabled=""[^>]*>New campaign/);
+});

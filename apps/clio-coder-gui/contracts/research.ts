@@ -299,5 +299,12 @@ export const ResearchCampaignSummary = Type.Union([
 export type ResearchCampaignSummary = Static<typeof ResearchCampaignSummary>;
 
 /** Campaigns in this workspace, newest first. */
-export const ResearchCampaigns = Type.Object({ campaigns: Type.Array(ResearchCampaignSummary) }, closed);
+export const ResearchCampaigns = Type.Object(
+	{
+		campaigns: Type.Array(ResearchCampaignSummary),
+		/** The workspace's unsettled `research start` operation, so a page opened later can follow and stop it. */
+		runningOperationId: Type.Optional(Type.String()),
+	},
+	closed,
+);
 export type ResearchCampaigns = Static<typeof ResearchCampaigns>;

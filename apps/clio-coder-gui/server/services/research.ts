@@ -86,6 +86,8 @@ export function summarizeCampaigns(list: ResearchCliList): ResearchCampaigns {
  */
 export class ResearchService {
 	private runs = new Set<AbortController>();
+	/** One campaign per workspace: concurrent benchmarks in one repository distort each other's measurements. */
+	private active = new Map<string, { operationId: string; key: string }>();
 	private settled = new Set<Promise<unknown>>();
 	private closed = false;
 	constructor(
@@ -101,7 +103,8 @@ export class ResearchService {
 			await this.runner.run({ kind: "research.list" }, workspace.path, signal),
 			"list",
 		);
-		return summarizeCampaigns(list);
+		const running = this.active.get(workspaceId);
+		return { ...summarizeCampaigns(list), ...(running ? { runningOperationId: running.operationId } : {}) };
 	}
 	async status(workspaceId: string, id: string, signal?: AbortSignal): Promise<ResearchCampaign> {
 		const workspace = await this.workspaces.get(workspaceId);
@@ -125,14 +128,27 @@ export class ResearchService {
 	async start(workspaceId: string, request: ResearchStartRequest, key: string): Promise<string> {
 		const workspace = await this.workspaces.get(workspaceId);
 		if (this.closed) throw new AppProblem("unavailable", "The GUI is stopping; no new research campaign starts.");
-		return this.operations.create({
+		const running = this.active.get(workspaceId);
+		// A replay of the running start's own key still resolves to its operation through the registry.
+		if (running && running.key !== key)
+			throw new AppProblem(
+				"conflict",
+				"A research campaign is already running in this workspace; stop it before starting another.",
+			);
+		let operationId = "";
+		operationId = this.operations.create({
 			kind: "research.start",
 			scope: workspaceId,
 			key,
 			fingerprint: fingerprint({ workspaceId, request }),
 			cancellable: true,
-			run: (progress, signal) => this.execute(workspace.path, request, progress, signal),
+			run: (progress, signal) =>
+				this.execute(workspace.path, request, progress, signal).finally(() => {
+					if (this.active.get(workspaceId)?.operationId === operationId) this.active.delete(workspaceId);
+				}),
 		});
+		if (!running) this.active.set(workspaceId, { operationId, key });
+		return operationId;
 	}
 	private execute(
 		cwd: string,
