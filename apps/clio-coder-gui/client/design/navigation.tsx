@@ -16,6 +16,7 @@ export const navigation = [
 	{ label: "Traces", path: "/traces", icon: "traces", group: "more" },
 	{ label: "Fleet", path: "/fleet", icon: "fleet", group: "more" },
 	{ label: "Evidence", path: "/evidence", icon: "evidence", group: "more" },
+	{ label: "Arena", path: "/arena", icon: "layers", group: "more" },
 	{ label: "Library", path: "/library", icon: "library", group: "more" },
 	{ label: "Toolchain", path: "/toolchain", icon: "toolchain", group: "more" },
 	{ label: "Settings", path: "/settings", icon: "settings", group: "more" },

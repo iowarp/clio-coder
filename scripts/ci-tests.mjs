@@ -128,6 +128,7 @@ export const guiTests = [
 	"system-model",
 	"telemetry-live",
 	"ssh-model",
+	"arena-model",
 	"machine-proxy",
 	"client-auth",
 	"session-control",

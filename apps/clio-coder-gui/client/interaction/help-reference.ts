@@ -64,6 +64,11 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 		title: "Evidence",
 		meaning: "Sealed work records and checks that verify they have not changed.",
 	},
+	"/arena": {
+		title: "Arena",
+		meaning:
+			"Run one prompt on two to four models side by side with their names hidden, vote for the better result, and see the standings.",
+	},
 	"/library": {
 		title: "Library",
 		meaning: "Available agents, skills, resources, extensions and checks, with their trust and scope.",

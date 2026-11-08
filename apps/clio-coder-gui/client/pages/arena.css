@@ -1,0 +1,158 @@
+.arena-page {
+	max-width: 1680px;
+	margin-inline: auto;
+}
+.arena-scope {
+	display: flex;
+	align-items: center;
+	gap: var(--space-4);
+	margin-block: var(--space-4);
+}
+.arena-layout {
+	display: grid;
+	grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+	gap: var(--space-5);
+	align-items: start;
+}
+@media (max-width: 900px) {
+	.arena-layout {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+.arena-list ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-1);
+}
+.arena-list button {
+	width: 100%;
+	text-align: start;
+	display: grid;
+	gap: var(--space-1);
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: inherit;
+}
+.arena-list button[aria-current="true"] {
+	border-color: var(--accent-line);
+	background: var(--surface-sunken);
+}
+.arena-list__prompt {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.arena-list__meta,
+.arena-reveal,
+.arena-facts {
+	font-family: var(--font-mono);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.arena-main {
+	display: grid;
+	gap: var(--space-6);
+	min-width: 0;
+}
+.arena-prompt p {
+	white-space: pre-wrap;
+}
+.arena-columns {
+	display: grid;
+	gap: 0;
+	overflow-x: auto;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+}
+.arena-column {
+	position: relative;
+	min-width: 0;
+	padding: var(--space-3) var(--space-4);
+	border-inline-end: 1px solid var(--line);
+}
+.arena-column:last-child {
+	border-inline-end: none;
+}
+.arena-column h3 {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	margin: 0 0 var(--space-2);
+}
+.arena-facts {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+	gap: var(--space-1) var(--space-3);
+	margin: 0 0 var(--space-3);
+}
+.arena-facts dd {
+	margin: 0;
+	color: var(--ink);
+}
+.arena-answer {
+	max-height: 480px;
+	overflow: auto;
+}
+.arena-diff pre,
+.arena-check pre {
+	max-height: 420px;
+	overflow: auto;
+	font-size: var(--text-instrument);
+	white-space: pre;
+}
+.arena-error {
+	color: var(--status-fail-fg);
+}
+.arena-vote {
+	display: grid;
+	gap: var(--space-3);
+	padding: var(--space-4);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+}
+.arena-vote__choices,
+.arena-new__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.arena-standings table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.arena-standings th,
+.arena-standings td {
+	text-align: start;
+	padding: var(--space-2) var(--space-3);
+	border-bottom: 1px solid var(--line);
+}
+.arena-new {
+	display: grid;
+	gap: var(--space-3);
+	margin-block-end: var(--space-6);
+	padding: var(--space-4);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+}
+.arena-new label {
+	display: grid;
+	gap: var(--space-1);
+}
+.arena-new__contender {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin-block-end: var(--space-2);
+}
+.arena-new__contender input {
+	flex: 1;
+}
+.arena-new__options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-4);
+}

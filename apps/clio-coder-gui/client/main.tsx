@@ -248,6 +248,13 @@ const router = createBrowserRouter([
 				},
 			},
 			{
+				path: "/arena",
+				lazy: async () => {
+					const { ArenaPage } = await import("./pages/arena.js");
+					return { element: <ArenaPage client={client} /> };
+				},
+			},
+			{
 				path: "/machines",
 				lazy: async () => {
 					const { MachinesPage } = await import("./pages/machines.js");
