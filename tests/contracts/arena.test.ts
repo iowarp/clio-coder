@@ -416,6 +416,8 @@ const end = args.indexOf("--");
 const prompt = end === -1 ? null : args.slice(end + 1).join(" ");
 if (process.env.ARENA_PID_DIR) writeFileSync(join(process.env.ARENA_PID_DIR, model + ".pid"), String(process.pid));
 writeFileSync(join(cwd, "answer.txt"), model + "\\n");
+if (model === "settings") { require("node:fs").mkdirSync(join(cwd, ".clio-coder"), { recursive: true }); writeFileSync(join(cwd, ".clio-coder", "settings.json"), "{}\\n"); }
+if (model === "catalog") require("node:fs").appendFileSync(join(cwd, ".clio-coder", "verifiers.yaml"), "# edited\\n");
 const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
@@ -589,6 +591,44 @@ describe("arena runner", () => {
 		const diff = readFileSync(join(arenaRoot(repo), result.id, "contender-1.diff"), "utf8");
 		assert.match(diff, /sub\/answer\.txt/);
 		assert.doesNotMatch(diff, /verifiers\.yaml/);
+	});
+
+	it("keeps a subdirectory project's .clio-coder edits in the diff, the copied catalog only when edited", async () => {
+		const { repo, fake, gitIn } = scratchRepo();
+		const project = join(repo, "sub");
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
+		writeFileSync(join(project, "README"), "sub\n");
+		gitIn("add", "sub/README");
+		gitIn("commit", "-qm", "sub");
+		writeFileSync(join(project, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
+		const run = (models: string[], check?: string) =>
+			runArenaMatch({
+				cwd: project,
+				prompt: "write your model name",
+				contenders: models.map((model) => ({ target: "t", model })),
+				timeoutSeconds: 30,
+				...(check ? { check } : {}),
+				clio: { file: process.execPath, args: [fake] },
+				env: {},
+			});
+		const diffOf = (result: ArenaMatch, model: string) => {
+			const contender = result.contenders.find((entry) => entry.model === model);
+			assert.ok(contender);
+			const patch = readFileSync(join(arenaRoot(repo), result.id, `contender-${contender.index + 1}.diff`), "utf8");
+			return { files: contender.facts?.diff?.files, writes: contender.facts?.writes, patch };
+		};
+		const plain = await run(["settings", "m1"]);
+		const settings = diffOf(plain, "settings");
+		assert.equal(settings.files, 2);
+		assert.equal(settings.writes, 2);
+		assert.match(settings.patch, /sub\/\.clio-coder\/settings\.json/);
+		const checked = await run(["catalog", "m1"], "unit");
+		const edited = diffOf(checked, "catalog");
+		assert.equal(edited.files, 2);
+		assert.match(edited.patch, /sub\/\.clio-coder\/verifiers\.yaml/);
+		const untouched = diffOf(checked, "m1");
+		assert.equal(untouched.files, 1);
+		assert.doesNotMatch(untouched.patch, /verifiers\.yaml/);
 	});
 
 	it("refuses a --check the source project does not declare before any contender starts", async () => {

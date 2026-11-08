@@ -109,18 +109,37 @@ export function validateArenaRunInput(input: Pick<ArenaRunInput, "contenders" | 
 	}
 }
 
+/** The catalog the harness copied into a worktree for `--check`: its repository-relative path and the bytes written. */
+interface CopiedCatalog {
+	path: string;
+	bytes: Buffer;
+}
+
+interface ArenaPlace {
+	cwd: string;
+	workspaceRoot: string;
+	worktree: string | null;
+	catalog: CopiedCatalog | null;
+}
+
 /**
- * Stage everything the contender left, then diff it against the shared baseline, outside the repository's and the
- * project's `.clio-coder/`; the project one holds the catalog copied in for `--check`.
+ * Stage everything the contender left, then diff it against the shared baseline, outside the repository's
+ * `.clio-coder/`. The catalog the harness copied in is left out too while it still holds exactly what the harness
+ * wrote; a contender's edit to it stays in the diff.
  */
-function captureDiff(worktree: string, projectCwd: string, baseline: string, diffPath: string): ArenaDiffStat {
-	const sub = relative(worktree, projectCwd).split(sep).join("/");
-	const pathspec = [
-		"--",
-		".",
-		":(exclude).clio-coder",
-		...(sub.length > 0 ? [`:(exclude,literal)${sub}/.clio-coder`] : []),
-	];
+function captureDiff(
+	worktree: string,
+	baseline: string,
+	diffPath: string,
+	copied: CopiedCatalog | null,
+): ArenaDiffStat {
+	const pathspec = ["--", ".", ":(exclude).clio-coder"];
+	if (copied !== null) {
+		const target = join(worktree, copied.path);
+		const stat = lstatSync(target, { throwIfNoEntry: false });
+		if (stat?.isFile() === true && readFileSync(target).equals(copied.bytes))
+			pathspec.push(`:(exclude,literal)${copied.path}`);
+	}
 	git(worktree, ["add", "-A", ...pathspec]);
 	const patch = git(worktree, ["diff", "--cached", "--no-color", "--no-ext-diff", baseline, ...pathspec]);
 	safeResourceWrite(diffPath, patch);
@@ -143,9 +162,9 @@ function refuseUndeclaredCheck(cwd: string, id: string): void {
  * (committed or planted) refuses the copy, and whatever sits at the catalog path, a link included, is removed and
  * the file created fresh.
  */
-function copySourceCatalog(sourceCwd: string, worktree: string, contenderCwd: string): void {
+function copySourceCatalog(sourceCwd: string, worktree: string, contenderCwd: string): CopiedCatalog | null {
 	const source = join(sourceCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
-	if (!existsSync(source)) return;
+	if (!existsSync(source)) return null;
 	const parts = relative(worktree, join(contenderCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH))
 		.split(sep)
 		.filter((part) => part.length > 0);
@@ -163,7 +182,9 @@ function copySourceCatalog(sourceCwd: string, worktree: string, contenderCwd: st
 	}
 	const target = join(dir, name);
 	if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) unlinkSync(target);
-	writeFileSync(target, readFileSync(source), { flag: "wx" });
+	const bytes = readFileSync(source);
+	writeFileSync(target, bytes, { flag: "wx" });
+	return { path: [...parts, name].join("/"), bytes };
 }
 
 async function runCheck(input: ArenaRunInput, cwd: string, id: string): Promise<ArenaCheckFact> {
@@ -204,7 +225,7 @@ async function runContender(
 	match: ArenaMatch,
 	contender: ArenaContender,
 	dir: string,
-	place: { cwd: string; workspaceRoot: string; worktree: string | null },
+	place: ArenaPlace,
 	save: () => void,
 ): Promise<void> {
 	const streamPath = contenderStreamPath(dir, contender.index);
@@ -236,7 +257,7 @@ async function runContender(
 	let check: ArenaCheckFact | null = null;
 	if (place.worktree !== null && match.baselineSha !== null) {
 		try {
-			diff = captureDiff(place.worktree, place.cwd, match.baselineSha, contenderDiffPath(dir, contender.index));
+			diff = captureDiff(place.worktree, match.baselineSha, contenderDiffPath(dir, contender.index), place.catalog);
 		} catch (caught) {
 			error = error ?? `diff: ${errorText(caught)}`;
 		}
@@ -323,7 +344,7 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 
 	let ownership: CompeteGroupOwnership | null = null;
 	try {
-		const places: Array<{ cwd: string; workspaceRoot: string; worktree: string | null }> = [];
+		const places: ArenaPlace[] = [];
 		if (base !== null) {
 			ownership = claimCompeteGroup(base.root, `arena-${id}`);
 			const sub = relative(base.root, cwd);
@@ -332,18 +353,19 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 				// position, so a path an agent quotes back says nothing the label does not.
 				const slot = blindSlot(match, contender.index);
 				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, slot, base.sha);
-				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path });
+				let catalog: CopiedCatalog | null = null;
 				if (input.check) {
 					try {
-						copySourceCatalog(cwd, worktree.path, join(worktree.path, sub));
+						catalog = copySourceCatalog(cwd, worktree.path, join(worktree.path, sub));
 					} catch {
 						// The copy before the check repeats this and reports a refusal as the check's result.
 					}
 				}
+				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path, catalog });
 				registerCompeteGroupRun(ownership, { runId: `${id}-${slot}`, pid: null, runtimeKind: "subprocess" });
 			}
 		} else {
-			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null });
+			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null, catalog: null });
 		}
 		input.onProgress?.(`match ${id}: ${match.contenders.length} contenders, ${match.isolation}`);
 		// One contender failing outright (its stream or a save failing) stops the others, and
