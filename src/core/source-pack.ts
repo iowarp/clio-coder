@@ -161,6 +161,49 @@ export function packedSourceDirectory(
 	return pack?.serving && pack.directories.has(member) ? { mtimeMs: pack.mtimeMs } : null;
 }
 
+/**
+ * What the serving pack holds under `absoluteDir`, for listings that walk the
+ * disk: packed files and the directories that exist only to hold them, as
+ * POSIX paths relative to `absoluteDir` (directories end in "/"). Only the
+ * package root, its `src/` and directories under `src/` qualify, so a
+ * checkout, a non-serving pack and any other tree answer null before the pack
+ * is opened. `depth` 1 keeps immediate children only.
+ */
+export function packedSourcePathsUnder(
+	absoluteDir: string,
+	options: { depth?: number } = {},
+	packageRoot: string = resolvePackageRoot(),
+): { files: string[]; directories: string[]; mtimeMs: number } | null {
+	const rel = relative(packageRoot, absoluteDir);
+	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+	const prefix = rel.length === 0 ? "" : `${rel.split(sep).join("/")}/`;
+	if (prefix.length > 0 && prefix !== "src/" && !prefix.startsWith("src/")) return null;
+	let pack: LoadedPack | null;
+	try {
+		pack = loadPack(packageRoot);
+	} catch {
+		return null;
+	}
+	if (!pack?.serving) return null;
+	const depth = options.depth ?? Number.POSITIVE_INFINITY;
+	const within = (path: string): string | null => {
+		if (!path.startsWith(prefix)) return null;
+		const rest = path.slice(prefix.length);
+		return rest.length > 0 && rest.split("/").length <= depth ? rest : null;
+	};
+	const files: string[] = [];
+	for (const member of pack.byPath.keys()) {
+		const rest = within(member);
+		if (rest !== null) files.push(rest);
+	}
+	const directories: string[] = [];
+	for (const dir of pack.directories) {
+		const rest = within(dir);
+		if (rest !== null) directories.push(`${rest}/`);
+	}
+	return { files: files.sort(), directories: directories.sort(), mtimeMs: pack.mtimeMs };
+}
+
 /** Every packed member as a package-relative `src/...` path, sorted, whether or not the pack is serving. */
 export function listPackedSources(packageRoot: string = resolvePackageRoot()): string[] {
 	const pack = loadPack(packageRoot);

@@ -33,6 +33,8 @@ function writePack(file: string, members: Record<string, string>): void {
 describe("packed source directory read", () => {
 	let pkg: string;
 	let readTool: ToolSpec;
+	let lsTool: ToolSpec;
+	let findTool: ToolSpec;
 	const savedRoot = process.env.CLIO_CODER_PACKAGE_ROOT;
 
 	before(async () => {
@@ -50,6 +52,8 @@ describe("packed source directory read", () => {
 		const packageRoot = await import("../../src/core/package-root.js");
 		strictEqual(packageRoot.resolvePackageRoot(), pkg, "another import resolved the package root first");
 		({ readTool } = await import("../../src/tools/read.js"));
+		({ lsTool } = await import("../../src/tools/ls.js"));
+		({ findTool } = await import("../../src/tools/find.js"));
 	});
 
 	after(() => {
@@ -85,5 +89,30 @@ describe("packed source directory read", () => {
 		};
 		strictEqual(result.kind, "ok");
 		strictEqual(/export const index = 1;/.test(result.output ?? ""), true, result.output);
+	});
+
+	async function output(tool: ToolSpec, args: Record<string, unknown>): Promise<string> {
+		// The fixture package carries no safety rule pack, so the path policy is supplied.
+		const result = (await tool.run(args, { allowsObservationPath: () => true })) as {
+			kind: string;
+			output?: string;
+			message?: string;
+		};
+		strictEqual(result.kind, "ok", result.message);
+		return result.output ?? "";
+	}
+
+	it("ls lists a pack-only directory and merges packed entries into src/, marked as packed", async () => {
+		const inner = (await output(lsTool, { path: join(pkg, "src", "interactive") })).split("\n");
+		deepStrictEqual(inner.slice(0, 2), ["index.ts (packed)", "nested/ (packed)"]);
+		const src = (await output(lsTool, { path: join(pkg, "src") })).split("\n");
+		deepStrictEqual(src.slice(0, 2), ["interactive/ (packed)", "loose/"]);
+	});
+
+	it("find includes packed members beside loose files and searches a pack-only directory", async () => {
+		const all = (await output(findTool, { pattern: "*.ts", path: join(pkg, "src") })).split("\n");
+		deepStrictEqual(all.slice(0, 3).sort(), ["interactive/index.ts", "interactive/nested/view.ts", "loose/kept.ts"]);
+		const inner = (await output(findTool, { pattern: "**/view.ts", path: join(pkg, "src", "interactive") })).split("\n");
+		strictEqual(inner[0], "nested/view.ts");
 	});
 });

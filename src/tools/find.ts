@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { Type } from "typebox";
+import { packedSourceDirectory, packedSourcePathsUnder } from "../core/source-pack.js";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { resolveFdBinary } from "./executables.js";
@@ -165,6 +166,31 @@ async function fallbackFind(
 	return out;
 }
 
+/**
+ * Packed source members under `searchPath` that match the glob the way the
+ * fallback walker matches, appended after the disk matches up to the collect
+ * limit. Null when nothing under `searchPath` is served from the pack, which
+ * is always the case in a checkout.
+ */
+function packedFind(
+	pattern: string,
+	searchPath: string,
+	collected: string[],
+	collectLimit: number,
+): { paths: string[]; mtimeMs: number } | null {
+	const packed = packedSourcePathsUnder(searchPath);
+	if (packed === null) return null;
+	const matcher = compileGlobRegex(pattern.includes("/") ? pattern : `**/${pattern}`);
+	const seen = new Set(collected.map((entry) => entry.replace(/\/$/, "")));
+	const paths: string[] = [];
+	for (const rel of [...packed.directories, ...packed.files]) {
+		if (collected.length + paths.length >= collectLimit) break;
+		if (seen.has(rel.replace(/\/$/, "")) || !matcher.test(rel)) continue;
+		paths.push(rel);
+	}
+	return { paths, mtimeMs: packed.mtimeMs };
+}
+
 interface OrderedPaths {
 	paths: string[];
 	/** Candidate cap was hit in mtime mode; ordering is approximate. */
@@ -178,9 +204,11 @@ function orderByMtime(
 	limit: number,
 	candidateCap: number,
 	search: SearchCompleteness,
+	packed: { paths: Set<string>; mtimeMs: number } | null,
 ): OrderedPaths {
 	const candidateCapHit = paths.length >= candidateCap;
 	const stamped = paths.map((relPath) => {
+		if (packed?.paths.has(relPath)) return { relPath, mtimeMs: packed.mtimeMs };
 		let mtimeMs = 0;
 		try {
 			mtimeMs = statSync(join(searchPath, relPath)).mtimeMs;
@@ -199,6 +227,7 @@ function renderFindResult(input: {
 	search: SearchCompleteness;
 	fallback: boolean;
 	withheldPaths: number;
+	packedPaths: Set<string>;
 	ordered: OrderedPaths;
 	collected: number;
 	collectLimit: number;
@@ -212,9 +241,14 @@ function renderFindResult(input: {
 		search.complete = false;
 		search.reason = "limit";
 	}
-	const coverageNotice = input.fallback
-		? "\n[Fallback search uses GENERATED_DIRS only; .gitignore is not applied.]"
-		: "\n[Native fd search: skipped symlinked directories are not counted.]";
+	const packedShown = ordered.paths.filter((entry) => input.packedPaths.has(entry)).length;
+	const coverageNotice =
+		(input.fallback
+			? "\n[Fallback search uses GENERATED_DIRS only; .gitignore is not applied.]"
+			: "\n[Native fd search: skipped symlinked directories are not counted.]") +
+		(packedShown > 0
+			? `\n[${packedShown} of these paths ship inside dist/assets/source.pack, not as files on disk; read opens them by this path.]`
+			: "");
 	if (ordered.paths.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Find,
@@ -250,6 +284,7 @@ function renderFindResult(input: {
 	const truncated = !search.complete || limitHit || ordered.candidateCapHit || truncation.truncated;
 	const next = limitHit ? `limit=${limit * 2}` : ordered.candidateCapHit ? "order=path" : undefined;
 	const details: Record<string, unknown> = { search, symlinkDirectories: { counted: input.fallback } };
+	if (input.packedPaths.size > 0) details.packed = { collected: input.packedPaths.size, shown: packedShown };
 	if (order === "mtime" && ordered.candidateCap !== null) {
 		details.candidates = {
 			cap: ordered.candidateCap,
@@ -303,8 +338,11 @@ export const findTool: ToolSpec = {
 		const searchPath = resolveReadPath(typeof args.path === "string" && args.path.length > 0 ? args.path : ".");
 		const moved = hookLandingRefusal("find", options?.hookLanding, searchPath);
 		if (moved !== null) return { kind: "error", message: moved };
-		if (!existsSync(searchPath)) return { kind: "error", message: `find: path not found: ${searchPath}` };
-		if (!statSync(searchPath).isDirectory()) return { kind: "error", message: `find: not a directory: ${searchPath}` };
+		// A directory of an installed package's src/ may exist only in the source pack.
+		const packOnly = !existsSync(searchPath) && packedSourceDirectory(searchPath) !== null;
+		if (!packOnly && !existsSync(searchPath)) return { kind: "error", message: `find: path not found: ${searchPath}` };
+		if (!packOnly && !statSync(searchPath).isDirectory())
+			return { kind: "error", message: `find: not a directory: ${searchPath}` };
 		const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : DEFAULT_LIMIT;
 		const includeIgnored = args.include_ignored === true;
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.find, options);
@@ -328,7 +366,9 @@ export const findTool: ToolSpec = {
 			const search = newSearchCompleteness();
 			const pathFilter = createObservationPathFilter(process.cwd(), options?.allowsObservationPath);
 			const fdPath = resolveFdBinary();
-			if (fdPath) {
+			if (packOnly) {
+				collectedPaths = [];
+			} else if (fdPath) {
 				const result = await fdFind(
 					fdPath,
 					pattern,
@@ -362,17 +402,29 @@ export const findTool: ToolSpec = {
 				search.complete = false;
 				search.reason = "cancelled";
 			}
+			const packed = packedFind(pattern, searchPath, collectedPaths, collectLimit);
+			if (packed) collectedPaths = [...collectedPaths, ...packed.paths];
 			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
+			const kept = new Set(collectedPaths);
+			const packedPaths = new Set(packed?.paths.filter((entry) => kept.has(entry)) ?? []);
 			const collectedCount = collectedPaths.length;
 			const ordered: OrderedPaths =
 				order === "mtime"
-					? orderByMtime(collectedPaths, searchPath, limit, collectLimit, search)
+					? orderByMtime(
+							collectedPaths,
+							searchPath,
+							limit,
+							collectLimit,
+							search,
+							packed ? { paths: packedPaths, mtimeMs: packed.mtimeMs } : null,
+						)
 					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
 			return renderFindResult({
 				searchPath,
 				search,
 				fallback: !fdPath,
 				withheldPaths: pathFilter.withheldPaths,
+				packedPaths,
 				ordered,
 				collected: collectedCount,
 				collectLimit,

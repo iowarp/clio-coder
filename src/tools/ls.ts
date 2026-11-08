@@ -2,6 +2,7 @@ import { lstat, opendir, readlink, stat } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { Type } from "typebox";
+import { packedSourceDirectory, packedSourcePathsUnder } from "../core/source-pack.js";
 import { ToolNames } from "../core/tool-names.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import {
@@ -19,6 +20,9 @@ import { hookLandingRefusal } from "./tool-landing.js";
 import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
+const PACKED_MARK = " (packed)";
+const PACKED_NOTICE =
+	"\n[(packed) entries ship inside dist/assets/source.pack, not as files on disk; read opens them by this path.]";
 
 function parseLimit(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : DEFAULT_LIMIT;
@@ -93,15 +97,22 @@ export const lsTool: ToolSpec = {
 		if (moved !== null) return { kind: "error", message: moved };
 		const limit = parseLimit(args.limit);
 
+		// An installed package serves most of its own src/ from the source pack,
+		// so a directory there may exist only in the pack or hold packed files.
+		let onDisk = true;
 		try {
 			const rootStat = await stat(root);
 			if (!rootStat.isDirectory()) {
 				return { kind: "error", message: `ls: not a directory: ${root}` };
 			}
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return { kind: "error", message: `ls: ${msg}` };
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT" || packedSourceDirectory(root) === null) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return { kind: "error", message: `ls: ${msg}` };
+			}
+			onDisk = false;
 		}
+		const packed = packedSourcePathsUnder(root, { depth: 1 });
 		const reservation = reserveObservation(OBSERVE_SELF_CAPS.ls, options);
 		if (reservation.exhausted) {
 			return observationBudgetExhausted({
@@ -121,23 +132,50 @@ export const lsTool: ToolSpec = {
 			let visibleCount = 0;
 			let scanned = 0;
 			const selection = new BoundedListingSelection(limit);
+			// Names seen on disk, kept only when the pack also has entries here.
+			const diskNames = packed ? new Set<string>() : null;
 			// Alphabetical selection requires examining every name, but only limit
 			// names are retained. No metadata calls are made for unselected entries.
-			for await (const entry of await opendir(root)) {
-				if (++scanned % 128 === 0) await yieldToLoop();
-				if (options?.signal?.aborted) return { kind: "error", message: "ls: operation aborted during enumeration" };
-				if (!allows(path.join(root, entry.name))) {
+			if (onDisk) {
+				for await (const entry of await opendir(root)) {
+					if (++scanned % 128 === 0) await yieldToLoop();
+					if (options?.signal?.aborted) return { kind: "error", message: "ls: operation aborted during enumeration" };
+					if (!allows(path.join(root, entry.name))) {
+						withheldPaths++;
+						continue;
+					}
+					diskNames?.add(entry.name);
+					visibleCount++;
+					selection.add(entry.name);
+				}
+			}
+			// Packed names carry their rendering ("name/" or "name") so they are
+			// never stat'ed; a directory also present on disk lists once, as disk.
+			const packedRendered = new Map<string, string>();
+			for (const rendered of packed ? [...packed.directories, ...packed.files] : []) {
+				const name = rendered.endsWith("/") ? rendered.slice(0, -1) : rendered;
+				if (diskNames?.has(name) || packedRendered.has(name)) continue;
+				scanned++;
+				if (!allows(path.join(root, name))) {
 					withheldPaths++;
 					continue;
 				}
+				packedRendered.set(name, `${rendered}${PACKED_MARK}`);
 				visibleCount++;
-				selection.add(entry.name);
+				selection.add(name);
 			}
 			const entries = selection.sorted();
 			const outputEntries: string[] = [];
 			const entryLimitReached = visibleCount > limit;
 			const search = newSearchCompleteness();
+			let packedShown = 0;
 			for (const entry of entries) {
+				const packedEntry = packedRendered.get(entry);
+				if (packedEntry !== undefined) {
+					outputEntries.push(packedEntry);
+					packedShown++;
+					continue;
+				}
 				const entryPath = path.join(root, entry);
 				try {
 					const entryStat = await lstat(entryPath);
@@ -185,8 +223,12 @@ export const lsTool: ToolSpec = {
 				tool: ToolNames.Ls,
 				withheldPaths,
 				unit: "entries",
-				output: truncation.content,
-				details: { skipped: search.skipped, selection: { scanned, retained: selection.retained } },
+				output: truncation.content + (packedShown > 0 ? PACKED_NOTICE : ""),
+				details: {
+					skipped: search.skipped,
+					selection: { scanned, retained: selection.retained },
+					...(packedRendered.size > 0 ? { packed: { entries: packedRendered.size, shown: packedShown } } : {}),
+				},
 				// Offload only when the byte cap cut collected entries; a bare
 				// entry limit continues via `next`.
 				...(truncation.truncated ? { fullOutput } : {}),
