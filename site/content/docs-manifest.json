@@ -4,8 +4,8 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.7.0",
-    "ref": "458d6209031cda97ec55947f889e846bbd6a98ef",
-    "commit": "458d6209031cda97ec55947f889e846bbd6a98ef",
+    "ref": "db67e389890da15ba63ac8345185532626369e08",
+    "commit": "db67e389890da15ba63ac8345185532626369e08",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "c46ea51a79c0474bf6cb7c412ec77b9c96b5fc101bc239d768332ef2491b8ccb",
-      "sourceSha256": "32da51c722759013692ba5f4dded1b3525c847158c279c377d3c26d72568dc06"
+      "sourceSha256": "249ff877bd43ed76852125927cd4d92bcbf731c73902c1afbb7a88b676755e1d"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -25,13 +25,13 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "1193355ade892006e090aeb0c98771d04fbc5e32c2e9bbeea6d88da39828fb7e",
-      "sourceSha256": "9d3e790a399dcbbe1e46bc0df22ab59883bca17c8ad2a92aca06c69d15baf4f3"
+      "sourceSha256": "ce4c71ed1bd88acb6781225ba597fde22c9bc5132c61c87f3cc996d2142997ca"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "061eec3a7cc09c06cb5159e7b80df832650b72e2937fd430898f614177cf5466",
-      "sourceSha256": "638d1d44bb2e518fc13eb603c9961adbc427370cf73c4336cc9aa9c6375f9f8e"
+      "sourceSha256": "0c6f81d1054d21ade33450a10aa2f9dc06d0b58bc14d827ac87c9fc266083aa2"
     },
     {
       "path": "guide/tool-usage.md",
@@ -61,7 +61,7 @@
       "path": "guide/gui.md",
       "source": "docs/guide/gui.md",
       "sha256": "11ac762deec6e1ebbb369d21054c942909241e89fc4e9419aef747eae73e6a7d",
-      "sourceSha256": "2d0a989d57d9b20ef0d5a466b718811bd00813766d75c722ac0a651db8c29161"
+      "sourceSha256": "16c8f61a766ed9514776a2265c13969e17d570dc038fa77731c77ae5e1f33d79"
     },
     {
       "path": "guide/fleet-dispatch.md",
@@ -73,7 +73,7 @@
       "path": "guide/resource-library.md",
       "source": "docs/guide/resource-library.md",
       "sha256": "2c8e220dd804cc0b0156a8dc14272edfa345baa887e5066d5735848ea085b6b6",
-      "sourceSha256": "84d809d7d28646f2d9ad1e17cf828151fa99adc79926ab8c3314d4df3e9854e6"
+      "sourceSha256": "94f173e41fad1a65d3ee2e551249abba60156afa80fcb5465e4d8253857af4f4"
     },
     {
       "path": "guide/plugins.md",
@@ -118,10 +118,16 @@
       "sourceSha256": "ce441564d4770511dcc54cf4674764b80b42c94d05ab53f8f3ce4eecbf711695"
     },
     {
+      "path": "guide/research-and-arena.md",
+      "source": "docs/guide/research-and-arena.md",
+      "sha256": "afe5117419360d6ad986eae1ab1ce2f51eec68a1b2f4b0cc6ddccff2fe14cff4",
+      "sourceSha256": "4958427de9943e70db02ea616e9e0d30a476cac875e56ca1ff83ba8a081a28ec"
+    },
+    {
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
       "sha256": "701d352f511ac8c659bd520ea43cb7dc7e58a34bcc7552a5ed857d5e9dc38f39",
-      "sourceSha256": "c8ef4a8b90ca44a3f1298f35e790bba0c7c668aa6a8831815bbcf2cb457ef3ab"
+      "sourceSha256": "a561e9544926aa5375b46cfa95b51d6bc5417afba4c33237246c9fdb7339ebaf"
     },
     {
       "path": "guide/environment-variables.md",
@@ -133,7 +139,7 @@
       "path": "guide/system-one.md",
       "source": "docs/guide/system-one.md",
       "sha256": "48061b95923b035c9e4030383f5af1a9f837be6ed2bcb6fa4f13e803b82b9657",
-      "sourceSha256": "03612491d789d399a53ea4ad069d29178757cefe64011ce2c789799a490cec92"
+      "sourceSha256": "3f5365729f4fbe1aeb9de8f0ccdb610fc5075771c1cb9b3303552446d48a650c"
     },
     {
       "path": "guide/information-flow.md",

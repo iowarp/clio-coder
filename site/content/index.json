@@ -250,6 +250,18 @@
     ]
   },
   {
+    "path": "guide/research-and-arena.md",
+    "source": "docs/guide/research-and-arena.md",
+    "title": "Climb a metric, compare models",
+    "group": "Everyday use",
+    "excerpt": "Improve a measured number with verified research campaigns, and compare models blind in the arena.",
+    "summary": "research-and-arena.md",
+    "headings": [
+      "Improve a number, and keep only real gains",
+      "Compare models blind"
+    ]
+  },
+  {
     "path": "guide/configuration-reference.md",
     "source": "docs/guide/configuration-reference.md",
     "title": "Configuration essentials",
