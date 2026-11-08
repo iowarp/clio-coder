@@ -17,6 +17,8 @@ import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
+import { ContinuationState, type TurnQueuesState } from "../../src/session-control/turn-state.js";
+import { checkTurnStateOwnership } from "../boundaries/check-boundaries.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -341,4 +343,52 @@ it("worker tokens that seal after the settle wait amend the cancelled outcome, i
 		strictEqual(data.turnId, reservedId);
 		deepStrictEqual(data.workers, SCOUT_TOKENS);
 	});
+});
+
+it("continuation state has one owner: a nudge per prompt, carried or resubmitted once, and no outside writes", () => {
+	const continuation = new ContinuationState();
+	strictEqual(continuation.request(), true);
+	strictEqual(continuation.request(), false, "the prompt's one nudge is spent");
+	continuation.carryIntoRun();
+	strictEqual(continuation.requested, false);
+	strictEqual(continuation.takeInRun(), true);
+	strictEqual(continuation.takeInRun(), false);
+	continuation.beginPrompt({ requestContinuation: true, yoloContinuation: false });
+	strictEqual(continuation.nudgeSpent, true, "a continuation prompt keeps the cap");
+	continuation.beginPrompt({ requestContinuation: false, yoloContinuation: false });
+	strictEqual(continuation.request(), true);
+	continuation.dropRequest();
+	strictEqual(continuation.takeRequest(), false, "a stranded resubmit superseded the request");
+	continuation.recordStop({ cause: "retries_exhausted", reason: "provider retries ran out" });
+	strictEqual(continuation.countYoloContinuation(), 1);
+	continuation.beginPrompt({ requestContinuation: false, yoloContinuation: true });
+	strictEqual(continuation.stop, null);
+	strictEqual(continuation.yoloContinuations, 1, "a yolo continuation keeps its count");
+
+	// Type-level only, never called: tsc rejects each write the module views and the owner forbid.
+	const _forbiddenWrites = (view: TurnQueuesState) => {
+		// @ts-expect-error a module's view keeps the fields it only reads readonly
+		view.streaming = true;
+		// @ts-expect-error the owner is never replaced
+		view.continuation = new ContinuationState();
+		// @ts-expect-error continuation fields change only through the owner's methods
+		view.continuation.requested = true;
+	};
+	void _forbiddenWrites;
+
+	const module = "src/session-control/turn-queues.ts";
+	deepStrictEqual(
+		checkTurnStateOwnership(module, "state.continuation.takeRequest();\nif (state.streaming) run();\n"),
+		[],
+	);
+	for (const source of [
+		"state.pendingRequestContinuation = false;",
+		"state.turnStop = null;",
+		"state.yoloContinuations++;",
+		"(state as any).continuation = other;",
+		'import type { ChatTurnState } from "./turn-state.js";',
+	])
+		ok(checkTurnStateOwnership(module, source)[0]?.startsWith("rule16:"), source);
+	deepStrictEqual(checkTurnStateOwnership("src/engine/acp/server.ts", "active.continuation = null;"), []);
+	deepStrictEqual(checkTurnStateOwnership("src/session-control/turn-state.ts", "state.turnStop = null;"), []);
 });

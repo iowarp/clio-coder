@@ -956,6 +956,64 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
 	return allowedFiles.has(resolved);
 }
 
+const TURN_STATE_OWNER = "src/session-control/turn-state.ts";
+const TURN_STATE_COMPOSER = "src/session-control/chat-loop.ts";
+/** `continuation` itself plus the flags it replaced, so a plain field cannot quietly come back. */
+const CONTINUATION_FIELDS = new Set([
+	"continuation",
+	"pendingRequestContinuation",
+	"pendingInRunContinuation",
+	"stalledTurnNudgeSpent",
+	"yoloContinuations",
+	"turnStop",
+]);
+
+/** Rule 16: turn modules take their declared state view, and only ContinuationState writes continuation state. */
+export function checkTurnStateOwnership(file: string, source: string): string[] {
+	if (!file.startsWith("src/") || file === TURN_STATE_OWNER) return [];
+	const inSessionControl = file.startsWith("src/session-control/");
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const violations: string[] = [];
+	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+	const writtenField = (target: ts.Expression): string | undefined => {
+		while (ts.isParenthesizedExpression(target) || ts.isNonNullExpression(target) || ts.isAsExpression(target))
+			target = target.expression;
+		const name = ts.isPropertyAccessExpression(target)
+			? target.name.text
+			: ts.isElementAccessExpression(target) && ts.isStringLiteralLike(target.argumentExpression)
+				? target.argumentExpression.text
+				: undefined;
+		return name !== undefined && CONTINUATION_FIELDS.has(name) ? name : undefined;
+	};
+	const visit = (node: ts.Node): void => {
+		if (file !== TURN_STATE_COMPOSER && ts.isIdentifier(node) && node.text === "ChatTurnState") {
+			violations.push(
+				`rule16: ${file}:${line(node)} names the whole ChatTurnState; only ${TURN_STATE_COMPOSER} composes it, every other module takes the view ${TURN_STATE_OWNER} declares for it`,
+			);
+		}
+		let field: string | undefined;
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+		)
+			field = writtenField(node.left);
+		else if (
+			(ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+			(node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+		)
+			field = writtenField(node.operand);
+		if (inSessionControl && field !== undefined) {
+			violations.push(
+				`rule16: ${file}:${line(node)} writes ${field}; continuation state changes only through the ContinuationState methods in ${TURN_STATE_OWNER}`,
+			);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /**
  * Enforce the static isolation rules:
  *   1. Only src/engine/** may import @earendil-works/pi-* at all. Since the
@@ -984,6 +1042,11 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *  14. src/interactive/**, src/engine/acp/** and src/cli/** sum no token or
  *      cost field: their figures are the read model's quantity displays,
  *      except the functions SURFACE_TOTAL_EXEMPTIONS names with a reason.
+ *  16. Only src/session-control/chat-loop.ts (the composer) and turn-state.ts
+ *      name ChatTurnState; every other turn module takes the view
+ *      turn-state.ts declares for it. Under src/session-control/** nothing
+ *      outside turn-state.ts assigns a continuation field: ContinuationState's
+ *      methods are its only writers.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
@@ -1020,6 +1083,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		violations.push(...checkLedgerUsageMutation(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkTelemetryWrites(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkLedgerUsageKeys(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(...checkTurnStateOwnership(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(
 			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
 		);
