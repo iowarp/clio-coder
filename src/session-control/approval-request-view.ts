@@ -37,8 +37,11 @@ export interface ApprovalRequestView {
 	 * reads it and no ask or block depends on it.
 	 */
 	consequence?: ReadonlyArray<string>;
-	/** Typed, sanitized multi-line artifact that this one approval authorizes. */
-	artifact?: { kind: "dispatch-plan"; text: string };
+	/**
+	 * Typed, sanitized multi-line artifact that this one approval authorizes: a
+	 * dispatch plan, or the exact settings diff a `configure_clio` apply saves.
+	 */
+	artifact?: { kind: "dispatch-plan" | "settings-change"; text: string };
 	/**
 	 * One-line preview of the call's allowlisted object fields. The operator is
 	 * deciding whether to allow this exact call, so the overlay must show what

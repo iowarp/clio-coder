@@ -7,7 +7,10 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permi
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createPermissionOverlayBody } from "../../src/interactive/permission-overlay.js";
+import { mainApprovalRequestView } from "../../src/session-control/approval-request-facts.js";
 import { configureClioApplyRefusal, createConfigureClioTool } from "../../src/tools/configure-clio.js";
 import { createRegistry, type RegistryVerdict } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -201,12 +204,15 @@ test("configure_clio fleet routing apply parks for the operator while its previe
 	});
 	const registry = defaultRegistry(env.dir);
 	registry.register(createConfigureClioTool(attended));
-	const asked: Array<{ actionClass: ActionClass; requestId: string; detail: string }> = [];
-	registry.onPermissionRequired((_call, decision, meta) => {
+	const asked: Array<{ actionClass: ActionClass; requestId: string; detail: string; card: string }> = [];
+	registry.onPermissionRequired((call, decision, meta) => {
+		// The operator's card carries the exact diff the apply saves, not only the proposal id.
+		const view = mainApprovalRequestView(call, decision, meta, "default", undefined);
 		asked.push({
 			actionClass: decision.classification.actionClass,
 			requestId: meta.requestId,
 			detail: decision.kind === "ask" ? decision.rejection.detail : "",
+			card: createPermissionOverlayBody(view).render(120).map(stripTerminalSequences).join("\n"),
 		});
 	});
 	const routingPreview = await registry.invoke({
@@ -223,6 +229,9 @@ test("configure_clio fleet routing apply parks for the operator while its previe
 	strictEqual(asked.length, 1);
 	match(asked[0]?.detail ?? "", /settings\.yaml/);
 	match(asked[0]?.detail ?? "", /fleet\.agentProfiles\.coder: fast/);
+	match(asked[0]?.card ?? "", /Settings change/);
+	match(asked[0]?.card ?? "", /fleet\.agentProfiles\.coder: fast/);
+	match(asked[0]?.card ?? "", /saves this change to your settings/);
 	strictEqual(readSettings().fleet.agentProfiles?.coder, undefined);
 	await registry.resumeParkedCalls({
 		actionClass: asked[0]?.actionClass as ActionClass,

@@ -196,7 +196,9 @@ export function mainApprovalRequestView(
 		...(consequence.length > 0 ? { consequence } : {}),
 		...(call.tool === ToolNames.Dispatch && decision.kind === "ask"
 			? { artifact: { kind: "dispatch-plan" as const, text: decision.rejection.detail } }
-			: {}),
+			: call.tool === ToolNames.ConfigureClio && decision.kind === "ask"
+				? { artifact: { kind: "settings-change" as const, text: decision.rejection.detail } }
+				: {}),
 		exposure: call.tool === ToolNames.AskUser ? askUserExposure(call.args) : mainCallExposure(call, decision),
 		...(target.length > 0 ? { target } : {}),
 		...(mutation !== null ? { mutation } : {}),

@@ -379,6 +379,13 @@ function permissionChoices(
 			{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 		];
 	}
+	if (view.artifact?.kind === "settings-change") {
+		return [
+			{ key: "Enter", verb: "allow", consequence: `saves this change to your settings${draftNote}` },
+			{ key: "Esc", verb: "deny", consequence: "skips it; nothing is saved" },
+			{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
+		];
+	}
 	if (view.artifact !== undefined) {
 		return [
 			{ key: "Enter", verb: "allow", consequence: `starts every worker in the plan${draftNote}` },
@@ -474,7 +481,7 @@ function bareChoiceRows(
 function cardTargetRows(theme: ClioTheme, view: ApprovalRequestView, width: number): string[] {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	// A plan card names the call by what the plan does; its raw arguments (`roster=<string 7 bytes>`) are in the inspector.
-	const plan = view.artifact !== undefined ? readDispatchPlan(view.artifact.text) : null;
+	const plan = view.artifact?.kind === "dispatch-plan" ? readDispatchPlan(view.artifact.text) : null;
 	const targetText = plan !== null ? planHeadline(plan) : targetWithoutPayloadSize(view.target, view.mutation);
 	if (targetText === undefined || targetText.length === 0) return [];
 	return plan !== null
@@ -795,7 +802,9 @@ function permissionCardSections(
 	const identityRows = identityRow(theme, view, presentation, content).rows.length;
 	const timerClause = compactCountdownClause(view, countdown);
 	const rest: string[] = [];
-	if (view.artifact !== undefined) {
+	if (view.artifact?.kind === "settings-change") {
+		rest.push(sectionRule(theme, content, "Settings change"), ...planTextRows(view.artifact.text, content));
+	} else if (view.artifact !== undefined) {
 		const plan = readDispatchPlan(view.artifact.text);
 		rest.push(
 			...(plan === null
@@ -1109,7 +1118,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			const artifact = this.view.artifact;
 			if (artifact !== undefined) {
 				rows.unshift(
-					sectionRule(theme, content, "Resolved dispatch plan"),
+					sectionRule(theme, content, artifact.kind === "settings-change" ? "Settings change" : "Resolved dispatch plan"),
 					...planTextRows(artifact.text, content),
 					sectionRule(theme, content, "Exact invocation"),
 				);
