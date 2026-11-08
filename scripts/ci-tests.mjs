@@ -73,6 +73,7 @@ export const coreTests = [
 	"overflow-compaction-fit",
 	"compaction-summary-tool-results",
 	"packed-source-directory",
+	"eval-onboarding-rescore",
 	"code-nav",
 	"skill-frontmatter-cache",
 	"codewiki-grammar-note",

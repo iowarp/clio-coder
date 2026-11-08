@@ -29,6 +29,12 @@ interface ToolCall {
 	/** The surface's call id, which pairs the call with its end event. */
 	id?: string;
 	/**
+	 * The engine tool name as ACP reported it (`gateway`, `read`), before
+	 * normalization. ACP wire ids are aliases, so this and call order are what
+	 * pair a call with its session ledger occurrence.
+	 */
+	tool?: string;
+	/**
 	 * How the call returned: its error flag and the tool result's details.
 	 * `truncated` marks an ACP `rawOutput` over the 32 KiB record cap, which
 	 * arrives as `{truncated, bytes}` with no details; `resettleFromLedger`
@@ -580,22 +586,69 @@ function ledgerUsage(
 	return usage;
 }
 
+/** One tool call the session ledger recorded, in the order the engine issued it, with its result once seen. */
+interface LedgerCall {
+	tool: string;
+	engineId: string;
+	result?: Record<string, unknown>;
+}
+
+/**
+ * The ledger's tool calls in issue order, each paired with its own result. An
+ * engine may reuse a call id across requests, so a result closes the oldest
+ * still-open call with that id rather than whichever call last used it.
+ */
+function ledgerCalls(entries: Record<string, unknown>[]): LedgerCall[] {
+	const calls: LedgerCall[] = [];
+	const open = new Map<string, LedgerCall[]>();
+	for (const entry of entries) {
+		const payload = asRecord(entry.payload);
+		if (entry.role === "assistant" && Array.isArray(payload.content)) {
+			for (const part of payload.content) {
+				const block = asRecord(part);
+				if (block.type !== "toolCall" || typeof block.id !== "string") continue;
+				const call: LedgerCall = { tool: String(block.name), engineId: block.id };
+				calls.push(call);
+				const pending = open.get(block.id);
+				if (pending === undefined) open.set(block.id, [call]);
+				else pending.push(call);
+			}
+		}
+		if (entry.role === "tool_result" && typeof payload.toolCallId === "string") {
+			const call = open.get(payload.toolCallId)?.shift();
+			if (call !== undefined) call.result = payload;
+		}
+	}
+	return calls;
+}
+
 /**
  * Restores the details an ACP record over the 32 KiB wire cap elided, from the
  * unbounded tool result the session ledger kept for the same call. Without it a
  * large but successful result (a dispatch with many receipts) scores as failed.
+ *
+ * ACP ids cannot be looked up in the ledger: the server aliases repeated,
+ * oversized and legacy engine ids to `clio-coder-tool-<n>`, while the ledger
+ * keeps the engine ids. So calls pair by occurrence: each ACP call takes the
+ * next ledger call with the same engine tool name. A record from before `tool`
+ * was kept falls back to matching its id.
  */
 function resettleFromLedger(entries: Record<string, unknown>[], tools: ToolCall[]): void {
-	const results = new Map<string, Record<string, unknown>>();
-	for (const entry of entries) {
-		if (entry.role !== "tool_result") continue;
-		const payload = asRecord(entry.payload);
-		if (typeof payload.toolCallId === "string") results.set(payload.toolCallId, payload);
-	}
+	const calls = ledgerCalls(entries);
+	let cursor = 0;
 	for (const tool of tools) {
-		if (tool.settled?.truncated !== true || tool.id === undefined) continue;
-		const payload = results.get(tool.id);
-		if (payload === undefined) continue;
+		let call: LedgerCall | undefined;
+		if (tool.tool !== undefined) {
+			const index = calls.findIndex((c, i) => i >= cursor && c.tool === tool.tool);
+			if (index >= 0) {
+				call = calls[index];
+				cursor = index + 1;
+			}
+		} else if (tool.id !== undefined) {
+			call = calls.find((c) => c.engineId === tool.id);
+		}
+		const payload = call?.result;
+		if (tool.settled?.truncated !== true || payload === undefined) continue;
 		tool.settled = {
 			isError: tool.settled.isError || payload.isError === true,
 			details: asRecord(asRecord(payload.result).details),
@@ -681,6 +734,7 @@ async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 			segment = "";
 			const tool = normalizeTool(String(update.name ?? update.title), asRecord(update.rawInput));
 			tool.id = id;
+			if (typeof update.name === "string") tool.tool = update.name;
 			driven.tools.push(tool);
 			if (evalCase.stopOn?.(tool) === true && !driven.stoppedEarly) {
 				driven.stoppedEarly = true;
