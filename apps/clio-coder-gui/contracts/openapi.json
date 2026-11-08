@@ -3494,6 +3494,1007 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/arena/matches": {
+			"get": {
+				"operationId": "arenaMatches",
+				"summary": "Arena matches in this workspace, newest first; identities appear only for voted matches.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["matches"],
+									"properties": {
+										"matches": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "createdAt", "status", "suite", "prompt", "contenders", "vote", "identities"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+													},
+													"createdAt": {
+														"type": "string"
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "complete"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															}
+														]
+													},
+													"suite": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"prompt": {
+														"type": "string"
+													},
+													"contenders": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"vote": {
+														"anyOf": [
+															{
+																"$ref": "#/components/schemas/Union_d3103d36"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"identities": {
+														"anyOf": [
+															{
+																"type": "array",
+																"items": {
+																	"type": "string"
+																},
+																"maxItems": 4
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 100000
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "arenaStart",
+				"summary": "Run one prompt on 2 to 4 contenders in isolated worktrees as a cancellable operation.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["prompt", "contenders", "timeoutSeconds"],
+								"properties": {
+									"prompt": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 8000
+									},
+									"contenders": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["target", "model"],
+											"properties": {
+												"target": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"model": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$"
+												}
+											},
+											"additionalProperties": false
+										},
+										"minItems": 2,
+										"maxItems": 4
+									},
+									"timeoutSeconds": {
+										"type": "integer",
+										"minimum": 30,
+										"maximum": 3600
+									},
+									"suite": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"check": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Object_operationId_ef738208"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/arena/matches/{matchId}": {
+			"get": {
+				"operationId": "arenaMatch",
+				"summary": "One arena match, blind until it has a vote and revealed after.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "matchId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"createdAt",
+										"completedAt",
+										"status",
+										"prompt",
+										"suite",
+										"isolation",
+										"check",
+										"error",
+										"revealed",
+										"vote",
+										"entries"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+										},
+										"createdAt": {
+											"type": "string"
+										},
+										"completedAt": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"status": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "running"
+												},
+												{
+													"type": "string",
+													"const": "complete"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"prompt": {
+											"type": "string"
+										},
+										"suite": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"isolation": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "worktree"
+												},
+												{
+													"type": "string",
+													"const": "read-only"
+												}
+											]
+										},
+										"check": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"error": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"revealed": {
+											"type": "boolean"
+										},
+										"vote": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["choice", "note", "votedAt"],
+													"properties": {
+														"choice": {
+															"$ref": "#/components/schemas/Union_d3103d36"
+														},
+														"note": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"votedAt": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"entries": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"label",
+													"status",
+													"exitCode",
+													"timedOut",
+													"turns",
+													"toolCalls",
+													"toolErrors",
+													"writes",
+													"blocks",
+													"diffStat",
+													"check",
+													"finalText",
+													"diff",
+													"diffTruncated",
+													"error",
+													"reveal"
+												],
+												"properties": {
+													"label": {
+														"$ref": "#/components/schemas/Union_07d8ac92"
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "pending"
+															},
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "done"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "timed-out"
+															}
+														]
+													},
+													"exitCode": {
+														"anyOf": [
+															{
+																"type": "integer"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"timedOut": {
+														"type": "boolean"
+													},
+													"turns": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"toolCalls": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"toolErrors": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"writes": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"blocks": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"diffStat": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["files", "insertions", "deletions"],
+																"properties": {
+																	"files": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"insertions": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"deletions": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"check": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["id", "exitCode", "tail"],
+																"properties": {
+																	"id": {
+																		"type": "string"
+																	},
+																	"exitCode": {
+																		"anyOf": [
+																			{
+																				"type": "integer"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"tail": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"finalText": {
+														"type": "string"
+													},
+													"diff": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"diffTruncated": {
+														"type": "boolean"
+													},
+													"error": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"reveal": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["index", "target", "model", "durationMs", "sessionId", "tokens", "cost"],
+																"properties": {
+																	"index": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"target": {
+																		"type": "string"
+																	},
+																	"model": {
+																		"type": "string"
+																	},
+																	"durationMs": {
+																		"anyOf": [
+																			{
+																				"type": "number",
+																				"minimum": 0
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"tokens": {
+																		"type": "string"
+																	},
+																	"cost": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 4
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/arena/standings": {
+			"get": {
+				"operationId": "arenaStandings",
+				"summary": "Win, loss and tie counts from recorded votes, with a Bradley-Terry score once enough votes exist.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "suite",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["suite", "matches", "votedMatches", "minVotesForScore", "standings"],
+									"properties": {
+										"suite": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"matches": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"votedMatches": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"minVotesForScore": {
+											"type": "integer",
+											"minimum": 1
+										},
+										"standings": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["identity", "target", "model", "votes", "wins", "losses", "ties", "bad", "score"],
+												"properties": {
+													"identity": {
+														"type": "string"
+													},
+													"target": {
+														"type": "string"
+													},
+													"model": {
+														"type": "string"
+													},
+													"votes": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"wins": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"losses": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"ties": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"bad": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"score": {
+														"anyOf": [
+															{
+																"type": "integer"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 10000
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/arena/matches/{matchId}/vote": {
+			"post": {
+				"operationId": "arenaVote",
+				"summary": "Record the human's blind vote for a finished match; a second vote must replace explicitly.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "matchId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["choice", "replace"],
+								"properties": {
+									"choice": {
+										"$ref": "#/components/schemas/Union_d3103d36"
+									},
+									"note": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 500,
+										"pattern": "^[^\\r\\n]*$"
+									},
+									"replace": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["schemaVersion", "matchId", "choice", "note", "votedAt", "replaced"],
+									"properties": {
+										"schemaVersion": {
+											"type": "number",
+											"const": 1
+										},
+										"matchId": {
+											"type": "string",
+											"pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+										},
+										"choice": {
+											"$ref": "#/components/schemas/Union_d3103d36"
+										},
+										"note": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"votedAt": {
+											"type": "string"
+										},
+										"replaced": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/evidence": {
 			"get": {
 				"operationId": "evidenceList",
@@ -33103,6 +34104,21 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_d3103d36": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Union_07d8ac92"
+					},
+					{
+						"type": "string",
+						"const": "tie"
+					},
+					{
+						"type": "string",
+						"const": "both-bad"
 					}
 				]
 			},
