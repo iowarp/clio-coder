@@ -519,6 +519,13 @@ clio-coder targets --probe
 clio-coder
 ```
 
+For a GitHub Copilot seat, sign in with the official Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`); Clio uses that login through the official Copilot SDK and never signs in itself:
+```bash
+clio-coder auth login copilot-sdk   # checks the login; in a terminal it offers to run `copilot login`
+clio-coder configure --id copilot --runtime copilot-sdk --set-orchestrator
+clio-coder auth status copilot-sdk
+```
+
 `clio-coder configure --runtime claude-sdk` exits 1 and prints the install command when the Claude Agent SDK is missing; see [Lean install](#lean-install-the-claude-agent-sdk).
 
 If a shell still tries an old removed path such as `~/.local/bin/clio-coder`, clear
