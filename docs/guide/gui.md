@@ -15,7 +15,7 @@ The graphical application is a browser interface to the same Clio Coder runtime 
 
 ### Start the GUI
 
-Start the GUI with `clio-coder gui --open` to open the graphical app. An existing app window is focused when available. For a persistent Linux login service, use `clio-coder gui background install --open`.
+Start the GUI with `clio-coder gui --open` to open the graphical app. Under WSL, or from the Chrome or Edge installed app, an existing app window is focused. On native Linux and macOS each launch opens a browser tab; see [Launches that focus the window](#launches-that-focus-the-window). For a persistent Linux login service, use `clio-coder gui background install --open`.
 
 ```text
 clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]

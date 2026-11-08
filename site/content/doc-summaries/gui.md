@@ -16,7 +16,7 @@ The installer offers the same step. The background app listens on port 4343, or 
 
 ## One window, many tasks
 
-Launching again brings the open Clio Coder window forward instead of opening another. Open a second window on purpose with **Open in new window** in a task's menu.
+Under WSL, or when the app is installed through Chrome or Edge, launching again brings the open Clio Coder window forward instead of opening another. On native Linux and macOS each launch opens a new browser tab. Open a second window on purpose with **Open in new window** in a task's menu.
 
 Any number of tasks can be open. Up to four turns run at once; a further turn shows **Waiting for a slot** and starts when one frees. A task with no running turn that no window has shown for five minutes is paused. Its conversation stays readable, and **Resume session** continues it.
 
