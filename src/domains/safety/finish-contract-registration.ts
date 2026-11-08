@@ -63,6 +63,12 @@ export interface CreateFinishContractRegistrationOptions {
 	 * limitation instead of merely warning.
 	 */
 	resolveRigor?: () => Rigor;
+	/**
+	 * True at contained yolo: a high-rigor re-prompt takes the reserved
+	 * verification slot, so a nudge another producer spent cannot leave the
+	 * change unchecked while nobody is there to notice.
+	 */
+	reserveVerificationNudge?: () => boolean;
 	readActiveAcceptance?: (window: ReadonlyArray<unknown>) => UserTaskAcceptance | undefined;
 	/**
 	 * Record the contract's decision to the audit ledger. Optional; when wired
@@ -226,7 +232,12 @@ export function createFinishContractRegistration(
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
 						: `[Clio Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
 				return [
-					{ kind: "request_continuation", message, note: "the change has no validation evidence yet" },
+					{
+						kind: "request_continuation",
+						message,
+						note: "the change has no validation evidence yet",
+						...(options.reserveVerificationNudge?.() === true ? { reserved: "verification" as const } : {}),
+					},
 					{ kind: "inject_reminder", message, severity: "warn" },
 				];
 			}

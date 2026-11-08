@@ -4606,7 +4606,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return meta ? readRecentSessionEntriesForContract(meta.id) : null;
 				},
 				resolveRigor: () =>
-					resolveRigor({ cwd: process.cwd(), override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) }),
+					resolveRigor({
+						cwd: process.cwd(),
+						override: parseRigorOverride(process.env.CLIO_CODER_RIGOR),
+						containedYolo: unattendedYolo(),
+					}),
+				reserveVerificationNudge: unattendedYolo,
 				readActiveAcceptance: (window) =>
 					activeUserTaskAcceptance(userTasks.snapshot(), taskBoard.snapshot(), session.current()?.id ?? null, window),
 				recordDecision: (record) => {

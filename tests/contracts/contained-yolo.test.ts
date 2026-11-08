@@ -10,10 +10,16 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
+import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
+import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
+import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import { renderSessionPostureUpdate } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { admissionAutonomy, effectiveYoloConfinement } from "../../src/domains/safety/autonomy.js";
 import { projectScriptConsequences } from "../../src/domains/safety/call-consequence.js";
+import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
+import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import { parseRigorOverride, rigorResolution } from "../../src/domains/safety/rigor.js";
 import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
 import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
@@ -23,6 +29,8 @@ import {
 	YOLO_UNCONFINED_ACCEPT_LABEL,
 	YOLO_UNCONFINED_DECLINE_LABEL,
 } from "../../src/interactive/yolo-activation.js";
+import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -285,4 +293,84 @@ test("contained yolo refuses a paid request at the ceiling instead of waiting fo
 	} finally {
 		await extension.stop?.();
 	}
+});
+
+test("contained yolo raises rigor to high, and an explicit CLIO_CODER_RIGOR still wins", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "clio-contained-rigor-"));
+	deepStrictEqual(rigorResolution({ cwd, containedYolo: true }), { rigor: "high", source: "contained-yolo" });
+	deepStrictEqual(rigorResolution({ cwd, containedYolo: true, override: parseRigorOverride("normal") }), {
+		rigor: "normal",
+		source: "override",
+	});
+	strictEqual(rigorResolution({ cwd, containedYolo: false }).rigor, "normal");
+});
+
+function finishGateTurn(contained: boolean) {
+	const entries: unknown[] = [
+		{ kind: "message", role: "user", turnId: "user-1", payload: { text: "change the file" } },
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "write-1",
+			payload: { name: ToolNames.Write, toolCallId: "write-1", args: { path: "src/thing.ts", content: "x" } },
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "write-1",
+			payload: { toolName: ToolNames.Write, toolCallId: "write-1", isError: false, result: { kind: "ok" } },
+		},
+	];
+	const audits: CompletionEvaluationInput[] = [];
+	const registration = createFinishContractRegistration({
+		readSessionEntries: () => entries,
+		resolveRigor: () => (contained ? "high" : "normal"),
+		reserveVerificationNudge: () => contained,
+		recordDecision: (input) => audits.push(input),
+	});
+	const state = createTurnState("off");
+	// Another producer already spent the one nudge this prompt shares.
+	state.stalledTurnNudgeSpent = true;
+	const footer: string[] = [];
+	const middleware = createTurnMiddleware({
+		state,
+		middleware: { runHook: (input) => runMiddlewareRegistrations(input, [registration]) } as MiddlewareContract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		emitNotice: () => {},
+		emitFooterNotice: (_level, _text, key) => footer.push(key),
+	});
+	const runtime = {
+		wireModelId: "fixture",
+		runtimeId: "fixture",
+		runtimeResolution: {},
+		agent: { state: { tools: [{ name: ToolNames.Bash }, { name: ToolNames.Limitation }], messages: [] } },
+	} as unknown as AgentRuntime;
+	const finish = () =>
+		middleware.fireTurnEnd(runtime, [
+			{ role: "assistant", content: [{ type: "text", text: "Done." }], stopReason: "stop" },
+		] as never);
+	return { state, footer, audits, finish };
+}
+
+test("contained yolo's finish gate keeps its own nudge and records an exhausted check as unverified", async () => {
+	const turn = finishGateTurn(true);
+	await turn.finish();
+	strictEqual(turn.state.pendingRequestContinuation, true);
+	strictEqual(turn.state.verificationNudgeSpent, true);
+	turn.state.pendingRequestContinuation = false;
+	await turn.finish();
+	strictEqual(turn.state.pendingRequestContinuation, false);
+	strictEqual(turn.footer.at(-1), "nudge.verification.spent");
+	deepStrictEqual(
+		turn.audits.map((audit) => [audit.decision, audit.rigor]),
+		[
+			["engage", "high"],
+			["engage", "high"],
+		],
+	);
+
+	const attended = finishGateTurn(false);
+	await attended.finish();
+	strictEqual(attended.state.pendingRequestContinuation, false);
+	strictEqual(attended.state.verificationNudgeSpent, false);
 });

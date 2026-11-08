@@ -2970,7 +2970,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnStop = null;
 				if (options.yoloContinuation !== true) state.yoloContinuations = 0;
 				middlewareToolChoice.reset();
-				if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
+				if (options.requestContinuation !== true) {
+					state.stalledTurnNudgeSpent = false;
+					state.verificationNudgeSpent = false;
+				}
 				const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
 				const pendingSkillRequests =
 					state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);

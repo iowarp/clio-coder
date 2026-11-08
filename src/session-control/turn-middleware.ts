@@ -258,16 +258,25 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		else deps.emitFooterNotice("info", message.replace(/^\[tip\]\s*/u, "tip: "), key);
 	};
 
-	const applyRequestContinuation = (message: string, note?: string): void => {
-		if (state.stalledTurnNudgeSpent) {
+	const applyRequestContinuation = (message: string, note?: string, reserved?: "verification"): void => {
+		if (reserved === "verification") {
+			if (state.verificationNudgeSpent) {
+				deps.emitFooterNotice(
+					"warning",
+					"the change has no validation evidence and this prompt's verification nudge is spent; it is recorded unverified",
+					"nudge.verification.spent",
+				);
+				return;
+			}
+			state.verificationNudgeSpent = true;
+		} else if (state.stalledTurnNudgeSpent) {
 			// One continuation per user prompt, and that cap is all this branch
 			// knows. It cannot tell whether the model stalled, answered, or was
 			// carried here by a second producer entirely, so it reports the cap and
 			// leaves any claim about a stall to the watchdog that measures one.
 			deps.emitFooterNotice("warning", "turn still has open work; this turn's nudge is spent", "nudge.continuation.spent");
 			return;
-		}
-		state.stalledTurnNudgeSpent = true;
+		} else state.stalledTurnNudgeSpent = true;
 		state.pendingRequestContinuation = true;
 		bufferReminder(message, "info");
 		// The nudge reaches the model as context inside the run, never as a
@@ -460,7 +469,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					// A locked request cannot call the tool a nudge asks for: a plan close
 					// here reasoned over that conflict for 131k tokens until max_tokens.
 					if (effect.toolFree === true || !(state.synthesisToolLock || state.toolBudgetLock))
-						applyRequestContinuation(effect.message, effect.note);
+						applyRequestContinuation(effect.message, effect.note, effect.reserved);
 					continue;
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
