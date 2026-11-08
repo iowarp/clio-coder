@@ -113,11 +113,6 @@ export async function runVectorTool(
 	}
 }
 
-function gitOp(args: Record<string, unknown>): string {
-	const check = checkGitFields(args);
-	return check.ok ? check.op : "";
-}
-
 /**
  * Run a typed add or commit. Admission already judged the exact argv; for a
  * worker admitted by its standing allowance rather than an approval, the
@@ -221,7 +216,9 @@ export const gitTool: ToolSpec = {
 	 * model would have written. Inspection runs as the read it is.
 	 */
 	safetyCall(args) {
-		const built = typedGitMutationArgv(gitOp(args), args);
+		const check = checkGitFields(args);
+		if (!check.ok) return undefined;
+		const built = typedGitMutationArgv(check.op, check.args);
 		if (built === null || !built.ok) return undefined;
 		const cwd = cwdArg(args);
 		return {
@@ -236,11 +233,11 @@ export const gitTool: ToolSpec = {
 		if (isGitInspectOp(check.op)) {
 			// Inspection never runs an external diff, a text conversion filter, or a pager.
 			const inspect = { ...(options?.signal !== undefined ? { signal: options.signal } : {}), env: typedGitInspectEnv() };
-			return runVectorTool("git", "git", gitInspectArgv(check.op, args), args, inspect);
+			return runVectorTool("git", "git", gitInspectArgv(check.op, check.args), check.args, inspect);
 		}
-		const built = typedGitMutationArgv(check.op, args);
+		const built = typedGitMutationArgv(check.op, check.args);
 		if (built === null) return { kind: "error", message: `git: op ${check.op} has no argv; nothing ran` };
 		if (!built.ok) return { kind: "error", message: built.error };
-		return runTypedGitMutation(built.argv, built.op, args, options);
+		return runTypedGitMutation(built.argv, built.op, check.args, options);
 	},
 };

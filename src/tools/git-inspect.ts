@@ -71,13 +71,45 @@ function gitRevError(rev: unknown, op: GitOp): string | null {
 	return null;
 }
 
-export type GitFieldCheck = { ok: true; op: GitOp } | { ok: false; op: string; error: string };
+/**
+ * Each call's `args` are the ones every later step reads: argv building,
+ * admission's safety projection and the loop guard's repeat key all take them
+ * from here, so an alias folded in below is judged as the argv it runs.
+ */
+export type GitFieldCheck =
+	| { ok: true; op: GitOp; args: Record<string, unknown> }
+	| { ok: false; op: string; error: string };
+
+/**
+ * Models often send `file` where an op takes `path` (or `paths` for add)
+ * (FW-9). It is folded into that field before validation; naming both with
+ * different values is refused, since either reading would drop one.
+ */
+const FILE_ALIAS = "file";
+
+function foldFileAlias(
+	op: GitOp,
+	args: Record<string, unknown>,
+): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
+	if (!Object.hasOwn(args, FILE_ALIAS)) return { ok: true, args };
+	const field = OP_FIELDS[op].includes("path") ? "path" : OP_FIELDS[op].includes("paths") ? "paths" : null;
+	if (field === null) return { ok: true, args };
+	const { [FILE_ALIAS]: file, ...rest } = args;
+	const value = field === "paths" && typeof file === "string" ? [file] : file;
+	if (Object.hasOwn(rest, field) && JSON.stringify(rest[field]) !== JSON.stringify(value)) {
+		return {
+			ok: false,
+			error: `git: op ${op} got both ${field} and ${FILE_ALIAS} with different values; nothing ran. Send only ${field}. Example: ${example(op)}`,
+		};
+	}
+	return { ok: true, args: { ...rest, [field]: value } };
+}
 
 /** The op the call names, and every field checked against what that op takes. */
-export function checkGitFields(args: Record<string, unknown>): GitFieldCheck {
-	const named = OP_ALIASES.flatMap((key) => (typeof args[key] === "string" ? [args[key] as string] : []));
+export function checkGitFields(input: Record<string, unknown>): GitFieldCheck {
+	const named = OP_ALIASES.flatMap((key) => (typeof input[key] === "string" ? [input[key] as string] : []));
 	const op = named[0] ?? "";
-	const unexpected = Object.keys(args).find(
+	const unexpected = Object.keys(input).find(
 		(key) => !COMMON_FIELDS.has(key) && !Object.values(OP_FIELDS).some((fields) => fields.includes(key)),
 	);
 	if (!(GIT_OPS as ReadonlyArray<string>).includes(op)) {
@@ -91,6 +123,9 @@ export function checkGitFields(args: Record<string, unknown>): GitFieldCheck {
 	if (new Set(named).size > 1) {
 		return { ok: false, op, error: `git: op, mode and action name different ops (${named.join(", ")}); nothing ran` };
 	}
+	const folded = foldFileAlias(gitOp, input);
+	if (!folded.ok) return { ok: false, op, error: folded.error };
+	const args = folded.args;
 	const accepted = OP_FIELDS[gitOp];
 	const refused = Object.keys(args).find((key) => !COMMON_FIELDS.has(key) && !accepted.includes(key));
 	if (refused !== undefined) {
@@ -111,7 +146,7 @@ export function checkGitFields(args: Record<string, unknown>): GitFieldCheck {
 			};
 		}
 	}
-	return { ok: true, op: gitOp };
+	return { ok: true, op: gitOp, args };
 }
 
 export function isGitInspectOp(op: GitOp): op is GitInspectOp {
@@ -162,5 +197,5 @@ export function gitCallIdentity(args: Record<string, unknown>): Record<string, u
 	const check = checkGitFields(args);
 	if (!check.ok || !isGitInspectOp(check.op)) return null;
 	const cwd = typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
-	return { argv: gitInspectArgv(check.op, args), ...(cwd !== undefined ? { cwd } : {}) };
+	return { argv: gitInspectArgv(check.op, check.args), ...(cwd !== undefined ? { cwd } : {}) };
 }

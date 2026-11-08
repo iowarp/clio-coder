@@ -7,8 +7,10 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { createWorkerGitContext } from "../../src/tools/git-exec.js";
+import { gitCallIdentity } from "../../src/tools/git-inspect.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import type { ToolRegistry, ToolResult } from "../../src/tools/registry.js";
+import { gitTool } from "../../src/tools/safe-exec.js";
 import { createTaskWorktree } from "../../src/tools/task-worktree.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -191,6 +193,16 @@ describe("git tool", () => {
 			/^git: op log does not take field "args"; nothing ran\. log takes rev, limit, stat, path, .*use op show with rev\. Example: /,
 		);
 		match(await refusal({ op: "status", limit: 3 }), /^git: op status does not take field "limit"; nothing ran\./);
+	});
+
+	it("reads file as path (paths for add) everywhere the argv is judged, and refuses a conflicting pair", async () => {
+		// FW-9: models send file where the op takes path.
+		const viaFile = await call({ op: "diff", cached: true, file: "docs" });
+		deepStrictEqual(viaFile.details?.argv, (await call({ op: "diff", cached: true, path: "docs" })).details?.argv);
+		deepStrictEqual(gitCallIdentity({ op: "log", file: "docs" }), gitCallIdentity({ op: "log", path: "docs" }));
+		strictEqual(gitTool.safetyCall?.({ op: "add", file: "a.txt" })?.args?.command, "git add -- a.txt");
+		match(await refusal({ op: "log", path: "a.txt", file: "docs" }), /^git: op log got both path and file/);
+		match(await refusal({ op: "commit", message: "m", file: "a.txt" }), /^git: op commit does not take field "file"/);
 	});
 });
 
