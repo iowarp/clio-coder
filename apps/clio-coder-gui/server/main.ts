@@ -20,6 +20,7 @@ import { listenPorts } from "./launcher/ports.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, openApp, openBrowser } from "./process-policy.js";
+import { ArenaService } from "./services/arena.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
@@ -194,6 +195,7 @@ export async function main(args = process.argv.slice(2)) {
 	}
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
+	const arena = new ArenaService(cli, workspaces, operations, env);
 	const settingsService = new SettingsService(reads, workspaces, ops);
 	const setup = new SetupService(reads, env, workspaces);
 	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
@@ -229,6 +231,7 @@ export async function main(args = process.argv.slice(2)) {
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
+		arena,
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),
 		sessions,
@@ -317,7 +320,7 @@ export async function main(args = process.argv.slice(2)) {
 		process.removeListener("SIGTERM", stop);
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
-		await Promise.all([supervisor.shutdown(), cli.close(), setup.close(), attachments.stopAll()]);
+		await Promise.all([supervisor.shutdown(), arena.close(), cli.close(), setup.close(), attachments.stopAll()]);
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 		try {

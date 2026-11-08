@@ -10,6 +10,7 @@ import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { getVersionInfo, runningBuildId } from "../../server/clio/http-shims.js";
 import { parse } from "../../server/http/validate.js";
+import { ArenaService } from "../../server/services/arena.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { EvidenceService } from "../../server/services/evidence.js";
@@ -96,6 +97,7 @@ export async function harness(
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
+		arena: new ArenaService(cli, workspaces, operations, env),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),
 		sessions,

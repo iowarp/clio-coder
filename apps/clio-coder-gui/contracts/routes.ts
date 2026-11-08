@@ -1,4 +1,14 @@
 import { type Static, type TSchema, Type } from "typebox";
+import {
+	ArenaMatch,
+	ArenaMatches,
+	ArenaMatchId,
+	ArenaStandings,
+	ArenaStandingsQuery,
+	ArenaStartRequest,
+	ArenaVote,
+	ArenaVoteRequest,
+} from "./arena.js";
 import { ArtifactList, ArtifactPage, ArtifactRead } from "./artifacts.js";
 import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
@@ -316,6 +326,45 @@ export const routes = {
 		response: UsageReport,
 		summary: "Canonical usage report for the last 30 days",
 		...runtimeRoutes.usage,
+	}),
+	arenaMatches: defineRoute({
+		...get,
+		params: operationParams,
+		response: ArenaMatches,
+		summary: "Arena matches in this workspace, newest first; identities appear only for voted matches.",
+		...runtimeRoutes.arenaMatches,
+	}),
+	arenaMatch: defineRoute({
+		...get,
+		params: Type.Object({ id: Id, matchId: ArenaMatchId }, { additionalProperties: false }),
+		response: ArenaMatch,
+		summary: "One arena match, blind until it has a vote and revealed after.",
+		...runtimeRoutes.arenaMatch,
+	}),
+	arenaStandings: defineRoute({
+		...get,
+		params: operationParams,
+		query: ArenaStandingsQuery,
+		response: ArenaStandings,
+		summary: "Win, loss and tie counts from recorded votes, with a Bradley-Terry score once enough votes exist.",
+		...runtimeRoutes.arenaStandings,
+	}),
+	arenaStart: defineRoute({
+		...post,
+		params: operationParams,
+		body: ArenaStartRequest,
+		response: Accepted,
+		summary: "Run one prompt on 2 to 4 contenders in isolated worktrees as a cancellable operation.",
+		...runtimeRoutes.arenaStart,
+	}),
+	arenaVote: defineRoute({
+		...post,
+		status: 200,
+		params: Type.Object({ id: Id, matchId: ArenaMatchId }, { additionalProperties: false }),
+		body: ArenaVoteRequest,
+		response: ArenaVote,
+		summary: "Record the human's blind vote for a finished match; a second vote must replace explicitly.",
+		...runtimeRoutes.arenaVote,
 	}),
 	evidenceList: defineRoute({
 		...get,

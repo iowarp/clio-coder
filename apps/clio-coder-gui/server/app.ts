@@ -9,6 +9,7 @@ import { routes } from "../contracts/routes.js";
 import { getVersionInfo, pendingInstalledVersion, resolvePackageRoot, runningBuildId } from "./clio/http-shims.js";
 import { auth, requestClient } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
+import { arenaRoutes } from "./http/routes-arena.js";
 import { authRoutes } from "./http/routes-auth.js";
 import { controlGuard, controlRoutes } from "./http/routes-control.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
@@ -25,6 +26,7 @@ import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
+import type { ArenaService } from "./services/arena.js";
 import { ArtifactWindow } from "./services/artifact-window.js";
 import { ClientRegistry } from "./services/clients.js";
 import { Commands } from "./services/commands.js";
@@ -68,6 +70,7 @@ export function createApp(options: {
 	system: SystemService;
 	library: LibraryService;
 	reports: ReportsService;
+	arena: ArenaService;
 	evidence: EvidenceService;
 	sessions: SessionService;
 	/** The ids this host has served. Process-wide: a loopback listener serves one operator. */
@@ -158,6 +161,7 @@ export function createApp(options: {
 	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
 	reportRoutes(app, hub, options.reports);
+	arenaRoutes(app, hub, options.arena);
 	evidenceRoutes(app, hub, options.evidence, artifacts);
 	sessionRoutes(app, hub, options.sessions, new Commands(), controls, options.snapshotHold);
 	app.all("/api/*", (context) => {

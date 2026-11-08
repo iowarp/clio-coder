@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
+import { ArenaChoice, ArenaMatchId, ArenaNote, ArenaStartRequest } from "../contracts/arena.js";
 import { Id } from "../contracts/common.js";
 import { MachineAdd, MachineId } from "../contracts/machines.js";
 import { AppProblem } from "./services/problem.js";
@@ -22,6 +23,20 @@ export const CliCommand = Type.Union([
 	Type.Object({ kind: Type.Literal("routing.models") }, closed),
 	Type.Object({ kind: Type.Literal("routing.profiles") }, closed),
 	Type.Object({ kind: Type.Literal("routing.bindings") }, closed),
+	Type.Object({ kind: Type.Literal("arena.list") }, closed),
+	Type.Object({ kind: Type.Literal("arena.standings"), suite: Type.Optional(Id) }, closed),
+	Type.Object({ kind: Type.Literal("arena.show"), matchId: ArenaMatchId }, closed),
+	Type.Object(
+		{
+			kind: Type.Literal("arena.vote"),
+			matchId: ArenaMatchId,
+			choice: ArenaChoice,
+			note: Type.Optional(ArenaNote),
+			replace: Type.Boolean(),
+		},
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("arena.run"), request: ArenaStartRequest }, closed),
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
@@ -79,5 +94,43 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 			return { argv: ["targets", "profile", "list", "--json"], output: "json" };
 		case "routing.bindings":
 			return { argv: ["targets", "profile", "bindings", "--json"], output: "json" };
+		case "arena.list":
+			return { argv: ["arena", "list", "--json"], output: "json" };
+		case "arena.standings":
+			return { argv: ["arena", "standings", "--json", ...(input.suite ? ["--suite", input.suite] : [])], output: "json" };
+		case "arena.show":
+			return { argv: ["arena", "show", input.matchId, "--json"], output: "json" };
+		case "arena.vote":
+			return {
+				argv: [
+					"arena",
+					"vote",
+					input.matchId,
+					input.choice,
+					"--json",
+					...(input.note ? ["--note", input.note] : []),
+					...(input.replace ? ["--replace"] : []),
+				],
+				output: "json",
+			};
+		case "arena.run": {
+			const request = input.request;
+			// The prompt follows "--", so text that starts with a dash can never read as an option.
+			return {
+				argv: [
+					"arena",
+					"run",
+					"--json",
+					"--timeout",
+					String(request.timeoutSeconds),
+					...request.contenders.flatMap((contender) => ["--contender", `${contender.target}/${contender.model}`]),
+					...(request.suite ? ["--suite", request.suite] : []),
+					...(request.check ? ["--check", request.check] : []),
+					"--",
+					request.prompt,
+				],
+				output: "json",
+			};
+		}
 	}
 }
