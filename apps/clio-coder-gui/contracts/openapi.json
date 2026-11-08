@@ -4594,6 +4594,9 @@
 													}
 												]
 											}
+										},
+										"runningOperationId": {
+											"type": "string"
 										}
 									},
 									"additionalProperties": false
