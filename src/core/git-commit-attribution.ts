@@ -391,18 +391,26 @@ if [ "$hook_name" = commit-msg ]; then
   # Git strips comment lines after this hook, and a message with nothing
   # else aborts the commit; a trailer added to it would commit an abandoned
   # editor. With core.commentChar=auto, git commented with the first of
-  # '#;@!$%^&|:' that started no line of the message it prepared, so every
-  # earlier candidate on a line here is message text and the latest one that
-  # starts a line is the comment character. Lines of any other candidate stay
+  # '#;@!$%^&|:' that started no line of the message it prepared, so above
+  # any scissors line every earlier candidate on a line is message text and
+  # the latest one that starts a line is the comment character. Lines of any other candidate stay
   # content, so a message git would commit is never mistaken for comments.
   comment_char=$(git config --get core.commentChar 2>/dev/null || true)
   case "$comment_char" in
     '') comment_char='#' ;;
     auto)
+      # A scissors line (git commit -v) names git's choice outright, and the
+      # diff below it must not be scanned: its @@ lines would win.
       comment_char=$(awk '
         BEGIN { candidates = "#;@!$%^&|:" }
-        { at = index(candidates, substr($0, 1, 1)); if (substr($0, 1, 1) != "" && at > last) last = at }
-        END { print (last ? substr(candidates, last, 1) : "#") }' "$message_file")
+        {
+          for (i = 1; i <= length(candidates); i++) {
+            c = substr(candidates, i, 1)
+            if ($0 == c " ------------------------ >8 ------------------------") { print c; done = 1; exit }
+          }
+          at = index(candidates, substr($0, 1, 1)); if (substr($0, 1, 1) != "" && at > last) last = at
+        }
+        END { if (!done) print (last ? substr(candidates, last, 1) : "#") }' "$message_file")
       trailer_comment_char=$comment_char
       ;;
   esac

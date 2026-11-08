@@ -338,6 +338,11 @@ describe("autonomous commit authorship", () => {
 				// Still aborted under auto.
 			}
 			strictEqual(git(["rev-parse", "HEAD"]), autoHead);
+			// commit -v under auto: the @@ lines below the scissors must not pick the comment character.
+			writeFileSync(join(repo, "v.txt"), "v\n");
+			git(["add", "v.txt"]);
+			absolute(["commit", "-q", "-v"], 'sed -i "1s/^/feat: verbose/"');
+			deepStrictEqual(last(), { ident: `${CLIO}|${HUMAN}`, trailers: [`Co-authored-by: ${HUMAN}`] });
 			git(["config", "--unset", "core.commentChar"]);
 			// Through the shim on PATH the same editor commit is the human's.
 			git(["commit", "-q", "--allow-empty"], { ...env, GIT_EDITOR: 'sed -i "1s/^/feat: shim/"' });
