@@ -116,8 +116,8 @@ export function ResearchPage({ client }: { client: Client }) {
 					client={client}
 					workspaceId={selection.id}
 					operationId={operationId}
-					onStarted={(id) => {
-						setStarted({ workspaceId: selection.id, operationId: id });
+					onStarted={(next) => {
+						setStarted(next);
 						void queries.invalidateQueries({ queryKey: ["research-campaigns"] });
 					}}
 					onClose={() => setComposing(false)}
@@ -400,6 +400,21 @@ function CampaignBody({ client, workspaceId, view }: { client: Client; workspace
 	);
 }
 
+type Started = { workspaceId: string; operationId: string };
+
+type StartVariables = { workspaceId: string; request: ResearchStartRequest };
+
+/** The workspace travels with the submit, so a page switched to another workspace before the reply still records it. */
+export function researchStartMutation(client: Client, onStarted: (started: Started) => void) {
+	return {
+		meta: { errorSurface: "inline" as const },
+		mutationFn: ({ workspaceId, request }: StartVariables) =>
+			client.call(routes.researchStart, { params: { id: workspaceId }, query: {}, body: request }, crypto.randomUUID()),
+		onSuccess: (result: { operationId: string }, { workspaceId }: StartVariables) =>
+			onStarted({ workspaceId, operationId: result.operationId }),
+	};
+}
+
 function NewCampaign({
 	client,
 	workspaceId,
@@ -410,7 +425,7 @@ function NewCampaign({
 	client: Client;
 	workspaceId: string;
 	operationId: string | null;
-	onStarted: (operationId: string) => void;
+	onStarted: (started: Started) => void;
 	onClose: () => void;
 }) {
 	const [draft, setDraft] = useState<ResearchDraft>(emptyResearchDraft);
@@ -427,12 +442,7 @@ function NewCampaign({
 		queryFn: ({ signal }) =>
 			client.call(routes.targetsList, { params: { id: workspaceId }, query: {}, body: {} }, undefined, signal),
 	});
-	const start = useMutation({
-		meta: { errorSurface: "inline" },
-		mutationFn: (request: ResearchStartRequest) =>
-			client.call(routes.researchStart, { params: { id: workspaceId }, query: {}, body: request }, crypto.randomUUID()),
-		onSuccess: (result) => onStarted(result.operationId),
-	});
+	const start = useMutation(researchStartMutation(client, onStarted));
 	const running = start.isPending || operationUnsettled(operationId, operation.data?.status);
 	const outcome = researchRequest(draft);
 	const checks = verifiers.data?.checks ?? [];
@@ -445,7 +455,7 @@ function NewCampaign({
 			onSubmit={(event) => {
 				event.preventDefault();
 				if (running || "problem" in outcome) return;
-				start.mutate(outcome.request);
+				start.mutate({ workspaceId, request: outcome.request });
 			}}
 		>
 			<h2>New campaign</h2>

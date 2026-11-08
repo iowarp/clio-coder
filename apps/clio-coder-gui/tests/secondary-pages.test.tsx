@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { test } from "node:test";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationObserver, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -30,7 +30,7 @@ const { MissionControl } = await import("../client/pages/mission-control.js");
 const { SessionControlsProvider } = await import("../client/shell/SessionControls.js");
 const { useWorkspaceSelection, WorkspacePicker } = await import("../client/pages/workspace-selection.js");
 const { OperatorMetrics } = await import("../client/pages/operator-metrics.js");
-const { ResearchPage } = await import("../client/pages/research.js");
+const { ResearchPage, researchStartMutation } = await import("../client/pages/research.js");
 const { sessionOperatorMetrics, goldenTelemetryRecords } = await import("./harness/telemetry-fixture.js");
 const client = { token: "test", call: () => new Promise(() => {}) } as unknown as Client;
 const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -416,4 +416,44 @@ test("research page follows a campaign the server still runs after the page was 
 	assert.match(html, /Stop campaign/);
 	assert.match(html, /iteration 1: agent run in it-0001/);
 	assert.match(html, /<button[^>]*class="primary"[^>]*disabled=""[^>]*>New campaign/);
+});
+
+test("a research start records the workspace it was submitted in, even if the page switched before the reply", {
+	timeout: 5000,
+}, async () => {
+	let reply: (value: { operationId: string }) => void = () => {};
+	const posted: string[] = [];
+	const slow = {
+		token: "test",
+		call: (_route: unknown, input: { params: { id: string } }) => {
+			posted.push(input.params.id);
+			return new Promise((resolve) => {
+				reply = resolve;
+			});
+		},
+	} as unknown as Client;
+	const recorded: { workspaceId: string; operationId: string }[] = [];
+	const observer = new MutationObserver(
+		queries(),
+		researchStartMutation(slow, (started) => recorded.push(started)),
+	);
+	const request = {
+		check: "bench",
+		metric: "wall_ms",
+		direction: "min" as const,
+		maxIterations: 1,
+		minImprovement: 0.05,
+		trials: 3,
+		gates: [],
+		scope: [],
+		allowUnpriced: false,
+	};
+	const done = observer.mutate({ workspaceId: "workspace-a", request });
+	// The page re-renders for workspace B while the POST for A is in flight.
+	for (let i = 0; i < 100 && posted.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+	observer.setOptions(researchStartMutation(slow, (started) => recorded.push(started)));
+	reply({ operationId: "op-a" });
+	await done;
+	assert.deepEqual(posted, ["workspace-a"]);
+	assert.deepEqual(recorded, [{ workspaceId: "workspace-a", operationId: "op-a" }]);
 });
