@@ -10,7 +10,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import {
 	CLIO_COMMIT_EMAIL,
@@ -39,7 +39,7 @@ const AUTHOR_MANAGED_ENV = "CLIO_CODER_GIT_AUTHOR_MANAGED";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 6;
+const MANAGED_HOOK_VERSION = 7;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -115,7 +115,9 @@ export interface ManagedCommitAttributionOptions {
 	 * process: Clio while an autonomous process or scope is active and the
 	 * setting is `auto`, the human otherwise. Clio authors only through the
 	 * managed hook, which credits the human, so a repository the hook cannot
-	 * reach keeps the human author.
+	 * reach (its own core.hooksPath, or Windows) keeps the human author with no
+	 * Clio trailer, and the managed git shim keeps the human author on every
+	 * command that writes a commit without that hook.
 	 */
 	author?: GitCommitAuthor;
 	/**
@@ -225,6 +227,7 @@ function withoutManagedGitConfig(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	}
 	// Only the author a Clio seam set is Clio's to remove; one the operator or
 	// the model set afterwards is theirs and stays.
+	if (env.PATH !== undefined) env.PATH = pathWithoutManagedShim(env.PATH);
 	if (env[AUTHOR_MANAGED_ENV] === "1") {
 		if (env.GIT_AUTHOR_NAME === CLIO_COMMIT_NAME) Reflect.deleteProperty(env, "GIT_AUTHOR_NAME");
 		if (env.GIT_AUTHOR_EMAIL === CLIO_COMMIT_EMAIL) Reflect.deleteProperty(env, "GIT_AUTHOR_EMAIL");
@@ -321,6 +324,15 @@ case "$common_dir_absolute" in
   *) default_hooks_directory=$common_dir_absolute/hooks; default_hook=$default_hooks_directory/$hook_name ;;
 esac
 
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# git commit exports the author it resolved, so --author and an amended
+# commit's author are seen here; git merge and git revert inherit it from the
+# environment. A cherry-pick does not export the picked commit's author, which
+# is why the CHERRY_PICK_HEAD state below exits before this is trusted.
+author_email=$(lower "$GIT_AUTHOR_EMAIL")
+clio_authored=
+if [ "$author_email" = '${CLIO_COMMIT_EMAIL.toLowerCase()}' ]; then clio_authored=1; fi
+
 if git config --get core.hooksPath >/dev/null 2>&1 &&
    [ "$${DEFAULT_HOOKS_EQUIVALENT_ENV}" != "$default_hooks_directory" ]; then
 	custom_hooks=$(git config --path --get core.hooksPath 2>/dev/null || true)
@@ -329,21 +341,30 @@ if git config --get core.hooksPath >/dev/null 2>&1 &&
     /*) custom_hook=$custom_hooks/$hook_name ;;
     *) custom_hook=$PWD/$custom_hooks/$hook_name ;;
   esac
-  if [ -n "$custom_hooks" ] && [ -x "$custom_hook" ]; then exec "$custom_hook" "$@"; fi
-	exit 0
-fi
-
-if [ "$hook_name" != 'prepare-commit-msg' ]; then
-  if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then exec "$default_hook" "$@"; fi
-  exit 0
+  # The operator's hooks own this repository: Clio adds none of its own
+  # trailers. A repository Clio probed with its own core.hooksPath never gets
+  # Clio as author, but a command that moved into such a repository after the
+  # probe still carries Clio's author, and then the human committer is
+  # credited after the operator's hook succeeds so the human is never dropped.
+  if [ "$hook_name" != 'prepare-commit-msg' ] || [ -z "$clio_authored" ]; then
+    if [ -n "$custom_hooks" ] && [ -x "$custom_hook" ]; then exec "$custom_hook" "$@"; fi
+    exit 0
+  fi
+  if [ -n "$custom_hooks" ] && [ -x "$custom_hook" ]; then "$custom_hook" "$@" || exit $?; fi
+  operator_hooks=1
+else
+  operator_hooks=
+  if [ "$hook_name" != 'prepare-commit-msg' ]; then
+    if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then exec "$default_hook" "$@"; fi
+    exit 0
+  fi
+  if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then
+    "$default_hook" "$@" || exit $?
+  fi
 fi
 
 message_file=$1
 message_source=$2
-
-if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then
-  "$default_hook" "$@" || exit $?
-fi
 
 # The repository's own hook semantics are settled. Everything below is
 # fail-open and applies only to Clio-spawned commits with attribution enabled.
@@ -353,11 +374,30 @@ if [ "$AI_AGENT" != '${AI_AGENT_NAME}' ] || [ "$${CLIO_GIT_COMMITS_ENABLED_ENV}"
 # -c/-C, squash, and template sources reuse or lack a real message, and an
 # editor session starts from an all-comment template where added trailers
 # would turn an abandoned editor into a commit whose whole message is trailers.
+# Clio's managed git shim keeps Clio as author only for invocations that reach
+# these sources, so an editor commit stays the human's.
 case "$message_source" in message|merge) ;; *) exit 0 ;; esac
-for marker in CHERRY_PICK_HEAD REVERT_HEAD rebase-apply rebase-merge sequencer; do
-  marker_path=$(git rev-parse --git-path "$marker" 2>/dev/null || true)
+git_path() { git rev-parse --git-path "$1" 2>/dev/null || true; }
+# A cherry-pick or rebase commits someone else's change under that commit's
+# author: no trailer of Clio's belongs on it.
+for marker in CHERRY_PICK_HEAD rebase-apply rebase-merge; do
+  marker_path=$(git_path "$marker")
   if [ -n "$marker_path" ] && [ -e "$marker_path" ]; then exit 0; fi
 done
+# A revert is authored by the current identity, so when that is Clio the human
+# committer must still be credited: on a stopped revert (REVERT_HEAD) and on
+# each commit of a revert range, whose sequencer todo starts with "revert".
+reverting=
+marker_path=$(git_path REVERT_HEAD)
+if [ -n "$marker_path" ] && [ -e "$marker_path" ]; then reverting=1; fi
+marker_path=$(git_path sequencer)
+if [ -n "$marker_path" ] && [ -e "$marker_path" ]; then
+  case "$(sed -n '1s/[[:space:]].*//p' "$marker_path/todo" 2>/dev/null)" in
+    revert) reverting=1 ;;
+    *) exit 0 ;;
+  esac
+fi
+if [ -n "$reverting" ] && [ -z "$clio_authored" ]; then exit 0; fi
 
 # Case-insensitive presence check on the whole message, so a human-written
 # variant of a Clio trailer is respected rather than duplicated.
@@ -379,11 +419,7 @@ append_trailer() {
     printf '%s\\n' '[clio-coder:attribution] git interpret-trailers failed; commit left as written' >&2
 }
 
-# git commit exports the author it resolved, so --author and an amended
-# commit's author are seen here; git merge inherits it from the environment.
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-author_email=$(lower "$GIT_AUTHOR_EMAIL")
-if [ "$author_email" = '${CLIO_COMMIT_EMAIL.toLowerCase()}' ]; then
+if [ -n "$clio_authored" ]; then
   # Clio authored this commit: its own Assisted-by and Co-authored-by would be
   # redundant, and the human committer is credited instead. An unconfigured
   # identity is never guessed into a trailer.
@@ -394,6 +430,8 @@ if [ "$author_email" = '${CLIO_COMMIT_EMAIL.toLowerCase()}' ]; then
     '' | '${CLIO_COMMIT_EMAIL.toLowerCase()}' | 'clio-coder@iowarp.ai') ;;
     *) append_trailer "Co-authored-by: $human" ;;
   esac
+  # Under the operator's own hooks or in a revert, the credit is all Clio adds.
+  if [ -n "$operator_hooks" ] || [ -n "$reverting" ]; then exit 0; fi
 else
   if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
     append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
@@ -411,20 +449,93 @@ done
 exit 0
 `;
 
-function installManagedHook(directory: string, name: string): void {
-	const hook = join(directory, name);
+/**
+ * A `git` found first on PATH wherever a Clio seam made Clio the author
+ * through the environment. Git applies GIT_AUTHOR_* to every command that
+ * writes a commit, but the managed hook can credit the human only where
+ * prepare-commit-msg runs with a message given up front: `git commit -m/-F`,
+ * `git merge` (also under `git pull`) and `git revert`. Every other
+ * invocation (`commit-tree`, `stash`, `notes`, an editor or template
+ * `git commit`, an alias) runs with Clio's author removed, so the human stays
+ * author and is never dropped. Cherry-pick, rebase and am keep the original
+ * commits' authors either way. An author the operator or the model chose
+ * (any other GIT_AUTHOR_* value) passes through untouched.
+ */
+const MANAGED_GIT_SHIM_SCRIPT = `#!/bin/sh
+# Clio Coder managed git shim v${MANAGED_HOOK_VERSION}. On PATH only in Clio
+# child-process environments where Clio is the commit author.
+
+shim_directory=\${0%/*}
+real_git=
+saved_ifs=$IFS
+set -f
+IFS=:
+for directory in $PATH; do
+  case "$directory" in '' | "$shim_directory") continue ;; esac
+  if [ -f "$directory/git" ] && [ -x "$directory/git" ]; then real_git=$directory/git; break; fi
+done
+IFS=$saved_ifs
+set +f
+if [ -z "$real_git" ]; then
+  printf '%s\\n' 'clio-coder: git was not found on PATH' >&2
+  exit 127
+fi
+
+if [ "$${AUTHOR_MANAGED_ENV}" = '1' ] && [ "$GIT_AUTHOR_NAME" = '${CLIO_COMMIT_NAME}' ] &&
+   [ "$GIT_AUTHOR_EMAIL" = '${CLIO_COMMIT_EMAIL}' ]; then
+  subcommand=
+  takes_value=
+  message=
+  for argument do
+    if [ -z "$subcommand" ]; then
+      if [ -n "$takes_value" ]; then takes_value=; continue; fi
+      case "$argument" in
+        -C | -c | --git-dir | --work-tree | --namespace | --super-prefix | --config-env | --attr-source) takes_value=1 ;;
+        -*) ;;
+        *) subcommand=$argument ;;
+      esac
+      continue
+    fi
+    [ "$subcommand" = commit ] || break
+    case "$argument" in
+      --) break ;;
+      --message | --message=* | --file | --file=*) message=1; break ;;
+      --*) ;;
+      -?*)
+        cluster=\${argument#-}
+        while [ -n "$cluster" ]; do
+          rest=\${cluster#?}
+          case "\${cluster%"$rest"}" in
+            m | F) message=1; break 2 ;;
+            C | c | t | S | u) break ;;
+          esac
+          cluster=$rest
+        done
+        ;;
+    esac
+  done
+  case "$subcommand" in
+    merge | pull | revert) ;;
+    commit) [ -n "$message" ] || unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL ${AUTHOR_MANAGED_ENV} ;;
+    *) unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL ${AUTHOR_MANAGED_ENV} ;;
+  esac
+fi
+exec "$real_git" "$@"
+`;
+
+function installManagedScript(path: string, script: string): void {
 	try {
-		if (existsSync(hook) && readFileSync(hook, "utf8") === MANAGED_HOOK_SCRIPT) {
-			chmodSync(hook, 0o755);
+		if (existsSync(path) && readFileSync(path, "utf8") === script) {
+			chmodSync(path, 0o755);
 			return;
 		}
 	} catch {
 		// Unreadable content is replaced below; the path is Clio-owned.
 	}
-	const temporary = `${hook}.tmp-${process.pid}-${Date.now()}`;
+	const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
 	try {
-		writeFileSync(temporary, MANAGED_HOOK_SCRIPT, { encoding: "utf8", mode: 0o755 });
-		renameSync(temporary, hook);
+		writeFileSync(temporary, script, { encoding: "utf8", mode: 0o755 });
+		renameSync(temporary, path);
 	} finally {
 		rmSync(temporary, { force: true });
 	}
@@ -448,9 +559,40 @@ function managedHooksDirectory(): string | null {
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}`);
 	if (installedHooksDirectory === directory && managedHooksDirectoryIsIntact(directory)) return directory;
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	for (const name of MANAGED_HOOK_NAMES) installManagedHook(directory, name);
+	for (const name of MANAGED_HOOK_NAMES) installManagedScript(join(directory, name), MANAGED_HOOK_SCRIPT);
 	installedHooksDirectory = directory;
 	return directory;
+}
+
+/** Where the managed git shim lives; a sibling of the hooks directory so Git never reads it as a hook. */
+function managedGitShimDirectoryPath(): string {
+	return join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}-shim`);
+}
+
+/** The installed git shim's directory, installed or repaired on use. */
+function managedGitShimDirectory(): string {
+	const directory = managedGitShimDirectoryPath();
+	const shim = join(directory, "git");
+	try {
+		if (readFileSync(shim, "utf8") === MANAGED_GIT_SHIM_SCRIPT) {
+			accessSync(shim, fsConstants.X_OK);
+			return directory;
+		}
+	} catch {
+		// Missing or damaged: installed below.
+	}
+	mkdirSync(directory, { recursive: true, mode: 0o700 });
+	installManagedScript(shim, MANAGED_GIT_SHIM_SCRIPT);
+	return directory;
+}
+
+/** `pathValue` without any entry naming the managed shim directory. */
+function pathWithoutManagedShim(pathValue: string): string {
+	const shimDirectory = managedGitShimDirectoryPath();
+	return pathValue
+		.split(delimiter)
+		.filter((entry) => entry !== shimDirectory)
+		.join(delimiter);
 }
 
 /** The environment entries that change what `git` resolves for a cwd. */
@@ -553,7 +695,9 @@ function applyClioAuthor(env: NodeJS.ProcessEnv, authorship: ClioCommitAuthorshi
  * Build a child environment that selects Clio's managed hooks directory through
  * command-scope Git configuration. Repository and user configuration are never
  * written. An effective core.hooksPath that is not the repository's default
- * hooks directory is left alone: attribution fails open with a diagnostic.
+ * hooks directory is left alone: attribution fails open with a diagnostic, and
+ * the commit stays plainly the human's (human author and committer, no Clio
+ * trailer), because Clio never runs its hook in place of the operator's.
  *
  * The repository probe behind this is cached per cwd and Git environment for
  * `PROBE_CACHE_TTL_MS`, and the managed hooks directory is installed once per
@@ -609,9 +753,30 @@ export function withManagedGitCommitAttributionEnvironment(
 	env.GIT_CONFIG_COUNT = String(count + 1);
 	env[`GIT_CONFIG_KEY_${count}`] = "core.hooksPath";
 	env[`GIT_CONFIG_VALUE_${count}`] = hooksDirectory;
-	if (options.authorship === undefined && (options.author ?? autonomousCommitAuthor(source)) === "clio") {
+	// Clio authors through the environment only with the managed git shim in
+	// front of PATH, which drops that author from every command the hook cannot
+	// credit the human on. Windows resolves `git` without a POSIX shim, so
+	// there the human stays the author.
+	if (
+		options.authorship === undefined &&
+		process.platform !== "win32" &&
+		(options.author ?? autonomousCommitAuthor(source)) === "clio"
+	) {
 		const authorship = resolveClioCommitAuthorship(cwd, env);
-		if (authorship !== null) applyClioAuthor(env, authorship);
+		if (authorship !== null) {
+			try {
+				const shimDirectory = managedGitShimDirectory();
+				applyClioAuthor(env, authorship);
+				env.PATH =
+					env.PATH === undefined || env.PATH.length === 0 ? shimDirectory : `${shimDirectory}${delimiter}${env.PATH}`;
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				return {
+					env,
+					diagnostic: boundedDiagnostic(`managed git shim unavailable; the human stays commit author (${reason})`),
+				};
+			}
+		}
 	}
 	return { env, diagnostic: null };
 }

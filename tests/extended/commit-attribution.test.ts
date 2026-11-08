@@ -255,6 +255,76 @@ describe("autonomous commit authorship", () => {
 		});
 	});
 
+	function autonomousSeam(repo: string) {
+		setAutonomousCommitProcess(true);
+		const { env, diagnostic } = withManagedGitCommitAttributionEnvironment(process.env, { cwd: repo, enabled: true });
+		strictEqual(diagnostic, null);
+		return env;
+	}
+
+	it("keeps the human author on commands that write commits without the hook", async () => {
+		await withRepo((repo, git) => {
+			git(["commit", "-q", "--allow-empty", "-m", "init"]);
+			const env = autonomousSeam(repo);
+			const tree = git(["commit-tree", "-p", "HEAD", "-m", "plumbing", "HEAD^{tree}"], env).trim();
+			strictEqual(git(["log", "-1", "--format=%an <%ae>", tree]).trim(), HUMAN);
+			writeFileSync(join(repo, "a.txt"), "a\n");
+			git(["add", "a.txt"]);
+			git(["stash", "-q"], env);
+			strictEqual(git(["log", "-1", "--format=%an <%ae>", "stash@{0}"]).trim(), HUMAN);
+		});
+	});
+
+	it("credits the human on a revert finished after a conflict", async () => {
+		await withRepo((repo, git) => {
+			const write = (text: string) => writeFileSync(join(repo, "f.txt"), text);
+			write("one\n");
+			git(["add", "f.txt"]);
+			git(["commit", "-q", "-m", "one"]);
+			write("two\n");
+			git(["commit", "-q", "-am", "two"]);
+			write("three\n");
+			git(["commit", "-q", "-am", "three"]);
+			const env = autonomousSeam(repo);
+			try {
+				git(["revert", "--no-edit", "HEAD~1"], env);
+			} catch {
+				// The conflict is the point.
+			}
+			write("resolved\n");
+			git(["add", "f.txt"]);
+			git(["revert", "--continue"], { ...env, GIT_EDITOR: "true" });
+			strictEqual(git(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(), `${CLIO}|${HUMAN}`);
+			deepStrictEqual(git(["log", "-1", "--format=%(trailers:only)"]).trim().split("\n"), [`Co-authored-by: ${HUMAN}`]);
+		});
+	});
+
+	it("credits the human after an operator's hooks run in a repository Clio's hook does not own", async () => {
+		await withRepo((repo, git) => {
+			const env = autonomousSeam(repo);
+			const other = join(repo, "..", "other");
+			const hooks = join(repo, "..", "operator-hooks");
+			mkdirSync(other);
+			mkdirSync(hooks);
+			writeFileSync(join(hooks, "prepare-commit-msg"), '#!/bin/sh\nprintf "Operator-hook: ran\\n\\n" >> "$1"\n', {
+				mode: 0o755,
+			});
+			const inOther = (args: string[], spawnEnv: NodeJS.ProcessEnv = process.env) =>
+				execFileSync("git", args, { cwd: other, env: spawnEnv, encoding: "utf8" });
+			inOther(["init", "-q"]);
+			inOther(["config", "user.name", "Human"]);
+			inOther(["config", "user.email", "human@example.com"]);
+			inOther(["config", "core.hooksPath", hooks]);
+			inOther(["commit", "-q", "--allow-empty", "-m", "feat: y"], env);
+			strictEqual(inOther(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(), `${CLIO}|${HUMAN}`);
+			const message = inOther(["log", "-1", "--format=%B"]);
+			match(message, /Operator-hook: ran/);
+			deepStrictEqual(inOther(["log", "-1", "--format=%(trailers:only)"]).trim().split("\n").slice(-1), [
+				`Co-authored-by: ${HUMAN}`,
+			]);
+		});
+	});
+
 	it("leaves the human author when no committer identity is configured, so nobody is dropped", async () => {
 		await withRepo((repo, git) => {
 			git(["config", "--unset", "user.name"]);
