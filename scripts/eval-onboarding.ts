@@ -65,6 +65,9 @@ const WRITE_TOOLS = new Set(["write", "edit"]);
 const usedObserve = (o: Observation): boolean => o.tools.some((t) => OBSERVE_TOOLS.has(t.name));
 const usedDocs = (o: Observation): boolean => o.tools.some((t) => t.name === "clio_docs");
 const lower = (o: Observation): string => o.finalText.toLowerCase();
+/** A docs page by path, or a labeled source list naming pages by title. */
+const cites = (o: Observation): boolean =>
+	/docs\/(?:guide|architecture)\/|\.md\b/u.test(o.finalText) || /\b(?:sources?|docs|see)\s*:/iu.test(o.finalText);
 
 /** A skills lookup, a skill load, or a library package lookup. */
 function isSkillLookup(t: ToolCall): boolean {
@@ -112,7 +115,7 @@ const CASES: EvalCase[] = [
 		score: (o) => ({
 			docs: usedDocs(o),
 			docsFirst: o.tools[0]?.name === "clio_docs",
-			cited: /docs\/guide\/|\.md\b/u.test(o.finalText),
+			cited: cites(o),
 			correct: lower(o).includes("fleet"),
 		}),
 	},
@@ -123,7 +126,7 @@ const CASES: EvalCase[] = [
 		score: (o) => ({
 			docs: usedDocs(o),
 			docsFirst: o.tools[0]?.name === "clio_docs",
-			cited: /docs\/guide\/|\.md\b/u.test(o.finalText),
+			cited: cites(o),
 			correct: lower(o).includes("threshold") && /0\.8|80 ?%|context\.compaction/u.test(lower(o)),
 		}),
 	},
