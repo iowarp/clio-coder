@@ -13,7 +13,7 @@ import { type ConfigContract, ConfigDomainModule } from "../../src/domains/confi
 import { createDispatchDomainModule, type DispatchContract } from "../../src/domains/dispatch/index.js";
 import { type Ledger, openLedger } from "../../src/domains/dispatch/state.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
-import { MiddlewareDomainModule } from "../../src/domains/middleware/index.js";
+import { createMiddlewareDomain } from "../../src/domains/middleware/index.js";
 import { createPromptsDomainModule } from "../../src/domains/prompts/index.js";
 import { ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import { ResourcesDomainModule } from "../../src/domains/resources/index.js";
@@ -78,7 +78,7 @@ test("an open dispatch ledger follows config updates and effective session overr
 		SafetyDomainModule,
 		AgentsDomainModule,
 		createPromptsDomainModule({ noContextFiles: true }),
-		MiddlewareDomainModule,
+		createMiddlewareDomain().module,
 		SessionDomainModule,
 		TelemetryDomainModule,
 		SchedulingDomainModule,

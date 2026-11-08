@@ -27,7 +27,6 @@ import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
-import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -584,7 +583,7 @@ async function loadBootstrapDispatch(): Promise<{
 		SafetyDomainModule,
 		createPromptsDomainModule({ noContextFiles: true }),
 		AgentsDomainModule,
-		MiddlewareDomainModule,
+		workerHooks.middlewareModule,
 		SessionDomainModule,
 		TelemetryDomainModule,
 		SchedulingDomainModule,

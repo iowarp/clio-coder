@@ -65,7 +65,6 @@ import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-bound
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { foregroundStreamUsage, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
@@ -297,7 +296,7 @@ async function runFleet(
 		SafetyDomainModule,
 		createPromptsDomainModule({ noContextFiles: true }),
 		AgentsDomainModule,
-		MiddlewareDomainModule,
+		workerHooks.middlewareModule,
 		TelemetryDomainModule,
 		SchedulingDomainModule,
 		// A fleet step is dispatched by executeFleetRun, which drains the handle

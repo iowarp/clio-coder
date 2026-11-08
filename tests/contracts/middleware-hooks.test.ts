@@ -18,16 +18,14 @@ import {
 	runMiddlewareAsyncRegistrations,
 	runMiddlewareRegistrations,
 } from "../../src/domains/middleware/runtime.js";
-import {
-	createMiddlewareContractFromSnapshot,
-	createMiddlewareSnapshot,
-} from "../../src/domains/middleware/snapshot.js";
+import { createMiddlewareHostFromSnapshot, createMiddlewareSnapshot } from "../../src/domains/middleware/snapshot.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { middlewareOwner } from "../harness/middleware-owner.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 
 function registration(
@@ -223,7 +221,7 @@ describe("middleware hook boundary", () => {
 		// keeps writing generation 2 into its receipts.
 		const third = buildExtensionSnapshot({ cwd: project, generation: 3 });
 		deepStrictEqual(third.hookSources, []);
-		const middleware = createMiddlewareBundle().contract;
+		const middleware = middlewareOwner(createMiddlewareBundle());
 		strictEqual(middleware.replaceRegistrations("user-hooks", 2, built.registrations).applied, true);
 		const rebuilt = buildUserHookRegistrations({
 			cwd: project,
@@ -343,10 +341,12 @@ function messages(effects: ReadonlyArray<MiddlewareEffect>): string[] {
 }
 
 function ownedBundle(diagnostics: MiddlewareDiagnostic[] = []) {
-	return createMiddlewareBundle({
-		ruleDefinitions: [FIXED_RULE],
-		onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-	}).contract;
+	return middlewareOwner(
+		createMiddlewareBundle({
+			ruleDefinitions: [FIXED_RULE],
+			onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+		}),
+	);
 }
 
 function permutations<T>(items: ReadonlyArray<T>): T[][] {
@@ -471,7 +471,7 @@ describe("middleware generation-owned registrations", () => {
 		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "A", "u", "B"]);
 		strictEqual(middleware.replaceRegistrations("user-hooks", 2, [emitting("v"), emitting("w")]).applied, true);
 		deepStrictEqual(middleware.runHook(PROBE).ruleIds, [FIXED_RULE_ID, "A", "v", "w", "B"]);
-		const worker = createMiddlewareContractFromSnapshot(middleware.snapshot());
+		const worker = middlewareOwner(createMiddlewareHostFromSnapshot(middleware.snapshot()));
 		strictEqual(worker.replaceRegistrations("user-hooks", 1, [emitting("worker-u")]).applied, true);
 		strictEqual(worker.ownedGeneration("user-hooks"), 1);
 		deepStrictEqual(worker.runHook(PROBE).ruleIds, ["worker-u"], "the worker contract honours the same owner semantics");
@@ -576,17 +576,19 @@ describe("middleware registration table publication", () => {
 	it("never invokes the diagnostic sink during preparation and survives a sink that registers a colliding host", () => {
 		const diagnostics: MiddlewareDiagnostic[] = [];
 		let sinkCalls = 0;
-		const middleware = createMiddlewareBundle({
-			ruleDefinitions: [FIXED_RULE],
-			onDiagnostic: (diagnostic) => {
-				sinkCalls += 1;
-				diagnostics.push(diagnostic);
-				// A hostile or careless sink registers a host hook that takes an id
-				// the owned set just accepted. Preparation must not have exposed the
-				// prepared list to this; publication must already be complete.
-				middleware.registerHook(emitting("v", "host-v"));
-			},
-		}).contract;
+		const middleware = middlewareOwner(
+			createMiddlewareBundle({
+				ruleDefinitions: [FIXED_RULE],
+				onDiagnostic: (diagnostic) => {
+					sinkCalls += 1;
+					diagnostics.push(diagnostic);
+					// A hostile or careless sink registers a host hook that takes an id
+					// the owned set just accepted. Preparation must not have exposed the
+					// prepared list to this; publication must already be complete.
+					middleware.registerHook(emitting("v", "host-v"));
+				},
+			}),
+		);
 		const prepared = middleware.prepareRegistrationReplacement("user-hooks", 1, [
 			emitting("u"),
 			emitting("u", "owned-u-duplicate"),

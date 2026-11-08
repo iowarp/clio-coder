@@ -1,5 +1,5 @@
 import { createHookBudgetTracker, resolveHookBudgetsFromEnv, resolveHookBudgetTunablesFromEnv } from "./budget.js";
-import type { MiddlewareContract } from "./contract.js";
+import type { MiddlewareContract, MiddlewareHost, MiddlewareRegistrar } from "./contract.js";
 import { recordFiredRules } from "./fired-record.js";
 import { createMiddlewareRegistrationTable } from "./registrations.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
@@ -31,13 +31,13 @@ export function createMiddlewareSnapshot(
 }
 
 /**
- * Rebuild a middleware contract from a declarative snapshot, typically inside
- * a worker subprocess. The snapshot carries no effect payloads, so each rule
+ * Rebuild a middleware host from a declarative snapshot, typically inside
+ * a worker subprocess, whose own composition keeps the registrar. The snapshot carries no effect payloads, so each rule
  * is resolved against the builtin definition table by id; the snapshot's
  * declarative fields (enabled, hooks, effectKinds) stay authoritative. A rule
  * id with no builtin definition in this binary evaluates to no effects.
  */
-export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapshot): MiddlewareContract {
+export function createMiddlewareHostFromSnapshot(snapshot: MiddlewareSnapshot): MiddlewareHost {
 	const builtinById = new Map(listMiddlewareRuleDefinitions().map((definition) => [definition.rule.id, definition]));
 	const definitions: MiddlewareRuleDefinition[] = snapshot.rules.map((rule) => {
 		const builtin = builtinById.get(rule.id);
@@ -60,7 +60,7 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 		budgets: resolveHookBudgetsFromEnv(),
 		...resolveHookBudgetTunablesFromEnv(),
 	});
-	return {
+	const contract: MiddlewareContract = {
 		runHook(input) {
 			const registrations = table.list();
 			return recordFiredRules(
@@ -95,6 +95,8 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 		snapshot() {
 			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));
 		},
+	};
+	const registrar: MiddlewareRegistrar = {
 		registerHook(registration) {
 			table.registerHook(registration);
 		},
@@ -111,4 +113,5 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 			return table.ownedGeneration(owner);
 		},
 	};
+	return { contract: Object.freeze(contract), registrar };
 }

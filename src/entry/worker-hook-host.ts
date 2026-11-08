@@ -1,12 +1,13 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge, type ExtensionsContract } from "../domains/extensions/index.js";
-import type { MiddlewareContract } from "../domains/middleware/index.js";
+import type { MiddlewareRegistrar } from "../domains/middleware/index.js";
 import { type ExtensionHost, type ExtensionHostOptions, startExtensionHost } from "./extension-host.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
 
 export interface WorkerHookHostOptions {
 	extensions: ExtensionsContract;
-	middleware: MiddlewareContract;
+	/** The registrar of the middleware this command composed; the host publishes the user-hook generation. */
+	middleware: MiddlewareRegistrar;
 	bus: TelemetryHub;
 	/** The installed packages the host may start: loadable, with an api 2 runtime. */
 	list: ExtensionHostOptions["list"];

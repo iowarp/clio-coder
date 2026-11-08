@@ -21,6 +21,7 @@ import type {
 	MiddlewareContract,
 	MiddlewareDiagnostic,
 	MiddlewareHookRegistration,
+	MiddlewareRegistrar,
 	MiddlewareRegistrationReplacement,
 	PrepareRegistrationReplacementResult,
 } from "../../src/domains/middleware/index.js";
@@ -29,6 +30,7 @@ import {
 	type ExtensionGenerationCommitted,
 	type ExtensionReloadCoordinatorDeps,
 } from "../../src/entry/extension-reload.js";
+import { middlewareOwner } from "../harness/middleware-owner.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
@@ -86,7 +88,7 @@ function hostHook(id: string, message = id): MiddlewareHookRegistration {
 interface LiveHarness {
 	bundle: ReturnType<typeof createExtensionsBundle>;
 	extensions: ExtensionsContract;
-	middleware: MiddlewareContract;
+	middleware: MiddlewareContract & MiddlewareRegistrar;
 	receipts: HookReceipt[];
 	lines: string[];
 	events: ExtensionGenerationCommitted[];
@@ -97,7 +99,7 @@ interface LiveHarness {
 function liveHarness(project: string): LiveHarness {
 	const bundle = createExtensionsBundle(domainContext, { cwd: () => project });
 	bundle.extension.start();
-	const middleware = createMiddlewareBundle().contract;
+	const middleware = middlewareOwner(createMiddlewareBundle());
 	const receipts: HookReceipt[] = [];
 	const lines: string[] = [];
 	const events: ExtensionGenerationCommitted[] = [];
@@ -130,7 +132,7 @@ function liveHarness(project: string): LiveHarness {
  * their own entries later, so adjacency is checked against the actual runtime
  * transition instead of inferred from the final state.
  */
-function observePublications(extensions: ExtensionsContract, middleware: MiddlewareContract, log: string[]): void {
+function observePublications(extensions: ExtensionsContract, middleware: MiddlewareRegistrar, log: string[]): void {
 	const prepareReload = extensions.prepareReload.bind(extensions);
 	extensions.prepareReload = () => {
 		const prepared = prepareReload();
@@ -399,7 +401,7 @@ describe("extension reload coordinator publication", () => {
 	it("publishes project-only hooks on degraded boot and leaves them unchanged on a rejected reload", () => {
 		const project = scratch();
 		writeProjectHooks(project, "project-only", "still-applies");
-		const middleware = createMiddlewareBundle().contract;
+		const middleware = middlewareOwner(createMiddlewareBundle());
 		const receipts: HookReceipt[] = [];
 		const lines: string[] = [];
 		let replacementCalls = 0;

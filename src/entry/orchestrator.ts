@@ -183,11 +183,11 @@ import {
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
 	createMarketplaceOfferRegistration,
+	createMiddlewareDomain,
 	createMiddlewareToolChoiceControl,
 	createSkillsReminderRegistration,
 	formatRegistrationConflict,
 	type MiddlewareContract,
-	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
@@ -2239,6 +2239,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// load; a worker dispatched before that carries no extension hooks.
 	let workerHookSource: import("./extension-reload.js").ExtensionReloadCoordinator["workerHooks"] | null = null;
 	const memoryOwner = new MemoryRuntime();
+	// The loader publishes only the query contract; this root keeps the right to register hooks.
+	const middlewareDomain = createMiddlewareDomain();
 	const result = await loadDomains(
 		[
 			options.startupSettings
@@ -2279,7 +2281,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				noSkills: options.noSkills === true || options.headless?.noSkills === true,
 			}),
 			AgentsDomainModule,
-			MiddlewareDomainModule,
+			middlewareDomain.module,
 			{
 				manifest: { name: "memory", dependsOn: [] },
 				createExtension: () => ({
@@ -2415,6 +2417,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const middleware = result.getContract<MiddlewareContract>("middleware");
+	const middlewareRegistrar = middlewareDomain.registrar();
 	const telemetry = result.getContract<TelemetryContract>("telemetry");
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
@@ -2503,7 +2506,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (interactive) initialNotices.push(conversion);
 		else bootStderr(`${conversion}\n`);
 	}
-	if (!providers || !dispatch || !telemetry || !safety || !middleware) {
+	if (!providers || !dispatch || !telemetry || !safety || !middleware || !middlewareRegistrar) {
 		bootStderr(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + telemetry contracts; aborting.\n",
 		);
@@ -2565,7 +2568,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// bundle with the stderr default; swap in a sink that publishes
 	// middleware.hook_failed (the interactive warn notice consumes it) and keep
 	// stderr for non-interactive runs, which have no notice subscriber.
-	middleware.setDiagnosticSink((diagnostic) => {
+	middlewareRegistrar.setDiagnosticSink((diagnostic) => {
 		if (diagnostic.kind === "registration_conflict") {
 			// Registration bookkeeping has no hook occurrence; the affected owner
 			// today declares user hooks, which never run on on_compaction, so the
@@ -2655,7 +2658,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// model that keeps calling tools.
 		turnSynthesisLockout: true,
 	});
-	middleware.registerHook(loopGuard);
+	middlewareRegistrar.registerHook(loopGuard);
 	let initialProtectedArtifactState: ProtectedArtifactState | undefined;
 	let initialProtectionReadError: string | null = null;
 	if (session) {
@@ -2691,8 +2694,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return protectedArtifactsGuard.state();
 	};
 	const dispatchDedup = createDispatchDedupRegistration();
-	middleware.registerHook(dispatchDedup.registration);
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(dispatchDedup.registration);
+	middlewareRegistrar.registerHook(
 		createStaleEditGuardRegistration({
 			readEntries: () => {
 				const meta = session?.current();
@@ -2704,14 +2707,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	);
 	// Observers run after the guards; they emit no effects and their sinks are
 	// best-effort (session ledger, codewiki refresh).
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(
 		createSkillActivationObserver((activation) => appendSkillActivationRegistryEvent(session, activation)),
 	);
 	// Task-board reminder: same user-message-visible channel, fired once per
 	// session when a request literally enumerates three or more steps. The
 	// static routing line and tasks hint ask for the same board; battery-tested
 	// local models only comply when the instruction rides the user message.
-	middleware.registerHook(createTaskBoardReminderRegistration());
+	middlewareRegistrar.registerHook(createTaskBoardReminderRegistration());
 	const taskMemoryBank = memoryOwner.bank;
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
@@ -2866,8 +2869,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			backgroundCallJournal,
 		),
 	});
-	middleware.registerHook(memoryIntervention);
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(memoryIntervention);
+	middlewareRegistrar.registerHook(
 		createMemoryRecallUseRegistration({
 			dataDir: clioDataDir,
 			stateDir: clioStateDir,
@@ -3076,7 +3079,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.subscribe("session.parked", () => sessionCodeConsent.reset());
 	bus.subscribe("session.reattached", () => sessionCodeConsent.reset());
 	// The codewiki refreshes the written paths when the context domain is loaded.
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(
 		createFileMutationObserver(({ paths }) => {
 			contextDomain?.noteFileChanges(paths);
 		}),
@@ -3110,7 +3113,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const runtimeHooks = createExtensionRuntimeHookBridge();
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
-		middleware,
+		middleware: middlewareRegistrar,
 		runtimeHooks,
 		// The gateway is registered after this coordinator; the lookup runs at call time.
 		mcpOwner: (tool) => toolBootstrap.mcpCapabilities?.ownerIdOf(tool) ?? null,
@@ -3129,7 +3132,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	workerHookSource = extensionReload.workerHooks;
 	await bootPhaseBoundary?.();
 	extensionReload.applyBoot();
-	middleware.registerHook(protectedArtifactsGuard);
+	middlewareRegistrar.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
 	if (lease) {
 		// The fleet board's history reads each earlier worker run's journal. Read it a run per loop turn while Stage 0
@@ -3230,7 +3233,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				})),
 			});
 		};
-		middleware.registerHook(
+		middlewareRegistrar.registerHook(
 			createSkillsReminderRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
 				contextPlacement: () => {
@@ -3270,7 +3273,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// dispatch worker), local matcher and operator-consented installs at every autonomy level. The
 	// registration also checks the own-marketplace source gate before installing.
 	if (resources && skillDiscoveryEnabled) {
-		middleware.registerHook(
+		middlewareRegistrar.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
 				listInstalledSkillNames: () => [
@@ -4490,28 +4493,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	seedOutcomeFromSession();
 	const unsubscribeOutcomeResume = bus.subscribe("session.reattached", seedOutcomeFromSession);
 	termination.onDrain(() => unsubscribeOutcomeResume());
-	middleware.registerHook(turnOutcomeCollector);
+	middlewareRegistrar.registerHook(turnOutcomeCollector);
 	// Only the main session writes claims (#406): a worker's own verify call judges a tree the worker controls, so its
 	// checks reach the log through host verification instead. The verify tool judges against process.cwd(), so the claim
 	// is scoped to the project that cwd lies in.
-	middleware.registerHook(createClaimCaptureRegistration({ cwd: () => process.cwd() }));
+	middlewareRegistrar.registerHook(createClaimCaptureRegistration({ cwd: () => process.cwd() }));
 	// A hypothesis slate the main session writes enters the same log at proposed; the check its criterion names moves it.
-	middleware.registerHook(createHypothesisCaptureRegistration({ cwd: () => process.cwd() }));
+	middlewareRegistrar.registerHook(createHypothesisCaptureRegistration({ cwd: () => process.cwd() }));
 	// Contested and superseded claims reach the main agent in the message tail when the task touches their check (#406).
 	// Registered after capture, so the awaited verify delivery reads the claim and edges that call just appended.
 	for (const registration of createClaimsDeliveryRegistrations({ cwd: () => process.cwd() }))
-		middleware.registerHook(registration);
+		middlewareRegistrar.registerHook(registration);
 
 	// turn_end assessors, fired by the chat-loop when the final assistant
 	// message of a run lands. Tool-prose first so its hard-block interruption
 	// precedes the finish-contract advisory in effect order.
-	middleware.registerHook(createToolProseRegistration());
-	middleware.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(createToolProseRegistration());
+	middlewareRegistrar.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
+	middlewareRegistrar.registerHook(
 		createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot }).registration,
 	);
-	middleware.registerHook(createUnbackedWorkerClaimRegistration());
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
+	middlewareRegistrar.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
 	);
 	const taskEstablished = (): boolean => {
@@ -4538,7 +4541,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
 	// surface: neither has an operator reading a transcript, so a notice they
 	// cannot see would be a worker run spent on nothing whatever the setting says.
-	middleware.registerHook(
+	middlewareRegistrar.registerHook(
 		createWatchdogRegistration({
 			firesOnThisSurface: interactive,
 			getSettings: () => (effectiveSettingsForDispatch?.() ?? getCurrentSettings()).safety.review,
@@ -4559,7 +4562,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 	);
 	if (session) {
-		middleware.registerHook(
+		middlewareRegistrar.registerHook(
 			createFinishContractRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
 				// Tail-scoped: the contract only needs the last-user-message window, so
@@ -4588,10 +4591,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	// DF-1: a final answer that cites line numbers no tool printed gets one
 	// continuation to re-read with line_numbers. Every surface, headless included.
-	middleware.registerHook(createCitationGroundingRegistration());
+	middlewareRegistrar.registerHook(createCitationGroundingRegistration());
 
 	if (!options.headless && !options.acp) {
-		middleware.registerHook(
+		middlewareRegistrar.registerHook(
 			createPlanCloseRegistration({
 				// Yolo's turn-ending contract stops a plan at its stated assumptions
 				// instead of a "Carry out this plan?" card, which parked unattended
@@ -4601,7 +4604,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it
 		// does, profile writes included, stops while interface.demo is off.
-		middleware.registerHook(
+		middlewareRegistrar.registerHook(
 			createGuidanceRegistration({
 				enabled: () => interfaceGuidanceEnabled(getCurrentSettings().interface),
 				autonomy: () => resolveEffectiveAutonomy(),

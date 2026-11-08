@@ -1,13 +1,3 @@
-import type { DomainModule } from "../../core/domain-loader.js";
-import type { MiddlewareContract } from "./contract.js";
-import { createMiddlewareBundle } from "./extension.js";
-import { MiddlewareManifest } from "./manifest.js";
-
-export const MiddlewareDomainModule: DomainModule<MiddlewareContract> = {
-	manifest: MiddlewareManifest,
-	createExtension: () => createMiddlewareBundle(),
-};
-
 export {
 	createHookBudgetTracker,
 	DEFAULT_HOOK_BUDGET_THRESHOLD,
@@ -22,7 +12,7 @@ export {
 	resolveHookBudgetsFromEnv,
 	resolveHookBudgetTunablesFromEnv,
 } from "./budget.js";
-export type { MiddlewareContract } from "./contract.js";
+export type { MiddlewareContract, MiddlewareHost, MiddlewareRegistrar } from "./contract.js";
 export {
 	buildDetachedBatchesMessage,
 	buildReadOnlyExplorationMessage,
@@ -40,8 +30,8 @@ export {
 	READ_ONLY_EXPLORATION_NUDGE_REGISTRATION_ID,
 	UNBACKED_WORKER_CLAIM_REGISTRATION_ID,
 } from "./dispatch-nudge.js";
-export type { MiddlewareBundleOptions } from "./extension.js";
-export { createEnvHookBudgetTracker, createMiddlewareBundle } from "./extension.js";
+export type { MiddlewareBundle, MiddlewareBundleOptions, MiddlewareDomain } from "./extension.js";
+export { createEnvHookBudgetTracker, createMiddlewareBundle, createMiddlewareDomain } from "./extension.js";
 export type {
 	HookReceipt,
 	HookReceiptExtension,
@@ -128,7 +118,7 @@ export {
 	type SkillsReminderDeps,
 	skillsReminderMessage,
 } from "./skills-reminder.js";
-export { createMiddlewareContractFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
+export { createMiddlewareHostFromSnapshot, createMiddlewareSnapshot } from "./snapshot.js";
 export {
 	countEnumeratedSteps,
 	createTaskBoardReminderRegistration,

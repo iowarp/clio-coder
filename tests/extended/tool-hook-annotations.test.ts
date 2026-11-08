@@ -9,6 +9,7 @@ import { buildUserHookRegistrations } from "../../src/domains/middleware/hooks-i
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { readTool } from "../../src/tools/read.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { middlewareOwner } from "../harness/middleware-owner.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("before-tool annotations reach successful and failed tool results in hook order", async () => {
@@ -45,7 +46,7 @@ test("before-tool annotations reach successful and failed tool results in hook o
 		deepStrictEqual(hooks.issues, []);
 		deepStrictEqual(hooks.fileIssues, []);
 		strictEqual(hooks.registrations.length, 2);
-		const middleware = createMiddlewareBundle().contract;
+		const middleware = middlewareOwner(createMiddlewareBundle());
 		middleware.replaceRegistrations("user-hooks", 1, hooks.registrations);
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd }), middleware });
 		registry.register(readTool);

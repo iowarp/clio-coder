@@ -1,16 +1,18 @@
-import type { LoadResult } from "../core/domain-loader.js";
+import type { DomainModule, LoadResult } from "../core/domain-loader.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import type { DispatchBundleOptions } from "../domains/dispatch/extension.js";
 import { type ExtensionsContract, isLoadableExtension } from "../domains/extensions/index.js";
-import type { MiddlewareContract } from "../domains/middleware/index.js";
+import { createMiddlewareDomain, type MiddlewareContract } from "../domains/middleware/index.js";
 import type { WorkerHookHost } from "../entry/worker-hook-host.js";
 import type { WorkerExtensionHook } from "../worker/protocol.js";
 
 /**
  * Extension tool hooks for the workers `fleet run`, `run --agent`,
  * `context wiki` and `context init` dispatch. `workerHooks` goes to the
- * dispatch domain at load; `start` runs once the domains are up and loads
+ * dispatch domain at load and `middlewareModule` into the same module list,
+ * because the host publishes the user-hook generation through the registrar
+ * only this command holds; `start` runs once the domains are up and loads
  * the host only when a trusted, loadable api 2 extension is installed, so a
  * workspace with none pays nothing.
  * Until then, and without one, workers carry no hooks. `start` waits for the
@@ -22,11 +24,13 @@ import type { WorkerExtensionHook } from "../worker/protocol.js";
  */
 export function createCliWorkerHooks(command: string): {
 	workerHooks: NonNullable<DispatchBundleOptions["workerHooks"]>;
+	middlewareModule: DomainModule<MiddlewareContract>;
 	start(loaded: LoadResult): Promise<string | null>;
 	/** Settles once every hook query already handed to the host is answered. */
 	drain(): Promise<void>;
 	dispose(): Promise<void>;
 } {
+	const middlewareDomain = createMiddlewareDomain();
 	let host: WorkerHookHost | null = null;
 	let disposed = false;
 	const inFlight = new Set<Promise<unknown>>();
@@ -55,9 +59,10 @@ export function createCliWorkerHooks(command: string): {
 			},
 			notify,
 		},
+		middlewareModule: middlewareDomain.module,
 		async start(loaded) {
 			const extensions = loaded.getContract<ExtensionsContract>("extensions");
-			const middleware = loaded.getContract<MiddlewareContract>("middleware");
+			const middleware = loaded.getContract<MiddlewareContract>("middleware") && middlewareDomain.registrar();
 			const config = loaded.getContract<ConfigContract>("config");
 			if (!extensions || !middleware) return null;
 			const list = (cwd: string) =>

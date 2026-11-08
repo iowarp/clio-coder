@@ -26,7 +26,6 @@ import type { RunResult } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
-import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -656,7 +655,7 @@ async function runDispatch(
 		SafetyDomainModule,
 		createPromptsDomainModule({ noContextFiles: options.noContextFiles === true }),
 		AgentsDomainModule,
-		MiddlewareDomainModule,
+		workerHooks.middlewareModule,
 		SessionDomainModule,
 		// Telemetry subscribes to the dispatch terminal events so a headless
 		// run auto-builds its forensic evidence bundle and sidecar index, the same

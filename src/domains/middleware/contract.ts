@@ -6,6 +6,12 @@ import type {
 import type { MiddlewareDiagnosticSink, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookResult, MiddlewareSnapshot } from "./types.js";
 
+/**
+ * The query surface other domains and turn code receive: evaluate the hooks
+ * and read the declarative snapshot. It carries no way to add, replace or
+ * redirect a registration; that is `MiddlewareRegistrar`, a separate object
+ * the loader never publishes.
+ */
 export interface MiddlewareContract {
 	runHook(input: MiddlewareHookInput): MiddlewareHookResult;
 	/** Await the optional serialized phase after `runHook`; never used by tool admission. */
@@ -21,6 +27,16 @@ export interface MiddlewareContract {
 		priorEffects?: ReadonlyArray<MiddlewareEffect>,
 	): Promise<MiddlewareHookResult>;
 	snapshot(): MiddlewareSnapshot;
+}
+
+/**
+ * The registration capability. Only the code that constructs the middleware
+ * (the composition root through `createMiddlewareDomain` or
+ * `createMiddlewareBundle`, a worker through
+ * `createMiddlewareHostFromSnapshot`) holds it, so a consumer of the published
+ * contract cannot register, replace or silence a hook.
+ */
+export interface MiddlewareRegistrar {
 	/**
 	 * Append a coded hook registration after every existing rule and
 	 * registration. The composition root calls this for guards that need
@@ -58,4 +74,10 @@ export interface MiddlewareContract {
 	): ReplaceRegistrationsReport;
 	/** Active generation for an owner; 0 when nothing was ever applied. */
 	ownedGeneration(owner: MiddlewareRegistrationOwner): number;
+}
+
+/** Both halves over one registration table, as the constructing owner receives them. */
+export interface MiddlewareHost {
+	contract: MiddlewareContract;
+	registrar: MiddlewareRegistrar;
 }

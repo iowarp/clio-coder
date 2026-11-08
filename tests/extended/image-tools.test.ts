@@ -101,8 +101,8 @@ test("agent adapter emits visual content blocks and nonvision shaping explains o
 	const { classify } = await import("../../src/domains/safety/action-classifier.js");
 	const { READONLY_SCOPE, WORKSPACE_SCOPE, CONFIRMED_SCOPE } = await import("../../src/domains/safety/scope.js");
 	const { createMiddlewareBundle } = await import("../../src/domains/middleware/extension.js");
-	const middleware = createMiddlewareBundle().contract;
-	middleware.registerHook({
+	const { contract: middleware, registrar } = createMiddlewareBundle();
+	registrar.registerHook({
 		id: "image-annotation",
 		description: "image preservation contract",
 		hooks: ["after_tool"],

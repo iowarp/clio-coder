@@ -11,7 +11,7 @@ import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import { workerReadOnlyTargetViolation, workerSandboxWritesNothing } from "../core/sandbox/worker-process.js";
 import type { ToolName } from "../core/tool-names.js";
 import {
-	createMiddlewareContractFromSnapshot,
+	createMiddlewareHostFromSnapshot,
 	type MiddlewareHookRegistration,
 	type MiddlewareSnapshot,
 } from "../domains/middleware/index.js";
@@ -202,9 +202,11 @@ export function createWorkerToolRegistry(
 	// the orchestrator, because the loop guard rides on it as a before_tool
 	// registration. An empty snapshot evaluates no declarative rules, matching
 	// the former no-middleware behavior.
-	const middleware = createMiddlewareContractFromSnapshot(middlewareSnapshot ?? { version: 1, rules: [] });
+	const { contract: middleware, registrar } = createMiddlewareHostFromSnapshot(
+		middlewareSnapshot ?? { version: 1, rules: [] },
+	);
 	for (const registration of hookRegistrations ?? []) {
-		middleware.registerHook(registration);
+		registrar.registerHook(registration);
 	}
 	// Execute authority comes only from the host-bound permit; read-only still dominates.
 	const registry = createRegistry({

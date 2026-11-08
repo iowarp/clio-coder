@@ -24,6 +24,7 @@ import { buildUserHookRegistrations, spawnSyncCommandRunner } from "../../src/do
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { createExtensionReloadCoordinator } from "../../src/entry/extension-reload.js";
+import { middlewareOwner } from "../harness/middleware-owner.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function approve(workspace: string, surface: "safety" | "hooks" | "settings"): string {
@@ -145,7 +146,7 @@ test("S3-01: local-file addition invalidates the entire surface and revocation s
 		deepStrictEqual(buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined }).registrations, []);
 		approve(workspace, "hooks");
 		const notices: string[] = [];
-		const middleware = createMiddlewareBundle().contract;
+		const middleware = middlewareOwner(createMiddlewareBundle());
 		const coordinator = createExtensionReloadCoordinator({
 			extensions: undefined,
 			middleware,

@@ -47,7 +47,6 @@ import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { callLevelUpstreamResponses, type RunResult } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
-import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
@@ -1070,7 +1069,7 @@ async function loadWikiDispatch(): Promise<{
 		SafetyDomainModule,
 		createPromptsDomainModule({ noContextFiles: true }),
 		AgentsDomainModule,
-		MiddlewareDomainModule,
+		workerHooks.middlewareModule,
 		SessionDomainModule,
 		TelemetryDomainModule,
 		SchedulingDomainModule,

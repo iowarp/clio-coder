@@ -49,7 +49,7 @@ import {
 	type CapturedHookSourceSet,
 	type HookReceipt,
 	type HookReceiptSink,
-	type MiddlewareContract,
+	type MiddlewareRegistrar,
 	type MiddlewareRegistrationConflict,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
@@ -97,7 +97,7 @@ export interface ExtensionGenerationCommitted {
 export interface ExtensionReloadCoordinatorDeps {
 	/** Absent on a degraded boot where the extensions domain failed to start. */
 	extensions: Pick<ExtensionsContract, "prepareReload" | "snapshot"> | undefined;
-	middleware: Pick<MiddlewareContract, "prepareRegistrationReplacement" | "replaceRegistrations" | "ownedGeneration">;
+	middleware: Pick<MiddlewareRegistrar, "prepareRegistrationReplacement" | "replaceRegistrations" | "ownedGeneration">;
 	/** Read once per run and canonicalized; the candidate must be for exactly this workspace. */
 	cwd: () => string;
 	recordReceipt: HookReceiptSink;

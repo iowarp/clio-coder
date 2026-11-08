@@ -100,6 +100,7 @@ import type { DispatchContract } from "../domains/dispatch/index.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
+	type MiddlewareRegistrar,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -858,7 +859,10 @@ export interface ChatLoop {
 export interface CreateChatLoopDeps {
 	eggAsk?: AskUserHandler;
 	turnControl?: TurnControlRunner;
+	/** Already registered by the caller; without one the loop registers its own through `middlewareRegistrar`. */
 	turnOutcomeCollector?: TurnOutcomeCollector;
+	/** The registration capability the loop's own outcome collector needs; only its constructor holds it. */
+	middlewareRegistrar?: Pick<MiddlewareRegistrar, "registerHook">;
 	getTaskEstablished?: () => boolean;
 	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
@@ -1682,7 +1686,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
-	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
+	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
 
 	let terminalTurnFailure: TurnFailureRecord | undefined;
 	const currentTurnFailure = (): TurnFailureRecord | undefined => terminalTurnFailure;

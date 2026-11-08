@@ -1,12 +1,13 @@
-import type { DomainBundle } from "../../core/domain-loader.js";
+import type { DomainBundle, DomainModule } from "../../core/domain-loader.js";
 import {
 	createHookBudgetTracker,
 	type HookBudgetTracker,
 	resolveHookBudgetsFromEnv,
 	resolveHookBudgetTunablesFromEnv,
 } from "./budget.js";
-import type { MiddlewareContract } from "./contract.js";
+import type { MiddlewareContract, MiddlewareRegistrar } from "./contract.js";
 import { recordFiredRules } from "./fired-record.js";
+import { MiddlewareManifest } from "./manifest.js";
 import { createMiddlewareRegistrationTable } from "./registrations.js";
 import { listMiddlewareRuleDefinitions } from "./rules.js";
 import {
@@ -56,7 +57,14 @@ export interface MiddlewareBundleOptions {
 	budgetTracker?: HookBudgetTracker;
 }
 
-export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): DomainBundle<MiddlewareContract> {
+/**
+ * The loader publishes `contract` alone; `registrar` stays with the caller that
+ * built the bundle, which is how the composition root keeps the right to add
+ * and replace hooks to itself.
+ */
+export type MiddlewareBundle = DomainBundle<MiddlewareContract> & { registrar: MiddlewareRegistrar };
+
+export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): MiddlewareBundle {
 	const ruleDefinitions = combineRuleDefinitions(listMiddlewareRuleDefinitions(), options.ruleDefinitions ?? []);
 	let diagnosticSink = options.onDiagnostic;
 	// Declarative rules are the fixed tier; construction-time coded
@@ -112,6 +120,8 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 		snapshot() {
 			return createMiddlewareSnapshot(ruleDefinitions.map((definition) => definition.rule));
 		},
+	};
+	const registrar: MiddlewareRegistrar = {
 		registerHook(registration) {
 			table.registerHook(registration);
 		},
@@ -134,7 +144,34 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): D
 				return undefined;
 			},
 		},
-		contract,
+		contract: Object.freeze(contract),
+		registrar,
+	};
+}
+
+/** A middleware domain module plus the registration capability of the instance it creates. */
+export interface MiddlewareDomain {
+	readonly module: DomainModule<MiddlewareContract>;
+	/** Undefined until the loader has created the domain. */
+	registrar(): MiddlewareRegistrar | undefined;
+}
+
+/**
+ * For a composition root: list `module` in `loadDomains` and keep the handle,
+ * because the loader publishes only the query contract.
+ */
+export function createMiddlewareDomain(options: MiddlewareBundleOptions = {}): MiddlewareDomain {
+	let registrar: MiddlewareRegistrar | undefined;
+	return {
+		module: {
+			manifest: MiddlewareManifest,
+			createExtension: () => {
+				const bundle = createMiddlewareBundle(options);
+				registrar = bundle.registrar;
+				return { extension: bundle.extension, contract: bundle.contract };
+			},
+		},
+		registrar: () => registrar,
 	};
 }
 
