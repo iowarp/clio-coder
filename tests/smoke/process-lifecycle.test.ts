@@ -1,5 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,7 +9,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readRunJournal } from "../harness/run-journal.js";
 
-const MARKER = "clio-lifecycle-marker";
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
 
@@ -132,7 +132,7 @@ interface HostProcess {
 function hostToolProcesses(marker: string): HostProcess[] {
 	let table: string;
 	try {
-		table = execFileSync("ps", ["-A", "-o", "pid=,lstart=,args="], {
+		table = execFileSync("ps", ["-ww", "-A", "-o", "pid=,lstart=,args="], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "ignore"],
 		});
@@ -164,6 +164,14 @@ function survivors(entries: ReadonlyArray<HostProcess>): HostProcess[] {
 	return entries.filter(hostProcessAlive);
 }
 
+/**
+ * The ps scan is host-wide, so each invocation tags its tool command with its
+ * own marker: concurrent runs must not count or kill each other's payloads.
+ */
+function lifecycleMarker(): string {
+	return `clio-lifecycle-${process.pid}-${randomUUID()}`;
+}
+
 /** Rejects instead of waiting forever when the CLI never exits. */
 function bounded<T>(promise: Promise<T>, timeoutMs: number, what: string): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -190,9 +198,10 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 		const project = join(root, "project");
 		const pidFile = join(project, ".tool-child.pid");
 		const stoppedFile = join(project, ".tool-child.stopped");
+		const marker = lifecycleMarker();
 		const command =
 			"trap 'printf stopped > .tool-child.stopped; exit 0' TERM INT HUP; " +
-			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done # clio-lifecycle-marker";
+			`printf '%s' "$$" > .tool-child.pid; while :; do sleep 1; done # ${marker}`;
 		const fixture = await provider(command);
 		let child: ReturnType<typeof spawn> | undefined;
 		let toolProcesses: HostProcess[] = [];
@@ -216,7 +225,7 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			ok(await waitFor(() => existsSync(pidFile), 20_000), `tool child did not start; stderr=${stderr}`);
 			const toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
 			ok(Number.isSafeInteger(toolPid) && toolPid > 0, `tool child wrote no pid: ${toolPid}`);
-			toolProcesses = hostToolProcesses(MARKER);
+			toolProcesses = hostToolProcesses(marker);
 			ok(toolProcesses.length > 0, "tool child has no host process");
 
 			child.kill("SIGINT");
@@ -255,9 +264,10 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 		const project = join(root, "project");
 		const pidFile = join(project, ".tool-child.pid");
 		const stoppedFile = join(project, ".tool-child.stopped");
+		const marker = lifecycleMarker();
 		const command =
 			"trap 'printf stopped > .tool-child.stopped; exit 0' TERM INT HUP; " +
-			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done # clio-lifecycle-marker";
+			`printf '%s' "$$" > .tool-child.pid; while :; do sleep 1; done # ${marker}`;
 		const fixture = await provider(command);
 		let child: ReturnType<typeof spawn> | undefined;
 		let toolProcesses: HostProcess[] = [];
@@ -281,7 +291,7 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			ok(await waitFor(() => existsSync(pidFile), 20_000), `tool child did not start; stderr=${stderr}`);
 			const toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
 			ok(Number.isSafeInteger(toolPid) && toolPid > 0, `tool child wrote no pid: ${toolPid}`);
-			toolProcesses = hostToolProcesses(MARKER);
+			toolProcesses = hostToolProcesses(marker);
 			ok(toolProcesses.length > 0, "tool child has no host process");
 
 			const result = await bounded(exit, EXIT_TIMEOUT_MS, "CLI exit");
