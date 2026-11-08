@@ -379,7 +379,7 @@ import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/comp
 import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.js";
 import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
-import { createRegistry } from "../tools/registry.js";
+import { acpHostReadOnlySource, createRegistry } from "../tools/registry.js";
 import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
 import { gitCheckoutRoot, recoverTaskWorktrees } from "../tools/task-worktree.js";
 import { allowedWorktreeParents } from "../tools/worktree-root.js";
@@ -1996,8 +1996,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			return outcome;
 		},
-		// `acp` takes no read-only flag; only a client ceiling makes its turns read-only.
-		...(acpMode ? { hostReadOnlySource: "acp-ceiling" as const } : {}),
+		// `acp --read-only` arrives as the server's standing tool limits; otherwise only a client ceiling makes its turns read-only.
+		...(acpMode ? { hostReadOnlySource: acpHostReadOnlySource(options.toolLimits?.readOnly === true) } : {}),
 	});
 	// Reloaded settings can change what refused a call, so the memory of it goes.
 	bus.subscribe("config.hot_reloaded", () => toolRegistry.forgetRefusals());

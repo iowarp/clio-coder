@@ -81,6 +81,7 @@ export const coreTests = [
 	"skill-frontmatter-cache",
 	"codewiki-grammar-note",
 	"read-only-user-files",
+	"read-only-remedy",
 	"sandbox-clio-roots",
 	"fleet-run-history-prime",
 	"codewiki-worker-identity",

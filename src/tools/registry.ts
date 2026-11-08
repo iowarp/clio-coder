@@ -3228,7 +3228,7 @@ function skillSurfaceBlockedVerdict(
 	return { kind: "blocked", reason, decision: blocked };
 }
 
-export type HostReadOnlySource = "run" | "acp-ceiling";
+export type HostReadOnlySource = "run" | "acp-server" | "acp-ceiling";
 
 /**
  * What a host read-only denial says set the scope and who can lift it. The
@@ -3240,11 +3240,25 @@ export const HOST_READ_ONLY_SOURCES: Readonly<Record<HostReadOnlySource, { detai
 		detail: "The host started this task read-only (clio-coder run --read-only)",
 		remedy: "the operator must rerun this task without the --read-only flag.",
 	},
+	"acp-server": {
+		detail: "The operator started this ACP server read-only (clio-coder acp --read-only)",
+		remedy: "the operator must restart the ACP server without the --read-only flag; no client ceiling can lift it.",
+	},
 	"acp-ceiling": {
 		detail: "The ACP client set readOnly in its clio-coder/ceiling for this session or prompt",
 		remedy: "the ACP client must send this work without readOnly in its clio-coder/ceiling.",
 	},
 };
+
+/**
+ * Who made an ACP server's turns read-only. `acp --read-only` holds every
+ * session and no client ceiling lifts it, so its denial names the flag even
+ * when a client also sent readOnly; naming the client's ceiling there sent the
+ * model to ask the client to drop a readOnly it never set (TC-1 Q4).
+ */
+export function acpHostReadOnlySource(serverReadOnly: boolean): HostReadOnlySource {
+	return serverReadOnly ? "acp-server" : "acp-ceiling";
+}
 
 /** A read-only dispatch or task scope resolves every forbidden call as a terminal denial. */
 function readOnlyDeniedVerdict(
