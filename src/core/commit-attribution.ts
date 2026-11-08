@@ -6,14 +6,43 @@
  * settings dependencies, so every controlled commit seam shares one policy.
  */
 
-export const CLIO_COMMIT_IDENTITY = "Clio Coder <clio-coder@iowarp.ai>";
+/** Slug of the IOWarp-owned GitHub App whose bot account is Clio's commit identity. */
+export const CLIO_GITHUB_APP_SLUG = "clio-coder";
 
-export const CLIO_COMMIT_TRAILERS = {
-	assisted: `Assisted-by: ${CLIO_COMMIT_IDENTITY}`,
-	tested: `Tested-by: ${CLIO_COMMIT_IDENTITY}`,
-	reviewed: `Reviewed-by: ${CLIO_COMMIT_IDENTITY}`,
-	coAuthored: `Co-authored-by: ${CLIO_COMMIT_IDENTITY}`,
-} as const;
+/**
+ * PLACEHOLDER until the IOWarp org creates the App: the account id of the
+ * App's bot user, read with `gh api users/clio-coder%5Bbot%5D --jq .id`. It is
+ * not the App id. GitHub links a trailer to an account only by email, and a
+ * bot account answers to `<id>+<slug>[bot]@users.noreply.github.com`; while
+ * this is null, commits keep the address GitHub cannot resolve. Setting it
+ * changes the managed hook script, so bump `MANAGED_HOOK_VERSION`
+ * (`src/core/git-commit-attribution.ts`) in the same commit.
+ */
+const CLIO_GITHUB_BOT_USER_ID: number | null = null;
+
+const LEGACY_CLIO_COMMIT_EMAIL = "clio-coder@iowarp.ai";
+
+function githubBotNoreplyEmail(userId: number | null, slug: string): string | null {
+	if (userId === null || !Number.isSafeInteger(userId) || userId <= 0) return null;
+	return `${userId}+${slug}[bot]@users.noreply.github.com`;
+}
+
+/** The one email every Clio commit trailer names. */
+export const CLIO_COMMIT_EMAIL =
+	githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? LEGACY_CLIO_COMMIT_EMAIL;
+
+export const CLIO_COMMIT_IDENTITY = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
+
+function roleTrailers(identity: string) {
+	return {
+		assisted: `Assisted-by: ${identity}`,
+		tested: `Tested-by: ${identity}`,
+		reviewed: `Reviewed-by: ${identity}`,
+		coAuthored: `Co-authored-by: ${identity}`,
+	} as const;
+}
+
+export const CLIO_COMMIT_TRAILERS = roleTrailers(CLIO_COMMIT_IDENTITY);
 
 export const CLIO_DECISION_TRAILER_KEY = "Clio-Decision";
 
@@ -78,6 +107,21 @@ const KNOWN_CLIO_TRAILERS = new Set(
 		.map((line) => normalizedTrailer(line))
 		.filter((line): line is string => line !== null),
 );
+
+/**
+ * A role trailer naming the address used before the bot identity, keyed by its
+ * normalized form, mapped to the same role under the current identity. Empty
+ * while the two addresses are the same.
+ */
+const LEGACY_ROLE_TRAILERS: ReadonlyMap<string, string> = (() => {
+	const legacy = roleTrailers(`Clio Coder <${LEGACY_CLIO_COMMIT_EMAIL}>`);
+	const upgrades = new Map<string, string>();
+	for (const role of Object.keys(legacy) as Array<keyof typeof legacy>) {
+		const key = normalizedTrailer(legacy[role]);
+		if (key !== null && !KNOWN_CLIO_TRAILERS.has(key)) upgrades.set(key, CLIO_COMMIT_TRAILERS[role]);
+	}
+	return upgrades;
+})();
 
 function isClioTrailer(key: string): boolean {
 	return (
@@ -144,8 +188,10 @@ function runTrailer(run: CommitRunEvidence | undefined): string | null {
  *
  * Disabled attribution is the one byte-preserving path. When enabled, CRLF and
  * lone CR are normalized to LF, the message ends with one newline, existing
- * subject/body and human trailers remain in order, repeated Clio trailers are
- * removed case-insensitively, and processing the result again is idempotent.
+ * subject/body and human trailers remain in order, a role trailer naming the
+ * earlier Clio address is rewritten to the current identity, repeated Clio
+ * trailers are removed case-insensitively, and processing the result again is
+ * idempotent.
  */
 export function attributeCommitMessage(
 	originalMessage: string,
@@ -157,6 +203,14 @@ export function attributeCommitMessage(
 	const normalized = originalMessage.replace(/\r\n?/gu, "\n");
 	const lines = normalized.replace(/\n+$/u, "").split("\n");
 	const blockStart = trailerBlockStart(lines);
+	// A role trailer still naming the pre-bot address is the same Clio claim:
+	// rewrite it to the current identity so the commit names one Clio account.
+	if (blockStart !== null) {
+		for (let index = blockStart; index < lines.length; index += 1) {
+			const upgraded = LEGACY_ROLE_TRAILERS.get(normalizedTrailer(lines[index] ?? "") ?? "");
+			if (upgraded !== undefined) lines[index] = upgraded;
+		}
+	}
 	const seenClio = new Set<string>();
 	const retained = lines.filter((line, index) => {
 		if (blockStart === null || index < blockStart) return true;

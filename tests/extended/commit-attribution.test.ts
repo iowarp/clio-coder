@@ -1,10 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
 	attributeCommitMessage,
+	CLIO_COMMIT_IDENTITY,
 	CLIO_COMMIT_TRAILERS,
 	CLIO_DECISION_TRAILER_CAP,
 	decisionTrailerRefs,
@@ -15,6 +17,7 @@ import {
 } from "../../src/core/git-commit-attribution.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const REFS = ["interview-1/db_engine", "agent:a1b2/cache-key-shape"];
 
@@ -131,5 +134,37 @@ describe("session commit seam", () => {
 		strictEqual("CLIO_CODER_COMMIT_DECISIONS" in env, false);
 		ok(!("CLIO_CODER_COMMIT_ASSISTED" in env));
 		match(env.CLIO_CODER_GIT_COMMITS_ENABLED ?? "", /^0$/u);
+	});
+});
+
+describe("Clio commit identity", () => {
+	it("rewrites a role trailer naming the earlier address to the current identity, once", () => {
+		const message =
+			"feat: x\n\nBody.\n\nCo-authored-by: Clio Coder <clio-coder@iowarp.ai>\nSigned-off-by: H <h@example.com>\n";
+		const once = attributeCommitMessage(message, { materiallyAuthored: true });
+		const coAuthors = once.split("\n").filter((line) => /^co-authored-by:/iu.test(line));
+		deepStrictEqual(coAuthors, [CLIO_COMMIT_TRAILERS.coAuthored]);
+		strictEqual(attributeCommitMessage(once, { materiallyAuthored: true }), once);
+	});
+
+	it("lands Co-authored-by in the final trailer paragraph Git and GitHub parse, through the managed hook", async () => {
+		const isolated = await isolateClioEnv("clio-coder-commit-identity-");
+		try {
+			const repo = join(isolated.dir, "repo");
+			mkdirSync(repo);
+			const git = (args: string[], env: NodeJS.ProcessEnv = process.env) =>
+				execFileSync("git", args, { cwd: repo, env, encoding: "utf8" });
+			git(["init", "-q"]);
+			git(["config", "user.name", "Human"]);
+			git(["config", "user.email", "human@example.com"]);
+			const { env, diagnostic } = withManagedGitCommitAttributionEnvironment(process.env, { cwd: repo, enabled: true });
+			strictEqual(diagnostic, null);
+			git(["commit", "-q", "--allow-empty", "-m", "feat: x\n\nBody.\nFixes #12"], env);
+			const paragraphs = git(["log", "-1", "--format=%B"]).trimEnd().split("\n\n");
+			deepStrictEqual(paragraphs.at(-1)?.split("\n"), [CLIO_COMMIT_TRAILERS.assisted, CLIO_COMMIT_TRAILERS.coAuthored]);
+			strictEqual(git(["log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)"]).trim(), CLIO_COMMIT_IDENTITY);
+		} finally {
+			isolated.restore();
+		}
 	});
 });
