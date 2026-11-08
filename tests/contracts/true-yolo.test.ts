@@ -556,7 +556,13 @@ test("doctor warns when a configured scratch root is dropped for containing the 
 // TC-1 Q2: doctor said "yolo runs unsandboxed" while a contained yolo run on the same host wrote only inside the sandbox.
 test("doctor's shell sandbox row describes the yolo confinement a yolo run resolves to", async (t) => {
 	const home = await isolateClioEnv("clio-yolo-doctor-confinement-");
-	t.after(() => home.restore());
+	// A contained-yolo shell exports the pin to its children; this table needs it absent.
+	const pinned = process.env[YOLO_CONFINEMENT_PIN_ENV];
+	delete process.env[YOLO_CONFINEMENT_PIN_ENV];
+	t.after(() => {
+		home.restore();
+		if (pinned !== undefined) process.env[YOLO_CONFINEMENT_PIN_ENV] = pinned;
+	});
 	const cwd = workspace("clio-yolo-doctor-confinement-ws-");
 	const hostContains = mainShellContained("auto", sandboxAvailability());
 	mkdirSync(join(home.dir, "config"), { recursive: true });
