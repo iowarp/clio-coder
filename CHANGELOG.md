@@ -2,17 +2,33 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.7.0 - 2026-11-07
 
-Since 0.7.0-rc.1, Clio closes three sandbox escapes, uses a GitHub Copilot subscription the way it uses ChatGPT and Claude subscriptions, sets itself up with your approval, teaches itself to newcomers, answers questions about itself from its own docs, and signs its commits as a GitHub App bot.
+Clio Coder 0.7.0 is the first stable release since 0.6.9 and includes everything published in 0.7.0-rc.1: the `data` tool for HDF5, NetCDF and Parquet, sealed `reproduce` checks judged against a tolerance, a per-project claims ledger (#406), cost per verified outcome, four science library packs, GitHub Copilot through the official Copilot SDK, cheaper in-prefix compaction and a pinned private pane host.
+
+Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox escapes, a passing reproduction check counts as the evidence it is, a contradicted memory leaves a running session, autonomous commits name Clio as author, Copilot works like the other subscriptions, Clio sets itself up with your approval and teaches itself to newcomers, and the composition root, turn state and domain contracts each get one owner.
 
 ### Upgrade notes
 
 - `verify` runs a project's checks in the main-session sandbox at autonomy default, as `bash` does, so a trojan test helper can no longer delete files outside the workspace or read `.env` through it. Dispatch host verification runs a worker's declared checks, sealed `reproduce` runs included, in the same sandbox.
+- Yolo is contained by default: it keeps the OS sandbox and the safety judge, and refuses back to Clio anything that would wait for you. An existing yolo user sees one notice; `safety.yoloConfinement: unconfined` with `safety.yoloUnconfinedAccepted: true` restores the old behavior.
+- Headless, worker, fleet and scheduled commits now have Clio Coder as author and you as committer and co-author. Set `integrations.git.commitAuthor: human` to keep yourself as author.
 - At default, `unsandboxed: true` always asks (`sandbox-escape`), even for a recognized command such as `npm test`; the safety judge lets it run when your request named the escape. Under yolo, `safety.sandbox: required` sandboxes every command default would contain, not only script files, and refuses `unsandboxed: true`.
 - A model can no longer change Clio's settings by running Clio's own `configure`, `targets`, `auth` or other settings commands, in any launcher form, sandboxed or not. Read forms still work, and your own `!` shell line is never blocked.
 - A `copilot-sdk` target works like the ChatGPT and Claude subscriptions: the account signed in with `copilot login` is the authorization, and Clio no longer asks for or records a separate per-account consent. Headless `run`, workers and fresh homes use the login directly. The `copilot-sdk-consent.json` file rc.1 wrote is deleted by the `2026-11-07-remove-copilot-consent` migration.
 - Commit trailers name Clio's GitHub App bot, `Clio Coder <353922063+clio-coder-agent[bot]@users.noreply.github.com>`, so GitHub shows its avatar on commits Clio helped write. The managed commit hook moves to v5, and an existing `clio-coder@iowarp.ai` trailer is folded into the bot identity.
+
+### Contained yolo
+
+- Yolo now runs contained by default: the OS sandbox and the safety judge stay on, and nothing waits for you; a call that would need you is refused back to Clio. Set `safety.yoloConfinement: unconfined` and `safety.yoloUnconfinedAccepted: true` to keep the old yolo.
+- Contained yolo pushes, publishes, opens PRs or issues, and deletes cloud resources only when your own message named the action.
+- A sandbox escape (`unsandboxed: true`) runs only when an operator message asked to run outside the sandbox, at every autonomy level.
+- Contained yolo finishes at rigor high and asks Clio to verify its work once; telling it to skip verification is recorded as unverified, not as a failure.
+- Yolo has session caps (`safety.limits.autonomousToolCalls` 600, `autonomousMinutes` 120, `autonomousTokens` 5M), shown in the footer. A cap pauses the run: press Enter on an empty prompt, or `clio-coder run --continue`, to resume with a fresh window. Headless runs exit 4 on a cap and 3 when the safety judge blocks 3 calls in a row or 20 in a session.
+
+### Commit authorship
+
+- Autonomous commits are authored by Clio Coder under its GitHub App bot address; you stay committer and get a `Co-authored-by` trailer. This covers dispatched workers, landing their work, fleet commit steps, headless `clio-coder run` and scheduled jobs. Interactive sessions keep you as author with Clio's trailer. Set `integrations.git.commitAuthor: human` to always stay author.
 
 ### Setup and Copilot
 
@@ -30,10 +46,19 @@ Since 0.7.0-rc.1, Clio closes three sandbox escapes, uses a GitHub Copilot subsc
 
 ### Fixes
 
+- A passing `reproduce`, `numeric-compare` or perf-budget check now satisfies a quality-policy requirement: judged checks are classified by their verdict, not a shell exit code. Before, a successful reproduction left the requirement outstanding.
+- A memory record contradicted during a session is withdrawn from that session's prompt, as it already was from fresh selection.
+- A middleware failure that escapes the runtime is journaled as `middleware.hook_failed` and shown as a warning; the turn continues without that hook's effects instead of hiding the failure.
+- A review dispatch goes to read-only recipes such as `scout`, which run in parallel; the session catalog marks read-only recipes, and a `parallel_writer_conflict` refusal names them.
 - A headless `clio-coder run` no longer drops the answer from stdout when the citation check's follow-up holds only corrections.
 - `clio-coder targets fleet` shows the fleet default set by `targets use --fleet-model`, with its source; `--json` prints `{ "default", "profiles" }`.
 - `library install` names `--with-requirements` when it refuses a missing requirement.
 - System One's direct OpenRouter calls send `X-OpenRouter-Categories: cli-agent`, as engine turns already did.
+
+### Internal
+
+- The composition root (`src/entry/orchestrator.ts`, 6,140 to 4,767 lines) only constructs and wires services: memory routing, the compaction flow, guardian state, route diagnostics and session ledger recorders live in their domains. Turn modules take narrow typed views of turn state, and continuation state has one owner. Published domain contracts are query-only: hook registration and run-reader binding go only to the owning composition, and `getContract(name)` is typed by one name-to-contract map. Boundary rules 15 to 17 keep all three from regressing. No user-visible change, and prompt bytes are identical.
+- The core test gate adds the numerical, reproduction, working-set and host-verification contracts (812 to 955 tests), and `eval:onboarding` scores a dispatch by the receipts it returned, not by the call.
 
 ## 0.7.0-rc.1 - 2026-11-07
 
