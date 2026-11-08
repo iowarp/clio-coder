@@ -549,6 +549,143 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 	return [...new Set(violations)];
 }
 
+/**
+ * Feature internals the composition root reached into before the 0.7.0
+ * refactor moved memory routing, compaction and the session recorders into
+ * their domains. The orchestrator wires the domain modules that own them; a
+ * value import of one of these means feature logic is growing back.
+ */
+const COMPOSITION_ROOT_FORBIDDEN_MODULES: ReadonlyArray<string> = [
+	"src/domains/session/compaction/compact.ts",
+	"src/domains/session/compaction/branch-summary.ts",
+	"src/domains/session/continuity/projection.ts",
+	"src/domains/session/continuity/carry.ts",
+	"src/domains/memory/background-budget.ts",
+	"src/domains/memory/task-memory-policy.ts",
+	"src/domains/memory/observations.ts",
+	"src/domains/telemetry/call-scope.ts",
+	"src/domains/telemetry/call-facts.ts",
+	"src/domains/quota/observed.ts",
+	"src/engine/ai.ts",
+];
+
+/** The same internals by name, since a barrel can re-export them. */
+const COMPOSITION_ROOT_FORBIDDEN_NAMES: ReadonlySet<string> = new Set([
+	"compact",
+	"openCallScope",
+	"completeEngineText",
+	"streamSimple",
+	"decideBackgroundStep",
+	"resolveContinuityProjection",
+	"continuityPayloadFromFold",
+	"serializeConversation",
+	"callSettlementFromMessage",
+	"observedQuota",
+	"entriesBeforeMemoryOff",
+	"completedLessonSource",
+	"observationCheckpoint",
+	"observationSourceUnits",
+	"buildDispatchMemorySection",
+	"resolveEffectivePricing",
+	"supportsAgentRoleTools",
+	"resolveModelCapabilities",
+	"protectedArtifactEntryFromArtifact",
+	"stagePendingProtectedArtifact",
+	"createRereadRecallPort",
+	"isSkillActivation",
+]);
+
+/**
+ * Module-scope functions the composition root keeps: boot itself, its
+ * entry-only presentation, and thin bindings of a session-control or engine
+ * value into a domain port. Anything else belongs to the domain that owns it.
+ */
+const COMPOSITION_ROOT_FUNCTIONS: ReadonlySet<string> = new Set([
+	"bootOrchestrator",
+	"bannerConfigurationLine",
+	"buildBanner",
+	"printJsonSessionHeader",
+	"applyHeadlessSettingsOverlay",
+	"settingsTargetRuntime",
+	"advanceThinkingLevel",
+	"advanceScopedTarget",
+	"createSystemOneOneShot",
+	"createProductionAutoCompact",
+	"replayCompactionHistory",
+	"readSessionEntriesForCompact",
+	"readFlowSessionEntries",
+	"readRecentSessionEntriesForContract",
+	"bindAcpHandoff",
+	"startupWorktreeRootSetting",
+]);
+
+/** The composition root's size after the 0.7.0 refactor, with room for wiring only. */
+export const COMPOSITION_ROOT_LINE_CEILING = 4800;
+
+/**
+ * rule15: the composition root constructs and wires services. It does not
+ * value-import feature internals, grow module-scope helpers, or grow past its
+ * line ceiling.
+ */
+export function checkCompositionRoot(file: string, source: string): string[] {
+	const violations: string[] = [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const lineOf = (node: ts.Node): number => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+	for (const statement of tree.statements) {
+		if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+			const clause = statement.importClause;
+			if (!clause || clause.isTypeOnly) continue;
+			const named = clause.namedBindings && ts.isNamedImports(clause.namedBindings) ? clause.namedBindings : undefined;
+			const valueNames = (named?.elements ?? [])
+				.filter((element) => !element.isTypeOnly)
+				.map((element) => (element.propertyName ?? element.name).text);
+			const hasValue =
+				clause.name !== undefined ||
+				(clause.namedBindings !== undefined && ts.isNamespaceImport(clause.namedBindings)) ||
+				valueNames.length > 0;
+			if (!hasValue) continue;
+			const specifier = statement.moduleSpecifier.text;
+			if (specifier.startsWith(".")) {
+				const resolved = path.posix
+					.normalize(path.posix.join(path.posix.dirname(file), specifier))
+					.replace(jsSuffixRegex, ".ts");
+				if (COMPOSITION_ROOT_FORBIDDEN_MODULES.includes(resolved))
+					violations.push(
+						`rule15: ${file}:${lineOf(statement)} value-imports ${resolved}, a feature internal; wire the domain module that owns it instead`,
+					);
+			}
+			for (const name of valueNames)
+				if (COMPOSITION_ROOT_FORBIDDEN_NAMES.has(name))
+					violations.push(
+						`rule15: ${file}:${lineOf(statement)} value-imports ${name}, a feature internal; wire the domain module that owns it instead`,
+					);
+			continue;
+		}
+		const functions: Array<{ name: string; node: ts.Node }> = [];
+		if (ts.isFunctionDeclaration(statement) && statement.name)
+			functions.push({ name: statement.name.text, node: statement });
+		if (ts.isVariableStatement(statement))
+			for (const declaration of statement.declarationList.declarations)
+				if (
+					ts.isIdentifier(declaration.name) &&
+					declaration.initializer &&
+					(ts.isArrowFunction(declaration.initializer) || ts.isFunctionExpression(declaration.initializer))
+				)
+					functions.push({ name: declaration.name.text, node: declaration });
+		for (const { name, node } of functions)
+			if (!COMPOSITION_ROOT_FUNCTIONS.has(name))
+				violations.push(
+					`rule15: ${file}:${lineOf(node)} declares module-scope function ${name}; move feature logic to the domain that owns it, or list a wiring helper in COMPOSITION_ROOT_FUNCTIONS (tests/boundaries/check-boundaries.ts) with its reason`,
+				);
+	}
+	const lines = source.split("\n").length;
+	if (lines > COMPOSITION_ROOT_LINE_CEILING)
+		violations.push(
+			`rule15: ${file} has ${lines} lines, over the composition root's ceiling of ${COMPOSITION_ROOT_LINE_CEILING}; move feature logic to the domain that owns it rather than raising the ceiling`,
+		);
+	return violations;
+}
+
 const jsSuffixRegex = /\.m?jsx?$/;
 const piPackagePrefix = "@earendil-works/pi-";
 // Since the 0.83.0 engine-boundary rework, no file outside src/engine/** may
@@ -1198,6 +1335,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	for (const file of valueImportClosure(path.join(projectRoot, "src/core/telemetry/producer.ts"))) {
 		violations.push(...checkTelemetryProducer(path.relative(projectRoot, file), readFileSync(file, "utf8")));
 	}
+	violations.push(...checkCompositionRoot(ORCHESTRATOR, readFileSync(path.join(projectRoot, ORCHESTRATOR), "utf8")));
 	// A share keeps a field verbatim only where its schema already bounds it (#434).
 	violations.push(...shareProjectionErrors().map((error) => `share-projection: ${error}`));
 	return { violations };
