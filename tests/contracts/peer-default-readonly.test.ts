@@ -52,11 +52,12 @@ test("peer launch arguments depend only on the read-only restriction", () => {
 				sandbox: readOnly ? "read-only" : "workspace-write",
 			});
 			const claude = buildClaudeCodeArgs(run);
+			const mode = claude.indexOf("--permission-mode");
 			deepStrictEqual(
-				claude.slice(5, readOnly ? 8 : 7),
+				claude.slice(mode, mode + (readOnly ? 3 : 2)),
 				readOnly ? ["--permission-mode", "plan", "--tools"] : ["--permission-mode", "acceptEdits"],
 			);
-			if (readOnly) equal(claude[8], "Read,Grep,Glob,LS,WebFetch,WebSearch");
+			if (readOnly) equal(claude[mode + 3], "Read,Grep,Glob,LS,WebFetch,WebSearch");
 			const agy = buildAgyArgs(run);
 			deepStrictEqual(
 				agy.slice(0, readOnly ? 3 : 2),

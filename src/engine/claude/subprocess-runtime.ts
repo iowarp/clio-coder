@@ -66,6 +66,8 @@ export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 		"-p",
 		"--output-format",
 		"stream-json",
+		// Claude Code rejects streamed print output without it; it adds no non-JSON lines to stdout.
+		"--verbose",
 		"--include-partial-messages",
 		"--no-session-persistence",
 		"--permission-mode",

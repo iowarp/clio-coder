@@ -37,6 +37,12 @@ writeFileSync(join(process.cwd(), "observed.json"), JSON.stringify({
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     }
 }));
+// Claude Code 2.1.x refuses streamed print output without --verbose.
+const argv = process.argv.slice(2);
+if (argv.includes("-p") && argv[argv.indexOf("--output-format") + 1] === "stream-json" && !argv.includes("--verbose")) {
+  process.stderr.write("Error: When using --print, --output-format=stream-json requires --verbose\\n");
+  process.exit(1);
+}
 if (scenario.stderr) process.stderr.write(scenario.stderr);
 if (scenario.exitLeader) {
   writeFileSync(join(process.cwd(), "leader.pid"), String(process.pid));

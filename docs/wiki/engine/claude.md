@@ -82,7 +82,7 @@ The returned `WorkerRunHandle` exposes `promise`, `abort`, and `steer`. `steer` 
 
 ## Data and control flow: the CLI subprocess path
 
-`startClaudeCodeWorkerRun(input, emit, dependencies)` checks `input.signal` first, then calls `buildClaudeCodeArgs`. That function calls `assertToolProfileEnforceable(input.toolProfile, "claude-code")` and produces `-p --output-format stream-json --include-partial-messages --no-session-persistence --permission-mode <mode>`. Read-only runs use mode `plan` plus `--tools Read,Grep,Glob,LS,WebFetch,WebSearch`; other runs use `acceptEdits`. `--model`, `--append-system-prompt` and `--session-id` (only when `isClaudeCodeSessionId` accepts the value) are added as configured.
+`startClaudeCodeWorkerRun(input, emit, dependencies)` checks `input.signal` first, then calls `buildClaudeCodeArgs`. That function calls `assertToolProfileEnforceable(input.toolProfile, "claude-code")` and produces `-p --output-format stream-json --verbose --include-partial-messages --no-session-persistence --permission-mode <mode>`. Read-only runs use mode `plan` plus `--tools Read,Grep,Glob,LS,WebFetch,WebSearch`; other runs use `acceptEdits`. `--model`, `--append-system-prompt` and `--session-id` (only when `isClaudeCodeSessionId` accepts the value) are added as configured.
 
 The prompt is written to the child's stdin with `child.stdin.end(prompt)`, from `buildClaudeCodePrompt`, so it never appears in argv. The child is spawned with `resolveSafeCwd(input.cwd, workspaceRoot)`, which throws `cwd escapes workspace root` for a path outside the workspace (the subprocess test asserts this before any spawn). The environment comes from `buildSafeToolEnv(claudeAuthEnvironment(sourceEnv), sourceEnv)` with the credential placed by `withClaudeCredential`.
 
