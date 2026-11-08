@@ -22,6 +22,8 @@ const { values } = parseArgs({
 		mode: { type: "string" },
 		workload: { type: "string" },
 		style: { type: "string" },
+		echo: { type: "boolean", default: false },
+		verify: { type: "boolean", default: false },
 	},
 });
 function positive(value: string): number {
@@ -173,17 +175,61 @@ function longReply(size: number): string {
  * job retained every frame's tokens: 1.47 MB per frame at reply-100k, a 4 GB
  * out-of-memory crash at reply-500k, and old-generation pauses in the numbers.
  */
+const recorded = new Set<string | symbol>(["appendUser", "applyEvent", "applyWorkerState"]);
+function recording(panel: ChatPanel, calls: Array<(target: ChatPanel) => void>): ChatPanel {
+	if (!values.verify) return panel;
+	return new Proxy(panel, {
+		get(target, key, receiver) {
+			const value = Reflect.get(target, key, receiver);
+			if (!recorded.has(key) || typeof value !== "function") return value;
+			return (...args: unknown[]) => {
+				calls.push((fresh) => Reflect.get(fresh, key).apply(fresh, args));
+				return value.apply(target, args);
+			};
+		},
+	});
+}
+
+/** The rows a renderer holds as painted: the regular screen's diff baseline, or the fullscreen document. */
+function paintedRows(tui: InstrumentedTuiMainScreen | InstrumentedTuiAltScreen): readonly string[] {
+	const state = tui as unknown as { previousLines?: readonly string[]; lastDocument?: readonly string[] };
+	return state.previousLines ?? state.lastDocument ?? [];
+}
+
 const yieldToLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
 
-async function sample(mode: TuiMode, workload: Workload): Promise<{ milliseconds: number[]; bytes: number }> {
+function mount(
+	mode: TuiMode,
+	terminal: Terminal,
+	chat: ChatPanel,
+	editor: Text,
+): InstrumentedTuiMainScreen | InstrumentedTuiAltScreen {
+	const tui =
+		mode === "regular"
+			? new InstrumentedTuiMainScreen(terminal, unobserved)
+			: new InstrumentedTuiAltScreen(terminal, unobserved);
+	const root = buildLayout({ banner: new Text("Clio", 0, 0), chat, editor, footer: new Text("ready", 0, 0) }, { mode });
+	if (tui instanceof InstrumentedTuiAltScreen) tui.setLayoutRoot(root);
+	else tui.addChild(root);
+	tui.start();
+	return tui;
+}
+
+async function sample(
+	mode: TuiMode,
+	workload: Workload,
+): Promise<{ milliseconds: number[]; bytes: number; verified: number; mismatches: number }> {
 	const terminal = new CountingTerminal();
 	let view: never | null = null;
-	const panel = createChatPanel({
+	const panelOptions = {
 		now: () => 1_000,
 		getTerminalRows: () => terminal.rows,
 		getTelemetry: () => view,
 		...(outputStyle ? { getOutputStyle: () => outputStyle } : {}),
-	});
+	};
+	// Under --verify every transcript call is kept, so a fresh panel can replay it with no render cache.
+	const calls: Array<(target: ChatPanel) => void> = [];
+	const panel = recording(createChatPanel(panelOptions), calls);
 	for (let index = 0; index < turns; index++) {
 		panel.appendUser(`Question ${index}`);
 		// Workloads that scan history need the history they scan: tool rows, and settled worker cards.
@@ -200,18 +246,24 @@ async function sample(mode: TuiMode, workload: Workload): Promise<{ milliseconds
 		settle(panel, answer);
 		if (workload === "telemetry" && index % 10 === 0) panel.applyWorkerState(workerState(1_000 + index, false));
 	}
-	const editor = new Text("draft", 0, 0);
-	const tui =
-		mode === "regular"
-			? new InstrumentedTuiMainScreen(terminal, unobserved)
-			: new InstrumentedTuiAltScreen(terminal, unobserved);
-	const root = buildLayout(
-		{ banner: new Text("Clio", 0, 0), chat: panel, editor, footer: new Text("ready", 0, 0) },
-		{ mode },
-	);
-	if (tui instanceof InstrumentedTuiAltScreen) tui.setLayoutRoot(root);
-	else tui.addChild(root);
-	tui.start();
+	let draft = "draft";
+	const editor = new Text(draft, 0, 0);
+	const tui = mount(mode, terminal, panel, editor);
+	/** Whether the renderer's painted rows equal a from-scratch render of the same transcript and draft. */
+	const matchesFresh = (): boolean => {
+		const fresh = createChatPanel(panelOptions);
+		for (const replay of calls) replay(fresh);
+		const freshTerminal = new CountingTerminal();
+		const freshTui = mount(mode, freshTerminal, fresh, new Text(draft, 0, 0));
+		try {
+			freshTui.renderNow();
+			const expected = paintedRows(freshTui);
+			const actual = paintedRows(tui);
+			return expected.length === actual.length && expected.every((row, index) => row === actual[index]);
+		} finally {
+			freshTui.stop();
+		}
+	};
 	try {
 		const workers = Array.from({ length: 8 }, (_, index) => workerState(index, true));
 		if (workload !== "composer") {
@@ -239,8 +291,14 @@ async function sample(mode: TuiMode, workload: Workload): Promise<{ milliseconds
 		tui.renderNow();
 		let output = "";
 		const mutate = (index: number): void => {
-			if (workload === "composer") editor.setText(`draft ${index % 10}`);
-			else if (workload === "tool") {
+			if (workload === "composer") {
+				draft = `draft ${index % 10}`;
+				editor.setText(draft);
+			} else if (values.echo) {
+				// A keystroke while the reply is open: only the composer changes.
+				draft = `draft ${index}`;
+				editor.setText(draft);
+			} else if (workload === "tool") {
 				output += `Build step ${index} complete\n`;
 				panel.applyEvent({
 					type: "tool_execution_update",
@@ -304,14 +362,21 @@ async function sample(mode: TuiMode, workload: Workload): Promise<{ milliseconds
 		}
 		terminal.bytes = 0;
 		const milliseconds: number[] = [];
+		let verified = 0;
+		let mismatches = 0;
 		for (let index = 0; index < frames; index++) {
 			const start = performance.now();
 			mutate(index + 20);
 			tui.renderNow();
 			milliseconds.push(performance.now() - start);
+			// Outside the timed span; every tenth frame and the last, since each check re-renders the whole transcript.
+			if (values.verify && (index % 10 === 0 || index === frames - 1)) {
+				verified += 1;
+				if (!matchesFresh()) mismatches += 1;
+			}
 			await yieldToLoop();
 		}
-		return { milliseconds, bytes: terminal.bytes };
+		return { milliseconds, bytes: terminal.bytes, verified, mismatches };
 	} finally {
 		tui.stop();
 	}
@@ -334,6 +399,12 @@ for (const mode of modes) {
 			p99Ms: percentile(0.99),
 			maxMs: percentile(1),
 			bytesPerFrame: Math.round(samples.reduce((sum, entry) => sum + entry.bytes, 0) / times.length),
+			...(values.verify
+				? {
+						verifiedFrames: samples.reduce((sum, entry) => sum + entry.verified, 0),
+						mismatches: samples.reduce((sum, entry) => sum + entry.mismatches, 0),
+					}
+				: {}),
 		});
 	}
 }
@@ -347,6 +418,7 @@ console.log(
 			turns,
 			frames,
 			repeats,
+			echo: values.echo,
 			results,
 		},
 		null,
