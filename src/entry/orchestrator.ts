@@ -12,7 +12,14 @@ import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
-import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
+import {
+	type ClioSettings,
+	readSettings,
+	recordYoloConfinementOnce,
+	type SettingsMutator,
+	updateSettings,
+	YOLO_CONTAINED_MIGRATION_NOTICE,
+} from "../core/config.js";
 import {
 	DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
 	interfaceGuidanceEnabled,
@@ -263,6 +270,7 @@ import {
 	type ResourcesContract,
 } from "../domains/resources/index.js";
 import { expandSubmitText } from "../domains/resources/submit-expansion.js";
+import { admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../domains/safety/finish-contract-registration.js";
@@ -3168,6 +3176,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const level = activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 		return level === "yolo" && yoloRefusal !== null ? "default" : level;
 	};
+	// Contained yolo (ob-yolo D1) admits, judges and permits workers exactly as
+	// default does; only where a call would wait for a person does it differ,
+	// which `unattendedAsks` tells the registry. Prompts, auto-continuation and
+	// the footer keep the operator's level.
+	const resolveAdmissionAutonomy = (): AutonomyLevel =>
+		admissionAutonomy(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
+	const unattendedYolo = (): boolean =>
+		containedYolo(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {
@@ -3339,7 +3355,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		createInternalGitPolicy({
 			workspace: process.cwd(),
 			guard: hookDrift,
-			autonomy: resolveEffectiveAutonomy,
+			autonomy: resolveAdmissionAutonomy,
 			emptyHooksDir: join(clioStateDir(), "git", "no-hooks"),
 			onDrift: (record) =>
 				bus.emit("safety.internal_git_drifted", {
@@ -3360,7 +3376,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// blocks share one session's escalation counts.
 	workerAskJudgeForDispatch = {
 		seat: () => safetyJudge,
-		autonomy: resolveEffectiveAutonomy,
+		autonomy: resolveAdmissionAutonomy,
 		hookDrift: () => hookDrift,
 	};
 	// Sessions whose snapshot start-of-session prune has run in this process.
@@ -3371,7 +3387,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		onMiddlewareEffects: (effects) => middlewareToolChoice.apply(effects),
 		// Awaited extension hooks return after the guard's own before_tool step.
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
-		autonomy: resolveEffectiveAutonomy,
+		autonomy: resolveAdmissionAutonomy,
+		unattendedAsks: unattendedYolo,
 		// Only this registry carries the operator's own scope (#419): its yolo,
 		// and its containment at default, where shell calls run in the
 		// main-session sandbox and a snapshot precedes a destructive call.
@@ -3653,6 +3670,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bootAutonomy = "default";
 			yoloHeldAtBoot = true;
 		}
+	}
+	// Yolo became contained (ob-yolo D1). An operator who used yolo before
+	// hears it once: interactive after accepting yolo, headless on a yolo run.
+	if (
+		yoloRefusal === null &&
+		(interactive ? savedSafety.yoloAccepted === true : startupAutonomy === "yolo") &&
+		savedSafety.yoloConfinement !== "unconfined" &&
+		recordYoloConfinementOnce()
+	) {
+		if (interactive) initialNotices.push(YOLO_CONTAINED_MIGRATION_NOTICE);
+		else process.stderr.write(`clio-coder: ${YOLO_CONTAINED_MIGRATION_NOTICE}\n`);
 	}
 	const startupOverrides: SessionOverrides = new Map(
 		bootAutonomy === undefined ? [] : [["safety.autonomy", bootAutonomy]],
@@ -4032,9 +4060,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-		// Same effective-autonomy resolution the registry admission uses, so plan
-		// provenance and compete winner handling agree with the approval surface.
+		// ask_user and configure_clio read the operator's level; dispatch and
+		// steer read the level admission runs at, so plan provenance, compete
+		// winner handling and the main agent's grants agree with the approval
+		// surface (contained yolo reads as default there).
 		getAutonomy: resolveEffectiveAutonomy,
+		getAdmissionAutonomy: resolveAdmissionAutonomy,
 		...(interactive ? { dispatchBackground } : {}),
 		...(mux ? { competeMuxWorktrees: mux } : {}),
 		// Registered only when a pane host answered detection, so the tool is

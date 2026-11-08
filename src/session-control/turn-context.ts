@@ -108,7 +108,7 @@ import {
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { type AutonomyLevel, effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
@@ -2848,6 +2848,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
+				// Only the opt-out is carried, so a contained session keeps its prompt key.
+				...(effectiveYoloConfinement(settings.safety) === "unconfined" ? { yoloConfinement: "unconfined" as const } : {}),
 				...(deps.liveSteering === false ? { liveSteering: false } : {}),
 				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
 			};

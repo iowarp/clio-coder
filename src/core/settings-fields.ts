@@ -264,6 +264,8 @@ export const SETTINGS_FIELD_NAMES = [
 	"workingSet",
 	"worktrees",
 	"yoloAccepted",
+	"yoloConfinement",
+	"yoloUnconfinedAccepted",
 ] as const;
 
 export type SettingsFieldName = (typeof SETTINGS_FIELD_NAMES)[number];

@@ -734,8 +734,15 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const minimal = style === "compact";
 	const learning = !minimal && state.demo !== false;
 	const autonomy = state.session.autonomy;
+	// Contained yolo is the warning tone; the unconfined opt-out is the error tone and shouts (ob-yolo D9).
+	const unconfined = autonomy === "yolo" && state.session.yoloConfinement === "unconfined";
 	const mode = autonomy
-		? theme.fg(autonomy === "yolo" ? "warning" : "annotation", autonomy === "yolo" ? "YOLO" : clean(autonomy))
+		? autonomy === "yolo"
+			? theme.fg(
+					unconfined ? "error" : "warning",
+					unconfined ? `YOLO ${GLYPH.dot} UNCONFINED` : `YOLO ${GLYPH.dot} contained`,
+				)
+			: theme.fg("annotation", clean(autonomy))
 		: "";
 	const modeLead = mode ? `${mode}${theme.fg("separator", ` ${GLYPH.dot} `)}` : "";
 	const identityWidth = Math.max(1, w - visibleWidth(modeLead));

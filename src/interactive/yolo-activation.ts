@@ -3,18 +3,24 @@ import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { AskUserHandler, AskUserQuestion } from "../tools/ask-user.js";
 
 /**
- * Turning yolo on from the terminal (#407). Yolo is the operator's
- * skip-permissions mode, so its first interactive activation shows a short
- * card saying what it does, and only an explicit accept records
- * `safety.yoloAccepted` in the operator's user settings and switches. As root
- * outside a container it is refused outright. The leader key, /settings and a
- * yolo the session was started with all pass through here.
+ * Turning yolo on from the terminal (#407). Yolo runs without stopping for the
+ * operator, so its first interactive activation shows a short card saying what
+ * it does, and only an explicit accept records `safety.yoloAccepted` in the
+ * operator's user settings and switches. As root outside a container it is
+ * refused outright. The leader key, /settings and a yolo the session was
+ * started with all pass through here.
+ *
+ * Yolo is contained by default (ob-yolo D1). Choosing unconfined yolo, the
+ * skip-permissions mode, shows its own card and records
+ * `safety.yoloUnconfinedAccepted`; until then yolo stays contained.
  */
 
 export type SettingScope = "session" | "project" | "global";
 
 export const YOLO_ACCEPT_LABEL = "Turn on yolo";
 export const YOLO_DECLINE_LABEL = "Stay at default";
+export const YOLO_UNCONFINED_ACCEPT_LABEL = "Run yolo unconfined";
+export const YOLO_UNCONFINED_DECLINE_LABEL = "Keep yolo contained";
 
 /** The acceptance card, asked through the existing ask_user card. */
 function yoloAcceptanceQuestion(): AskUserQuestion {
@@ -22,15 +28,34 @@ function yoloAcceptanceQuestion(): AskUserQuestion {
 		header: "Yolo",
 		question: [
 			"Turn on yolo? It is built for long unattended jobs:",
-			"- No approval stops. Edits, commands, scripts, git history changes and outward actions run as called, and questions take their recommended option.",
-			"- No sandbox by default. Commands and scripts run as you unless safety.sandbox is required.",
-			"- The floor still blocks deleting or overwriting /, your home directory or a system tree, mkfs, wipefs, writes to a block device, fork bombs, and writes into Clio's own config, state and trust records. Rules in an approved .clio-coder/safety.yaml hold.",
+			"- Nothing waits for you. Questions take their recommended option, and a call that would need your approval is refused back to Clio instead of asking.",
+			"- Commands stay in the OS sandbox: the workspace and scratch roots are writable, credentials and secret files are hidden. Risky calls (leaving the sandbox, writes outside the workspace, destructive git, pushes and publishes) go to the safety judge, which allows only what your request asked for.",
+			"- The floor still blocks deleting /, your home directory or a system tree, mkfs, writes to a block device, fork bombs, and writes into Clio's own state. Rules in an approved .clio-coder/safety.yaml hold.",
 			"- Workspace snapshots and the telemetry journals stay on, so /rewind can restore files. Yolo is refused as root outside a container.",
 			"You accept once; safety.yoloAccepted in your user settings records it.",
 		].join("\n"),
 		options: [
 			{ label: YOLO_ACCEPT_LABEL, description: "Record the acceptance and switch to yolo." },
 			{ label: YOLO_DECLINE_LABEL, description: "Keep approval stops; nothing is saved." },
+		],
+	};
+}
+
+/** The unconfined acceptance card: today's skip-permissions yolo (#407). */
+function yoloUnconfinedAcceptanceQuestion(): AskUserQuestion {
+	return {
+		header: "Unconfined yolo",
+		question: [
+			"Run yolo unconfined? It is the skip-permissions mode:",
+			"- No approval stops and no safety judge. Edits, commands, scripts, git history changes and outward actions run as called.",
+			"- No sandbox by default. Commands and scripts run as you, with your credentials, unless safety.sandbox is required.",
+			"- The floor still blocks deleting or overwriting /, your home directory or a system tree, mkfs, wipefs, writes to a block device, fork bombs, and writes into Clio's own config, state and trust records. Rules in an approved .clio-coder/safety.yaml hold.",
+			"Contained yolo already runs without stopping for you; choose unconfined only when your work needs what the sandbox hides.",
+			"You accept once; safety.yoloUnconfinedAccepted in your user settings records it.",
+		].join("\n"),
+		options: [
+			{ label: YOLO_UNCONFINED_ACCEPT_LABEL, description: "Record the acceptance and run yolo unconfined." },
+			{ label: YOLO_UNCONFINED_DECLINE_LABEL, description: "Yolo stays contained; nothing is saved." },
 		],
 	};
 }
@@ -101,9 +126,55 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 		}
 	};
 
+	const acceptUnconfined = async (scope: SettingScope, source?: ConfigChangeSource): Promise<void> => {
+		if (asking) return;
+		asking = true;
+		try {
+			deps.prepareScreen();
+			const result = await deps.ask([yoloUnconfinedAcceptanceQuestion()]);
+			if (result.unavailable === true) {
+				deps.notify(
+					"info",
+					"Unconfined yolo needs a one-time acceptance; choose it again once the screen is free.",
+					"safety:yolo-unconfined-accept",
+				);
+				return;
+			}
+			if (result.cancelled === true || result.answers[0]?.options?.includes(YOLO_UNCONFINED_ACCEPT_LABEL) !== true) {
+				deps.notify("info", "Yolo stays contained.", "safety:yolo-unconfined-accept");
+				return;
+			}
+			const current = deps.getSettings();
+			if (current === undefined) return;
+			const accepted = structuredClone(current);
+			accepted.safety.yoloUnconfinedAccepted = true;
+			deps.commitSetting("safety.yoloUnconfinedAccepted", accepted, "global", source);
+			const switched = structuredClone(deps.getSettings() ?? accepted);
+			switched.safety.yoloConfinement = "unconfined";
+			deps.commitSetting("safety.yoloConfinement", switched, scope, source);
+			deps.afterCommit?.();
+		} catch (error) {
+			deps.notify(
+				"error",
+				`Yolo stays contained: ${error instanceof Error ? error.message : String(error)}`,
+				"safety:yolo-unconfined-accept",
+			);
+		} finally {
+			asking = false;
+		}
+	};
+
 	return {
 		commit(id, next, scope, source) {
 			const current = deps.getSettings();
+			if (
+				id === "safety.yoloConfinement" &&
+				next.safety.yoloConfinement === "unconfined" &&
+				current?.safety.yoloUnconfinedAccepted !== true
+			) {
+				void Promise.resolve().then(() => acceptUnconfined(scope, source));
+				return;
+			}
 			const turningOn = id === "safety.autonomy" && next.safety.autonomy === "yolo" && current?.safety.autonomy !== "yolo";
 			if (!turningOn) {
 				deps.commitSetting(id, next, scope, source);

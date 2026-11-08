@@ -347,6 +347,12 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 	},
 	// Acceptance of yolo is the operator's own, never a repository's (#407).
 	{ key: "yoloAccepted", message: "yolo acceptance is recorded only in user settings; project value ignored" },
+	// A repository could otherwise lift yolo's containment, or accept that for the operator.
+	{ key: "yoloConfinement", message: "yolo confinement is set only in user settings; project value ignored" },
+	{
+		key: "yoloUnconfinedAccepted",
+		message: "unconfined yolo acceptance is recorded only in user settings; project value ignored",
+	},
 	// The judge decides which calls run without the operator, so a repository
 	// could otherwise add allow rules, retarget it or switch it off.
 	{ key: "judge", message: "the safety judge is configured only in user settings; project value ignored" },

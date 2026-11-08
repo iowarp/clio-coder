@@ -7,6 +7,7 @@ import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
+import { effectiveYoloConfinement } from "../../domains/safety/autonomy.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -317,6 +318,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				name: deps.getSessionInfo?.().name ?? null,
 				target,
 				autonomy: settings?.safety.autonomy ?? "default",
+				yoloConfinement: effectiveYoloConfinement(settings?.safety),
 				targetId: settings?.chat?.target ?? null,
 				modelId: settings?.chat?.model ?? null,
 				leaderArmed: deps.getLeaderArmed?.() ?? false,

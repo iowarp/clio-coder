@@ -8,7 +8,7 @@
 
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { AutonomyLevel, YoloConfinement } from "../domains/safety/autonomy.js";
 import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
@@ -682,6 +682,21 @@ export interface SafetySettings {
 	 */
 	yoloAccepted: boolean;
 	/**
+	 * What yolo means: `contained` (the default) admits as default does, with
+	 * the sandbox, snapshots and the safety judge, and refuses back to the agent
+	 * what would wait for a person; `unconfined` is the skip-permissions yolo
+	 * where only the yolo floor and operator-authored rules block. Read only
+	 * from the operator's own settings file.
+	 */
+	yoloConfinement: YoloConfinement;
+	/**
+	 * The operator accepted unconfined yolo, through its own acceptance card or
+	 * by writing it here. `yoloConfinement: unconfined` takes effect only with
+	 * it, on every surface including headless runs; accepting contained yolo
+	 * does not accept it. Read only from the operator's own settings file.
+	 */
+	yoloUnconfinedAccepted: boolean;
+	/**
 	 * The safety judge at autonomy `default`: a model that reviews a call the
 	 * policy would park for approval against the operator's own messages, and
 	 * either runs it or refuses it back to the agent. Read only from the
@@ -846,6 +861,8 @@ export const DEFAULT_SETTINGS = {
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
 		yoloAccepted: false,
+		yoloConfinement: "contained" as YoloConfinement,
+		yoloUnconfinedAccepted: false,
 		judge: {
 			enabled: true,
 			target: null,
@@ -1070,6 +1087,15 @@ safety:
   # Set by the one-time card that turns yolo on interactively. Honored only in
   # this file.
   yoloAccepted: false
+  # What yolo means: contained keeps default's sandbox, snapshots and safety
+  # judge and refuses back to the agent what would wait for you; unconfined
+  # runs everything except the yolo floor and your approved safety.yaml rules.
+  # Honored only in this file.
+  yoloConfinement: contained
+  # Set by the separate card that turns on unconfined yolo, or by hand;
+  # yoloConfinement: unconfined takes effect only when this is true. Honored
+  # only in this file.
+  yoloUnconfinedAccepted: false
   # At autonomy default, a model reviews each call that would need your approval
   # against your own messages and runs or refuses it; it asks you only when it
   # cannot decide or keeps refusing. target and model null use the chat route.

@@ -90,6 +90,8 @@ export interface SessionFacts {
 	activeSkills?: ReadonlyArray<string>;
 	/** Explicit mode remains readable after transient setting feedback expires. */
 	autonomy?: string;
+	/** The operator's yolo confinement; read only at yolo, absent reads contained. */
+	yoloConfinement?: string;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
 	memoryIntervention?: {
 		enabled: boolean;

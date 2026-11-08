@@ -13,7 +13,7 @@ Clio Coder gates tool calls before they run and confines some of them while they
 Autonomy is the operator's grant to the main agent. There are two levels.
 
 - `default` follows one rule: containment first, judgment second, asking last. Workspace edits and contained shell work run. Destructive work that a workspace snapshot can undo runs after the snapshot is taken. A call that escapes containment, or that a deterministic rule would stop, is reviewed by the [safety judge](#the-safety-judge) against the operator's own messages. The operator is asked only when the judge gives no verdict, after the judge has blocked repeatedly, or for a decision only the operator may make. An approval card or question nobody answers resolves after the [unattended timeout](#unattended-resolution).
-- `yolo` is the skip-permissions mode. Only the [yolo floor](#the-yolo-floor), operator rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block. Nothing asks, `ask_user` answers itself, and commands run unsandboxed; only `safety.sandbox: required` keeps commands in a sandbox. The operator accepts it once, and it is refused as root outside a container.
+- `yolo` runs without stopping for the operator, for long unattended jobs. It is [contained](#contained-and-unconfined) by default: admission, containment, snapshots and the safety judge are exactly `default`'s, `ask_user` answers itself, and a call `default` would ask the operator about is refused back to the model instead. Unconfined yolo (`safety.yoloConfinement: unconfined`, accepted once on its own) is the skip-permissions mode: only the [yolo floor](#the-yolo-floor), operator rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block, and commands run unsandboxed unless `safety.sandbox` is `required`. The operator accepts yolo once, and it is refused as root outside a container.
 
 Dispatched workers inherit the main session's level through their permit and keep their own OS sandbox; see [Workers at each level](#workers-at-each-level). A headless `clio-coder run` takes `yolo` only from its own `--autonomy yolo`; see [Headless runs](#headless-runs).
 
@@ -35,15 +35,17 @@ The operator's own main session at `default` settles one call in this order. Ste
 
 Before an admitted call's body runs, the registry takes the snapshot its trigger asks for; see [Workspace snapshots and /rewind](#workspace-snapshots-and-rewind).
 
-At `yolo` the order stops after step 2, with operator-authored rules added to the blocks. Everything else runs. A call that passed a rail which would have asked or blocked is journaled in its `tool.decided` record as `yolo-admitted:<reason code>`.
+Contained `yolo` runs steps 1 to 7 exactly as `default` does. Step 8 becomes a refusal: a call the judge did not allow, an operator-only decision included, returns to the model with reason code `contained_yolo_unattended`, and an identical retry is refused from the turn's denial memory without reaching the judge again. Nothing reaches step 9.
+
+Unconfined `yolo` stops after step 2, with operator-authored rules added to the blocks. Everything else runs. A call that passed a rail which would have asked or blocked is journaled in its `tool.decided` record as `yolo-admitted:<reason code>`.
 
 Workers, a main-agent grant of a worker's ask, scheduled command jobs, the Claude SDK bridge and the ACP delegation mediator do not get the operator's scope. They meet [the safety net](#the-safety-net) as written: damage-control blocks stay blocks, there is no containment relaxation and no snapshot, and asks follow their own route. A scheduled `main` job and a `main_turn` delivery run as turns of the operator's own session, so they get its scope.
 
 ### What runs, what is judged, what blocks
 
-In this table "judge" means the safety judge decides first and the operator is asked only when the judge gives no verdict or has escalated. "Operator" means the judge never sees the ask. For a worker, "asks" means the worker's ask route, `fleet.permissions.mode`, which by default hands an ordinary ask to the main session's judge.
+In this table "judge" means the safety judge decides first and the operator is asked only when the judge gives no verdict or has escalated. "Operator" means the judge never sees the ask. Contained `yolo` follows the `default` column, except that where the operator would be asked the call is refused instead. For a worker, "asks" means the worker's ask route, `fleet.permissions.mode`, which by default hands an ordinary ask to the main session's judge.
 
-| Action | `default`, operator's session | `yolo`, operator's session | Workers at `default` |
+| Action | `default`, operator's session | unconfined `yolo`, operator's session | Workers at `default` |
 | --- | --- | --- | --- |
 | Read, list, search or `data` inside the workspace or a [read-scope exemption](#read-scope) | runs | runs | runs |
 | Read, list, search or `data` outside the workspace, on a path no zero-access entry covers | runs | runs | asks |
@@ -247,7 +249,16 @@ ACP clients, the GUI, headless runs and worker escalations are unchanged: a work
 
 ## Yolo
 
-Yolo is the operator's skip-permissions mode for long unattended jobs. The main session never stops for an approval or a question ([policy-engine.ts](../../src/domains/safety/policy-engine.ts), [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts)).
+Yolo is the operator's mode for long unattended jobs. The main session never stops for an approval or a question ([policy-engine.ts](../../src/domains/safety/policy-engine.ts), [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts), [autonomy.ts](../../src/domains/safety/autonomy.ts)).
+
+### Contained and unconfined
+
+`safety.yoloConfinement` (user layer only, default `contained`) says what yolo gives up to avoid waiting.
+
+- **Contained** keeps `default`'s boundaries and drops only the waiting. Admission, the [main-session sandbox](#the-main-session-sandbox), workspace snapshots and the [safety judge](#the-safety-judge) run exactly as at `default`; a sandbox escape, a write outside the workspace and scratch roots, destructive git and an outward action still go to the judge, which allows what the operator's own messages asked for. A call the judge blocks or leaves without a verdict, and every operator-only decision, is refused back to the model with reason code `contained_yolo_unattended`; the model is told to continue with work that does not need it and to name it in its final reply. Dispatched workers get `default`'s permit and route, and their operator-authority asks are denied as if nobody were attached. The registry reads the level as `default` and adds the never-park rule; the prompt, auto-continuation, `ask_user` and the footer read `yolo`.
+- **Unconfined** is the skip-permissions yolo described in the rest of this section. It takes effect only with `safety.yoloUnconfinedAccepted: true`, which its own acceptance card records; until then yolo runs contained.
+
+The floor, [operator rules and ceilings](#operator-rules-and-ceilings) hold at both. The rest of this section, from the floor on, describes unconfined yolo unless it says otherwise.
 
 ### The yolo floor
 
@@ -270,7 +281,7 @@ The floor reads the command text, its ANSI-C and locale-decoded forms, each segm
 
 ### Operator rules and ceilings
 
-Besides the floor, yolo keeps two things:
+Besides the floor, unconfined yolo keeps two things:
 
 - **Operator rules.** The path entries of an approved `.clio-coder/safety.yaml` (`zeroAccessPaths`, `readOnlyPaths`, `noWritePaths`, `noDeletePaths`), judged alone without the built-in defaults, and a bash read of one of its zero-access entries. While the file carries any such entry it is read-only too, because an edit would drop its approval and every rule in it. These block under `operator-rule:<reason code>`, such as `operator-rule:path-policy:zeroAccessPaths`.
 - **The run's ceilings.** Write roots (`write-root`), an approved policy that no longer parses (`project-policy-invalid`), an empty bash command, an invalid `verify` working directory, a read-only run, the turn's tool scope, an armed skill's tool surface, and `safety.sandbox: required` on a host with no backend, or a call that asks to leave it (`yolo-sandbox-required`).
@@ -279,15 +290,17 @@ Everything else is admitted, including the built-in zero-access and read-only pa
 
 ### Sandbox, questions and turns
 
-Yolo runs commands unsandboxed. Only `safety.sandbox: required` keeps a sandbox: every bash, `run_script` and command-running `verify` call that `default` would contain, and every script even when it publishes, then runs in the [main-session sandbox](#the-main-session-sandbox) when a backend exists and is refused when none does. A test or build command runs arbitrary project code, so `required` does not stop at script files. A call with `unsandboxed: true` is refused under `required`; outward calls that run no script file, and a typed `git` commit's hooks, stay outside it. Under `auto` the OS sandbox serves dispatched workers only.
+Unconfined yolo runs commands unsandboxed. Only `safety.sandbox: required` keeps a sandbox: every bash, `run_script` and command-running `verify` call that `default` would contain, and every script even when it publishes, then runs in the [main-session sandbox](#the-main-session-sandbox) when a backend exists and is refused when none does. A test or build command runs arbitrary project code, so `required` does not stop at script files. A call with `unsandboxed: true` is refused under `required`; outward calls that run no script file, and a typed `git` commit's hooks, stay outside it. Under `auto` the OS sandbox serves dispatched workers only.
 
-`ask_user` resolves at once without reaching the surface: each question takes its first option, an outward question included, and a free-text question proceeds on the model's judgment. The decision board records each choice as Clio's decision. The yolo prompt tells the model the operator is away by contract, to take reasonable defaults, never to wait for an answer, and to state every assumption in its final reply. The turn-ending contract renders a yolo variant that ends turns `Done` and stops a requested plan at its assumptions instead of an approval card.
+At both confinements `ask_user` resolves at once without reaching the surface: each question takes its first option, an outward question included, and a free-text question proceeds on the model's judgment. The decision board records each choice as Clio's decision. The yolo prompt tells the model the operator is away by contract, to take reasonable defaults, never to wait for an answer, and to state every assumption in its final reply. The turn-ending contract renders a yolo variant that ends turns `Done` and stops a requested plan at its assumptions instead of an approval card.
 
 Workspace snapshots and the telemetry journals stay on at `yolo`, so `/rewind` can still restore files.
 
 ### Turning yolo on
 
-The first interactive activation, from the leader key, `/settings`, or a session started with `yolo` through `--autonomy yolo` or the user settings, shows a one-time acceptance card. Only an explicit accept records `safety.yoloAccepted: true` in the operator's user settings and switches; a session started at `yolo` holds at `default` until then. Headless `--autonomy yolo` and an ACP client's mode choice count as acceptance and write nothing ([yolo-activation.ts](../../src/interactive/yolo-activation.ts)).
+The first interactive activation, from the leader key, `/settings`, or a session started with `yolo` through `--autonomy yolo` or the user settings, shows a one-time acceptance card. Only an explicit accept records `safety.yoloAccepted: true` in the operator's user settings and switches; a session started at `yolo` holds at `default` until then. Headless `--autonomy yolo` and an ACP client's mode choice count as acceptance and write nothing ([yolo-activation.ts](../../src/interactive/yolo-activation.ts)). Choosing `unconfined` in `/settings` shows a second card with the skip-permissions terms, and only its accept records `safety.yoloUnconfinedAccepted: true`. That acceptance is required on every surface, headless included; an ACP client cannot choose unconfined. The footer reads `YOLO · contained` in the warning tone or `YOLO · UNCONFINED` in the error tone, and the composer rail reads `YOLO` or `YOLO!`.
+
+An operator who accepted yolo before it became contained, or a headless `--autonomy yolo` run, gets a one-time notice saying so and how to keep unconfined yolo; Clio then records `safety.yoloConfinement: contained` in the user settings so it shows once.
 
 Yolo is refused for an effective uid 0 outside a detected container ([yolo-host.ts](../../src/core/yolo-host.ts)). Container evidence is the `container` environment variable, `KUBERNETES_SERVICE_HOST`, `/.dockerenv`, `/run/.containerenv`, or a `/proc/1/cgroup` naming docker, kubepods, containerd, lxc or podman; `CLIO_CODER_SANDBOXED=1` attests a sandbox the detection missed. Windows has no effective uid and is never refused. An interactive session that would start at `yolo` starts at `default` with the refusal as a notice, a toggle shows it as a warning, headless `clio-coder run --autonomy yolo` exits 2, an ACP mode change fails with `yolo_refused`, and any other path to `yolo`, such as a hot-reloaded settings file, resolves to `default`.
 
@@ -296,16 +309,17 @@ Yolo is refused for an effective uid 0 outside a detected container ([yolo-host.
 Workers inherit the main session's mode inside their own permit and OS sandbox.
 
 - **At `default`.** A worker's admission is the deterministic [safety net](#the-safety-net): no containment relaxation, no damage-control re-sort, no snapshot, and reads outside the workspace ask. Its asks follow `fleet.permissions.mode`, whose default `judge` hands a native local worker's ordinary (main-authority) ask to the main session's safety judge in the orchestrator. The judge reads the operator's messages and the worker's redacted call, labelled as a worker's call, never the dispatch task or the worker transcript. An allow grants the call once, inside the worker's permit and OS sandbox. A block, no verdict, an escalated judge or a judge that is off denies it, and a denied execute ask counts toward the worker's [refusal limit](worker-dispatch-mechanics.md#worker-refusal-limit). Operator-authority asks are never judged: attended they reach the operator's card, and headless the worker denies them. A worker's typed `write`, `edit` or `artifact` call on a git control file of its repository (the shell sandbox's set for the worker's cwd, linked worktrees included) is a main-authority ask under `git-control-file`, routed by `fleet.permissions.mode` like any ordinary ask: `judge` sends it to the safety judge, `deny` denies it, and a main grant runs it. The paths are matched by name in any repository, a repository the worker creates mid-run included, and against the resolved set of its cwd repository, `core.hooksPath` directories included; the typed `git` tool is unchanged. Under `judge`, a worker's git call after a hook file changed goes to the operator; see [Git hook drift](#git-hook-drift). A worker's destructive git stays blocked.
-- **At `yolo`.** A mediated, non-read-only worker whose recipe and task do not declare `asks: deny` or `asks: fail` gets the operator's yolo for every action class (`executeAutonomy: yolo` on its permit). Only the floor, operator rules and its dispatch ceilings (read-only, tool scope, write roots, skill surface) refuse its calls, its commands stay in the worker OS sandbox, and its prompt carries the `safety.yolo-worker` fragment. A read-only or unmediated worker, or one whose recipe or task declares `asks: deny` or `asks: fail`, stays at `default`. See [Worker permits](#worker-permits).
+- **At contained `yolo`.** Workers are dispatched as at `default`: the same permit, judge route and sandbox. Their operator-authority asks are denied as with nobody attached, and the main agent's grant of a worker's ask follows `default`'s rules.
+- **At unconfined `yolo`.** A mediated, non-read-only worker whose recipe and task do not declare `asks: deny` or `asks: fail` gets the operator's yolo for every action class (`executeAutonomy: yolo` on its permit). Only the floor, operator rules and its dispatch ceilings (read-only, tool scope, write roots, skill surface) refuse its calls, its commands stay in the worker OS sandbox, and its prompt carries the `safety.yolo-worker` fragment. A read-only or unmediated worker, or one whose recipe or task declares `asks: deny` or `asks: fail`, stays at `default`. See [Worker permits](#worker-permits).
 
-`judge` runs as `deny` at `yolo`, when `safety.judge.enabled` is false, and where no judge can answer: claude-sdk, ACP and subprocess runtimes, remote placements, the fleet CLI and `clio-coder run --agent` ([grant-authority.ts](../../src/domains/dispatch/grant-authority.ts)).
+`judge` runs as `deny` at unconfined `yolo`, when `safety.judge.enabled` is false, and where no judge can answer: claude-sdk, ACP and subprocess runtimes, remote placements, the fleet CLI and `clio-coder run --agent` ([grant-authority.ts](../../src/domains/dispatch/grant-authority.ts)).
 
 ## Headless runs
 
 A headless `clio-coder run` has nobody attached.
 
 - At `default` the main session gets containment, snapshots and the safety judge like any other surface. An ask the judge blocks returns the judge's refusal. Every operator-only ask (plan-scale dispatch included), and every ask the judge leaves without a verdict, is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`, followed by the rule, the cause, `This call was denied; no approval is pending.` and, for an unrecognized command, the recognized form to use. The session prompt says approval-required calls are denied. `ask_user` is not registered.
-- `yolo` comes only from the run's own `--autonomy yolo`. A `settings.yaml` that sets `yolo` does not carry over; the run starts at `default` and says so on stderr.
+- `yolo` comes only from the run's own `--autonomy yolo`. A `settings.yaml` that sets `yolo` does not carry over; the run starts at `default` and says so on stderr. A contained yolo run admits as `default` does and refuses what `default` would deny, with the contained-yolo reason instead of the headless one; unconfined needs `safety.yoloUnconfinedAccepted` in the user settings.
 - Workers it dispatches at `default` keep the `judge` route, because the judge answers without an operator; their operator-authority asks are denied.
 
 ## The safety net
@@ -588,6 +602,8 @@ The safety judge also journals its own `safety.judged` records, and an unattende
 | `safety.snapshots` | `auto` | live | `auto` snapshots a Git work tree before the main agent mutates it; `off` takes none. |
 | `safety.unattendedAfterSeconds` | `300` | live | Seconds a TUI approval card or `ask_user` round waits before Clio denies the call or picks the recommended option. `0` waits forever. User layer only. |
 | `safety.yoloAccepted` | `false` | live | Set by the one-time card that turns `yolo` on interactively; `false` shows the card again. User layer only. |
+| `safety.yoloConfinement` | `contained` | live | What yolo gives up to avoid waiting: `contained` or `unconfined`; see [Contained and unconfined](#contained-and-unconfined). User layer only. |
+| `safety.yoloUnconfinedAccepted` | `false` | live | Set by the unconfined yolo card; unconfined takes effect only with it. User layer only. |
 | `safety.judge.enabled` | `true` | live | The safety judge at `default`. User layer only, like every `safety.judge` key. |
 | `safety.judge.target` | `null` | live | Target the judge asks; `null` asks the session's chat route. |
 | `safety.judge.model` | `null` | live | Model on that target; `null` asks the chat model, or the judge target's default model. |

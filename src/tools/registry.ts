@@ -370,6 +370,15 @@ export interface RegistryDeps {
 	 * off); a read-only session's shell calls run in it at either level.
 	 */
 	containment?: () => { sandbox: boolean; snapshots: boolean; readOnlySandbox?: boolean };
+	/**
+	 * Whether nobody will answer a park, read per call: the operator's contained
+	 * yolo (ob-yolo D1). Admission and the safety judge run exactly as at
+	 * default; a call the judge neither allowed nor blocked is refused back to
+	 * the model instead of parking, and the refusal is remembered so an
+	 * identical repeat is refused at once. Only the main session's registry
+	 * wires it.
+	 */
+	unattendedAsks?: () => boolean;
 	/** The main session's id, which names a read-only run's scratch directory. */
 	currentSessionId?: () => string | undefined;
 	/**
@@ -1794,16 +1803,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		unattended = false,
 	): Extract<RegistryVerdict, { kind: "blocked" }> => {
 		const headless = reason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER) || reason === NO_PARK_LISTENER_REASON;
-		const timedOut = denied && unattended;
-		if (!denied && !headless) return verdict;
+		const contained = reason === CONTAINED_YOLO_REASON;
+		const timedOut = (denied && unattended) || contained;
+		if (!denied && !headless && !contained) return verdict;
 		const refused = withDenial(
 			verdict,
 			"operator_approval",
 			headless
 				? "an operator must approve it, which a headless run cannot do: rerun interactively, or let an approved policy or autonomy level admit it."
-				: timedOut
-					? UNATTENDED_ALLOWED_BY
-					: "the operator must approve it; ask what to do instead of repeating it.",
+				: contained
+					? CONTAINED_YOLO_ALLOWED_BY
+					: timedOut
+						? UNATTENDED_ALLOWED_BY
+						: "the operator must approve it; ask what to do instead of repeating it.",
 			verdict.decision.policy?.ruleId,
 		);
 		if ((headless || timedOut) && refused.denial !== undefined) unattendedDenials.add(refused.denial);
@@ -2249,6 +2261,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			return observeBlockedAttempt(admissionCall, verdict, options) ?? verdict;
 		}
 		const judgeGate = judged.kind === "park" ? { gateReason: judged.gateReason, gateBuild: judged.build } : {};
+		if (deps.principal !== "worker" && deps.unattendedAsks?.() === true) {
+			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
+			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
+				reasonCode: CONTAINED_YOLO_REASON_CODE,
+			});
+			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+			return (
+				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
+				parkDenial(
+					parkAnsweredBlockedVerdict(
+						outcome.decision,
+						admissionCall.tool,
+						loopReason ?? CONTAINED_YOLO_REASON,
+						judged.kind === "park" ? judged.gateReason : undefined,
+					),
+					CONTAINED_YOLO_REASON,
+				)
+			);
+		}
 		// A park settles only through a listener's answer, so with no listener
 		// the promise would never resolve. Refuse the call instead, fail closed.
 		if (permissionListeners.size === 0) {
@@ -2840,6 +2871,12 @@ function safetyJudgeAllowedDecision(ask: SafetyDecision): SafetyDecision {
 const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
 const NO_PARK_LISTENER_REASON =
 	"refused: this call needs operator confirmation and no permission listener is registered to ask for it";
+/** Audit code of a call contained yolo refused because it would have waited for the operator. */
+const CONTAINED_YOLO_REASON_CODE = "contained_yolo_unattended";
+const CONTAINED_YOLO_REASON =
+	"refused: contained yolo runs without the operator, and this call needs their decision. Do not retry it; continue with work that does not need it and name it in your report as left for the operator.";
+const CONTAINED_YOLO_ALLOWED_BY =
+	"only the operator can decide it, when they are back; contained yolo never waits for them.";
 const PARK_ABORT_REASON = "run aborted before the operator decided";
 /** Audit and event code of an identical repeat refused from the turn's denial memory. */
 const DENIED_REPEAT_REASON_CODE = "denied_repeat";

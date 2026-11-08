@@ -236,7 +236,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never asks and runs unsandboxed unless safety.sandbox is required; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Its first activation asks you to accept it once, and it is refused as root outside a container.",
+		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never waits for you: it keeps default's sandbox and safety judge, and a call that would need your approval is refused back to Clio instead of asking. Unconfined yolo (safety.yoloConfinement, accepted once) skips approvals and the sandbox; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Yolo's first activation asks you to accept it once, and it is refused as root outside a container.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -462,6 +462,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"telemetry.mode": ["standard", "research"],
 	"safety.autonomy": ["default", "yolo"],
+	"safety.yoloConfinement": ["contained", "unconfined"],
 	"safety.sandbox": ["auto", "required", "off"],
 	"safety.sandboxUnixSockets": ["block", "allow"],
 	"safety.snapshots": ["auto", "off"],
@@ -571,7 +572,15 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.yoloAccepted": [
 		"Yolo accepted",
-		"Set when you accept the one-time card that turns yolo on: no approval stops, no sandbox by default, only the yolo floor blocks. Turn it off to see the card again. User settings only.",
+		"Set when you accept the one-time card that turns yolo on. Turn it off to see the card again. User settings only.",
+	],
+	"safety.yoloConfinement": [
+		"Yolo confinement",
+		"contained keeps default's sandbox, snapshots and safety judge, and refuses back to the agent what would wait for you, so nothing stops. unconfined is the skip-permissions yolo: no sandbox unless safety.sandbox is required, only the yolo floor and your approved safety.yaml rules block, and it has its own one-time card. User settings only.",
+	],
+	"safety.yoloUnconfinedAccepted": [
+		"Unconfined yolo accepted",
+		"Set when you accept the separate card for unconfined yolo; unconfined takes effect only when this is on, headless runs included. Turn it off to see that card again. User settings only.",
 	],
 	"safety.judge.enabled": [
 		"Safety judge",

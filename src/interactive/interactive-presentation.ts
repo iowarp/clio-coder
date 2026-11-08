@@ -15,9 +15,9 @@ import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
-
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
@@ -966,6 +966,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getMotionEnabled: () => motionEnabled(),
 		isStreaming: () => deps.chat.isStreaming(),
 		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
+		getYoloConfinement: () => effectiveYoloConfinement(deps.getSettings?.().safety),
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		...(deps.getPermissionTerms ? { getPermissionTerms: deps.getPermissionTerms } : {}),

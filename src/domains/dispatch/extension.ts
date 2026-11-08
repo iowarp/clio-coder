@@ -213,7 +213,7 @@ import {
 } from "../providers/index.js";
 import { runtimeNotRegistered } from "../providers/retired-runtimes.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
-import type { AutonomyLevel } from "../safety/autonomy.js";
+import { type AutonomyLevel, admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
 import { assessFinishContract, type FinishContractAssessment } from "../safety/finish-contract.js";
 import type { GitHookDriftGuard } from "../safety/hook-drift.js";
@@ -539,6 +539,18 @@ interface RunTokenMeter {
 
 /** How long after a long-lived surface asks for it route history warming begins. */
 const ROUTE_HISTORY_WARM_DELAY_MS = 1_500;
+
+/** The level a worker's permit and ask routing take from the operator's settings: contained yolo is default. */
+function operatorAdmissionAutonomy(
+	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined | null,
+): AutonomyLevel {
+	return admissionAutonomy(settings?.safety.autonomy ?? "default", effectiveYoloConfinement(settings?.safety));
+}
+
+/** Whether the operator runs contained yolo, which never waits for a person. */
+function operatorContainedYolo(settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined | null): boolean {
+	return containedYolo(settings?.safety.autonomy ?? "default", effectiveYoloConfinement(settings?.safety));
+}
 
 function meterSpend(meter: RunTokenMeter): RunUsageFacts {
 	return meter.usage?.facts ?? unobservedRunUsageFacts();
@@ -2297,10 +2309,11 @@ function resolveDispatchPermitOnce(
 		...(spec.permissions !== undefined ? { declared: spec.permissions } : {}),
 		...(req.permitNarrowing !== undefined ? { narrowing: req.permitNarrowing } : {}),
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
-		operatorAutonomy: settings?.safety.autonomy ?? "default",
+		// Contained yolo hands workers default's permit and routes (ob-yolo D1).
+		operatorAutonomy: operatorAdmissionAutonomy(settings),
 		mode: effectiveWorkerPermissionMode({
 			mode: settings?.fleet.permissions.mode ?? "deny",
-			autonomy: settings?.safety.autonomy ?? "default",
+			autonomy: operatorAdmissionAutonomy(settings),
 			judgeEnabled: settings?.safety.judge.enabled === true,
 			judgeSeated,
 			boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
@@ -3705,7 +3718,10 @@ export function createDispatchBundle(
 	const active = new Map<string, ActiveRun>();
 	// Phase D: the trusted broker for worker asks routed to the main agent. It
 	// is process-local, like the workers it answers.
-	const grantAttended = options?.workerPermissionResponder === true;
+	// Contained yolo never waits for the operator, so its worker asks and
+	// operator rails are answered as unattended even where a person could be.
+	const grantAttended = (): boolean =>
+		options?.workerPermissionResponder === true && !operatorContainedYolo(getEffectiveSettings());
 	// One merge card is on screen at a time. A batch can withhold several
 	// members, each waits its turn here while the members that merge cleanly
 	// have already landed.
@@ -3845,7 +3861,7 @@ export function createDispatchBundle(
 			// An operator rail goes straight to the operator's card when this
 			// process has one; an ordinary ask waits for the main agent, whose
 			// dispatch call yields on it.
-			requested(record.approvalAuthority === "operator" && grantAttended);
+			requested(record.approvalAuthority === "operator" && grantAttended());
 			// The safety judge decides a judge-routed ask, so the main agent is not woken for it.
 			if (record.approvalAuthority === "main" && record.reviewer === undefined) {
 				const view = grantView(record);
@@ -7310,11 +7326,12 @@ export function createDispatchBundle(
 					readOnly: lifecycle.readOnly,
 					budget: lifecycle.budget,
 					...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
-					workerPermissionResponder: options?.workerPermissionResponder === true,
+					workerPermissionResponder:
+						options?.workerPermissionResponder === true && !operatorContainedYolo(lifecycle.settings),
 					permit: lifecycle.permit,
 					...(grantAttempt !== undefined ? { grantAttempt } : {}),
 					...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
-					mainAutonomy: lifecycle.settings?.safety.autonomy ?? "default",
+					mainAutonomy: operatorAdmissionAutonomy(lifecycle.settings),
 					...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
 				},
 				config ?? undefined,
@@ -10904,7 +10921,7 @@ export function createDispatchBundle(
 			// Changed git hooks are the operator's call: attended, the request
 			// reaches the operator's card and an allow accepts the files it named;
 			// with nobody to ask it is denied.
-			if (!grantAttended) {
+			if (!grantAttended()) {
 				grantBroker.decide(record.requestId, { decision: "deny", issuer: "main", reason: verdict.reason });
 				return;
 			}
@@ -10986,7 +11003,7 @@ export function createDispatchBundle(
 		const verdict = evaluateMainGrant({
 			record,
 			autonomy: input.autonomy,
-			attended: grantAttended,
+			attended: grantAttended(),
 			safety,
 			...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
 		});

@@ -22,7 +22,7 @@ tests:
   - "tests/contracts/bash-exec-settlement.test.ts"
 invariants:
   - "Project settings and project.local settings are read only when the project surface snapshot verdict is trusted; otherwise their layer blob is dropped and a trust notice is recorded as an issue."
-  - "Operator-only safety keys (scratchRoots, sandboxPassEnv, sandboxUnixSockets, unattendedAfterSeconds, yoloAccepted, judge) and trustedUnmediated are stripped from project layers, with an issue recorded for each."
+  - "Operator-only safety keys (scratchRoots, sandboxPassEnv, sandboxUnixSockets, unattendedAfterSeconds, yoloAccepted, yoloConfinement, yoloUnconfinedAccepted, judge) and trustedUnmediated are stripped from project layers, with an issue recorded for each."
   - "A bash command that would run in the main session without a sandbox plan is refused with a not-spawned result rather than executed."
   - "A run record directory is refused if the records root resolves outside the workspace root, and a pre-existing directory with the same run id is an error."
 validate:
@@ -69,7 +69,7 @@ validate:
 
 ### Operator-only keys and runtime trust
 
-`OPERATOR_ONLY_SAFETY_KEYS` in `src/core/settings-layers.ts` lists the `safety.*` keys that a project layer may not set: `scratchRoots`, `sandboxPassEnv`, `sandboxUnixSockets`, `unattendedAfterSeconds`, `yoloAccepted`, and `judge`. `stripProjectOperatorSafety` removes each present key, pushes an issue with `origin` and a `safety.<key>` path, and returns the cleaned blob. `stripProjectRuntimeTrust` does the same for `trustedUnmediated` on `targets[]` entries and `integrations.externalAgents.entries[]`. The code comments state the reason: a repository could otherwise grant itself write authority or hand its commands the operator's tokens.
+`OPERATOR_ONLY_SAFETY_KEYS` in `src/core/settings-layers.ts` lists the `safety.*` keys that a project layer may not set: `scratchRoots`, `sandboxPassEnv`, `sandboxUnixSockets`, `unattendedAfterSeconds`, `yoloAccepted`, `yoloConfinement`, `yoloUnconfinedAccepted`, and `judge`. `stripProjectOperatorSafety` removes each present key, pushes an issue with `origin` and a `safety.<key>` path, and returns the cleaned blob. `stripProjectRuntimeTrust` does the same for `trustedUnmediated` on `targets[]` entries and `integrations.externalAgents.entries[]`. The code comments state the reason: a repository could otherwise grant itself write authority or hand its commands the operator's tokens.
 
 ### Writing settings
 

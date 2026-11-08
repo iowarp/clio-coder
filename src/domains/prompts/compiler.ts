@@ -10,7 +10,7 @@ import { turnAllowsTool } from "../../core/turn-constraints.js";
 import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
-import { isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
+import { isAutonomyLevel, modelMayActivateSkills, type YoloConfinement } from "../safety/autonomy.js";
 import { askRouteForMode, type WorkerPermit, workerPermitPromptLine } from "../safety/worker-permit.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { DEMO_GUIDANCE } from "./demo-guidance.js";
@@ -80,6 +80,11 @@ export interface SessionPromptInputs {
 	 * levels, and the safety section must say that instead of promising a pause.
 	 */
 	headless?: boolean;
+	/**
+	 * The operator's yolo confinement (ob-yolo D1). Read only at yolo; absent
+	 * reads as contained, so only the unconfined opt-out needs carrying.
+	 */
+	yoloConfinement?: YoloConfinement;
 	/**
 	 * False when no operator message can arrive mid-run: a headless run
 	 * without a steer channel. Undefined reads as true.
@@ -242,12 +247,14 @@ function lookupFragment(table: FragmentTable, id: string, role: string): LoadedF
  * section and the dispatch worker safety-posture message must describe the
  * same enforced behavior, so neither side duplicates this switch.
  */
-function safetyOneLiner(level: string): string {
+function safetyOneLiner(level: string, confinement?: YoloConfinement): string {
 	switch (level) {
 		case "default":
 			return "workspace edits run; shell commands run contained in the OS sandbox when the host has one, and what would need approval is first reviewed by the safety judge.";
 		case "yolo":
-			return "nothing stops for approval and nobody answers questions; only the yolo floor and operator-authored rules block.";
+			return confinement === "unconfined"
+				? "unconfined: nothing stops for approval and nobody answers questions; only the yolo floor and operator-authored rules block."
+				: "contained: default's sandbox and safety judge apply, nothing waits for the operator, and a call the judge does not allow is refused instead of asked.";
 		default:
 			return "follow the active safety contract.";
 	}
@@ -272,10 +279,27 @@ export const SESSION_APPROVAL_SEMANTICS =
 export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
 	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run.";
 
-function renderSafetySection(safetyFragment: LoadedFragment, level: string, headless: boolean): string {
-	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level)}`;
+/** The safety fragment for a level: yolo has one body per confinement under the one `safety.yolo` posture. */
+function safetyFragmentFor(
+	table: FragmentTable,
+	level: string,
+	confinement: YoloConfinement | undefined,
+): LoadedFragment {
+	return level === "yolo" && confinement === "unconfined"
+		? lookupFragment(table, "safety.yolo-unconfined", "safety")
+		: lookupFragment(table, `safety.${level}`, "safety");
+}
+
+function renderSafetySection(
+	safetyFragment: LoadedFragment,
+	level: string,
+	headless: boolean,
+	confinement?: YoloConfinement,
+): string {
+	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level, confinement)}`;
 	const body = safetyFragment.body.trim();
-	// Nothing parks under yolo (#407), so no line says what parking means.
+	// Nothing parks under yolo of either confinement (#407): contained yolo
+	// refuses what would park, which its body says, so no line says what parking means.
 	const approval = level === "yolo" ? null : headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
 	if (body.length === 0) return oneLine;
 	return approval === null ? `${oneLine}\n\n${body}` : `${oneLine}\n${approval}\n\n${body}`;
@@ -284,14 +308,14 @@ function renderSafetySection(safetyFragment: LoadedFragment, level: string, head
 /** A host policy transition replaces every posture-dependent clause together (#423). */
 export function renderSessionPostureUpdate(table: FragmentTable, level: string, inputs: SessionPromptInputs): string {
 	if (!isAutonomyLevel(level)) throw new Error("Invalid session posture");
-	const safety = lookupFragment(table, `safety.${level}`, "safety");
+	const safety = safetyFragmentFor(table, level, inputs.yoloConfinement);
 	const contract = renderToolContractBlock(inputs, level);
 	const hasEnding = contract.includes("## Ending a turn");
 	return [
 		"[Clio Coder host policy update]",
 		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
 		"# Safety",
-		renderSafetySection(safety, level, inputs.headless === true),
+		renderSafetySection(safety, level, inputs.headless === true, inputs.yoloConfinement),
 		...(hasEnding
 			? [renderTurnEndingContract((inputs.toolNames ?? []).includes("ask_user"), level === "yolo").join("\n")]
 			: []),
@@ -873,9 +897,13 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSessionPrompt {
 	const identity = lookupFragment(table, inputs.identity, "identity");
 	const operatingContract = lookupFragment(table, inputs.operatingContract, "operating contract");
-	const safety = lookupFragment(table, inputs.safety, "safety");
-	const autonomyLevel = safety.id.startsWith("safety.") ? safety.id.slice("safety.".length) : safety.id;
+	const posture = lookupFragment(table, inputs.safety, "safety");
+	const autonomyLevel = posture.id.startsWith("safety.") ? posture.id.slice("safety.".length) : posture.id;
 	const session = inputs.sessionInputs;
+	const safety =
+		autonomyLevel === "yolo" && session.yoloConfinement === "unconfined"
+			? safetyFragmentFor(table, autonomyLevel, session.yoloConfinement)
+			: posture;
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -1021,7 +1049,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 						.join("\n")
 				: "",
 		],
-		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true)],
+		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, session.yoloConfinement)],
 		["runtime", [renderRuntimeBlock(session), modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
 		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],

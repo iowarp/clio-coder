@@ -68,6 +68,10 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"safety.unattendedAfterSeconds",
 	// Read at each interactive yolo activation, so the next toggle observes it (#407).
 	"safety.yoloAccepted",
+	// The main registry and dispatch read it at every admission and permit, so
+	// the next call observes a change; the prompt follows on the next turn.
+	"safety.yoloConfinement",
+	"safety.yoloUnconfinedAccepted",
 	// The judge reads its settings at every review, so the next parked call
 	// observes a change.
 	"safety.judge",
