@@ -20,11 +20,11 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { shellQuote } from "../../../core/shell-quote.js";
-import { clioStateDir } from "../../../core/xdg.js";
+import { clioCacheDir, clioStateDir } from "../../../core/xdg.js";
 import type { HostLayout, MuxHostPlatform } from "./platform.js";
 
 /**
@@ -44,20 +44,25 @@ export interface PosixHostOptions {
 	uid?: number;
 	/** Clio's state root; the private host roots live under `<state>/mux/<hash>`. */
 	stateDir?: () => string;
+	/** Clio's cache root, the last fallback for the runtime directory before /tmp. */
+	cacheDir?: () => string;
 }
 
 /**
  * Runtime directories to try, most preferred first; a candidate that would
  * make the socket path too long is skipped, and one that cannot be made
- * private is passed over when the host is laid out. Linux uses the session's
- * `XDG_RUNTIME_DIR`, then a uid-named directory in the operator's `TMPDIR`;
- * macOS uses its per-user `TMPDIR`. Both end at a uid-named directory in /tmp.
+ * private and writable is passed over when the host is laid out. Linux uses
+ * the session's `XDG_RUNTIME_DIR`, then a uid-named directory in the operator's
+ * `TMPDIR`; macOS uses its per-user `TMPDIR`. Both then try `<state>/mux/run`
+ * and `<cache>/run`, which a launcher's write fence leaves writable when it
+ * makes `/run/user/<uid>` read-only, and end at a uid-named directory in /tmp.
  */
 export function posixRuntimeDirCandidates(
 	env: NodeJS.ProcessEnv,
 	session: string,
 	platform: NodeJS.Platform,
 	uid: number,
+	clioRoots: { state?: string; cache?: string } = {},
 ): string[] {
 	const fits = (dir: string): boolean => Buffer.byteLength(join(dir, `${session}-client.sock`)) <= SOCKET_PATH_BUDGET;
 	const preferred: string[] = [];
@@ -68,6 +73,8 @@ export function posixRuntimeDirCandidates(
 		// TMPDIR may be shared between users, so the directory carries the uid.
 		if (env.TMPDIR?.startsWith("/")) preferred.push(join(env.TMPDIR, `clio-coder-${uid}`));
 	}
+	if (clioRoots.state !== undefined) preferred.push(join(clioRoots.state, "mux", "run"));
+	if (clioRoots.cache !== undefined) preferred.push(join(clioRoots.cache, "run"));
 	const fallback = `/tmp/clio-coder-${uid}`;
 	return [...new Set([...preferred.filter(fits), fallback])];
 }
@@ -89,11 +96,35 @@ function ensurePrivateDir(dir: string, uid: number): void {
 	if ((stat.mode & 0o077) !== 0) chmodSync(dir, 0o700);
 }
 
-function runtimeDir(env: NodeJS.ProcessEnv, session: string, platform: NodeJS.Platform, uid: number): string {
+/**
+ * A candidate is usable only if the host's own subdirectory can be made in it
+ * and written. An existing `$XDG_RUNTIME_DIR/clio-coder` under a read-only
+ * fence passes the private-directory check, then fails with EROFS on the
+ * session's subdirectory, which used to drop the launch to the plain terminal.
+ */
+function ensureWritableRuntime(candidate: string, session: string, uid: number): void {
+	ensurePrivateDir(candidate, uid);
+	const own = posixHostRuntimeDir(join(candidate, `${session}.sock`));
+	ensurePrivateDir(own, uid);
+	const probe = join(own, `.probe-${process.pid}`);
+	writeFileSync(probe, "", { flag: "w", mode: 0o600 });
+	rmSync(probe, { force: true });
+}
+
+function runtimeDir(
+	env: NodeJS.ProcessEnv,
+	session: string,
+	platform: NodeJS.Platform,
+	uid: number,
+	clioRoots: { state?: string; cache?: string },
+): string {
 	const failures: string[] = [];
-	for (const candidate of posixRuntimeDirCandidates(env, session, platform, uid)) {
+	for (const candidate of posixRuntimeDirCandidates(env, session, platform, uid, clioRoots)) {
 		try {
-			ensurePrivateDir(candidate, uid);
+			// Clio's own roots may not have the parent yet; system roots are never created.
+			const underClio = [clioRoots.state, clioRoots.cache].some((r) => r !== undefined && candidate.startsWith(`${r}/`));
+			if (underClio) mkdirSync(dirname(candidate), { recursive: true, mode: 0o700 });
+			ensureWritableRuntime(candidate, session, uid);
 			return candidate;
 		} catch (error) {
 			failures.push(error instanceof Error ? error.message : String(error));
@@ -159,6 +190,7 @@ function hostSocketPath(
 	session: string,
 	platform: NodeJS.Platform,
 	owner: number,
+	clioRoots: { state?: string; cache?: string },
 ): string {
 	const record = join(root, "socket-path");
 	try {
@@ -170,7 +202,7 @@ function hostSocketPath(
 	} catch {
 		// No record, or its socket is gone: choose afresh.
 	}
-	const socketPath = join(runtimeDir(env, session, platform, owner), `${session}.sock`);
+	const socketPath = join(runtimeDir(env, session, platform, owner, clioRoots), `${session}.sock`);
 	writeIfChanged(record, `${socketPath}\n`, 0o600);
 	return socketPath;
 }
@@ -184,13 +216,16 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 	const platform = options.platform ?? process.platform;
 	const uid = (): number => options.uid ?? process.getuid?.() ?? 0;
 	const stateDir = options.stateDir ?? clioStateDir;
+	// An injected state root (tests, other homes) keeps the fallback inside that root unless a cache root is given too.
+	const cacheDir = options.cacheDir ?? (options.stateDir ? undefined : clioCacheDir);
 	return {
 		hostLayout({ session, env }): HostLayout {
 			const owner = uid();
 			const root = posixHostRoot(stateDir(), session);
 			mkdirSync(join(stateDir(), "mux"), { recursive: true, mode: 0o700 });
 			ensurePrivateDir(root, owner);
-			const socketPath = hostSocketPath(root, env, session, platform, owner);
+			const clioRoots = { state: stateDir(), ...(cacheDir ? { cache: cacheDir() } : {}) };
+			const socketPath = hostSocketPath(root, env, session, platform, owner, clioRoots);
 			const privateRuntime = posixHostRuntimeDir(socketPath);
 			ensurePrivateDir(privateRuntime, owner);
 			const configHome = join(root, "config");

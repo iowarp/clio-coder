@@ -102,6 +102,35 @@ describe("private pane host layout (POSIX)", () => {
 		equal(statSync(candidates[0]).mode & 0o777, 0o700);
 	});
 
+	it("falls back to Clio's state root when the runtime dir exists but cannot be written", (t) => {
+		const uid = process.getuid?.() ?? 0;
+		if (uid === 0) {
+			t.skip("root ignores directory permissions");
+			return;
+		}
+		const scratch = mkdtempSync(join(tmpdir(), "h"));
+		const session = "clio-coder-c";
+		const fenced = join(scratch, "run");
+		mkdirSync(join(fenced, "clio-coder"), { recursive: true, mode: 0o700 });
+		chmodSync(join(fenced, "clio-coder"), 0o500);
+		t.after(() => {
+			chmodSync(join(fenced, "clio-coder"), 0o700);
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		const state = join(scratch, "s");
+		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", uid, { state, cache: join(scratch, "c") }), [
+			join(state, "mux", "run"),
+			join(scratch, "c", "run"),
+			`/tmp/clio-coder-${uid}`,
+		]);
+		const layout = createPosixHostPlatform({ platform: "linux", stateDir: () => state }).hostLayout({
+			session,
+			env: { XDG_RUNTIME_DIR: fenced },
+		});
+		equal(layout.socketPath, join(state, "mux", "run", `${session}.sock`));
+		equal(statSync(join(state, "mux", "run", "c")).mode & 0o777, 0o700);
+	});
+
 	it("lays out a private root, socket and shim, and hands the operator's XDG roots to the shim", (t) => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-private-host-"));
 		// A short fixture session keeps Unix sockets inside the harness root.
