@@ -1,6 +1,6 @@
 import { ceilChars } from "../session/context-accounting.js";
 import { keptLessonLabel, projectKeptLesson } from "./lesson-projection.js";
-import { eligibleMemoryRecords } from "./operations.js";
+import { eligibleMemoryRecords, memoryRecordEligible } from "./operations.js";
 import {
 	type MemoryRelevanceInput,
 	type RankedMemoryCandidate,
@@ -13,7 +13,6 @@ import type {
 	MemoryRepositoryIdentity,
 	MemoryRuntimeIdentity,
 	MemoryScope,
-	MemoryStatus,
 } from "./types.js";
 
 export const MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET = 400;
@@ -156,6 +155,14 @@ export function memorySectionBlocks(section: string): Array<{ id: string; text: 
 
 const MEMORY_UPDATE_HEADING = "# Memory update";
 
+/** Whether a record a compiled prompt carries may still stand there: the fresh-selection eligibility, or why not. */
+export type MemoryRecordStanding = "eligible" | "withdrawn" | "deleted";
+
+export function memoryRecordStanding(record: MemoryRecord | undefined): MemoryRecordStanding {
+	if (record === undefined) return "deleted";
+	return memoryRecordEligible(record) ? "eligible" : "withdrawn";
+}
+
 /**
  * The records a live section carries that the session's frozen `# Memory`
  * section lacks and no earlier host-framed reminder in the history delivered.
@@ -168,18 +175,21 @@ export function memorySectionDelta(
 	frozen: string,
 	live: string,
 	framed: readonly string[],
-	statuses: ReadonlyMap<string, MemoryStatus | "deleted"> = new Map(),
+	standings: ReadonlyMap<string, MemoryRecordStanding> = new Map(),
 ): string {
+	const lapsed = (id: string): boolean => {
+		const standing = standings.get(id);
+		return standing === "withdrawn" || standing === "deleted";
+	};
 	const known = memorySectionBlocks(frozen).map((block) => block.text);
 	const delivered = [frozen, ...framed.filter((text) => text.includes(MEMORY_UPDATE_HEADING))];
 	const withdrawn = [...new Set(delivered.flatMap((text) => memorySectionBlocks(text).map((block) => block.id)))]
-		.filter((id) => statuses.get(id) === "rejected" || statuses.get(id) === "deleted")
+		.filter(lapsed)
 		.map((id) => `- [${id}] withdrawn. Do not use this memory record.`)
 		.filter((line) => !framed.some((text) => text.includes(line)));
 	const fresh = memorySectionBlocks(live).filter(
 		(block) =>
-			statuses.get(block.id) !== "rejected" &&
-			statuses.get(block.id) !== "deleted" &&
+			!lapsed(block.id) &&
 			!known.includes(block.text) &&
 			!framed.some((text) => text.includes(block.text)),
 	);

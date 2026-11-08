@@ -152,7 +152,7 @@ import {
 	MemoryRuntime,
 	markMemoryOffRecording,
 	memoryFlowSweepNotice,
-	memoryStatus,
+	memoryRecordStanding,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
@@ -4794,12 +4794,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemoryRecordStatuses: (ids) => {
 			try {
 				const records = new Map(readMemoryStoreSnapshot(clioDataDir()).records.map((record) => [record.id, record]));
-				return new Map(
-					ids.map((id) => {
-						const record = records.get(id);
-						return [id, record ? memoryStatus(record) : "deleted"] as const;
-					}),
-				);
+				return new Map(ids.map((id) => [id, memoryRecordStanding(records.get(id))] as const));
 			} catch {
 				// An unreadable store cannot establish a withdrawal (#423).
 				return new Map();

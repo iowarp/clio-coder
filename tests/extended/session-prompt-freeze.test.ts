@@ -8,6 +8,8 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
+import { buildMemoryPromptSection, memoryRecordStanding } from "../../src/domains/memory/prompt-section.js";
+import type { MemoryRecord } from "../../src/domains/memory/types.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
@@ -158,7 +160,12 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 
 	async function chatFixture(
 		memory: { section: string },
-		options: { autonomy?: { level: AutonomyLevel }; policyUpdates?: boolean; memoryOn?: { value: boolean } } = {},
+		options: {
+			autonomy?: { level: AutonomyLevel };
+			policyUpdates?: boolean;
+			memoryOn?: { value: boolean };
+			memoryRecords?: ReadonlyMap<string, MemoryRecord>;
+		} = {},
 	) {
 		const requests: Context[] = [];
 		faux.setResponses(
@@ -243,6 +250,12 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			prompts,
 			getMemorySection: () => memory.section,
 			...(options.memoryOn ? { memoryEnabled: () => options.memoryOn?.value ?? true } : {}),
+			...(options.memoryRecords
+				? {
+						getMemoryRecordStatuses: (ids: readonly string[]) =>
+							new Map(ids.map((id) => [id, memoryRecordStanding(options.memoryRecords?.get(id))] as const)),
+					}
+				: {}),
 			...(session && state ? { session, readSessionEntries: () => readCurrentEntries(state) } : {}),
 		});
 		return { loop, requests };
@@ -282,6 +295,38 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			// History already carries the record, so the next turn does not repeat it.
 			const next = await assertPrefixKept(f.requests[1] as Context, f.requests[2] as Context);
 			strictEqual(next.includes("Never edit generated wiki pages."), false, next);
+		} finally {
+			f.loop.dispose();
+		}
+	});
+
+	it("withdraws a record contradicted mid-session from the held prompt, as fresh selection excludes it", async () => {
+		const record: MemoryRecord = {
+			id: "mem-contradicted",
+			scope: "global",
+			key: "solver-step",
+			lesson: "Use a step size of 0.5 for the solver.",
+			evidenceRefs: ["run:x"],
+			appliesWhen: [],
+			avoidWhen: [],
+			confidence: 0.9,
+			createdAt: "2026-11-01T00:00:00.000Z",
+			approved: true,
+		};
+		const records = new Map([[record.id, record]]);
+		const memory = { section: buildMemoryPromptSection([...records.values()]).section };
+		const f = await chatFixture(memory, { memoryRecords: records });
+		try {
+			await f.loop.submit("first task");
+			ok(systemText(f.requests[0]).includes("Use a step size of 0.5"));
+			// A claim regression links the record; it stays approved, and fresh selection now drops it.
+			records.set(record.id, { ...record, regressions: ["contradicted by claim:c2"] });
+			memory.section = buildMemoryPromptSection([...records.values()]).section;
+			strictEqual(memory.section, "");
+			await f.loop.submit("second task");
+			strictEqual(systemText(f.requests[1]), systemText(f.requests[0]));
+			const tail = await assertPrefixKept(f.requests[0] as Context, f.requests[1] as Context);
+			ok(tail.includes("- [mem-contradicted] withdrawn. Do not use this memory record."), tail);
 		} finally {
 			f.loop.dispose();
 		}

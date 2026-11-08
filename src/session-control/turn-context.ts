@@ -94,8 +94,11 @@ import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-s
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
-import { memorySectionBlocks, memorySectionDelta } from "../domains/memory/prompt-section.js";
-import type { MemoryStatus } from "../domains/memory/types.js";
+import {
+	type MemoryRecordStanding,
+	memorySectionBlocks,
+	memorySectionDelta,
+} from "../domains/memory/prompt-section.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
@@ -241,7 +244,7 @@ export interface TurnContextDeps {
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
 	/** False while `context.memory.enabled` is off: no section, held or live, and no update reminder. */
 	memoryEnabled?: (() => boolean) | undefined;
-	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryStatus | "deleted">) | undefined;
+	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryRecordStanding>) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/** Live source of each active route for the attended prompt; absent for headless runs. */
 	getRouteSources?: (() => Readonly<Record<RouteName, RouteSource>>) | undefined;
