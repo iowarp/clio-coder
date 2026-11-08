@@ -648,3 +648,31 @@ test("a read-only run admits a dispatch, whose workers inherit read-only, and re
 		strictEqual(steer.kind === "deny" && steer.code, "read_only", principal);
 	}
 });
+
+test("an execute-class MCP tool call is not contained by the sandbox and goes to the judge under its own rule", async () => {
+	const cwd = workspace("clio-mcp-execute-");
+	const session = defaultSession(cwd, { sandbox: true, snapshots: false });
+	const sent: unknown[] = [];
+	const name = "mcp_stub__send_note" as ToolSpec["name"];
+	session.registry.register({
+		name,
+		description: "Sends a note. Local MCP server stub (user), trusted with action class execute.",
+		parameters: bashTool.parameters,
+		baseActionClass: "execute",
+		safetyCall: () => ({ tool: ToolNames.Bash, args: { command: "python3 stub_mcp.py" }, projection: "mcp-server" }),
+		run: async (args) => {
+			sent.push(args);
+			return { kind: "ok", output: "sent" };
+		},
+	});
+	const result = await session.registry.invoke({ tool: name, args: { text: "hi" } });
+	strictEqual(result.kind, "blocked", JSON.stringify(result));
+	deepStrictEqual(sent, [], "an unjudged ask never reaches the server");
+	strictEqual(session.reviewed.length, 1);
+	const decision = session.reviewed[0]?.decision;
+	strictEqual(decision?.kind, "ask");
+	deepStrictEqual(
+		{ ruleId: decision?.policy?.ruleId, source: decision?.policy?.policySource, sandbox: decision?.policy?.shellSandbox },
+		{ ruleId: "mcp-execute", source: "mcp-trust", sandbox: undefined },
+	);
+});

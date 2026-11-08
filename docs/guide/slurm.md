@@ -91,6 +91,11 @@ the trust-record class in every scope. The entries are covered by the declaratio
 trust digest, so changing them in a project or plugin declaration requires
 re-approval. `unknown` asks for one-shot approval
 in `default`, runs in `yolo`, and is denied on read-only dispatched runs.
+`execute` also asks in `default`, under rule `mcp-execute`: the call runs on
+the server's own process, which the main-session sandbox does not hold, so the
+safety judge reviews it first and a headless run denies it unless the judge
+allows it. The server's launch command still passes the shell safety rules,
+and `yolo` runs the call.
 See [MCP configuration](configuration-reference.md).
 
 For a trusted user-scope server declared with the id `slurm`, Clio Coder

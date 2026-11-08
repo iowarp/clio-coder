@@ -48,8 +48,10 @@ export interface ClassifierCall {
 	/**
 	 * Set only by a trusted tool's own `safetyCall` projection, never from
 	 * model arguments: the effect is that tool's fixed argv spelled as bash.
+	 * `mcp-server` is an execute-class MCP tool's launch vector: the call runs
+	 * on that already running server, never in the main-session sandbox.
 	 */
-	projection?: "typed-git";
+	projection?: "typed-git" | "mcp-server";
 }
 
 export interface Classification {

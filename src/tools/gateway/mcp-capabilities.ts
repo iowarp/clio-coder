@@ -676,11 +676,14 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		};
 		// The execute trust class projects the launch vector to a bash command
 		// so the policy engine applies the shell rules to it, as an extension
-		// command does; read runs everywhere and unknown asks everywhere.
+		// command does; read runs everywhere and unknown asks everywhere. The
+		// marker keeps the main-session sandbox from vouching for a call that
+		// runs on the server's own process.
 		if (trustClass === "execute") {
 			spec.safetyCall = (): ClassifierCall => ({
 				tool: "bash",
 				args: { command: [declaration.command, ...declaration.args].map(quoted).join(" ") },
+				projection: "mcp-server",
 			});
 		}
 		return spec;

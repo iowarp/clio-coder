@@ -140,6 +140,7 @@ import {
 
 export type SafetyPolicySource =
 	| "damage-control:base"
+	| "mcp-trust"
 	| "project-policy"
 	| "project-policy-invalid"
 	| "builtin-command-allowlist"
@@ -1609,8 +1610,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Unrecognized checks are left to the autonomy mapping: default asks,
 			// while yolo admits them headlessly.
 			if (bash.kind === "block") return blockDecision(base, bash);
-			if (bash.kind === "ask") return settle(askDecision(base, bash));
-			return settle(allowDecision(base, bash));
+			const scanned = call.projection === "mcp-server" ? mcpExecutePolicy(bash) : bash;
+			if (scanned.kind === "ask") return settle(askDecision(base, scanned));
+			return settle(allowDecision(base, scanned));
 		}
 
 		const allowInput: DeferredAsk = {
@@ -2273,6 +2275,31 @@ function evaluateBashPolicy(
 	};
 }
 
+/** Rule id of an execute-class MCP tool call, whose admission the autonomy level decides. */
+export const MCP_EXECUTE_RULE_ID = "mcp-execute";
+
+/**
+ * An execute-class MCP tool call through its launch vector's shell scan. The
+ * scan's rails still decide, but the allowlist's recognition of the launch
+ * command says nothing about the tool call, so the call is never recognized
+ * and carries the MCP trust rule rather than a bash rule.
+ */
+function mcpExecutePolicy(
+	bash: ReturnType<typeof evaluateBashPolicy>,
+): ReturnType<typeof evaluateBashPolicy> {
+	if (bash.policySource !== "builtin-command-allowlist") return bash;
+	return {
+		...bash,
+		ruleId: MCP_EXECUTE_RULE_ID,
+		reasonCode: MCP_EXECUTE_RULE_ID,
+		reasons: [
+			"an execute-class MCP tool call runs on its trusted server's own process, outside the main-session sandbox; the autonomy level decides admission",
+		],
+		policySource: "mcp-trust",
+		execRecognition: "unrecognized",
+	};
+}
+
 /**
  * The roots stay lexical: `cwd` is already canonical and the settings loader
  * refuses a symlinked `.clio-coder`, so resolving them would only add the two
@@ -2749,6 +2776,8 @@ function containedShellCall(
 ): boolean {
 	if (!runsProjectCommand(call, verifyCommand)) return false;
 	if (call.args?.unsandboxed === true) return false;
+	// An MCP tool runs on its server's own process, which no main-session sandbox holds.
+	if (call.projection === "mcp-server") return false;
 	return !reachesOutward(call, classification, verifyCommand);
 }
 

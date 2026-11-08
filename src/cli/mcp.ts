@@ -41,8 +41,9 @@ JSON responses (--json):
       serverPolicyRefusal?} | {tool, error}]}
     Launches one trusted server through the same client the gateway uses,
     lists its tools, makes each --call in order, and closes it. Each call is
-    admitted as a session admits it; one that needs approval is refused, as
-    in a headless run, and a tool the server does not list is never sent. A
+    admitted as a session admits it; one that needs approval is refused,
+    because no operator or safety judge reviews it here (a headless run's
+    judge may allow it), and a tool the server does not list is never sent. A
     call whose request gets no answer is recorded as {tool, error} and ends
     the calls; a JSON-RPC error answer is that call's error.
     An untrusted or stale declaration is never launched. The supported seam for external
@@ -402,8 +403,9 @@ async function mcpTestOutput(id: string, calls: ReadonlyArray<McpTestCall>): Pro
 		// in, so `mcp test` admits exactly what a session admits: action class,
 		// confirmation rule, execute projection, information flow and repeat
 		// refusal. Arguments are not checked against the tool's input schema;
-		// the server validates them. No park listener exists here, so an ask is
-		// refused the way a headless run refuses it instead of waiting.
+		// the server validates them. No park listener or safety judge exists
+		// here, so an ask is refused instead of waiting; a headless run's judge
+		// may still allow the same call.
 		const results: Array<Record<string, unknown>> = [];
 		for (const call of calls) {
 			const capability = mcpToolName(id, call.tool);
