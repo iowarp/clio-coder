@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { tryWithStateFileLockSync, withStateFileLockSection } from "../../core/state-file-lock.js";
-import { endpointLabel } from "../providers/endpoint-capacity.js";
+import { endpointLabel, maxConcurrentRequestsRemedy } from "../providers/endpoint-capacity.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import { AdmissionCanceledError, AdmissionTimedOutError } from "./admission-error.js";
@@ -114,6 +114,8 @@ export function createLeaseSlotGuard(
 	};
 }
 
+const URL_SLOT_REMEDY = "raise this target's maxConcurrentRequests to the server's actual slot count";
+
 /** Retry cadence while queued requests are blocked behind live capacity. */
 const PUMP_MIN_MS = 10;
 const PUMP_MAX_MS = 500;
@@ -143,14 +145,14 @@ export function foregroundEndpointBlock(input: {
 	if (input.operatorStarted === true) {
 		return [
 			`dispatch: admission denied: the main turn is using ${limit === 1 ? "the only slot" : `all ${limit} slots`} on endpoint '${endpointLabel(input.endpointKey)}'.`,
-			" Run this again when the turn finishes, point workers at a second endpoint, or raise this target's maxConcurrentRequests to the server's actual slot count.",
+			` Run this again when the turn finishes, point workers at a second endpoint, or ${maxConcurrentRequestsRemedy(input.endpointKey, URL_SLOT_REMEDY)}.`,
 		].join("");
 	}
 	return [
 		`dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' cannot open a worker slot`,
 		` while ${describeEndpointCapacityHolders(holders)} (${active}/${limit} slots).`,
 		" The foreground agent cannot release its slot until this tool call returns, so waiting here would deadlock.",
-		" Point workers at a second endpoint or raise this target's maxConcurrentRequests to the server's actual slot count.",
+		` Point workers at a second endpoint or ${maxConcurrentRequestsRemedy(input.endpointKey, URL_SLOT_REMEDY)}.`,
 	].join("");
 }
 

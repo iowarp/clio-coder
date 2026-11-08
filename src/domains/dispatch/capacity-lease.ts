@@ -11,7 +11,7 @@ import {
 } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
-import { endpointLabel, foregroundStreamUsage } from "../providers/endpoint-capacity.js";
+import { endpointLabel, foregroundStreamUsage, maxConcurrentRequestsRemedy } from "../providers/endpoint-capacity.js";
 
 export { processBirthToken } from "../../core/process-identity.js";
 
@@ -361,9 +361,12 @@ export function describeEndpointCapacityHolders(holders: EndpointCapacityHolders
  * A council runs its whole roster in one wave, so "dispatch fewer at once" is
  * not a move it has; saying so keeps the remedy honest.
  */
-export function endpointCapacityRemedy(input?: { rosterFloor?: number }): string {
-	const ways =
-		"set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server";
+export function endpointCapacityRemedy(endpointKey: string, input?: { rosterFloor?: number }): string {
+	const raise = maxConcurrentRequestsRemedy(
+		endpointKey,
+		"set this target's maxConcurrentRequests to the slot count the server was started with",
+	);
+	const ways = `${raise}, collect in-flight runs, or point workers at a second server`;
 	if (input?.rosterFloor === undefined) return `reduce the same-wave worker count, ${ways}`;
 	return `a council runs its whole roster in one wave and cannot go below ${input.rosterFloor} members, so ${ways}`;
 }
@@ -405,7 +408,7 @@ function assertCapacity(
 			const used = holders.leases + holders.reservations + holders.foregroundStreams;
 			if (used >= endpointLimit)
 				throw new Error(
-					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; ${endpointCapacityRemedy()}`,
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; ${endpointCapacityRemedy(endpointKey)}`,
 				);
 		}
 	}

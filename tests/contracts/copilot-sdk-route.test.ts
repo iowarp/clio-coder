@@ -16,10 +16,11 @@ import { after, before, mock, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
+import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
-import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
+import { endpointCapacityFor, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { copilotSdkAccount } from "../../src/engine/ai.js";
@@ -1017,12 +1018,33 @@ test("the first step of a fresh conversation is measured from a boundary read be
 	disposeCopilotConversations("unbounded-session");
 });
 
-test("a copilot-sdk target admits one request at a time unless its capacity says more", () => {
+// TC-1 QL1: at one seat the Copilot chat's own stream held the only slot, so every dispatch to a Copilot worker was refused.
+test("a default copilot-sdk target admits workers beside the foreground turn, and a full one names the target's maxConcurrentRequests", async () => {
 	const runtime = { id: "copilot-sdk", tier: "subscription" as const };
-	strictEqual(endpointCapacityFor({ target: { id: "copilot", runtime: "copilot-sdk" }, runtime }, {})?.limit, 1);
 	strictEqual(
-		endpointCapacityFor({ target: { id: "copilot", runtime: "copilot-sdk", maxConcurrentRequests: 3 }, runtime }, {})
+		endpointCapacityFor({ target: { id: "copilot", runtime: "copilot-sdk", maxConcurrentRequests: 1 }, runtime }, {})
 			?.limit,
-		3,
+		1,
 	);
+	const capacity = endpointCapacityFor({ target: { id: "copilot", runtime: "copilot-sdk" }, runtime }, {});
+	ok(capacity !== null && capacity.limit >= 3, "the foreground turn plus two workers fit by default");
+	const controller = createCapacityAdmissionController({
+		limits: () => ({ global: 8, nodes: { local: 8 }, endpoints: { [capacity.key]: capacity.limit } }),
+	});
+	const releaseForeground = registerForegroundStream(capacity.key);
+	try {
+		const admit = (assignmentId: string) =>
+			controller.admit({ assignmentId, nodeId: "local", endpointKey: capacity.key });
+		const workers = [];
+		for (let index = 1; index < capacity.limit; index += 1) workers.push(await admit(`worker-${index}`));
+		ok(workers.length >= 2);
+		await rejects(admit("one-too-many"), (error: unknown) => {
+			ok(error instanceof Error);
+			match(error.message, /set maxConcurrentRequests on target 'copilot' above its default of \d+/u);
+			return true;
+		});
+	} finally {
+		releaseForeground();
+		await controller.stop();
+	}
 });

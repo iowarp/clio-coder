@@ -24,8 +24,16 @@ export type EndpointCapacitySource =
 	| "local-native-default"
 	| "runtime-default";
 
-/** One seat's runtime: a copilot-sdk target admits one request at a time unless `maxConcurrentRequests` says more. */
 const COPILOT_SDK_RUNTIME = "copilot-sdk";
+const COPILOT_SDK_KEY_PREFIX = `${COPILOT_SDK_RUNTIME}://`;
+
+/**
+ * Requests a copilot-sdk target admits at once unless `maxConcurrentRequests`
+ * says otherwise. Copilot serves each request in the cloud, so one seat
+ * refused every dispatch from a Copilot chat to a Copilot worker: the
+ * foreground stream held the only slot (TC-1 QL1).
+ */
+const COPILOT_SDK_DEFAULT_CONCURRENCY = 4;
 
 export interface EndpointCapacity {
 	key: string;
@@ -48,7 +56,7 @@ const UNBOUNDED_LOCAL_NATIVE_RUNTIMES = new Set(["vllm", "sglang"]);
 export function canonicalEndpointKey(value: TargetDescriptor | string): string | null {
 	// A copilot-sdk target has no URL; the seat behind the target is its scheduler.
 	if (typeof value !== "string" && value.runtime === COPILOT_SDK_RUNTIME && value.url === undefined)
-		return `${COPILOT_SDK_RUNTIME}://${encodeURIComponent(value.id)}`;
+		return `${COPILOT_SDK_KEY_PREFIX}${encodeURIComponent(value.id)}`;
 	return canonicalEndpointUrl(typeof value === "string" ? value : value.url);
 }
 
@@ -118,6 +126,18 @@ export function endpointLabel(endpointKey: string): string {
 	}
 }
 
+/**
+ * How a capacity denial tells the reader to raise the bound. A copilot-sdk key
+ * is one target, so the denial names it and its default; a URL endpoint may
+ * serve several targets, so `urlRemedy` speaks of the target that dispatched.
+ */
+export function maxConcurrentRequestsRemedy(endpointKey: string, urlRemedy: string): string {
+	const gateway = gatewayEndpointKey(endpointKey);
+	if (!gateway.startsWith(COPILOT_SDK_KEY_PREFIX)) return urlRemedy;
+	const targetId = decodeURIComponent(gateway.slice(COPILOT_SDK_KEY_PREFIX.length));
+	return `set maxConcurrentRequests on target '${targetId}' above its default of ${COPILOT_SDK_DEFAULT_CONCURRENCY}`;
+}
+
 function positiveInteger(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
@@ -143,7 +163,8 @@ export interface EndpointCapacityInput {
  *   2. A probe this process ran.
  *   3. A probe a previous process ran and persisted, still inside its
  *      staleness bound and still describing the same runtime.
- *   4. The conservative local-native default of one slot.
+ *   4. The runtime default: four requests for a copilot-sdk target, else
+ *      the conservative local-native default of one slot.
  *
  * Steps 2 and 3 answer with the same number for the same server, so a dispatch
  * typed one second after boot and one typed a minute later resolve identically.
@@ -167,7 +188,7 @@ export function endpointCapacityFor(
 		return { key, label, limit: prior.slots, source: "discovered-prior" };
 	}
 	if ((input.runtime?.id ?? input.target.runtime) === COPILOT_SDK_RUNTIME)
-		return { key, label, limit: 1, source: "runtime-default" };
+		return { key, label, limit: COPILOT_SDK_DEFAULT_CONCURRENCY, source: "runtime-default" };
 	if (input.runtime?.tier !== "local-native" || UNBOUNDED_LOCAL_NATIVE_RUNTIMES.has(input.runtime.id)) return null;
 	return { key, label, limit: 1, source: "local-native-default" };
 }

@@ -99,7 +99,10 @@ function endpointCapacityDenial(input: {
 	foregroundStreams: number;
 	topology?: ReservationTopology;
 }): string {
-	const remedy = endpointCapacityRemedy(input.topology === "council" ? { rosterFloor: COUNCIL_MIN_MEMBERS } : undefined);
+	const remedy = endpointCapacityRemedy(
+		input.endpointKey,
+		input.topology === "council" ? { rosterFloor: COUNCIL_MIN_MEMBERS } : undefined,
+	);
 	return `dispatch: admission denied: endpoint '${endpointLabel(input.endpointKey)}' capacity exceeded (${input.used + input.requested}/${input.limit} slots): ${describeEndpointCapacityHolders(input)}; ${remedy}`;
 }
 
