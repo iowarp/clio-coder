@@ -145,3 +145,22 @@ it("shows the fleet default that targets use --fleet-model sets, with no profile
 	);
 	deepStrictEqual(json.profiles, []);
 });
+
+it("names the Copilot sign-in as the auth of a copilot-sdk target", async () => {
+	updateSettings((value) => {
+		value.targets = [{ id: "copilot", runtime: "copilot-sdk", defaultModel: "gpt-6-luna" }];
+	});
+	const columns = process.env.COLUMNS;
+	process.env.COLUMNS = "240";
+	let listed: { code: number; output: string };
+	try {
+		listed = await stdoutOf([]);
+	} finally {
+		if (columns === undefined) delete process.env.COLUMNS;
+		else process.env.COLUMNS = columns;
+	}
+	strictEqual(listed.code, 0);
+	const row = listed.output.split("\n").find((line) => line.startsWith("copilot "));
+	match(row ?? "", /copilot login/u);
+	strictEqual(/\bnone\b/u.test(row ?? ""), false, row);
+});

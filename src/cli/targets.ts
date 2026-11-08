@@ -1134,6 +1134,8 @@ function formatUrl(status: TargetStatus): string {
 function formatAuth(providers: ProvidersContract, status: TargetStatus): string {
 	if (!status.runtime) return "-";
 	if (status.runtime.externalAgentLoop !== undefined && status.runtime.auth !== "claude-cli") return "operator session";
+	// Copilot reads the official runtime's own sign-in; `auth status copilot-sdk` names the account.
+	if (status.runtime.id === "copilot-sdk") return "copilot login";
 	if (status.runtime.auth !== "api-key" && status.runtime.auth !== "oauth") return status.runtime.auth;
 	const auth = providers.auth.statusForTarget(status.target, status.runtime);
 	if (!auth.available) return "disconnected";
