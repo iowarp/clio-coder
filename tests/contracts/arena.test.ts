@@ -563,6 +563,34 @@ describe("arena runner", () => {
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 	});
 
+	it("does not charge a subdirectory project's contenders for the catalog copied in", async () => {
+		const { repo, fake } = scratchRepo();
+		const project = join(repo, "sub");
+		mkdirSync(join(project, ".clio-coder"), { recursive: true });
+		writeFileSync(join(project, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
+		const result = await runArenaMatch({
+			cwd: project,
+			prompt: "write your model name",
+			contenders: [
+				{ target: "t", model: "m1" },
+				{ target: "t", model: "m2" },
+			],
+			timeoutSeconds: 30,
+			check: "unit",
+			clio: { file: process.execPath, args: [fake] },
+			env: {},
+		});
+		assert.equal(result.status, "complete", result.error ?? "");
+		for (const contender of result.contenders) {
+			assert.deepEqual(contender.facts?.diff, { files: 1, insertions: 1, deletions: 0 });
+			assert.equal(contender.facts?.writes, 1);
+			assert.match(contender.facts?.check?.tail ?? "", /check unit: pass/);
+		}
+		const diff = readFileSync(join(arenaRoot(repo), result.id, "contender-1.diff"), "utf8");
+		assert.match(diff, /sub\/answer\.txt/);
+		assert.doesNotMatch(diff, /verifiers\.yaml/);
+	});
+
 	it("refuses a --check the source project does not declare before any contender starts", async () => {
 		const { repo, fake, gitIn } = scratchRepo();
 		await assert.rejects(

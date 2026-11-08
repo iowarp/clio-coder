@@ -109,10 +109,19 @@ export function validateArenaRunInput(input: Pick<ArenaRunInput, "contenders" | 
 	}
 }
 
-/** Stage everything the contender left, then diff it against the shared baseline, outside `.clio-coder/`. */
-function captureDiff(worktree: string, baseline: string, diffPath: string): ArenaDiffStat {
-	git(worktree, ["add", "-A", "--", ".", ":(exclude).clio-coder"]);
-	const pathspec = ["--", ".", ":(exclude).clio-coder"];
+/**
+ * Stage everything the contender left, then diff it against the shared baseline, outside the repository's and the
+ * project's `.clio-coder/`; the project one holds the catalog copied in for `--check`.
+ */
+function captureDiff(worktree: string, projectCwd: string, baseline: string, diffPath: string): ArenaDiffStat {
+	const sub = relative(worktree, projectCwd).split(sep).join("/");
+	const pathspec = [
+		"--",
+		".",
+		":(exclude).clio-coder",
+		...(sub.length > 0 ? [`:(exclude,literal)${sub}/.clio-coder`] : []),
+	];
+	git(worktree, ["add", "-A", ...pathspec]);
 	const patch = git(worktree, ["diff", "--cached", "--no-color", "--no-ext-diff", baseline, ...pathspec]);
 	safeResourceWrite(diffPath, patch);
 	return readNumstat(git(worktree, ["diff", "--cached", "--numstat", baseline, ...pathspec]));
@@ -227,7 +236,7 @@ async function runContender(
 	let check: ArenaCheckFact | null = null;
 	if (place.worktree !== null && match.baselineSha !== null) {
 		try {
-			diff = captureDiff(place.worktree, match.baselineSha, contenderDiffPath(dir, contender.index));
+			diff = captureDiff(place.worktree, place.cwd, match.baselineSha, contenderDiffPath(dir, contender.index));
 		} catch (caught) {
 			error = error ?? `diff: ${errorText(caught)}`;
 		}
