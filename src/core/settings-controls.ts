@@ -521,6 +521,18 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Worker response time",
 		"Seconds one native worker model response may run, including locked synthesis rounds.",
 	],
+	"safety.limits.autonomousToolCalls": [
+		"Yolo stretch tool calls",
+		"Tool calls one yolo stretch runs before it pauses for you to resume; 0 turns this cap off.",
+	],
+	"safety.limits.autonomousMinutes": [
+		"Yolo stretch minutes",
+		"Minutes of active turn time one yolo stretch runs before it pauses for you to resume; 0 turns this cap off.",
+	],
+	"safety.limits.autonomousTokens": [
+		"Yolo stretch tokens",
+		"Tokens one yolo stretch spends before it pauses for you to resume; 0 turns this cap off.",
+	],
 	"context.semantic.enabled": [
 		"Semantic search",
 		"Make the optional project search index available to Clio after pinning a qualified embedding route.",
