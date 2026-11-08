@@ -29,10 +29,33 @@ function githubBotNoreplyEmail(userId: number | null, slug: string): string | nu
 	return `${userId}+${slug}[bot]@users.noreply.github.com`;
 }
 
-/** The one email every Clio commit trailer names. */
-const CLIO_COMMIT_EMAIL = githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? IOWARP_COMMIT_EMAIL;
+/** The one email every Clio commit trailer names, and the author email of an autonomous commit. */
+export const CLIO_COMMIT_EMAIL =
+	githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? IOWARP_COMMIT_EMAIL;
 
-export const CLIO_COMMIT_IDENTITY = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
+export const CLIO_COMMIT_NAME = "Clio Coder";
+
+export const CLIO_COMMIT_IDENTITY = `${CLIO_COMMIT_NAME} <${CLIO_COMMIT_EMAIL}>`;
+
+/** Whether `email` is one of Clio's own commit addresses, compared case-insensitively. */
+function isClioCommitEmail(email: string): boolean {
+	const folded = email.trim().toLowerCase();
+	return folded === CLIO_COMMIT_EMAIL.toLowerCase() || folded === IOWARP_COMMIT_EMAIL;
+}
+
+/** A Git identity `Name <email>` that can stand in one trailer line. */
+const HUMAN_IDENTITY = /^([^<>\r\n]*[^<>\s])\s+<([^<>\s]+@[^<>\s]+)>$/u;
+
+/**
+ * The `Co-authored-by:` trailer crediting the human committer of a
+ * Clio-authored commit, or null when `identity` is not one well-formed
+ * `Name <email>` or names Clio itself.
+ */
+export function humanCoAuthorTrailer(identity: string): string | null {
+	const match = HUMAN_IDENTITY.exec(identity.trim());
+	if (match === null || isClioCommitEmail(match[2] ?? "")) return null;
+	return `Co-authored-by: ${match[1]} <${match[2]}>`;
+}
 
 function roleTrailers(identity: string) {
 	return {
@@ -183,6 +206,24 @@ function runTrailer(run: CommitRunEvidence | undefined): string | null {
 	return `Clio-Evidence: run-v${run.version}/sha256:${run.digest}`;
 }
 
+export interface CommitAttributionOptions {
+	/**
+	 * Clio is the commit's author (an autonomous commit), and this is the human
+	 * committer's `Name <email>`. Clio's Assisted-by and Co-authored-by are then
+	 * redundant and dropped; the human gets one `Co-authored-by:` trailer.
+	 * Evidence trailers (Tested-by, Reviewed-by, Clio-Evidence, Clio-Decision)
+	 * are unaffected.
+	 */
+	clioAuthorFor?: string;
+}
+
+/** Clio's role trailers that only restate authorship once Clio is the author. */
+const CLIO_AUTHOR_REDUNDANT_TRAILERS: ReadonlySet<string> = new Set(
+	[CLIO_COMMIT_TRAILERS.assisted, CLIO_COMMIT_TRAILERS.coAuthored]
+		.map((line) => normalizedTrailer(line))
+		.filter((line): line is string => line !== null),
+);
+
 /**
  * Append only evidence-justified Clio trailers.
  *
@@ -197,8 +238,10 @@ export function attributeCommitMessage(
 	originalMessage: string,
 	evidence: Readonly<CommitAttributionEvidence>,
 	enabled = true,
+	options: Readonly<CommitAttributionOptions> = {},
 ): string {
 	if (!enabled) return originalMessage;
+	const humanTrailer = options.clioAuthorFor === undefined ? null : humanCoAuthorTrailer(options.clioAuthorFor);
 
 	const normalized = originalMessage.replace(/\r\n?/gu, "\n");
 	const lines = normalized.replace(/\n+$/u, "").split("\n");
@@ -216,6 +259,7 @@ export function attributeCommitMessage(
 		if (blockStart === null || index < blockStart) return true;
 		const key = normalizedTrailer(line);
 		if (key === null || !isClioTrailer(key)) return true;
+		if (humanTrailer !== null && CLIO_AUTHOR_REDUNDANT_TRAILERS.has(key)) return false;
 		if (seenClio.has(key)) return false;
 		seenClio.add(key);
 		return true;
@@ -224,13 +268,15 @@ export function attributeCommitMessage(
 	const desired: string[] = [];
 	// Material authorship necessarily means material assistance too. Keeping the
 	// two facts separate lets Co-authored-by remain a platform compatibility
-	// marker rather than a substitute for the semantic role trailer.
-	if (evidence.materiallyAssisted === true || evidence.materiallyAuthored === true) {
+	// marker rather than a substitute for the semantic role trailer. When Clio
+	// is the author, both are redundant and the human is credited instead.
+	if (humanTrailer === null && (evidence.materiallyAssisted === true || evidence.materiallyAuthored === true)) {
 		desired.push(CLIO_COMMIT_TRAILERS.assisted);
 	}
 	if (evidence.validationSucceeded === true) desired.push(CLIO_COMMIT_TRAILERS.tested);
 	if (evidence.independentReviewPassed === true) desired.push(CLIO_COMMIT_TRAILERS.reviewed);
-	if (evidence.materiallyAuthored === true) desired.push(CLIO_COMMIT_TRAILERS.coAuthored);
+	if (humanTrailer === null && evidence.materiallyAuthored === true) desired.push(CLIO_COMMIT_TRAILERS.coAuthored);
+	if (humanTrailer !== null) desired.push(humanTrailer);
 	const runEvidence = runTrailer(evidence.run);
 	if (runEvidence !== null) desired.push(runEvidence);
 	for (const ref of decisionTrailerRefs(evidence.decisions)) desired.push(decisionTrailer(ref));

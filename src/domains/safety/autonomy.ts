@@ -36,6 +36,48 @@ export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 	return typeof value === "string" && (AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value);
 }
 
+/**
+ * What yolo means for the operator's own session (ob-yolo D1). `contained`
+ * keeps default's admission, sandbox, snapshots and safety judge, and refuses
+ * back to the agent what default would park for a person, so nothing waits.
+ * `unconfined` is the skip-permissions yolo (#407): only the yolo floor and
+ * operator-authored rules block. Read only from the operator's own settings.
+ */
+export const YOLO_CONFINEMENTS = ["contained", "unconfined"] as const;
+
+export type YoloConfinement = (typeof YOLO_CONFINEMENTS)[number];
+
+export const DEFAULT_YOLO_CONFINEMENT: YoloConfinement = "contained";
+
+/**
+ * The confinement the operator's yolo runs at. Unconfined takes effect only
+ * once the operator accepted it (`safety.yoloUnconfinedAccepted`, recorded by
+ * its own card or written by hand in user settings); until then yolo stays
+ * contained. Every surface reads confinement through here.
+ */
+export function effectiveYoloConfinement(
+	safety: { yoloConfinement?: YoloConfinement; yoloUnconfinedAccepted?: boolean } | undefined | null,
+): YoloConfinement {
+	return safety?.yoloConfinement === "unconfined" && safety.yoloUnconfinedAccepted === true
+		? "unconfined"
+		: DEFAULT_YOLO_CONFINEMENT;
+}
+
+/**
+ * The level admission, the safety judge and worker permits run at. Contained
+ * yolo admits exactly as default does; the never-park rule that makes it
+ * unattended lives where calls would park. Prompts, auto-continuation and the
+ * footer keep reading the operator's level.
+ */
+export function admissionAutonomy(level: AutonomyLevel, confinement: YoloConfinement | undefined): AutonomyLevel {
+	return level === "yolo" && (confinement ?? DEFAULT_YOLO_CONFINEMENT) === "contained" ? "default" : level;
+}
+
+/** True when the operator's level is yolo and it runs contained. */
+export function containedYolo(level: AutonomyLevel, confinement: YoloConfinement | undefined): boolean {
+	return level === "yolo" && admissionAutonomy(level, confinement) === "default";
+}
+
 /** Operator input accepts only the two current modes. Saved settings migrate separately. */
 export function autonomyFromUserInput(value: string): AutonomyLevel | null {
 	return isAutonomyLevel(value) ? value : null;

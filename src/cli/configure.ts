@@ -1745,6 +1745,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Runtime plugins", listOr(settings.integrations.runtimePlugins)],
 				["Library remote sync", onOff(settings.integrations.library.sync)],
 				["Git commit attribution", onOff(settings.integrations.git.commitAttribution)],
+				["Autonomous commit author", settings.integrations.git.commitAuthor],
 			];
 			for (const agent of settings.integrations.externalAgents.entries)
 				rows.push([agent.id, `${agent.command} (governance: ${agent.toolGovernance ?? "default"})`]);

@@ -1068,7 +1068,7 @@ test("the instant shell uses the finished welcome footprint without hydration co
 		ok(!lines.join("\n").includes("✓"));
 	}
 	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
-	ok(wide.includes("YOLO · no approval stops"));
+	ok(wide.includes("YOLO · contained · never waits"));
 	ok(wide.includes("Checking project awareness"));
 	match(wide, /v\d+\.\d+\.\d+/u);
 	ok(boot.render(120).map(stripTerminalSequences)[0]?.includes("Clio Coder"));

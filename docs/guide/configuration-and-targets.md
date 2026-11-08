@@ -251,6 +251,9 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.limits.readBytesPerCall` | `51200` | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | next turn |
 | `safety.limits.workerResponseSeconds` | `600` | next turn |
+| `safety.limits.autonomousToolCalls` | `600` | immediately; a project layer can only tighten it |
+| `safety.limits.autonomousMinutes` | `120` | immediately; a project layer can only tighten it |
+| `safety.limits.autonomousTokens` | `5000000` | immediately; a project layer can only tighten it |
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |
@@ -262,6 +265,8 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none |
 | `safety.unattendedAfterSeconds` | `300` | immediately; user layer only; seconds an attended permission card or ask_user round waits before Clio denies the call or picks the recommended option; `0` waits forever |
 | `safety.yoloAccepted` | `false` | immediately; user layer only; set by the one-time card that turns yolo on interactively, and `false` shows the card again |
+| `safety.yoloConfinement` | `contained` | immediately; user layer only; `contained` keeps default's sandbox, snapshots and safety judge at yolo and refuses what would wait for you, `unconfined` is the skip-permissions yolo and takes effect only with `safety.yoloUnconfinedAccepted` |
+| `safety.yoloUnconfinedAccepted` | `false` | immediately; user layer only; set by the separate card that turns unconfined yolo on, or by hand; `false` keeps yolo contained |
 | `safety.judge.enabled` | `true` | immediately; user layer only; at autonomy `default` a model reviews each main-session call that would park for approval against the operator's own messages, then runs it or refuses it with a reason; it also answers worker asks under `fleet.permissions.mode: judge` |
 | `safety.judge.target` | `null` | immediately; user layer only; `null` asks the session's chat route |
 | `safety.judge.model` | `null` | immediately; user layer only; `null` asks the chat model, or the judge target's default model when `safety.judge.target` is set |
@@ -310,6 +315,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `integrations.library.confirmedRemote` | `null` | next turn |
 | `integrations.library.sync` | `false` | next turn |
 | `integrations.git.commitAttribution` | `true` | immediately for subsequent commits |
+| `integrations.git.commitAuthor` | `auto` | immediately for subsequent commits |
 | `integrations.music.enabled` | `false` | immediately, at the next `/music` |
 | `integrations.music.station` | `http://radio.cliamp.stream/lofi/stream` | immediately, at the next `/music` |
 | `integrations.music.agentControl` | `false` | restart |

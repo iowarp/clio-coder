@@ -42,6 +42,12 @@ export interface SchedulingContract {
 		telemetry?: TelemetryContext;
 		signal?: AbortSignal;
 	}): Promise<void>;
+	/**
+	 * While `refuse` reads true, a paid request at the ceiling is refused as a
+	 * headless one is, whatever its caller asked: contained yolo never waits
+	 * for an operator to raise the ceiling.
+	 */
+	setNeverWaitForRaise?(refuse: () => boolean): void;
 	/** Arm a `clio-coder run --max-cost-usd` cap, so a stop at it names the flag. */
 	setRunCostCap?(cap: RunCostCap): void;
 	/** The armed run cap, or null outside a capped run. */

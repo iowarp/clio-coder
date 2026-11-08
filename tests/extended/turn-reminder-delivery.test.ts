@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { TaskMemoryTelemetryStep } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
@@ -308,4 +309,54 @@ test("a Pi system baseline does not make the first substantive turn look like ex
 	agent.state.messages.push({ role: "user", content: "inspect source", timestamp: 1 });
 	middleware.fireTurnStart(runtime, "continue");
 	deepStrictEqual(counts, [0, 1]);
+});
+
+test("a middleware failure that escapes the runtime is reported and the turn continues without its effects", async () => {
+	const bus = createTelemetryHub();
+	const journaled: unknown[] = [];
+	bus.subscribe("middleware.hook_failed", (payload) => {
+		journaled.push(payload);
+	});
+	const footer: Array<[string, string, string]> = [];
+	const runtime = {
+		wireModelId: "fixture",
+		runtimeId: "fixture",
+		runtimeResolution: {},
+		agent: { state: { tools: [], messages: [] } },
+	} as unknown as AgentRuntime;
+	const middleware = createTurnMiddleware({
+		state: createTurnState("off"),
+		middleware: {
+			runHook: () => {
+				throw new Error("registration table corrupted");
+			},
+		} as unknown as MiddlewareContract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		emitNotice: () => {},
+		emitFooterNotice: (level, text, key) => footer.push([level, text, key]),
+		bus,
+	});
+	middleware.fireTurnStart(runtime, "inspect source");
+	await middleware.fireTurnEnd(runtime, [], { toolCallId: "fixture", toolName: "read" });
+	strictEqual(middleware.flushPendingReminders(), "");
+	deepStrictEqual(
+		journaled.map((payload) => {
+			const { at: _at, ...facts } = payload as { at: number };
+			return facts;
+		}),
+		["turn_start", "turn_end"].map((hook) => ({
+			kind: "hook_failed",
+			registrationId: "middleware.runtime",
+			hook,
+			message: "registration table corrupted",
+		})),
+	);
+	deepStrictEqual(
+		footer.map(([level, , key]) => [level, key]),
+		[
+			["warning", "middleware:middleware.runtime:turn_start:hook_failed"],
+			["warning", "middleware:middleware.runtime:turn_end:hook_failed"],
+		],
+	);
+	strictEqual(footer[1]?.[1].includes("registration table corrupted"), true);
 });

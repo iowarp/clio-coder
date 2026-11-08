@@ -226,6 +226,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 			cwd: options.cwd ?? process.cwd(),
 			enabled: gitCommitAttributionEnabled(process.env),
 			evidence: { materiallyAssisted: true },
+			author: "human",
 		});
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		this.child = spawn(command, args, {

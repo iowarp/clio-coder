@@ -48,6 +48,10 @@ export const HIGH_RIGOR_REVALIDATION_MESSAGE =
 	`e.g. "npm run test", "npm run lint", "npm run build") or call the limitation tool with the scope ` +
 	`and reason of what could not be verified. Do not end the turn until you have validated or recorded the limitation.`;
 
+/** Contained yolo's nudge: an operator who waived checks gets an unverified change, not an incomplete task. */
+export const CONTAINED_YOLO_CHECK_WAIVER =
+	" If the operator asked you not to run checks, do neither: end the turn and say in your final reply that the change is unverified; it is recorded for them as unverified.";
+
 export interface CreateFinishContractRegistrationOptions {
 	getTurnConstraints?: () => TurnConstraints | undefined;
 	/**
@@ -63,6 +67,12 @@ export interface CreateFinishContractRegistrationOptions {
 	 * limitation instead of merely warning.
 	 */
 	resolveRigor?: () => Rigor;
+	/**
+	 * True at contained yolo: a high-rigor re-prompt takes the reserved
+	 * verification slot, so a nudge another producer spent cannot leave the
+	 * change unchecked while nobody is there to notice.
+	 */
+	reserveVerificationNudge?: () => boolean;
 	readActiveAcceptance?: (window: ReadonlyArray<unknown>) => UserTaskAcceptance | undefined;
 	/**
 	 * Record the contract's decision to the audit ledger. Optional; when wired
@@ -218,15 +228,22 @@ export function createFinishContractRegistration(
 				// Withhold the completion and force a re-prompt: a continuation
 				// request carries the turn onward, and the paired reminder gives
 				// the directive its own visible system-reminder line.
-				const message = assessment.quality?.length
+				const reserved = options.reserveVerificationNudge?.() === true;
+				const directive = assessment.quality?.length
 					? `${assessment.message}${canRecordLimitation ? " Alternatively, record a limitation with each outstanding check's exact ID in limitation.paths; these checks remain unverified." : ""}`
 					: verificationTools.length > 0 && canRecordLimitation
 						? activeAcceptance?.verification.length || assessment.message.includes("quality policy")
 							? assessment.message
 							: HIGH_RIGOR_REVALIDATION_MESSAGE
 						: `[Clio Coder] High-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
+				const message = reserved ? `${directive}${CONTAINED_YOLO_CHECK_WAIVER}` : directive;
 				return [
-					{ kind: "request_continuation", message, note: "the change has no validation evidence yet" },
+					{
+						kind: "request_continuation",
+						message,
+						note: "the change has no validation evidence yet",
+						...(reserved ? { reserved: "verification" as const } : {}),
+					},
 					{ kind: "inject_reminder", message, severity: "warn" },
 				];
 			}

@@ -174,6 +174,8 @@ export interface ChatTurnState {
 	turnSharedWorkerNote: boolean;
 	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
 	stalledTurnNudgeSpent: boolean;
+	/** The finish gate's reserved verification nudge, one per user prompt like the shared one. */
+	verificationNudgeSpent: boolean;
 	/** A middleware request_continuation is waiting to resubmit after settle. */
 	pendingRequestContinuation: boolean;
 	/** A middleware continuation carries the current run one more request, delivered by prepareNextTurn. */
@@ -226,6 +228,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnToolNames: [],
 		turnSharedWorkerNote: false,
 		stalledTurnNudgeSpent: false,
+		verificationNudgeSpent: false,
 		pendingRequestContinuation: false,
 		pendingInRunContinuation: false,
 		currentPendingSkillPolicy: undefined,

@@ -5,7 +5,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { AgentsContract } from "../agents/contract.js";
 import { listPlaybooks } from "../agents/playbook.js";
-import { isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
+import { type AgentSpec, isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import {
 	type ContextContract,
@@ -113,11 +113,7 @@ export function createPromptsBundle(
 		try {
 			snapshot.agents = (agentsDomain()?.listSpecs() ?? [])
 				.filter((spec) => isUserVisibleAgent(spec) || spec.audience === "shadow")
-				// The marker rides on the purpose so the name stays a valid dispatch id.
-				.map((spec) => ({
-					name: spec.id,
-					purpose: spec.audience === "shadow" ? `(shadow) ${spec.description}` : spec.description,
-				}));
+				.map((spec) => ({ name: spec.id, purpose: agentCatalogPurpose(spec) }));
 		} catch {
 			// dispatch({list:true}) remains the authoritative roster.
 		}
@@ -594,13 +590,26 @@ interface CatalogSnapshot {
 	mcpServers: string[];
 }
 
+/**
+ * An agent's catalog purpose. Markers ride on the purpose so the name stays a
+ * valid dispatch id; read-only marks the recipes that parallel reviews and
+ * investigations can use without declaring write roots.
+ */
+export function agentCatalogPurpose(spec: Pick<AgentSpec, "audience" | "capabilityClass" | "description">): string {
+	const markers = [
+		...(spec.audience === "shadow" ? ["shadow"] : []),
+		...(spec.capabilityClass === "read-only" ? ["read-only"] : []),
+	];
+	return markers.length > 0 ? `(${markers.join(", ")}) ${spec.description}` : spec.description;
+}
+
 const CATALOG_PURPOSE_MAX_CHARS = 80;
 /** Far past the 64 the prior-session line quotes, and small enough that redacting it cannot stall a session start. */
 const PRIOR_TOPIC_MAX_CHARS = 4_096;
 const CATALOG_MAX_ENTRIES = 60;
 
 /** The description's first sentence, trimmed at a word boundary; enough to route, not to use. */
-function catalogPurpose(description: string): string {
+export function catalogPurpose(description: string): string {
 	const collapsed = description
 		.replace(/\s+/g, " ")
 		.replace(/^(?:this skill|this agent|use this skill to|use when)\s+/i, "")

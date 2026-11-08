@@ -58,6 +58,18 @@ export async function pruneStaleMemory(dataDir: string, now: Date = new Date()):
 	return pruneStaleMemoryRecords(dataDir, now);
 }
 
+/**
+ * Whether a record may stand in a prompt at all: operator-approved, evidence-linked and not contradicted. Fresh
+ * selection and the withdrawal of a record an already compiled prompt carries both read this one predicate.
+ */
+export function memoryRecordEligible(record: MemoryRecord): boolean {
+	return (
+		record.approved &&
+		record.evidenceRefs.length > 0 &&
+		(record.regressions === undefined || record.regressions.length === 0)
+	);
+}
+
 /** Eligibility precedes ranking or budget truncation; output retains legacy priority. */
 export function eligibleMemoryRecords(
 	records: ReadonlyArray<MemoryRecord>,
@@ -68,9 +80,7 @@ export function eligibleMemoryRecords(
 	const activeRuntime = validActiveNamedIdentity(options.activeRuntime, "runtime");
 	const activeAgent = validActiveNamedIdentity(options.activeAgent, "agent");
 	return sortMemoryRecords(records)
-		.filter((record) => record.approved)
-		.filter((record) => record.evidenceRefs.length > 0)
-		.filter((record) => record.regressions === undefined || record.regressions.length === 0)
+		.filter(memoryRecordEligible)
 		.filter((record) => allowedScopes === null || allowedScopes.has(record.scope))
 		.filter((record) => repositoryApplies(record, activeRepository))
 		.filter((record) => runtimeApplies(record, activeRuntime))

@@ -64,6 +64,7 @@ const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, st
 	"interface.panes.files.mode": { companion: "Stay open", chooser: "Choose once" },
 	"interface.panes.files.profile": { managed: "Clio theme", user: "My file manager" },
 	"fleet.worktrees.root": { disk: "Disk", tmpfs: "Memory", auto: "Automatic" },
+	"integrations.git.commitAuthor": { auto: "Automatic", human: "Always me" },
 };
 
 export function formatSettingsValue(path: string, value: string): string {

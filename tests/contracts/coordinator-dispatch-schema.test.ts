@@ -1,9 +1,13 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Value } from "typebox/value";
 import { FLEET_ANTI_CHURN_RULE } from "../../src/domains/agents/catalog.js";
+import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
+import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
+import { agentCatalogPurpose, catalogPurpose } from "../../src/domains/prompts/extension.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { validateEngineToolArguments } from "../../src/engine/ai.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -17,6 +21,23 @@ import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+describe("parallel review routing", () => {
+	it("marks the read-only recipes a parallel review can use in the session catalog", () => {
+		const line = (id: string) => {
+			const recipe = loadRecipesFromDir({
+				source: "builtin",
+				dir: join(import.meta.dirname, "../../src/domains/agents/builtins"),
+			}).find((entry) => entry.id === id);
+			ok(recipe, id);
+			return catalogPurpose(agentCatalogPurpose(normalizeAgentSpec(recipe)));
+		};
+		match(line("scout"), /^\(shadow, read-only\) .*code review/);
+		for (const writer of ["debugger", "verifier", "coder"]) doesNotMatch(line(writer), /read-only/, writer);
+		const coordinator = loadFragments().byId.get("operating.coordinator")?.body ?? "";
+		match(coordinator.replace(/\s+/g, " "), /send them to read-only recipes in one parallel dispatch/);
+	});
+});
 
 describe("compact coordinator dispatch contract", () => {
 	let env: IsolatedClioEnv;

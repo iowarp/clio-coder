@@ -11,6 +11,7 @@
 import type { ClioSettings } from "../core/config.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import type { ApplicationInputTui } from "../engine/tui.js";
 import { type Component, Container, isKeyRelease, isKeyRepeat, matchesKey, ScrollView, VStack } from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
@@ -246,6 +247,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getOutputStyle: () => settings.interface.outputDetail,
 		getMotionEnabled: () => true,
 		getAutonomy: () => settings.safety.autonomy,
+		getYoloConfinement: () => effectiveYoloConfinement(settings.safety),
 		getSubmitKeyLabel: () => keybindings.getKeys("tui.input.submit")[0] ?? "Enter",
 		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Ctrl+J",
 	};
@@ -268,6 +270,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getContextUsage: () => editorChrome.getContextUsage?.(),
 		getOutputStyle: () => editorChrome.getOutputStyle?.() ?? settings.interface.outputDetail,
 		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
+		getYoloConfinement: () => editorChrome.getYoloConfinement?.() ?? effectiveYoloConfinement(settings.safety),
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,
 		isAwaitingApproval: () => editorChrome.isAwaitingApproval?.() ?? false,
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",

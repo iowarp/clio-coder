@@ -26,6 +26,10 @@ interface ToolCall {
 	/** Effective capability: `clio_docs` for gateway op=call, `gateway:find` for discovery. */
 	name: string;
 	args: Record<string, unknown>;
+	/** The surface's call id, which pairs the call with its end event. */
+	id?: string;
+	/** How the call returned: its error flag and the tool result's details. */
+	settled?: { isError: boolean; details: Record<string, unknown> };
 }
 
 interface RunRecord {
@@ -56,6 +60,15 @@ interface EvalCase {
 	prompt: string;
 	/** Ends the run once the decision being scored is visible; the rest of the run would only cost time. */
 	stopOn?: (tool: ToolCall) => boolean;
+	/** Ends the run once a matching call has returned, for cases scored on the call's result. */
+	stopAfter?: (tool: ToolCall) => boolean;
+	/**
+	 * Plays the operator who approves the multi-task dispatch plan the prompt asked
+	 * for; default autonomy parks every plan-scale dispatch for one approval. ACP
+	 * approves only the dispatch permission. A headless run has no approval path,
+	 * so it runs the main agent at yolo; workers keep their own default.
+	 */
+	approvesDispatchPlan?: true;
 	score: (obs: Observation) => Record<string, boolean>;
 }
 
@@ -77,6 +90,22 @@ const cites = (o: Observation): boolean =>
 		/\b[A-Z][\w-]*(?:\s+[A-Z][\w-]*)*\s+guides?\b/u,
 		/\blines?\s+\d+\s*[–-]\s*\d+/u,
 	].some((re) => re.test(o.finalText));
+
+/**
+ * A dispatch call that returned without error and whose every run receipt
+ * exited 0 with a succeeded outcome; a receipt carries `outcome` only when it
+ * did not succeed. A detached dispatch returns ids, not receipts, so it does
+ * not count.
+ */
+function dispatchSucceeded(t: ToolCall): boolean {
+	if (t.name !== "dispatch" || t.settled === undefined || t.settled.isError) return false;
+	const runs = t.settled.details.runs;
+	return (
+		Array.isArray(runs) &&
+		runs.length > 0 &&
+		runs.every((run) => asRecord(run).exitCode === 0 && asRecord(run).outcome === undefined)
+	);
+}
 
 /** A skills lookup, a skill load, or a library package lookup. */
 function isSkillLookup(t: ToolCall): boolean {
@@ -166,8 +195,12 @@ const CASES: EvalCase[] = [
 		kind: "dispatch",
 		prompt:
 			"Do a thorough bug review of each of the three modules in tinystats (core.py, io.py, cli.py). The reviews are independent of each other. Do not edit anything.",
-		stopOn: (t) => t.name === "dispatch",
-		score: (o) => ({ dispatched: o.tools.some((t) => t.name === "dispatch") }),
+		stopAfter: (t) => t.name === "dispatch",
+		approvesDispatchPlan: true,
+		score: (o) => ({
+			dispatched: o.tools.some((t) => t.name === "dispatch"),
+			succeeded: o.tools.some(dispatchSucceeded),
+		}),
 	},
 	{
 		id: "trivial-http",
@@ -391,6 +424,14 @@ function normalizeTool(name: string, args: Record<string, unknown>): ToolCall {
 	return { name, args };
 }
 
+/** Records how the call `id` returned on its first terminal event, and returns it. */
+function settle(tools: ToolCall[], id: unknown, isError: unknown, result: unknown): ToolCall | undefined {
+	const tool = tools.find((t) => t.id !== undefined && t.id === id);
+	if (tool === undefined || tool.settled !== undefined) return undefined;
+	tool.settled = { isError: isError === true, details: asRecord(asRecord(result).details) };
+	return tool;
+}
+
 interface Driven {
 	tools: ToolCall[];
 	finalText: string;
@@ -417,6 +458,7 @@ async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 	const args = [opts.clio, "run", "--json", "--timeout", String(opts.timeoutSec)];
 	if (opts.target !== null) args.push("--target", opts.target);
 	if (opts.model !== null) args.push("--model", opts.model);
+	if (evalCase.approvesDispatchPlan === true) args.push("--autonomy", "yolo");
 	args.push(evalCase.prompt);
 	const child = spawn(process.execPath, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 	const driven: Driven = {
@@ -446,8 +488,16 @@ async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 		driven.raw.push(frame);
 		if (frame.type === "tool_execution_start") {
 			const tool = normalizeTool(String(frame.toolName), asRecord(frame.args));
+			if (typeof frame.toolCallId === "string") tool.id = frame.toolCallId;
 			driven.tools.push(tool);
 			if (evalCase.stopOn?.(tool) === true && !driven.stoppedEarly) {
+				driven.stoppedEarly = true;
+				killTree(child);
+			}
+		}
+		if (frame.type === "tool_execution_end") {
+			const tool = settle(driven.tools, frame.toolCallId, frame.isError, frame.result);
+			if (tool !== undefined && evalCase.stopAfter?.(tool) === true && !driven.stoppedEarly) {
 				driven.stoppedEarly = true;
 				killTree(child);
 			}
@@ -554,9 +604,12 @@ async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 			return;
 		}
 		if (msg.method === "session/request_permission" && msg.id !== undefined) {
-			// No operator answers in the eval, matching a headless run's denial.
-			driven.raw.push({ permission: asRecord(msg.params).toolCall });
-			send({ id: msg.id, result: { outcome: { outcome: "selected", optionId: "reject-once" } } });
+			// No operator answers in the eval, matching a headless run's denial, except
+			// the dispatch plan a dispatch case asked for.
+			const toolCall = asRecord(asRecord(msg.params).toolCall);
+			driven.raw.push({ permission: toolCall });
+			const approve = evalCase.approvesDispatchPlan === true && toolCall.title === "dispatch";
+			send({ id: msg.id, result: { outcome: { outcome: "selected", optionId: approve ? "allow-once" : "reject-once" } } });
 			return;
 		}
 		if (msg.id !== undefined && msg.method !== undefined) {
@@ -578,8 +631,24 @@ async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 			if (segment.trim().length > 0) driven.finalText = segment;
 			segment = "";
 			const tool = normalizeTool(String(update.name ?? update.title), asRecord(update.rawInput));
+			tool.id = id;
 			driven.tools.push(tool);
 			if (evalCase.stopOn?.(tool) === true && !driven.stoppedEarly) {
+				driven.stoppedEarly = true;
+				send({ method: "session/cancel", params: { sessionId } });
+			}
+			return;
+		}
+		if (kind === "tool_call_update" && (update.status === "completed" || update.status === "failed")) {
+			const output = asRecord(update.rawOutput);
+			driven.raw.push({ tool_call_update: { toolCallId: update.toolCallId, status: update.status, rawOutput: output } });
+			const tool = settle(
+				driven.tools,
+				update.toolCallId,
+				output.isError === true || update.status === "failed",
+				output.result,
+			);
+			if (tool !== undefined && evalCase.stopAfter?.(tool) === true && !driven.stoppedEarly) {
 				driven.stoppedEarly = true;
 				send({ method: "session/cancel", params: { sessionId } });
 			}

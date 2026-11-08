@@ -1783,6 +1783,9 @@ export function buildSettingItems(
 		settingItem("attribution.gitCommits", settings.integrations.git.commitAttribution ? "enabled" : "disabled", {
 			values: ["enabled", "disabled"],
 		}),
+		settingItem("attribution.commitAuthor", settings.integrations.git.commitAuthor, {
+			values: ["auto", "human"],
+		}),
 		settingItem("compaction.model", compaction.model ?? "(orchestrator target)", {
 			submenu: editTextSubmenu("Edit compaction model; blank uses the orchestrator"),
 			affordance: "free text",
@@ -2439,6 +2442,9 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			return;
 		case "attribution.gitCommits":
 			if (value === "enabled" || value === "disabled") settings.integrations.git.commitAttribution = value === "enabled";
+			return;
+		case "attribution.commitAuthor":
+			if (value === "auto" || value === "human") settings.integrations.git.commitAuthor = value;
 			return;
 		case "orchestrator.thinkingLevel":
 			settings.chat.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.chat.thinkingLevel;

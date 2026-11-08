@@ -22,6 +22,9 @@ export const SETTINGS_FIELD_NAMES = [
 	"auto",
 	"autoInterrupt",
 	"autoUpdate",
+	"autonomousMinutes",
+	"autonomousTokens",
+	"autonomousToolCalls",
 	"autonomy",
 	"backend",
 	"background",
@@ -46,6 +49,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"color",
 	"command",
 	"commitAttribution",
+	"commitAuthor",
 	"compaction",
 	"concurrency",
 	"confirmedRemote",
@@ -264,6 +268,8 @@ export const SETTINGS_FIELD_NAMES = [
 	"workingSet",
 	"worktrees",
 	"yoloAccepted",
+	"yoloConfinement",
+	"yoloUnconfinedAccepted",
 ] as const;
 
 export type SettingsFieldName = (typeof SETTINGS_FIELD_NAMES)[number];

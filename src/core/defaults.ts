@@ -8,7 +8,7 @@
 
 import { DEFAULT_WORKING_SET_SETTINGS } from "../domains/context/working-set/defaults.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { AutonomyLevel, YoloConfinement } from "../domains/safety/autonomy.js";
 import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
@@ -399,7 +399,16 @@ export interface ProjectResourcesSettings {
 export interface GitIntegrationSettings {
 	/** Evidence-aware role trailers on commits created through Clio. */
 	commitAttribution: boolean;
+	/**
+	 * Who authors autonomous commits (dispatched workers and their landing,
+	 * headless `run`, scheduled job turns). `auto` makes Clio the author with
+	 * the human committer credited as co-author; `human` keeps the human the
+	 * author everywhere. Interactive sessions always keep the human author.
+	 */
+	commitAuthor: GitCommitAuthorSetting;
 }
+
+export type GitCommitAuthorSetting = "auto" | "human";
 
 /** The music pane: cliamp in a herdr dock. Off until the operator turns it on. */
 export interface MusicIntegrationSettings {
@@ -624,6 +633,12 @@ export interface SafetySettings {
 		readBytesPerCall: number;
 		observationBytesPerTurn: number;
 		workerResponseSeconds: number;
+		/** Tool calls one yolo stretch runs before it pauses for the operator; 0 is off. */
+		autonomousToolCalls: number;
+		/** Minutes of active turn time one yolo stretch runs before it pauses; 0 is off. */
+		autonomousMinutes: number;
+		/** Tokens one yolo stretch spends before it pauses; 0 is off. */
+		autonomousTokens: number;
 	};
 	review: ReviewSettings;
 	/**
@@ -681,6 +696,21 @@ export interface SafetySettings {
 	 * choice count as acceptance and write nothing.
 	 */
 	yoloAccepted: boolean;
+	/**
+	 * What yolo means: `contained` (the default) admits as default does, with
+	 * the sandbox, snapshots and the safety judge, and refuses back to the agent
+	 * what would wait for a person; `unconfined` is the skip-permissions yolo
+	 * where only the yolo floor and operator-authored rules block. Read only
+	 * from the operator's own settings file.
+	 */
+	yoloConfinement: YoloConfinement;
+	/**
+	 * The operator accepted unconfined yolo, through its own acceptance card or
+	 * by writing it here. `yoloConfinement: unconfined` takes effect only with
+	 * it, on every surface including headless runs; accepting contained yolo
+	 * does not accept it. Read only from the operator's own settings file.
+	 */
+	yoloUnconfinedAccepted: boolean;
 	/**
 	 * The safety judge at autonomy `default`: a model that reviews a call the
 	 * policy would park for approval against the operator's own messages, and
@@ -836,6 +866,9 @@ export const DEFAULT_SETTINGS = {
 			readBytesPerCall: GUARDRAIL_DEFAULTS.readMaxBytes,
 			observationBytesPerTurn: GUARDRAIL_DEFAULTS.observationTurnBudgetBytes,
 			workerResponseSeconds: 600,
+			autonomousToolCalls: 600,
+			autonomousMinutes: 120,
+			autonomousTokens: 5_000_000,
 		},
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
@@ -846,6 +879,8 @@ export const DEFAULT_SETTINGS = {
 		snapshots: "auto" as WorkspaceSnapshotMode,
 		unattendedAfterSeconds: 300,
 		yoloAccepted: false,
+		yoloConfinement: "contained" as YoloConfinement,
+		yoloUnconfinedAccepted: false,
 		judge: {
 			enabled: true,
 			target: null,
@@ -897,7 +932,7 @@ export const DEFAULT_SETTINGS = {
 			confirmedRemote: null as string | null,
 			sync: false,
 		},
-		git: { commitAttribution: true },
+		git: { commitAttribution: true, commitAuthor: "auto" as GitCommitAuthorSetting },
 		music: { enabled: false, station: DEFAULT_MUSIC_STATION, agentControl: false },
 	} as IntegrationsSettings,
 	telemetry: {
@@ -1042,6 +1077,11 @@ safety:
     readBytesPerCall: 51200
     observationBytesPerTurn: 196608
     workerResponseSeconds: 600
+    # One yolo stretch pauses for you after this many tool calls, minutes of
+    # active turn time, or tokens; 0 turns a cap off.
+    autonomousToolCalls: 600
+    autonomousMinutes: 120
+    autonomousTokens: 5000000
   review:
     enabled: false
   # OS sandbox for shell commands: auto | required | off. Dispatched workers
@@ -1070,6 +1110,15 @@ safety:
   # Set by the one-time card that turns yolo on interactively. Honored only in
   # this file.
   yoloAccepted: false
+  # What yolo means: contained keeps default's sandbox, snapshots and safety
+  # judge and refuses back to the agent what would wait for you; unconfined
+  # runs everything except the yolo floor and your approved safety.yaml rules.
+  # Honored only in this file.
+  yoloConfinement: contained
+  # Set by the separate card that turns on unconfined yolo, or by hand;
+  # yoloConfinement: unconfined takes effect only when this is true. Honored
+  # only in this file.
+  yoloUnconfinedAccepted: false
   # At autonomy default, a model reviews each call that would need your approval
   # against your own messages and runs or refuses it; it asks you only when it
   # cannot decide or keeps refusing. target and model null use the chat route.
@@ -1127,6 +1176,7 @@ integrations:
     sync: false
   git:
     commitAttribution: true
+    commitAuthor: auto
   music:
     enabled: false
     station: http://radio.cliamp.stream/lofi/stream
