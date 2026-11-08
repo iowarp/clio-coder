@@ -445,12 +445,39 @@ const SHELL_STATE_WORDS = new Set([
 	"unset",
 ]);
 
+/**
+ * Words that run the rest of their segment as a command, such as `time exit 0`
+ * or `env cd /`. The guard does not model what they run, so a segment they
+ * lead ends the part of the chain that can be credited, as a state change does.
+ */
+const COMMAND_PREFIX_WORDS = new Set([
+	"!",
+	"busybox",
+	"chroot",
+	"coproc",
+	"doas",
+	"env",
+	"ionice",
+	"nice",
+	"nohup",
+	"setsid",
+	"stdbuf",
+	"sudo",
+	"taskset",
+	"time",
+	"timeout",
+	"unbuffer",
+	"xargs",
+]);
+
 const SHELL_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/u;
 
 function changesShellState(segment: ReadonlyArray<string>): boolean {
 	// A bare assignment persists for the rest of the chain; one before a command applies to that command only.
 	const word = segment.find((candidate) => !SHELL_ASSIGNMENT.test(candidate));
-	return word === undefined || SHELL_STATE_WORDS.has(word);
+	if (word === undefined || SHELL_STATE_WORDS.has(word)) return true;
+	const name = word.slice(word.lastIndexOf("/") + 1);
+	return COMMAND_PREFIX_WORDS.has(name) || SHELL_STATE_WORDS.has(name);
 }
 
 function shellWord(word: string): string {

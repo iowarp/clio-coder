@@ -365,6 +365,11 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			"true && cd / && pwd",
 			"pushd / && pwd",
 			"PATH=/nowhere && pwd",
+			"time exit 0 && false",
+			"time cd / && pwd",
+			"env exec true && false",
+			"nohup true && command cd / && pwd",
+			"/usr/bin/time exit 0 && false",
 			"./acceptance.sh && cp before.ts src/thing.ts",
 			"./acceptance.sh && rm src/thing.ts",
 		]) {
