@@ -474,42 +474,43 @@ describe("native worker MCP capabilities", () => {
 		);
 	});
 
-	it("accepts external research sources from a read-only worker whose MCP server is trusted --network", async () => {
-		const report = JSON.stringify({
-			source: "external",
-			findings: [{ claim: "The evidence service reports evidence-67.", evidence: "mcp_fake__echo result" }],
+	const report = JSON.stringify({
+		source: "external",
+		findings: [{ claim: "The evidence service reports evidence-67.", evidence: "mcp_fake__echo result" }],
+	});
+	async function dispatchReport() {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.retry.maxRetries = 0;
+		const bundle = makeDispatchBundle(readOnlyCoderContext(settings, TOOLS), {
+			heartbeatIntervalMs: 3_600_000,
+			spawnWorker: () => ({
+				pid: null,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+				abort: () => {},
+				send: () => true,
+				events: (async function* () {
+					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
+				})(),
+			}),
 		});
-		const dispatchReport = async () => {
-			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.fleet.retry.maxRetries = 0;
-			const bundle = makeDispatchBundle(readOnlyCoderContext(settings, TOOLS), {
-				heartbeatIntervalMs: 3_600_000,
-				spawnWorker: () => ({
-					pid: null,
-					promise: Promise.resolve({ exitCode: 0, signal: null }),
-					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
-					abort: () => {},
-					send: () => true,
-					events: (async function* () {
-						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
-					})(),
-				}),
+		await bundle.extension.start();
+		try {
+			const run = await bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "researcher",
+				task: "Report the evidence service's answer.",
+				cwd: project,
+				requestOrigin: "internal",
+				resultContractOverride: { kind: "research-report" },
 			});
-			await bundle.extension.start();
-			try {
-				const run = await bundle.contract.dispatch({
-					agentId: "coder",
-					executionRole: "researcher",
-					task: "Report the evidence service's answer.",
-					cwd: project,
-					requestOrigin: "internal",
-					resultContractOverride: { kind: "research-report" },
-				});
-				return await run.finalPromise;
-			} finally {
-				await bundle.extension.stop?.();
-			}
-		};
+			return await run.finalPromise;
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	}
+
+	it("accepts external research sources from a read-only worker whose MCP server is trusted --network", async () => {
 		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
 		const local = await dispatchReport();
 		strictEqual(local.outcomeCode, "result_contract_invalid");
@@ -517,6 +518,16 @@ describe("native worker MCP capabilities", () => {
 		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
 		const networked = await dispatchReport();
 		strictEqual(networked.outcome, "succeeded", networked.outcomeDetail ?? networked.outcome);
+	});
+
+	it("refuses external research sources when only the project declaration claims network, and admits no untrusted server", async () => {
+		const file = join(project, ".clio-coder", "mcp.yaml");
+		writeFileSync(file, readFileSync(file, "utf8").replace("  - id: other", "    network: true\n  - id: other"));
+		await rejects(dispatchReport(), /MCP server 'fake' is untrusted/);
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const claimed = await dispatchReport();
+		strictEqual(claimed.outcomeCode, "result_contract_invalid");
+		match(claimed.outcomeDetail ?? "", /no allowed network posture/);
 	});
 
 	it("withholds the grant from a writing worker whose write root covers the server's cwd and says why", async () => {
