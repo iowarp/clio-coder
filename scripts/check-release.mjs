@@ -83,7 +83,7 @@ const SIZE_BUDGETS = [
 	{
 		class: "codemap",
 		match: (path) => path === CODEMAP,
-		// The 0.7.0 candidate measured 944,185 bytes after the code map was gzipped: 1.0 MB rounded up plus a 0.5 MB cycle allowance (#442).
+		// The 0.7.0 candidate measured 944,220 bytes after the code map was gzipped: 1.0 MB rounded up plus a 0.5 MB cycle allowance (#442).
 		maxBytes: 1_500_000,
 	},
 	{
@@ -94,7 +94,7 @@ const SIZE_BUDGETS = [
 			path !== CODEMAP &&
 			path !== SOURCE_PACK &&
 			!path.startsWith("dist/gui/client/"),
-		// The 0.7.0 candidate measured 15,014,447 bytes: 15.5 MB rounded up plus a 0.5 MB cycle allowance (#442).
+		// The 0.7.0 candidate measured 15,014,874 bytes: 15.5 MB rounded up plus a 0.5 MB cycle allowance (#442).
 		maxBytes: 16_000_000,
 	},
 	{
@@ -107,7 +107,7 @@ const SIZE_BUDGETS = [
 		class: "src",
 		// The packed TypeScript source is still src/, stored in one file (scripts/build-source-pack.ts).
 		match: (path) => path.startsWith("src/") || path === SOURCE_PACK,
-		// The 0.7.0 candidate measured 6,357,354 bytes in the source pack: 6.5 MB rounded up plus a 0.5 MB cycle allowance (#442).
+		// The 0.7.0 candidate measured 6,357,590 bytes in the source pack: 6.5 MB rounded up plus a 0.5 MB cycle allowance (#442).
 		maxBytes: 7_000_000,
 	},
 	{
@@ -123,11 +123,11 @@ const SIZE_BUDGETS = [
 			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
 			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs", "assets/clio-mark-gui.webp"].includes(path) ||
 			SHIPPED_SCRIPTS.has(path),
-		// The 0.7.0 candidate measured 1,811,625 bytes; the rule would raise this to 2.5 MB, so it stays at 2.0 MB.
+		// The 0.7.0 candidate measured 1,820,298 bytes; the rule would raise this to 2.5 MB, so it stays at 2.0 MB.
 		maxBytes: 2_000_000,
 	},
 ];
-// Maintainer decision: 17.0 MB; the 0.6.9 candidate measured 16,493,956 packed bytes and the 0.7.0 candidate 16,185,755 (#442).
+// Maintainer decision: 17.0 MB; the 0.6.9 candidate measured 16,493,956 packed bytes and the 0.7.0 candidate 16,188,476 (#442).
 const MAX_TARBALL_BYTES = 17_000_000;
 const MAX_UNPACKED_BYTES = SIZE_BUDGETS.reduce((total, budget) => total + budget.maxBytes, 0);
 const MAX_ENTRY_COUNT = 3_000;
