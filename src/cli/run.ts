@@ -53,7 +53,7 @@ import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--verify "<cmd>" [--verify-timeout <seconds>]] [--max-cost-usd <N>] [--agent <recipe-id>] [--] "<task>"\n';
 
 const HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -92,6 +92,9 @@ Flags:
                             autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
+  --verify "<cmd>"          an acceptance check for this run only, repeatable: bash runs it in the run's cwd after
+                            the turn, and the finish gate counts the agent's own run of it (see below)
+  --verify-timeout <secs>   limit for each --verify check (default 300); a check that runs over fails
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per
@@ -121,6 +124,17 @@ A headless turn starts a fresh session unless --session or --continue names one
 to append to. A named session that cannot be resumed fails the run: an answer
 written without the history the caller asked for is worse than no answer. The
 session id is reported on stderr, and as the "session" event under --json.
+
+--verify declares a check for this run alone, named run-acceptance (then
+run-acceptance-2, ...); nothing is written to .clio-coder/verifiers.yaml. The
+finish gate treats it like a declared verifier: when the agent changes files
+and then runs the command through bash, as a whole && segment, it counts as a
+check. After the turn, the run itself runs each check with bash and reports it
+as {id, command, exitCode, passed, durationMs, timedOut, ranAfterLastEdit} in
+the terminal turn_end's "verify" array, in a {"type":"verify"} frame under
+--json-events full, and on stderr in text mode. ranAfterLastEdit says whether
+the agent ran the check after its last edit. A failed check does not change
+the run's exit code. An interrupted run skips the checks.
 
 There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
@@ -493,6 +507,11 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			if (parsed.verify.length > 0 && parsed.agentId !== undefined) {
+				writeRunDiagnostic("clio-coder run: --verify applies to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
 			// Yolo as root outside a container is refused before boot (#407).
 			if (parsed.autonomy === "yolo") {
 				const refusal = yoloRootRefusal();
@@ -582,6 +601,14 @@ async function executeRunCommand(
 								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 								...(parsed.failOnNoop ? { failOnNoop: true } : {}),
 								...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
+								...(parsed.verify.length > 0
+									? {
+											verify: {
+												checks: runVerifyChecks(parsed.verify),
+												timeoutMs: (parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS) * 1000,
+											},
+										}
+									: {}),
 								...(deadline !== undefined ? { deadline } : {}),
 								...(parsed.sessionId !== undefined
 									? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
@@ -614,6 +641,16 @@ async function executeRunCommand(
 			}
 		},
 	);
+}
+
+const DEFAULT_VERIFY_TIMEOUT_SECONDS = 300;
+
+/** `--verify` commands as this run's checks: run-acceptance, then run-acceptance-2 and on. */
+function runVerifyChecks(commands: ReadonlyArray<string>): Array<{ id: string; command: string }> {
+	return commands.map((command, index) => ({
+		id: index === 0 ? "run-acceptance" : `run-acceptance-${index + 1}`,
+		command,
+	}));
 }
 
 async function runDispatch(

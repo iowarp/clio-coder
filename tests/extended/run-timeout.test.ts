@@ -213,4 +213,40 @@ describe("clio-coder run --timeout", () => {
 		strictEqual(agent.code, 2, agent.stderr);
 		match(agent.stderr, /--timeout applies to the main agent, not --agent dispatch/);
 	});
+
+	it("runs each --verify check after the turn and credits the agent's own run of it after its edit", async () => {
+		const { turn } = await headlessTurn(
+			[
+				{ kind: "tool", name: "write", arguments: { path: "calc.txt", content: "5\n" } },
+				{ kind: "tool", name: "bash", arguments: { command: "grep -qx 5 calc.txt && echo OK" } },
+			],
+			"default",
+			["--json-events", "terminal", "--verify", "grep -qx 5 calc.txt", "--verify", "exit 3", "--verify-timeout", "30"],
+		);
+		strictEqual(turn.code, 0, turn.stderr);
+		doesNotMatch(turn.stdout, /ran no check/);
+		const end = JSON.parse(turn.stdout.trim().split("\n").at(-1) ?? "{}") as {
+			type?: string;
+			verify?: Array<Record<string, unknown>>;
+		};
+		strictEqual(end.type, "turn_end");
+		const [accepted, failing] = end.verify ?? [];
+		ok(typeof accepted?.durationMs === "number");
+		strictEqual(
+			JSON.stringify({ ...accepted, durationMs: 0 }),
+			JSON.stringify({
+				id: "run-acceptance",
+				command: "grep -qx 5 calc.txt",
+				exitCode: 0,
+				passed: true,
+				durationMs: 0,
+				timedOut: false,
+				ranAfterLastEdit: true,
+			}),
+		);
+		strictEqual(failing?.id, "run-acceptance-2");
+		strictEqual(failing?.exitCode, 3);
+		strictEqual(failing?.passed, false);
+		strictEqual(failing?.ranAfterLastEdit, false);
+	});
 });

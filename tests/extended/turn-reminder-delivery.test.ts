@@ -26,6 +26,16 @@ import { type AgentRuntime, createTurnState } from "../../src/session-control/tu
 for (const [message, text, key] of [
 	[FINISH_CONTRACT_ADVISORY_MESSAGE, "Clio changed files but ran no check on them afterwards", "finish.unverified"],
 	[
+		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast, lint. Run checks: run-acceptance.`,
+		"Clio changed files but ran no check on them afterwards; run verify unit.fast (or lint)",
+		"finish.unverified",
+	],
+	[
+		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Run checks: run-acceptance.`,
+		"Clio changed files but ran no check on them afterwards; the run's --verify check (run-acceptance) still runs after the turn",
+		"finish.unverified",
+	],
+	[
 		FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 		"checks passed; coverage of the change not measured",
 		"finish.coverage-unverified",

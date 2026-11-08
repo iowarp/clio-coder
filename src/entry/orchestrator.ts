@@ -3100,10 +3100,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 		}),
 	);
+	// `run --verify` checks the last finish decision credited to the agent's own run after its last edit.
+	const runVerifyChecks = options.headless?.verify?.checks ?? [];
+	let creditedRunChecks: ReadonlySet<string> = new Set();
 	if (session) {
 		middlewareRegistrar.registerHook(
 			createFinishContractRegistration({
 				getTurnConstraints: () => chat.currentTurnConstraints?.(),
+				...(runVerifyChecks.length > 0 ? { readSessionVerifiers: () => runVerifyChecks } : {}),
 				// Tail-scoped: the contract only needs the last-user-message window, so
 				// it parses a bounded ledger tail per turn_end rather than the whole
 				// file (which grows unbounded with session length).
@@ -3128,6 +3132,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						record.evidenceKinds,
 					);
 					safety.decisions.recordCompletionContract?.(record);
+					creditedRunChecks = new Set(record.verificationScope?.passedChecks ?? []);
 				},
 			}),
 		);
@@ -4369,6 +4374,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
+				...(options.headless.verify !== undefined
+					? { verify: { ...options.headless.verify, credited: () => creditedRunChecks } }
+					: {}),
 				...(dispatch ? { dispatch } : {}),
 				autonomyHalt: () => lastAutonomyHalt,
 				autonomy: () => autonomyWindow.report(true),

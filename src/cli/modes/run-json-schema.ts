@@ -236,6 +236,28 @@ export interface RunJsonTerminalTurnEndFrame {
 	safety?: Pick<NonNullable<RunResult["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
 	/** A yolo run's window, its halt and the calls it left for the operator (ob-yolo D7). */
 	autonomy?: AutonomyReport;
+	/** `run --verify`: each check as the run ran it after the turn, in flag order. */
+	verify?: RunJsonVerifyResult[];
+}
+
+/** One `run --verify` check, run with bash in the run's cwd once the turn settled. */
+export interface RunJsonVerifyResult {
+	/** `run-acceptance`, then `run-acceptance-2` and on, in flag order. */
+	id: string;
+	command: string;
+	/** Null when the shell ended by a signal, a timeout among them, or never started. */
+	exitCode: number | null;
+	passed: boolean;
+	durationMs: number;
+	timedOut: boolean;
+	/** The agent itself ran this check after its last edit, so the finish gate counted it. */
+	ranAfterLastEdit: boolean;
+}
+
+/** The `run --verify` results a `--json-events full` stream ends with. */
+export interface RunJsonVerifyFrame {
+	type: "verify";
+	checks: RunJsonVerifyResult[];
 }
 
 /** The yolo audit a streamed `--json` run ends with: the window, its halt and the calls left for the operator. */
@@ -308,7 +330,8 @@ export type RunJsonMainFrame =
 	| RunJsonTerminalTurnEndFrame
 	| RunJsonDispatchScopeNoticeFrame
 	| RunJsonDispatchSettlementFrame
-	| RunJsonAutonomyFrame;
+	| RunJsonAutonomyFrame
+	| RunJsonVerifyFrame;
 
 /**
  * Frames of a `run --agent --json` stream. `RunJsonWorkerEventFrame` is open,

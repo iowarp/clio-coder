@@ -4,6 +4,7 @@ import type { ClioSettings } from "../core/config.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
+import type { SessionVerifier } from "../domains/safety/finish-contract.js";
 import type { AutonomyLevel } from "../domains/safety/index.js";
 import type { AcpHandshake } from "../engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
@@ -81,6 +82,8 @@ export interface BootOptions {
 		maxCostUsd?: number;
 		/** `clio-coder run --timeout`: the armed wall-clock limit for the whole run. */
 		deadline?: HeadlessRunDeadline;
+		/** `clio-coder run --verify`: the run's own acceptance checks and the limit for each. */
+		verify?: { checks: ReadonlyArray<SessionVerifier>; timeoutMs: number };
 	};
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;

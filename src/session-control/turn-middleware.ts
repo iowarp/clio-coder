@@ -26,6 +26,7 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_DECLARED_CHECKS_PREFIX,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
 } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
@@ -239,17 +240,26 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// warning to the operator without posing it as a new user instruction
 			// or carrying stale advice into the next model turn. When the workspace
 			// declares checks, name the one to run rather than leave a bare warning.
-			const declared = message
-				.slice(FINISH_CONTRACT_ADVISORY_MESSAGE.length)
-				.replace(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, "")
-				.replace(/\.$/u, "")
-				.split(", ")
-				.filter((id) => id.length > 0);
+			const named = (prefix: string): string[] => {
+				const at = message.indexOf(prefix);
+				if (at < 0) return [];
+				// Check ids may hold dots, so a list ends at ". " or the message's final period.
+				const rest = message.slice(at + prefix.length);
+				const stop = rest.indexOf(". ");
+				const list = stop >= 0 ? rest.slice(0, stop) : rest.replace(/\.$/u, "");
+				return list.split(", ").filter((id) => id.length > 0);
+			};
+			const declared = named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX);
+			const runChecks = named(FINISH_CONTRACT_RUN_CHECKS_PREFIX);
+			const hint =
+				declared.length > 0
+					? `; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
+					: runChecks.length > 0
+						? `; the run's --verify check (${runChecks.join(", ")}) still runs after the turn`
+						: "";
 			deps.emitFooterNotice(
 				"warning",
-				declared.length > 0
-					? `Clio changed files but ran no check on them afterwards; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
-					: "Clio changed files but ran no check on them afterwards",
+				`Clio changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
 			return;

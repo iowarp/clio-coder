@@ -59,6 +59,10 @@ export interface RunCliArgs {
 	maxCostUsd?: number;
 	/** Wall-clock limit for the whole run, in seconds. */
 	timeoutSeconds?: number;
+	/** `--verify`: shell commands the run declares as its acceptance checks, in flag order. */
+	verify: string[];
+	/** `--verify-timeout`: the limit for each `--verify` check, in seconds. */
+	verifyTimeoutSeconds?: number;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -76,6 +80,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		noSkills: false,
 		continueSession: false,
 		failOnNoop: false,
+		verify: [],
 		skillPaths: [],
 		fileArgs: [],
 		messages: [],
@@ -305,6 +310,32 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
+		if (arg === "--verify") {
+			const value = argv[i + 1];
+			// The command is shell text, so it may start with a dash; only its absence or a blank is an error.
+			if (value === undefined || value.trim().length === 0) {
+				parsed.diagnostics.push({ type: "error", message: "--verify requires a shell command" });
+			} else {
+				i += 1;
+				parsed.verify.push(value);
+			}
+			continue;
+		}
+		if (arg === "--verify-timeout") {
+			const value = need(arg);
+			if (value !== null) {
+				const seconds = Number(value);
+				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
+					parsed.verifyTimeoutSeconds = seconds;
+				} else {
+					parsed.diagnostics.push({
+						type: "error",
+						message: `--verify-timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
+					});
+				}
+			}
+			continue;
+		}
 		if (arg === "--fail-on-noop") {
 			parsed.failOnNoop = true;
 			continue;
@@ -341,6 +372,9 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			type: "error",
 			message: "--autonomy applies to the main agent; use --read-only to restrict --agent dispatch",
 		});
+	}
+	if (parsed.verifyTimeoutSeconds !== undefined && parsed.verify.length === 0) {
+		parsed.diagnostics.push({ type: "error", message: "--verify-timeout applies only with --verify" });
 	}
 	// Only the main-agent stream reads the mode (cli/modes/print.ts); a dispatch
 	// took the flag and printed its usual stream.

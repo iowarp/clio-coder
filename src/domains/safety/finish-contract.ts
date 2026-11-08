@@ -31,6 +31,9 @@ export const FINISH_CONTRACT_ADVISORY_MESSAGE =
  */
 export const FINISH_CONTRACT_DECLARED_CHECKS_PREFIX = " Declared checks: ";
 
+/** Appended for checks the caller declared for this run only (`run --verify`), which `verify` does not know. */
+export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
+
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
@@ -323,14 +326,14 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 		return { kind: "ok", reason: "deletion_only", evidence: [], mutatedPaths };
 	}
 
-	const declaredIds = [...new Set(declared.map((check) => check.id))];
+	const named = (prefix: string, session: boolean) => {
+		const ids = [...new Set(declared.filter((check) => check.session === session).map((check) => check.id))];
+		return ids.length > 0 ? `${prefix}${ids.join(", ")}.` : "";
+	};
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message:
-			declaredIds.length > 0
-				? `${FINISH_CONTRACT_ADVISORY_MESSAGE}${FINISH_CONTRACT_DECLARED_CHECKS_PREFIX}${declaredIds.join(", ")}.`
-				: FINISH_CONTRACT_ADVISORY_MESSAGE,
+		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}`,
 		evidence: [],
 		mutatedPaths,
 	};
@@ -341,6 +344,8 @@ interface DeclaredVerifierCommand {
 	id: string;
 	segments: string[][];
 	cwd: string;
+	/** Declared for this session only, so `verify` cannot run it by id. */
+	session: boolean;
 }
 
 /**
@@ -358,7 +363,7 @@ function declaredVerifierCommands(
 	const declared: DeclaredVerifierCommand[] = [];
 	for (const verifier of sessionVerifiers ?? []) {
 		const segments = shellAndSegments(verifier.command);
-		if (segments !== null) declared.push({ id: verifier.id, segments, cwd: root });
+		if (segments !== null) declared.push({ id: verifier.id, segments, cwd: root, session: true });
 	}
 	try {
 		const loaded = loadProjectVerifierCatalog(root);
@@ -366,7 +371,7 @@ function declaredVerifierCommands(
 			if (check.kind !== "command" || check.runs !== undefined) continue;
 			const cwd = resolveProjectVerifierExecutionCwd(check.cwd, root);
 			if (cwd instanceof Error) continue;
-			declared.push({ id: check.id, segments: [check.command], cwd: resolve(cwd) });
+			declared.push({ id: check.id, segments: [check.command], cwd: resolve(cwd), session: false });
 		}
 	} catch {
 		// An unreadable catalog declares nothing the shell could be credited for.
@@ -661,17 +666,16 @@ function collectValidationEvidence(
 			continue;
 		}
 
+		// A declared check credits on its own terms even when the command is also a generic validation command.
+		const declaredRun = bashDeclaredVerifierCall(entry, workspaceRoot, declared);
+		if (declaredRun !== null) declaredRuns.set(declaredRun.toolCallId, declaredRun);
+
 		const call = bashValidationCall(entry, acceptanceChecks, workspaceRoot);
 		if (call !== null) {
 			toolCalls.set(call.toolCallId, call);
 			continue;
 		}
-
-		const declaredRun = bashDeclaredVerifierCall(entry, workspaceRoot, declared);
-		if (declaredRun !== null) {
-			declaredRuns.set(declaredRun.toolCallId, declaredRun);
-			continue;
-		}
+		if (declaredRun !== null) continue;
 
 		const typedValidationCall = validationToolCall(entry);
 		if (typedValidationCall !== null) {
@@ -704,10 +708,12 @@ function collectValidationEvidence(
 			continue;
 		}
 
-		const bashExecution =
-			bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot) ??
-			(afterLastEdit(index, null) ? bashExecutionDeclaredEvidence(entry, workspaceRoot, declared) : null);
+		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
+		const declaredExecution = afterLastEdit(index, null)
+			? bashExecutionDeclaredEvidence(entry, workspaceRoot, declared)
+			: null;
+		if (declaredExecution !== null) pushEvidence(evidence, seen, declaredExecution);
 	}
 
 	return evidence;

@@ -29,6 +29,7 @@ import {
 	type FinishContractAssessment,
 	mutationPathsForTool,
 	recentEntries,
+	type SessionVerifier,
 } from "./finish-contract.js";
 import { extractCommandPathWalks } from "./protected-artifacts.js";
 import type { Rigor } from "./rigor.js";
@@ -74,6 +75,8 @@ export interface CreateFinishContractRegistrationOptions {
 	 */
 	reserveVerificationNudge?: () => boolean;
 	readActiveAcceptance?: (window: ReadonlyArray<unknown>) => UserTaskAcceptance | undefined;
+	/** Checks declared for this session only (`run --verify`), credited like the project's declared checks. */
+	readSessionVerifiers?: () => ReadonlyArray<SessionVerifier>;
 	/**
 	 * Record the contract's decision to the audit ledger. Optional; when wired
 	 * (production passes the safety audit sink), every turn_end decision — each
@@ -193,6 +196,7 @@ export function createFinishContractRegistration(
 			const assessment = assessFinishContract({
 				sessionEntries: entries,
 				workspaceRoot: process.cwd(),
+				sessionVerifiers: options.readSessionVerifiers?.() ?? [],
 				unchangedPaths: unchangedPaths(),
 				rigor,
 				...(activeAcceptance ? { activeAcceptance } : {}),

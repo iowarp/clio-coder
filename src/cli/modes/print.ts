@@ -77,6 +77,7 @@ import { createHeadlessJsonProjector } from "./json-stream.js";
 import { writeFrame } from "./jsonl.js";
 import type { RunJsonMainFrame, RunJsonMainSessionFrame, RunJsonSegmentUsage } from "./run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
+import { formatHeadlessVerifyResult, type HeadlessVerifyOptions, runHeadlessVerifyChecks } from "./run-verify.js";
 
 export interface HeadlessSamplingOverrides {
 	temperature?: number;
@@ -123,6 +124,8 @@ export interface HeadlessMainAgentOptions {
 	 * wall-clock limit from an external signal.
 	 */
 	deadline?: HeadlessRunDeadline;
+	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
+	verify?: HeadlessVerifyOptions;
 	/**
 	 * The dispatch ledger. When present, the run waits for the workers it
 	 * dispatched before sealing and fails when one did not deliver (D3, D6b).
@@ -1143,6 +1146,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// did has already put the coordinator into shutdown, which the first branch
 	// below reads.
 	options.deadline?.settle();
+	// An interrupted turn has nothing to accept, and a shutdown stops the checks.
+	const verify =
+		options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null
+			? await runHeadlessVerifyChecks(options.verify, (hook) => termination.onDrain(hook))
+			: null;
+	if (verify !== null && mode === "text") {
+		for (const check of verify) process.stderr.write(`${formatHeadlessVerifyResult(check)}\n`);
+	}
 
 	const endedAt = new Date().toISOString();
 	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
@@ -1276,6 +1287,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeJsonHeader(true);
 		writeMainFrame({ type: "autonomy", ...autonomy });
 	}
+	if (verify !== null && mode === "json" && jsonEvents !== "terminal") {
+		writeJsonHeader(true);
+		writeMainFrame({ type: "verify", checks: verify });
+	}
 
 	if (mode === "json" && jsonEvents === "terminal") {
 		writeJsonHeader(true);
@@ -1301,6 +1316,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
 			},
 			...(autonomy !== null ? { autonomy } : {}),
+			...(verify !== null ? { verify } : {}),
 		});
 	}
 

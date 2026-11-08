@@ -327,7 +327,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			strictEqual(unproven.reason, "unvalidated_mutation");
 			strictEqual(
 				unproven.kind === "engage" ? unproven.message : "",
-				`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: run-acceptance, calc.`,
+				`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: calc. Run checks: run-acceptance.`,
 			);
 		}
 	});
