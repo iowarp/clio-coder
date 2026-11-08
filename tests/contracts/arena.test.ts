@@ -240,21 +240,48 @@ const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
 out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model }] } });
+if (model === "slow") setTimeout(() => {}, 60_000);
 `;
 
+function scratchRepo(): { base: string; repo: string; fake: string; gitIn: (...args: string[]) => Buffer } {
+	const base = mkdtempSync(join(tmpdir(), "clio-coder-arena-run-"));
+	const repo = join(base, "repo");
+	mkdirSync(repo);
+	const gitIn = (...args: string[]) =>
+		execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "pipe" });
+	gitIn("init", "-q", "-b", "main");
+	writeFileSync(join(repo, "README"), "x\n");
+	gitIn("add", "-A");
+	gitIn("commit", "-qm", "init");
+	const fake = join(base, "fake-clio.cjs");
+	writeFileSync(fake, FAKE_CLIO);
+	return { base, repo, fake, gitIn };
+}
+
 describe("arena runner", () => {
+	it("stops every contender on abort and still removes the worktrees", async () => {
+		const { repo, fake, gitIn } = scratchRepo();
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 1500);
+		const result = await runArenaMatch({
+			cwd: repo,
+			prompt: "hang",
+			contenders: [
+				{ target: "t", model: "slow" },
+				{ target: "t", model: "m2" },
+			],
+			timeoutSeconds: 120,
+			clio: { file: process.execPath, args: [fake] },
+			env: {},
+			signal: controller.signal,
+		});
+		assert.equal(result.status, "failed");
+		assert.match(result.error ?? "", /canceled/);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
 	it("runs contenders in separate worktrees, keeps their diffs, and cleans up", async () => {
-		const base = mkdtempSync(join(tmpdir(), "clio-coder-arena-run-"));
-		const repo = join(base, "repo");
-		mkdirSync(repo);
-		const gitIn = (...args: string[]) =>
-			execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "pipe" });
-		gitIn("init", "-q", "-b", "main");
-		writeFileSync(join(repo, "README"), "x\n");
-		gitIn("add", "-A");
-		gitIn("commit", "-qm", "init");
-		const fake = join(base, "fake-clio.cjs");
-		writeFileSync(fake, FAKE_CLIO);
+		const { repo, fake, gitIn } = scratchRepo();
 		const result = await runArenaMatch({
 			cwd: repo,
 			prompt: "write your model name",

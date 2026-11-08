@@ -273,7 +273,10 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 				if (ownership !== null) settleCompeteGroupRun(ownership, `${id}-${contender.index + 1}`);
 			}),
 		);
-		match.status = "complete";
+		if (input.signal?.aborted) {
+			match.status = "failed";
+			match.error = "canceled before every contender finished";
+		} else match.status = "complete";
 	} catch (caught) {
 		match.status = "failed";
 		match.error = errorText(caught);
