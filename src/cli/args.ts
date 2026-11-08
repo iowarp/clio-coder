@@ -94,6 +94,12 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			i += 1;
 			return value;
 		};
+		// End of options: everything after "--" is message text, verbatim, so a prompt
+		// that starts with a dash or an "@" is never read as a flag or a file.
+		if (arg === "--") {
+			parsed.messages.push(...argv.slice(i + 1));
+			break;
+		}
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
 			continue;

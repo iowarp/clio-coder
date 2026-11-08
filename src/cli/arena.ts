@@ -375,7 +375,10 @@ function standingsCommand(args: string[]): number {
 
 export async function runArenaCommand(args: string[]): Promise<number> {
 	const [verb, ...rest] = args;
-	if (verb === undefined || verb === "--help" || verb === "-h" || args.includes("--help") || args.includes("-h")) {
+	// Help is an option, so a literal "--help" after "--" is prompt text, not a request for help.
+	const end = args.indexOf("--");
+	const options = end === -1 ? args : args.slice(0, end);
+	if (verb === undefined || options.includes("--help") || options.includes("-h")) {
 		process.stdout.write(`${HELP}\n`);
 		return 0;
 	}

@@ -19,7 +19,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | Command | Purpose |
 | --- | --- |
 | `clio-coder` | Launch the interactive terminal UI. |
-| `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
+| `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. Everything after `--` is task text, even text that starts with `-`. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively. The finished run settles and seals in its telemetry run scope. |
 | `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--read-only]` | Serve Clio Coder as an ACP v1 agent over stdio for ACP frontends. `--permission-timeout` overrides `integrations.externalAgents.defaults.permissionTimeoutMs`, the server's default bound on a mediated permission request. `--read-only` holds every session to the read-only ceiling, so no file outside Clio's home changes; see [ACP read-only server](#acp-session-and-prompt-capability-ceilings). |
 | `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. `clio-coder --acp` is an alias for `clio-coder acp`. |

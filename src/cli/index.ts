@@ -298,7 +298,9 @@ async function main(argv: string[]): Promise<number> {
  * guard runs before enablement, not after the module's own help check.
  */
 async function enableBootCompileCache(subArgs: ReadonlyArray<string> = []): Promise<void> {
-	if (subArgs.includes("--help") || subArgs.includes("-h")) return;
+	const end = subArgs.indexOf("--");
+	const options = end === -1 ? subArgs : subArgs.slice(0, end);
+	if (options.includes("--help") || options.includes("-h")) return;
 	const { enableClioCompileCache } = await import("../core/compile-cache.js");
 	enableClioCompileCache();
 }

@@ -53,11 +53,12 @@ import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--max-cost-usd <N>] [--agent <recipe-id>] [--] "<task>"\n';
 
-const HELP = `clio-coder run [flags] "<task>"
+const HELP = `clio-coder run [flags] [--] "<task>"
 
 Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
+Everything after "--" is the task text, even when it starts with "-" or "@".
 
 Flags:
   --cwd <dir>               run as if started in <dir>; applies to --agent too
