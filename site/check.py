@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check generated pages, metadata, assets, and the internal link graph."""
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -229,6 +230,9 @@ if not (root / '.nojekyll').is_file():
 for installer in ('install.sh', 'install.ps1', 'install.cmd'):
     if f'/{installer}' in (root / 'sitemap.xml').read_text():
         errors.append(f'{installer} must not be listed in the sitemap')
+for path in pages:
+    if re.search(r'<p>:::', (root / ('index.html' if path == '/' else path.lstrip('/'))).read_text()):
+        errors.append(f'{path}: an unconverted guide directive reached the page')
 if errors:
     print('\n'.join(errors))
     sys.exit(1)

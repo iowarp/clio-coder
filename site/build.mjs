@@ -278,6 +278,17 @@ function shell(html, path, title, description, type) {
 		path,
 	);
 }
+// The lines of the directive opened at `start`, up to its own closing `:::`.
+// A block such as steps may contain a nested directive, usually a capture.
+function directiveBody(lines, start) {
+	const inner = [];
+	for (let i = start + 1, depth = 0; i < lines.length; i++) {
+		if (/^:::\s*[a-z]+/.test(lines[i])) depth++;
+		else if (lines[i].trim() === ":::" && depth-- === 0) break;
+		inner.push(lines[i]);
+	}
+	return inner;
+}
 // Guide directives: a line `::: name arguments` opens a block and `:::`
 // closes it. The body is Markdown. Directives compose the product's existing
 // vocabulary (eyebrows, copper step numbers, rules, captures) into a guide.
@@ -296,10 +307,10 @@ function directives(markdown, render) {
 			continue;
 		}
 		flush();
-		const inner = [];
-		for (i++; i < lines.length && lines[i].trim() !== ":::"; i++) inner.push(lines[i]);
+		const inner = directiveBody(lines, i);
+		i += inner.length + 1;
 		if (i >= lines.length) throw new Error(`Unclosed guide directive: ${open[1]}`);
-		html += directive(open[1], (open[2] ?? "").trim(), inner.join("\n"), render);
+		html += directive(open[1], (open[2] ?? "").trim(), inner.join("\n"), (text) => directives(text, render));
 	}
 	flush();
 	return html;
