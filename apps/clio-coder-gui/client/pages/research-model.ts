@@ -317,3 +317,17 @@ export function researchRequest(draft: ResearchDraft): { request: ResearchStartR
 		},
 	};
 }
+
+/**
+ * The `research start` operation the page follows. The server's unsettled one wins: it is this window's own campaign
+ * while that runs, and once that settles it may be a campaign started elsewhere. This window's start counts only in its
+ * workspace, and only until the list knows better (just after the start, or to keep a settled run's log in view).
+ */
+export function followedOperation(
+	started: { workspaceId: string; operationId: string } | null,
+	workspaceId: string,
+	runningOperationId: string | undefined,
+): string | null {
+	if (runningOperationId) return runningOperationId;
+	return started?.workspaceId === workspaceId ? started.operationId : null;
+}

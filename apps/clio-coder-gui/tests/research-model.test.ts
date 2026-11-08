@@ -8,6 +8,7 @@ import {
 	campaignFromProgress,
 	curveChart,
 	emptyResearchDraft,
+	followedOperation,
 	iterationRows,
 	logLine,
 	regradeLines,
@@ -155,4 +156,16 @@ test("the form sends only a request the contract accepts", () => {
 		assert.match(result.problem, problem);
 	}
 	assert.ok("request" in researchRequest({ ...draft, direction: "max", minImprovement: "1.5" }));
+});
+
+test("the page follows the workspace's running campaign over one this window started earlier", () => {
+	const mine = { workspaceId: "w1", operationId: "op-a" };
+	// Just started here: the list has not caught up yet.
+	assert.equal(followedOperation(mine, "w1", undefined), "op-a");
+	// Campaign A settled and campaign B was started elsewhere: follow B so Stop and the disabled form apply to it.
+	assert.equal(followedOperation(mine, "w1", "op-b"), "op-b");
+	// Another workspace never shows this window's campaign.
+	assert.equal(followedOperation(mine, "w2", undefined), null);
+	assert.equal(followedOperation(mine, "w2", "op-c"), "op-c");
+	assert.equal(followedOperation(null, "w1", undefined), null);
 });

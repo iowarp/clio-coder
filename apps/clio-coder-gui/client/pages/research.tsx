@@ -15,6 +15,7 @@ import {
 	campaignFromProgress,
 	curveChart,
 	emptyResearchDraft,
+	followedOperation,
 	iterationRows,
 	logLine,
 	RESEARCH_PANEL,
@@ -41,7 +42,7 @@ export function ResearchPage({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const campaignId = search.get("campaign");
 	const [composing, setComposing] = useState(false);
-	const [started, setStarted] = useState<string | null>(null);
+	const [started, setStarted] = useState<{ workspaceId: string; operationId: string } | null>(null);
 	const pick = (id: string | null) =>
 		setSearch((current) => {
 			const next = new URLSearchParams(current);
@@ -58,7 +59,7 @@ export function ResearchPage({ client }: { client: Client }) {
 		refetchInterval: (query) => (query.state.data?.runningOperationId ? 5000 : false),
 	});
 	// A campaign started on an earlier visit or in another window keeps running on the server; follow it again.
-	const operationId = started ?? campaigns.data?.runningOperationId ?? null;
+	const operationId = followedOperation(started, selection.id, campaigns.data?.runningOperationId);
 	const operation = useOperation(client, operationId);
 	const messages = operation.data?.progress.map((row) => row.message) ?? [];
 	const liveCampaign = campaignFromProgress(messages);
@@ -116,7 +117,7 @@ export function ResearchPage({ client }: { client: Client }) {
 					workspaceId={selection.id}
 					operationId={operationId}
 					onStarted={(id) => {
-						setStarted(id);
+						setStarted({ workspaceId: selection.id, operationId: id });
 						void queries.invalidateQueries({ queryKey: ["research-campaigns"] });
 					}}
 					onClose={() => setComposing(false)}
