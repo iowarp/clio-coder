@@ -39,7 +39,7 @@ const AUTHOR_MANAGED_ENV = "CLIO_CODER_GIT_AUTHOR_MANAGED";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 7;
+const MANAGED_HOOK_VERSION = 8;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -115,9 +115,9 @@ export interface ManagedCommitAttributionOptions {
 	 * process: Clio while an autonomous process or scope is active and the
 	 * setting is `auto`, the human otherwise. Clio authors only through the
 	 * managed hook, which credits the human, so a repository the hook cannot
-	 * reach (its own core.hooksPath, or Windows) keeps the human author with no
-	 * Clio trailer, and the managed git shim keeps the human author on every
-	 * command that writes a commit without that hook.
+	 * reach (its own core.hooksPath) keeps the human author with no Clio
+	 * trailer, and the managed git shim (`git`, and `git.cmd` on Windows) keeps
+	 * the human author on every command that writes a commit without that hook.
 	 */
 	author?: GitCommitAuthor;
 	/**
@@ -227,7 +227,9 @@ function withoutManagedGitConfig(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	}
 	// Only the author a Clio seam set is Clio's to remove; one the operator or
 	// the model set afterwards is theirs and stays.
-	if (env.PATH !== undefined) env.PATH = pathWithoutManagedShim(env.PATH);
+	const pathKey = pathEnvKey(env);
+	const pathValue = env[pathKey];
+	if (pathValue !== undefined) env[pathKey] = pathWithoutManagedShim(pathValue);
 	if (env[AUTHOR_MANAGED_ENV] === "1") {
 		if (env.GIT_AUTHOR_NAME === CLIO_COMMIT_NAME) Reflect.deleteProperty(env, "GIT_AUTHOR_NAME");
 		if (env.GIT_AUTHOR_EMAIL === CLIO_COMMIT_EMAIL) Reflect.deleteProperty(env, "GIT_AUTHOR_EMAIL");
@@ -332,6 +334,15 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 author_email=$(lower "$GIT_AUTHOR_EMAIL")
 clio_authored=
 if [ "$author_email" = '${CLIO_COMMIT_EMAIL.toLowerCase()}' ]; then clio_authored=1; fi
+# prepare-commit-msg adds every Clio trailer. commit-msg runs after the editor
+# and only credits the human on a Clio-authored commit prepare-commit-msg left
+# alone: an editor or template commit through a git the shim never saw (an
+# absolute /usr/bin/git, git.exe found without PATHEXT, or a git library).
+attributing=
+case "$hook_name" in
+  prepare-commit-msg) attributing=1 ;;
+  commit-msg) [ -z "$clio_authored" ] || attributing=1 ;;
+esac
 
 if git config --get core.hooksPath >/dev/null 2>&1 &&
    [ "$${DEFAULT_HOOKS_EQUIVALENT_ENV}" != "$default_hooks_directory" ]; then
@@ -346,7 +357,7 @@ if git config --get core.hooksPath >/dev/null 2>&1 &&
   # Clio as author, but a command that moved into such a repository after the
   # probe still carries Clio's author, and then the human committer is
   # credited after the operator's hook succeeds so the human is never dropped.
-  if [ "$hook_name" != 'prepare-commit-msg' ] || [ -z "$clio_authored" ]; then
+  if [ -z "$attributing" ] || [ -z "$clio_authored" ]; then
     if [ -n "$custom_hooks" ] && [ -x "$custom_hook" ]; then exec "$custom_hook" "$@"; fi
     exit 0
   fi
@@ -354,7 +365,7 @@ if git config --get core.hooksPath >/dev/null 2>&1 &&
   operator_hooks=1
 else
   operator_hooks=
-  if [ "$hook_name" != 'prepare-commit-msg' ]; then
+  if [ -z "$attributing" ]; then
     if [ -n "$default_hook" ] && [ -x "$default_hook" ]; then exec "$default_hook" "$@"; fi
     exit 0
   fi
@@ -369,6 +380,23 @@ message_source=$2
 # The repository's own hook semantics are settled. Everything below is
 # fail-open and applies only to Clio-spawned commits with attribution enabled.
 if [ "$AI_AGENT" != '${AI_AGENT_NAME}' ] || [ "$${CLIO_GIT_COMMITS_ENABLED_ENV}" != '1' ]; then exit 0; fi
+git_path() { git rev-parse --git-path "$1" 2>/dev/null || true; }
+
+if [ "$hook_name" = commit-msg ]; then
+  for marker in CHERRY_PICK_HEAD rebase-apply rebase-merge; do
+    marker_path=$(git_path "$marker")
+    if [ -n "$marker_path" ] && [ -e "$marker_path" ]; then exit 0; fi
+  done
+  # Git strips comment lines after this hook, and a message with nothing
+  # else aborts the commit; a trailer added to it would commit an abandoned
+  # editor. With core.commentChar=auto the comment character is unknown here.
+  comment_char=$(git config --get core.commentChar 2>/dev/null || true)
+  case "$comment_char" in '') comment_char='#' ;; auto) exit 0 ;; esac
+  awk -v c="$comment_char" '
+    $0 == c " ------------------------ >8 ------------------------" { exit }
+    index($0, c) != 1 && $0 ~ /[^[:space:]]/ { found = 1; exit }
+    END { exit found ? 0 : 1 }' "$message_file" || exit 0
+fi
 
 # Only a message supplied up front (-m, -F, or a merge) is attributed. --amend,
 # -c/-C, squash, and template sources reuse or lack a real message, and an
@@ -376,8 +404,9 @@ if [ "$AI_AGENT" != '${AI_AGENT_NAME}' ] || [ "$${CLIO_GIT_COMMITS_ENABLED_ENV}"
 # would turn an abandoned editor into a commit whose whole message is trailers.
 # Clio's managed git shim keeps Clio as author only for invocations that reach
 # these sources, so an editor commit stays the human's.
-case "$message_source" in message|merge) ;; *) exit 0 ;; esac
-git_path() { git rev-parse --git-path "$1" 2>/dev/null || true; }
+if [ "$hook_name" = prepare-commit-msg ]; then
+  case "$message_source" in message|merge) ;; *) exit 0 ;; esac
+fi
 # A cherry-pick or rebase commits someone else's change under that commit's
 # author: no trailer of Clio's belongs on it.
 for marker in CHERRY_PICK_HEAD rebase-apply rebase-merge; do
@@ -430,8 +459,9 @@ if [ -n "$clio_authored" ]; then
     '' | '${CLIO_COMMIT_EMAIL.toLowerCase()}' | 'clio-coder@iowarp.ai') ;;
     *) append_trailer "Co-authored-by: $human" ;;
   esac
-  # Under the operator's own hooks or in a revert, the credit is all Clio adds.
-  if [ -n "$operator_hooks" ] || [ -n "$reverting" ]; then exit 0; fi
+  # Under the operator's own hooks, in a revert, or from commit-msg, the
+  # credit is all Clio adds.
+  if [ -n "$operator_hooks" ] || [ -n "$reverting" ] || [ "$hook_name" = commit-msg ]; then exit 0; fi
 else
   if [ "$${ASSISTED_ENV}" = '1' ] || [ "$${AUTHORED_ENV}" = '1' ]; then
     append_trailer '${CLIO_COMMIT_TRAILERS.assisted}'
@@ -547,6 +577,209 @@ fi
 exec "$real_git" "$@"
 `;
 
+/** The Node half of the Windows wrapper, beside the POSIX shim in the same directory. */
+const MANAGED_GIT_SHIM_NODE_NAME = "git-shim.cjs";
+
+/**
+ * The shim's decision and git lookup in JavaScript, for `git.cmd`. cmd.exe,
+ * PowerShell and any `shell: true` spawn resolve `git` through PATHEXT and so
+ * find `git.cmd` in the shim directory before the real `git.exe`; Git Bash
+ * runs the POSIX `git` beside it. A batch file cannot parse arguments, so
+ * `git.cmd` forwards `%*` to Node, which splits the command line with the
+ * same MSVCRT rules `git.exe` uses and re-quotes it for `git.exe` the same
+ * way. The argument rules mirror {@link MANAGED_GIT_SHIM_SCRIPT} exactly.
+ * Loaded with `require`, it exports its pure parts for tests.
+ */
+const MANAGED_GIT_SHIM_NODE_SCRIPT = String.raw`"use strict";
+// Clio Coder managed git shim v${MANAGED_HOOK_VERSION} (Node half of git.cmd). On PATH only
+// in Clio child-process environments where Clio is the commit author.
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const nodePath = require("node:path");
+
+const SHIM_DIRECTORY = /[\\/]git-hooks[\\/]v\d+-shim[\\/]?$/i;
+const GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"]);
+const COMMIT_VALUE_OPTIONS = new Set(["--author", "--date", "--cleanup", "--trailer", "--pathspec-from-file"]);
+const COMMIT_ATTACHED_VALUE = /^--(?:author|date|cleanup|trailer|pathspec-from-file|untracked-files|gpg-sign)=/;
+const COMMIT_UNSURE = /^--(?:template|reuse-message|reedit-message|fixup|squash)(?:=|$)|^--edit$/;
+const COMMIT_FLAGS = new Set(["--all", "--quiet", "--verbose", "--amend", "--no-edit", "--no-verify", "--verify",
+  "--allow-empty", "--allow-empty-message", "--signoff", "--no-signoff", "--reset-author", "--include", "--only",
+  "--no-post-rewrite", "--status", "--no-status", "--untracked-files", "--gpg-sign", "--no-gpg-sign",
+  "--pathspec-file-nul"]);
+
+/** Whether Clio stays the author of this git invocation: true only where the managed hook credits the human. */
+function keepsClioAuthor(args) {
+  let subcommand = "";
+  let takesValue = false;
+  let message = false;
+  let unsure = false;
+  let index = 0;
+  for (; index < args.length && subcommand === ""; index += 1) {
+    const argument = args[index];
+    if (takesValue) takesValue = false;
+    else if (GLOBAL_VALUE_OPTIONS.has(argument)) takesValue = true;
+    else if (!argument.startsWith("-")) subcommand = argument;
+  }
+  if (subcommand === "commit") {
+    scan: for (; index < args.length; index += 1) {
+      const argument = args[index];
+      if (takesValue) {
+        takesValue = false;
+        continue;
+      }
+      if (argument === "--") break;
+      if (argument.startsWith("--message=") || argument.startsWith("--file=")) message = true;
+      else if (argument === "--message" || argument === "--file") {
+        message = true;
+        takesValue = true;
+      } else if (COMMIT_VALUE_OPTIONS.has(argument)) takesValue = true;
+      else if (COMMIT_ATTACHED_VALUE.test(argument)) continue;
+      else if (COMMIT_UNSURE.test(argument)) {
+        unsure = true;
+        break;
+      } else if (COMMIT_FLAGS.has(argument)) continue;
+      else if (argument.startsWith("--")) {
+        unsure = true;
+        break;
+      } else if (argument.length > 1 && argument.startsWith("-")) {
+        const cluster = argument.slice(1);
+        for (let at = 0; at < cluster.length; at += 1) {
+          const flag = cluster[at];
+          if (flag === "m" || flag === "F") {
+            message = true;
+            if (at === cluster.length - 1) takesValue = true;
+            break;
+          }
+          if (flag === "C" || flag === "c" || flag === "t" || flag === "e") {
+            unsure = true;
+            break scan;
+          }
+          if (flag === "S" || flag === "u") break;
+          if (!/^[a-zA-Z0-9]$/.test(flag)) {
+            unsure = true;
+            break scan;
+          }
+        }
+      }
+    }
+  }
+  if (takesValue) unsure = true;
+  if (subcommand === "merge" || subcommand === "pull" || subcommand === "revert") return true;
+  return subcommand === "commit" && message && !unsure;
+}
+
+/** The environment key that holds the search path; Windows keeps whatever case it was given. */
+function pathKey(env, platform) {
+  if (platform !== "win32") return "PATH";
+  return Object.keys(env).find((key) => key.toUpperCase() === "PATH") || "Path";
+}
+
+/**
+ * The git this shim stands in front of: the first one on the search path
+ * outside every managed shim directory and other than this file. On Windows
+ * only an executable counts, in PATHEXT order; a batch git could not receive
+ * the forwarded arguments intact, so it is passed over.
+ */
+function findRealGit(host) {
+  const windows = host.platform === "win32";
+  const paths = windows ? nodePath.win32 : nodePath.posix;
+  const fold = (value) => (windows ? paths.resolve(value).toLowerCase() : paths.resolve(value));
+  const ownDirectory = fold(paths.dirname(host.shimFile));
+  const names = windows
+    ? (host.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+        .split(";")
+        .map((extension) => extension.trim().toLowerCase())
+        .filter((extension) => extension === ".exe" || extension === ".com")
+        .map((extension) => "git" + extension)
+    : ["git"];
+  for (const entry of (host.env[pathKey(host.env, host.platform)] || "").split(windows ? ";" : ":")) {
+    const directory = windows ? entry.trim().replace(/^"(.*)"$/, "$1") : entry;
+    if (directory === "" || SHIM_DIRECTORY.test(directory) || fold(directory) === ownDirectory) continue;
+    for (const name of names) {
+      const candidate = paths.join(directory, name);
+      if (host.isExecutableFile(candidate) && !host.sameFile(candidate, host.shimFile)) return candidate;
+    }
+  }
+  return null;
+}
+
+function isExecutableFile(candidate) {
+  try {
+    if (!fs.statSync(candidate).isFile()) return false;
+    if (process.platform !== "win32") fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sameFile(left, right) {
+  try {
+    const fold = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+    return fold(fs.realpathSync.native(left)) === fold(fs.realpathSync.native(right));
+  } catch {
+    return false;
+  }
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const realGit = findRealGit({ platform: process.platform, env: process.env, shimFile: __filename, isExecutableFile, sameFile });
+  if (realGit === null) {
+    process.stderr.write("clio-coder: git was not found on PATH\n");
+    process.exit(127);
+  }
+  const env = { ...process.env };
+  if (env.${AUTHOR_MANAGED_ENV} === "1" && env.GIT_AUTHOR_NAME === "${CLIO_COMMIT_NAME}" &&
+      env.GIT_AUTHOR_EMAIL === "${CLIO_COMMIT_EMAIL}" && !keepsClioAuthor(args)) {
+    delete env.GIT_AUTHOR_NAME;
+    delete env.GIT_AUTHOR_EMAIL;
+    delete env.${AUTHOR_MANAGED_ENV};
+  }
+  // The console delivers Ctrl+C to git as well; git decides, this waits.
+  for (const signal of ["SIGINT", "SIGBREAK", "SIGTERM", "SIGHUP"]) process.on(signal, () => {});
+  const child = childProcess.spawn(realGit, args, { env, stdio: "inherit", windowsHide: false });
+  child.on("error", (error) => {
+    process.stderr.write("clio-coder: " + error.message + "\n");
+    process.exit(127);
+  });
+  child.on("exit", (code, signal) => {
+    if (signal !== null) {
+      process.removeAllListeners(signal);
+      process.kill(process.pid, signal);
+    }
+    process.exit(code === null ? 1 : code);
+  });
+}
+
+if (require.main === module) main();
+else module.exports = { keepsClioAuthor, findRealGit, pathKey };
+`;
+
+/**
+ * `git.cmd`: the entry PATHEXT lookup finds. Node and the shim are named by
+ * absolute path, so neither `%~dp0` nor a second PATH search is involved;
+ * `%` is doubled because cmd.exe expands it even inside quotes. `%*` is the
+ * caller's command line as given, which Node splits as `git.exe` would.
+ */
+function managedGitCmdScript(nodeExecutable: string, shimScript: string): string {
+	const quoted = (value: string) => `"${value.replace(/%/gu, "%%")}"`;
+	return [
+		"@echo off",
+		`rem Clio Coder managed git wrapper v${MANAGED_HOOK_VERSION}. On PATH only in Clio`,
+		"rem child-process environments where Clio is the commit author.",
+		`${quoted(nodeExecutable)} ${quoted(shimScript)} %*`,
+		"exit /b %ERRORLEVEL%",
+		"",
+	].join("\r\n");
+}
+
+/** The environment key holding the search path: `PATH`, or on Windows whichever case the source used. */
+function pathEnvKey(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string {
+	if (platform !== "win32") return "PATH";
+	return Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "Path";
+}
+
 function installManagedScript(path: string, script: string): void {
 	try {
 		if (existsSync(path) && readFileSync(path, "utf8") === script) {
@@ -589,22 +822,30 @@ function managedHooksDirectory(): string | null {
 }
 
 /** Where the managed git shim lives: a sibling of the hooks directory, so Git never reads it as a hook. */
-const MANAGED_SHIM_DIRECTORY_PATTERN = /[\\/]git-hooks[\\/]v\d+-shim$/u;
+const MANAGED_SHIM_DIRECTORY_PATTERN = /[\\/]git-hooks[\\/]v\d+-shim[\\/]?$/iu;
 
-/** The installed git shim's directory, installed or repaired on use. */
+/**
+ * The installed git shim's directory, installed or repaired on use. Every
+ * platform gets the same three files: `git` for POSIX shells and Git Bash,
+ * and `git.cmd` with its Node half for Windows PATHEXT lookup.
+ */
 function managedGitShimDirectory(): string {
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}-shim`);
-	const shim = join(directory, "git");
+	const nodeShim = join(directory, MANAGED_GIT_SHIM_NODE_NAME);
+	const files: Array<[string, string]> = [
+		[join(directory, "git"), MANAGED_GIT_SHIM_SCRIPT],
+		[nodeShim, MANAGED_GIT_SHIM_NODE_SCRIPT],
+		[join(directory, "git.cmd"), managedGitCmdScript(process.execPath, nodeShim)],
+	];
 	try {
-		if (readFileSync(shim, "utf8") === MANAGED_GIT_SHIM_SCRIPT) {
-			accessSync(shim, fsConstants.X_OK);
-			return directory;
-		}
+		for (const [path, script] of files) if (readFileSync(path, "utf8") !== script) throw new Error("stale");
+		accessSync(join(directory, "git"), fsConstants.X_OK);
+		return directory;
 	} catch {
 		// Missing or damaged: installed below.
 	}
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
-	installManagedScript(shim, MANAGED_GIT_SHIM_SCRIPT);
+	for (const [path, script] of files) installManagedScript(path, script);
 	return directory;
 }
 
@@ -782,20 +1023,20 @@ export function withManagedGitCommitAttributionEnvironment(
 	env[`GIT_CONFIG_VALUE_${count}`] = hooksDirectory;
 	// Clio authors through the environment only with the managed git shim in
 	// front of PATH, which drops that author from every command the hook cannot
-	// credit the human on. Windows resolves `git` without a POSIX shim, so
-	// there the human stays the author.
-	if (
-		options.authorship === undefined &&
-		process.platform !== "win32" &&
-		(options.author ?? autonomousCommitAuthor(source)) === "clio"
-	) {
+	// credit the human on. A git reached without the shim (an absolute path,
+	// git.exe spawned without PATHEXT, a git library) still sees Clio as
+	// author; the hook's commit-msg pass credits the human on every commit it
+	// runs for, and only hookless plumbing keeps Clio with no trailer.
+	if (options.authorship === undefined && (options.author ?? autonomousCommitAuthor(source)) === "clio") {
 		const authorship = resolveClioCommitAuthorship(cwd, env);
 		if (authorship !== null) {
 			try {
 				const shimDirectory = managedGitShimDirectory();
 				applyClioAuthor(env, authorship);
-				env.PATH =
-					env.PATH === undefined || env.PATH.length === 0 ? shimDirectory : `${shimDirectory}${delimiter}${env.PATH}`;
+				const pathKey = pathEnvKey(env);
+				const pathValue = env[pathKey];
+				env[pathKey] =
+					pathValue === undefined || pathValue.length === 0 ? shimDirectory : `${shimDirectory}${delimiter}${pathValue}`;
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
 				return {

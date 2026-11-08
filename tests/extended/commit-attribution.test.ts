@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -300,6 +301,111 @@ describe("autonomous commit authorship", () => {
 			});
 			match(version, /^git version /u);
 		});
+	});
+
+	it("gives an absolute-path git the Clio author with the human credited, and an abandoned editor stays aborted", async () => {
+		await withRepo((repo, git) => {
+			git(["commit", "-q", "--allow-empty", "-m", "init"]);
+			const env = autonomousSeam(repo);
+			const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+			const absolute = (args: string[], editor: string) =>
+				execFileSync(realGit, args, { cwd: repo, env: { ...env, GIT_EDITOR: editor }, encoding: "utf8" });
+			const last = () => ({
+				ident: git(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(),
+				trailers: git(["log", "-1", "--format=%(trailers:only)"]).trim().split("\n"),
+			});
+			absolute(["commit", "-q", "--allow-empty", "-m", "feat: message"], "true");
+			deepStrictEqual(last(), { ident: `${CLIO}|${HUMAN}`, trailers: [`Co-authored-by: ${HUMAN}`] });
+			absolute(["commit", "-q", "--allow-empty"], 'sed -i "1s/^/feat: edited/"');
+			deepStrictEqual(last(), { ident: `${CLIO}|${HUMAN}`, trailers: [`Co-authored-by: ${HUMAN}`] });
+			const head = git(["rev-parse", "HEAD"]);
+			try {
+				absolute(["commit", "-q", "--allow-empty"], "true");
+			} catch {
+				// An all-comment message aborts the commit, as it must.
+			}
+			strictEqual(git(["rev-parse", "HEAD"]), head);
+			// Through the shim on PATH the same editor commit is the human's.
+			git(["commit", "-q", "--allow-empty"], { ...env, GIT_EDITOR: 'sed -i "1s/^/feat: shim/"' });
+			strictEqual(last().ident, `${HUMAN}|${HUMAN}`);
+		});
+	});
+
+	it("installs a Windows git.cmd whose Node half decides exactly like the POSIX shim and skips other shims on PATH", async () => {
+		const isolated = await isolateClioEnv("clio-coder-50%-shim-");
+		try {
+			const repo = join(isolated.dir, "repo");
+			mkdirSync(repo);
+			const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+			git(["init", "-q"]);
+			git(["config", "user.name", "Human"]);
+			git(["config", "user.email", "human@example.com"]);
+			setGitCommitAttributionEnabled(true);
+			setGitCommitAuthorSetting("auto");
+			const env = autonomousSeam(repo);
+			const shimDirectory = (env.PATH ?? "").split(":")[0] ?? "";
+			const nodeShim = join(shimDirectory, "git-shim.cjs");
+			const cmd = readFileSync(join(shimDirectory, "git.cmd"), "utf8");
+			const doubled = (path: string) => `"${path.replace(/%/gu, "%%")}"`;
+			ok(nodeShim.includes("%"));
+			deepStrictEqual(cmd.split("\r\n").slice(-3), [
+				`${doubled(process.execPath)} ${doubled(nodeShim)} %*`,
+				"exit /b %ERRORLEVEL%",
+				"",
+			]);
+
+			// Both halves front a fake git that reports the author it was given.
+			const fake = join(isolated.dir, "fake-bin");
+			mkdirSync(fake);
+			writeFileSync(join(fake, "git"), '#!/bin/sh\nprintf "%s" "$GIT_AUTHOR_NAME"\n', { mode: 0o755 });
+			const fakeEnv = { ...env, PATH: `${shimDirectory}:${fake}` };
+			const shim = createRequire(import.meta.url)(nodeShim) as {
+				keepsClioAuthor: (args: string[]) => boolean;
+				findRealGit: (host: object) => string | null;
+			};
+			for (const args of [
+				["commit", "-m", "x"],
+				["-C", ".", "-c", "k=v", "commit", "-qam", "x"],
+				["commit", "--message=x", "--no-verify"],
+				["commit", "-F", "-m"],
+				["commit", "-t", "-m"],
+				["commit", "--template", "-m"],
+				["commit", "-m", "x", "--no-message"],
+				["commit", "-m", "x", "-e"],
+				["commit", "-m"],
+				["commit-tree", "HEAD^{tree}", "-m", "x"],
+				["stash"],
+				["merge", "--no-ff", "b"],
+				["revert", "HEAD"],
+				["-C"],
+			]) {
+				const posix = execFileSync(join(shimDirectory, "git"), args, { env: fakeEnv, encoding: "utf8" });
+				const node = execFileSync(process.execPath, [nodeShim, ...args], { env: fakeEnv, encoding: "utf8" });
+				const expected = shim.keepsClioAuthor(args) ? "Clio Coder" : "";
+				deepStrictEqual([posix, node], [expected, expected], args.join(" "));
+			}
+
+			const exists = new Set([
+				"C:\\Users\\op\\state\\git-hooks\\v7-shim\\git.exe",
+				"C:\\Tools\\git.cmd",
+				"C:\\Program Files\\Git\\cmd\\git.com",
+				"C:\\Program Files\\Git\\cmd\\git.exe",
+			]);
+			const windowsHost = (path: string, pathext?: string) => ({
+				platform: "win32",
+				env: { Path: path, ...(pathext === undefined ? {} : { PATHEXT: pathext }) },
+				shimFile: "C:\\Users\\op\\state\\git-hooks\\v8-shim\\git-shim.cjs",
+				isExecutableFile: (candidate: string) => exists.has(candidate),
+				sameFile: () => false,
+			});
+			const path =
+				'C:\\Users\\op\\state\\git-hooks\\V8-SHIM;C:\\Users\\op\\state\\git-hooks\\v7-shim;C:\\Tools;"C:\\Program Files\\Git\\cmd"';
+			strictEqual(shim.findRealGit(windowsHost(path)), "C:\\Program Files\\Git\\cmd\\git.com");
+			strictEqual(shim.findRealGit(windowsHost(path, ".EXE;.CMD")), "C:\\Program Files\\Git\\cmd\\git.exe");
+			strictEqual(shim.findRealGit(windowsHost("C:\\Tools")), null);
+		} finally {
+			isolated.restore();
+		}
 	});
 
 	it("credits the human on a revert finished after a conflict", async () => {
