@@ -11,6 +11,7 @@ import {
 import { SAFE_EXEC_PIPE_DRAIN_BOUND_MS } from "./safe-exec.js";
 import { holdsNamedCredential, knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
+import { signalSandboxPayload } from "./sandbox/signal.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
 
@@ -432,6 +433,11 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		const sendSignal = (signalName: NodeJS.Signals): void => {
 			const pid = child.pid;
 			if (pid && process.platform !== "win32") {
+				// A sandboxed payload sits in its own session inside the sandbox, out of
+				// the launcher's group. TERM goes to the payload alone so it can stop
+				// gracefully and the launcher exits after it; KILL reaches both.
+				const payloadSignalled = sandbox.kind === "sandboxed" && signalSandboxPayload(pid, signalName);
+				if (payloadSignalled && signalName !== "SIGKILL") return;
 				try {
 					process.kill(-pid, signalName);
 					return;

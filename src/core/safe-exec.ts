@@ -8,6 +8,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
+import { signalSandboxPayload } from "./sandbox/signal.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
 
@@ -563,6 +564,11 @@ export function runCommandVector(
 		const groupSignal = (signalName: NodeJS.Signals): boolean => {
 			const pid = child.pid;
 			if (pid && process.platform !== "win32") {
+				// A sandboxed payload sits in its own session inside the sandbox, out of
+				// the launcher's group. TERM goes to the payload alone so it can stop
+				// gracefully and the launcher exits after it; KILL reaches both.
+				const payloadSignalled = sandbox.kind === "sandboxed" && signalSandboxPayload(pid, signalName);
+				if (payloadSignalled && signalName !== "SIGKILL") return true;
 				try {
 					process.kill(-pid, signalName);
 					return true;
