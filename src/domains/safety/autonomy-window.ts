@@ -17,7 +17,7 @@ import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import { describeCallTarget } from "./call-target.js";
 import type { SafetyDecision } from "./contract.js";
-import { redactSecretString } from "./redaction.js";
+import { isEnvReference, isSecretArgKey, redactSecretString } from "./redaction.js";
 
 /** The `outcomeDetail` and abort reason prefix of a cap halt. */
 export const AUTONOMOUS_CAP_REASON = "autonomous-cap";
@@ -357,6 +357,25 @@ export function settledCallTokens(usage: unknown): number {
 	return total > 0 ? total : value("input") + value("cacheRead") + value("cacheWrite") + value("output");
 }
 
+// The shared redactors work word by word, so a quoted value with spaces would leak past its first word.
+const QUOTED_HEADER_RE = /(["'])(\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?)((?:(?!\1).)*)\1/giu;
+const QUOTED_VALUE_RE = /(--?([A-Za-z0-9_-]+)(?:=|\s+)|\b([A-Za-z0-9_.-]+)\s*[=:]\s*)(["'])((?:(?!\4).)*)\4/gu;
+
+/** Redact whole quoted credential values: `NAME="a b"`, `--token 'a b'`, `"Authorization: Basic a b"`. */
+function redactQuotedSecrets(text: string): string {
+	const headers = text.replace(QUOTED_HEADER_RE, (match, quote: string, head: string, name: string, value: string) =>
+		isSecretArgKey(name) && value.length > 0 ? `${quote}${head}[redacted]${quote}` : match,
+	);
+	return headers.replace(
+		QUOTED_VALUE_RE,
+		(match, lead: string, flag: string | undefined, key: string | undefined, quote: string, value: string) => {
+			const name = flag ?? key ?? "";
+			if (!isSecretArgKey(name) || value.length === 0 || value === "[redacted]") return match;
+			return isEnvReference(`${quote}${value}${quote}`) ? match : `${lead}${quote}[redacted]${quote}`;
+		},
+	);
+}
+
 /** Name a refused call for the operator: credentials scrubbed by key and by value shape, then clipped to 200 characters. */
 export function describeOpenDecision(
 	call: ClassifierCall,
@@ -364,7 +383,17 @@ export function describeOpenDecision(
 	kind: OpenDecisionKind,
 	rule?: string,
 ): Omit<OpenDecision, "seq"> {
-	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
+	const args =
+		call.args === undefined
+			? undefined
+			: Object.fromEntries(
+					Object.entries(call.args).map(([key, value]) => [
+						key,
+						typeof value === "string" ? redactQuotedSecrets(value) : value,
+					]),
+				);
+	const policyCommand = decision.policy?.command;
+	const raw = policyCommand !== undefined ? redactQuotedSecrets(policyCommand) : describeCallTarget(call.tool, args);
 	const scrubbed = redactSecretsText(redactSecretString(raw.trim()), createRedactionTally());
 	const clipped =
 		scrubbed.length <= OPEN_DECISION_COMMAND_MAX_CHARS

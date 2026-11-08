@@ -288,6 +288,28 @@ test("an open decision's command hides Authorization headers and bare provider t
 	match(entry.command, /^curl -H 'Authorization: Bearer /u);
 });
 
+test("an open decision's command hides whole quoted credentials that hold spaces", () => {
+	const ask = {
+		kind: "ask",
+		classification: { actionClass: "execute", reasons: [] },
+		rejection: { short: "", detail: "" },
+	} as unknown as SafetyDecision;
+	const command = (text: string): string =>
+		describeOpenDecision({ tool: "bash", args: { command: text } }, ask, "judge-block").command;
+	for (const quote of [`"`, `'`]) {
+		const cases = [
+			`PASSWORD=${quote}firstpart secondpart${quote} ./scripts/sync-assets`,
+			`deploy --password ${quote}firstpart secondpart${quote} --token=${quote}firstpart secondpart${quote} now`,
+			`curl -H ${quote}X-Api-Key: firstpart secondpart${quote} -H ${quote}Authorization: Basic firstpart secondpart${quote} x`,
+		];
+		for (const text of cases) {
+			const shown = command(text);
+			ok(!shown.includes("firstpart") && !shown.includes("secondpart"), shown);
+		}
+		match(command(cases[0] ?? ""), /\.\/scripts\/sync-assets$/u);
+	}
+});
+
 test("an ended yolo audit stays ended: late settlements never reopen it", () => {
 	const names: string[] = [];
 	let ended: Record<string, unknown> | undefined;
