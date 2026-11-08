@@ -1684,9 +1684,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const level = activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 		return level === "yolo" && yoloRefusal !== null ? "default" : level;
 	};
-	// Every bash command this session runs carries its live level as an
-	// autonomy ceiling, so a clio-coder it starts cannot take yolo above it.
-	setToolEnvAutonomy(resolveEffectiveAutonomy);
 	// Contained yolo (ob-yolo D1) admits, judges and permits workers exactly as
 	// default does; only where a call would wait for a person does it differ,
 	// which `unattendedAsks` tells the registry. Prompts, auto-continuation and
@@ -1695,6 +1692,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		admissionAutonomy(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
 	const unattendedYolo = (): boolean =>
 		containedYolo(resolveEffectiveAutonomy(), effectiveYoloConfinement(getCurrentSettings().safety));
+	// Every bash command this session runs carries its live level as an autonomy ceiling, and the contained pin while
+	// it runs contained yolo, so a clio-coder it starts cannot take more autonomy or less confinement than it has.
+	setToolEnvAutonomy(resolveEffectiveAutonomy, unattendedYolo);
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {

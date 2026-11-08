@@ -10,7 +10,7 @@ import { scratchRootFindings } from "../../src/cli/doctor.js";
 import { runResearchCommand } from "../../src/cli/research.js";
 import { runClioRun } from "../../src/cli/run.js";
 import { AUTONOMY_CEILING_ENV, runBashCommand, setToolEnvAutonomy } from "../../src/core/bash-exec.js";
-import { readSettings } from "../../src/core/config.js";
+import { readSettings, settingsPath } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
@@ -23,6 +23,7 @@ import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
+import { effectiveYoloConfinement, YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import {
 	createSafetyPolicyEngine,
@@ -932,4 +933,51 @@ test("the autonomy ceiling reaches bash commands below yolo and refuses yolo abo
 	strictEqual(refusals, 3, errors.join(""));
 	delete process.env[AUTONOMY_CEILING_ENV];
 	strictEqual(autonomyCeilingRefusal(), null);
+});
+
+test("a contained-yolo session's bash pins every clio-coder it starts, and a nested child cannot widen the pin", async (t) => {
+	const home = await isolateClioEnv("clio-yolo-pin-");
+	const inherited = process.env[YOLO_CONFINEMENT_PIN_ENV];
+	t.after(() => {
+		setToolEnvAutonomy(null);
+		if (inherited === undefined) delete process.env[YOLO_CONFINEMENT_PIN_ENV];
+		else process.env[YOLO_CONFINEMENT_PIN_ENV] = inherited;
+		home.restore();
+	});
+	delete process.env[YOLO_CONFINEMENT_PIN_ENV];
+	writeFileSync(
+		settingsPath(),
+		"safety:\n  autonomy: yolo\n  yoloConfinement: unconfined\n  yoloUnconfinedAccepted: true\n",
+	);
+	strictEqual(effectiveYoloConfinement(readSettings().safety), "unconfined");
+	const pin = async (): Promise<string> =>
+		(await runBashCommand(`printf %s "\${${YOLO_CONFINEMENT_PIN_ENV}-unset}"`)).stdout;
+	let contained = true;
+	setToolEnvAutonomy(
+		() => "yolo",
+		() => contained,
+	);
+	strictEqual(await pin(), "contained");
+	contained = false;
+	strictEqual(await pin(), "unset", "an unconfined session sets no pin");
+	contained = true;
+
+	// A real nested process that overwrites the pin still reads contained through the one confinement reader.
+	const root = process.cwd();
+	const child = join(mkdtempSync(join(tmpdir(), "clio-yolo-pin-child-")), "child.mts");
+	writeFileSync(
+		child,
+		[
+			`import { readSettings } from ${JSON.stringify(join(root, "src/core/config.ts"))};`,
+			`import { effectiveYoloConfinement } from ${JSON.stringify(join(root, "src/domains/safety/autonomy.ts"))};`,
+			"process.stdout.write(effectiveYoloConfinement(readSettings().safety));",
+		].join("\n"),
+	);
+	const nested = await runBashCommand(
+		`cd ${JSON.stringify(root)} && ${YOLO_CONFINEMENT_PIN_ENV}=unconfined ${JSON.stringify(process.execPath)} --import tsx ${JSON.stringify(child)}`,
+		{ timeoutMs: 60_000 },
+	);
+	strictEqual(nested.stdout, "contained", nested.stderr);
+	process.env[YOLO_CONFINEMENT_PIN_ENV] = "unconfined";
+	strictEqual(effectiveYoloConfinement(readSettings().safety), "contained", "any pin value narrows, none widens");
 });

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { YOLO_CONFINEMENT_PIN_ENV, yoloConfinementPinned } from "../domains/safety/autonomy.js";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import { bashShellPath } from "./bash-shell.js";
@@ -214,10 +215,15 @@ export function createBashOutputProgressController(
 export const AUTONOMY_CEILING_ENV = "CLIO_CODER_AUTONOMY_CEILING";
 
 let toolEnvAutonomy: (() => string) | null = null;
+let toolEnvContainedYolo: (() => boolean) | null = null;
 
-/** Registers the live autonomy of this process's session, read on every command so a level change lands at once. */
-export function setToolEnvAutonomy(read: (() => string) | null): void {
+/**
+ * Registers the live autonomy of this process's session, and whether it runs contained yolo, read on every command so
+ * a level change lands at once.
+ */
+export function setToolEnvAutonomy(read: (() => string) | null, containedYolo: (() => boolean) | null = null): void {
 	toolEnvAutonomy = read;
+	toolEnvContainedYolo = containedYolo;
 }
 
 /** A session below yolo sets its own level; one at yolo passes on only a ceiling it inherited itself. */
@@ -243,6 +249,8 @@ function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	Reflect.deleteProperty(env, AUTONOMY_CEILING_ENV);
 	const ceiling = toolEnvAutonomyCeiling();
 	if (ceiling !== undefined) env[AUTONOMY_CEILING_ENV] = ceiling;
+	// A contained-yolo session, or one launched pinned, holds every clio-coder its commands start to contained yolo.
+	if (toolEnvContainedYolo?.() === true || yoloConfinementPinned()) env[YOLO_CONFINEMENT_PIN_ENV] = "contained";
 	return env;
 }
 

@@ -215,7 +215,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
 - Research optimizes one metric of one check at a time and runs one candidate per iteration. Resuming a stopped campaign,
   parameter sweeps and parallel candidates are not in 0.7.0.
-- `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs.
+- `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs. The pin also reaches every `clio-coder` such a run starts from bash, and setting it to another value does not widen it.
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
 - Arena contenders inherit the parent environment, the same as any `clio-coder run`.
 - A research measurement is only as good as its check. Run `research report` and look at the A/A line before you trust

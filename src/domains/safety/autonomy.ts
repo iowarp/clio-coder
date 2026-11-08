@@ -53,14 +53,20 @@ export const DEFAULT_YOLO_CONFINEMENT: YoloConfinement = "contained";
  * Pins a run, and every clio-coder its commands start, to contained yolo.
  * `research` and `arena` promise contained yolo, so each child they launch at
  * yolo carries it rather than reading the operator's settings, which could
- * turn unconfined mid-campaign. Only `contained` is honored; nothing here can
- * grant unconfined.
+ * turn unconfined mid-campaign. The pin only narrows: any value at all,
+ * `unconfined` included, reads as `contained`, so a nested run cannot widen
+ * it by overwriting the value. Only removing the variable escapes it.
  */
 export const YOLO_CONFINEMENT_PIN_ENV = "CLIO_CODER_YOLO_CONFINEMENT";
 
 /** The child environment for a run launched at yolo that must stay contained. */
 export function withContainedYoloPin<Env extends Record<string, string | undefined>>(env: Env): Env {
 	return { ...env, [YOLO_CONFINEMENT_PIN_ENV]: "contained" };
+}
+
+/** True when this process carries the contained pin, whatever value it was given. */
+export function yoloConfinementPinned(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env[YOLO_CONFINEMENT_PIN_ENV] !== undefined;
 }
 
 /**
@@ -74,7 +80,7 @@ export function withContainedYoloPin<Env extends Record<string, string | undefin
 export function effectiveYoloConfinement(
 	safety: { yoloConfinement?: YoloConfinement; yoloUnconfinedAccepted?: boolean } | undefined | null,
 ): YoloConfinement {
-	if (process.env[YOLO_CONFINEMENT_PIN_ENV] === "contained") return DEFAULT_YOLO_CONFINEMENT;
+	if (yoloConfinementPinned()) return DEFAULT_YOLO_CONFINEMENT;
 	return safety?.yoloConfinement === "unconfined" && safety.yoloUnconfinedAccepted === true
 		? "unconfined"
 		: DEFAULT_YOLO_CONFINEMENT;
