@@ -600,4 +600,38 @@ describe("research review fixes", () => {
 		strictEqual(view.iterations[0]?.hypothesisVerdict, "supported");
 		strictEqual(claims.unlinked, 0);
 	});
+
+	it("protects every link in a chained symlink resolution", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"tools/run.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [commandCheck("score", ["node", "bench/run.js"])],
+			}),
+		});
+		mkdirSync(join(repo, "aliases"));
+		symlinkSync("../tools", join(repo, "aliases/next"));
+		symlinkSync("aliases/next", join(repo, "bench"));
+		git(repo, "add", "-A");
+		git(repo, "commit", "-q", "-m", "chained links");
+		const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false });
+		for (const path of ["bench", "aliases/next", "bench/run.js", "tools/run.js"])
+			ok(campaign.protected.includes(path), `${path} in ${campaign.protected.join(",")}`);
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				rmSync(join(request.worktree, "aliases/next"));
+				symlinkSync("../fake", join(request.worktree, "aliases/next"));
+				mkdirSync(join(request.worktree, "fake"));
+				writeFileSync(join(request.worktree, "fake/run.js"), "process.stdout.write('{\"score\":0}')\n");
+				return done;
+			},
+		});
+		deepStrictEqual(
+			summarizeCampaign(campaign.project, campaign.id).iterations.map((iteration) => iteration.outcome),
+			["protected"],
+		);
+	});
 });

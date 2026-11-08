@@ -110,10 +110,51 @@ function insideRoot(rootReal: string, target: string): string | null {
 	return rel.split(sep).join("/");
 }
 
+/** How many links one path's resolution may follow, as a kernel bounds it; a longer chain is a loop. */
+const MAX_SYMLINK_HOPS = 40;
+
+/**
+ * Every symlink inside the repository that resolving `path` passes through, repository-relative: links on the path's
+ * own components and, recursively, links on the components of each link's target. Retargeting any of them would
+ * redirect the path, so each is protected. Resolution stops after `MAX_SYMLINK_HOPS` links.
+ */
+function symlinksResolving(rootReal: string, path: string): string[] {
+	const links = new Set<string>();
+	const pending = path.split("/");
+	let current = rootReal;
+	let hops = 0;
+	while (pending.length > 0) {
+		const part = pending.shift() as string;
+		if (part === "" || part === ".") continue;
+		if (part === "..") {
+			current = dirname(current);
+			continue;
+		}
+		const next = join(current, part);
+		let link: string;
+		try {
+			if (!lstatSync(next).isSymbolicLink()) {
+				current = next;
+				continue;
+			}
+			link = readlinkSync(next);
+		} catch {
+			break;
+		}
+		if (++hops > MAX_SYMLINK_HOPS) break;
+		const rel = insideRoot(rootReal, next);
+		if (rel !== null && rel.length > 0) links.add(rel);
+		if (isAbsolute(link)) current = sep;
+		pending.unshift(...link.split(sep));
+	}
+	return [...links];
+}
+
 /**
  * Repository-relative files a check's argv names, as they exist in `root`: those are protected from the agent. Every
  * argv entry counts, the executable included, so a repo-local `./bench.py` is protected as much as `python3 bench.py`.
- * Every symlink along a named path (the file itself or any parent directory) is protected as a link, and the path's
+ * Every symlink that resolving a named path passes through (its own components, and recursively the components of each
+ * link's target) is protected as a link, and the path's
  * resolved target inside the repository is protected too, so neither the link nor what it reaches can be swapped.
  */
 export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] {
@@ -130,11 +171,7 @@ export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] 
 			const full = join(root, relative);
 			if (!existsSync(full)) continue;
 			named.add(relative);
-			const parts = relative.split("/");
-			for (let depth = 1; depth <= parts.length; depth++) {
-				const prefix = parts.slice(0, depth).join("/");
-				if (lstatSync(join(root, prefix)).isSymbolicLink()) named.add(prefix);
-			}
+			for (const link of symlinksResolving(rootReal, relative)) named.add(link);
 			const resolved = insideRoot(rootReal, realpathSync(full));
 			if (resolved !== null && resolved.length > 0) named.add(resolved);
 		}
