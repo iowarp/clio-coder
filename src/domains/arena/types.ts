@@ -17,6 +17,16 @@ export const ARENA_MAX_CONTENDERS = 4;
 /** Votes an identity needs before its Elo rating is shown; fewer is noise. */
 export const ARENA_SCORE_MIN_VOTES = 5;
 
+/** Every contender in a match runs at the same autonomy; yolo is always contained yolo. */
+export type ArenaAutonomy = "default" | "yolo";
+
+/** What a yolo contender's own audit said: whether its caps or the judge paused it, and how many calls it left open. */
+export interface ArenaAutonomyFact {
+	confinement: "contained" | "unconfined";
+	halted: string | null;
+	openDecisions: number;
+}
+
 export interface ArenaContenderSpec {
 	target: string;
 	model: string;
@@ -52,6 +62,8 @@ export interface ArenaFacts {
 	diff: ArenaDiffStat | null;
 	check: ArenaCheckFact | null;
 	error: string | null;
+	/** Present on a yolo match's contender that reported its audit. */
+	autonomy?: ArenaAutonomyFact;
 }
 
 export type ArenaContenderStatus = "pending" | "running" | "done" | "failed" | "timed-out";
@@ -76,6 +88,8 @@ export interface ArenaMatch {
 	root: string;
 	baselineSha: string | null;
 	isolation: ArenaIsolation;
+	/** Absent on matches recorded before arena took --autonomy, which all ran at default. */
+	autonomy?: ArenaAutonomy;
 	seed: number;
 	/** `order[k]` is the contender index shown under label `ARENA_LABELS[k]`. */
 	order: number[];

@@ -18,6 +18,7 @@ import {
 	validateArenaRunInput,
 } from "../domains/arena/index.js";
 import { formatColumns, printError } from "./argv.js";
+import { containedYoloRefusal } from "./contained-yolo-gate.js";
 
 const HELP = `Usage:
   clio-coder arena run --contender <target>/<model> --contender <target>/<model> [...] [options] <prompt>
@@ -39,11 +40,18 @@ run options:
   --suite <name>                tag the match; list and standings can filter on it
   --seed <n>                    seed for the blind order (default random, stored with the match)
   --read-only                   run contenders read-only even inside a Git repository
+  --autonomy default|yolo       every contender's autonomy (default: default); yolo is contained
   --json                        print the blind match view as JSON
 
 Inside a Git repository every contender works in its own worktree from HEAD,
 so uncommitted changes are not part of the baseline; each leaves a diff and the
 worktrees are removed afterwards. Outside Git the contenders run read-only.
+
+At --autonomy yolo every contender runs contained yolo: the OS sandbox, the
+safety judge and your autonomous caps stay on, and a call that would need you
+is refused back to the contender. The match records the autonomy, and each
+contender's facts count what paused it and the calls it left open, like its
+blocks. Unconfined yolo is refused here.
 
 show hides who each contender is, along with duration, tokens and cost, until
 the match has a vote; --reveal before voting is refused. vote records one
@@ -70,6 +78,7 @@ const VALUE_FLAGS = new Set([
 	"--suite",
 	"--seed",
 	"--note",
+	"--autonomy",
 ]);
 const BOOLEAN_FLAGS = new Set(["--json", "--reveal", "--replace", "--read-only"]);
 
@@ -143,7 +152,9 @@ function indent(text: string, maxLines: number): string {
 
 function renderView(view: ArenaMatchView): string {
 	const out: string[] = [];
-	out.push(`match ${view.id}  ${view.status}  ${view.isolation}${view.suite ? `  suite ${view.suite}` : ""}`);
+	out.push(
+		`match ${view.id}  ${view.status}  ${view.isolation}${view.autonomy === "yolo" ? "  autonomy yolo (contained)" : ""}${view.suite ? `  suite ${view.suite}` : ""}`,
+	);
 	out.push(`prompt: ${view.prompt}`);
 	if (view.error) out.push(`error: ${view.error}`);
 	if (view.vote)
@@ -158,7 +169,7 @@ function renderView(view: ArenaMatchView): string {
 			? `diff ${entry.diffStat.files} file(s) +${entry.diffStat.insertions} -${entry.diffStat.deletions}`
 			: "no diff";
 		out.push(
-			`── ${entry.label} ── ${entry.status}  exit ${entry.exitCode ?? "?"}${entry.timedOut ? " (timed out)" : ""}  turns ${entry.turns ?? "?"}  tools ${entry.toolCalls ?? "?"} (${entry.toolErrors ?? "?"} errors)  writes ${entry.writes ?? "?"}  blocks ${entry.blocks ?? "?"}  ${stat}`,
+			`── ${entry.label} ── ${entry.status}  exit ${entry.exitCode ?? "?"}${entry.timedOut ? " (timed out)" : ""}  turns ${entry.turns ?? "?"}  tools ${entry.toolCalls ?? "?"} (${entry.toolErrors ?? "?"} errors)  writes ${entry.writes ?? "?"}  blocks ${entry.blocks ?? "?"}${entry.yolo !== null ? `  open decisions ${entry.yolo.openDecisions}${entry.yolo.paused !== null ? ` (yolo paused: ${entry.yolo.paused})` : ""}` : ""}  ${stat}`,
 		);
 		if (entry.reveal) {
 			const seconds = entry.reveal.durationMs === null ? "?" : `${(entry.reveal.durationMs / 1000).toFixed(1)}s`;
@@ -190,7 +201,7 @@ function parentEnv(): Record<string, string> {
 async function runCommand(args: string[]): Promise<number> {
 	const parsed = parse(
 		args,
-		["--contender", "--cwd", "--timeout", "--max-cost-usd", "--check", "--suite", "--seed"],
+		["--contender", "--cwd", "--timeout", "--max-cost-usd", "--check", "--suite", "--seed", "--autonomy"],
 		["--json", "--read-only"],
 	);
 	const contenders = (parsed.values.get("--contender") ?? []).map(contenderSpec);
@@ -206,10 +217,16 @@ async function runCommand(args: string[]): Promise<number> {
 	if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff)) {
 		throw new UsageError("--seed takes a whole number from 0 to 4294967295");
 	}
+	const autonomy = single(parsed, "--autonomy") ?? "default";
+	if (autonomy !== "default" && autonomy !== "yolo") throw new UsageError("--autonomy takes default or yolo");
 	try {
 		validateArenaRunInput({ contenders, prompt, timeoutSeconds });
 	} catch (error) {
 		throw new UsageError(error instanceof Error ? error.message : String(error));
+	}
+	if (autonomy === "yolo") {
+		const refusal = containedYoloRefusal("arena");
+		if (refusal !== null) throw new UsageError(refusal);
 	}
 	const json = parsed.flags.has("--json");
 	const check = single(parsed, "--check");
@@ -235,6 +252,7 @@ async function runCommand(args: string[]): Promise<number> {
 		...(check !== undefined ? { check } : {}),
 		...(suite !== undefined ? { suite } : {}),
 		readOnly: parsed.flags.has("--read-only"),
+		autonomy,
 		clio: { file: process.execPath, args: [...process.execArgv, entry] },
 		env: parentEnv(),
 		signal: controller.signal,

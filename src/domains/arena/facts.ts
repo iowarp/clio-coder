@@ -1,6 +1,6 @@
 import type { FactSum } from "../../core/telemetry/fact.js";
 import type { PricingSum } from "../../core/telemetry/pricing.js";
-import type { ArenaDiffStat } from "./types.js";
+import type { ArenaAutonomyFact, ArenaDiffStat } from "./types.js";
 
 /** What one contender's `run --json-events full` stream says, read frame by frame. */
 export interface ArenaStreamFacts {
@@ -13,6 +13,8 @@ export interface ArenaStreamFacts {
 	totalTokens: FactSum | null;
 	cost: PricingSum | null;
 	finalText: string;
+	/** The `autonomy` frame a yolo run writes; null at default. */
+	autonomy: ArenaAutonomyFact | null;
 }
 
 type Frame = Record<string, unknown>;
@@ -84,6 +86,7 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 		totalTokens: null,
 		cost: null,
 		finalText: "",
+		autonomy: null,
 	};
 	for (const line of ndjson.split("\n")) {
 		const trimmed = line.trim();
@@ -111,6 +114,16 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 				if (blocked) facts.blocks += 1;
 				else if (frame.isError === true || frame.outcome === "error") facts.toolErrors += 1;
 				else if (frame.actionClass === "write" && frame.outcome === "ok") facts.writes += 1;
+				break;
+			}
+			case "autonomy": {
+				if (frame.confinement !== "contained" && frame.confinement !== "unconfined") break;
+				const omitted = typeof frame.openDecisionsOmitted === "number" ? frame.openDecisionsOmitted : 0;
+				facts.autonomy = {
+					confinement: frame.confinement,
+					halted: isRecord(frame.halted) && typeof frame.halted.kind === "string" ? frame.halted.kind : null,
+					openDecisions: (Array.isArray(frame.openDecisions) ? frame.openDecisions.length : 0) + omitted,
+				};
 				break;
 			}
 			case "agent_end": {

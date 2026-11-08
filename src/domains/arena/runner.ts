@@ -36,6 +36,7 @@ import {
 	ARENA_MAX_CONTENDERS,
 	ARENA_MIN_CONTENDERS,
 	ARENA_SCHEMA_VERSION,
+	type ArenaAutonomy,
 	type ArenaCheckFact,
 	type ArenaContender,
 	type ArenaContenderSpec,
@@ -56,6 +57,8 @@ export interface ArenaRunInput {
 	check?: string | null;
 	/** Run every contender read-only even inside a Git repository. */
 	readOnly?: boolean;
+	/** Every contender's autonomy; absent is default. Yolo is contained: the caller refuses unconfined. */
+	autonomy?: ArenaAutonomy;
 	/** How to start this same Clio Coder: the executable and the arguments before the subcommand. */
 	clio: { file: string; args: ReadonlyArray<string> };
 	/**
@@ -215,6 +218,7 @@ function contenderArgs(input: ArenaRunInput, spec: ArenaContenderSpec, cwd: stri
 		String(input.timeoutSeconds),
 		...(input.maxCostUsd != null ? ["--max-cost-usd", String(input.maxCostUsd)] : []),
 		...(readOnly ? ["--read-only"] : []),
+		...(input.autonomy === "yolo" ? ["--autonomy", "yolo"] : []),
 		"--json-events",
 		"full",
 		"--",
@@ -290,6 +294,7 @@ async function runContender(
 		finalText: stream.finalText,
 		diff,
 		check,
+		...(stream.autonomy !== null ? { autonomy: stream.autonomy } : {}),
 		error: error ?? (result !== null && result.exitCode !== 0 && stderrTail.length > 0 ? stderrTail : null),
 	};
 	contender.facts = facts;
@@ -330,6 +335,7 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 		root: projectRoot,
 		baselineSha: base?.sha ?? null,
 		isolation: base === null ? "read-only" : "worktree",
+		autonomy: input.autonomy ?? "default",
 		seed,
 		order: blindOrder(input.contenders.length, seed),
 		timeoutSeconds: input.timeoutSeconds,
@@ -369,7 +375,9 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 		} else {
 			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null, catalog: null });
 		}
-		input.onProgress?.(`match ${id}: ${match.contenders.length} contenders, ${match.isolation}`);
+		input.onProgress?.(
+			`match ${id}: ${match.contenders.length} contenders, ${match.isolation}, autonomy ${match.autonomy === "yolo" ? "yolo (contained)" : "default"}`,
+		);
 		// One contender failing outright (its stream or a save failing) stops the others, and
 		// cleanup waits until every contender has settled, so no worktree is removed under a live run.
 		const halt = new AbortController();

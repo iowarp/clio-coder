@@ -23,6 +23,11 @@ export interface ArenaEntryView {
 	toolErrors: number | null;
 	writes: number | null;
 	blocks: number | null;
+	/**
+	 * A yolo contender's audit as outcome counts, like blocks: what paused it (a cap kind or `judge`) and how many
+	 * calls it refused back for the operator. Neither names who the contender is. Null at default.
+	 */
+	yolo: { paused: string | null; openDecisions: number } | null;
 	diffStat: ArenaDiffStat | null;
 	check: ArenaCheckFact | null;
 	finalText: string;
@@ -51,6 +56,8 @@ export interface ArenaMatchView {
 	prompt: string;
 	suite: string | null;
 	isolation: ArenaMatch["isolation"];
+	/** Shared by every contender, so it says nothing about who is who. */
+	autonomy: "default" | "yolo";
 	check: string | null;
 	error: string | null;
 	revealed: boolean;
@@ -136,6 +143,10 @@ export function arenaMatchView(
 			toolErrors: facts?.toolErrors ?? null,
 			writes: facts?.writes ?? null,
 			blocks: facts?.blocks ?? null,
+			yolo:
+				facts?.autonomy !== undefined
+					? { paused: facts.autonomy.halted, openDecisions: facts.autonomy.openDecisions }
+					: null,
 			diffStat: facts?.diff ?? null,
 			check: facts?.check ? { ...facts.check, tail: blind(facts.check.tail) } : null,
 			finalText: blind(facts?.finalText ?? ""),
@@ -164,6 +175,7 @@ export function arenaMatchView(
 		prompt: match.prompt,
 		suite: match.suite,
 		isolation: match.isolation,
+		autonomy: match.autonomy ?? "default",
 		check: match.check,
 		error: match.error === null ? null : blind(match.error),
 		revealed,

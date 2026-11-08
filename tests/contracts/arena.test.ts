@@ -422,6 +422,7 @@ const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
 out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) + " in " + cwd }] } });
+if (args[args.indexOf("--autonomy") + 1] === "yolo") out({ type: "autonomy", confinement: "contained", caps: {}, usage: { toolCalls: 1, activeMs: 1, tokens: 1 }, halted: model === "m2" ? { kind: "toolCalls", detail: "600 calls" } : null, openDecisions: [{ seq: 1, tool: "bash", command: "push-from-" + model, kind: "ask" }], openDecisionsOmitted: 2 });
 if (model === "slow") setTimeout(() => {}, 60_000);
 if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
 `;
@@ -714,6 +715,43 @@ describe("arena runner", () => {
 		const slow = Number(readFileSync(join(pids, "slow.pid"), "utf8"));
 		assert.throws(() => process.kill(slow, 0), /ESRCH/);
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
+	it("runs every contender at the match's autonomy and shows yolo audits as blind counts", async () => {
+		const { repo, fake } = scratchRepo();
+		const run = (autonomy?: "yolo") =>
+			runArenaMatch({
+				cwd: repo,
+				prompt: "go",
+				contenders: [
+					{ target: "t", model: "m1" },
+					{ target: "t", model: "m2" },
+				],
+				timeoutSeconds: 30,
+				readOnly: true,
+				...(autonomy !== undefined ? { autonomy } : {}),
+				clio: { file: process.execPath, args: [fake] },
+				env: {},
+			});
+		const plain = await run();
+		assert.equal(plain.autonomy, "default");
+		assert.ok(plain.contenders.every((contender) => contender.facts?.autonomy === undefined));
+		assert.ok(arenaMatchView(arenaRoot(repo), plain, null).entries.every((entry) => entry.yolo === null));
+
+		const yolo = await run("yolo");
+		assert.equal(yolo.status, "complete", yolo.error ?? "");
+		assert.equal(yolo.autonomy, "yolo");
+		const byModel = new Map(yolo.contenders.map((contender) => [contender.model, contender.facts?.autonomy]));
+		assert.deepEqual(byModel.get("m1"), { confinement: "contained", halted: null, openDecisions: 3 });
+		assert.deepEqual(byModel.get("m2"), { confinement: "contained", halted: "toolCalls", openDecisions: 3 });
+		const blind = arenaMatchView(arenaRoot(repo), yolo, null);
+		assert.equal(blind.autonomy, "yolo");
+		assert.deepEqual(blind.entries.map((entry) => entry.yolo?.paused ?? null).sort(), [null, "toolCalls"].sort());
+		// The refused commands stay in the contender's own session, out of the blind view.
+		assert.doesNotMatch(JSON.stringify(blind), /push-from-/);
+		// A match recorded before arena took --autonomy reads as default.
+		const { autonomy: _dropped, ...legacy } = yolo;
+		assert.equal(arenaMatchView(arenaRoot(repo), legacy, null).autonomy, "default");
 	});
 
 	it("passes a prompt that looks like a flag as text and names only blind labels in progress", async () => {
