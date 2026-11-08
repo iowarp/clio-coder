@@ -11,7 +11,10 @@ const httpModules = new Map([
 	// The server records its loaded build and reads activation so live status can report a pending upgrade.
 	// The context ledger's and fleet frames' counts, and every limit, are worded by the canonical renderer on the
 	// server; browser contracts carry only rendered strings (#434).
-	["src/core/telemetry/render.ts", new Set(["renderCompactCount", "renderCount", "renderFact", "renderUsdLimit"])],
+	[
+		"src/core/telemetry/render.ts",
+		new Set(["renderCompactCount", "renderCount", "renderFact", "renderUsdLimit", "renderUsdSpend"]),
+	],
 	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
 	// The exact loaded build, so a remote node's GUI is driven by this client only when both builds agree.
 	["src/core/build-info.ts", new Set(["runningBuildId"])],
