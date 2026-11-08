@@ -132,6 +132,7 @@
 		"@earendil-works/pi-tui": "1.5.0",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"grok-mermaid": "0.2.2",
+		"minimatch": "10.2.6",
 		"smol-toml": "1.9.0"
 	},
 	"devDependencies": {

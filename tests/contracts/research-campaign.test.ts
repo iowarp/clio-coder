@@ -36,6 +36,7 @@ import {
 	createSpawnAgentRunner,
 	describeGrade,
 	grade,
+	inScope,
 	type ObjectiveValue,
 	openResearchCampaign,
 	parseAgentRunFrames,
@@ -78,6 +79,32 @@ function scratchRepo(files: Record<string, string>): string {
 }
 
 const base = { direction: "min" as const, minImprovement: 0.05, seed: 7, resamples: 2000 };
+
+describe("research scope", () => {
+	it("lets scope wildcards cross dot segments while literal names stay exact", () => {
+		ok(inScope(".github/workflows/ci.yml", ["**"]));
+		ok(inScope(".github/workflows/ci.yml", ["**/*.yml"]));
+		ok(inScope("src/.cache/a.ts", ["src/**/*.ts"]));
+		ok(inScope(".env", ["*"]));
+		ok(inScope(".github/workflows/ci.yml", [".github/**"]));
+		ok(inScope("src/a.ts", []));
+		ok(!inScope(".github/workflows/ci.yml", ["src/**"]));
+		ok(!inScope(".github/x.yml", [".gitlab/**"]));
+		ok(!inScope("src/a.ts", ["src/*.js"]));
+		ok(inScope(".github/.cache/ci.yml", ["{.github,src}/**/*.yml"]));
+		ok(inScope(".github/.cache/ci.yml", ["[.]github/**/*.yml"]));
+		ok(!inScope(".env", ["[!.]*"]));
+		ok(inScope("env", ["[!.]*"]));
+		ok(!inScope(".github/ci.yml", ["!(.github)/**"]));
+		ok(!inScope("src/../x", ["src/**"]));
+		ok(inScope("src-other/a.ts", ["!(src)/**"]));
+		ok(!inScope("src/unrelated.ts", ["!important.ts"]));
+		ok(inScope("!notes.txt", ["[[!]*"]));
+		ok(!inScope("^notes.txt", ["[[!]*"]));
+		ok(inScope("src/a.ts", ["src\\*.ts"]));
+		ok(!inScope("foo*", ["foo\\*"]));
+	});
+});
 
 describe("research grading", () => {
 	it("calls a clear drop improved, the same samples unchanged, and repeats itself under one seed", () => {

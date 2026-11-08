@@ -100,7 +100,8 @@ git diff HEAD clio/research/<id>
    - repeats an earlier tree;
    - touches a protected path (the verifier catalog, every file the checks name including the executable, and the
      symlinks on the way to them);
-   - changes a file outside `--scope`.
+   - changes a file outside `--scope`. Scope globs match dot segments too, so `**` covers `.github/` and `**/*.yml`
+     covers `.github/workflows/ci.yml`.
 4. **Measurement.** Base and candidate run in interleaved pairs (`--trials`, default 5). The change counts as improved
    only when two conditions hold:
    - the median moves by at least `--min-improvement` (default 5%) in the right direction;

@@ -6,6 +6,7 @@
  */
 import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { minimatch } from "minimatch";
 import { runCommandVector } from "../../core/safe-exec.js";
 import type { ToolResult } from "../../tools/registry.js";
 import { type DeclaredCheck, resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
@@ -218,6 +219,16 @@ export function changeReachesProtected(worktree: string, path: string, protected
 	});
 }
 
+// posix.matchesGlob is minimatch without a dot option, so * and ** skipped .github/ and .env. Same matcher and
+// options as Node's, plus dot.
+const SCOPE_GLOB_OPTIONS = {
+	dot: true,
+	nonegate: true,
+	nocomment: true,
+	optimizationLevel: 2,
+	windowsPathsNoEscape: true,
+} as const;
+
 export function inScope(path: string, scope: ReadonlyArray<string>): boolean {
-	return scope.length === 0 || scope.some((pattern) => path === pattern || posix.matchesGlob(path, pattern));
+	return scope.length === 0 || scope.some((pattern) => path === pattern || minimatch(path, pattern, SCOPE_GLOB_OPTIONS));
 }
