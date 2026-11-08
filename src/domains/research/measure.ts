@@ -113,7 +113,8 @@ function insideRoot(rootReal: string, target: string): string | null {
 /**
  * Repository-relative files a check's argv names, as they exist in `root`: those are protected from the agent. Every
  * argv entry counts, the executable included, so a repo-local `./bench.py` is protected as much as `python3 bench.py`.
- * A named path that is a symlink also protects what it resolves to inside the repository.
+ * Every symlink along a named path (the file itself or any parent directory) is protected as a link, and the path's
+ * resolved target inside the repository is protected too, so neither the link nor what it reaches can be swapped.
  */
 export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] {
 	const named = new Set<string>();
@@ -129,6 +130,11 @@ export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] 
 			const full = join(root, relative);
 			if (!existsSync(full)) continue;
 			named.add(relative);
+			const parts = relative.split("/");
+			for (let depth = 1; depth <= parts.length; depth++) {
+				const prefix = parts.slice(0, depth).join("/");
+				if (lstatSync(join(root, prefix)).isSymbolicLink()) named.add(prefix);
+			}
 			const resolved = insideRoot(rootReal, realpathSync(full));
 			if (resolved !== null && resolved.length > 0) named.add(resolved);
 		}
@@ -143,11 +149,16 @@ export function touchesProtected(path: string, protectedPaths: ReadonlyArray<str
 }
 
 /**
- * Whether a changed path in `worktree` reaches a protected file: it names one, or it is a symlink whose target (as
- * written, and as resolved) is, contains or lies under a protected path, or leaves the worktree.
+ * Whether a changed path reaches a protected file. `path` comes from the diff of the base tree against the candidate
+ * with renames split, so a deletion, replacement or rename of a protected path shows up under its base name. It
+ * reaches one when it is or lies under a protected path, when it is a parent component of one (a directory or link
+ * replaced on the way to it), or when in `worktree` it is a symlink whose target (as written, and as resolved) is,
+ * contains or lies under a protected path, or leaves the worktree.
  */
 export function changeReachesProtected(worktree: string, path: string, protectedPaths: ReadonlyArray<string>): boolean {
 	if (touchesProtected(path, protectedPaths)) return true;
+	const normalized = posix.normalize(path);
+	if (protectedPaths.some((entry) => entry.startsWith(`${normalized}/`))) return true;
 	const full = join(worktree, posix.normalize(path));
 	let link: string;
 	try {

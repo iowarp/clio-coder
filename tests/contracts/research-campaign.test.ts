@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -14,7 +15,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { installResearchStopSignals, runResearchCommand } from "../../src/cli/research.js";
-import { claimsProjectRoot, readClaims } from "../../src/domains/claims/index.js";
+import {
+	appendHypotheses,
+	claimsProjectRoot,
+	HYPOTHESIS_SLATE_SCHEMA,
+	hypothesesFromSlate,
+	readClaims,
+} from "../../src/domains/claims/index.js";
 import {
 	type AgentRunner,
 	type AgentRunResult,
@@ -465,5 +472,132 @@ describe("research review fixes", () => {
 			["interrupted"],
 		);
 		strictEqual(worktreeCount(repo), 1);
+	});
+
+	it("protects symlinked parent directories and judges deletions, renames and replacements by their base path", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"tools/run.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [commandCheck("score", ["node", "bench/run.js"])],
+			}),
+		});
+		symlinkSync("tools", join(repo, "bench"));
+		git(repo, "add", "-A");
+		git(repo, "commit", "-q", "-m", "bench link");
+		const campaign = openScore(repo, { maxIterations: 4, allowUnpriced: false });
+		for (const path of ["bench", "bench/run.js", "tools/run.js"])
+			ok(campaign.protected.includes(path), `${path} in ${campaign.protected.join(",")}`);
+		const fake = "process.stdout.write('{\"score\":0}')\n";
+		const edits: Array<(worktree: string) => void> = [
+			// Retarget the link at a fake bench.
+			(worktree) => {
+				rmSync(join(worktree, "bench"));
+				symlinkSync("fake", join(worktree, "bench"));
+				mkdirSync(join(worktree, "fake"));
+				writeFileSync(join(worktree, "fake/run.js"), fake);
+			},
+			// Replace the link with a real directory.
+			(worktree) => {
+				rmSync(join(worktree, "bench"));
+				mkdirSync(join(worktree, "bench"));
+				writeFileSync(join(worktree, "bench/run.js"), fake);
+			},
+			// Rename the protected target away.
+			(worktree) => renameSync(join(worktree, "tools/run.js"), join(worktree, "tools/old.js")),
+			// Replace the target's parent directory with a link.
+			(worktree) => {
+				rmSync(join(worktree, "tools"), { recursive: true });
+				mkdirSync(join(worktree, "fake"));
+				writeFileSync(join(worktree, "fake/run.js"), fake);
+				symlinkSync("fake", join(worktree, "tools"));
+			},
+		];
+		let calls = 0;
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				edits[calls++]?.(request.worktree);
+				return done;
+			},
+		});
+		deepStrictEqual(
+			summarizeCampaign(campaign.project, campaign.id).iterations.map((iteration) => iteration.outcome),
+			["protected", "protected", "protected", "protected"],
+		);
+	});
+
+	it("keeps claim evidence for project hypotheses bound to a gate, and only the research hypothesis goes without", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			"sane.js": "process.stdout.write(JSON.stringify({v:Number(require('fs').readFileSync('value.txt','utf8'))}))\n",
+			"ref.json": '{"v":100}\n',
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					commandCheck("score", ["node", "score.js"]),
+					{
+						...commandCheck("sane", ["node", "sane.js"]),
+						kind: "numeric-compare",
+						reference: "ref.json",
+						tolerance: { absolute: 0 },
+					},
+				],
+			}),
+		});
+		const project = claimsProjectRoot(repo);
+		const slateText = `${JSON.stringify({
+			schema: HYPOTHESIS_SLATE_SCHEMA,
+			hypotheses: [
+				{
+					id: "H1",
+					statement: "value.txt stays at its reference",
+					prediction: "sane agrees",
+					status: "proposed",
+					experiment: { successCriterion: { kind: "verify", verifyId: "sane", statement: "sane agrees" } },
+				},
+			],
+		})}\n`;
+		const slate = join(repo, "hypotheses.json");
+		writeFileSync(slate, slateText);
+		const drafts =
+			hypothesesFromSlate({
+				text: slateText,
+				slateSha256: "0".repeat(64),
+				path: slate,
+				project,
+				at: new Date().toISOString(),
+				source: { channel: "slate", sessionId: null, toolCallId: null },
+			}) ?? [];
+		const [project1] = (await appendHypotheses(project, drafts)) ?? [];
+		ok(project1 !== undefined);
+		const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false }, ["sane"]);
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				writeFileSync(join(request.worktree, "value.txt"), "50\n");
+				return done;
+			},
+		});
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["gate-failed"],
+		);
+		const claims = readClaims(project);
+		const disagreeing = claims.records.find((claim) => claim.keys.check === "sane" && claim.verdict === "disagrees");
+		ok(disagreeing !== undefined);
+		const projectTest = claims.hypothesisTests.find((test) => test.hypothesis === project1.id);
+		strictEqual(projectTest?.outcome, "refuted");
+		strictEqual(projectTest?.claim, disagreeing.id);
+		const researchTests = claims.hypothesisTests.filter((test) => test.hypothesis !== project1.id);
+		ok(researchTests.length > 0);
+		ok(researchTests.every((test) => test.outcome === "tested" && test.claim === undefined));
+		strictEqual(view.iterations[0]?.hypothesisVerdict, "supported");
+		strictEqual(claims.unlinked, 0);
 	});
 });
