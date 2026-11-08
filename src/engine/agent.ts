@@ -360,7 +360,11 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	const convertToLlm = agent.convertToLlm.bind(agent);
 	agent.convertToLlm = async (messages) => {
 		const converted = (await convertToLlm(messages)).map((message) => {
-			if (message.role === "assistant" && message.stopReason !== "aborted" && !isUsageRecord(message.usage))
+			if (
+				message.role === "assistant" &&
+				message.stopReason !== "aborted" &&
+				(!isUsageRecord(message.usage) || usageInvalidated(message))
+			)
 				return { ...message, usage: unsentCallUsage() };
 			if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
 			const partial = message.content
@@ -385,6 +389,19 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		state: () => agent.state,
 		requestCorrelationId: (message) => correlations.get(message),
 	};
+}
+
+/**
+ * Observation masking and working-set eviction stamp every earlier assistant
+ * message `contextUsageInvalidated`: its usage measured a longer prompt than
+ * the one now sent. pi-ai does not know the stamp, and its request-time
+ * `clampMaxTokensToContext` anchors on the newest assistant usage, so a stale
+ * pre-eviction size under a low context cap clamped max_tokens to 1. The
+ * provider-bound copy drops that anchor like an unsent call's; the record keeps
+ * its usage.
+ */
+function usageInvalidated(message: object): boolean {
+	return (message as { contextUsageInvalidated?: unknown }).contextUsageInvalidated === true;
 }
 
 function isUsageRecord(value: unknown): boolean {

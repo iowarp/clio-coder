@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
+import { normalizeContext } from "../../src/engine/context.js";
 import { lockedSynthesisRepromptMessages } from "../../src/engine/loop-guard.js";
 import { assistantSessionPayload } from "../../src/session-control/chat-loop-messages.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/session-control/session-replay-messages.js";
@@ -58,4 +60,30 @@ test("a resumed session sizes its context past a persisted synthesis re-prompt",
 	// The re-prompt adds no usage of its own: the anchor stays the last real call.
 	assert.equal(estimate.usageTokens, 940);
 	assert.equal(estimate.lastUsageIndex, wire.length - 2);
+});
+
+// The first turn after a working-set eviction under `--max-context-tokens 28000`
+// went out with max_tokens 1 and ended at stopReason=length. The projection
+// stamps every earlier assistant `contextUsageInvalidated`, but pi-ai's
+// request-time clamp ignored the stamp and anchored on the pre-eviction prompt.
+test("a usage anchor invalidated by an eviction does not size the next request", async () => {
+	const preEviction = { ...usage, input: 24_500, totalTokens: 24_540 };
+	const entries = [
+		entry(0, "user", { text: "Read the files." }),
+		entry(1, "assistant", { text: "Read them.", stopReason: "stop", usage: preEviction, contextUsageInvalidated: true }),
+		entry(2, "user", { text: "List them." }),
+	];
+	const messages = buildReplayAgentMessagesFromTurns(entries);
+	const { agent } = createEngineAgent({
+		initialState: { systemPrompt: "", tools: [], messages: [], thinkingLevel: "off" },
+	});
+	const wire = await agent.convertToLlm(messages);
+	assert.equal(estimateContextTokens(wire).lastUsageIndex, null, "the stale anchor is dropped");
+	assert.equal((messages[1] as { usage?: { totalTokens?: number } }).usage?.totalTokens, 24_540, "the record keeps it");
+	const maxTokens = clampMaxTokensToContext(
+		{ contextWindow: 28_000 } as never,
+		normalizeContext({ messages: wire }),
+		14_000,
+	);
+	assert.equal(maxTokens, 14_000);
 });
