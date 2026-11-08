@@ -60,6 +60,38 @@ export interface ArenaMatchView {
 
 export class ArenaRevealRefused extends Error {}
 
+const HIDDEN = "[hidden]";
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Diagnostics are raw child output, which can name a contender: an unknown
+ * target, a model the route does not list, a session id, or a compete worktree
+ * or branch whose slot number is the --contender position. Before a vote those
+ * are replaced; the raw text returns with the reveal.
+ */
+function blindRedactor(match: ArenaMatch): (text: string) => string {
+	const terms = new Set<string>();
+	for (const contender of match.contenders) {
+		terms.add(`${contender.target}/${contender.model}`);
+		terms.add(contender.target);
+		terms.add(contender.model);
+		if (contender.facts?.sessionId) terms.add(contender.facts.sessionId);
+	}
+	const ordered = [...terms].filter((term) => term.length > 0).sort((a, b) => b.length - a.length);
+	const named =
+		ordered.length === 0
+			? null
+			: new RegExp(`(?<![A-Za-z0-9._/-])(?:${ordered.map(escapeRegExp).join("|")})(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9])`, "g");
+	return (text) => {
+		let out = text
+			.replace(/\.clio-coder[\\/]worktrees[\\/][^\s'"`]*/g, `.clio-coder/worktrees/${HIDDEN}`)
+			.replace(/clio-coder\/compete\/[^\s'"`]*/g, `clio-coder/compete/${HIDDEN}`)
+			.replace(/\b(candidate|contender)[- ]\d+/gi, `$1 ${HIDDEN}`);
+		if (named !== null) out = out.replace(named, HIDDEN);
+		return out;
+	};
+}
+
 /**
  * Project a match for a voter. Identity, duration, tokens and cost stay hidden
  * until the vote is in, because each can name the model. Asking to reveal
@@ -75,6 +107,7 @@ export function arenaMatchView(
 		throw new ArenaRevealRefused(`match ${match.id} has no vote yet; vote before revealing who is who`);
 	}
 	const revealed = vote !== null;
+	const blind = revealed ? (text: string) => text : blindRedactor(match);
 	const entries = matchLabels(match).map((label, k): ArenaEntryView => {
 		const index = match.order[k] as number;
 		const contender = match.contenders.find((c) => c.index === index);
@@ -91,11 +124,11 @@ export function arenaMatchView(
 			writes: facts?.writes ?? null,
 			blocks: facts?.blocks ?? null,
 			diffStat: facts?.diff ?? null,
-			check: facts?.check ?? null,
+			check: facts?.check ? { ...facts.check, tail: blind(facts.check.tail) } : null,
 			finalText: facts?.finalText ?? "",
 			diff: diff?.text ?? null,
 			diffTruncated: diff?.truncated ?? false,
-			error: facts?.error ?? null,
+			error: facts?.error ? blind(facts.error) : null,
 			reveal:
 				revealed && contender !== undefined
 					? {
@@ -119,7 +152,7 @@ export function arenaMatchView(
 		suite: match.suite,
 		isolation: match.isolation,
 		check: match.check,
-		error: match.error,
+		error: match.error === null ? null : blind(match.error),
 		revealed,
 		vote: vote === null ? null : { choice: vote.choice, note: vote.note, votedAt: vote.votedAt },
 		entries,
