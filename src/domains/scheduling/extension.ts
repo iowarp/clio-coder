@@ -135,6 +135,7 @@ export function createSchedulingBundle(
 		},
 	};
 
+	let neverWaitForRaise: () => boolean = () => false;
 	const contract: SchedulingContract = {
 		ceilingUsd: () => {
 			syncBudget();
@@ -214,7 +215,7 @@ export function createSchedulingBundle(
 						if (telemetryHub().emit("budget.crossed", { ...rest, spendUsd }, telemetry)) crossings.add(crossing);
 					}
 				}
-				if (!waitForRaise) {
+				if (!waitForRaise || neverWaitForRaise()) {
 					recordHold("refused");
 					throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens, held.block.pricing);
 				}
@@ -235,6 +236,15 @@ export function createSchedulingBundle(
 					throw error;
 				}
 			}
+		},
+		setNeverWaitForRaise: (refuse) => {
+			neverWaitForRaise = () => {
+				try {
+					return refuse();
+				} catch {
+					return false;
+				}
+			};
 		},
 		setRunCostCap: (cap) => {
 			runCap = cap;

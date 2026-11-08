@@ -2219,6 +2219,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let workerAskJudgeForDispatch: {
 		seat: () => SafetyJudgeSeat;
 		autonomy: () => AutonomyLevel;
+		operatorAutonomy: () => AutonomyLevel;
 		hookDrift: () => GitHookDriftGuard;
 	} | null = null;
 
@@ -2324,6 +2325,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				workerSteering: !options.headless,
 				// Under fleet.permissions.mode=judge the main session's safety judge
 				// reviews native workers' ordinary asks in this process.
+				operatorAutonomy: () => workerAskJudgeForDispatch?.operatorAutonomy(),
 				workerAskJudge: {
 					seat: () => workerAskJudgeForDispatch?.seat(),
 					autonomy: () => workerAskJudgeForDispatch?.autonomy() ?? "default",
@@ -3377,6 +3379,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	workerAskJudgeForDispatch = {
 		seat: () => safetyJudge,
 		autonomy: resolveAdmissionAutonomy,
+		operatorAutonomy: resolveEffectiveAutonomy,
 		hookDrift: () => hookDrift,
 	};
 	// Sessions whose snapshot start-of-session prune has run in this process.
@@ -3845,6 +3848,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// System One: one instance for the process, fixed at startup in what it binds.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;
 	const sessionScheduling = result.getContract<SchedulingContract>("scheduling");
+	sessionScheduling?.setNeverWaitForRaise?.(unattendedYolo);
 	const systemOneAdmissionDeps = {
 		providers,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
@@ -3944,6 +3948,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		attended: options.headless === undefined,
 		safety,
 		autonomy: resolveEffectiveAutonomy,
+		admissionAutonomy: resolveAdmissionAutonomy,
 		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
 		createSession: () => {
 			const settings = getCurrentSettings();

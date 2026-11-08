@@ -3,7 +3,7 @@ import type { ClioSettings } from "../../core/config.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
-import { describeMainCallConsequences } from "./call-consequence.js";
+import { describeMainCallConsequences, projectScriptConsequences } from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
 import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
@@ -88,7 +88,7 @@ const BLOCK_RULES: ReadonlyArray<readonly [string, string]> = [
 	["remote-code", "run code fetched from the network (such as curl piped to a shell) that the operator did not ask for"],
 ];
 
-const OPERATOR_NAMED_RULE = "operator-named";
+export const OPERATOR_NAMED_RULE = "operator-named";
 
 const ALLOW_RULES: ReadonlyArray<readonly [string, string]> = [
 	[OPERATOR_NAMED_RULE, "an action an operator message explicitly names"],
@@ -363,6 +363,12 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					consequences = (deps.consequences ?? describeMainCallConsequences)(call);
 				} catch {
 					// A consequence sentence is a feature for the judge, never a precondition.
+				}
+				try {
+					// What a named project script executes, so approving its name is not approving an unread body.
+					consequences = [...consequences, ...projectScriptConsequences(call)];
+				} catch {
+					// As above: a feature, never a precondition.
 				}
 				const system = safetyJudgeSystemPrompt(config);
 				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};

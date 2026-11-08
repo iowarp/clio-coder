@@ -30,6 +30,7 @@ export const coreTests = [
 	"default-containment",
 	"contained-secrets",
 	"true-yolo",
+	"contained-yolo",
 	"transcript-operator-grant",
 	"yolo-script-sandbox",
 	"verify-sandbox-trojan",

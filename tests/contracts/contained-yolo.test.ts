@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +6,17 @@ import { test } from "node:test";
 import { readSettings, recordYoloConfinementOnce, settingsPath } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
+import type { ConfigContract } from "../../src/domains/config/index.js";
 import { renderSessionPostureUpdate } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { admissionAutonomy, effectiveYoloConfinement } from "../../src/domains/safety/autonomy.js";
+import { projectScriptConsequences } from "../../src/domains/safety/call-consequence.js";
 import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
+import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
+import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
 	createYoloActivation,
@@ -213,4 +218,71 @@ test("the contained migration records the confinement once and keeps an operator
 	writeFileSync(settingsPath(), "version: 2\nsafety:\n  yoloConfinement: unconfined\n");
 	strictEqual(recordYoloConfinementOnce(), false);
 	match(readFileSync(settingsPath(), "utf8"), /yoloConfinement: unconfined/u);
+});
+
+test("contained yolo runs an outward call the judge allows only when the operator named it", async () => {
+	const push = { tool: ToolNames.Bash, args: { command: "git push origin HEAD:main" } };
+	const named = containedRegistry(() => JSON.stringify({ verdict: "allow", rule: "operator-named", reason: "asked" }));
+	strictEqual((await named.registry.invoke(push)).kind, "ok");
+
+	const inferred = containedRegistry(() =>
+		JSON.stringify({ verdict: "allow", rule: "workspace", reason: "serves the task" }),
+	);
+	const verdict = await inferred.registry.invoke(push, { turnId: "turn-1" });
+	strictEqual(verdict.kind, "blocked");
+	if (verdict.kind === "blocked") {
+		match(verdict.reason, /contained yolo runs without the operator/u);
+		match(
+			verdict.decision.kind === "allow" ? "" : verdict.decision.rejection.detail,
+			/allowed this outward call under rule workspace/u,
+		);
+	}
+	deepStrictEqual([inferred.ran, inferred.parks.length, inferred.judged()], [[], 0, 1]);
+});
+
+test("contained yolo refuses a Scout external read root without a card", async () => {
+	const { registry, parks } = containedRegistry(() => "unused");
+	strictEqual(await registry.requestReadRootApproval?.("/srv/elsewhere"), null);
+	strictEqual(parks.length, 0);
+});
+
+test("the judge reads the package.json body a named project script runs", () => {
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-script-body-")));
+	writeFileSync(
+		join(cwd, "package.json"),
+		JSON.stringify({ scripts: { release: "git push --force origin HEAD:main; cat .env", prerelease: "node lint.mjs" } }),
+	);
+	const lines = (command: string) => projectScriptConsequences({ tool: ToolNames.Bash, args: { command, cwd } });
+	deepStrictEqual(lines("npm test && npm run release"), [
+		'runs package.json script "release", repository data that executes as written: prerelease: node lint.mjs; release: git push --force origin HEAD:main; cat .env',
+	]);
+	deepStrictEqual(lines("pnpm release"), lines("npm run release"));
+	deepStrictEqual(lines("git status"), []);
+});
+
+test("contained yolo refuses a paid request at the ceiling instead of waiting for a raise", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.limits.sessionCostUsd = 1;
+	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
+	const spent = { usd: 1.25, estimated: false, unpriced: false, ref: null };
+	const telemetry = { sessionSpend: () => spent, settledSessionSpend: async () => spent };
+	const { contract, extension } = createSchedulingBundle({
+		bus: createTelemetryHub(),
+		getContract: (<T>(name: string) =>
+			(name === "config" ? config : name === "telemetry" ? telemetry : undefined) as T | undefined) as never,
+	});
+	await extension.start?.();
+	try {
+		let contained = true;
+		contract.setNeverWaitForRaise?.(() => contained);
+		await rejects(contract.admitPaidRequest?.({ waitForRaise: true }) ?? Promise.resolve(), SessionCostCeilingError);
+		contained = false;
+		const controller = new AbortController();
+		const held = contract.admitPaidRequest?.({ waitForRaise: true, signal: controller.signal });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		controller.abort(new Error("operator left"));
+		await rejects(held ?? Promise.resolve(), /operator left/u);
+	} finally {
+		await extension.stop?.();
+	}
 });

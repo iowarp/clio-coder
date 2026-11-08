@@ -27,7 +27,13 @@ export interface JobHostDeps {
 	/** A transient `run` host cannot promise future occurrences (#411). */
 	attended: boolean;
 	safety: SafetyContract;
+	/** The operator's level: whether an interrupted job turn continues on its own. */
 	autonomy(): AutonomyLevel;
+	/**
+	 * The level a job's command is admitted at and its environment is built for.
+	 * Contained yolo admits as default does; absent, the operator's level.
+	 */
+	admissionAutonomy?(): AutonomyLevel;
 	/** The session's test-runner consent is owed; a job command is admitted as its direct call would be. */
 	sessionCodeConsentPending?(): boolean;
 	createSession(): void;
@@ -109,12 +115,13 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		}
 		return current;
 	};
+	const admissionAutonomy = deps.admissionAutonomy ?? deps.autonomy;
 	const runtimeDeps = {
 		chat: () => chat,
 		isCurrent,
 		constraints: () => chat?.jobConstraints?.() ?? chat?.currentTurnConstraints?.(),
 		safety: deps.safety,
-		autonomy: deps.autonomy,
+		autonomy: admissionAutonomy,
 		...(deps.sessionCodeConsentPending !== undefined
 			? { sessionCodeConsentPending: deps.sessionCodeConsentPending }
 			: {}),
@@ -166,7 +173,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		owner,
 		constraints: runtimeDeps.constraints,
 		hostRefusal,
-		autonomy: deps.autonomy,
+		autonomy: admissionAutonomy,
 		admissionRefusal: (runner, creator, constraints) => jobAuthorityRefusal(runtimeDeps, creator, runner, constraints),
 	});
 	const subscriptions = [
