@@ -54,6 +54,14 @@ checks:
 A `perf-budget` check works as an objective too: its `wall_ms` falls back to the measured duration. A `reproduce` check
 cannot be an objective, but it can be a gate.
 
+Install what the checks need in the project before the campaign starts, not through the agent. Each candidate is
+measured and gated as its commit plus the environment its worktree had before the agent ran, such as installed
+dependencies or build output a checkout step leaves. The worktrees sit under `.clio-coder/worktrees/` inside the
+project, so a `node_modules` there resolves from them. That environment is read-only to the agent: a file added,
+removed or changed inside it rejects the candidate unmeasured as `protected` ("changed the pre-agent environment").
+Anything else the agent leaves untracked or ignored, a fresh install or a check's output included, is removed before
+measuring, and the checks recreate their own output.
+
 ### Run a campaign
 
 ```bash
@@ -143,8 +151,10 @@ contender runs in its own worktree from `HEAD`. Uncommitted changes are not part
 removed after each contender's diff is saved. Outside Git, or with `--read-only`, contenders only read. Put `--` before a
 prompt that starts with `-`.
 
-`--check <id>` dry-runs one verifier in each contender's worktree when it finishes. The catalog has to be committed for
-the worktrees to have it.
+`--check <id>` dry-runs one verifier in each contender's worktree when it finishes. An id the project cannot resolve is
+refused before any contender starts. The project's `.clio-coder/verifiers.yaml` is copied into each worktree, committed or
+not, and replaces any copy a contender wrote. Files the check reads, such as reference outputs or inputs, are not copied,
+so commit them.
 
 ### Vote blind, then reveal
 
