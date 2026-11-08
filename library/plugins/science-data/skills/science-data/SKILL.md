@@ -49,8 +49,9 @@ the remedy the listing prints.
 These are `read` and run without asking. Every other pandas tool writes a file,
 so it asks first: `save_data`, and `clean_data`, `filter_data`,
 `groupby_operations`, `handle_missing_data`, `merge_datasets`,
-`optimize_memory`, `pivot_table` and `time_series_operations`, which each write
-a CSV beside the input on every call and replace one of the same name. Use them
+`optimize_memory`, `pivot_table` and `time_series_operations`, which write a
+CSV beside the input and replace one of the same name (`handle_missing_data`
+writes for every strategy except `detect`). Use them
 only when the user asks for a file; for a grouped aggregate without one, use
 `mcp_parquet__aggregate_column_tool`.
 

@@ -813,7 +813,7 @@ entries:
       needs one online launch to build its environment before it runs offline."
     version: 0.1.1
     sourceUrl: plugins/science-data
-    sha256: f7cdae20f0a4a4a2839144ef5216262aa17a00dd6360b0042d1898d1dedb210d
+    sha256: 6254c88bceab76866e042ce6cbe85de4dee0cc9dda95455a3f47fd86f3477043
     provides:
       - kind: skill
         name: science-data
