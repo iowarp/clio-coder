@@ -8,7 +8,9 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
+import { limitationTool } from "../../src/tools/limitation.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { RUN_SCRIPT_TOOL_NAME, runScriptToolSurface } from "../../src/tools/run-script.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("gateway correction contracts", () => {
@@ -160,5 +162,52 @@ describe("gateway correction contracts", () => {
 				}
 			}
 		}
+	});
+
+	it("runs a capability's argument normalizer before validating a gateway call", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
+		const scriptRuns: Record<string, unknown>[] = [];
+		registry.register({ ...limitationTool, placement: "gateway" });
+		registry.register({
+			...runScriptToolSurface,
+			placement: "gateway",
+			run: async (args) => {
+				scriptRuns.push(args);
+				return { kind: "ok", output: "ran" };
+			},
+		});
+		registry.register(createGatewayTool({ registry }));
+		const call = (capability: string, args: Record<string, unknown>) =>
+			registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability, args } });
+
+		const limitation = await call(ToolNames.Limitation, { scope: "H100 run", reason: "no NVIDIA GPU on this host" });
+		ok(limitation.kind === "ok" && limitation.result.kind === "ok", JSON.stringify(limitation));
+		deepStrictEqual(limitation.result.details?.limitation, {
+			scope: "H100 run (no NVIDIA GPU on this host)",
+			reason: "other",
+			paths: [],
+		});
+
+		const script = await call(RUN_SCRIPT_TOOL_NAME, {
+			interpreter: "python3",
+			script: "analyze.py",
+			args: '["--n", "5"]',
+			inputs: "data.csv",
+		});
+		ok(script.kind === "ok" && script.result.kind === "ok", JSON.stringify(script));
+		strictEqual(scriptRuns.length, 1);
+		deepStrictEqual(scriptRuns[0]?.args, ["--n", "5"]);
+		deepStrictEqual(scriptRuns[0]?.inputs, ["data.csv"]);
+
+		// What a normalizer leaves alone still fails the schema, and no body runs.
+		for (const [capability, args] of [
+			[ToolNames.Limitation, { scope: "H100 run", reason: 7 }],
+			[RUN_SCRIPT_TOOL_NAME, { interpreter: "python3", script: "analyze.py", args: { n: 5 } }],
+		] as const) {
+			const rejected = await call(capability, args);
+			ok(rejected.kind === "ok" && rejected.result.kind === "error", JSON.stringify(rejected));
+			match(rejected.result.message, new RegExp(`gateway: ${capability} arguments rejected`));
+		}
+		strictEqual(scriptRuns.length, 1);
 	});
 });

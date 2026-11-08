@@ -19,6 +19,7 @@ import {
 	nestedBlockedResult,
 	nestedChainResult,
 	nestedExecutedResult,
+	prepareToolArgs,
 	resolveToolPromptHint,
 	type ToolInvokeOptions,
 	type ToolRegistry,
@@ -788,13 +789,18 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			return { kind: "error", message: `gateway: args for ${spec.name} must be a JSON object` };
 		}
 		const rawArgs: Record<string, unknown> = isRecord(args.args) ? args.args : {};
+		// The direct path runs the capability's normalizer ahead of schema
+		// validation (agent-tools wires it as pi's prepareArguments), so a prose
+		// limitation reason or a JSON-string run_script array lands the same way
+		// here. Admission-prepared tools keep theirs on the registry path there too.
+		const preparedArgs = spec.prepareAdmissionArguments ? rawArgs : prepareToolArgs(spec, rawArgs);
 		// The same coercion pi-ai applies to a direct call's arguments before
 		// execute, so "5" reaches a number field as 5 either way.
 		let validated: Record<string, unknown>;
 		try {
 			validated = validateEngineToolArguments(
 				{ name: spec.name, description: spec.description, parameters: spec.parameters },
-				{ type: "toolCall", id: options?.toolCallId ?? "", name: spec.name, arguments: rawArgs },
+				{ type: "toolCall", id: options?.toolCallId ?? "", name: spec.name, arguments: preparedArgs },
 			) as Record<string, unknown>;
 		} catch (error) {
 			const examples = gatewayExamples(spec, "", 1, allowedSet(options));
