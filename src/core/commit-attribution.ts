@@ -6,21 +6,26 @@
  * settings dependencies, so every controlled commit seam shares one policy.
  */
 
-/** Slug of the IOWarp-owned GitHub App whose bot account is Clio's commit identity. */
-export const CLIO_GITHUB_APP_SLUG = "clio-coder";
+/**
+ * PLACEHOLDER: slug of the IOWarp-owned GitHub App whose bot account would be
+ * Clio's commit identity. `clio-coder` is an unrelated user's login, and an
+ * App may not take an existing account's name, so confirm the registered slug.
+ */
+const CLIO_GITHUB_APP_SLUG = "clio-coder-agent";
 
 /**
  * PLACEHOLDER until the IOWarp org creates the App: the account id of the
- * App's bot user, read with `gh api users/clio-coder%5Bbot%5D --jq .id`. It is
- * not the App id. GitHub links a trailer to an account only by email, and a
- * bot account answers to `<id>+<slug>[bot]@users.noreply.github.com`; while
- * this is null, commits keep the address GitHub cannot resolve. Setting it
- * changes the managed hook script, so bump `MANAGED_HOOK_VERSION`
- * (`src/core/git-commit-attribution.ts`) in the same commit.
+ * App's bot user, read with `gh api users/<slug>%5Bbot%5D --jq .id`. It is not
+ * the App id. GitHub links a trailer to an account only by email, and a bot
+ * account answers to `<id>+<slug>[bot]@users.noreply.github.com`. While this
+ * is null, trailers name `clio-coder@iowarp.ai`, which renders once a GitHub
+ * account verifies it. Setting it changes the managed hook script, so bump
+ * `MANAGED_HOOK_VERSION` (`src/core/git-commit-attribution.ts`) in the same
+ * commit.
  */
 const CLIO_GITHUB_BOT_USER_ID: number | null = null;
 
-const LEGACY_CLIO_COMMIT_EMAIL = "clio-coder@iowarp.ai";
+const IOWARP_COMMIT_EMAIL = "clio-coder@iowarp.ai";
 
 function githubBotNoreplyEmail(userId: number | null, slug: string): string | null {
 	if (userId === null || !Number.isSafeInteger(userId) || userId <= 0) return null;
@@ -28,8 +33,7 @@ function githubBotNoreplyEmail(userId: number | null, slug: string): string | nu
 }
 
 /** The one email every Clio commit trailer names. */
-export const CLIO_COMMIT_EMAIL =
-	githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? LEGACY_CLIO_COMMIT_EMAIL;
+const CLIO_COMMIT_EMAIL = githubBotNoreplyEmail(CLIO_GITHUB_BOT_USER_ID, CLIO_GITHUB_APP_SLUG) ?? IOWARP_COMMIT_EMAIL;
 
 export const CLIO_COMMIT_IDENTITY = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
 
@@ -109,12 +113,11 @@ const KNOWN_CLIO_TRAILERS = new Set(
 );
 
 /**
- * A role trailer naming the address used before the bot identity, keyed by its
- * normalized form, mapped to the same role under the current identity. Empty
- * while the two addresses are the same.
+ * A role trailer naming clio-coder@iowarp.ai, keyed by its normalized form,
+ * mapped to the same role under the bot identity. Empty while no bot id is set.
  */
-const LEGACY_ROLE_TRAILERS: ReadonlyMap<string, string> = (() => {
-	const legacy = roleTrailers(`Clio Coder <${LEGACY_CLIO_COMMIT_EMAIL}>`);
+const IOWARP_ROLE_TRAILER_UPGRADES: ReadonlyMap<string, string> = (() => {
+	const legacy = roleTrailers(`Clio Coder <${IOWARP_COMMIT_EMAIL}>`);
 	const upgrades = new Map<string, string>();
 	for (const role of Object.keys(legacy) as Array<keyof typeof legacy>) {
 		const key = normalizedTrailer(legacy[role]);
@@ -189,7 +192,7 @@ function runTrailer(run: CommitRunEvidence | undefined): string | null {
  * Disabled attribution is the one byte-preserving path. When enabled, CRLF and
  * lone CR are normalized to LF, the message ends with one newline, existing
  * subject/body and human trailers remain in order, a role trailer naming the
- * earlier Clio address is rewritten to the current identity, repeated Clio
+ * clio-coder@iowarp.ai address is rewritten to the bot identity, repeated Clio
  * trailers are removed case-insensitively, and processing the result again is
  * idempotent.
  */
@@ -203,11 +206,11 @@ export function attributeCommitMessage(
 	const normalized = originalMessage.replace(/\r\n?/gu, "\n");
 	const lines = normalized.replace(/\n+$/u, "").split("\n");
 	const blockStart = trailerBlockStart(lines);
-	// A role trailer still naming the pre-bot address is the same Clio claim:
-	// rewrite it to the current identity so the commit names one Clio account.
+	// Once the bot identity is set, a clio-coder@iowarp.ai role trailer is the
+	// same Clio claim: rewrite it so the commit names one Clio account.
 	if (blockStart !== null) {
 		for (let index = blockStart; index < lines.length; index += 1) {
-			const upgraded = LEGACY_ROLE_TRAILERS.get(normalizedTrailer(lines[index] ?? "") ?? "");
+			const upgraded = IOWARP_ROLE_TRAILER_UPGRADES.get(normalizedTrailer(lines[index] ?? "") ?? "");
 			if (upgraded !== undefined) lines[index] = upgraded;
 		}
 	}
