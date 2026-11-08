@@ -204,6 +204,65 @@ export function checkLedgerUsageKeys(file: string, source: string): string[] {
 	return violations;
 }
 
+/** The names that carry the right to register middleware hooks (rule15). */
+const MIDDLEWARE_REGISTRATION_CAPABILITY = new Set([
+	"MiddlewareRegistrar",
+	"MiddlewareHost",
+	"MiddlewareBundle",
+	"MiddlewareDomain",
+	"createMiddlewareDomain",
+	"createMiddlewareBundle",
+	"createMiddlewareHostFromSnapshot",
+]);
+
+/**
+ * Files outside src/domains/middleware/** that hold the registration capability
+ * (rule15). The loader publishes only the query contract; a composition that
+ * owns the middleware domain keeps the registrar and hands it to its own
+ * collaborators.
+ */
+const MIDDLEWARE_REGISTRAR_HOLDERS: ReadonlyMap<string, string> = new Map([
+	["src/entry/orchestrator.ts", "the interactive composition root owns the middleware domain"],
+	["src/entry/extension-reload.ts", "replaces registrations for the orchestrator on reload"],
+	["src/entry/worker-hook-host.ts", "registers extension hooks for the orchestrator's worker host"],
+	["src/cli/worker-extension-hooks.ts", "the headless and fleet composition owns its middleware domain"],
+	["src/engine/worker-tools.ts", "the worker builds its own host from the parent's snapshot"],
+	["src/session-control/chat-loop.ts", "receives registerHook from the orchestrator as a dependency"],
+]);
+
+/**
+ * A published contract carries no registration capability, and its type comes
+ * from DomainContractMap, never from the caller (rule15).
+ */
+export function checkDomainContractAccess(file: string, source: string, usedHolders?: Set<string>): string[] {
+	const holdsCapability = file.startsWith("src/domains/middleware/") || MIDDLEWARE_REGISTRAR_HOLDERS.has(file);
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const violations: string[] = [];
+	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+	const visit = (node: ts.Node): void => {
+		if (ts.isIdentifier(node) && MIDDLEWARE_REGISTRATION_CAPABILITY.has(node.text)) {
+			if (holdsCapability) usedHolders?.add(file);
+			else
+				violations.push(
+					`rule15: ${file}:${line(node)} names ${node.text}; only the composition that owns the middleware domain registers hooks (MIDDLEWARE_REGISTRAR_HOLDERS)`,
+				);
+		}
+		if (
+			ts.isCallExpression(node) &&
+			node.typeArguments !== undefined &&
+			(ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : node.expression.getText(tree)) ===
+				"getContract"
+		) {
+			violations.push(
+				`rule15: ${file}:${line(node)} passes a type argument to getContract; the contract type comes from DomainContractMap`,
+			);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Applied to the producer's complete local value-import closure, including helper modules (#434). */
 export function checkTelemetryProducer(file: string, source: string): string[] {
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -984,6 +1043,10 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *  14. src/interactive/**, src/engine/acp/** and src/cli/** sum no token or
  *      cost field: their figures are the read model's quantity displays,
  *      except the functions SURFACE_TOTAL_EXEMPTIONS names with a reason.
+ *  15. Only src/domains/middleware/** and the MIDDLEWARE_REGISTRAR_HOLDERS name
+ *      the middleware registration capability, and no getContract call passes
+ *      a type argument: the published contract is the query surface and its
+ *      type comes from DomainContractMap.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
@@ -1013,6 +1076,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	/** Runtime importers by declared seam, so rule 6b can disposition each reacher. */
 	const valueReachedSeams = new Map<string, Set<string>>();
 	const usedSurfaceExemptions = new Set<string>();
+	const usedRegistrarHolders = new Set<string>();
 
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
@@ -1022,6 +1086,13 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		violations.push(...checkLedgerUsageKeys(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(
 			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
+		);
+		violations.push(
+			...checkDomainContractAccess(
+				path.relative(projectRoot, filePath).split(path.sep).join("/"),
+				source,
+				usedRegistrarHolders,
+			),
 		);
 		const specifiers = extractSpecifiers(source);
 		const references = extractReferenceDirectives(source);
@@ -1186,6 +1257,12 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 				violations.push(
 					`rule14: SURFACE_TOTAL_EXEMPTIONS exempts ${exemption.file}#${fn}, which no longer sums a token or cost field; remove the exemption`,
 				);
+
+	for (const holder of MIDDLEWARE_REGISTRAR_HOLDERS.keys())
+		if (!usedRegistrarHolders.has(holder))
+			violations.push(
+				`rule15: MIDDLEWARE_REGISTRAR_HOLDERS lists ${holder}, which no longer names the registration capability; remove the entry`,
+			);
 
 	for (const directory of ["client", "server"]) {
 		for (const file of walk(path.join(projectRoot, "apps/clio-coder-gui", directory))) {

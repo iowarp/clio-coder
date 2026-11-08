@@ -11,6 +11,7 @@ import {
 	resolveShutdownHookBudgetMs,
 	ShutdownBudgetExceeded,
 } from "../../src/core/termination.js";
+import { checkDomainContractAccess } from "../boundaries/check-boundaries.js";
 
 /** These fixtures name their own domains, so they type the loader by their own map. */
 type FixtureMap = Record<string, Record<string, unknown>>;
@@ -266,4 +267,14 @@ test("accepted persistence runs after observed resource settlement", async (t) =
 		release();
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("rule15 keeps hook registration with the owning composition and contract types in the map", () => {
+	const registrar = 'import type { MiddlewareRegistrar } from "../domains/middleware/index.js";\n';
+	strictEqual(checkDomainContractAccess("src/domains/dispatch/extension.ts", registrar).length, 1);
+	strictEqual(checkDomainContractAccess("src/tools/registry.ts", "createMiddlewareDomain();").length, 1);
+	deepStrictEqual(checkDomainContractAccess("src/entry/orchestrator.ts", registrar), []);
+	deepStrictEqual(checkDomainContractAccess("src/domains/middleware/snapshot.ts", registrar), []);
+	strictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract<ConfigContract>("config");').length, 1);
+	deepStrictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract("config");'), []);
 });
