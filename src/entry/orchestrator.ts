@@ -61,7 +61,6 @@ import {
 	setAtPath,
 } from "../core/session-routing.js";
 import { type SettingsOrigin, settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
-import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits } from "../core/telemetry/capture.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
@@ -89,8 +88,7 @@ import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
-import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
-import { createRereadRecallPort } from "../domains/context/working-set/reread.js";
+import { createSessionRereadPort } from "../domains/context/working-set/session-reread.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -238,10 +236,7 @@ import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
 import { standingChecks } from "../domains/safety/observed-checks.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
-import {
-	createProtectedArtifactsRegistration,
-	type ProtectedArtifactProtectEvent,
-} from "../domains/safety/protected-artifacts-registration.js";
+import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import type { SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
@@ -262,17 +257,17 @@ import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { reconcilePendingProtectedArtifacts } from "../domains/session/protected-artifact-journal.js";
 import {
-	clearPendingProtectedArtifact,
-	reconcilePendingProtectedArtifacts,
-	stagePendingProtectedArtifact,
-} from "../domains/session/protected-artifact-journal.js";
-import {
-	protectedArtifactEntryFromArtifact,
-	protectedArtifactStateFromSessionEntries,
-} from "../domains/session/protected-artifacts.js";
+	appendProtectedArtifactRegistryEvent,
+	protectedArtifactStateForCurrentSession,
+} from "../domains/session/protected-artifact-recording.js";
 import { sessionLedgersForRoots } from "../domains/session/related-ledgers.js";
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
+import {
+	appendSkillActivationRegistryEvent,
+	foldDispatchSkillActivations,
+} from "../domains/session/skill-activation-recording.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
@@ -352,7 +347,6 @@ import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
 import { emitApproval } from "../core/telemetry/approvals.js";
-import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
 	actionKeyLabel,
@@ -549,30 +543,6 @@ function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
 }
 
 /**
- * The read tool's reread port over the live session. The hash index it keeps
- * is rebuilt only when an eviction event lands (`ContextPruned`) or the
- * session changes, so an ordinary read never re-parses the ledger.
- */
-function createSessionRereadPort(session: SessionContract, bus: TelemetryHub): ReadRecallPort {
-	const port = createRereadRecallPort({
-		sessionId: () => session.current()?.id ?? null,
-		readEntries: () => {
-			const meta = session.current();
-			return meta ? session.readEntries() : [];
-		},
-		activeLeafTurnId: () => {
-			const meta = session.current();
-			return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
-		},
-		cwd: () => session.current()?.cwd ?? null,
-		appendEntry: (entry) => session.appendEntry(entry),
-		onRecalled: (payload) => bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
-	});
-	bus.subscribe("context.pruned", () => port.invalidate());
-	return port;
-}
-
-/**
  * The finish-contract only inspects the window since the last user message
  * (`recentEntries`, capped at 80), so it reads a bounded tail of the ledger
  * instead of parsing the whole file every turn_end. 160 = twice the 80-entry cap
@@ -588,79 +558,6 @@ function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] 
 		readSessionTailTurns(sessionId, FINISH_CONTRACT_TAIL_ENTRIES).entries,
 		sessionCurrentPath(sessionId),
 	);
-}
-
-function protectedArtifactStateForCurrentSession(
-	session: SessionContract,
-): ReturnType<typeof protectedArtifactStateFromSessionEntries> {
-	const meta = session.current();
-	if (!meta) return { artifacts: [] };
-	reconcilePendingProtectedArtifacts(session);
-	return protectedArtifactStateFromSessionEntries(session.readEntries());
-}
-
-function appendProtectedArtifactRegistryEvent(
-	session: SessionContract | undefined,
-	event: ProtectedArtifactProtectEvent,
-): void {
-	const current = session?.current();
-	if (session === undefined || current === null || current === undefined) {
-		throw new Error("no active session is available for protected artifact persistence");
-	}
-	const pending = stagePendingProtectedArtifact(current.id, event);
-	session.appendEntry(
-		protectedArtifactEntryFromArtifact(event.artifact, {
-			parentTurnId: event.turnId ?? null,
-			toolName: event.toolName,
-			...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
-			...(event.runId !== undefined ? { runId: event.runId } : {}),
-			...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
-		}),
-	);
-	if (session.flushAppends === undefined) {
-		throw new Error("session does not expose the durable append flush required by protected artifact persistence");
-	}
-	session.flushAppends();
-	clearPendingProtectedArtifact(pending);
-}
-
-/**
- * Fold a terminal dispatch payload's worker skill activations into the session
- * ledger, tagged with the runId, so worker skill provenance sits next to
- * main-agent activations.
- *
- * Both terminal channels carry them and the run finalizer emits exactly one of
- * the two, so this cannot double-record. The orchestrator never observes worker
- * tool calls directly, because a worker runs its own registry in its own
- * subprocess, which makes this the only recording path there is. Returns how
- * many were folded.
- */
-function foldDispatchSkillActivations(
-	session: SessionContract | undefined,
-	payload: { runId?: unknown; skillActivations?: ReadonlyArray<unknown> } | undefined,
-): number {
-	const runId = payload?.runId;
-	if (typeof runId !== "string") return 0;
-	let folded = 0;
-	for (const activation of payload?.skillActivations ?? []) {
-		if (!isSkillActivation(activation)) continue;
-		appendSkillActivationRegistryEvent(session, { ...activation, runId });
-		folded += 1;
-	}
-	return folded;
-}
-
-function appendSkillActivationRegistryEvent(
-	session: SessionContract | undefined,
-	activation: Parameters<SessionContract["recordSkillActivation"]>[0],
-): void {
-	if (!session?.current()) return;
-	try {
-		session.recordSkillActivation(activation);
-	} catch {
-		// Activation metadata should never alter the result of a completed
-		// context(scope=skills) call. Missing ledger data is visible in diagnostics.
-	}
 }
 
 /**
