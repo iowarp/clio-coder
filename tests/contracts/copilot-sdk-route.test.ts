@@ -340,6 +340,15 @@ async function step(context: Context, sessionId = "route-session", signal?: Abor
  * milliseconds: the work under test is event-driven, so no wall-clock threshold decides the outcome.
  */
 // Callers that expect settlement use the large default: real I/O can lag event-loop turns on a loaded host.
+async function eventually(condition: () => boolean, deadlineMs = 2_000): Promise<boolean> {
+	const deadline = Date.now() + deadlineMs;
+	while (!condition()) {
+		if (Date.now() > deadline) return false;
+		await new Promise((resolve) => setTimeout(resolve, 2));
+	}
+	return true;
+}
+
 async function settledWithinTurns<T>(promise: Promise<T>, turns = 100_000): Promise<T | "pending"> {
 	let outcome: { value: T } | null = null;
 	void promise.then((value) => {
@@ -806,6 +815,8 @@ test("cancelling while Copilot creates the session sends nothing and disposes th
 });
 
 test("a createSession that never answers releases the runtime hold as soon as the step is cancelled", async () => {
+	// Holds are counted process-wide; an earlier test's session disposal may still hold the runtime.
+	ok(await eventually(() => fake().referenced === false), "no earlier hold remains before this step");
 	fake().createGate = new Promise<void>(() => {
 		// Never resolves: the runtime never answers session.create.
 	});
@@ -819,8 +830,8 @@ test("a createSession that never answers releases the runtime hold as soon as th
 		const settled = await settledWithinTurns(pending);
 		ok(settled !== "pending");
 		strictEqual(settled.stopReason, "aborted");
-		await settledWithinTurns(new Promise<void>(() => {}), 5);
-		strictEqual(fake().referenced, false, "no hold outlives the cancelled step");
+		// createSession never answers, so only the cancel can release the hold.
+		ok(await eventually(() => fake().referenced === false), "no hold outlives the cancelled step");
 	} finally {
 		fake().createGate = null;
 	}
