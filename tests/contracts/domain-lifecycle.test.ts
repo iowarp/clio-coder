@@ -269,12 +269,16 @@ test("accepted persistence runs after observed resource settlement", async (t) =
 	}
 });
 
-test("rule15 keeps hook registration with the owning composition and contract types in the map", () => {
+test("rule15 keeps owner capabilities with the owning composition and contract types in the map", () => {
 	const registrar = 'import type { MiddlewareRegistrar } from "../domains/middleware/index.js";\n';
 	strictEqual(checkDomainContractAccess("src/domains/dispatch/extension.ts", registrar).length, 1);
 	strictEqual(checkDomainContractAccess("src/tools/registry.ts", "createMiddlewareDomain();").length, 1);
 	deepStrictEqual(checkDomainContractAccess("src/entry/orchestrator.ts", registrar), []);
 	deepStrictEqual(checkDomainContractAccess("src/domains/middleware/snapshot.ts", registrar), []);
+	const binder = 'import type { TelemetryRunReaderBinder } from "../domains/telemetry/index.js";\n';
+	strictEqual(checkDomainContractAccess("src/domains/dispatch/extension.ts", binder).length, 1);
+	strictEqual(checkDomainContractAccess("src/cli/worker-extension-hooks.ts", binder).length, 1);
+	deepStrictEqual(checkDomainContractAccess("src/interactive/interactive-presentation.ts", binder), []);
 	strictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract<ConfigContract>("config");').length, 1);
 	deepStrictEqual(checkDomainContractAccess("src/cli/run.ts", 'loaded.getContract("config");'), []);
 });

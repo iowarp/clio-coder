@@ -9,7 +9,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 
 import { join } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
-import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import type { DomainBundle, DomainContext, DomainExtension, DomainModule } from "../../core/domain-loader.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
@@ -34,9 +34,10 @@ import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js"
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
-import type { SessionSpend, TelemetryContract, TelemetryView } from "./contract.js";
+import type { SessionSpend, TelemetryContract, TelemetryRunReaderBinder, TelemetryView } from "./contract.js";
 import { foldFacts } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
+import { TelemetryManifest } from "./manifest.js";
 import type { ProcessJournal } from "./process-journal.js";
 import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
@@ -75,7 +76,10 @@ function spendOfQuantity(quantity: Quantity | null | undefined): SessionSpend {
 	};
 }
 
-export function createTelemetryBundle(context: DomainContext): DomainBundle<TelemetryContract> {
+/** The published contract, plus the reader binding its owning composition keeps. */
+export type TelemetryBundle = DomainBundle<TelemetryContract> & { runReaders: TelemetryRunReaderBinder };
+
+export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 	// Writers ask before every record and batch, so the capture is answered from memory: consent per session
 	// refreshes on the cold path before each lease, and the result is reused until settings or consent change (#434).
 	const consent = createConsentView(clioStateDir());
@@ -452,12 +456,36 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			return sum ? sum.measured + sum.estimated : 0;
 		},
 		resetSession,
-		bindRunReaders: (readers) => projection.bindRunReaders(readers),
 		reconcileRuns: () => projection.reconcileRuns(),
 		setFleetPhase: (runId, phase) => projection.setFleetPhase(runId, phase),
 		snapshot: () => projection.snapshot(),
 		subscribe: (listener) => projection.subscribe(listener),
 	};
 
-	return { extension, contract };
+	return { extension, contract, runReaders: { bindRunReaders: (readers) => projection.bindRunReaders(readers) } };
+}
+
+export interface TelemetryDomain {
+	readonly module: DomainModule<"telemetry">;
+	/** Undefined until the loader has created the domain. */
+	runReaders(): TelemetryRunReaderBinder | undefined;
+}
+
+/**
+ * For a composition root that binds live run readers: list `module` in
+ * `loadDomains` and keep the handle, because the loader publishes only the contract.
+ */
+export function createTelemetryDomain(): TelemetryDomain {
+	let runReaders: TelemetryRunReaderBinder | undefined;
+	return {
+		module: {
+			manifest: TelemetryManifest,
+			createExtension: (context) => {
+				const bundle = createTelemetryBundle(context);
+				runReaders = bundle.runReaders;
+				return { extension: bundle.extension, contract: bundle.contract };
+			},
+		},
+		runReaders: () => runReaders,
+	};
 }

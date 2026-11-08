@@ -120,10 +120,17 @@ export interface TelemetryRunReaders {
 	} | null;
 }
 
-/** Run projection controls shared by the contract and the in-memory projection. */
-export interface TelemetryRunProjection {
+/**
+ * The right to point the run projection at live readers. The last binding wins for every reader of the
+ * projection, so only the composition that owns the telemetry domain holds it; it is not on the contract.
+ */
+export interface TelemetryRunReaderBinder {
 	/** Bind live dispatch and run-result readers; disposal detaches this binding only. */
 	bindRunReaders(readers: TelemetryRunReaders): () => void;
+}
+
+/** Run projection controls shared by the contract and the in-memory projection. */
+export interface TelemetryRunProjection {
 	/** Fold retry timers and live counters from the dispatch reader. */
 	reconcileRuns(): void;
 	/** Record an explicit fleet position, including before a run's first event. */

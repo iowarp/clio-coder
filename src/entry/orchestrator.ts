@@ -329,7 +329,7 @@ import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { READ_MODEL_FOLD, TelemetryDomainModule } from "../domains/telemetry/index.js";
+import { createTelemetryDomain, READ_MODEL_FOLD } from "../domains/telemetry/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
@@ -2233,6 +2233,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryOwner = new MemoryRuntime();
 	// The loader publishes only the query contract; this root keeps the right to register hooks.
 	const middlewareDomain = createMiddlewareDomain();
+	const telemetryDomain = createTelemetryDomain();
 	// Annotated: the module options close over contracts read from this result.
 	const result: LoadResult = await loadDomains(
 		[
@@ -2283,7 +2284,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			},
 			SessionDomainModule,
-			TelemetryDomainModule,
+			telemetryDomain.module,
 			// Budget alerts and the plan baseline read the ceiling through the
 			// session's effective view, where `--max-cost-usd` sets it.
 			createSchedulingDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
@@ -2410,6 +2411,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const middleware = result.getContract("middleware");
 	const middlewareRegistrar = middlewareDomain.registrar();
 	const telemetry = result.getContract("telemetry");
+	const telemetryRunReaders = telemetryDomain.runReaders();
 	const safety = result.getContract("safety");
 	const session = result.getContract("session");
 	telemetry?.resetSession(session?.current()?.id ?? null);
@@ -5877,6 +5879,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		systemOne,
 		systemOneControl,
 		telemetry,
+		...(telemetryRunReaders ? { telemetryRunReaders } : {}),
 		chat,
 		...(options.terminalLease
 			? {

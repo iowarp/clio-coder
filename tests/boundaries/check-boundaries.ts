@@ -204,30 +204,41 @@ export function checkLedgerUsageKeys(file: string, source: string): string[] {
 	return violations;
 }
 
-/** The names that carry the right to register middleware hooks (rule15). */
-const MIDDLEWARE_REGISTRATION_CAPABILITY = new Set([
-	"MiddlewareRegistrar",
-	"MiddlewareHost",
-	"MiddlewareBundle",
-	"MiddlewareDomain",
-	"createMiddlewareDomain",
-	"createMiddlewareBundle",
-	"createMiddlewareHostFromSnapshot",
+/**
+ * Names that carry a domain owner's capability, by owning domain (rule15): the
+ * middleware registrar installs executable hooks, and the telemetry binder
+ * points the shared run projection at live readers. Neither is on a contract.
+ */
+const OWNER_CAPABILITIES: ReadonlyMap<string, string> = new Map([
+	["MiddlewareRegistrar", "middleware"],
+	["MiddlewareHost", "middleware"],
+	["MiddlewareBundle", "middleware"],
+	["MiddlewareDomain", "middleware"],
+	["createMiddlewareDomain", "middleware"],
+	["createMiddlewareBundle", "middleware"],
+	["createMiddlewareHostFromSnapshot", "middleware"],
+	["TelemetryRunReaderBinder", "telemetry"],
+	["TelemetryBundle", "telemetry"],
+	["TelemetryDomain", "telemetry"],
+	["createTelemetryDomain", "telemetry"],
+	["createTelemetryBundle", "telemetry"],
 ]);
 
 /**
- * Files outside src/domains/middleware/** that hold the registration capability
- * (rule15). The loader publishes only the query contract; a composition that
- * owns the middleware domain keeps the registrar and hands it to its own
- * collaborators.
+ * Files outside the owning domain that hold its capability, keyed
+ * `file#domain` (rule15). The loader publishes only contracts; a composition
+ * that owns the domain keeps the capability and hands it to its collaborators.
  */
-const MIDDLEWARE_REGISTRAR_HOLDERS: ReadonlyMap<string, string> = new Map([
-	["src/entry/orchestrator.ts", "the interactive composition root owns the middleware domain"],
-	["src/entry/extension-reload.ts", "replaces registrations for the orchestrator on reload"],
-	["src/entry/worker-hook-host.ts", "registers extension hooks for the orchestrator's worker host"],
-	["src/cli/worker-extension-hooks.ts", "the headless and fleet composition owns its middleware domain"],
-	["src/engine/worker-tools.ts", "the worker builds its own host from the parent's snapshot"],
-	["src/session-control/chat-loop.ts", "receives registerHook from the orchestrator as a dependency"],
+const OWNER_CAPABILITY_HOLDERS: ReadonlyMap<string, string> = new Map([
+	["src/entry/orchestrator.ts#middleware", "the interactive composition root owns the middleware domain"],
+	["src/entry/extension-reload.ts#middleware", "replaces registrations for the orchestrator on reload"],
+	["src/entry/worker-hook-host.ts#middleware", "registers extension hooks for the orchestrator's worker host"],
+	["src/cli/worker-extension-hooks.ts#middleware", "the headless and fleet composition owns its middleware domain"],
+	["src/engine/worker-tools.ts#middleware", "the worker builds its own host from the parent's snapshot"],
+	["src/session-control/chat-loop.ts#middleware", "receives registerHook from the orchestrator as a dependency"],
+	["src/entry/orchestrator.ts#telemetry", "the interactive composition root owns the telemetry domain"],
+	["src/interactive/interactive-application.ts#telemetry", "passes the orchestrator's binder to the presentation"],
+	["src/interactive/interactive-presentation.ts#telemetry", "binds the terminal's live run readers for its lifetime"],
 ]);
 
 /**
@@ -235,16 +246,17 @@ const MIDDLEWARE_REGISTRAR_HOLDERS: ReadonlyMap<string, string> = new Map([
  * from DomainContractMap, never from the caller (rule15).
  */
 export function checkDomainContractAccess(file: string, source: string, usedHolders?: Set<string>): string[] {
-	const holdsCapability = file.startsWith("src/domains/middleware/") || MIDDLEWARE_REGISTRAR_HOLDERS.has(file);
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	const violations: string[] = [];
 	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 	const visit = (node: ts.Node): void => {
-		if (ts.isIdentifier(node) && MIDDLEWARE_REGISTRATION_CAPABILITY.has(node.text)) {
-			if (holdsCapability) usedHolders?.add(file);
+		const owner = ts.isIdentifier(node) ? OWNER_CAPABILITIES.get(node.text) : undefined;
+		if (owner !== undefined && !file.startsWith(`src/domains/${owner}/`)) {
+			const holder = `${file}#${owner}`;
+			if (OWNER_CAPABILITY_HOLDERS.has(holder)) usedHolders?.add(holder);
 			else
 				violations.push(
-					`rule15: ${file}:${line(node)} names ${node.text}; only the composition that owns the middleware domain registers hooks (MIDDLEWARE_REGISTRAR_HOLDERS)`,
+					`rule15: ${file}:${line(node)} names ${(node as ts.Identifier).text}; only a composition that owns the ${owner} domain holds it (OWNER_CAPABILITY_HOLDERS)`,
 				);
 		}
 		if (
@@ -1043,10 +1055,11 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *  14. src/interactive/**, src/engine/acp/** and src/cli/** sum no token or
  *      cost field: their figures are the read model's quantity displays,
  *      except the functions SURFACE_TOTAL_EXEMPTIONS names with a reason.
- *  15. Only src/domains/middleware/** and the MIDDLEWARE_REGISTRAR_HOLDERS name
- *      the middleware registration capability, and no getContract call passes
- *      a type argument: the published contract is the query surface and its
- *      type comes from DomainContractMap.
+ *  15. A domain owner's capability (the middleware registrar, the telemetry
+ *      run-reader binder) is named only inside its domain and by the
+ *      OWNER_CAPABILITY_HOLDERS, and no getContract call passes a type
+ *      argument: a published contract cannot install another domain's
+ *      behavior, and its type comes from DomainContractMap.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.
  *   6. Any value importer outside the computed Stage 0 closure and its
@@ -1076,7 +1089,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	/** Runtime importers by declared seam, so rule 6b can disposition each reacher. */
 	const valueReachedSeams = new Map<string, Set<string>>();
 	const usedSurfaceExemptions = new Set<string>();
-	const usedRegistrarHolders = new Set<string>();
+	const usedCapabilityHolders = new Set<string>();
 
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
@@ -1091,7 +1104,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			...checkDomainContractAccess(
 				path.relative(projectRoot, filePath).split(path.sep).join("/"),
 				source,
-				usedRegistrarHolders,
+				usedCapabilityHolders,
 			),
 		);
 		const specifiers = extractSpecifiers(source);
@@ -1258,10 +1271,10 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 					`rule14: SURFACE_TOTAL_EXEMPTIONS exempts ${exemption.file}#${fn}, which no longer sums a token or cost field; remove the exemption`,
 				);
 
-	for (const holder of MIDDLEWARE_REGISTRAR_HOLDERS.keys())
-		if (!usedRegistrarHolders.has(holder))
+	for (const holder of OWNER_CAPABILITY_HOLDERS.keys())
+		if (!usedCapabilityHolders.has(holder))
 			violations.push(
-				`rule15: MIDDLEWARE_REGISTRAR_HOLDERS lists ${holder}, which no longer names the registration capability; remove the entry`,
+				`rule15: OWNER_CAPABILITY_HOLDERS lists ${holder}, which no longer names that domain's capability; remove the entry`,
 			);
 
 	for (const directory of ["client", "server"]) {

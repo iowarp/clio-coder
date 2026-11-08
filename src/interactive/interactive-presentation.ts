@@ -21,7 +21,11 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
-import type { TelemetryContract, TokenThroughputSnapshot } from "../domains/telemetry/index.js";
+import type {
+	TelemetryContract,
+	TelemetryRunReaderBinder,
+	TokenThroughputSnapshot,
+} from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth } from "../engine/tui.js";
@@ -146,6 +150,8 @@ export interface InteractivePresentationDeps {
 	providers: ProvidersContract;
 	dispatch: Pick<DispatchContract, "snapshot">;
 	telemetry: TelemetryContract;
+	/** Present when the composition owns the telemetry domain; the run board then reads live dispatch state. */
+	telemetryRunReaders?: TelemetryRunReaderBinder;
 	chat: ChatLoop;
 	/** Messages waiting in the queue, which decides whether its keys are worth offering. */
 	getQueuedMessageCount?: () => number;
@@ -489,7 +495,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	const unbindRunReaders = deps.telemetry.bindRunReaders({
+	const unbindRunReaders = deps.telemetryRunReaders?.bindRunReaders({
 		dispatchSnapshot: () => deps.dispatch.snapshot(),
 		readRunResult: (runId) => readWorkerRunResultFacts(runId),
 	});
@@ -1267,7 +1273,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		unsubscribeLoops?.();
 		backgroundCalls.dispose();
 		dispatchBoardStore.unsubscribe();
-		unbindRunReaders();
+		unbindRunReaders?.();
 	};
 	const disposeStatus = (): void => {
 		if (statusDisposed) return;

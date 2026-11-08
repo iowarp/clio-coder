@@ -40,7 +40,7 @@ import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { SystemOne } from "../domains/system-one/index.js";
-import type { TelemetryContract } from "../domains/telemetry/index.js";
+import type { TelemetryContract, TelemetryRunReaderBinder } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress, TuiAltScreen } from "../engine/tui.js";
@@ -155,6 +155,8 @@ export interface InteractiveDeps {
 	/** The session's System One instance, for the breakers `/health` shows. */
 	systemOne?: SystemOne;
 	telemetry: TelemetryContract;
+	/** The owning composition's right to point the run projection at this terminal's live readers. */
+	telemetryRunReaders?: TelemetryRunReaderBinder;
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
 	onFirstFrameCommit?: (frameId: number) => void;
@@ -858,6 +860,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		providers: deps.providers,
 		dispatch: deps.dispatch,
 		telemetry: deps.telemetry,
+		...(deps.telemetryRunReaders ? { telemetryRunReaders: deps.telemetryRunReaders } : {}),
 		chat: deps.chat,
 		workspaceFacts,
 		sessionTranscript,

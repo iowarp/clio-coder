@@ -578,7 +578,7 @@ function presentation(
 		bus: { on: () => noop, emit: noop },
 		providers: { list: () => [status()] },
 		dispatch: { snapshot: () => ({ running: [] }) },
-		telemetry: { bindRunReaders: () => noop, snapshot: () => ({ session: {} }), subscribe: () => noop },
+		telemetry: { snapshot: () => ({ session: {} }), subscribe: () => noop },
 		chat: {
 			contextUsage: () => ({}),
 			contextLedger: () => null,

@@ -31,6 +31,7 @@ import { summarizeTrustStatus } from "../evidence/trust-projection.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type {
 	TelemetryRunProjection,
+	TelemetryRunReaderBinder,
 	TelemetryRunReaders,
 	TelemetryRunSummary,
 	TelemetrySnapshot,
@@ -48,7 +49,7 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
  */
 export type ProjectionReadModel = TelemetryRunReaders;
 
-export interface TelemetryProjection extends TelemetryRunProjection {
+export interface TelemetryProjection extends TelemetryRunProjection, TelemetryRunReaderBinder {
 	snapshot(): TelemetrySnapshot;
 	subscribe(listener: (snapshot: TelemetrySnapshot) => void): () => void;
 	/** Recompute after a direct session mutation (resetSession/throughput). */

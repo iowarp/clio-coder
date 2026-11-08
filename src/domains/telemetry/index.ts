@@ -4,7 +4,10 @@ import { TelemetryManifest } from "./manifest.js";
 
 export const TelemetryDomainModule: DomainModule<"telemetry"> = {
 	manifest: TelemetryManifest,
-	createExtension: createTelemetryBundle,
+	createExtension: (context) => {
+		const { extension, contract } = createTelemetryBundle(context);
+		return { extension, contract };
+	},
 };
 
 /** The read boundary every telemetry reader opens its paths through, for surfaces that report a store present (#434). */
@@ -14,10 +17,13 @@ export { summarizeRunAccountability } from "./accountability.js";
 export { workspaceTelemetryCapture } from "./consent.js";
 export type {
 	TelemetryContract,
+	TelemetryRunReaderBinder,
 	TelemetryRunSummary,
 	TelemetrySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
+export type { TelemetryDomain } from "./extension.js";
+export { createTelemetryDomain } from "./extension.js";
 export type {
 	DecisionRow,
 	DecisionsFold,
