@@ -137,6 +137,28 @@ describe("middleware hook boundary", () => {
 		}
 	});
 
+	it("names the middleware rule that blocked a call on the guard block's policy", async () => {
+		const guard = registration("edit-guard", () => [
+			{ kind: "block_tool", reason: "stale edit", severity: "hard-block" },
+		]);
+		const quiet = registration("quiet", () => [{ kind: "annotate_tool_result", message: "seen", severity: "info" }]);
+		const middleware = createMiddlewareBundle({ registrations: [quiet, guard] }).contract;
+		const registry = createRegistry({ safety: createWorkerSafety(), middleware });
+		registry.register({
+			name: ToolNames.Read,
+			description: "Read fixture",
+			parameters: Type.Object({ path: Type.String() }),
+			baseActionClass: "read",
+			run: async () => ({ kind: "ok", output: "fixture" }),
+		});
+		const result = await registry.invoke({ tool: ToolNames.Read, args: { path: "a.txt" } });
+		strictEqual(result.kind, "blocked");
+		const policy = result.kind === "blocked" ? result.decision.policy : undefined;
+		ok(policy !== undefined, "the guard block keeps the admission's policy");
+		strictEqual(policy.reasonCode, "guard_block");
+		strictEqual(policy.ruleId, "edit-guard");
+	});
+
 	it("does not admit hooks from an unverifiable installed extension", () => {
 		const project = scratch();
 		const outside = scratch();

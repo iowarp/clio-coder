@@ -32,6 +32,7 @@ import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type {
 	MiddlewareEffect,
 	MiddlewareHookInput,
+	MiddlewareHookResult,
 	MiddlewareMetadataValue,
 	ToolCallLanding,
 } from "../domains/middleware/types.js";
@@ -1230,7 +1231,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 			}
 			if (block) {
-				const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
+				const verdict = guardBlockedVerdict(decision, call.tool, block.reason, guardRuleIds.get(block));
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
 					reasonCode: GUARD_BLOCK_REASON_CODE,
 				});
@@ -1447,7 +1448,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			deps.flow?.carried() ?? null,
 			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata?.repeatableRead === true,
 		);
-		const effects = deps.middleware.runHook(input).effects;
+		const effects = noteGuardRule(deps.middleware.runHook(input));
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
 		} catch {
@@ -1594,7 +1595,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		};
 		let effects: ReadonlyArray<MiddlewareEffect>;
 		try {
-			effects = (await deps.middleware.runAwaitedHook(input, priorEffects)).effects;
+			effects = noteGuardRule(await deps.middleware.runAwaitedHook(input, priorEffects));
 		} catch {
 			// Registrations isolate their own failures; anything escaping is a runtime bug and changes no call.
 			return [];
@@ -3033,6 +3034,7 @@ function guardBlockedVerdict(
 	decision: SafetyDecision,
 	tool: string,
 	reason: string,
+	ruleId?: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
 	const blocked: SafetyDecision = {
 		kind: "block",
@@ -3042,7 +3044,15 @@ function guardBlockedVerdict(
 			detail: reason,
 			hints: [],
 		},
-		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: GUARD_BLOCK_REASON_CODE } } : {}),
+		...(decision.policy !== undefined
+			? {
+					policy: {
+						...decision.policy,
+						reasonCode: GUARD_BLOCK_REASON_CODE,
+						...(ruleId !== undefined ? { ruleId } : {}),
+					},
+				}
+			: {}),
 	};
 	return { kind: "blocked", reason, decision: blocked };
 }
@@ -3441,6 +3451,16 @@ function detectedValidationCommand(call: ClassifierCall): string | null {
 	if (command === null) return null;
 	const detected = detectValidationCommand(command);
 	return detected.kind === "validation" ? detected.matched : null;
+}
+
+/** The middleware rule that emitted each hook result's first block_tool effect, so a guard block names its rule. */
+const guardRuleIds = new WeakMap<MiddlewareEffect, string>();
+
+function noteGuardRule(result: MiddlewareHookResult): ReadonlyArray<MiddlewareEffect> {
+	const block = firstBlockToolEffect(result.effects);
+	const ruleId = result.fired?.find((rule) => rule.effects.includes("block_tool"))?.ruleId;
+	if (block !== null && ruleId !== undefined) guardRuleIds.set(block, ruleId);
+	return result.effects;
 }
 
 function firstBlockToolEffect(
