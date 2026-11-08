@@ -280,7 +280,8 @@ async function readJsonLines(
 			if (text.length > 0 && text.length >= state.text.length) state.text = text;
 			continue;
 		}
-		emitTextDelta(emit, state, extractDelta(record));
+		const payload = record.type === "stream_event" ? (nestedRecord(record, "event") ?? record) : record;
+		emitTextDelta(emit, state, extractDelta(payload));
 	}
 }
 

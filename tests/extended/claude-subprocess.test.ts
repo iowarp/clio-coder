@@ -114,8 +114,7 @@ function assistant(result: { messages: AgentMessage[] }): AgentMessage & { role:
 const SYSTEM = { type: "system", subtype: "init", model: "claude-selected" };
 const DELTA = {
 	type: "stream_event",
-	event: { type: "content_block_delta" },
-	delta: { type: "text_delta", text: "hello " },
+	event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hello " } },
 };
 const RESULT = {
 	type: "result",
@@ -157,7 +156,14 @@ describe("Claude Code external subprocess contract", () => {
 
 	it("sends the prompt on stdin, keeps it out of argv, and passes only allowlisted environment values", async () => {
 		const { root, binary, home } = scratch();
-		writeScenario(root, { lines: [SYSTEM, DELTA, { ...DELTA, delta: { type: "text_delta", text: "world" } }, RESULT] });
+		writeScenario(root, {
+			lines: [
+				SYSTEM,
+				DELTA,
+				{ ...DELTA, event: { ...DELTA.event, delta: { type: "text_delta", text: "world" } } },
+				RESULT,
+			],
+		});
 		const events: Array<{ type: string }> = [];
 		const input = workerInput(root);
 		const handle = startClaudeCodeWorkerRun(input, (event) => events.push(event), {
@@ -232,7 +238,7 @@ describe("Claude Code external subprocess contract", () => {
 		match(assistant(oversizedResult).errorMessage ?? "", /line exceeded/);
 
 		const cumulative = scratch();
-		const chunk = { ...DELTA, delta: { type: "text_delta", text: "y".repeat(64 * 1024) } };
+		const chunk = { ...DELTA, event: { ...DELTA.event, delta: { type: "text_delta", text: "y".repeat(64 * 1024) } } };
 		writeScenario(cumulative.root, {
 			lines: [SYSTEM],
 			repeat: { line: chunk, count: Math.ceil(CLAUDE_MAX_STREAM_BYTES / (64 * 1024)) + 2 },
