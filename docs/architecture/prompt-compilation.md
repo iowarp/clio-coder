@@ -33,7 +33,7 @@ Fragments are Markdown files under `src/domains/prompts/fragments/`, loaded by `
 
 ## Fragment inventory by tier
 
-There are 27 fragments. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, and the one-line header of the safety section) are rendered inline from typed inputs. The current task scope is not a compiled section at all; it rides in the turn's reminder, as described under [Task scope](#task-scope).
+There are 28 fragments. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, and the one-line header of the safety section) are rendered inline from typed inputs. The current task scope is not a compiled section at all; it rides in the turn's reminder, as described under [Task scope](#task-scope).
 
 | Fragment | Attended main | Headless main | Worker | Renders when |
 | --- | --- | --- | --- | --- |
@@ -42,6 +42,7 @@ There are 27 fragments. Sections that are not fragments (`tool-contract`, `retri
 | `identity.clio-coder-worker` | no | no | yes | Always. |
 | `identity.self-awareness` | yes | yes | no | The identity is `identity.clio`. Rendered inside the harness-awareness section. |
 | `identity.self-awareness-attended` | yes | no | no | Attended and `identity.self-awareness` rendered. |
+| `identity.docs-lookup` | yes | yes | no | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. Rendered inside the harness-awareness section. |
 | `identity.docs-routing` | yes | no | no | See [Attended-only fragments](#attended-only-fragments). |
 | `identity.settings-routing` | yes | no | no | See [Attended-only fragments](#attended-only-fragments). |
 | `operating.memory-guidance`, `operating.support-guidance` | yes, inline in the identity section | no | no | Attended, identity `identity.clio`, and `identity.docs-routing` did not render. |
@@ -70,7 +71,7 @@ These seven fragments render only when `headless` is unset. A headless run never
 | --- | --- | --- | --- |
 | `identity.clio-attended` | identity | Guidance for replies to the operator: answer first, register matching, the in-chat "Remember: <value>" rule, and the rule that Clio Coder cannot inspect how its replies render. | The identity is `identity.clio`. |
 | `identity.self-awareness-attended` | harness-awareness | How Clio answers questions about the software from the bundled docs and source, including `code_nav(source="clio")`. | `identity.self-awareness` rendered. |
-| `identity.docs-routing` | harness-awareness | Routes questions about Clio Coder through `gateway(op="call", capability="clio_docs")`, plus the `clio_library` sentence when that capability is admitted. | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. |
+| `identity.docs-routing` | harness-awareness | Catalog, playbook and memory routing for questions about Clio Coder, plus the `clio_library` sentence when that capability is admitted. | `identity.docs-lookup` rendered. |
 | `identity.settings-routing` | harness-awareness | Routes questions about Clio Coder's settings to `context(scope="settings")`, written in its gateway call form, and states how a setting change is made. | `identity.self-awareness` rendered and `context` is reachable, directly or through an admitted gateway. |
 | `operating.contract-attended` | operating-contract | Asking before acting on a path outside the workspace, and the rule that a repeated operator request after settled dispatches is not a loop block. | None. |
 | `operating.user-control` | operating-contract | Operator agency and understanding: state assumptions in time to steer, explain outcomes in proportion, do not present untested results as validated conclusions. | None. |
@@ -87,9 +88,10 @@ Demo guidance is appended to the operating contract only for the TUI, when `inte
 These fragments are not attended-only. Their tiers are in the inventory above.
 
 - `identity.clio` holds Clio Coder's identity, the rule that claims about the workspace come from files or tools, and the two-state turn ending: done with no closing offer, or waiting on a decision only the operator can make.
+- `identity.docs-lookup` routes a question about Clio Coder's documented commands, configuration or behavior to `clio_docs` before any workspace search, follows a hit's ready-to-use read call for detail, names the docs pages the answer rests on, and keeps workspace questions away from `clio_docs`.
 - `operating.contract` is the constitutional posture shared by all three tiers: plain prose, honoring no-tools and no-delegation instructions, batching independent reads, treating safety policy as authoritative, and recording consequential design choices before implementing.
 - `operating.steering` tells the model that a user message arriving between tool results steers the current run, and that a later message wins over an earlier one.
-- `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. A suspicion goes into `task` or `briefing` as a question to test, never as a finding, and the coordinator does not certify two implementations equivalent until every path that changes the compared state is traced in each. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
+- `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. A suspicion goes into `task` or `briefing` as a question to test, never as a finding, and the coordinator does not certify two implementations equivalent until every path that changes the compared state is traced in each. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Several independent reviews or investigations go out in one parallel dispatch whose tasks name their files, rather than being done in turn or read first. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
 - `operating.fleet` states that workers run locally unless a pin or preference selects an SSH node, and how the model asks once per session for a node.
 - `operating.discovered-skills` teaches progressive skill discovery through `context(scope="skills")` and carries `{SKILL_ACTIVATION_POLICY}`.
 - `operating.worker` is the assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself.
@@ -106,7 +108,7 @@ The safety section opens with `Autonomy: <level>.` and a one-line directive, the
 
 ## Headless main prompt
 
-A headless main prompt carries `identity.clio`, `identity.self-awareness`, `operating.contract`, `operating.contract-headless`, `operating.steering` only when a steer channel exists, `operating.coordinator` when dispatch is reachable, `operating.fleet` too when the session has SSH nodes, `operating.discovered-skills` without `operating.skill-installs`, and `safety.<level>`.
+A headless main prompt carries `identity.clio`, `identity.self-awareness`, `identity.docs-lookup` when `clio_docs` is reachable through gateway, `operating.contract`, `operating.contract-headless`, `operating.steering` only when a steer channel exists, `operating.coordinator` when dispatch is reachable, `operating.fleet` too when the session has SSH nodes, `operating.discovered-skills` without `operating.skill-installs`, and `safety.<level>`.
 
 `operating.contract-headless` is the only fragment that renders for headless main alone. It carries the unattended finishing rule: restate the task as separate clauses, check whether existing tests cover each clause, write a focused reproduction test only when no existing test covers the clause and the task and project instructions allow tests, make the reproduction fail on untouched code first, and map each clause to evidence in the diff or a check that ran before the final report. A clause without evidence is unfinished.
 
@@ -114,7 +116,7 @@ The safety section swaps the attended approval sentence for this one: "No operat
 
 Other differences from the attended tier:
 
-- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. Each stays reachable through `gateway(op="find")`, and a find that names the capability exactly also returns its schema, so the call needs no `describe` round trip ([gateway/index.ts](../../src/tools/gateway/index.ts)).
+- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. `identity.docs-lookup` still names the `clio_docs` call, because a headless question about Clio Coder without it listed and grepped the docs tree for several turns (measured with `pnpm run eval:onboarding`). Each stays reachable through `gateway(op="find")`, and a find that names the capability exactly also returns its schema, so the call needs no `describe` round trip ([gateway/index.ts](../../src/tools/gateway/index.ts)).
 - The `ask_user` turn-ending contract never renders, because no operator can answer an interview.
 - No `Routes:` line appears in the runtime block, because the orchestrator passes route sources to attended sessions only.
 - The orchestrator registers task-ranked skills and capability advice for headless main turns as well as attended turns. The advice rides model-only reminder text in the message tail, alongside the system prompt's conditional skills guidance; it does not alter tool schemas ([skills-reminder.ts](../../src/domains/middleware/skills-reminder.ts)).

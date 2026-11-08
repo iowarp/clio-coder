@@ -598,7 +598,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 		inputs.turnConstraints?.mode !== "answer" &&
 		inputs.turnConstraints?.delegation !== "forbidden"
 			? [
-					'Find specialists and workflows with gateway(op="call", capability="clio_library", args={query:"<task>"}); catalog rows supply invocation and readiness. Catalog reads activate and install nothing. Never invent recipe or skill names.',
+					'Find specialists and workflows with gateway(op="call", capability="clio_library", args={query:"<task>"}), and check it before starting a task in a specialized domain or a named method (a cluster scheduler, a scientific data format, test-driven development); catalog rows supply invocation and readiness. Catalog reads activate and install nothing. Never invent recipe or skill names.',
 				]
 			: []),
 	];
@@ -904,18 +904,20 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// performance clause unaddressed; a headless run has no operator to catch it.
 	const headlessContract = attended ? undefined : table.byId.get("operating.contract-headless");
 	const skillInstalls = attended ? table.byId.get("operating.skill-installs") : undefined;
-	// The routing directive teaches a gateway call, so it renders only when
+	// The routing directives teach a gateway call, so they render only when
 	// gateway is on the surface and the provider supports tool calls. The paths
-	// and the code-outranks-docs rule name no tool and stay unconditional.
-	const docsRouting =
+	// and the code-outranks-docs rule name no tool and stay unconditional. The
+	// clio_docs lookup serves headless runs too: without it a headless question
+	// about Clio listed and grepped the docs tree for several turns.
+	const docsLookup =
 		selfAwareness &&
-		attended &&
 		session.providerSupportsTools !== false &&
 		toolSurfaceHasTool(session.toolNames, "gateway") &&
 		session.coordinatorCapabilities.includes("clio_docs") &&
 		turnAllowsTool(session.turnConstraints, "clio_docs")
-			? table.byId.get("identity.docs-routing")
+			? table.byId.get("identity.docs-lookup")
 			: undefined;
+	const docsRouting = docsLookup && attended ? table.byId.get("identity.docs-routing") : undefined;
 	// Defer procedures only when this session can retrieve them. Restricted or
 	// tool-less sessions keep the same guidance without an impossible tool route.
 	const inlineGuidance =
@@ -944,6 +946,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		harnessAwareness = [
 			rendered.trim(),
 			...(attendedSelfAwareness ? [attendedSelfAwareness.body.trim()] : []),
+			...(docsLookup ? [docsLookup.body.trim()] : []),
 			...(docsRouting
 				? [
 						docsRouting.body
@@ -1044,6 +1047,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...inlineGuidance,
 		...(selfAwareness ? [selfAwareness] : []),
 		...(attendedSelfAwareness ? [attendedSelfAwareness] : []),
+		...(docsLookup ? [docsLookup] : []),
 		...(docsRouting ? [docsRouting] : []),
 		operatingContract,
 		...(attendedContract ? [attendedContract] : []),

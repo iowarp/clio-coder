@@ -88,7 +88,7 @@ describe("interactive-only guidance in the session prompt", () => {
 	});
 	afterEach(() => env.restore());
 
-	it("leaves docs, settings and operator-control guidance out of a headless session", () => {
+	it("keeps the clio_docs lookup but leaves docs, settings and operator-control guidance out of a headless session", () => {
 		const prompt = (headless: boolean) =>
 			compile(loadFragments(), {
 				identity: "identity.clio",
@@ -117,6 +117,9 @@ describe("interactive-only guidance in the session prompt", () => {
 			[false, false, false],
 		);
 		ok(!prompt(true).includes("# Answering questions about Clio"), "no inline support guidance replaces the routing");
+		const lookup = 'call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering';
+		ok(prompt(true).includes(lookup), "a headless question about Clio still goes to clio_docs first");
+		strictEqual(prompt(false).split(lookup).length, 2, "the attended prompt carries the lookup once");
 		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
 	});
 

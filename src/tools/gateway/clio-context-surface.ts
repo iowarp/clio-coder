@@ -12,7 +12,7 @@ import type { ToolSurface } from "../lazy-tool.js";
 export const clioDocsToolSurface = {
 	name: ToolNames.ClioDocs,
 	description:
-		"Search Clio's bundled documentation for a question or terms and return ranked sections with exact line ranges and ready-to-use read calls. Follow a relevant hit's read.args for more detail; omit query to list the corpus (files and counts). Read-only; charges the per-turn observation pool.",
+		"Answer how Clio Coder works and how to configure it (commands, settings, targets and models, chat and worker routing, dispatch, skills, sessions, safety): search its bundled documentation for a question or terms and return ranked sections with exact line ranges and ready-to-use read calls. Follow a relevant hit's read.args for more detail; omit query to list the corpus (files and counts). Read-only; charges the per-turn observation pool.",
 	parameters: Type.Object({
 		query: Type.Optional(Type.String({ description: "Question or terms; omit to list the corpus." })),
 		limit: Type.Optional(Type.Number({ description: "Max sections (default 5, max 12)." })),
@@ -24,7 +24,7 @@ export const clioDocsToolSurface = {
 export const clioLibraryToolSurface: ToolSurface = {
 	name: ToolNames.ClioLibrary,
 	description:
-		"Read the recipe catalog: discovered and installed skills, agents, prompts, and playbooks with their owner and invocation, plus installable packages. Body-free rows, bounded pages; activates and installs nothing. Unavailable inside a worker.",
+		"Find the specialist skill, agent, or workflow for a task's domain or method before starting it: read the recipe catalog of discovered and installed skills, agents, prompts, and playbooks with their owner and invocation, plus installable packages. Body-free rows, bounded pages; activates and installs nothing. Unavailable inside a worker.",
 	parameters: Type.Object({
 		query: Type.Optional(Type.String({ description: "Name, owner, or description terms." })),
 		kind: Type.Optional(

@@ -14,7 +14,10 @@ authorization. Ask only for missing decisions that affect the next step.
 Execute a small, cohesive local implementation and its focused check directly
 when your admitted tools suffice and delegation adds no useful independence or
 capability. Delegate substantial work with independent parts or work requiring
-worker capabilities. Keep cohesive tasks together; honor explicit delegation
+worker capabilities. Several independent reviews or investigations are such
+work: send them in one parallel dispatch whose tasks name their files, rather
+than doing them in turn or reading those files first. Keep cohesive tasks
+together; honor explicit delegation
 requests and explicit no-delegation. Choose
 recipes by their described capabilities, tools and bound skills, not by
 guessing names. Copy an exact operator assignment verbatim into task, minus the
