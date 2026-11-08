@@ -243,6 +243,20 @@ const UNSUPPORTED_FILES = [
 ];
 
 /**
+ * A default component folder is scanned only when something is there; a missing
+ * default is no error, unlike a path the manifest declares. A symlink or file at
+ * that name is still scanned, so its refusal is reported.
+ */
+function defaultDir(root: string, name: string): string[] {
+	try {
+		lstatSync(path.join(root, name));
+		return [name];
+	} catch {
+		return [];
+	}
+}
+
+/**
  * Normalize one foreign package tree into a portable Clio package. Source files
  * are only read. Every resource has an outcome; every dropped host feature is
  * named in `unsupported`.
@@ -346,7 +360,7 @@ export function projectForeignPlugin(input: {
 	if (input.format === "claude-code") {
 		declaredSkills.push("skills", ...skillsField);
 		const commands = pathList(parsed.commands, "commands", problems);
-		declaredCommands.push(...(commands.length ? commands : ["commands"]));
+		declaredCommands.push(...(commands.length ? commands : defaultDir(root, "commands")));
 		if (
 			commands.length &&
 			isDir(path.join(root, "commands")) &&
@@ -354,7 +368,7 @@ export function projectForeignPlugin(input: {
 		)
 			notes.push("Manifest commands replaces the default commands/ directory; the default folder is not scanned.");
 		const agents = pathList(parsed.agents, "agents", problems);
-		declaredAgents.push(...(agents.length ? agents : ["agents"]));
+		declaredAgents.push(...(agents.length ? agents : defaultDir(root, "agents")));
 		if (
 			agents.length &&
 			isDir(path.join(root, "agents")) &&

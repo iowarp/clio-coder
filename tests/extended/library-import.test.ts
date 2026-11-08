@@ -672,6 +672,32 @@ describe("library import of foreign plugin packages", () => {
 		ok(custom.omitted.includes("SKILL.md"), "root SKILL.md is not a skill once skills/ exists");
 	});
 
+	it("scans missing default commands/ and agents/ folders as absent, but reports a missing manifest path (Q9)", () => {
+		file("skillonly/.claude-plugin/plugin.json", JSON.stringify({ name: "skillonly", version: "0.1.0" }));
+		file("skillonly/skills/review/SKILL.md", skill("review"));
+		file("skillonly/hooks/hooks.json", JSON.stringify({ hooks: {} }));
+		file("skillonly/.mcp.json", JSON.stringify({ mcpServers: {} }));
+		const bare = projectForeignPlugin({ root: path.join(vendor, "skillonly"), format: "claude-code" });
+		deepStrictEqual(
+			bare.unsupported.filter((line) => !line.startsWith("hooks/hooks.json") && !line.startsWith(".mcp.json")),
+			[],
+		);
+		deepStrictEqual(
+			bare.outcomes.map((o) => [o.kind, o.name, o.status]),
+			[["skill", "review", "converted"]],
+		);
+		file(
+			"declared/.claude-plugin/plugin.json",
+			JSON.stringify({ name: "declared", version: "0.1.0", commands: "./cmds" }),
+		);
+		file("declared/skills/review/SKILL.md", skill("review"));
+		const declared = projectForeignPlugin({ root: path.join(vendor, "declared"), format: "claude-code" });
+		const missing = declared.unsupported.filter((line) => line.startsWith("prompt path"));
+		strictEqual(missing.length, 1, declared.unsupported.join("\n"));
+		match(missing[0] ?? "", /ENOENT/u);
+		ok(!declared.unsupported.some((line) => line.startsWith("agent path")));
+	});
+
 	it("refuses escaping manifest paths and symlinked packages, omits executables, and blocks recipes needing omitted companions", () => {
 		file(
 			"unsafe/.claude-plugin/plugin.json",
