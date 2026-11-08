@@ -34,6 +34,7 @@ import { holdExitSummaryForLauncher } from "../domains/mux/workspace/exit-summar
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { expandSubmitText, type SubmitExpansion } from "../domains/resources/submit-expansion.js";
+import type { AutonomyReport } from "../domains/safety/autonomy-window.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
@@ -236,6 +237,8 @@ export interface InteractiveDeps {
 	session?: SessionContract;
 	/** Git hook files changed since this process started, for the exit summary (src/domains/safety/hook-drift.ts). */
 	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
+	/** The yolo audit for the exit summary (src/domains/safety/autonomy-window.ts). */
+	autonomy?: () => AutonomyReport | null;
 	/** Read current session entries for replay/context rebuilds after local non-chat entries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
 	/** Live session task board for the footer tasks row and the /tasks overlay. */
@@ -599,6 +602,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		getToolCounts: () => presentation.toolCounts(),
 		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
 		...(deps.gitHookChanges !== undefined ? { gitHookChanges: deps.gitHookChanges } : {}),
+		...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
 		getModel: () => {
 			const settings = deps.getSettings?.();
 			return settings?.chat.target && settings.chat.model

@@ -362,7 +362,7 @@ export function describeOpenDecision(
 }
 
 /** One numbered line per open decision, for notices and summaries. */
-function formatOpenDecision(entry: OpenDecision): string {
+export function formatOpenDecision(entry: OpenDecision): string {
 	return `${entry.seq}) ${entry.tool} \`${entry.command}\` (${entry.kind}${entry.rule !== undefined ? `, rule ${entry.rule}` : ""})`;
 }
 

@@ -6,6 +6,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { journalDefinition, validPayload } from "../../src/core/telemetry/events.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
@@ -24,9 +25,12 @@ import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import type { SafetyJudgeNote } from "../../src/domains/safety/safety-judge.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createSafetyJudgeHost } from "../../src/entry/safety-judge-host.js";
+import { renderExitSummary } from "../../src/interactive/exit-summary.js";
+import { createExitSummaryCollector } from "../../src/interactive/exit-summary-collector.js";
 import { renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -250,6 +254,27 @@ test("open decisions are bounded, scrubbed and clipped, and a judge-streak end l
 		/12 open decisions left for you\.$/u,
 	);
 	match(autonomyHaltNotice({ kind: "calls", limit: 4, detail: "4-call cap", usage }, "headless"), /fresh window$/u);
+});
+
+test("the exit summary closes a yolo session with its window, its halt and the decisions it left", () => {
+	const fx = windowFixture({ toolCalls: 3, minutes: 0, tokens: 0 });
+	fx.window.openDecision({ tool: "bash", command: "git push origin main", kind: "operator-only", rule: "git-push" });
+	for (let i = 0; i < 3; i += 1) fx.window.toolCall();
+	const collector = createExitSummaryCollector({
+		bus: createTelemetryHub(),
+		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+		autonomy: () => fx.window.report(),
+	});
+	const brief = renderExitSummary(collector.snapshot(), "brief", 200, false).join("\n");
+	match(brief, /Autonomy: contained yolo · 3 tool calls, .* tokens · paused at the 3-call cap · 1 open decision$/mu);
+	const standard = renderExitSummary(collector.snapshot(), "standard", 200, false).join("\n");
+	match(standard, /Autonomy: .*1 open decision · 1\) bash `git push origin main` \(operator-only, rule git-push\)/u);
+	collector.dispose();
 });
 
 test("a project may tighten an autonomous cap but never loosen or disable it", async (t) => {

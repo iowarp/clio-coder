@@ -1,6 +1,8 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
 import { resolveExitSummaryStyle } from "../core/defaults.js";
+import { formatFooterTokens } from "../core/display-units.js";
 import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
+import { formatOpenDecision } from "../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
@@ -177,6 +179,34 @@ function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">):
 	return [...shown, ...more];
 }
 
+/**
+ * `contained yolo · 42 tool calls, 12 min, 310k tokens · paused at the 40-call cap · 2 open decisions`, then the
+ * decisions themselves when `list`, or null when the session never ran at yolo (ob-yolo D7).
+ */
+function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: boolean): string[] | null {
+	const report = snapshot.autonomy;
+	if (report === undefined) return null;
+	const used = report.usage;
+	const total = report.openDecisions.length + report.openDecisionsOmitted;
+	const halted =
+		report.halted === null
+			? []
+			: [
+					report.halted.kind === "judge"
+						? `ended by the safety judge (${report.halted.detail})`
+						: `paused at the ${report.halted.detail}`,
+				];
+	const shown = list ? report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision) : [];
+	return [
+		`${report.confinement} yolo`,
+		`${countLabel(used.toolCalls, "tool call")}, ${formatCompactMs(used.activeMs)}, ${formatFooterTokens(used.tokens)} tokens`,
+		...halted,
+		total === 0 ? "no open decisions" : countLabel(total, "open decision"),
+		...shown,
+		...(shown.length > 0 && total > shown.length ? [`${count(total - shown.length)} more`] : []),
+	];
+}
+
 function workerOutcome(worker: ExitSummarySnapshot["workers"][number]): string {
 	return worker.outcome === "succeeded" && worker.against !== undefined ? worker.against : worker.outcome;
 }
@@ -246,6 +276,7 @@ export function renderExitSummary(
 	const unattended = unattendedSummary(snapshot);
 	const gitHooks = gitHooksSummary(snapshot);
 	const internalGit = internalGitSummary(snapshot);
+	const autonomy = autonomySummary(snapshot, style !== "brief");
 	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
 	// The command and its id are one thing to type, so a narrow card breaks before `/resume`, never between them (E7).
 	const resumeCommand = `/resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
@@ -275,6 +306,8 @@ export function renderExitSummary(
 		// Nor is a hook that runs outside the sandbox on the next git command.
 		if (gitHooks !== null) add("Git hooks", gitHooks);
 		if (internalGit !== null) add("Internal git", internalGit);
+		// Yolo's account of what it ran alone and what it left for the operator.
+		if (autonomy !== null) add("Autonomy", autonomy);
 	} else {
 		// A turn is one operator prompt; a model call is one request sent, so a turn that used tools or retried makes
 		// several. Workers' calls count here as /usage counts them, and `workers` counts their runs.
@@ -300,6 +333,8 @@ export function renderExitSummary(
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);
 		if (internalGit !== null) add("Internal git", internalGit);
+		// Yolo's account of what it ran alone and what it left for the operator.
+		if (autonomy !== null) add("Autonomy", autonomy);
 		if (style === "standard") {
 			divide();
 			if (models.length > 0) {

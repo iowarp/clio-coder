@@ -4506,6 +4506,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { session } : {}),
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		gitHookChanges: () => hookDrift.sessionChanges(),
+		autonomy: () => autonomyWindow.report(),
 		labelOperatorCommand,
 		beforeShellEntryRecorded,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),

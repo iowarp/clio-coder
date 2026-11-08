@@ -6,6 +6,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { plainOutcomeLabel, settledRunCaveat, TOOL_GUARD_REASON_CODE } from "../domains/dispatch/failure-headline.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
+import type { AutonomyReport } from "../domains/safety/autonomy-window.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -80,6 +81,8 @@ export interface ExitSummarySnapshot {
 		outcome: string;
 		changes: ReadonlyArray<{ path: string; kind: string; key?: string }>;
 	}>;
+	/** The session's yolo audit: its window, its halt and the calls left for the operator (ob-yolo D7). */
+	autonomy?: AutonomyReport;
 }
 
 /** A path inside the workspace by its workspace path, any other as given. */
@@ -115,6 +118,8 @@ interface CollectorDeps {
 	readSessionEntries?: () => ReadonlyArray<unknown>;
 	/** The git hook drift guard's account of hook files changed this visit (src/domains/safety/hook-drift.ts). */
 	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
+	/** The autonomy window's audit; null when the session never ran at yolo. */
+	autonomy?: () => AutonomyReport | null;
 	now?: () => number;
 }
 
@@ -540,6 +545,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				// An unreadable ledger counts no ledger outcome; the card still closes with the spend it has.
 			}
 			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom, entries);
+			const autonomy = deps.autonomy?.() ?? null;
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,
@@ -562,6 +568,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				workers: [...workers.values()],
 				compactions,
 				...(gitHooks.length > 0 ? { gitHooks } : {}),
+				...(autonomy !== null ? { autonomy } : {}),
 				...(internalGit.size > 0
 					? {
 							internalGit: [...internalGit.values()].map((entry) => ({
