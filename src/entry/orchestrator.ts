@@ -4459,6 +4459,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		telemetry,
 		...(telemetryRunReaders ? { telemetryRunReaders } : {}),
 		chat,
+		...(options.sessionFile === undefined ? {} : { sessionFile: options.sessionFile }),
 		...(options.terminalLease
 			? {
 					terminalLease: options.terminalLease,

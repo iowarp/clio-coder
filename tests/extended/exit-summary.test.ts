@@ -1,11 +1,16 @@
-import { deepStrictEqual, match, ok } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { countVerifiedOutcomes } from "../../src/domains/evidence/verified-outcomes.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
 import { createExitSummaryCollector, exitSpend } from "../../src/interactive/exit-summary-collector.js";
+import { createSessionFileRecorder, sessionFileOutcomeForExitCode } from "../../src/interactive/session-file.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
@@ -174,4 +179,81 @@ test("the exit card divides the session's spend over its distinct verified outco
 	// A run whose checks the ledger does not show counts only when there is no counted pass it could repeat.
 	deepStrictEqual(countVerifiedOutcomes(entries, new Set(["run-hidden"])).workers, 0);
 	deepStrictEqual(countVerifiedOutcomes([], new Set(["run-hidden"])).workers, 1);
+});
+
+test("--session-file writes one atomic 0600 record from the exit snapshot, whichever exit path arrives first", () => {
+	strictEqual(extractGlobalFlags(["--session-file", "out/rec.json"]).sessionFile, resolve("out/rec.json"));
+	strictEqual(extractGlobalFlags(["--session-file"]).error, "--session-file requires a path");
+	strictEqual(extractGlobalFlags(["--session-file", "--with-panes"]).error, "--session-file requires a path");
+	deepStrictEqual([0, 130, 143, 129, 1].map(sessionFileOutcomeForExitCode), [
+		"quit",
+		"interrupted",
+		"interrupted",
+		"interrupted",
+		"crashed",
+	]);
+	const dir = mkdtempSync(join(tmpdir(), "clio-session-file-"));
+	try {
+		const view = telemetryViewOf(
+			"session-1",
+			telemetryCall("session-1", { usage: { input: 1000, output: 200 }, usd: 0.5, pricedBy: "target-rates" }),
+		);
+		const spend = exitSpend(view, "1970-01-01T00:00:00.000Z");
+		ok(spend.kind === "ready");
+		const path = join(dir, "nested", "record.json");
+		const recorder = createSessionFileRecorder({
+			path,
+			cwd: "/work",
+			now: () => new Date("2026-11-06T00:00:00.000Z"),
+			snapshot: () =>
+				({
+					sessionId: "session-1",
+					sessionName: null,
+					turns: 2,
+					models: [
+						{ target: "a", model: "m1" },
+						{ target: "b", model: "m2" },
+					],
+					spend,
+				}) as never,
+		});
+		strictEqual(recorder.record("interrupted", 0), true);
+		strictEqual(recorder.record("crashed", 1), false);
+		strictEqual(statSync(path).mode & 0o777, 0o600);
+		deepStrictEqual(readdirSync(join(dir, "nested")), ["record.json"]);
+		const record = JSON.parse(readFileSync(path, "utf8"));
+		const { tokens, usd } = view.session().totals;
+		deepStrictEqual(record, {
+			version: 1,
+			sessionId: "session-1",
+			sessionName: null,
+			outcome: "interrupted",
+			exitCode: 0,
+			usage: { tokens: { display: tokens.display, fact: tokens.fact }, cost: { display: usd.display, fact: usd.fact } },
+			model: { target: "b", model: "m2" },
+			models: [
+				{ target: "a", model: "m1" },
+				{ target: "b", model: "m2" },
+			],
+			turns: 2,
+			cwd: "/work",
+			endedAt: "2026-11-06T00:00:00.000Z",
+		});
+		// No conversation still leaves an outcome on record; an unwritable path warns instead of throwing at exit.
+		const empty = join(dir, "empty.json");
+		createSessionFileRecorder({ path: empty, cwd: "/work", snapshot: () => null }).record("quit", 0);
+		const bare = JSON.parse(readFileSync(empty, "utf8"));
+		deepStrictEqual([bare.sessionId, bare.outcome, bare.usage, bare.model], [null, "quit", null, null]);
+		const warnings: string[] = [];
+		const blocked = createSessionFileRecorder({
+			path: join(empty, "under-a-file.json"),
+			cwd: "/work",
+			snapshot: () => null,
+			warn: (line) => warnings.push(line),
+		});
+		strictEqual(blocked.record("quit", 0), false);
+		match(warnings.join("\n"), /could not write the session record/u);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

@@ -174,7 +174,7 @@ export interface InteractiveInputRuntimeDeps {
 	beforeStopUi?: () => Promise<void>;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
-	onCleanExit?: () => void;
+	onCleanExit?: (trigger: "quit" | "interrupt") => void;
 	reportShutdownFailure?: (step: string, error: unknown) => void;
 	/** Defaults to the process termination coordinator's drain phase. */
 	registerTerminalTeardown?: (teardown: () => void | Promise<void>) => void;

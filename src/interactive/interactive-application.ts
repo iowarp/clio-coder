@@ -4,6 +4,7 @@ import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
+import { isRestartHandoff } from "../core/restart-status.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
@@ -93,6 +94,7 @@ import { suspendProcessUntilContinued } from "./process-suspend.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
+import { createSessionFileRecorder, sessionFileOutcomeForExitCode } from "./session-file.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
 import { createSteerReceipts } from "./steer-receipts.js";
@@ -167,6 +169,8 @@ export interface InteractiveDeps {
 	beforeShellEntryRecorded?: () => void;
 	/** Existing Stage 0 owner to hydrate in place. */
 	terminalLease?: TerminalLease;
+	/** `--session-file <path>` (absolute): where the session's exit record is written. */
+	sessionFile?: string;
 	/** Fired after the first committed frame containing the hydrated Stage 1 root. */
 	onHydratedFrameCommit?: (frameId: number | null, interactivity: BootInteractivity) => void;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
@@ -610,6 +614,19 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				: null;
 		},
 	});
+	const sessionFile = deps.sessionFile
+		? createSessionFileRecorder({ path: deps.sessionFile, snapshot: () => exitSummary.snapshot(), cwd: process.cwd() })
+		: null;
+	if (sessionFile) {
+		// A clean exit records first with what ended it; a signal records in the drain while the session is still
+		// readable; anything else that ends the process records at exit. /restart hands the record to its child.
+		const recordAt = (code: number): void => {
+			if (getTerminationCoordinator().hasExitHandoff() || isRestartHandoff()) return;
+			sessionFile.record(sessionFileOutcomeForExitCode(code), code);
+		};
+		getTerminationCoordinator().onDrain(() => recordAt(getTerminationCoordinator().getExitCode()));
+		process.once("exit", (code) => recordAt(code));
+	}
 	/**
 	 * Ctrl+G armed the leader and is waiting for the next key. Owned here because
 	 * the footer reads it and the input runtime that flips it is built later.
@@ -2232,7 +2249,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			else shell.stop();
 		},
 		cancelParkedCalls: (reason) => deps.toolRegistry?.cancelParkedCalls(reason),
-		onCleanExit: () => {
+		onCleanExit: (trigger) => {
+			if (sessionFile && !getTerminationCoordinator().hasExitHandoff()) {
+				sessionFile.record(trigger === "interrupt" ? "interrupted" : "quit", 0);
+			}
 			const ui = deps.getSettings?.().interface;
 			const snapshot = exitSummary.snapshot();
 			const lines =

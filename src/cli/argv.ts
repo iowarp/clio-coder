@@ -7,6 +7,7 @@
  * heavier graph.
  */
 
+import { resolve } from "node:path";
 import chalk from "chalk";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
@@ -81,6 +82,8 @@ export interface GlobalCliFlags {
 	autonomy?: AutonomyLevel;
 	/** `--allow-tools`/`--delegate-tools` before any subcommand: the interactive session's tool limits. */
 	toolLimits?: SessionToolLimits;
+	/** `--session-file <path>` before any subcommand, made absolute: where the interactive session writes its exit record. */
+	sessionFile?: string;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
 	 * `--no-skills`, `--with-panes`) as typed, in order, so a
@@ -161,6 +164,7 @@ export function extractGlobalFlags(
 	let panes: "with" | undefined;
 	let autonomy: AutonomyLevel | undefined;
 	let toolLimits: SessionToolLimits | undefined;
+	let sessionFile: string | undefined;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	const rootFlags: string[] = [];
@@ -246,6 +250,25 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
+		if (arg === "--session-file") {
+			const value = argv[i + 1];
+			if (value === undefined || value.trim() === "" || value.startsWith("-") || isSubcommand(value)) {
+				return {
+					noContextFiles,
+					noSkills,
+					skillPaths,
+					bootFlags,
+					rootFlags,
+					rest,
+					error: "--session-file requires a path",
+					...(apiKey === undefined ? {} : { apiKey }),
+					...(panes === undefined ? {} : { panes }),
+				};
+			}
+			sessionFile = resolve(value);
+			i += 1;
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
@@ -290,6 +313,7 @@ export function extractGlobalFlags(
 		...(panes === undefined ? {} : { panes }),
 		...(autonomy === undefined ? {} : { autonomy }),
 		...(toolLimits === undefined ? {} : { toolLimits }),
+		...(sessionFile === undefined ? {} : { sessionFile }),
 		...(demo === undefined ? {} : { demo }),
 	};
 }

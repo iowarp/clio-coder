@@ -144,8 +144,11 @@ export interface ApplicationControllerDeps {
 	stopUi: () => void;
 	cancelParkedCalls: (reason: string) => void;
 	onShutdown: () => Promise<void>;
-	/** Print the final account only after a successful terminal teardown. */
-	onCleanExit?: () => void;
+	/**
+	 * Print the final account only after a successful terminal teardown. `interrupt` when the
+	 * double ctrl+c ended the session, `quit` for every other shutdown request.
+	 */
+	onCleanExit?: (trigger: "quit" | "interrupt") => void;
 	/**
 	 * Report a teardown step that failed. Deliberately not the UI notice channel:
 	 * interactive teardown disposes that before the application's own shutdown
@@ -275,6 +278,8 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		}
 	};
 
+	let exitTrigger: "quit" | "interrupt" = "quit";
+
 	const shutdown = async (): Promise<void> => {
 		if (shuttingDown) return;
 		shuttingDown = true;
@@ -313,7 +318,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			// also has to precede onShutdown, which exits the process.
 			failed = failures.length > 0;
 			reportFailures();
-			if (!failed) deps.onCleanExit?.();
+			if (!failed) deps.onCleanExit?.(exitTrigger);
 			await deps.onShutdown();
 		} catch (error) {
 			failed = true;
@@ -354,6 +359,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 		});
 		if (action === "shutdown") {
 			lastCtrlCAt = 0;
+			if (!shuttingDown) exitTrigger = "interrupt";
 			void shutdown();
 			return;
 		}

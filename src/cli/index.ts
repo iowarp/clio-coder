@@ -57,6 +57,7 @@ Usage:
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
+  clio-coder --session-file <path>     on exit, write this session's record (id, outcome, usage, model) as JSON
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
@@ -216,6 +217,7 @@ async function main(argv: string[]): Promise<number> {
 		demo,
 		autonomy,
 		toolLimits,
+		sessionFile,
 		bootFlags,
 		rootFlags,
 		rest,
@@ -268,6 +270,10 @@ async function main(argv: string[]): Promise<number> {
 		);
 		return 2;
 	}
+	if (sessionFile !== undefined && subcommand) {
+		printError("--session-file applies to the interactive session only; start clio-coder without a subcommand.");
+		return 2;
+	}
 	// A `dev` command is judged by the command it names, which is the one that
 	// would have received and dropped the options.
 	const refusal = unhonoredBootFlag(subcommand === "dev" ? subArgs[0] : subcommand, bootFlags);
@@ -283,6 +289,7 @@ async function main(argv: string[]): Promise<number> {
 			...(demo === undefined ? {} : { demo }),
 			...(autonomy === undefined ? {} : { autonomy }),
 			...(toolLimits === undefined ? {} : { toolLimits }),
+			...(sessionFile === undefined ? {} : { sessionFile }),
 		});
 	}
 

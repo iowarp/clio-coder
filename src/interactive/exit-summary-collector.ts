@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { FactMetric } from "../core/telemetry/dto.js";
+import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -136,6 +136,8 @@ export type ExitSpend =
 			/** `in · out · cache read · cache write · reasoning` where something was reported, then the notes. */
 			breakdown: string;
 			cost: string;
+			/** The read model's own session totals, unsummed here, for the `--session-file` record. */
+			totals: { tokens: Quantity; usd: Quantity };
 			/**
 			 * Model calls sent since the visit began, counted by `sentCallCount` as the /usage model calls row counts them:
 			 * a retry is another attempt of the same call, and a worker run's calls are included. The card once said
@@ -225,6 +227,7 @@ export function exitSpend(
 		tokens: [sessionTokens.total, ...sessionTokens.notes].join(" · "),
 		breakdown: tokenBreakdown(view),
 		cost: session.totals.usd.display,
+		totals: { tokens: session.totals.tokens, usd: session.totals.usd },
 		visitCalls: sentCallCount(view, { from: visitFrom }),
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
 		callTime: callTime === null ? null : usageLineFigure(callTime),

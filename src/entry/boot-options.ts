@@ -58,6 +58,8 @@ export interface BootOptions {
 	 * every turn of the session runs under them, as `clio-coder run` runs its one task.
 	 */
 	toolLimits?: SessionToolLimits;
+	/** Global `--session-file <path>` (absolute): the interactive session writes its exit record there. */
+	sessionFile?: string;
 	headless?: {
 		/** `run --systemone`: the one setting for this run, an engine name or `off`. */
 		systemOne?: string;
