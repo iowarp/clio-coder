@@ -12,6 +12,11 @@
  */
 
 import { formatFooterTokens } from "../../core/display-units.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import type { ClassifierCall } from "./action-classifier.js";
+import { describeCallTarget } from "./call-target.js";
+import type { SafetyDecision } from "./contract.js";
+import { redactSecretString } from "./redaction.js";
 
 /** The `outcomeDetail` and abort reason prefix of a cap halt. */
 export const AUTONOMOUS_CAP_REASON = "autonomous-cap";
@@ -47,6 +52,44 @@ export interface AutonomyHalt {
 	usage: AutonomyUsage;
 }
 
+export type OpenDecisionKind = EventPayload<"autonomy.open_decision">["kind"];
+
+/** A call yolo refused because it needed the operator (ob-yolo D7), kept for the end of the run. */
+export interface OpenDecision {
+	seq: number;
+	tool: string;
+	/** The command or target, clipped and with credentials scrubbed, as worker refusals name it. */
+	command: string;
+	kind: OpenDecisionKind;
+	rule?: string;
+}
+
+/** Open decisions a session keeps; older ones are counted, not listed. */
+export const OPEN_DECISION_LIMIT = 50;
+const OPEN_DECISION_COMMAND_MAX_CHARS = 200;
+
+/** The audit `run --json` and the exit summary read: the window, its halt and the open decisions. */
+export interface AutonomyReport {
+	confinement: "contained" | "unconfined";
+	caps: AutonomousCaps;
+	usage: AutonomyUsage;
+	halted: { kind: AutonomyHaltKind; detail: string } | null;
+	openDecisions: OpenDecision[];
+	openDecisionsOmitted: number;
+}
+
+type AutonomyEventName =
+	| "autonomy.entered"
+	| "autonomy.open_decision"
+	| "autonomy.cap_reached"
+	| "autonomy.resumed"
+	| "autonomy.ended";
+export type AutonomyEmit = <K extends AutonomyEventName>(
+	name: K,
+	payload: EventPayload<K>,
+	sessionId: string | null,
+) => void;
+
 /** What the footer shows of the window at yolo. */
 export interface AutonomyStatus {
 	usage: AutonomyUsage;
@@ -72,6 +115,14 @@ export interface AutonomyWindow {
 	usage(): AutonomyUsage;
 	/** The caps that apply now, or null when nothing is counted. */
 	caps(): AutonomousCaps | null;
+	/** A call refused because it needed the operator; ignored below yolo. */
+	openDecision(entry: Omit<OpenDecision, "seq">): void;
+	/** The session's open decisions; `sinceReopen` keeps those since the operator last spoke. */
+	openDecisions(sinceReopen?: boolean): OpenDecision[];
+	/** The audit so far, or null when yolo never ran in this session. */
+	report(): AutonomyReport | null;
+	/** The process is ending: journal how the yolo stretch ended. */
+	end(): void;
 }
 
 export interface AutonomyWindowDeps {
@@ -80,6 +131,9 @@ export interface AutonomyWindowDeps {
 	/** The session the counts belong to; a change starts a fresh window. */
 	session?: () => string | null;
 	now?: () => number;
+	confinement?: () => "contained" | "unconfined";
+	/** Journals the `autonomy.*` events for the session they belong to. */
+	emit?: AutonomyEmit;
 }
 
 const MINUTE_MS = 60_000;
@@ -92,6 +146,18 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	let activeMs = 0;
 	let turnStart: number | null = null;
 	let halt: AutonomyHalt | null = null;
+	let entered = false;
+	let seq = 0;
+	let reopenedAt = 0;
+	let omitted = 0;
+	const decisions: OpenDecision[] = [];
+	const emit: AutonomyEmit = (name, payload, sessionId) => deps.emit?.(name, payload, sessionId);
+	const confinement = (): "contained" | "unconfined" => deps.confinement?.() ?? "contained";
+	const ended = (reason: EventPayload<"autonomy.ended">["reason"], sessionId: string | null): void => {
+		if (!entered) return;
+		entered = false;
+		emit("autonomy.ended", { reason, ...usage(), openDecisions: seq }, sessionId);
+	};
 
 	const clear = (): void => {
 		toolCalls = 0;
@@ -104,8 +170,11 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		if (deps.session === undefined) return;
 		const current = deps.session();
 		if (current === session) return;
+		ended("session-changed", session);
 		session = current;
 		clear();
+		decisions.length = 0;
+		seq = reopenedAt = omitted = 0;
 	};
 	const usage = (): AutonomyUsage => ({
 		toolCalls,
@@ -115,6 +184,16 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	const latch = (next: AutonomyHalt): void => {
 		if (halt !== null) return;
 		halt = next;
+		emit(
+			"autonomy.cap_reached",
+			{
+				kind: next.kind,
+				...(next.limit !== undefined ? { limit: next.limit } : {}),
+				...next.usage,
+				openDecisions: seq,
+			},
+			session,
+		);
 		deps.onHalt(next);
 	};
 	const check = (caps: AutonomousCaps): void => {
@@ -130,7 +209,18 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	};
 	const counting = (): AutonomousCaps | null => {
 		follow();
-		return deps.caps();
+		const caps = deps.caps();
+		if (caps === null) ended("left-yolo", session);
+		// Session-scoped events need their session; the first turn opens one.
+		else if (!entered && session !== null) {
+			entered = true;
+			emit(
+				"autonomy.entered",
+				{ confinement: confinement(), capToolCalls: caps.toolCalls, capMinutes: caps.minutes, capTokens: caps.tokens },
+				session,
+			);
+		}
+		return caps;
 	};
 
 	return {
@@ -147,7 +237,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			check(caps);
 		},
 		turnStarted() {
-			follow();
+			counting();
 			if (turnStart === null) turnStart = now();
 		},
 		// Time accrues here but is checked at the next call event, so a pause
@@ -170,6 +260,8 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			follow();
 			const cleared = halt;
 			clear();
+			reopenedAt = seq;
+			if (cleared !== null) emit("autonomy.resumed", { cleared: cleared.kind }, session);
 			return cleared;
 		},
 		usage() {
@@ -177,6 +269,48 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			return usage();
 		},
 		caps: () => counting(),
+		openDecision(entry) {
+			if (counting() === null) return;
+			seq += 1;
+			const recorded: OpenDecision = { ...entry, seq };
+			decisions.push(recorded);
+			if (decisions.length > OPEN_DECISION_LIMIT) {
+				decisions.shift();
+				omitted += 1;
+			}
+			emit(
+				"autonomy.open_decision",
+				{
+					tool: recorded.tool,
+					kind: recorded.kind,
+					...(recorded.rule !== undefined ? { rule: recorded.rule } : {}),
+					seq,
+					command: recorded.command,
+				},
+				session,
+			);
+		},
+		openDecisions(sinceReopen = false) {
+			follow();
+			return decisions.filter((entry) => !sinceReopen || entry.seq > reopenedAt);
+		},
+		report() {
+			follow();
+			const caps = deps.caps();
+			if (caps === null && !entered && seq === 0) return null;
+			return {
+				confinement: confinement(),
+				caps: caps ?? { toolCalls: 0, minutes: 0, tokens: 0 },
+				usage: usage(),
+				halted: halt === null ? null : { kind: halt.kind, detail: halt.detail },
+				openDecisions: [...decisions],
+				openDecisionsOmitted: omitted,
+			};
+		},
+		end() {
+			follow();
+			ended(halt === null ? "shutdown" : halt.kind === "judge" ? "judge-streak" : "autonomous-cap", session);
+		},
 	};
 }
 
@@ -201,8 +335,57 @@ export function settledCallTokens(usage: unknown): number {
 	return total > 0 ? total : value("input") + value("cacheRead") + value("cacheWrite") + value("output");
 }
 
-/** The pause notice: the interactive one names the keys, the headless one the command that resumes. */
-export function autonomyHaltNotice(halt: AutonomyHalt, surface: "interactive" | "headless" = "interactive"): string {
+/** Name a refused call for the operator: clipped to 200 characters with credentials scrubbed, like a worker refusal. */
+export function describeOpenDecision(
+	call: ClassifierCall,
+	decision: SafetyDecision,
+	kind: OpenDecisionKind,
+	rule?: string,
+): Omit<OpenDecision, "seq"> {
+	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
+	const scrubbed = redactSecretString(raw.trim());
+	const clipped =
+		scrubbed.length <= OPEN_DECISION_COMMAND_MAX_CHARS
+			? scrubbed
+			: `${scrubbed.slice(0, OPEN_DECISION_COMMAND_MAX_CHARS)}…`;
+	const named =
+		rule ??
+		(decision.kind === "ask" ? decision.confirmationRuleId : undefined) ??
+		decision.policy?.ruleId ??
+		decision.policy?.reasonCode;
+	return {
+		tool: call.tool,
+		command: clipped.length > 0 ? clipped : "(no command)",
+		kind,
+		...(named !== undefined ? { rule: named } : {}),
+	};
+}
+
+/** One numbered line per open decision, for notices and summaries. */
+function formatOpenDecision(entry: OpenDecision): string {
+	return `${entry.seq}) ${entry.tool} \`${entry.command}\` (${entry.kind}${entry.rule !== undefined ? `, rule ${entry.rule}` : ""})`;
+}
+
+/** The decisions a halt notice lists, then how many it left out. */
+function openDecisionsClause(open: ReadonlyArray<OpenDecision>, list: boolean): string {
+	if (open.length === 0) return "";
+	const noun = open.length === 1 ? "open decision" : "open decisions";
+	if (!list) return ` ${open.length} ${noun} left for you.`;
+	const shown = open.slice(-10);
+	const more = open.length > shown.length ? `; ${open.length - shown.length} more` : "";
+	return ` Left for you (${open.length} ${noun}): ${shown.map(formatOpenDecision).join("; ")}${more}.`;
+}
+
+/**
+ * The pause notice: the interactive one names the keys, the headless one the command that resumes. A judge-streak
+ * end lists the open decisions it leaves (ob-yolo D4); a cap counts them.
+ */
+export function autonomyHaltNotice(
+	halt: AutonomyHalt,
+	surface: "interactive" | "headless" = "interactive",
+	open: ReadonlyArray<OpenDecision> = [],
+): string {
+	const left = openDecisionsClause(open, halt.kind === "judge");
 	const used = halt.usage;
 	const spent = `${used.toolCalls} tool calls, ${Math.round(used.activeMs / MINUTE_MS)} min, ${formatFooterTokens(used.tokens)} tokens`;
 	if (surface === "headless") {
@@ -210,10 +393,10 @@ export function autonomyHaltNotice(halt: AutonomyHalt, surface: "interactive" | 
 			halt.kind === "judge"
 				? `${JUDGE_STREAK_REASON}: the safety judge blocked too many calls (${halt.detail}), so yolo ended the run`
 				: `${AUTONOMOUS_CAP_REASON}: yolo paused at the ${halt.detail}`;
-		return `${what} after ${spent}; review it, then \`clio-coder run --continue "<prompt>"\` resumes with a fresh window`;
+		return `${what} after ${spent}; review it, then \`clio-coder run --continue "<prompt>"\` resumes with a fresh window${left === "" ? "" : `.${left}`}`;
 	}
 	if (halt.kind === "judge") {
-		return `yolo paused: the safety judge blocked too many calls (${halt.detail}). Enter on an empty prompt continues and turns review back on; a new message also continues.`;
+		return `yolo paused: the safety judge blocked too many calls (${halt.detail}). Enter on an empty prompt continues and turns review back on; a new message also continues.${left}`;
 	}
 	const again =
 		halt.kind === "calls"
@@ -221,5 +404,5 @@ export function autonomyHaltNotice(halt: AutonomyHalt, surface: "interactive" | 
 			: halt.kind === "tokens"
 				? `another ${formatFooterTokens(halt.limit ?? 0)} tokens`
 				: `another ${halt.limit} minutes`;
-	return `yolo paused: ${halt.detail} (${spent}). Enter on an empty prompt continues for ${again}; a new message also continues.`;
+	return `yolo paused: ${halt.detail} (${spent}). Enter on an empty prompt continues for ${again}; a new message also continues.${left}`;
 }

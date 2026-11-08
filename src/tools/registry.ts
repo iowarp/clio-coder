@@ -46,6 +46,7 @@ import {
 } from "../domains/safety/admission.js";
 import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
+import type { OpenDecisionKind } from "../domains/safety/autonomy-window.js";
 import { mainCallExposure } from "../domains/safety/call-consequence.js";
 import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
@@ -380,6 +381,8 @@ export interface RegistryDeps {
 	 * wires it.
 	 */
 	unattendedAsks?: () => boolean;
+	/** Observes each call `unattendedAsks` refused, for contained yolo's open decisions (ob-yolo D7); decides nothing. */
+	onUnattendedRefusal?: (call: ClassifierCall, decision: SafetyDecision, kind: OpenDecisionKind, rule?: string) => void;
 	/** The main session's id, which names a read-only run's scratch directory. */
 	currentSessionId?: () => string | undefined;
 	/**
@@ -2261,6 +2264,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					: {}),
 			};
 			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
+			if (unattended) deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "judge-block", judged.rule);
 			const verdict = withDenial(
 				{ kind: "blocked", reason: judged.refusal, decision: blocked },
 				"clio_policy",
@@ -2275,6 +2279,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
 				reasonCode: CONTAINED_YOLO_REASON_CODE,
 			});
+			if (outwardUnnamed) deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "outward-unnamed", judged.rule);
+			else if (judged.kind === "park")
+				deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "no-verdict", judged.cause);
+			else deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "operator-only");
 			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
 			return (
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??

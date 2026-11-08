@@ -355,6 +355,7 @@ import {
 	autonomousCaps,
 	autonomyHaltNotice,
 	createAutonomyWindow,
+	describeOpenDecision,
 	JUDGE_STREAK_REASON,
 	settledCallTokens,
 } from "../domains/safety/autonomy-window.js";
@@ -1820,16 +1821,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const autonomyWindow = createAutonomyWindow({
 		caps: () => autonomousCaps(resolveEffectiveAutonomy(), getCurrentSettings().safety.limits),
 		session: () => session?.current()?.id ?? null,
+		confinement: () => effectiveYoloConfinement(getCurrentSettings().safety),
+		emit: (name, payload, sessionId) => bus.emit(name, payload, sessionTelemetryContext(sessionId)),
 		onHalt: (halt) => {
 			lastAutonomyHalt = halt;
 			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
-			chat.cancel({
-				reason: `[Clio Coder] ${autonomyHaltNotice(halt, options.headless !== undefined ? "headless" : "interactive")}`,
-				source: "autonomy",
-				auditReason: `${prefix}: ${halt.detail}`,
-			});
+			const cancel = (): void =>
+				chat.cancel({
+					reason: `[Clio Coder] ${autonomyHaltNotice(
+						halt,
+						options.headless !== undefined ? "headless" : "interactive",
+						autonomyWindow.openDecisions(true),
+					)}`,
+					source: "autonomy",
+					auditReason: `${prefix}: ${halt.detail}`,
+				});
+			// The judge escalates inside the review of the block that crossed the line, before the
+			// registry records it as an open decision; the latch already holds, so the notice can wait a tick.
+			if (halt.kind === "judge") setImmediate(cancel);
+			else cancel();
 		},
 	});
+	bus.subscribe("shutdown.requested", () => autonomyWindow.end());
 	bus.subscribe("tool.settled", (_payload, context) => {
 		if (context?.agent.role === "main") autonomyWindow.toolCall();
 	});
@@ -1930,6 +1943,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveAdmissionAutonomy,
 		unattendedAsks: unattendedYolo,
+		onUnattendedRefusal: (call, decision, kind, rule) =>
+			autonomyWindow.openDecision(describeOpenDecision(call, decision, kind, rule)),
 		// Only this registry carries the operator's own scope (#419): its yolo,
 		// and its containment at default, where shell calls run in the
 		// main-session sandbox and a snapshot precedes a destructive call.

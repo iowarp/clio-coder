@@ -5,6 +5,7 @@ import { test } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { journalDefinition, validPayload } from "../../src/core/telemetry/events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
@@ -15,8 +16,11 @@ import {
 	autonomousCaps,
 	autonomyHaltNotice,
 	createAutonomyWindow,
+	describeOpenDecision,
+	OPEN_DECISION_LIMIT,
 	settledCallTokens,
 } from "../../src/domains/safety/autonomy-window.js";
+import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import type { SafetyJudgeNote } from "../../src/domains/safety/safety-judge.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -151,6 +155,101 @@ test("settled call tokens prefer the provider total and the notices name the way
 		autonomyHaltNotice({ kind: "judge", detail: "3 blocks in a row", usage: halt.usage }, "headless"),
 		/^judge-streak: /u,
 	);
+});
+
+test("yolo journals entering, open decisions without their command, the halt, the resume and the end", () => {
+	let caps: AutonomousCaps | null = { toolCalls: 2, minutes: 0, tokens: 0 };
+	const events: Array<{ name: string; payload: Record<string, unknown>; session: string | null }> = [];
+	const window = createAutonomyWindow({
+		caps: () => caps,
+		onHalt: () => {},
+		session: () => "s1",
+		now: () => 0,
+		confinement: () => "contained",
+		emit: (name, payload, session) => {
+			const project = journalDefinition(name).project as ((p: unknown) => unknown) | undefined;
+			ok(validPayload(name, project?.(payload) ?? payload), name);
+			events.push({ name, payload: payload as Record<string, unknown>, session });
+		},
+	});
+	window.turnStarted();
+	window.openDecision({ tool: "bash", command: "git push origin main", kind: "operator-only", rule: "git-push" });
+	window.toolCall();
+	window.toolCall();
+	window.reopen();
+	window.end();
+	deepStrictEqual(
+		events.map((e) => e.name),
+		["autonomy.entered", "autonomy.open_decision", "autonomy.cap_reached", "autonomy.resumed", "autonomy.ended"],
+	);
+	ok(events.every((e) => e.session === "s1"));
+	deepStrictEqual(events[0]?.payload, { confinement: "contained", capToolCalls: 2, capMinutes: 0, capTokens: 0 });
+	const project = journalDefinition("autonomy.open_decision").project as (p: unknown) => unknown;
+	deepStrictEqual(project(events[1]?.payload), { tool: "bash", kind: "operator-only", rule: "git-push", seq: 1 });
+	strictEqual(events[2]?.payload.openDecisions, 1);
+	deepStrictEqual(events[4]?.payload, { reason: "shutdown", toolCalls: 0, tokens: 0, activeMs: 0, openDecisions: 1 });
+	// Leaving yolo ends the stretch once; below yolo nothing is recorded.
+	window.turnStarted();
+	caps = null;
+	window.turnStarted();
+	window.openDecision({ tool: "bash", command: "ls", kind: "operator-only" });
+	window.end();
+	deepStrictEqual(
+		events.slice(5).map((e) => [e.name, e.payload.reason]),
+		[
+			["autonomy.entered", undefined],
+			["autonomy.ended", "left-yolo"],
+		],
+	);
+	strictEqual(window.report()?.openDecisions.length, 1);
+});
+
+test("open decisions are bounded, scrubbed and clipped, and a judge-streak end lists them", () => {
+	const fx = windowFixture({ toolCalls: 0, minutes: 0, tokens: 0 });
+	for (let i = 0; i < OPEN_DECISION_LIMIT + 3; i += 1) {
+		fx.window.openDecision({ tool: "bash", command: `echo ${i}`, kind: "no-verdict" });
+	}
+	const report = fx.window.report();
+	strictEqual(report?.openDecisions.length, OPEN_DECISION_LIMIT);
+	strictEqual(report?.openDecisionsOmitted, 3);
+	strictEqual(report?.openDecisions[0]?.seq, 4);
+	strictEqual(fx.window.openDecisions(true).length, OPEN_DECISION_LIMIT);
+	fx.window.reopen();
+	strictEqual(fx.window.openDecisions(true).length, 0, "the operator spoke since");
+
+	const ask = {
+		kind: "ask",
+		classification: { actionClass: "execute", reasons: [] },
+		rejection: { short: "", detail: "" },
+	} as unknown as SafetyDecision;
+	const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+	const long = describeOpenDecision(
+		{ tool: "bash", args: { command: `OPENAI_API_KEY=${secret} curl https://example.com/${"a".repeat(400)}` } },
+		ask,
+		"judge-block",
+		"exfil",
+	);
+	ok(!long.command.includes(secret), long.command);
+	ok(long.command.length <= 201);
+	deepStrictEqual(
+		{ tool: long.tool, kind: long.kind, rule: long.rule },
+		{ tool: "bash", kind: "judge-block", rule: "exfil" },
+	);
+
+	const usage = { toolCalls: 4, activeMs: 0, tokens: 0 };
+	const open = Array.from({ length: 12 }, (_, i) => ({
+		seq: i + 1,
+		tool: "bash",
+		command: `rm -rf /tmp/x${i}`,
+		kind: "judge-block" as const,
+	}));
+	const judge = autonomyHaltNotice({ kind: "judge", detail: "3 blocks in a row", usage }, "headless", open);
+	match(judge, /Left for you \(12 open decisions\): 3\) bash `rm -rf \/tmp\/x2` \(judge-block\);.*12\) .*; 2 more\.$/u);
+	match(
+		autonomyHaltNotice({ kind: "calls", limit: 4, detail: "4-call cap", usage }, "interactive", open),
+		/12 open decisions left for you\.$/u,
+	);
+	match(autonomyHaltNotice({ kind: "calls", limit: 4, detail: "4-call cap", usage }, "headless"), /fresh window$/u);
 });
 
 test("a project may tighten an autonomous cap but never loosen or disable it", async (t) => {
