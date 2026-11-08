@@ -410,12 +410,9 @@ describe("native worker MCP capabilities", () => {
 		match(workerMcpNoNetworkNotice(confined, dropped.tools) ?? "", /MCP server 'fake' starts .*no network/);
 	});
 
-	async function dispatchGranted(agentTools: ToolName[]) {
-		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
-		const settings = structuredClone(DEFAULT_SETTINGS);
-		settings.safety.sandbox = "required";
+	/** The stub coder with the given tools and without its git worktree allowance, which a read-only class refuses. */
+	function readOnlyCoderContext(settings: typeof DEFAULT_SETTINGS, agentTools: ToolName[]) {
 		const context = dispatchStubContext({ settings, agentTools });
-		// The stub coder keeps its git worktree allowance, which a read-only class refuses.
 		const withoutGit = (recipe: AgentRecipe | null): AgentRecipe | null => {
 			if (recipe === null) return null;
 			const { permissions: _git, ...rest } = recipe;
@@ -434,13 +431,21 @@ describe("native worker MCP capabilities", () => {
 				},
 			} as unknown as DomainContractMap[N];
 		};
+		return { ...context, getContract };
+	}
+
+	async function dispatchGranted(agentTools: ToolName[]) {
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = "required";
+		const context = readOnlyCoderContext(settings, agentTools);
 		const notices: Array<{ code: string; message: string }> = [];
 		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
 			notices.push(notice);
 		});
 		let spawned: WorkerSpec | undefined;
 		const bundle = makeDispatchBundle(
-			{ ...context, getContract },
+			context,
 			{
 				spawnWorker: (spec) => {
 					spawned = spec;
@@ -470,6 +475,51 @@ describe("native worker MCP capabilities", () => {
 			parsed.permit?.ceiling.mcp?.tools.map((entry) => [entry.serverId, entry.network]),
 			[["fake", true]],
 		);
+	});
+
+	it("accepts external research sources from a read-only worker whose MCP server is trusted --network", async () => {
+		const report = JSON.stringify({
+			source: "external",
+			findings: [{ claim: "The evidence service reports evidence-67.", evidence: "mcp_fake__echo result" }],
+		});
+		const dispatchReport = async () => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.fleet.retry.maxRetries = 0;
+			const bundle = makeDispatchBundle(readOnlyCoderContext(settings, TOOLS), {
+				heartbeatIntervalMs: 3_600_000,
+				spawnWorker: () => ({
+					pid: null,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+					abort: () => {},
+					send: () => true,
+					events: (async function* () {
+						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: report } };
+					})(),
+				}),
+			});
+			await bundle.extension.start();
+			try {
+				const run = await bundle.contract.dispatch({
+					agentId: "coder",
+					executionRole: "researcher",
+					task: "Report the evidence service's answer.",
+					cwd: project,
+					requestOrigin: "internal",
+					resultContractOverride: { kind: "research-report" },
+				});
+				return await run.finalPromise;
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		};
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read" }).ok);
+		const local = await dispatchReport();
+		strictEqual(local.outcomeCode, "result_contract_invalid");
+		match(local.outcomeDetail ?? "", /mcp trust <id> --network/);
+		ok(trustMcpServer({ cwd: project, id: "fake", actionClass: "read", network: true }).ok);
+		const networked = await dispatchReport();
+		strictEqual(networked.outcome, "succeeded", networked.outcomeDetail ?? networked.outcome);
 	});
 
 	it("withholds the grant from a writing worker whose write root covers the server's cwd and says why", async () => {

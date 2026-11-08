@@ -2043,6 +2043,20 @@ interface DispatchAdmissionStage {
 	mcpNetworkWithheld?: ReadonlyArray<WorkerMcpNetworkWithheld>;
 }
 
+/**
+ * Whether a worker's result may cite external sources: it holds a web tool,
+ * or an MCP capability it was offered belongs to a server that kept the
+ * operator's network grant. That grant reaches only the server's process,
+ * which is how such a worker reaches anything outside the workspace.
+ */
+function workerHasNetworkPosture(admission: DispatchAdmissionStage): boolean {
+	const tools = admission.allowedTools;
+	if (tools.includes(ToolNames.WebFetch) || tools.includes(ToolNames.WebRead)) return true;
+	return (admission.mcp?.tools ?? []).some(
+		(entry) => entry.network === true && tools.includes(`mcp_${entry.serverId}__${entry.tool}` as ToolName),
+	);
+}
+
 interface DispatchWorkerSpecInput {
 	req: DispatchRequest;
 	flowRestrictions?: FlowRestrictionSet | null;
@@ -7684,9 +7698,7 @@ export function createDispatchBundle(
 									contract: helperContract,
 									data,
 									cwd: lifecycle.cwd,
-									networkAllowed:
-										lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
-										lifecycle.admission.allowedTools.includes(ToolNames.WebRead),
+									networkAllowed: workerHasNetworkPosture(lifecycle.admission),
 									observedRunEffects: runEffects.snapshot(),
 									filesystem: nodeResultContractFilesystem(),
 								}).structured,
@@ -8836,8 +8848,7 @@ export function createDispatchBundle(
 					outputTruncated: capturedOutput?.truncated === true,
 					cwd: lifecycle.cwd,
 					networkAllowed:
-						lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
-						lifecycle.admission.allowedTools.includes(ToolNames.WebRead) ||
+						workerHasNetworkPosture(lifecycle.admission) ||
 						lifecycle.target.runtime.externalAgentLoop?.network === "externally-governed-unobserved",
 					observedRunEffects,
 					filesystem: nodeResultContractFilesystem(),

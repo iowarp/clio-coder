@@ -1595,7 +1595,7 @@ function validateResearch(
 		return failure(
 			contract,
 			"unmeasured",
-			'Research field "source" is external but the run has no allowed network posture; legal values are local | external, and use local for workspace-only evidence',
+			'Research field "source" is external but the run has no allowed network posture: give the recipe web_fetch or web_read, or an MCP tool whose server has network trust (clio-coder mcp trust <id> --network, or network: true in a user declaration); use source local for workspace-only evidence',
 		);
 	}
 	for (const [index, finding] of value.findings.entries()) {
