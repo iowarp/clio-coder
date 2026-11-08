@@ -2,11 +2,13 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## 0.7.0 - 2026-11-07
+## 0.7.0 - 2026-11-08
 
 Clio Coder 0.7.0 is the first stable release since 0.6.9 and includes everything published in 0.7.0-rc.1: the `data` tool for HDF5, NetCDF and Parquet, sealed `reproduce` checks judged against a tolerance, a per-project claims ledger (#406), cost per verified outcome, four science library packs, GitHub Copilot through the official Copilot SDK, cheaper in-prefix compaction and a pinned private pane host.
 
-Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox escapes, a passing reproduction check counts as the evidence it is, a contradicted memory leaves a running session, autonomous commits name Clio as author, Copilot works like the other subscriptions, Clio sets itself up with your approval and teaches itself to newcomers, and the composition root, turn state and domain contracts each get one owner.
+It adds two built-in commands, adapted from the clio-researcher and clio-bench prototypes. `clio-coder research` turns a benchmark or a scientific score into a budgeted, verified hill climb. `clio-coder arena` runs one prompt on up to four models side by side, shows the results blind and ranks the models by Elo from your votes. Both have a page in the desktop app.
+
+Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch leaves an audit of what it refused, a dispatched worker never runs above the autonomy of the session that dispatched it, an execute-class MCP tool asks at default, Clio closes three sandbox escapes, a passing reproduction check counts as the evidence it is, a contradicted memory leaves a running session, autonomous commits name Clio as author on every platform, Windows included, Copilot works like the other subscriptions, Clio sets itself up with your approval and teaches itself to newcomers, and the composition root, turn state and domain contracts each get one owner.
 
 ### Upgrade notes
 
@@ -16,7 +18,20 @@ Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox esca
 - At default, `unsandboxed: true` always asks (`sandbox-escape`), even for a recognized command such as `npm test`; the safety judge lets it run when your request named the escape. Under yolo, `safety.sandbox: required` sandboxes every command default would contain, not only script files, and refuses `unsandboxed: true`.
 - A model can no longer change Clio's settings by running Clio's own `configure`, `targets`, `auth` or other settings commands, in any launcher form, sandboxed or not. Read forms still work, and your own `!` shell line is never blocked.
 - A `copilot-sdk` target works like the ChatGPT and Claude subscriptions: the account signed in with `copilot login` is the authorization, and Clio no longer asks for or records a separate per-account consent. Headless `run`, workers and fresh homes use the login directly. The `copilot-sdk-consent.json` file rc.1 wrote is deleted by the `2026-11-07-remove-copilot-consent` migration.
-- Commit trailers name Clio's GitHub App bot, `Clio Coder <353922063+clio-coder-agent[bot]@users.noreply.github.com>`, so GitHub shows its avatar on commits Clio helped write. The managed commit hook moves to v5, and an existing `clio-coder@iowarp.ai` trailer is folded into the bot identity.
+- Commit trailers name Clio's GitHub App bot, `Clio Coder <353922063+clio-coder-agent[bot]@users.noreply.github.com>`, so GitHub shows its avatar on commits Clio helped write. The managed commit hook moves to v8, and an existing `clio-coder@iowarp.ai` trailer is folded into the bot identity.
+- A session or worker below yolo now passes its autonomy level to every bash command it runs, as `CLIO_CODER_AUTONOMY_CEILING`. Started under that ceiling, `clio-coder run`, `research start` and `arena run` with `--autonomy yolo` exit 2. Any other session started there, interactive or ACP, stays at `default`. A dispatched worker's autonomy is capped at the dispatcher's live level, checked again just before the worker starts, so a worker never runs at yolo unless its dispatcher is at yolo. A contained-yolo dispatcher's workers run at `default`.
+- A trusted MCP tool classed `execute` asks at `default` under its own rule, `mcp-execute`. Before, a launch command the shell allowlist or a project `safety.yaml` recognized let it run unasked, journaled as a bash rule. Under yolo it no longer depends on the script sandbox.
+- A read-only run (`--read-only`) can load a skill again; loading a skill only reads it.
+
+### Research and Arena
+
+- `clio-coder research` runs a verified hill climb on a project metric. `research start` has Clio's agent propose a change in a fresh worktree, to move one key of a verifier check's JSON payload (for example `wall_ms`). It measures noise first with an A/A check, and keeps a change only when interleaved trials move the median by at least `--min-improvement`, a seeded bootstrap 95% interval excludes zero, and every `--gate` check passes; a judged `numeric-compare` objective is a gate too. Kept changes advance `clio/research/<id>` by compare-and-swap, and your checked-out branch is never touched.
+- A campaign refuses changes to protected paths, symlinked ones included, and to files outside `--scope`. Files that a check itself creates are left out of the iteration commit. It stops at `--max-iterations`, `--max-wall-minutes` or `--max-cost-usd`, whichever comes first, and never counts unknown spend as zero. Ctrl-C, SIGTERM and SIGHUP stop the campaign cleanly. Judged gates and hypotheses are recorded in the claims ledger.
+- `research status`, `research report` and `research list` read campaigns, and so do the read-only `/research` overlay and the desktop app's Research page. `report` regrades every verdict from the raw samples. A real move smaller than the threshold reads "below threshold (−3.00% vs required −5.00%)", not "unchanged".
+- `clio-coder arena run` gives one prompt to 2 to 4 `<target>/<model>` contenders, each in its own worktree. `arena show` hides identity, duration, tokens and cost until you vote, and redacts session ids, model names, worktree paths and branch names from answers, diffs and check output. `arena vote` records a win, a tie or both-bad, and `--replace` changes a vote. `arena standings` counts wins, losses, ties and both-bad votes, and adds an Elo rating (start 1000, K 32, replayed in match order) once a contender has 5 votes. Clio never grades a contender; only your votes count.
+- `arena run --check <id>` runs a declared verifier in each worktree, resolved against your project's catalog; an undeclared id is refused before any contender starts. `--suite` tags matches. A contender's diff is captured when the project gitignores `.clio-coder/` or sits in a subdirectory of its repository, and its write count comes from that diff when the event stream misses a write.
+- Both commands accept `--autonomy yolo`, which is contained yolo: the sandbox, the safety judge and the autonomous caps stay on, and unconfined yolo is refused. A research iteration that a cap or the judge paused is archived and never kept. `status`, `report` and the arena view list the open decisions left for you.
+- The guide is `docs/guide/research-and-arena.md`.
 
 ### Contained yolo
 
@@ -25,10 +40,15 @@ Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox esca
 - A sandbox escape (`unsandboxed: true`) runs only when an operator message asked to run outside the sandbox, at every autonomy level.
 - Contained yolo finishes at rigor high and asks Clio to verify its work once; telling it to skip verification is recorded as unverified, not as a failure.
 - Yolo has session caps (`safety.limits.autonomousToolCalls` 600, `autonomousMinutes` 120, `autonomousTokens` 5M), shown in the footer. A cap pauses the run: press Enter on an empty prompt, or `clio-coder run --continue`, to resume with a fresh window. Headless runs exit 4 on a cap and 3 when the safety judge blocks 3 calls in a row or 20 in a session.
+- Every contained-yolo stretch keeps an audit. The journal records `autonomy.entered`, `open_decision`, `cap_reached`, `resumed` and `ended`, with content-free fields only.
+- The exit summary has an Autonomy block: tool calls, time, tokens, why the stretch ended, and the last open decisions.
+- `run --json` reports the audit, `telemetry why-stopped` explains a pause, and a judge-streak stop lists the calls left for you. Commands in that list are clipped and scrubbed of secrets.
 
 ### Commit authorship
 
 - Autonomous commits are authored by Clio Coder under its GitHub App bot address; you stay committer and get a `Co-authored-by` trailer. This covers dispatched workers, landing their work, fleet commit steps, headless `clio-coder run` and scheduled jobs. Interactive sessions keep you as author with Clio's trailer. Set `integrations.git.commitAuthor: human` to always stay author.
+- On Windows, Clio is now the author of autonomous commits, as on Linux and macOS. A managed `git.cmd` wrapper covers cmd.exe and PowerShell, and the POSIX wrapper covers Git Bash.
+- Every git path keeps you as co-author when Clio is author: `commit -v`, `core.commentChar=auto`, reverts, a repository with its own `core.hooksPath`, and fleet commits made on a remote host. Before, some of these dropped you. Unrecognized long options to `git commit` leave you as author.
 
 ### Setup and Copilot
 
@@ -44,8 +64,36 @@ Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox esca
 - Questions about Clio in headless `clio-coder run` sessions go to the bundled docs (`clio_docs`) instead of grepping the docs tree, and answers name the docs pages they rest on. The model checks the skill catalog before specialized work and sends independent reviews to one parallel dispatch without reading every file first. `pnpm run eval:onboarding` measures this live across the headless and ACP surfaces.
 - The README leads with one harness for every model, a three-step start and an exact install path for AI agents; the docs map gains a "Your first hour" path.
 
+### Desktop app
+
+- The Research page browses a workspace's campaigns with their iteration timeline, regrades a campaign, and starts or stops one. A workspace runs one campaign at a time, and a reopened page follows the running campaign. Closing the terminal (SIGHUP) stops the campaign cleanly and leaves no worktrees.
+- The Arena page runs matches with blind columns, takes votes and shows Elo standings.
+- `interface.guiTurnCapacity` (1 to 16, default 4) sets how many app turns run at once.
+- On Linux desktops, `clio-coder gui` brings an open app window forward before opening a new tab.
+- Routing shows the fleet default. Background setup off Linux reports itself as unavailable instead of failing. A long task title truncates without hiding the status mark.
+
+### Data
+
+- `data op=stats` reports `argmin` and `argmax`, the absolute index of the first minimum and maximum, for HDF5, NetCDF and Parquet. They respect strided windows and skip fill, missing and non-finite values.
+
 ### Fixes
 
+- A cancelled sandboxed command is stopped through its payload, so SIGTERM reaches the program itself and not only the sandbox launcher.
+- After a context eviction under a low context cap, a request could go out with a one-token output budget. Such a request now fails before the call and is refitted once.
+- Context eviction weighs the cost of rewriting the prompt cache, so it keeps a cheap stale unit rather than invalidating a long cached prefix.
+- The safety judge sees an MCP tool's action class and description.
+- `run --verify "<cmd>"` adds an acceptance check for one run. An interactive session started with `--session-file <path>` writes a session record there on exit.
+- A shell run of a declared verifier counts as running that check.
+- Under a read-only sandbox, tool caches go to the run's temp directory.
+- A middleware block names its rule.
+- In headless runs, `prompt_submit` hooks see the typed `/name` line, not the expanded template.
+- An extension command's output in the TUI is credited to the extension that owns it.
+- The pane host falls back to Clio's state or cache directory when the runtime directory is not writable.
+- A failed settings watcher, such as EMFILE, prints one line instead of a stack.
+- Sibling sweep runs no longer supersede each other's claims.
+- A claude-code or claude-sdk worker no longer fails attestation with "tool surface drift" (#449).
+- MCP servers see the installed Clio Coder version in the `clientInfo` Clio sends when it connects.
+- The TUI redraws only the rows a streaming frame changed, which keeps long replies smooth.
 - A passing `reproduce`, `numeric-compare` or perf-budget check now satisfies a quality-policy requirement: judged checks are classified by their verdict, not a shell exit code. Before, a successful reproduction left the requirement outstanding.
 - A memory record contradicted during a session is withdrawn from that session's prompt, as it already was from fresh selection.
 - A middleware failure that escapes the runtime is journaled as `middleware.hook_failed` and shown as a warning; the turn continues without that hook's effects instead of hiding the failure.
@@ -59,6 +107,13 @@ Since 0.7.0-rc.1, yolo runs contained by default, Clio closes three sandbox esca
 
 - The composition root (`src/entry/orchestrator.ts`, 6,140 to 4,767 lines) only constructs and wires services: memory routing, the compaction flow, guardian state, route diagnostics and session ledger recorders live in their domains. Turn modules take narrow typed views of turn state, and continuation state has one owner. Published domain contracts are query-only: hook registration and run-reader binding go only to the owning composition, and `getContract(name)` is typed by one name-to-contract map. Boundary rules 15 to 17 keep all three from regressing. No user-visible change, and prompt bytes are identical.
 - The core test gate adds the numerical, reproduction, working-set and host-verification contracts (812 to 955 tests), and `eval:onboarding` scores a dispatch by the receipts it returned, not by the call.
+- CI has an optional `browser-smoke` job, run only on manual dispatch. The installed-package smoke test bounds `npm install` by the test's own budget and reports npm's log on failure instead of hanging.
+
+### Known limits
+
+- A research campaign cannot be resumed, each iteration tries one candidate, and there are no parameter sweeps.
+- `arena run` has no SIGHUP handler, and arena contenders inherit the parent environment. Only `.clio-coder/verifiers.yaml` is copied into a contender's worktree, so untracked files a check reads must be committed.
+- On Windows, cmd.exe expands `%NAME%` in the arguments of the `git.cmd` wrapper when `NAME` is set, even inside quotes, so `git add 'file%USERNAME%.txt'` from PowerShell or a commit message containing `%PATH%` reaches git with the value substituted. Git Bash is not affected; call `git.exe` by name or use `-F <file>` to pass such text literally.
 
 ## 0.7.0-rc.1 - 2026-11-07
 
