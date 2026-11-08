@@ -48,6 +48,7 @@ import {
 import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
+import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
@@ -282,6 +283,8 @@ type TextSegment = {
 	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
 	/** The last rows hung under the gutter, so an unchanged row keeps its hung string (#428). */
 	hung?: { input: string[]; prefix: string; output: string[] };
+	/** The last streamed rows before and after their leading blank rows were dropped. */
+	unblanked?: { rows: string[]; lines: string[] };
 	/** Fitted rows by Markdown row, so an unchanged row is not measured again on the next delta. Streaming only. */
 	rowMemo?: RowMemo | undefined;
 	/** Read by the stream renderer to price the next repaint; a new segment starts unpriced. */
@@ -321,6 +324,8 @@ type SettledBlocks = {
 	layout?: { width: number; bareFences: boolean; epoch: number; rows: string[]; through: number };
 	/** The open tail's Markdown component and the source it last rendered. */
 	tail?: { view: Markdown; source: string; epoch: number; bareFences: boolean };
+	/** The rows last returned and how many of them were head rows at which layout, which later rows still lead with. */
+	returned?: { layout: NonNullable<SettledBlocks["layout"]>; rows: string[]; headRows: number };
 };
 type ToolSegment = {
 	kind: "tool";
@@ -1241,6 +1246,15 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		rows = markdownRows(seg.markdown.view, width, bareFences, memo);
 	}
 	const lines = withoutLeadingBlanks(rows);
+	// Dropping the same leading blanks as last time keeps what the split vouched for, one row per blank fewer.
+	const previous = seg.unblanked;
+	if (lines !== rows && previous !== undefined && previous.rows !== previous.lines) {
+		const dropped = rows.length - lines.length;
+		if (previous.rows.length - previous.lines.length === dropped)
+			keepRows(lines, previous.lines, keptRows(rows, previous.rows) - dropped);
+	}
+	if (seg.finalized) delete seg.unblanked;
+	else seg.unblanked = { rows, lines };
 	if (!seg.finalized) seg.liveRender = { durationMs: performance.now() - startedAt, codeUnits: seg.text.length };
 	seg.rendered.layouts.set(key, lines);
 	if (seg.rendered.layouts.size > 3) {
@@ -1333,7 +1347,12 @@ function renderSettledSplit(
 		tail.view.setText(region);
 		tail.source = region;
 	}
-	return layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
+	const rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
+	// A layout's head rows only grow, so every head row the last frame returned still leads in place.
+	const returned = settled.returned;
+	if (returned?.layout === layout) keepRows(rows, returned.rows, returned.headRows);
+	settled.returned = { layout, rows, headRows: layout.rows.length };
+	return rows;
 }
 
 /**
@@ -1428,14 +1447,30 @@ function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string
 	const memo = seg.hung;
 	if (memo?.input === lines && memo.prefix === firstPrefix) return memo.output;
 	// The unchanged rows lead: find where they end, copy their hung rows in one native slice, and hang the rest.
+	// The rows the layers below vouch for are not compared again (#428).
 	let same = 0;
 	if (memo?.prefix === firstPrefix) {
 		const limit = Math.min(lines.length, memo.input.length);
+		same = keptRows(lines, memo.input);
 		while (same < limit && memo.input[same] === lines[same]) same += 1;
 	}
-	const output = same > 0 && memo !== undefined ? memo.output.slice(0, same) : [];
-	for (let index = same; index < lines.length; index += 1)
-		output.push(`${index === 0 ? firstPrefix : PROSE_GUTTER}${lines[index] ?? ""}`);
+	const hung = (index: number): string => `${index === 0 ? firstPrefix : PROSE_GUTTER}${lines[index] ?? ""}`;
+	let output: string[];
+	if (same > 0 && memo !== undefined) {
+		// One exact-size copy: a reply's rows are a large array, and a slice grown by a push allocated it twice.
+		const base = memo.output;
+		if (lines.length <= base.length) output = base.slice(0, lines.length);
+		else {
+			const added: string[] = [];
+			for (let index = base.length; index < lines.length; index += 1) added.push(hung(index));
+			output = base.concat(added);
+		}
+		for (let index = same; index < Math.min(lines.length, base.length); index += 1) output[index] = hung(index);
+	} else {
+		output = [];
+		for (let index = 0; index < lines.length; index += 1) output.push(hung(index));
+	}
+	if (memo !== undefined) keepRows(output, memo.output, same);
 	seg.hung = { input: lines, prefix: firstPrefix, output };
 	return output;
 }
@@ -1904,8 +1939,9 @@ interface TurnBlock {
  * action with a body (arguments, output, a diff) opens a gap on both sides so
  * its body cannot be mistaken for its neighbor's.
  */
-function joinTurnBlocks(blocks: readonly TurnBlock[]): string[] {
+function joinTurnBlocks(blocks: readonly TurnBlock[], memo?: JoinedRows): string[] {
 	const parts: (readonly string[])[] = [];
+	const pieces: RowPiece[] = [];
 	let previous: TurnBlock | undefined;
 	for (const block of blocks) {
 		// Markdown can open or close a block on an empty row; the gap between
@@ -1918,15 +1954,33 @@ function joinTurnBlocks(blocks: readonly TurnBlock[]): string[] {
 		if (start === end) continue;
 		if (previous !== undefined) {
 			const stacked = previous.kind === "tool" && block.kind === "tool" && !previous.body && !block.body;
-			if (!stacked) parts.push(GAP_ROW);
+			if (!stacked) {
+				parts.push(GAP_ROW);
+				pieces.push({ rows: GAP_ROW, start: 0, end: 1 });
+			}
 		}
 		parts.push(start === 0 && end === lines.length ? lines : lines.slice(start, end));
+		pieces.push({ rows: lines, start, end });
 		previous = block;
 	}
 	// One native concat: a streaming answer's block is the whole reply, and a row-by-row copy of it showed in
-	// the frame time (#428). The result is always a new array, which callers may keep.
-	return NO_ROW_LIST.concat(...parts);
+	// the frame time (#428). The result is a new array, which callers may keep, except for a streaming turn of one
+	// whole prose block: its rows are returned as they are, since copying a reply's rows cost more than the rest of the
+	// join, and the panel only reads them.
+	const only = parts.length === 1 ? blocks.find((block) => block.lines === parts[0]) : undefined;
+	const output = memo !== undefined && only?.kind === "prose" ? only.lines : NO_ROW_LIST.concat(...parts);
+	if (memo !== undefined) {
+		if (memo.output !== undefined) keepRows(output, memo.output, keptPieceRows(pieces, memo.pieces));
+		memo.pieces = pieces;
+		memo.output = output;
+	}
+	return output;
 }
+
+/** A turn's last joined rows and the stretches of block rows they were joined from. */
+type JoinedRows = { pieces: RowPiece[]; output?: string[] };
+/** Per streaming turn, so a frame knows how many of its rows lead unchanged from the turn's last frame. */
+const joinedTurns = new WeakMap<object, JoinedRows>();
 
 const GAP_ROW: readonly string[] = [""];
 const NO_ROW_LIST: readonly string[] = [];
@@ -2201,7 +2255,15 @@ function renderEntryLines(
 	if (entry.turnUsage && !entry.pending) {
 		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt) });
 	}
-	return joinTurnBlocks(blocks);
+	let joined: JoinedRows | undefined;
+	if (entry.pending) {
+		joined = joinedTurns.get(entry);
+		if (joined === undefined) {
+			joined = { pieces: [] };
+			joinedTurns.set(entry, joined);
+		}
+	}
+	return joinTurnBlocks(blocks, joined);
 }
 
 /** Two stretches of one run of reasoning, as one text. */
@@ -2351,6 +2413,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 	let cachedWidth: number | undefined;
 	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
+	/** The pieces `cachedRegions.tail` was built from. */
+	let tailPieces: RowPiece[] = [];
 	/** The last frame concatenated, built on first request; null until someone asks for it. */
 	let cachedLines: string[] | null = [];
 	let cachedDetail: TranscriptDetailPolicy | undefined;
@@ -3139,7 +3203,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let out: string[] = [];
 		// A row-by-row push of a long streaming reply showed in the frame time, so an entry larger than
 		// everything before it is copied natively (#428).
+		// What the tail was built from, so the frame can tell how much of it leads unchanged from the last one.
+		const pieces: RowPiece[] = [];
 		const appendRows = (rows: readonly string[]): void => {
+			pieces.push({ rows, start: 0, end: rows.length });
 			if (rows.length > 256 && rows.length > out.length) out = out.concat(rows);
 			else for (const line of rows) out.push(line);
 		};
@@ -3164,7 +3231,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// Compact. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
 			const separated = i > 0 && !stacksUnder(entry, previous, detail);
-			if (separated) out.push("");
+			if (separated) {
+				out.push("");
+				pieces.push({ rows: GAP_ROW, start: 0, end: 1 });
+			}
 			const entryStart = out.length;
 			const renders = entryRenderCache.get(entry);
 			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
@@ -3210,7 +3280,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 			}
 			// An entry with nothing to show draws no gap either.
-			if (separated && out.length === entryStart) out.pop();
+			if (separated && out.length === entryStart) {
+				out.pop();
+				pieces.splice(-2, 2);
+			}
 			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
 				freezeTailRows = out.length;
@@ -3227,6 +3300,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				key: baseKey,
 			};
 		}
+		if (cachedRegions.prefix === prefix) keepRows(out, cachedRegions.tail, keptPieceRows(pieces, tailPieces));
+		tailPieces = pieces;
 		cachedRegions = { prefix, tail: out };
 		cachedLines = null;
 		cachedWidth = width;

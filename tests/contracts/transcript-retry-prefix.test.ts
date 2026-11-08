@@ -2,6 +2,7 @@ import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { keptRows } from "../../src/interactive/kept-rows.js";
 
 const WIDTHS = [60, 80, 120, 200] as const;
 
@@ -50,5 +51,50 @@ test("an update of the same retry attempt replaces its frozen row", () => {
 		const plain = panel.render(width).map(stripTerminalSequences).join("\n");
 		match(plain, /recovered after 1 attempt/u);
 		strictEqual((plain.match(/↻/gu) ?? []).length, 1);
+	}
+});
+
+/**
+ * A stream tick reports how many leading rows of the live tail are last tick's strings, and the terminal renderer
+ * skips those rows. The count must never cover a row that changed: neither the open tail of a plain reply, nor rows
+ * above it that a late reference definition rewrites. Either streamed frame must match the same reply rendered fresh.
+ */
+test("the rows a stream tick vouches for are last tick's rows, even when a late definition rewrites earlier ones", () => {
+	const paragraphs = Array.from(
+		{ length: 40 },
+		(_, index) => `Paragraph ${index} of the answer, with prose that wraps.\n\n`,
+	);
+	const texts = [
+		`${paragraphs.join("")}Done.`,
+		`See [the guide][ref] first.\n\n${paragraphs.join("")}[ref]: https://example.com/guide\n\nDone.`,
+	];
+	const start = (panel: ReturnType<typeof createChatPanel>): void => {
+		panel.appendUser("Write the guide.");
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	};
+	for (const text of texts) {
+		const panel = createChatPanel({ now: () => 0 });
+		start(panel);
+		let previous = panel.renderRegions(80);
+		let vouched = 0;
+		for (const delta of text.match(/[\s\S]{1,23}/gu) ?? []) {
+			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta } as never);
+			const frame = panel.renderRegions(80);
+			const kept = frame.prefix === previous.prefix ? keptRows(frame.tail, previous.tail) : 0;
+			for (let row = 0; row < kept; row += 1)
+				strictEqual(
+					frame.tail[row],
+					previous.tail[row],
+					`row ${row} of ${kept} vouched for after ${JSON.stringify(delta)}`,
+				);
+			vouched += kept;
+			previous = frame;
+		}
+		ok(vouched > 0, "stream ticks vouch for unchanged rows");
+		const fresh = createChatPanel({ now: () => 0 });
+		start(fresh);
+		fresh.applyEvent({ type: "text_delta", contentIndex: 0, delta: text } as never);
+		strictEqual(panel.render(80).join("\n"), fresh.render(80).join("\n"));
 	}
 });

@@ -143,8 +143,23 @@ index cd41095edc02c3b6b9dc622414fd4942d095d0f6..61ffb093f8cff281cc671d5c68108f25
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
+diff --git a/dist/tui-main-screen.d.ts b/dist/tui-main-screen.d.ts
+index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a4603ef9f34d 100644
+--- a/dist/tui-main-screen.d.ts
++++ b/dist/tui-main-screen.d.ts
+@@ -21,6 +21,10 @@ export declare class TuiMainScreen extends TuiBase implements TUI {
+     private previousViewportTop;
+     captureRenderState(): TuiMainScreenRenderState;
+     restoreRenderState(state: TuiMainScreenRenderState): void;
++    /** Clio patch: rows taken from the previous frame without comparing them, during a frame. */
++    protected keptLeadingRows: number;
++    /** Clio patch: leading rows of this frame's root rows that are the very strings of the previous frame's. */
++    protected keptRenderedRows(lines: string[]): number;
+     protected resetRenderState(): void;
+     protected beforeTerminalStop(options: TuiStopOptions): void;
+     private collectKittyImageIds;
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286dbdfc61500 100644
+index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7327408ce 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
 @@ -3,7 +3,8 @@ import * as os from "node:os";
@@ -157,7 +172,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
  /** OSC 133 prompt markers at the start of a rendered line. Fullscreen uses them for prompt navigation. */
  const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
  const KITTY_SEQUENCE_PREFIX = "\x1b_G";
-@@ -109,6 +110,61 @@ export class TuiMainScreen extends TuiBase {
+@@ -109,6 +110,87 @@ export class TuiMainScreen extends TuiBase {
      hardwareCursorRow = 0;
      maxLinesRendered = 0;
      previousViewportTop = 0;
@@ -170,6 +185,23 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
 +    lineResetMemo = { raw: [], out: [], image: new Uint8Array(0) };
 +    /** Clio patch: image row indices of every reset output array this renderer produced. */
 +    lineImageRows = new WeakMap();
++    /**
++     * Clio patch: the previous frame's rendered rows after the OSC 133 strip, rewritten in place from the first row
++     * not kept, because a new array per frame over a tall transcript cost more than the rest of a keystroke frame.
++     */
++    zoneStrippedRows = [];
++    /**
++     * Clio patch: how many leading rows this frame takes from the previous frame without comparing them. `doRender`
++     * sets it before the rows are resolved and reset, and clears it after.
++     */
++    keptLeadingRows = 0;
++    /**
++     * Clio patch: how many leading rows of `lines`, the root's rows for this frame, are the very strings of the root's
++     * rows for the previous frame. Only a subclass that knows says more than 0; a wrong answer paints stale rows.
++     */
++    keptRenderedRows(lines) {
++        return 0;
++    }
 +    applyLineResets(lines) {
 +        const memo = this.lineResetMemo;
 +        // The raw snapshot and the image flags are rewritten in place: a frame
@@ -184,7 +216,16 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
 +        }
 +        const previousLength = raw.length;
 +        const imageRows = [];
-+        for (let i = 0; i < lines.length; i++) {
++        // Clio patch: kept rows are the very strings the memo holds, so their output and image flags carry over.
++        const kept = Math.min(this.keptLeadingRows, previousLength);
++        for (let i = 0; i < kept; i++)
++            lines[i] = previousOut[i];
++        for (const row of this.lineImageRows.get(previousOut) ?? []) {
++            if (row >= kept)
++                break;
++            imageRows.push(row);
++        }
++        for (let i = kept; i < lines.length; i++) {
 +            const line = lines[i];
 +            if (i < previousLength && line === raw[i]) {
 +                lines[i] = previousOut[i];
@@ -219,15 +260,16 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
      captureRenderState() {
          return {
              previousLines: [...this.previousLines],
-@@ -131,6 +187,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -131,6 +213,8 @@ export class TuiMainScreen extends TuiBase {
          this.previousViewportTop = state.previousViewportTop;
      }
      resetRenderState() {
 +        this.lineResetMemo = { raw: [], out: [], image: new Uint8Array(0) };
++        this.zoneStrippedRows = [];
          this.previousLines = [];
          this.previousWidth = -1;
          this.previousHeight = -1;
-@@ -153,8 +210,8 @@ export class TuiMainScreen extends TuiBase {
+@@ -153,8 +237,8 @@ export class TuiMainScreen extends TuiBase {
      }
      collectKittyImageIds(lines) {
          const ids = new Set();
@@ -238,7 +280,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
                  ids.add(id);
              }
          }
-@@ -185,7 +242,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -185,7 +269,7 @@ export class TuiMainScreen extends TuiBase {
          let expandedFirstChanged = firstChanged;
          let expandedLastChanged = lastChanged;
          const expandForLines = (lines) => {
@@ -247,13 +289,51 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..fc8711966417be0256ae4481a29286db
                  if (extractKittyImageIds(lines[i]).length === 0)
                      continue;
                  const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
-@@ -230,7 +287,8 @@ export class TuiMainScreen extends TuiBase {
+@@ -230,7 +314,27 @@ export class TuiMainScreen extends TuiBase {
          // Render all components to get new lines
          // Resolve fake cursors before compositing so overlays and line slicing see plain SGR codes
          // Drop OSC 133 markers: the terminal reads 133;A as a new shell prompt, which ends program status (OSC 7501)
 -        let newLines = this.resolveFakeCursors(this.render(width).map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
 +        // Clio patch: only a row that starts with an OSC 133 marker can match the anchored pattern, and a regex call per row cost more than the rest of a frame over a tall transcript.
-+        let newLines = this.resolveFakeCursors(this.render(width).map((line) => (line.startsWith("\x1b]133;") ? line.replace(OSC133_ZONE_PREFIX, "") : line)));
++        // Clio patch: rows the root vouches for are taken from the previous frame as they were stripped, resolved and
++        // reset, and are not compared again. Only rows outside both frames' viewports qualify, at an unchanged size
++        // and with no overlay, since the cursor marker, overlays and the viewport are a row's only other inputs.
++        const rendered = this.render(width);
++        const zoneStripped = this.zoneStrippedRows;
++        const kept = widthChanged || heightChanged || this.previousWidth !== width || this.hasOverlayEntries
++            ? 0
++            : Math.max(0, Math.min(this.keptRenderedRows(rendered), zoneStripped.length - height, rendered.length - height));
++        const stripped = zoneStripped;
++        for (let i = kept; i < rendered.length; i++) {
++            const line = rendered[i];
++            stripped[i] = line.startsWith("\x1b]133;") ? line.replace(OSC133_ZONE_PREFIX, "") : line;
++        }
++        stripped.length = rendered.length;
++        const resetMemoOut = this.lineResetMemo.out;
++        this.keptLeadingRows = kept;
++        let newLines = this.resolveFakeCursors(stripped);
++        // The rest of the frame rewrites what `resolveFakeCursors` returns, so a memo it returned is the frame's now.
++        if (newLines === stripped)
++            this.zoneStrippedRows = [];
          // Composite overlays into the rendered lines (before differential compare)
          if (this.hasOverlayEntries) {
              newLines = this.compositeOverlays(newLines, width, height);
+@@ -238,6 +342,9 @@ export class TuiMainScreen extends TuiBase {
+         // Extract cursor position before applying line resets (marker must be found first)
+         const cursorPos = this.extractCursorPosition(newLines, height);
+         newLines = this.applyLineResets(newLines);
++        this.keptLeadingRows = 0;
++        // Clio patch: the kept rows equal the baseline's when the previous frame's reset output is the baseline.
++        const diffFrom = kept > 0 && this.previousLines === resetMemoOut ? kept : 0;
+         // Helper to clear scrollback and viewport and render all new lines
+         const fullRender = (clear) => {
+             this.fullRedrawCount += 1;
+@@ -325,7 +432,7 @@ export class TuiMainScreen extends TuiBase {
+         let firstChanged = -1;
+         let lastChanged = -1;
+         const maxLines = Math.max(newLines.length, this.previousLines.length);
+-        for (let i = 0; i < maxLines; i++) {
++        for (let i = diffFrom; i < maxLines; i++) {
+             const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+             const newLine = i < newLines.length ? newLines[i] : "";
+             if (oldLine !== newLine) {

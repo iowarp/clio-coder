@@ -88,6 +88,7 @@ class RegularFrameRows {
 		showHardwareCursor: boolean,
 		baseline: readonly string[] | undefined,
 		resolve: (line: string) => string,
+		kept: number,
 	): string[] {
 		if (showHardwareCursor !== this.showHardwareCursor) {
 			this.showHardwareCursor = showHardwareCursor;
@@ -97,7 +98,10 @@ class RegularFrameRows {
 		const resolved = this.resolved;
 		// Without a baseline to steer around, a fresh array is the only safe one.
 		const rows = (baseline && this.pool.find((rows) => rows !== baseline && rows !== this.memoOutput)) ?? [];
-		for (let index = 0; index < lines.length; index++) {
+		// Kept rows are the strings `raw` holds, so they resolve as they did.
+		const from = Math.min(kept, raw.length);
+		for (let index = 0; index < from; index++) rows[index] = resolved[index] as string;
+		for (let index = from; index < lines.length; index++) {
 			const line = lines[index] as string;
 			if (line !== raw[index]) {
 				raw[index] = line;
@@ -140,9 +144,32 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 		this.awaitingFrameRows = false;
 		// pi-tui keeps the baseline private; the fallback in `next` stays safe if a Pi upgrade renames it.
 		const baseline = (this as unknown as { previousLines?: readonly string[] }).previousLines;
-		return this.frameRows.next(lines, this.getShowHardwareCursor(), baseline, (line) => {
-			return super.resolveFakeCursors([line])[0] ?? line;
-		});
+		return this.frameRows.next(
+			lines,
+			this.getShowHardwareCursor(),
+			baseline,
+			(line) => super.resolveFakeCursors([line])[0] ?? line,
+			this.keptLeadingRows,
+		);
+	}
+
+	/**
+	 * A root that counts its renders and the leading rows each one left unchanged vouches for this frame's rows,
+	 * when its last render before this frame's was the previous frame's (#428).
+	 */
+	protected override keptRenderedRows(_lines: string[]): number {
+		const only = this.children.length === 1 ? (this.children[0] as Partial<KeptRowsRoot>) : undefined;
+		const renders = only?.renderCount;
+		const kept =
+			typeof renders === "number" &&
+			only === this.keptRoot &&
+			renders === this.keptRootRenders + 1 &&
+			this.awaitingFrameRows
+				? (only?.keptRowCount ?? 0)
+				: 0;
+		this.keptRoot = only;
+		this.keptRootRenders = renders ?? -1;
+		return kept;
 	}
 
 	protected override doRender(): void {
@@ -196,6 +223,14 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	private readonly deferredAdmission: DeferredRenderAdmission;
 	private readonly frameRows = new RegularFrameRows();
 	private awaitingFrameRows = false;
+	private keptRoot: unknown;
+	private keptRootRenders = -1;
+}
+
+/** A root component that knows how many leading rows of each render are the very strings of the render before. */
+interface KeptRowsRoot {
+	readonly renderCount: number;
+	readonly keptRowCount: number;
 }
 
 export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {

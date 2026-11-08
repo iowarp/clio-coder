@@ -1,6 +1,7 @@
 import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui.js";
 import { ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
+import { keptRows } from "./kept-rows.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
@@ -219,7 +220,14 @@ class RegularRoot implements Component {
 	 */
 	private heldPrefix: readonly string[] | null = null;
 	private heldPrefixAt = -1;
+	/** The transcript tail the buffer holds after the prefix, and the row it starts at. */
+	private heldTail: readonly string[] | undefined;
+	private heldTailAt = -1;
 	private renderedSkinEpoch = skinEpoch();
+	/** Counts `render` calls, so a renderer can tell `keptRowCount` is about the call after the one it saw. */
+	renderCount = 0;
+	/** How many leading rows the last `render` left as the very strings the render before it returned. */
+	keptRowCount = 0;
 
 	constructor(private readonly parts: LayoutParts) {}
 
@@ -229,15 +237,27 @@ class RegularRoot implements Component {
 			this.invalidate();
 		}
 		const out = this.out;
+		const previousLength = out.length;
+		this.renderCount += 1;
 		let row = 0;
-		const write = (lines: readonly string[]): void => {
-			for (const line of lines) out[row++] = line;
+		// The first row this frame wrote a string other than the one already there.
+		let firstChanged = -1;
+		const put = (line: string): void => {
+			if (out[row] !== line) {
+				if (firstChanged < 0) firstChanged = row;
+				out[row] = line;
+			}
+			row += 1;
+		};
+		const write = (lines: readonly string[], from = 0): void => {
+			for (let index = from; index < lines.length; index += 1) put(lines[index] as string);
 		};
 		write(this.parts.banner.render(width));
 		const regions = this.parts.chat.renderRegions?.(width);
+		let tail: readonly string[] | undefined;
 		if (regions !== undefined) {
 			if (regions.prefix.length + regions.tail.length > 0) {
-				out[row++] = "";
+				put("");
 				if (regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
 					row += regions.prefix.length;
 				} else {
@@ -245,8 +265,13 @@ class RegularRoot implements Component {
 					this.heldPrefixAt = row;
 					write(regions.prefix);
 				}
-				write(regions.tail);
-				out[row++] = "";
+				// The tail rows its panel vouches for are already in place, so a streaming reply writes only its end.
+				const kept = row === this.heldTailAt ? keptRows(regions.tail, this.heldTail) : 0;
+				tail = regions.tail;
+				this.heldTailAt = row;
+				row += kept;
+				write(regions.tail, kept);
+				put("");
 			} else {
 				this.heldPrefix = null;
 			}
@@ -265,12 +290,16 @@ class RegularRoot implements Component {
 		if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
 		write(this.parts.editor.render(width));
 		write(this.parts.footer.render(width));
+		this.heldTail = tail;
+		if (tail === undefined) this.heldTailAt = -1;
 		out.length = row;
+		this.keptRowCount = Math.min(firstChanged < 0 ? row : firstChanged, previousLength);
 		return out;
 	}
 
 	invalidate(): void {
 		this.heldPrefix = null;
+		this.heldTail = undefined;
 		this.parts.banner.invalidate();
 		this.parts.chat.invalidate();
 		this.parts.workspace?.invalidate();
