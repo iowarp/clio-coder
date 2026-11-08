@@ -5,15 +5,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFi
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
+import { runArenaCommand } from "../../src/cli/arena.js";
 import { scratchRootFindings } from "../../src/cli/doctor.js";
-import { runBashCommand } from "../../src/core/bash-exec.js";
+import { runResearchCommand } from "../../src/cli/research.js";
+import { runClioRun } from "../../src/cli/run.js";
+import { AUTONOMY_CEILING_ENV, runBashCommand, setToolEnvAutonomy } from "../../src/core/bash-exec.js";
 import { readSettings } from "../../src/core/config.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy, yoloScriptSandboxState } from "../../src/core/sandbox/main-session.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
-import { type YoloHostFacts, yoloRootRefusal } from "../../src/core/yolo-host.js";
+import { autonomyCeilingRefusal, type YoloHostFacts, yoloRootRefusal } from "../../src/core/yolo-host.js";
 import { evaluateMainGrant } from "../../src/domains/dispatch/grant-authority.js";
 import type { GrantRecord } from "../../src/domains/dispatch/grant-broker.js";
 import { compileWorker } from "../../src/domains/prompts/compiler.js";
@@ -887,4 +890,46 @@ test("a worker permit that inherited yolo compiles the yolo worker safety fragme
 		compileWith().fragmentManifest.some((fragment) => fragment.id === "safety.default"),
 		true,
 	);
+});
+
+// A delegated run never gets more autonomy than its dispatcher: a session below
+// yolo marks its live level in every bash command's environment, and a
+// clio-coder started there refuses yolo above it.
+test("the autonomy ceiling reaches bash commands below yolo and refuses yolo above it in run, research and arena", async (t) => {
+	const home = await isolateClioEnv("clio-yolo-ceiling-");
+	const inherited = process.env[AUTONOMY_CEILING_ENV];
+	t.after(() => {
+		setToolEnvAutonomy(null);
+		if (inherited === undefined) delete process.env[AUTONOMY_CEILING_ENV];
+		else process.env[AUTONOMY_CEILING_ENV] = inherited;
+		home.restore();
+	});
+	delete process.env[AUTONOMY_CEILING_ENV];
+	const probe = async (): Promise<string> =>
+		(await runBashCommand(`printf %s "\${${AUTONOMY_CEILING_ENV}-unset}"`)).stdout;
+	let live = "default";
+	setToolEnvAutonomy(() => live);
+	strictEqual(await probe(), "default");
+	live = "yolo";
+	strictEqual(await probe(), "unset");
+	process.env[AUTONOMY_CEILING_ENV] = "default";
+	strictEqual(await probe(), "default", "a yolo session started under a ceiling passes it on");
+
+	match(autonomyCeilingRefusal() ?? "", /autonomy default.*more autonomy than its dispatcher/);
+	const errors: string[] = [];
+	t.mock.method(process.stderr, "write", (chunk: unknown) => {
+		errors.push(String(chunk));
+		return true;
+	});
+	strictEqual(await runClioRun(["--autonomy", "yolo", "Inspect"], { noContextFiles: true }), 2);
+	const research = ["start", "--check", "score", "--metric", "score", "--direction", "min", "--max-iterations", "1"];
+	strictEqual(await runResearchCommand([...research, "--autonomy", "yolo"]), 2);
+	strictEqual(
+		await runArenaCommand(["run", "--contender", "a/m1", "--contender", "b/m2", "--autonomy", "yolo", "Inspect"]),
+		2,
+	);
+	const refusals = errors.join("").split(AUTONOMY_CEILING_ENV).length - 1;
+	strictEqual(refusals, 3, errors.join(""));
+	delete process.env[AUTONOMY_CEILING_ENV];
+	strictEqual(autonomyCeilingRefusal(), null);
 });

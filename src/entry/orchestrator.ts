@@ -8,6 +8,7 @@ import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
+import { setToolEnvAutonomy } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import {
@@ -82,7 +83,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { narrowTurnConstraints, templateToolConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import { yoloRootRefusal } from "../core/yolo-host.js";
+import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import {
@@ -1663,7 +1664,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
 	// Root outside a container never runs yolo (#407). The uid and the
 	// container do not change while the process runs, so it is read once.
-	const yoloRefusal = yoloRootRefusal();
+	const yoloRefusal = yoloRootRefusal() ?? autonomyCeilingRefusal();
 	// The one effective-autonomy resolution. Every admission surface (registry
 	// admission, dispatch plan provenance, ACP session snapshot) resolves
 	// through these two functions so a fallback added to one surface cannot
@@ -1683,6 +1684,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const level = activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 		return level === "yolo" && yoloRefusal !== null ? "default" : level;
 	};
+	// Every bash command this session runs carries its live level as an
+	// autonomy ceiling, so a clio-coder it starts cannot take yolo above it.
+	setToolEnvAutonomy(resolveEffectiveAutonomy);
 	// Contained yolo (ob-yolo D1) admits, judges and permits workers exactly as
 	// default does; only where a call would wait for a person does it differ,
 	// which `unattendedAsks` tells the registry. Prompts, auto-continuation and

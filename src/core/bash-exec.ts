@@ -207,6 +207,27 @@ export function createBashOutputProgressController(
 	};
 }
 
+/**
+ * Names the autonomy a `clio-coder` started from a bash command may take at most, so a delegated run never gets more
+ * autonomy than the session that started it. `run`, `research` and `arena` refuse `--autonomy yolo` under it.
+ */
+export const AUTONOMY_CEILING_ENV = "CLIO_CODER_AUTONOMY_CEILING";
+
+let toolEnvAutonomy: (() => string) | null = null;
+
+/** Registers the live autonomy of this process's session, read on every command so a level change lands at once. */
+export function setToolEnvAutonomy(read: (() => string) | null): void {
+	toolEnvAutonomy = read;
+}
+
+/** A session below yolo sets its own level; one at yolo passes on only a ceiling it inherited itself. */
+function toolEnvAutonomyCeiling(): string | undefined {
+	const live = toolEnvAutonomy?.();
+	if (live !== undefined && live !== "yolo") return live;
+	const inherited = process.env[AUTONOMY_CEILING_ENV];
+	return inherited !== undefined && inherited !== "" ? inherited : undefined;
+}
+
 /** What every bash command's environment drops, sandboxed or not: exported functions and Clio's control keys. */
 function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...source };
@@ -218,6 +239,10 @@ function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
+	// Set last from the live level, so a login snapshot taken at another level cannot carry a stale ceiling.
+	Reflect.deleteProperty(env, AUTONOMY_CEILING_ENV);
+	const ceiling = toolEnvAutonomyCeiling();
+	if (ceiling !== undefined) env[AUTONOMY_CEILING_ENV] = ceiling;
 	return env;
 }
 

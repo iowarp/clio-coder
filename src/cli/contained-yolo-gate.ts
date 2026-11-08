@@ -1,5 +1,5 @@
 import { readSettings } from "../core/config.js";
-import { yoloRootRefusal } from "../core/yolo-host.js";
+import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 
 /**
@@ -11,6 +11,8 @@ import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 export function containedYoloRefusal(surface: "research" | "arena"): string | null {
 	const root = yoloRootRefusal();
 	if (root !== null) return root;
+	const ceiling = autonomyCeilingRefusal();
+	if (ceiling !== null) return ceiling;
 	if (effectiveYoloConfinement(readSettings().safety) === "unconfined")
 		return `${surface} runs yolo contained only, and your user settings choose unconfined yolo (safety.yoloConfinement); set it back to contained to use --autonomy yolo here`;
 	return null;

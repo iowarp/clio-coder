@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { AUTONOMY_CEILING_ENV } from "./bash-exec.js";
 
 /**
  * Root refusal for yolo (#407). Yolo runs every command without asking and
@@ -71,4 +72,15 @@ export const YOLO_ROOT_REFUSAL =
 export function yoloRootRefusal(facts: YoloHostFacts = readYoloHostFacts()): string | null {
 	if (facts.platform === "win32" || facts.euid !== 0) return null;
 	return runsInContainer(facts) ? null : YOLO_ROOT_REFUSAL;
+}
+
+/**
+ * Why yolo is refused because a session below yolo started this process from its bash tool, or null.
+ * A delegated run never gets more autonomy than its dispatcher; the session marks its level in every bash command's
+ * environment.
+ */
+export function autonomyCeilingRefusal(): string | null {
+	const ceiling = process.env[AUTONOMY_CEILING_ENV];
+	if (ceiling === undefined || ceiling === "" || ceiling === "yolo") return null;
+	return `the session that started this command runs at autonomy ${ceiling}, and a delegated run cannot take more autonomy than its dispatcher (${AUTONOMY_CEILING_ENV}=${ceiling})`;
 }

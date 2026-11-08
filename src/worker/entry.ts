@@ -17,6 +17,7 @@ process.title = "clio-coder-worker";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
+import { setToolEnvAutonomy } from "../core/bash-exec.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
 import { adoptDevRootOwner } from "../core/dev-roots.js";
 import {
@@ -333,6 +334,8 @@ async function main(): Promise<number> {
 		stopHeartbeat();
 		return 2;
 	}
+	// The worker's bash commands carry its own level as the ceiling for any clio-coder they start.
+	setToolEnvAutonomy(() => spec.permit.allowance.executeAutonomy ?? "default");
 	// Slim streaming events before NDJSON serialization: pi's message_update
 	// carries the full cumulative message twice (top-level + assistantMessageEvent
 	// .partial), which reserializes quadratically on stdout. No worker-stdout
