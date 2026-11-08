@@ -4495,6 +4495,1790 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/research/campaigns": {
+			"get": {
+				"operationId": "researchCampaigns",
+				"summary": "Research campaigns in this workspace, newest first, with their objective, stop reason and ratchets.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["campaigns"],
+									"properties": {
+										"campaigns": {
+											"type": "array",
+											"items": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["id", "createdAt", "state", "objective", "stop", "iterations", "ratchets"],
+														"properties": {
+															"id": {
+																"type": "string",
+																"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+															},
+															"createdAt": {
+																"type": "string"
+															},
+															"state": {
+																"$ref": "#/components/schemas/Union_278774b0"
+															},
+															"objective": {
+																"type": "object",
+																"required": ["check", "metric", "direction"],
+																"properties": {
+																	"check": {
+																		"type": "string"
+																	},
+																	"metric": {
+																		"type": "string"
+																	},
+																	"direction": {
+																		"$ref": "#/components/schemas/Union_86259f38"
+																	}
+																},
+																"additionalProperties": false
+															},
+															"stop": {
+																"anyOf": [
+																	{
+																		"$ref": "#/components/schemas/Union_21bcd605"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"iterations": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"ratchets": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"required": ["id", "error"],
+														"properties": {
+															"id": {
+																"type": "string"
+															},
+															"error": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												]
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "researchStart",
+				"summary": "Run a research hill climb in isolated worktrees as a cancellable operation; cancelling stops it like Ctrl-C.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["check", "metric", "direction", "maxIterations", "gates", "scope", "allowUnpriced"],
+								"properties": {
+									"check": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"metric": {
+										"type": "string",
+										"pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$"
+									},
+									"direction": {
+										"$ref": "#/components/schemas/Union_86259f38"
+									},
+									"maxIterations": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 1000
+									},
+									"minImprovement": {
+										"type": "number",
+										"exclusiveMinimum": 0,
+										"maximum": 100
+									},
+									"trials": {
+										"type": "integer",
+										"minimum": 2,
+										"maximum": 100
+									},
+									"gates": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"maxItems": 32
+									},
+									"scope": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256,
+											"pattern": "^[^\\-\\r\\n][^\\r\\n]*$"
+										},
+										"maxItems": 64
+									},
+									"maxWallMinutes": {
+										"type": "number",
+										"exclusiveMinimum": 0,
+										"maximum": 10080
+									},
+									"maxCostUsd": {
+										"type": "number",
+										"exclusiveMinimum": 0,
+										"maximum": 10000
+									},
+									"allowUnpriced": {
+										"type": "boolean"
+									},
+									"goal": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 2000,
+										"pattern": "^[^\\-\\s][^\\r\\n]*$"
+									},
+									"target": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"model": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Object_operationId_ef738208"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/research/campaigns/{campaignId}": {
+			"get": {
+				"operationId": "researchCampaign",
+				"summary": "One research campaign: its frozen objective, the A/A check and every iteration as journaled.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "campaignId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"state",
+										"stop",
+										"best",
+										"ratchets",
+										"spend",
+										"aa",
+										"iterations",
+										"campaign",
+										"unreadableJournalLines"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+										},
+										"state": {
+											"$ref": "#/components/schemas/Union_278774b0"
+										},
+										"stop": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["reason", "detail", "at"],
+													"properties": {
+														"reason": {
+															"$ref": "#/components/schemas/Union_21bcd605"
+														},
+														"detail": {
+															"type": "string"
+														},
+														"at": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"best": {
+											"type": "string"
+										},
+										"ratchets": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"spend": {
+											"type": "object",
+											"required": ["usd", "unknownRuns", "estimated"],
+											"properties": {
+												"usd": {
+													"type": "number"
+												},
+												"unknownRuns": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"estimated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"aa": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["grade", "noisy", "allowed", "samples"],
+													"properties": {
+														"grade": {
+															"$ref": "#/components/schemas/Object_baseMedian_candidateMedian_ci_559ef456"
+														},
+														"noisy": {
+															"type": "boolean"
+														},
+														"allowed": {
+															"type": "boolean"
+														},
+														"samples": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"iterations": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"iteration",
+													"parent",
+													"commit",
+													"changed",
+													"agent",
+													"cost",
+													"samples",
+													"grade",
+													"gates",
+													"outcome",
+													"detail",
+													"hypothesis",
+													"hypothesisVerdict",
+													"claims"
+												],
+												"properties": {
+													"iteration": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"parent": {
+														"type": "string"
+													},
+													"commit": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"changed": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"agent": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["exitCode", "sessionId", "outcome", "summary"],
+																"properties": {
+																	"exitCode": {
+																		"anyOf": [
+																			{
+																				"type": "integer"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cost": {
+														"anyOf": [
+															{
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["kind", "usd"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "measured"
+																			},
+																			"usd": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "usd"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			"usd": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "free"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "reason"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "unknown"
+																			},
+																			"reason": {
+																				"type": "string"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																]
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"samples": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"grade": {
+														"$ref": "#/components/schemas/Union_a602c574"
+													},
+													"gates": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["check", "passed", "execution", "summary"],
+															"properties": {
+																"check": {
+																	"type": "string"
+																},
+																"passed": {
+																	"type": "boolean"
+																},
+																"execution": {
+																	"type": "string"
+																},
+																"summary": {
+																	"type": "string"
+																},
+																"claim": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"outcome": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "ratcheted"
+															},
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "agent-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "no-op"
+																	},
+																	{
+																		"type": "string",
+																		"const": "duplicate"
+																	},
+																	{
+																		"type": "string",
+																		"const": "out-of-scope"
+																	},
+																	{
+																		"type": "string",
+																		"const": "protected"
+																	},
+																	{
+																		"type": "string",
+																		"const": "measure-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gate-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "not-improved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "ratchet-lost"
+																	},
+																	{
+																		"type": "string",
+																		"const": "deadline"
+																	},
+																	{
+																		"type": "string",
+																		"const": "interrupted"
+																	}
+																]
+															}
+														]
+													},
+													"detail": {
+														"type": "string"
+													},
+													"hypothesis": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hypothesisVerdict": {
+														"anyOf": [
+															{
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "supported"
+																	},
+																	{
+																		"type": "string",
+																		"const": "refuted"
+																	},
+																	{
+																		"type": "string",
+																		"const": "inconclusive"
+																	}
+																]
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"claims": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"campaign": {
+											"type": "object",
+											"required": [
+												"version",
+												"id",
+												"createdAt",
+												"project",
+												"objective",
+												"gates",
+												"scope",
+												"protected",
+												"budget",
+												"allowNoisy",
+												"keep",
+												"agent",
+												"base",
+												"ref",
+												"checks",
+												"checkDigest",
+												"seed",
+												"resamples",
+												"clioVersion"
+											],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"id": {
+													"type": "string",
+													"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+												},
+												"createdAt": {
+													"type": "string"
+												},
+												"project": {
+													"type": "string"
+												},
+												"objective": {
+													"type": "object",
+													"required": ["check", "metric", "direction", "minImprovement", "trials"],
+													"properties": {
+														"check": {
+															"type": "string"
+														},
+														"metric": {
+															"type": "string"
+														},
+														"direction": {
+															"$ref": "#/components/schemas/Union_86259f38"
+														},
+														"minImprovement": {
+															"type": "number"
+														},
+														"trials": {
+															"type": "integer"
+														}
+													},
+													"additionalProperties": false
+												},
+												"gates": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"scope": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"protected": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"budget": {
+													"type": "object",
+													"required": ["maxIterations", "allowUnpriced"],
+													"properties": {
+														"maxIterations": {
+															"type": "integer"
+														},
+														"maxWallMinutes": {
+															"type": "number"
+														},
+														"maxCostUsd": {
+															"type": "number"
+														},
+														"allowUnpriced": {
+															"type": "boolean"
+														}
+													},
+													"additionalProperties": false
+												},
+												"allowNoisy": {
+													"type": "boolean"
+												},
+												"keep": {
+													"type": "boolean"
+												},
+												"agent": {
+													"type": "object",
+													"required": ["autonomy"],
+													"properties": {
+														"target": {
+															"type": "string"
+														},
+														"model": {
+															"type": "string"
+														},
+														"autonomy": {
+															"type": "string",
+															"const": "default"
+														},
+														"goal": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												"base": {
+													"type": "string"
+												},
+												"ref": {
+													"type": "string"
+												},
+												"checks": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["id", "description", "command", "cwd", "timeoutMs", "tags", "source", "kind"],
+														"properties": {
+															"id": {
+																"type": "string"
+															},
+															"description": {
+																"type": "string"
+															},
+															"command": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"cwd": {
+																"type": "string"
+															},
+															"timeoutMs": {
+																"type": "number"
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"source": {
+																"type": "object",
+																"required": ["kind", "path"],
+																"properties": {
+																	"kind": {
+																		"type": "string"
+																	},
+																	"path": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "command"
+																	},
+																	{
+																		"type": "string",
+																		"const": "numeric-compare"
+																	},
+																	{
+																		"type": "string",
+																		"const": "perf-budget"
+																	},
+																	{
+																		"type": "string",
+																		"const": "reproduce"
+																	}
+																]
+															},
+															"numeric": {
+																"type": "object",
+																"required": ["reference", "tolerance"],
+																"properties": {
+																	"reference": {
+																		"type": "string"
+																	},
+																	"tolerance": {
+																		"type": "object",
+																		"patternProperties": {
+																			"^.*$": {}
+																		}
+																	}
+																},
+																"additionalProperties": false
+															},
+															"perf": {
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															"reproduce": {
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															"runs": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"checkDigest": {
+													"type": "string"
+												},
+												"seed": {
+													"type": "integer"
+												},
+												"resamples": {
+													"type": "integer"
+												},
+												"clioVersion": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"unreadableJournalLines": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"display": {
+											"type": "object",
+											"required": ["spend", "costs"],
+											"properties": {
+												"spend": {
+													"type": "string"
+												},
+												"cap": {
+													"type": "string"
+												},
+												"costs": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												}
+											},
+											"additionalProperties": false
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/research/campaigns/{campaignId}/report": {
+			"get": {
+				"operationId": "researchReport",
+				"summary": "Regrade every measurement of a campaign from its raw samples and say whether each agrees with the journal.",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "campaignId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"state",
+										"stop",
+										"best",
+										"ratchets",
+										"spend",
+										"aa",
+										"iterations",
+										"campaign",
+										"unreadableJournalLines",
+										"recomputed",
+										"agrees"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+										},
+										"state": {
+											"$ref": "#/components/schemas/Union_278774b0"
+										},
+										"stop": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["reason", "detail", "at"],
+													"properties": {
+														"reason": {
+															"$ref": "#/components/schemas/Union_21bcd605"
+														},
+														"detail": {
+															"type": "string"
+														},
+														"at": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"best": {
+											"type": "string"
+										},
+										"ratchets": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"spend": {
+											"type": "object",
+											"required": ["usd", "unknownRuns", "estimated"],
+											"properties": {
+												"usd": {
+													"type": "number"
+												},
+												"unknownRuns": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"estimated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"aa": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["grade", "noisy", "allowed", "samples"],
+													"properties": {
+														"grade": {
+															"$ref": "#/components/schemas/Object_baseMedian_candidateMedian_ci_559ef456"
+														},
+														"noisy": {
+															"type": "boolean"
+														},
+														"allowed": {
+															"type": "boolean"
+														},
+														"samples": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"iterations": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"iteration",
+													"parent",
+													"commit",
+													"changed",
+													"agent",
+													"cost",
+													"samples",
+													"grade",
+													"gates",
+													"outcome",
+													"detail",
+													"hypothesis",
+													"hypothesisVerdict",
+													"claims"
+												],
+												"properties": {
+													"iteration": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"parent": {
+														"type": "string"
+													},
+													"commit": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"changed": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"agent": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["exitCode", "sessionId", "outcome", "summary"],
+																"properties": {
+																	"exitCode": {
+																		"anyOf": [
+																			{
+																				"type": "integer"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"sessionId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"outcome": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"summary": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cost": {
+														"anyOf": [
+															{
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["kind", "usd"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "measured"
+																			},
+																			"usd": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "usd"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "estimated"
+																			},
+																			"usd": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "free"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "reason"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "unknown"
+																			},
+																			"reason": {
+																				"type": "string"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																]
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"samples": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"grade": {
+														"$ref": "#/components/schemas/Union_a602c574"
+													},
+													"gates": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["check", "passed", "execution", "summary"],
+															"properties": {
+																"check": {
+																	"type": "string"
+																},
+																"passed": {
+																	"type": "boolean"
+																},
+																"execution": {
+																	"type": "string"
+																},
+																"summary": {
+																	"type": "string"
+																},
+																"claim": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"outcome": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "ratcheted"
+															},
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "agent-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "no-op"
+																	},
+																	{
+																		"type": "string",
+																		"const": "duplicate"
+																	},
+																	{
+																		"type": "string",
+																		"const": "out-of-scope"
+																	},
+																	{
+																		"type": "string",
+																		"const": "protected"
+																	},
+																	{
+																		"type": "string",
+																		"const": "measure-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gate-failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "not-improved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "ratchet-lost"
+																	},
+																	{
+																		"type": "string",
+																		"const": "deadline"
+																	},
+																	{
+																		"type": "string",
+																		"const": "interrupted"
+																	}
+																]
+															}
+														]
+													},
+													"detail": {
+														"type": "string"
+													},
+													"hypothesis": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hypothesisVerdict": {
+														"anyOf": [
+															{
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "supported"
+																	},
+																	{
+																		"type": "string",
+																		"const": "refuted"
+																	},
+																	{
+																		"type": "string",
+																		"const": "inconclusive"
+																	}
+																]
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"claims": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"campaign": {
+											"type": "object",
+											"required": [
+												"version",
+												"id",
+												"createdAt",
+												"project",
+												"objective",
+												"gates",
+												"scope",
+												"protected",
+												"budget",
+												"allowNoisy",
+												"keep",
+												"agent",
+												"base",
+												"ref",
+												"checks",
+												"checkDigest",
+												"seed",
+												"resamples",
+												"clioVersion"
+											],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"id": {
+													"type": "string",
+													"pattern": "^r[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$"
+												},
+												"createdAt": {
+													"type": "string"
+												},
+												"project": {
+													"type": "string"
+												},
+												"objective": {
+													"type": "object",
+													"required": ["check", "metric", "direction", "minImprovement", "trials"],
+													"properties": {
+														"check": {
+															"type": "string"
+														},
+														"metric": {
+															"type": "string"
+														},
+														"direction": {
+															"$ref": "#/components/schemas/Union_86259f38"
+														},
+														"minImprovement": {
+															"type": "number"
+														},
+														"trials": {
+															"type": "integer"
+														}
+													},
+													"additionalProperties": false
+												},
+												"gates": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"scope": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"protected": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"budget": {
+													"type": "object",
+													"required": ["maxIterations", "allowUnpriced"],
+													"properties": {
+														"maxIterations": {
+															"type": "integer"
+														},
+														"maxWallMinutes": {
+															"type": "number"
+														},
+														"maxCostUsd": {
+															"type": "number"
+														},
+														"allowUnpriced": {
+															"type": "boolean"
+														}
+													},
+													"additionalProperties": false
+												},
+												"allowNoisy": {
+													"type": "boolean"
+												},
+												"keep": {
+													"type": "boolean"
+												},
+												"agent": {
+													"type": "object",
+													"required": ["autonomy"],
+													"properties": {
+														"target": {
+															"type": "string"
+														},
+														"model": {
+															"type": "string"
+														},
+														"autonomy": {
+															"type": "string",
+															"const": "default"
+														},
+														"goal": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												"base": {
+													"type": "string"
+												},
+												"ref": {
+													"type": "string"
+												},
+												"checks": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["id", "description", "command", "cwd", "timeoutMs", "tags", "source", "kind"],
+														"properties": {
+															"id": {
+																"type": "string"
+															},
+															"description": {
+																"type": "string"
+															},
+															"command": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"cwd": {
+																"type": "string"
+															},
+															"timeoutMs": {
+																"type": "number"
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"source": {
+																"type": "object",
+																"required": ["kind", "path"],
+																"properties": {
+																	"kind": {
+																		"type": "string"
+																	},
+																	"path": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "command"
+																	},
+																	{
+																		"type": "string",
+																		"const": "numeric-compare"
+																	},
+																	{
+																		"type": "string",
+																		"const": "perf-budget"
+																	},
+																	{
+																		"type": "string",
+																		"const": "reproduce"
+																	}
+																]
+															},
+															"numeric": {
+																"type": "object",
+																"required": ["reference", "tolerance"],
+																"properties": {
+																	"reference": {
+																		"type": "string"
+																	},
+																	"tolerance": {
+																		"type": "object",
+																		"patternProperties": {
+																			"^.*$": {}
+																		}
+																	}
+																},
+																"additionalProperties": false
+															},
+															"perf": {
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															"reproduce": {
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															"runs": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"checkDigest": {
+													"type": "string"
+												},
+												"seed": {
+													"type": "integer"
+												},
+												"resamples": {
+													"type": "integer"
+												},
+												"clioVersion": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"unreadableJournalLines": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"display": {
+											"type": "object",
+											"required": ["spend", "costs"],
+											"properties": {
+												"spend": {
+													"type": "string"
+												},
+												"cap": {
+													"type": "string"
+												},
+												"costs": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												}
+											},
+											"additionalProperties": false
+										},
+										"recomputed": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["of", "samples", "journal", "recomputed", "agrees"],
+												"properties": {
+													"of": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "aa"
+															},
+															{
+																"type": "integer",
+																"minimum": 1
+															}
+														]
+													},
+													"samples": {
+														"type": "string"
+													},
+													"journal": {
+														"$ref": "#/components/schemas/Union_a602c574"
+													},
+													"recomputed": {
+														"$ref": "#/components/schemas/Object_baseMedian_candidateMedian_ci_559ef456"
+													},
+													"agrees": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"agrees": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/evidence": {
 			"get": {
 				"operationId": "evidenceList",
@@ -23945,6 +25729,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_baseMedian_candidateMedian_ci_559ef456": {
+				"type": "object",
+				"required": ["verdict", "classification", "baseMedian", "candidateMedian", "delta", "ci", "seed", "resamples"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_fd2af4a0"
+				},
+				"additionalProperties": false
+			},
 			"Object_base_exitCode_reason_2bfd3f0c": {
 				"type": "object",
 				"required": ["status"],
@@ -25991,6 +27783,19 @@
 					},
 					"mask": {
 						"type": "boolean"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_high_low_da41d447": {
+				"type": "object",
+				"required": ["low", "high"],
+				"properties": {
+					"low": {
+						"type": "number"
+					},
+					"high": {
+						"type": "number"
 					}
 				},
 				"additionalProperties": false
@@ -31437,6 +33242,53 @@
 					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
+			"Shape_fd2af4a0": {
+				"verdict": {
+					"$ref": "#/components/schemas/Union_7c27c829"
+				},
+				"classification": {
+					"$ref": "#/components/schemas/Union_e6702cbf"
+				},
+				"baseMedian": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"candidateMedian": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"delta": {
+					"anyOf": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"ci": {
+					"$ref": "#/components/schemas/Union_9962ea3d"
+				},
+				"seed": {
+					"type": "integer"
+				},
+				"resamples": {
+					"type": "integer"
+				}
+			},
 			"Shape_fe51400d": {
 				"kind": {
 					"type": "string",
@@ -32611,6 +34463,38 @@
 					}
 				]
 			},
+			"Union_21bcd605": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "max-iterations"
+					},
+					{
+						"type": "string",
+						"const": "max-wall-minutes"
+					},
+					{
+						"type": "string",
+						"const": "max-cost-usd"
+					},
+					{
+						"type": "string",
+						"const": "budget-unenforceable"
+					},
+					{
+						"type": "string",
+						"const": "stopped"
+					},
+					{
+						"type": "string",
+						"const": "noisy"
+					},
+					{
+						"type": "string",
+						"const": "error"
+					}
+				]
+			},
 			"Union_26181c03": {
 				"anyOf": [
 					{
@@ -32643,6 +34527,18 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_278774b0": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "running"
+					},
+					{
+						"type": "string",
+						"const": "stopped"
 					}
 				]
 			},
@@ -33333,6 +35229,26 @@
 					}
 				]
 			},
+			"Union_7c27c829": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "improved"
+					},
+					{
+						"type": "string",
+						"const": "unchanged"
+					},
+					{
+						"type": "string",
+						"const": "regressed"
+					},
+					{
+						"type": "string",
+						"const": "inconclusive"
+					}
+				]
+			},
 			"Union_7e4ed1ca": {
 				"anyOf": [
 					{
@@ -33453,6 +35369,18 @@
 					{
 						"type": "string",
 						"const": "over"
+					}
+				]
+			},
+			"Union_86259f38": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "min"
+					},
+					{
+						"type": "string",
+						"const": "max"
 					}
 				]
 			},
@@ -33603,6 +35531,16 @@
 					}
 				]
 			},
+			"Union_9962ea3d": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_high_low_da41d447"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_9a136014": {
 				"anyOf": [
 					{
@@ -33681,6 +35619,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Enum_09fa48b8"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_a602c574": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_baseMedian_candidateMedian_ci_559ef456"
 					},
 					{
 						"type": "null"
@@ -34318,6 +36266,26 @@
 					{
 						"type": "string",
 						"const": "replay"
+					}
+				]
+			},
+			"Union_e6702cbf": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "improved"
+					},
+					{
+						"type": "string",
+						"const": "unchanged"
+					},
+					{
+						"type": "string",
+						"const": "regressed"
+					},
+					{
+						"type": "string",
+						"const": "undefined"
 					}
 				]
 			},
