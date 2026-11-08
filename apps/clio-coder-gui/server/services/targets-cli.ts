@@ -155,9 +155,10 @@ export class TargetsService {
 			this.runner.run({ kind: "routing.profiles" }, workspace.path),
 			this.runner.run({ kind: "routing.bindings" }, workspace.path),
 		]);
+		// `targets profile list --json` reads `{ default, profiles }`; the fleet default is not a named profile.
+		const profileList = object(rawProfiles);
 		const models = items(rawModels),
-			// `targets profile list --json` reads `{ default, profiles }`; the fleet default is not a named profile.
-			profiles = items(object(rawProfiles).profiles),
+			profiles = items(profileList.profiles),
 			bindings = items(rawBindings);
 		const result = {
 			models: models.slice(0, 2000).map((value) => {
@@ -183,6 +184,19 @@ export class TargetsService {
 					...(Value.Check(SettingsOrigin, row.source) ? { source: row.source } : {}),
 				};
 			}),
+			default:
+				profileList.default == null
+					? null
+					: (() => {
+							const row = object(profileList.default);
+							return {
+								target: text(row.target),
+								runtime: optionalText(row.runtime),
+								model: optionalText(row.model),
+								thinkingLevel: text(row.thinkingLevel),
+								...(Value.Check(SettingsOrigin, row.source) ? { source: row.source } : {}),
+							};
+						})(),
 			bindings: bindings.slice(0, 2000).map((value) => {
 				const row = object(value);
 				return {

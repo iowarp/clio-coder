@@ -71,6 +71,20 @@ export const Routing = Type.Object(
 			),
 			{ maxItems: 2000 },
 		),
+		/** The fleet default a run without a profile uses; null when no default connection is set. */
+		default: Type.Union([
+			Type.Object(
+				{
+					target: text,
+					runtime: nullable,
+					model: nullable,
+					thinkingLevel: text,
+					source: Type.Optional(SettingsOrigin),
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
 		bindings: Type.Array(
 			Type.Object({ agentId: text, profile: text, target: nullable, model: nullable, resolved: Type.Boolean() }, closed),
 			{ maxItems: 2000 },

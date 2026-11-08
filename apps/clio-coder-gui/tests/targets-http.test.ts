@@ -51,6 +51,7 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 		const routing = await json(await h.request(`${path}/routing`), Routing);
 		const cliProfiles = await h.cli.run({ kind: "routing.profiles" }, cwd);
 		assert.deepEqual(routing.profiles, (cliProfiles as { profiles: unknown }).profiles);
+		assert.equal(routing.default, null);
 		assert.deepEqual(routing.bindings, [
 			{ agentId: "coder", profile: "local", target: "fixture-target", model: null, resolved: true },
 		]);
@@ -80,6 +81,9 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 				action === "use" ? "fixture-target" : null,
 			);
 			if (action === "use") assert.deepEqual(op.result.settings, settings);
+			// The fleet default crosses beside the named profiles, from the same `{ default, profiles }` listing.
+			const routed = await json(await h.request(`${path}/routing`), Routing);
+			assert.equal(routed.default?.target ?? null, action === "use" ? "fixture-target" : null);
 		}
 		assert.equal((await h.request(`/api/workspaces/unknown/targets`)).status, 404);
 		assert.equal((await h.post(`${path}/targets/--help/use`)).status, 422);

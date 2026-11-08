@@ -123,6 +123,7 @@ export const guiTests = [
 	"chat-turns",
 	"egress-policy",
 	"sessions-http",
+	"targets-http",
 	"library-http",
 	"file-preview",
 	"app-state",

@@ -7019,7 +7019,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["models", "profiles", "bindings", "truncated"],
+									"required": ["models", "profiles", "default", "bindings", "truncated"],
 									"properties": {
 										"models": {
 											"type": "array",
@@ -7133,6 +7133,53 @@
 												"additionalProperties": false
 											},
 											"maxItems": 2000
+										},
+										"default": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["target", "runtime", "model", "thinkingLevel"],
+													"properties": {
+														"target": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"runtime": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"maxLength": 256
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"model": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"maxLength": 256
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"thinkingLevel": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"source": {
+															"$ref": "#/components/schemas/Union_aebda74a"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"bindings": {
 											"type": "array",

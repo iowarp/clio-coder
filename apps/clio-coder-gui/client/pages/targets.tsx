@@ -283,6 +283,22 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 							</section>
 							<section hidden={routingView !== "profiles"}>
 								<h2>Profiles · {routing.data.profiles.length}</h2>
+								{routing.data.default ? (
+									<dl className="settings-list" aria-label="Fleet default">
+										<div>
+											<dt>Fleet default</dt>
+											<dd>
+												{routing.data.default.target} · {routing.data.default.model ?? "No model"}
+											</dd>
+											<dd>
+												{routing.data.default.thinkingLevel}
+												{routing.data.default.source ? <small> · {routing.data.default.source} settings</small> : null}
+											</dd>
+										</div>
+									</dl>
+								) : (
+									<p>No fleet default is set; a run without a profile has no connection.</p>
+								)}
 								{!routing.data.profiles.length && <PanelEmpty>{emptyState.emptyStore("fleet profile")}</PanelEmpty>}
 								<dl className="settings-list">
 									{routing.data.profiles.map((row) => (
