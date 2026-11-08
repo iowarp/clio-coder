@@ -942,7 +942,14 @@ later catalog edit cannot change the approved command. Undeclared ids fail
 before approval with `verification_check_undeclared` and declaration guidance.
 
 After a successful worker attempt, the orchestrator runs the frozen checks with
-no shell, a fixed cwd, and the code-step environment allowlist. Logs are written
+no shell, a fixed cwd, and the code-step environment allowlist. The worker may
+have written the tests and helpers a check runs, so each check, a sealed
+`reproduce` run included, runs inside the main-session sandbox rooted at the
+run's workspace, as the operator's own `bash` would at `default`: writes stay in
+the workspace, scratch roots and package caches, Clio's directories stay
+read-only, and credentials and secret files are hidden. `safety.sandbox: off`
+runs the checks bare, as does `auto` on a host with no backend; `required`
+without a backend records each check as `spawn-failed`. Logs are written
 under the run artifact directory. Successful evidence is memoized by the
 workspace fingerprint, resolved argv, cwd, and allowed environment values. A
 memo hit names the run that produced the original evidence. A changed tree is a

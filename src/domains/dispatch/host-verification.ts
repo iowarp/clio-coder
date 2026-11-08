@@ -2,11 +2,15 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import type { ClioSettings } from "../../core/config.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
 import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
+import { type MainSandboxPolicy, mainSandboxPolicy, mainShellContained } from "../../core/sandbox/main-session.js";
+import type { SandboxMode } from "../../core/sandbox/types.js";
 import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -14,6 +18,7 @@ import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
+import { effectiveScratchRoots } from "../safety/scratch-roots.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { hostCheckBaseNote } from "./host-verification-note.js";
@@ -396,7 +401,10 @@ function judgeResolvedCheck(
  * may be untracked files the tree fingerprint does not cover, so a stored
  * pass could outlive the bytes it judged.
  */
-async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHostVerificationCheck> {
+async function runSealedReproduce(
+	resolvedCheck: ResolvedCheck,
+	shellSandbox: MainSandboxPolicy | undefined,
+): Promise<RunHostVerificationCheck> {
 	const sealed = resolvedCheck.reproduce;
 	const argv = [...resolvedCheck.argv];
 	if (sealed === undefined) {
@@ -419,6 +427,7 @@ async function runSealedReproduce(resolvedCheck: ResolvedCheck): Promise<RunHost
 		timeoutMs: resolvedCheck.timeoutMs,
 		spec: sealed.spec,
 		workspaceRoot: root,
+		...(shellSandbox !== undefined ? { shellSandbox } : {}),
 	});
 	const base = { check: resolvedCheck.check, argv, cwd: resolvedCheck.cwd, memo: false };
 	switch (outcome.kind) {
@@ -466,11 +475,12 @@ async function runResolvedCheck(input: {
 	resolvedCheck: ResolvedCheck;
 	stateDir: string;
 	env: NodeJS.ProcessEnv;
+	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
 }): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
 	const resolvedCheck = input.resolvedCheck;
 	if (resolvedCheck.kind === "reproduce") {
-		const check = await runSealedReproduce(resolvedCheck);
+		const check = await runSealedReproduce(resolvedCheck, input.shellSandbox);
 		return { check, outputExcerpt: check.outputTail };
 	}
 	const command: PlaybookCommand = {
@@ -514,6 +524,7 @@ async function runResolvedCheck(input: {
 		artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
 		env: input.env,
 		maxOutputBytes: captureMaxBytes,
+		...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
 	});
 	const artifactPath = outcome.record.artifactPaths[0];
 	// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
@@ -550,12 +561,38 @@ async function runResolvedCheck(input: {
 	return { check, outputExcerpt: outcome.report.outputExcerpt };
 }
 
+/**
+ * The sandbox host verification runs a run's declared checks in. A worker
+ * may have written the test files and helpers a check executes, so the host
+ * runs them where the main session's own bash would: the main-session
+ * sandbox rooted at the run's workspace. `off` runs them bare, as does `auto`
+ * on a host with no backend, where the worker itself ran unsandboxed; under
+ * `required` a missing backend refuses each check rather than running it bare.
+ */
+export function hostVerificationSandbox(
+	settings: Readonly<Pick<ClioSettings, "safety" | "targets">> | undefined,
+	workspace: string,
+	availability = sandboxAvailability(),
+): MainSandboxPolicy | undefined {
+	const mode: SandboxMode = settings?.safety.sandbox ?? "auto";
+	if (mode === "off" || (mode === "auto" && !mainShellContained(mode, availability))) return undefined;
+	return mainSandboxPolicy({
+		workspace,
+		scratchRoots: effectiveScratchRoots(settings?.safety.scratchRoots ?? [], workspace),
+		...(settings !== undefined
+			? { env: sandboxEnvPolicy(settings), unixSockets: settings.safety.sandboxUnixSockets }
+			: {}),
+	});
+}
+
 export async function runHostVerification(input: {
 	runId: string;
 	request: Pick<DispatchRequest, "resolvedVerification">;
 	workerSuccessful: boolean;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
+	/** The sandbox every check runs in; see {@link hostVerificationSandbox}. Absent runs them bare. */
+	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
 }): Promise<RunHostVerification | undefined> {
 	const checks = input.request.resolvedVerification;
@@ -571,6 +608,7 @@ export async function runHostVerification(input: {
 			resolvedCheck,
 			stateDir,
 			env,
+			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
 			...(input.onDiagnostic !== undefined ? { onDiagnostic: input.onDiagnostic } : {}),
 		});
 		results.push(outcome.check);
@@ -632,6 +670,7 @@ export interface BatchVerificationParticipant {
 	runId: string;
 	request: Pick<DispatchRequest, "resolvedVerification" | "intent" | "cwd">;
 	workerSuccessful: boolean;
+	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
 }
 
@@ -791,6 +830,7 @@ export function createBatchVerificationGate(
 			workerSuccessful: participant.workerSuccessful,
 			stateDir,
 			env,
+			...(participant.shellSandbox !== undefined ? { shellSandbox: participant.shellSandbox } : {}),
 			...(participant.onDiagnostic !== undefined ? { onDiagnostic: participant.onDiagnostic } : {}),
 		});
 
@@ -826,6 +866,7 @@ export function createBatchVerificationGate(
 				resolvedCheck: entry.resolvedCheck,
 				stateDir,
 				env,
+				...(entry.owner.shellSandbox !== undefined ? { shellSandbox: entry.owner.shellSandbox } : {}),
 				// The owning member's callback, because the artifact directory is
 				// named for that same run and the diagnostic text is closed over the
 				// run id it was built for (`extension.ts:5534`); any other member's

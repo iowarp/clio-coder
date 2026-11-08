@@ -498,7 +498,7 @@ The host resolves one immutable permit per worker attempt ([worker-permit.ts](..
 
 ## Worker OS sandbox
 
-`safety.sandbox` runs the commands of a dispatched native (HTTP runtime) worker under an OS sandbox: the `bash` tool, `run_script` and verification checks. Subprocess and SDK runtimes and workers placed on a `fleet.nodes` node are not sandboxed. The main session's commands use the [main-session sandbox](#the-main-session-sandbox) at `default` instead. Native `write` and `edit` run outside the child sandbox but honor the same read-only paths.
+`safety.sandbox` runs the commands of a dispatched native (HTTP runtime) worker under an OS sandbox: the `bash` tool, `run_script` and verification checks. Subprocess and SDK runtimes and workers placed on a `fleet.nodes` node are not sandboxed. The main session's commands use the [main-session sandbox](#the-main-session-sandbox) at `default` instead, and so does the orchestrator's host verification of any worker's declared checks, sealed `reproduce` runs included, rooted at the run's workspace: bare only under `off` or `auto` with no backend, refused under `required` with none. Native `write` and `edit` run outside the child sandbox but honor the same read-only paths.
 
 | Value | Behavior |
 | --- | --- |

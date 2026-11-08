@@ -351,6 +351,7 @@ import {
 	compareHostVerificationBase,
 	createBatchVerificationGate,
 	hostVerificationRejection,
+	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
 import { renderDispatchIntentRequirements } from "./intent-requirements.js";
@@ -8849,10 +8850,15 @@ export function createDispatchBundle(
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
 					failureMessage = finalDetail;
 				}
+				const hostVerificationSandboxPolicy =
+					(req.resolvedVerification?.length ?? 0) > 0
+						? hostVerificationSandbox(lifecycle.settings, req.taskWorktree?.path ?? lifecycle.cwd)
+						: undefined;
 				const hostVerificationInput = {
 					runId: envelope.id,
 					request: req,
 					workerSuccessful: finalOutcome === "succeeded",
+					...(hostVerificationSandboxPolicy !== undefined ? { shellSandbox: hostVerificationSandboxPolicy } : {}),
 					onDiagnostic: (error: unknown) =>
 						reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
 				};

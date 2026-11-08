@@ -32,6 +32,8 @@ import {
 	SAFE_EXEC_PIPE_DRAIN_BOUND_MS,
 } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { scrubSandboxEnv } from "../../core/sandbox/env-scrub.js";
+import { type MainSandboxPolicy, planMainSandboxSpawn } from "../../core/sandbox/main-session.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import {
@@ -110,6 +112,12 @@ export interface CodeStepRunInput {
 		enabled: boolean;
 		evidence: Readonly<CommitAttributionEvidence>;
 	};
+	/**
+	 * Run the command, and every changed test it adds, inside the main-session
+	 * sandbox. Host verification uses it for checks a worker may have written;
+	 * a backend gone at spawn time refuses the command instead of running it bare.
+	 */
+	shellSandbox?: MainSandboxPolicy;
 	signal?: AbortSignal;
 }
 
@@ -459,12 +467,31 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		throw new Error("code step: maxOutputBytes must be a positive safe integer");
 	const [executable, ...args] = argv;
 	if (executable === undefined) throw new Error(`code step: command '${command.id}' has no executable`);
+	const contained =
+		input.shellSandbox === undefined ? undefined : planMainSandboxSpawn(input.shellSandbox, { argv: [...argv] }, cwd);
+	if (contained?.kind === "refused") {
+		return {
+			exitCode: CODE_STEP_SPAWN_FAILURE_EXIT_CODE,
+			signal: null,
+			timedOut: false,
+			captured: Buffer.from(`${contained.message}\n`, "utf8"),
+			stdout: Buffer.alloc(0),
+			outputBytes: 0,
+			spawnError: contained.message,
+			launched: false,
+		};
+	}
+	const source = input.env ?? process.env;
+	const allowed = codeStepEnv(command, source);
 	return await new Promise<SpawnOutcome>((resolvePromise) => {
-		const attribution = withManagedGitCommitAttributionEnvironment(codeStepEnv(command, input.env ?? process.env), {
-			cwd,
-			enabled: input.commitAttribution?.enabled ?? gitCommitAttributionEnabled(process.env),
-			...(input.commitAttribution?.evidence === undefined ? {} : { evidence: input.commitAttribution.evidence }),
-		});
+		const attribution = withManagedGitCommitAttributionEnvironment(
+			contained === undefined ? allowed : scrubSandboxEnv(allowed, contained.env, source).env,
+			{
+				cwd,
+				enabled: input.commitAttribution?.enabled ?? gitCommitAttributionEnabled(process.env),
+				...(input.commitAttribution?.evidence === undefined ? {} : { evidence: input.commitAttribution.evidence }),
+			},
+		);
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		const chunks: Buffer[] = [];
 		const stdoutChunks: Buffer[] = [];
@@ -479,7 +506,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		let pipeDrainIncomplete = false;
 		let drainTimer: ReturnType<typeof setTimeout> | undefined;
 		let cleanupStatus: ProcessGroupCleanupStatus | null = null;
-		const child = spawn(executable, args, {
+		const child = spawn(contained?.file ?? executable, contained?.args ?? args, {
 			cwd,
 			env: attribution.env,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -487,6 +514,7 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 			// whole tree rather than orphaning a test runner's children.
 			detached: process.platform !== "win32",
 		});
+		if (contained !== undefined) child.once("exit", contained.afterExit);
 		const collect = (chunk: Buffer, stdout: boolean): void => {
 			outputBytes += chunk.length;
 			if (captured >= captureMaxBytes) return;
