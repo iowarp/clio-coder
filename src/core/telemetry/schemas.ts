@@ -1555,7 +1555,13 @@ export const TurnContinuedSchema = Type.Object(
 const autonomyUsage = { toolCalls: count, activeMs: duration, tokens: count };
 export const AutonomyHaltKind = vocabulary(["calls", "minutes", "tokens", "judge"]);
 export const AutonomyOpenDecisionKind = vocabulary(["judge-block", "no-verdict", "operator-only", "outward-unnamed"]);
-export const AutonomyEndReason = vocabulary(["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]);
+export const AutonomyEndReason = vocabulary([
+	"autonomous-cap",
+	"judge-streak",
+	"shutdown",
+	"left-yolo",
+	"session-changed",
+]);
 export const AutonomyEnteredSchema = Type.Object(
 	{
 		confinement: vocabulary(["contained", "unconfined"]),
