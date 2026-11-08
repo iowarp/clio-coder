@@ -11,6 +11,8 @@ import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	canonicalProjectRoot,
 	createMcpStdioClient,
+	DEFAULT_KILL_GRACE_MS,
+	DEFAULT_TEARDOWN_BOUND_MS,
 	type McpClient,
 	mcpToolActionClass,
 	mcpToolConfirmationRule,
@@ -571,16 +573,27 @@ describe("gateway MCP capabilities", () => {
 		});
 		let stdout = "";
 		let stderr = "";
+		let phase = "boot";
+		// Booting the parent compiles and loads src/ through tsx, which under load took over 13 s of the old
+		// single 15 s guard. Boot is not what this test measures, so it gets only a hang guard. The timed budget
+		// starts when the parent reports its MCP child, and it is derived from the teardown the client promises:
+		// SIGTERM, the kill grace, SIGKILL, then the bounded wait for the group to disappear.
+		const terminationBudgetMs = 2 * (DEFAULT_KILL_GRACE_MS + DEFAULT_TEARDOWN_BOUND_MS);
+		let timer = setTimeout(() => parent.kill("SIGKILL"), 120_000);
 		parent.stdout.on("data", (data) => {
 			stdout += String(data);
+			if (phase === "boot" && stdout.includes("\n")) {
+				phase = "termination";
+				clearTimeout(timer);
+				timer = setTimeout(() => parent.kill("SIGKILL"), terminationBudgetMs);
+			}
 		});
 		parent.stderr.on("data", (data) => {
 			stderr += String(data);
 		});
-		const timer = setTimeout(() => parent.kill("SIGKILL"), 15_000);
 		try {
-			const [code] = await once(parent, "close");
-			strictEqual(code, 0, stderr);
+			const [code, signal] = await once(parent, "close");
+			strictEqual(code, 0, `${phase} ended by ${signal ?? "exit"}: ${stderr}`);
 			const pid = Number(stdout.trim());
 			ok(Number.isInteger(pid) && pid > 0, stdout);
 			strictEqual(processAlive(-pid), false, "the process group is gone before the parent exits");
