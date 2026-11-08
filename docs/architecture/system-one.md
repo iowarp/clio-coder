@@ -70,7 +70,7 @@ A profile is a declared contract for a served model, not a measurement ([profile
 | `strands-decider` | `systemone-v1` | yes | all | 1 to 255 | 4096 | per question |
 | `llm-structured` | `llm-prompt` | no | all | 1 to 255 | none | whole request |
 
-`llm-structured` is what any chat target declares and is not chosen by hand. `generic` declares no real probabilities because nothing says what an unnamed server's numbers are. The `systemone-v1` renderer sends each question as the point wrote it, and the semantic kind and renderer revision stay in Clio Coder and are not sent. Julia-1 options are proven to fit by UTF-8 bytes until [julia-tokenizer.ts](../../src/domains/system-one/julia-tokenizer.ts) has fetched the model's tokenizer, pinned by revision and SHA-256, into the Clio Coder cache.
+A profile describes a model family and ships no server for it. A typed profile such as `julia-1` is answered by a `systemone` server the operator supplies, for Julia-1 an operator-run adapter, and Clio Coder ships only the client and the profile. `llm-structured` is what any chat target declares and is not chosen by hand. `generic` declares no real probabilities because nothing says what an unnamed server's numbers are. The `systemone-v1` renderer sends each question as the point wrote it, and the semantic kind and renderer revision stay in Clio Coder and are not sent. Julia-1 options are proven to fit by UTF-8 bytes until [julia-tokenizer.ts](../../src/domains/system-one/julia-tokenizer.ts) has fetched the model's tokenizer, pinned by revision and SHA-256, into the Clio Coder cache.
 
 ## Formation
 

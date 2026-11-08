@@ -8,8 +8,9 @@
  * question a profile cannot carry is abstained on before any byte leaves, and
  * an oversized option is refused rather than cut. Every typed family still speaks
  * the existing `POST /v1/systemone` wire; a model without a server for it is the
- * operator's to serve (for example the Julia adapter), and nothing here installs a
- * runtime or weights.
+ * operator's to serve, and nothing here installs a runtime or weights. The
+ * `julia-1` profile is one such case: Clio ships the client and the profile, and
+ * the Julia-1 adapter that answers `systemone` for it is operator-supplied.
  *
  * Wire compatibility: the legacy request is `{state, model?, questions}` and no
  * known server is documented to ignore extra members, so the semantic kind and

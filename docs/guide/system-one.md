@@ -137,7 +137,7 @@ Name the profile. A bound `generic` engine answers `consult` and triage, but its
 
 The target's runtime must implement typed decisions: `typesafe-jev` (a hosted engine, 32,000 tokens counted over the whole request), `systemone` (a server you run that answers `POST /v1/systemone`, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with `model: mercury-decide` (credential `INCEPTION_API_KEY`). Set `capabilities.contextWindow` to what the served checkpoint actually reads: 4096 for the Strands Decider, 1024 for Julia-1 at the window its published accuracy used.
 
-Clio Coder ships a client for these wires, not an inference server or an accelerator scheduler. The server you run owns its device, and no setting places an engine. Naming each target after its placement (`decider-npu`) makes the doctor rows read as a map of the machine. When a `julia-1` engine is bound, Clio Coder fetches the pinned tokenizer from the model repository and caches it. Until then it uses conservative byte bounds and can abstain.
+Clio Coder ships a client for these wires, not an inference server or an accelerator scheduler. The server you run owns its device, and no setting places an engine. Naming each target after its placement (`decider-npu`) makes the doctor rows read as a map of the machine. The same holds for Julia-1. Clio Coder ships the `julia-1` profile and the `systemone` client, not the model server. The Julia-1 adapter that answers `POST /v1/systemone` for that profile is operator-supplied, and you run it yourself. When a `julia-1` engine is bound, Clio Coder fetches the pinned tokenizer from the model repository and caches it. Until then it uses conservative byte bounds and can abstain.
 
 ### `kind: llm`
 
