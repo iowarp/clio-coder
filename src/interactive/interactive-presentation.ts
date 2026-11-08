@@ -647,6 +647,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),
 		...(deps.getShutdownArmed ? { getShutdownArmed: deps.getShutdownArmed } : {}),
 		getActiveSkillSurface: () => deps.chat.activeSkillSurface(),
+		getAutonomyStatus: () => deps.chat.autonomyStatus?.() ?? null,
 		getActiveEggs: () => deps.chat.activeEggs?.() ?? [],
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),

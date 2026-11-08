@@ -91,7 +91,8 @@ Flags:
                             implies --json; refused with --agent
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
-  --continue                append this turn to the most recent session for this cwd
+  --continue                append this turn to the most recent session for this cwd; after a yolo
+                            autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each

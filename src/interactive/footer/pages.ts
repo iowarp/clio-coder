@@ -11,6 +11,7 @@
 
 import { outputStyleLabel } from "../../core/defaults.js";
 import { renderUsdLimit } from "../../core/telemetry/render.js";
+import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -723,6 +724,34 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
 	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), GLYPH.ellipsis);
 }
 
+/**
+ * The autonomous window beside the hints: `412/600 calls · 38/120 min · 1.9M/5M tok`, the nearest cap alone when
+ * narrow, and the way back once it has paused.
+ */
+function autonomyWindowFact(theme: ClioTheme, status: AutonomyStatus, narrow: boolean): string {
+	if (status.halted !== null) {
+		return theme.fg("warning", narrow ? "yolo paused" : `yolo paused ${GLYPH.dot} Enter continues`);
+	}
+	const { caps, usage } = status;
+	const minutes = Math.floor(usage.activeMs / 60_000);
+	const meters = [
+		{ used: usage.toolCalls, cap: caps.toolCalls, text: `${usage.toolCalls}/${caps.toolCalls} calls` },
+		{ used: minutes, cap: caps.minutes, text: `${minutes}/${caps.minutes} min` },
+		{
+			used: usage.tokens,
+			cap: caps.tokens,
+			text: `${formatFooterTokens(usage.tokens)}/${formatFooterTokens(caps.tokens)} tok`,
+		},
+	].filter((meter) => meter.cap > 0);
+	if (meters.length === 0) return "";
+	const nearest = meters.reduce((best, meter) => (meter.used / meter.cap > best.used / best.cap ? meter : best));
+	const shown = narrow ? [nearest] : meters;
+	return theme.fg(
+		nearest.used / nearest.cap >= 0.8 ? "warning" : "counter",
+		shown.map((meter) => meter.text).join(` ${GLYPH.dot} `),
+	);
+}
+
 /** The widest stats a row carries, `272K/272K (100.0%) · last 999 tok/s`. */
 const STATS_RESERVE_WIDTH = 35;
 
@@ -734,19 +763,27 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const minimal = style === "compact";
 	const learning = !minimal && state.demo !== false;
 	const autonomy = state.session.autonomy;
+	const narrow = w <= 60;
 	// Contained yolo is the warning tone; the unconfined opt-out is the error tone and shouts (ob-yolo D9).
 	const unconfined = autonomy === "yolo" && state.session.yoloConfinement === "unconfined";
+	// Contained with no OS sandbox backend keeps only the judge and the floor, and says so (D9).
+	const unsandboxed = autonomy === "yolo" && !unconfined && state.session.autonomyWindow?.osSandbox === false;
 	const mode = autonomy
 		? autonomy === "yolo"
 			? theme.fg(
 					unconfined ? "error" : "warning",
-					unconfined ? `YOLO ${GLYPH.dot} UNCONFINED` : `YOLO ${GLYPH.dot} contained`,
+					unconfined
+						? `YOLO ${GLYPH.dot} UNCONFINED`
+						: unsandboxed
+							? narrow
+								? `YOLO ${GLYPH.dot} no sandbox`
+								: `YOLO ${GLYPH.dot} contained (no OS sandbox)`
+							: `YOLO ${GLYPH.dot} contained`,
 				)
 			: theme.fg("annotation", clean(autonomy))
 		: "";
 	const modeLead = mode ? `${mode}${theme.fg("separator", ` ${GLYPH.dot} `)}` : "";
 	const identityWidth = Math.max(1, w - visibleWidth(modeLead));
-	const narrow = w <= 60;
 	const fit = (text: string, room = w) =>
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
 	const separator = theme.fg("separator", ` ${GLYPH.dot} `);
@@ -855,6 +892,9 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? theme.fg("unknownValue", "memory review paused")
 				: "";
 	const facts = [
+		autonomy === "yolo" && state.session.autonomyWindow
+			? autonomyWindowFact(theme, state.session.autonomyWindow, narrow)
+			: "",
 		!minimal && state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		!minimal && state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",

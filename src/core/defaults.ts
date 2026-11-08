@@ -624,6 +624,12 @@ export interface SafetySettings {
 		readBytesPerCall: number;
 		observationBytesPerTurn: number;
 		workerResponseSeconds: number;
+		/** Tool calls one yolo stretch runs before it pauses for the operator; 0 is off. */
+		autonomousToolCalls: number;
+		/** Minutes of active turn time one yolo stretch runs before it pauses; 0 is off. */
+		autonomousMinutes: number;
+		/** Tokens one yolo stretch spends before it pauses; 0 is off. */
+		autonomousTokens: number;
 	};
 	review: ReviewSettings;
 	/**
@@ -851,6 +857,9 @@ export const DEFAULT_SETTINGS = {
 			readBytesPerCall: GUARDRAIL_DEFAULTS.readMaxBytes,
 			observationBytesPerTurn: GUARDRAIL_DEFAULTS.observationTurnBudgetBytes,
 			workerResponseSeconds: 600,
+			autonomousToolCalls: 600,
+			autonomousMinutes: 120,
+			autonomousTokens: 5_000_000,
 		},
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
@@ -1059,6 +1068,11 @@ safety:
     readBytesPerCall: 51200
     observationBytesPerTurn: 196608
     workerResponseSeconds: 600
+    # One yolo stretch pauses for you after this many tool calls, minutes of
+    # active turn time, or tokens; 0 turns a cap off.
+    autonomousToolCalls: 600
+    autonomousMinutes: 120
+    autonomousTokens: 5000000
   review:
     enabled: false
   # OS sandbox for shell commands: auto | required | off. Dispatched workers

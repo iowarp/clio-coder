@@ -311,7 +311,7 @@ export interface SafetyBlockedPayload {
 
 /** Where a `run.aborted` event originated. */
 export type RunAbortSource = "dispatch_abort" | "dispatch_drain";
-export type TurnAbortSource = "stream_cancel" | "loop_guard" | "job_clock";
+export type TurnAbortSource = "stream_cancel" | "loop_guard" | "job_clock" | "autonomy";
 
 /**
  * Payload published on `run.aborted` when dispatch cancels (dispatch_abort) or drains (dispatch_drain) a run.

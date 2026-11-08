@@ -1526,9 +1526,9 @@ export const RunAbortedSchema = Type.Object(
 	},
 	closed,
 );
-/** A main turn's stream stopped by the operator, the loop guard or a job's clock; no dispatch run is involved (#434, #445). */
+/** A main turn's stream stopped by the operator, the loop guard, a job's clock or a yolo pause; no dispatch run is involved (#434, #445). */
 export const TurnAbortedSchema = Type.Object(
-	{ source: vocabulary(["stream_cancel", "loop_guard", "job_clock"]) },
+	{ source: vocabulary(["stream_cancel", "loop_guard", "job_clock", "autonomy"]) },
 	closed,
 );
 /** A job continued past its default clock, the one automatic continuation a turn gets (#445). */

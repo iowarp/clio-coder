@@ -244,6 +244,9 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 			return place("safety", "Autonomy");
 		case "safety.limits.sessionCostUsd":
 		case "safety.limits.chatToolCallsPerTurn":
+		case "safety.limits.autonomousToolCalls":
+		case "safety.limits.autonomousMinutes":
+		case "safety.limits.autonomousTokens":
 			return place("safety", "Spending & tool limits");
 		case "safety.sandbox":
 		case "safety.sandboxNetwork":

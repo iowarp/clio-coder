@@ -321,6 +321,52 @@ function stripProjectTelemetry(
 }
 
 /**
+ * The autonomous caps bound how long yolo runs without the operator, so a
+ * repository may tighten them and never loosen or switch one off: a project
+ * value stays only when it is a positive integer no larger than the
+ * operator's own, where the operator's 0 (off) leaves any positive value
+ * tighter.
+ */
+const AUTONOMOUS_CAP_KEYS = ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const;
+
+function stripProjectAutonomousCaps(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!isRecord(blob.safety) || !isRecord(blob.safety.limits)) return blob;
+	const operatorSafety = isRecord(userBlob?.safety) ? userBlob.safety : {};
+	const operatorLimits = isRecord(operatorSafety.limits) ? operatorSafety.limits : {};
+	const limits: Record<string, unknown> = { ...blob.safety.limits };
+	let stripped = false;
+	for (const key of AUTONOMOUS_CAP_KEYS) {
+		if (!Object.hasOwn(limits, key)) continue;
+		const requested = limits[key];
+		const operatorValue =
+			typeof operatorLimits[key] === "number" ? operatorLimits[key] : DEFAULT_SETTINGS.safety.limits[key];
+		const tighter =
+			typeof requested === "number" &&
+			Number.isInteger(requested) &&
+			requested > 0 &&
+			(operatorValue === 0 || requested <= operatorValue);
+		if (tighter) continue;
+		issues.push({
+			origin,
+			path: `safety.limits.${key}`,
+			message: "a project may only tighten an autonomous cap from user settings; project value ignored",
+		});
+		delete limits[key];
+		stripped = true;
+	}
+	if (!stripped) return blob;
+	const safety: Record<string, unknown> = { ...blob.safety };
+	if (Object.keys(limits).length === 0) delete safety.limits;
+	else safety.limits = limits;
+	return { ...blob, safety };
+}
+
+/**
  * Safety keys only the operator's own file may set. Scratch roots widen where
  * yolo may delete outside the workspace (#419), so a repository can neither set
  * nor extend them. The unattended window decides how long Clio waits for this
@@ -496,11 +542,16 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectTelemetry(
-						stripProjectOperatorSafety(
-							stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+				: stripProjectAutonomousCaps(
+						stripProjectTelemetry(
+							stripProjectOperatorSafety(
+								stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+								origin,
+								issues,
+							),
 							origin,
 							issues,
+							userBlob,
 						),
 						origin,
 						issues,

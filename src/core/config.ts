@@ -2401,6 +2401,9 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"readBytesPerCall",
 						"observationBytesPerTurn",
 						"workerResponseSeconds",
+						"autonomousToolCalls",
+						"autonomousMinutes",
+						"autonomousTokens",
 					]);
 					if ("sessionCostUsd" in limits) {
 						const parsed = expectNumber(issues, "safety.limits.sessionCostUsd", limits.sessionCostUsd, { min: 0 });
@@ -2414,6 +2417,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					] as const) {
 						if (!(key in limits)) continue;
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
+						if (parsed !== undefined) settings.safety.limits[key] = parsed;
+					}
+					for (const key of ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const) {
+						if (!(key in limits)) continue;
+						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 0 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;
 					}
 				}

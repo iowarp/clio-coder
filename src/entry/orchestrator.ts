@@ -298,7 +298,7 @@ import {
 	type ProtectedArtifactProtectEvent,
 } from "../domains/safety/protected-artifacts-registration.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
-import type { SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
+import { SAFETY_JUDGE_CONSECUTIVE_BLOCKS, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
@@ -420,6 +420,15 @@ export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 import { emitApproval } from "../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
+import {
+	AUTONOMOUS_CAP_REASON,
+	type AutonomyHalt,
+	autonomousCaps,
+	autonomyHaltNotice,
+	createAutonomyWindow,
+	JUDGE_STREAK_REASON,
+	settledCallTokens,
+} from "../domains/safety/autonomy-window.js";
 import {
 	actionKeyLabel,
 	detectPlatformKeybindingWarnings,
@@ -3308,6 +3317,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 	const middlewareToolChoice = createMiddlewareToolChoiceControl();
+	// The autonomous window (ob-yolo D6): at yolo, how far Clio runs on its own
+	// before it pauses for the operator. A halt cancels the turn and latches
+	// until the operator speaks; `chat` is built further down, and nothing
+	// halts before the first turn runs.
+	let lastAutonomyHalt: AutonomyHalt | null = null;
+	const autonomyWindow = createAutonomyWindow({
+		caps: () => autonomousCaps(resolveEffectiveAutonomy(), getCurrentSettings().safety.limits),
+		session: () => session?.current()?.id ?? null,
+		onHalt: (halt) => {
+			lastAutonomyHalt = halt;
+			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
+			chat.cancel({
+				reason: `[Clio Coder] ${autonomyHaltNotice(halt, options.headless !== undefined ? "headless" : "interactive")}`,
+				source: "autonomy",
+				auditReason: `${prefix}: ${halt.detail}`,
+			});
+		},
+	});
+	bus.subscribe("tool.settled", (_payload, context) => {
+		if (context?.agent.role === "main") autonomyWindow.toolCall();
+	});
+	bus.subscribe("call.settled", (payload, context) => {
+		if (context?.agent.role === "main") autonomyWindow.tokens(settledCallTokens(payload.usage));
+	});
 	// The safety judge reviews what autonomy default would park for the operator
 	// against the operator's own messages. Its round goes through System One's
 	// one-shot port and request admission, built further down; nothing calls the
@@ -3321,6 +3354,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
+		// Past either threshold every later review would refuse in silence, so contained yolo ends the run (D4).
+		onEscalation: (note) => {
+			if (!unattendedYolo()) return;
+			autonomyWindow.haltFor(
+				"judge",
+				note.consecutiveBlocks >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
+					? `${note.consecutiveBlocks} blocks in a row`
+					: `${note.totalBlocks} blocks this session`,
+			);
+		},
 		// `systemOne` and `chat` are built further down; nothing calls the judge before the first tool call.
 		screen: createJudgeScreen({
 			systemOne: () => systemOne,
@@ -4686,6 +4729,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		getSettings: getCurrentSettings,
 		getAutonomy: resolveEffectiveAutonomy,
+		autonomy: {
+			halted: () => autonomyWindow.halted(),
+			operatorSpoke: () => {
+				const cleared = autonomyWindow.reopen();
+				if (cleared === null) return;
+				lastAutonomyHalt = null;
+				// Resuming after a block streak is the operator's approval to review again.
+				if (cleared.kind === "judge") safetyJudge.operatorApproved();
+			},
+			turnStarted: () => autonomyWindow.turnStarted(),
+			turnSettled: () => autonomyWindow.turnSettled(),
+			status: () => {
+				const caps = autonomyWindow.caps();
+				if (caps === null) return null;
+				return {
+					usage: autonomyWindow.usage(),
+					caps,
+					halted: autonomyWindow.halted(),
+					osSandbox: mainShellContained(getCurrentSettings().safety.sandbox, sandboxAvailability()),
+				};
+			},
+		},
 		providers,
 		middleware,
 		// The turn_start observation rides the prompt seam, so it names the line
@@ -5847,6 +5912,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
+				autonomyHalt: () => lastAutonomyHalt,
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry
 					? {
