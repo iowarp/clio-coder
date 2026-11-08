@@ -540,7 +540,7 @@ describe("arena runner", () => {
 			});
 			assert.equal(result.status, "complete", result.error ?? "");
 			for (const contender of result.contenders) {
-				assert.equal(contender.error ?? null, null);
+				assert.equal(contender.facts?.error, null);
 				assert.deepEqual(contender.facts?.diff, { files: 1, insertions: 1, deletions: 0 });
 				assert.match(contender.facts?.check?.tail ?? "", /check unit: pass/);
 			}
