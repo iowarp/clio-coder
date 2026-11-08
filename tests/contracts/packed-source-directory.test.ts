@@ -44,6 +44,9 @@ describe("packed source directory read", () => {
 		writePack(join(pkg, "dist", "assets", "source.pack"), {
 			"src/interactive/nested/view.ts": "export const view = 1;\n",
 			"src/interactive/index.ts": "export const index = 1;\n",
+			"src/vault/a.ts": "export const a = 1;\n",
+			"src/vault/b.ts": "export const b = 1;\n",
+			"src/vault/c.ts": "export const c = 1;\n",
 		});
 		mkdirSync(join(pkg, "src", "loose"), { recursive: true });
 		writeFileSync(join(pkg, "src", "loose", "kept.ts"), "export const kept = 1;\n");
@@ -91,15 +94,24 @@ describe("packed source directory read", () => {
 		strictEqual(/export const index = 1;/.test(result.output ?? ""), true, result.output);
 	});
 
-	async function output(tool: ToolSpec, args: Record<string, unknown>): Promise<string> {
+	async function run(
+		tool: ToolSpec,
+		args: Record<string, unknown>,
+		allows: (path: string) => boolean = () => true,
+	): Promise<{ output: string; details: Record<string, unknown> }> {
 		// The fixture package carries no safety rule pack, so the path policy is supplied.
-		const result = (await tool.run(args, { allowsObservationPath: () => true })) as {
+		const result = (await tool.run(args, { allowsObservationPath: allows })) as {
 			kind: string;
 			output?: string;
 			message?: string;
+			details?: Record<string, unknown>;
 		};
 		strictEqual(result.kind, "ok", result.message);
-		return result.output ?? "";
+		return { output: result.output ?? "", details: result.details ?? {} };
+	}
+
+	async function output(tool: ToolSpec, args: Record<string, unknown>): Promise<string> {
+		return (await run(tool, args)).output;
 	}
 
 	it("ls lists a pack-only directory and merges packed entries into src/, marked as packed", async () => {
@@ -114,5 +126,15 @@ describe("packed source directory read", () => {
 		deepStrictEqual(all.slice(0, 3).sort(), ["interactive/index.ts", "interactive/nested/view.ts", "loose/kept.ts"]);
 		const inner = (await output(findTool, { pattern: "**/view.ts", path: join(pkg, "src", "interactive") })).split("\n");
 		strictEqual(inner[0], "nested/view.ts");
+	});
+
+	it("withheld packed members never take a limit slot from a permitted one", async () => {
+		const vault = join(pkg, "src", "vault");
+		const denyAB = (path: string) => !/[\\/][ab]\.ts$/.test(path);
+		const found = await run(findTool, { pattern: "*.ts", path: vault, limit: 1 }, denyAB);
+		strictEqual(found.output.split("\n")[0], "c.ts", found.output);
+		strictEqual((found.details.search as { complete: boolean }).complete, true);
+		const listed = await run(lsTool, { path: vault, limit: 1 }, denyAB);
+		strictEqual(listed.output.split("\n")[0], "c.ts (packed)", listed.output);
 	});
 });

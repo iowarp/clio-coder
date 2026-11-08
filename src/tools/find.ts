@@ -177,6 +177,7 @@ function packedFind(
 	searchPath: string,
 	collected: string[],
 	collectLimit: number,
+	allows: (path: string) => boolean,
 ): { paths: string[]; mtimeMs: number } | null {
 	const packed = packedSourcePathsUnder(searchPath);
 	if (packed === null) return null;
@@ -186,6 +187,8 @@ function packedFind(
 	for (const rel of [...packed.directories, ...packed.files]) {
 		if (collected.length + paths.length >= collectLimit) break;
 		if (seen.has(rel.replace(/\/$/, "")) || !matcher.test(rel)) continue;
+		// Filter before the match counts, so withheld members never take a slot from permitted ones.
+		if (!allows(join(searchPath, rel))) continue;
 		paths.push(rel);
 	}
 	return { paths, mtimeMs: packed.mtimeMs };
@@ -402,7 +405,7 @@ export const findTool: ToolSpec = {
 				search.complete = false;
 				search.reason = "cancelled";
 			}
-			const packed = packedFind(pattern, searchPath, collectedPaths, collectLimit);
+			const packed = packedFind(pattern, searchPath, collectedPaths, collectLimit, pathFilter.allows);
 			if (packed) collectedPaths = [...collectedPaths, ...packed.paths];
 			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
 			const kept = new Set(collectedPaths);
