@@ -431,6 +431,27 @@ export function resolveWorkerPermit(input: WorkerPermitInput): WorkerPermit {
 }
 
 /**
+ * The permit without the operator's yolo grant, every other field unchanged and
+ * the digest sealed again. A dispatcher that left yolo while its attempt waited
+ * for capacity launches the worker with this, so no worker ends up above its
+ * dispatcher.
+ */
+export function withoutExecuteAutonomy(permit: WorkerPermit): WorkerPermit {
+	if (permit.allowance.executeAutonomy === undefined) return permit;
+	const { executeAutonomy: _dropped, ...allowance } = permit.allowance;
+	return Object.freeze({
+		...permit,
+		allowance: Object.freeze(allowance),
+		digest: workerPermitDigest({
+			version: permit.version,
+			ceiling: permit.ceiling,
+			allowance,
+			...(permit.trustedUnmediated === true ? { trustedUnmediated: true as const } : {}),
+		}),
+	});
+}
+
+/**
  * Marks a permit Clio recorded and did not enforce. An ACP peer runs its own
  * tools, and Clio answers only the permission requests the peer chooses to
  * send, under the agent's toolGovernance. A call the peer never asks about

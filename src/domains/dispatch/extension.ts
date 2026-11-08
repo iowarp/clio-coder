@@ -240,6 +240,7 @@ import {
 	recordOnlyAcpPermit,
 	resolveWorkerPermit,
 	type WorkerPermit,
+	withoutExecuteAutonomy,
 	workerPermissionModeForPermit,
 } from "../safety/worker-permit.js";
 import {
@@ -7276,6 +7277,15 @@ export function createDispatchBundle(
 			if (queuedIdentity !== null) pendingCapacity.delete(queuedIdentity.runId);
 		}
 		const leaseSlot = createLeaseSlotGuard(capacityAdmission, capacityLease.leaseId, req.lineage !== undefined);
+		// The permit was resolved before capacity admission, which may have
+		// waited. A dispatcher that left yolo meanwhile launches its worker
+		// without the yolo grant, and every record from here on carries the
+		// narrowed permit.
+		if (
+			lifecycle.permit.allowance.executeAutonomy === "yolo" &&
+			operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)) !== "yolo"
+		)
+			lifecycle.permit = withoutExecuteAutonomy(lifecycle.permit);
 
 		const ledgerRef = (() => {
 			try {

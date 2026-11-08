@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
+import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -98,6 +99,61 @@ test("a dispatcher no one granted yolo never seals a yolo worker, whatever setti
 	strictEqual((await allowanceUnderYoloSettings("clio-ceiling-default-", () => "default")).executeAutonomy, undefined);
 	// The live level is the ceiling: a granted unconfined yolo operator still passes it on.
 	strictEqual((await allowanceUnderYoloSettings("clio-ceiling-yolo-", () => "yolo")).executeAutonomy, "yolo");
+});
+
+test("an attempt queued for capacity launches at the dispatcher's live level, not the one it was admitted under", async () => {
+	const env = await isolateClioEnv("clio-ceiling-queued-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.autonomy = "yolo";
+	settings.safety.yoloConfinement = "unconfined";
+	settings.safety.yoloUnconfinedAccepted = true;
+	let live: "default" | "yolo" = "yolo";
+	const specs: WorkerSpec[] = [];
+	let releaseFirst = (): void => {};
+	const firstHeld = new Promise<void>((resolve) => {
+		releaseFirst = resolve;
+	});
+	const scheduling = { maxWorkers: () => 1 };
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings, scheduling }), {
+		operatorAutonomy: () => live,
+		spawnWorker: (spec): SpawnedWorker => {
+			specs.push(spec);
+			const hold = specs.length === 1 ? firstHeld : Promise.resolve();
+			return {
+				pid: null,
+				promise: hold.then(() => ({ exitCode: 0, signal: null })),
+				heartbeatAt: { current: Date.now(), monotonic: 0 },
+				events: (async function* () {
+					await hold;
+					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } };
+				})(),
+				abort() {},
+			};
+		},
+	});
+	try {
+		await bundle.extension.start();
+		const request = { agentId: "coder", task: "Inspect the task", executionRole: "builder" as const, cwd: env.dir };
+		const first = await bundle.contract.dispatch(request);
+		const queued = bundle.contract.dispatch(request);
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		strictEqual(specs.length, 1, "the second attempt waits for the only slot");
+		live = "default";
+		releaseFirst();
+		await first.finalPromise;
+		const second = await queued;
+		const receipt = await second.finalPromise;
+		strictEqual(specs[0]?.permit.allowance.executeAutonomy, "yolo");
+		const narrowed = specs[1];
+		ok(narrowed);
+		strictEqual(narrowed.permit.allowance.executeAutonomy, undefined);
+		strictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(narrowed))).permit.digest, narrowed.permit.digest);
+		strictEqual(receipt.safety?.permit?.executeAutonomy, undefined);
+		strictEqual(receipt.safety?.permit?.digest, narrowed.permit.digest);
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
 });
 
 /** The JSON document production dispatch writes for a default coder run. */
