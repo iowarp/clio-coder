@@ -332,6 +332,43 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
+	it("credits every declared check a chain runs, unless an earlier segment can skip or move it", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-declared-chain-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const sessionVerifiers = [
+			{ id: "run-acceptance", command: "./acceptance.sh" },
+			{ id: "run-second", command: "./second.sh" },
+			{ id: "run-false", command: "false" },
+			{ id: "run-pwd", command: "pwd" },
+		];
+		const assess = (command: string) =>
+			assessFinishContract({
+				sessionEntries: [
+					userMessage("user-1"),
+					...mutationWindow().slice(1),
+					toolCall("sh-1", ToolNames.Bash, { command }),
+					toolResult("sh-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "Fixed."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				sessionVerifiers,
+			});
+		const passedChecks = (command: string) => [...(assess(command).verificationScope?.passedChecks ?? [])].sort();
+		deepStrictEqual(passedChecks("./acceptance.sh && ./second.sh"), ["run-acceptance", "run-second"]);
+		deepStrictEqual(passedChecks("true && pwd"), ["run-pwd"]);
+		deepStrictEqual(passedChecks("cp before.ts src/thing.ts && ./acceptance.sh"), ["run-acceptance"]);
+		for (const command of [
+			"exit 0 && false",
+			"exec true && false",
+			"true && cd / && pwd",
+			"pushd / && pwd",
+			"PATH=/nowhere && pwd",
+		]) {
+			strictEqual(assess(command).reason, "unvalidated_mutation", command);
+		}
+	});
+
 	it("requires verified and validated canonical dispatch evidence, not just a zero exit code", () => {
 		const trusted = composeTrustStatus({
 			artifactIntegrity: {
