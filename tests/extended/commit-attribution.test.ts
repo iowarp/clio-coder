@@ -1,22 +1,28 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
 	attributeCommitMessage,
+	CLIO_COMMIT_EMAIL,
 	CLIO_COMMIT_IDENTITY,
 	CLIO_COMMIT_TRAILERS,
 	CLIO_DECISION_TRAILER_CAP,
 	decisionTrailerRefs,
 } from "../../src/core/commit-attribution.js";
 import {
+	enterAutonomousCommitScope,
+	setAutonomousCommitProcess,
 	setCommitDecisionRefsProvider,
+	setGitCommitAttributionEnabled,
+	setGitCommitAuthorSetting,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../src/core/git-commit-attribution.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
+import { commitWorktreePath } from "../../src/tools/task-worktree.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const REFS = ["interview-1/db_engine", "agent:a1b2/cache-key-shape"];
@@ -166,5 +172,117 @@ describe("Clio commit identity", () => {
 		} finally {
 			isolated.restore();
 		}
+	});
+});
+
+describe("autonomous commit authorship", () => {
+	const HUMAN = "Human <human@example.com>";
+	const CLIO = `Clio Coder <${CLIO_COMMIT_EMAIL}>`;
+
+	afterEach(() => {
+		setAutonomousCommitProcess(false);
+	});
+
+	it("swaps Clio's trailers for the human co-author and keeps every other trailer", () => {
+		const message = attributeCommitMessage(
+			`feat: x\n\n${CLIO_COMMIT_TRAILERS.assisted}\n${CLIO_COMMIT_TRAILERS.coAuthored}\nSigned-off-by: ${HUMAN}\n`,
+			{ materiallyAuthored: true, decisions: ["i/k"] },
+			true,
+			{ clioAuthorFor: HUMAN },
+		);
+		strictEqual(message, `feat: x\n\nSigned-off-by: ${HUMAN}\nCo-authored-by: ${HUMAN}\nClio-Decision: i/k\n`);
+		strictEqual(attributeCommitMessage("feat: x", {}, true, { clioAuthorFor: CLIO }), "feat: x\n");
+	});
+
+	async function withRepo(run: (repo: string, git: (args: string[], env?: NodeJS.ProcessEnv) => string) => void) {
+		const isolated = await isolateClioEnv("clio-coder-commit-author-");
+		try {
+			const repo = join(isolated.dir, "repo");
+			mkdirSync(repo);
+			const git = (args: string[], env: NodeJS.ProcessEnv = process.env) =>
+				execFileSync("git", args, { cwd: repo, env, encoding: "utf8" });
+			git(["init", "-q"]);
+			git(["config", "user.name", "Human"]);
+			git(["config", "user.email", "human@example.com"]);
+			setGitCommitAttributionEnabled(true);
+			setGitCommitAuthorSetting("auto");
+			run(repo, git);
+		} finally {
+			isolated.restore();
+		}
+	}
+
+	function commitThroughSeam(
+		repo: string,
+		git: (args: string[], env?: NodeJS.ProcessEnv) => string,
+		source = process.env,
+	) {
+		const { env, diagnostic } = withManagedGitCommitAttributionEnvironment(source, {
+			cwd: repo,
+			enabled: true,
+			evidence: { materiallyAuthored: true },
+		});
+		strictEqual(diagnostic, null);
+		git(["commit", "-q", "--allow-empty", "-m", "feat: x"], env);
+		return {
+			ident: git(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(),
+			trailers: git(["log", "-1", "--format=%(trailers:only)"]).trim().split("\n"),
+		};
+	}
+
+	it("makes Clio the author of an autonomous commit and the human its committer and co-author", async () => {
+		await withRepo((repo, git) => {
+			setAutonomousCommitProcess(true);
+			const { ident, trailers } = commitThroughSeam(repo, git);
+			strictEqual(ident, `${CLIO}|${HUMAN}`);
+			deepStrictEqual(trailers, [`Co-authored-by: ${HUMAN}`]);
+		});
+	});
+
+	it("keeps the human author with Clio trailers for interactive work, the human setting, and an explicit author", async () => {
+		await withRepo((repo, git) => {
+			const interactive = commitThroughSeam(repo, git);
+			strictEqual(interactive.ident, `${HUMAN}|${HUMAN}`);
+			deepStrictEqual(interactive.trailers, [CLIO_COMMIT_TRAILERS.assisted, CLIO_COMMIT_TRAILERS.coAuthored]);
+
+			setAutonomousCommitProcess(true);
+			setGitCommitAuthorSetting("human");
+			strictEqual(commitThroughSeam(repo, git).ident, `${HUMAN}|${HUMAN}`);
+
+			setGitCommitAuthorSetting("auto");
+			const chosen = commitThroughSeam(repo, git, { ...process.env, GIT_AUTHOR_NAME: "Op", GIT_AUTHOR_EMAIL: "op@x.io" });
+			strictEqual(chosen.ident, `Op <op@x.io>|${HUMAN}`);
+		});
+	});
+
+	it("leaves the human author when no committer identity is configured, so nobody is dropped", async () => {
+		await withRepo((repo, git) => {
+			git(["config", "--unset", "user.name"]);
+			git(["config", "--unset", "user.email"]);
+			const release = enterAutonomousCommitScope();
+			try {
+				const env = { ...process.env, GIT_COMMITTER_NAME: "", GIT_COMMITTER_EMAIL: "" };
+				const { env: spawned } = withManagedGitCommitAttributionEnvironment(env, { cwd: repo, enabled: true });
+				ok(spawned.GIT_AUTHOR_EMAIL !== CLIO_COMMIT_EMAIL);
+			} finally {
+				release();
+			}
+		});
+	});
+
+	it("lands a worker's worktree as Clio with the human co-author, unless attribution is off", async () => {
+		await withRepo((repo, git) => {
+			git(["commit", "-q", "--allow-empty", "-m", "init"]);
+			writeFileSync(join(repo, "a.txt"), "a\n");
+			commitWorktreePath(repo, "clio", "task: a", { authoredPaths: null });
+			strictEqual(git(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(), `${CLIO}|${HUMAN}`);
+			strictEqual(git(["log", "-1", "--format=%B"]), `task: a\n\nCo-authored-by: ${HUMAN}\n\n`);
+
+			setGitCommitAttributionEnabled(false);
+			writeFileSync(join(repo, "b.txt"), "b\n");
+			commitWorktreePath(repo, "clio", "task: b", { authoredPaths: null });
+			strictEqual(git(["log", "-1", "--format=%an <%ae>"]).trim(), HUMAN);
+			strictEqual(git(["log", "-1", "--format=%B"]), "task: b\n\n");
+		});
 	});
 });

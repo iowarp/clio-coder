@@ -25,6 +25,13 @@ export function parallelWriterConflict(
 	specs: ReadonlyArray<AgentSpec>,
 ): string | null {
 	const classes = new Map(specs.map((spec) => [spec.id, spec.capabilityClass]));
+	const readOnlyIds = specs
+		.filter((spec) => spec.capabilityClass === "read-only" && spec.audience !== "internal")
+		.map((spec) => spec.id);
+	const inspection =
+		readOnlyIds.length > 0
+			? `For inspection or review, dispatch read-only recipes instead: ${readOnlyIds.join(", ")}.`
+			: "For inspection, choose read-only recipes from dispatch(list: true).";
 	const writers = requests.filter(
 		(request) => request.worktree !== true && request.readOnly !== true && classes.get(request.agentId) !== "read-only",
 	);
@@ -34,7 +41,7 @@ export function parallelWriterConflict(
 			const left = roots[i] ?? [],
 				right = roots[j] ?? [];
 			if (!left.length || !right.length || writeRootsOverlap(left, right)) {
-				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. For inspection, choose read-only recipes from dispatch(list: true). For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
+				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. ${inspection} For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
 			}
 		}
 	return null;

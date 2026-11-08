@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { enterAutonomousCommitScope } from "../core/git-commit-attribution.js";
 import {
 	continuationCountsAgainstCap,
 	JobClockExpired,
@@ -116,6 +117,7 @@ import {
 } from "../domains/providers/index.js";
 import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
+import type { AutonomyHalt, AutonomyStatus } from "../domains/safety/autonomy-window.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import { sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
@@ -592,6 +594,17 @@ function operatorFacingEngineError(message: string): string {
  * turn carrying that reason in place of the empty aborted turn, and tags the
  * `turn.aborted` event with `source`.
  */
+/** What the chat loop needs of the autonomous window. */
+export interface ChatAutonomyWindow {
+	halted(): AutonomyHalt | null;
+	/** An operator prompt is starting: a fresh window, clearing any halt. */
+	operatorSpoke(): void;
+	turnStarted(): void;
+	turnSettled(): void;
+	/** The window's counts for the footer; null below yolo. */
+	status?(): AutonomyStatus | null;
+}
+
 export interface ChatCancelOptions {
 	/** Operator-facing explanation for a system-initiated stop. */
 	reason?: string;
@@ -712,6 +725,14 @@ export interface ChatLoop {
 	 * queues the text for the next slot instead.
 	 */
 	interruptRefusal(): string | null;
+	/**
+	 * Continue a yolo run the autonomous window paused, on the operator's
+	 * keypress: a fresh window, then a continuation turn. False when nothing
+	 * is paused or a run is active.
+	 */
+	resumeAutonomy(): boolean;
+	/** The autonomous window at yolo, for the footer; null below yolo or when unwired. */
+	autonomyStatus(): AutonomyStatus | null;
 	/**
 	 * `/skill off`: drop the tool surface an activated skill armed, so the next
 	 * turn runs with the full surface again. Returns the skill names that were
@@ -887,6 +908,11 @@ export interface CreateChatLoopDeps {
 	 * back to the settings value.
 	 */
 	getAutonomy?: () => AutonomyLevel;
+	/**
+	 * The autonomous window (ob-yolo D6). While it holds a halt every turn Clio
+	 * would send itself is refused; an operator prompt reopens it.
+	 */
+	autonomy?: ChatAutonomyWindow;
 	providers: ProvidersContract;
 	/** Optional independent image model, bound to fleet.profiles.vision. */
 	visionSidecar?: VisionSidecar;
@@ -1485,6 +1511,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		middlewareToolChoice,
 		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
+		bus: deps.bus,
 	});
 
 	try {
@@ -2652,6 +2679,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
 		setQueuedEntryKind: (id, kind) => queues.setEntryKind(id, kind),
 		interruptRefusal: () => (state.streaming ? interruptRefusalReason() : null),
+		resumeAutonomy: () => {
+			const autonomy = deps.autonomy;
+			if (autonomy === undefined || autonomy.halted() === null) return false;
+			if (disposed || state.streaming || state.activeUserTurnId !== null) return false;
+			autonomy.operatorSpoke();
+			void api.submit(
+				"[Clio Coder] The operator resumed yolo after it paused. Continue from where the previous turn stopped, and if the work is already finished, say so and stop.",
+				{ origin: "yolo resume", yoloContinuation: true },
+			);
+			return true;
+		},
+		autonomyStatus: () => deps.autonomy?.status?.() ?? null,
 		clearSkillSurface: () => {
 			const cleared = skillSurfaceNames(state.activeSkillSurface);
 			armSkillSurface(undefined, undefined, true);
@@ -2778,6 +2817,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
+					return;
+				}
+			}
+
+			if (deps.autonomy !== undefined) {
+				// A turn Clio sends itself waits while yolo is paused; the operator's own prompt reopens the window.
+				const ownTurn =
+					options.requestContinuation === true ||
+					options.yoloContinuation === true ||
+					options.machineTurn !== undefined ||
+					options.origin !== undefined;
+				if (!ownTurn) deps.autonomy.operatorSpoke();
+				else if (deps.autonomy.halted() !== null) {
+					returnUnstarted();
 					return;
 				}
 			}
@@ -3355,6 +3408,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 				// 7. Run the prompt, then route the settled state through recovery.
 				state.streaming = true;
+				deps.autonomy?.turnStarted();
 				const foregroundOn = (runtime: AgentRuntime): (() => void) => {
 					const endpointKey = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
 					return endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
@@ -3524,6 +3578,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// still ended on the operator's say-so, which the outcome has to show.
 					const interviewDismissed = askUserPolicy?.status === "cancelled";
 					releaseForeground();
+					deps.autonomy?.turnSettled();
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
 					if (askUserPolicy) {
@@ -3742,7 +3797,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			queues.onRunCancelled({
 				hold: options?.reason === INTERRUPT_CANCEL_REASON,
 				preserve: preserveQueue,
-				settle: options?.source === "loop_guard",
+				settle: options?.source === "loop_guard" || options?.source === "autonomy",
 			});
 			const requestedReason = options?.reason?.trim();
 			if (wasStreaming) {
@@ -4473,6 +4528,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return refused(
 				"The attended turn projection is detached; delivery remains with its job controller until the host is available.",
 			);
+		const paused = deps.autonomy?.halted() ?? null;
+		if (paused !== null)
+			return refused(`Yolo is paused for the operator (${paused.detail}); delivery remains with its job controller.`);
 		if (!api.machineTurnAvailable?.())
 			return refused("The main conversation is busy; delivery remains with its job controller.");
 		const current = (): boolean =>
@@ -4487,6 +4545,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		let ownedUserTurnId: string | null = null;
 		let ownedRuntime: AgentRuntime | null = null;
 		let projectionLease: Extract<MachineTurnProjectionAdmission, { status: "ready" }> | null = null;
+		// A scheduled job's turn is autonomous: its commits name Clio as author under `auto`.
+		const autonomousCommits: { release: (() => void) | null } = { release: null };
 		const cancel = (): void => {
 			if (
 				machineTurnOwner === token &&
@@ -4559,6 +4619,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				onAdmitted: () => {
 					if (machinePreparation?.token === token) machinePreparation = null;
 					machineTurnRunning = token;
+					autonomousCommits.release ??= enterAutonomousCommitScope();
 					ownedUserTurnId = state.activeUserTurnId;
 					ownedRuntime = state.runtime;
 					emit({
@@ -4587,6 +4648,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 		} finally {
 			request.signal.removeEventListener("abort", cancel);
+			autonomousCommits.release?.();
 			if (machineTurnRunning === token) machineTurnRunning = null;
 			try {
 				projectionLease?.release();

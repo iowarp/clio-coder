@@ -65,6 +65,8 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		getAgentSpecs: () => [
 			{ id: "coder", capabilityClass: "workspace-edit" },
 			{ id: "scout", capabilityClass: "read-only" },
+			{ id: "verifier", capabilityClass: "verification" },
+			{ id: "context-bootstrap", capabilityClass: "read-only", audience: "internal" },
 		],
 	} as unknown as DispatchToolDeps);
 	const prepare = (tasks: unknown[], extra = {}) =>
@@ -76,6 +78,13 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 	});
 	try {
 		match(String(prepare([writer(), writer()])), /parallel_writer_conflict/);
+		// Verification recipes run checks in the tree, so a parallel review sent to
+		// them stays refused; the refusal names the read-only recipes that can take it.
+		const review = (agent: string) => ({ agent, task: "Review src/a.ts for bugs" });
+		const refusal = String(prepare([review("verifier"), review("verifier")]));
+		match(refusal, /parallel_writer_conflict/);
+		match(refusal, /dispatch read-only recipes instead: scout\./);
+		strictEqual(prepare([review("scout"), review("scout")]), undefined);
 		match(String(prepare([writer(["src/"]), writer(["src/nested/"])])), /parallel_writer_conflict/);
 		strictEqual(prepare([writer(["src/"]), writer(["docs/"])]), undefined);
 		strictEqual(prepare([writer(), { agent: "scout", task: "Inspect sources" }]), undefined);

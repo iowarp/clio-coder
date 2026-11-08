@@ -39,6 +39,14 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import {
+	AUTONOMOUS_CAP_EXIT_CODE,
+	AUTONOMOUS_CAP_REASON,
+	AUTONOMY_JUDGE_STREAK_EXIT_CODE,
+	type AutonomyHalt,
+	autonomyHaltNotice,
+	JUDGE_STREAK_REASON,
+} from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
@@ -138,6 +146,8 @@ export interface HeadlessMainAgentOptions {
 	segmentUsage?: (messages: ReadonlyArray<AgentMessage>) => Promise<RunJsonSegmentUsage | null>;
 	/** `clio-coder run --max-cost-usd`: the cap the run ran under. */
 	costCap?: RunResultCostCap;
+	/** The yolo pause that stopped the run, if any: exit 4 for a cap, 3 for a judge streak (ob-yolo D4, D6). */
+	autonomyHalt?: () => AutonomyHalt | null;
 }
 
 interface HeadlessMainAgentResult {
@@ -1243,6 +1253,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (result.callsNotRun !== null && !result.sawTerminatingToolResult) {
 			stderrMessage = [stderrMessage, `clio-coder run: ${result.callsNotRun}`].filter(Boolean).join("\n");
 		}
+	}
+	// A yolo pause ends the run on purpose, whatever the cancelled turn left behind; a signal still outranks it.
+	const halt = terminal.exitCode !== 0 && !termination.isShuttingDown() ? (options.autonomyHalt?.() ?? null) : null;
+	if (halt !== null) {
+		const failureMessage = `clio-coder run: ${autonomyHaltNotice(halt, "headless")}`;
+		terminal = {
+			exitCode: halt.kind === "judge" ? AUTONOMY_JUDGE_STREAK_EXIT_CODE : AUTONOMOUS_CAP_EXIT_CODE,
+			outcome: "failed",
+			status: "failed",
+			failureMessage,
+			outcomeDetail: halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON,
+		};
+		stderrMessage = failureMessage;
 	}
 	const exitCode = terminal.exitCode;
 

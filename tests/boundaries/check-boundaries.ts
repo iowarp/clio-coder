@@ -964,6 +964,7 @@ const CONTINUATION_FIELDS = new Set([
 	"pendingRequestContinuation",
 	"pendingInRunContinuation",
 	"stalledTurnNudgeSpent",
+	"verificationNudgeSpent",
 	"yoloContinuations",
 	"turnStop",
 ]);

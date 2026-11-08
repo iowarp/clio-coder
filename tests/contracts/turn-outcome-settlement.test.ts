@@ -355,7 +355,11 @@ it("continuation state has one owner: a nudge per prompt, carried or resubmitted
 	strictEqual(continuation.takeInRun(), false);
 	continuation.beginPrompt({ requestContinuation: true, yoloContinuation: false });
 	strictEqual(continuation.nudgeSpent, true, "a continuation prompt keeps the cap");
+	strictEqual(continuation.request("verification"), true, "the verification nudge has its own cap");
+	strictEqual(continuation.request("verification"), false);
+	strictEqual(continuation.takeRequest(), true);
 	continuation.beginPrompt({ requestContinuation: false, yoloContinuation: false });
+	strictEqual(continuation.verificationNudgeSpent, false, "an operator prompt resets the verification nudge");
 	strictEqual(continuation.request(), true);
 	continuation.dropRequest();
 	strictEqual(continuation.takeRequest(), false, "a stranded resubmit superseded the request");

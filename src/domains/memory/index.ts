@@ -97,6 +97,8 @@ export {
 	MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
 	type MemoryPromptDecision,
 	type MemoryPromptOptions,
+	type MemoryRecordStanding,
+	memoryRecordStanding,
 	renderMemoryPromptSection,
 	selectMemoryForPrompt,
 } from "./prompt-section.js";

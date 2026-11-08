@@ -24,29 +24,28 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 export const verifyToolSurface: ToolSurface = {
 	name: ToolNames.Verify,
 	description:
-		'Run a declared verification check: check=<id> runs one, and an undeclared id names the declared ones; check="frontend" with path validates an HTML/CSS/JS artifact; no arguments lists declared and build/CI-derived checks.',
+		'Run a declared or build/CI-derived check; an undeclared id lists them. check="frontend" validates the HTML/CSS/JS artifact at path.',
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({
 				description: `Check id, package script (${VERIFICATION_SCRIPT_FAMILY_HINT}), or "frontend"; omit to list.`,
 			}),
 		),
-		path: Type.Optional(Type.String({ description: "frontend: artifact file under the workspace root." })),
+		path: Type.Optional(Type.String({ description: "frontend: artifact file in the workspace." })),
 		args: Type.Optional(
 			Type.Array(Type.String(), {
-				description: "Extra arguments: after -- for package scripts, appended for derived runners.",
+				description: "Extra args: after -- for package scripts, else appended.",
 			}),
 		),
 		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: browser mode." })),
-		cwd: Type.Optional(Type.String({ description: "Package script working directory." })),
+		cwd: Type.Optional(Type.String({ description: "Package script cwd." })),
 		unsandboxed: Type.Optional(
 			Type.Boolean({
-				description:
-					"Leave the sandbox, only after a check failed because of it (credentials, a path outside the writable roots); the call is reviewed.",
+				description: "Leave the sandbox only after it failed a check (credentials, unwritable paths); reviewed.",
 			}),
 		),
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (not declared checks)." })),
-		max_output_bytes: Type.Optional(Type.Number({ description: "Output cap in bytes." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Output byte cap." })),
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",

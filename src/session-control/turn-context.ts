@@ -94,8 +94,11 @@ import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-s
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
-import { memorySectionBlocks, memorySectionDelta } from "../domains/memory/prompt-section.js";
-import type { MemoryStatus } from "../domains/memory/types.js";
+import {
+	type MemoryRecordStanding,
+	memorySectionBlocks,
+	memorySectionDelta,
+} from "../domains/memory/prompt-section.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
@@ -108,7 +111,7 @@ import {
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { type AutonomyLevel, effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
@@ -241,7 +244,7 @@ export interface TurnContextDeps {
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
 	/** False while `context.memory.enabled` is off: no section, held or live, and no update reminder. */
 	memoryEnabled?: (() => boolean) | undefined;
-	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryStatus | "deleted">) | undefined;
+	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryRecordStanding>) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/** Live source of each active route for the attended prompt; absent for headless runs. */
 	getRouteSources?: (() => Readonly<Record<RouteName, RouteSource>>) | undefined;
@@ -2848,6 +2851,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
+				// Only the opt-out is carried, so a contained session keeps its prompt key.
+				...(effectiveYoloConfinement(settings.safety) === "unconfined" ? { yoloConfinement: "unconfined" as const } : {}),
 				...(deps.liveSteering === false ? { liveSteering: false } : {}),
 				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
 			};

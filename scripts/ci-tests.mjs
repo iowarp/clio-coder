@@ -30,6 +30,8 @@ export const coreTests = [
 	"default-containment",
 	"contained-secrets",
 	"true-yolo",
+	"contained-yolo",
+	"autonomy-window",
 	"transcript-operator-grant",
 	"yolo-script-sandbox",
 	"verify-sandbox-trojan",
@@ -94,7 +96,22 @@ export const coreTests = [
 	"keyboard-model",
 	"background-surfaces",
 	"completed-worker-presentation",
-].map((name) => `tests/contracts/${name}.test.ts`);
+	"gateway-prompt",
+	"host-verification-admission",
+	"receipt-verify-latest-outcome",
+	"verify-numeric",
+	"verify-numeric-boundaries",
+	"verify-reproduce",
+	"verify-toolchain-checks",
+]
+	.map((name) => `tests/contracts/${name}.test.ts`)
+	// Signature features whose guards live in the extended suite: the working
+	// set, judged perf checks and sealed receipts under heartbeat contention.
+	.concat(
+		["working-set-core", "verify-perf", "dispatch-heartbeat-finalization"].map(
+			(name) => `tests/extended/${name}.test.ts`,
+		),
+	);
 
 export const guiTests = [
 	"chat-composer",

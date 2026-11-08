@@ -338,6 +338,29 @@ function captureSnapshot(context: SnapshotContext, policy: QualityPolicy, check:
 	};
 }
 
+/**
+ * Whether a verify receipt is a pass. A declared check carries its judgement, and the judgement is the evidence:
+ * a judged kind (reproduce, numeric-compare, perf-budget) passes on its verdict, which a reproduce run reports
+ * without a top-level exit code, and a command check passes on a clean exit. A receipt with no judgement falls
+ * back to its exit code.
+ */
+function verifyReceiptPassed(receipt: Record<string, unknown>, details: Record<string, unknown>): boolean {
+	if (
+		receipt.kind === "error" ||
+		details.kind === "error" ||
+		receipt.isError === true ||
+		details.aborted === true ||
+		details.timedOut === true ||
+		details.outputCapped === true
+	)
+		return false;
+	const judgement = record(details.judgement);
+	if (judgement === null) return details.exitCode === 0;
+	if (judgement.execution !== "succeeded") return false;
+	if (judgement.validation === "passed") return true;
+	return judgement.validation === "exit-code" && details.exitCode === 0;
+}
+
 /** Only paired native verify receipts count; shell prose and unrelated checks cannot satisfy policy. */
 export function assessQualityPolicy(
 	root: string,
@@ -397,15 +420,7 @@ export function assessQualityPolicy(
 				return finding("limited", "Explicit limitation recorded; check remains unverified.");
 			if (!receipt) return finding("missing", `Run verify(check=${JSON.stringify(check)}) without args or cwd overrides.`);
 			const details = record(receipt.details);
-			if (
-				receipt.kind === "error" ||
-				details?.kind === "error" ||
-				receipt.isError ||
-				details?.exitCode !== 0 ||
-				details?.aborted === true ||
-				details?.timedOut === true ||
-				details?.outputCapped === true
-			)
+			if (details === null || !verifyReceiptPassed(receipt, details))
 				return rule.allowLimitations && limited.has(check)
 					? finding("limited", "Explicit limitation recorded; latest check did not pass.")
 					: finding("failed", "Latest check did not complete successfully.");

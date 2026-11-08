@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-import { AUTONOMY_LEVELS } from "../domains/safety/autonomy.js";
+import { AUTONOMY_LEVELS, YOLO_CONFINEMENTS } from "../domains/safety/autonomy.js";
 import { scratchRootProblem } from "../domains/safety/scratch-roots.js";
 import { PROFILE_IDS } from "../domains/system-one/profiles.js";
 import { TURN_CONTROL_WORKFLOWS } from "../domains/turn-control/settings.js";
@@ -2305,6 +2305,8 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"snapshots",
 				"unattendedAfterSeconds",
 				"yoloAccepted",
+				"yoloConfinement",
+				"yoloUnconfinedAccepted",
 				"judge",
 			]);
 			if ("autonomy" in safety) {
@@ -2351,6 +2353,14 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const parsed = expectBoolean(issues, "safety.yoloAccepted", safety.yoloAccepted);
 				if (parsed !== undefined) settings.safety.yoloAccepted = parsed;
 			}
+			if ("yoloConfinement" in safety) {
+				const parsed = expectEnum(issues, "safety.yoloConfinement", safety.yoloConfinement, YOLO_CONFINEMENTS);
+				if (parsed !== undefined) settings.safety.yoloConfinement = parsed;
+			}
+			if ("yoloUnconfinedAccepted" in safety) {
+				const parsed = expectBoolean(issues, "safety.yoloUnconfinedAccepted", safety.yoloUnconfinedAccepted);
+				if (parsed !== undefined) settings.safety.yoloUnconfinedAccepted = parsed;
+			}
 			if ("unattendedAfterSeconds" in safety) {
 				const parsed = expectInteger(issues, "safety.unattendedAfterSeconds", safety.unattendedAfterSeconds, { min: 0 });
 				if (parsed !== undefined) settings.safety.unattendedAfterSeconds = parsed;
@@ -2391,6 +2401,9 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"readBytesPerCall",
 						"observationBytesPerTurn",
 						"workerResponseSeconds",
+						"autonomousToolCalls",
+						"autonomousMinutes",
+						"autonomousTokens",
 					]);
 					if ("sessionCostUsd" in limits) {
 						const parsed = expectNumber(issues, "safety.limits.sessionCostUsd", limits.sessionCostUsd, { min: 0 });
@@ -2404,6 +2417,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					] as const) {
 						if (!(key in limits)) continue;
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
+						if (parsed !== undefined) settings.safety.limits[key] = parsed;
+					}
+					for (const key of ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const) {
+						if (!(key in limits)) continue;
+						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 0 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;
 					}
 				}
@@ -2591,10 +2609,17 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				if (!isPlainObject(integrations.git))
 					issues.add("integrations.git", `expected a map, got ${describe(integrations.git)}`);
 				else {
-					issues.unknownKeys("integrations.git", integrations.git, ["commitAttribution"]);
+					issues.unknownKeys("integrations.git", integrations.git, ["commitAttribution", "commitAuthor"]);
 					if ("commitAttribution" in integrations.git) {
 						const parsed = expectBoolean(issues, "integrations.git.commitAttribution", integrations.git.commitAttribution);
 						if (parsed !== undefined) settings.integrations.git.commitAttribution = parsed;
+					}
+					if ("commitAuthor" in integrations.git) {
+						const parsed = expectEnum(issues, "integrations.git.commitAuthor", integrations.git.commitAuthor, [
+							"auto",
+							"human",
+						] as const);
+						if (parsed !== undefined) settings.integrations.git.commitAuthor = parsed;
 					}
 				}
 			}
@@ -2821,6 +2846,38 @@ export function updateSavedSettingsDocument(
 		const saved = readSavedDocument();
 		persistSettings(mutate(cloneValue(saved)));
 	}, options);
+}
+
+/** Shown once to an operator whose yolo became contained on upgrade (ob-yolo D1). */
+export const YOLO_CONTAINED_MIGRATION_NOTICE =
+	"Yolo now runs contained: the OS sandbox and the safety judge stay on, and nothing waits for you; a call that would need you is refused back to Clio instead of asking. To keep the old unconfined yolo, set safety.yoloConfinement: unconfined and safety.yoloUnconfinedAccepted: true in your user settings, or choose it in /settings.";
+
+/**
+ * Record `safety.yoloConfinement: contained` in the operator's user settings
+ * when the file has no confinement yet, so the migration notice shows once.
+ * Returns true only when this call wrote it. An unreadable or unwritable file
+ * writes nothing and returns false.
+ */
+export function recordYoloConfinementOnce(): boolean {
+	const unrecorded = (saved: unknown): saved is Record<string, unknown> & { safety?: Record<string, unknown> } => {
+		if (saved === null || typeof saved !== "object" || Array.isArray(saved)) return false;
+		const safety = (saved as { safety?: unknown }).safety;
+		if (safety === undefined) return true;
+		return safety !== null && typeof safety === "object" && !Array.isArray(safety) && !("yoloConfinement" in safety);
+	};
+	if (!existsSync(settingsPath()) || !unrecorded(readSavedDocument())) return false;
+	let wrote = false;
+	try {
+		updateSavedSettingsDocument((saved) => {
+			if (!unrecorded(saved)) return saved;
+			saved.safety = { ...(saved.safety ?? {}), yoloConfinement: "contained" };
+			wrote = true;
+			return saved;
+		});
+	} catch {
+		return false;
+	}
+	return wrote;
 }
 
 /**

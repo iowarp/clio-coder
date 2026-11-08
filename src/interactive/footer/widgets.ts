@@ -3,6 +3,7 @@ import type { ContextActivityPhase } from "../../core/telemetry/live-events.js";
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
+import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
@@ -90,6 +91,10 @@ export interface SessionFacts {
 	activeSkills?: ReadonlyArray<string>;
 	/** Explicit mode remains readable after transient setting feedback expires. */
 	autonomy?: string;
+	/** The operator's yolo confinement; read only at yolo, absent reads contained. */
+	yoloConfinement?: string;
+	/** The autonomous window's counts and caps; present only at yolo. */
+	autonomyWindow?: AutonomyStatus;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
 	memoryIntervention?: {
 		enabled: boolean;

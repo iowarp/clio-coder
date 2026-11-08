@@ -17,7 +17,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { stripAuthoredTrailers } from "../core/commit-message.js";
+import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
 import { internalGitArgv } from "../core/internal-git.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import {
@@ -291,7 +293,17 @@ export function commitWorktreePath(
 		git(path, ["add", "--", ...batch.map((entry) => `:(top,literal)${entry}`)]);
 	}
 	const committed = git(path, ["diff", "--cached", "--name-only", "-z"]).length > 0;
-	if (committed) git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
+	if (committed) {
+		// Landing dispatched work is autonomous: under `auto` Clio authors it and the human co-authors.
+		const authorship = autonomousLandAuthorship(path);
+		const attributed =
+			authorship === null ? message : attributeCommitMessage(message, {}, true, { clioAuthorFor: authorship.human });
+		git(
+			path,
+			[...hostCommitIdentity(path, identity), "commit", "-m", attributed, "--no-verify"],
+			authorship === null ? {} : { env: { ...process.env, ...authorship.env } },
+		);
+	}
 	const leftUncommitted = untrackedPaths(path).filter((entry) => !excluded.has(entry));
 	const { stamps } = untrackedState(path, leftUncommitted);
 	return {
@@ -362,7 +374,12 @@ export function mergeWorktreeBranch(
 	let targetCommit: string | undefined;
 	let mergeHeadPath: string | undefined;
 	// Conflict-path reporting parses Git diagnostics, so merge subprocesses need a stable locale.
-	const mergeEnv = { ...process.env, LC_ALL: "C", LANGUAGE: "" };
+	const authorship = autonomousLandAuthorship(root);
+	const mergeEnv = { ...process.env, ...authorship?.env, LC_ALL: "C", LANGUAGE: "" };
+	const mergeMessage =
+		authorship === null
+			? message
+			: attributeCommitMessage(message ?? `Merge branch '${branch}'`, {}, true, { clioAuthorFor: authorship.human });
 	try {
 		targetCommit = git(root, ["rev-parse", "--verify", "--end-of-options", `${branch}^{commit}`]);
 		const gitDir = git(root, ["rev-parse", "--absolute-git-dir"]);
@@ -384,7 +401,7 @@ export function mergeWorktreeBranch(
 				"merge",
 				"--no-edit",
 				"--no-verify",
-				...(message !== undefined ? ["-m", message] : []),
+				...(mergeMessage !== undefined ? ["-m", mergeMessage] : []),
 				branch,
 			],
 			{ env: mergeEnv },

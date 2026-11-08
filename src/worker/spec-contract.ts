@@ -208,6 +208,8 @@ interface WorkerSpecFields {
 	trustProjectCompatRoots?: boolean;
 	/** Effective commit-attribution setting inherited from the dispatching session. */
 	gitCommitAttribution?: boolean;
+	/** `integrations.git.commitAuthor`; a worker is autonomous, so `auto` makes Clio the author of its commits. */
+	gitCommitAuthor?: "auto" | "human";
 	/**
 	 * The dispatching session's dev-root owner token, so this worker counts as the
 	 * owner of the dev extension folders that session registered. Secret: read once
@@ -1144,6 +1146,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.trustProjectCompatRoots !== undefined && typeof spec.trustProjectCompatRoots !== "boolean") {
 		throw new Error("WorkerSpec.trustProjectCompatRoots must be a boolean");
+	}
+	if (spec.gitCommitAuthor !== undefined && spec.gitCommitAuthor !== "auto" && spec.gitCommitAuthor !== "human") {
+		throw new Error("WorkerSpec.gitCommitAuthor must be auto or human");
 	}
 	if (spec.gitCommitAttribution !== undefined && typeof spec.gitCommitAttribution !== "boolean") {
 		throw new Error("WorkerSpec.gitCommitAttribution must be a boolean");

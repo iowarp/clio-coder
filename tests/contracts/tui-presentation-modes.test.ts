@@ -314,7 +314,7 @@ test("welcome centers the artwork and gives contextual project guidance without 
 		const text = rows.join("\n");
 		ok(!/describe a task|Permissions|configured|recipes|Systems engineering/u.test(text));
 		match(text, /local · model/u);
-		match(text, /YOLO · no approval stops/u);
+		match(text, /YOLO · contained · never waits/u);
 		match(text, /\/context init/u);
 		const stale = buildWelcomeDashboardLines({ ...stats, projectContext: "stale" }, "0.5.7", width, "launchpad")
 			.map(stripTerminalSequences)
@@ -365,7 +365,7 @@ test("startup and live tier changes share one bounded welcome policy", () => {
 		settings.safety.autonomy = "yolo";
 		const after = live.render(120);
 		ok(after !== before, "autonomy invalidates the welcome cache");
-		match(after.map(stripTerminalSequences).join("\n"), /YOLO · no approval stops/u);
+		match(after.map(stripTerminalSequences).join("\n"), /YOLO · contained · never waits/u);
 	} finally {
 		live.dispose();
 	}

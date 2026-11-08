@@ -238,10 +238,15 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.snapshots":
 		case "safety.unattendedAfterSeconds":
 		case "safety.yoloAccepted":
+		case "safety.yoloConfinement":
+		case "safety.yoloUnconfinedAccepted":
 		case "safetyNet":
 			return place("safety", "Autonomy");
 		case "safety.limits.sessionCostUsd":
 		case "safety.limits.chatToolCallsPerTurn":
+		case "safety.limits.autonomousToolCalls":
+		case "safety.limits.autonomousMinutes":
+		case "safety.limits.autonomousTokens":
 			return place("safety", "Spending & tool limits");
 		case "safety.sandbox":
 		case "safety.sandboxNetwork":

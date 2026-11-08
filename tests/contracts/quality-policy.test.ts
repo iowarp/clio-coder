@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import childProcess, { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs, { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -392,6 +393,44 @@ it("supports declared catalog checks and derived check provenance", async () =>
 		ok(loaded.ok && loaded.policy);
 		if (loaded.ok && loaded.policy)
 			strictEqual(captureQualitySnapshot(root, loaded.policy, "cargo-test").check, "cargo-test");
+	}));
+
+it("classifies a reproduce check by its judged verdict, not a shell exit code", async () =>
+	project(async (root) => {
+		const declare = (script: string): void => {
+			writeFileSync(join(root, "check.cjs"), script);
+			writeFileSync(
+				join(root, ".clio-coder/verifiers.yaml"),
+				stringify({
+					version: 2,
+					checks: [
+						{
+							id: "solver-repro",
+							description: "Reproduce solver metrics",
+							command: [process.execPath, "check.cjs"],
+							cwd: ".",
+							timeoutMs: 10_000,
+							tags: ["test"],
+							kind: "reproduce",
+							inputs: [{ path: "check.cjs", sha256: createHash("sha256").update(script).digest("hex") }],
+							environment: "copy",
+							compare: "twice",
+							tolerance: { absolute: 0 },
+						},
+					],
+				}),
+			);
+		};
+		policy(root, false, ["solver-repro"]);
+		const entries = mutation();
+		declare("console.log(JSON.stringify({ residual: { value: 1 } }));\n");
+		const passed = await verify(entries, { check: "solver-repro" });
+		strictEqual(passed.kind, "ok", JSON.stringify(passed));
+		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "passed");
+		declare("console.log(JSON.stringify({ residual: { value: Math.random() } }));\n");
+		const failed = await verify(entries, { check: "solver-repro" });
+		strictEqual((failed.details?.judgement as { validation?: string } | undefined)?.validation, "failed");
+		strictEqual(assessFinishContract({ workspaceRoot: root, sessionEntries: entries }).quality?.[0]?.state, "failed");
 	}));
 
 it("preserves ordinary verification without a policy and diagnoses non-Git snapshot availability", async () =>

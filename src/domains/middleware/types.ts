@@ -67,9 +67,11 @@ export type MiddlewareEffect =
 	 * says the turn was continued. An empty note marks the host's own card (the
 	 * plan close), which is already on screen and needs no announcement.
 	 * `toolFree` marks a continuation the host carries out itself, the only kind
-	 * a tool-locked request can honor.
+	 * a tool-locked request can honor. `reserved: "verification"` draws on the
+	 * finish gate's own slot instead of the one nudge a prompt shares, so
+	 * another producer's nudge cannot starve a missing check at contained yolo.
 	 */
-	| { kind: "request_continuation"; message: string; note?: string; toolFree?: true }
+	| { kind: "request_continuation"; message: string; note?: string; toolFree?: true; reserved?: "verification" }
 	| { kind: "require_tool"; toolName: string }
 	| { kind: "lock_tools" }
 	/**

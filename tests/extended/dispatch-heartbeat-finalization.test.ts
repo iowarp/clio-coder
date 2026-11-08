@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -65,11 +65,13 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 	t.mock.timers.enable({ apis: ["setInterval"] });
 	const stateDir = process.env.CLIO_CODER_STATE_DIR;
 	ok(stateDir);
-	const project = join(stateDir, "project");
+	// Beside Clio's state root, not in it: host checks run in the main-session
+	// sandbox, which keeps Clio's own directories read-only and the workspace writable.
+	const project = join(dirname(stateDir), "project");
 	mkdirSync(project, { recursive: true });
 	writeFileSync(join(project, "input.txt"), "expected\n");
 	execFileSync("git", ["init", "-q", "-b", "main", project]);
-	const checkLog = join(stateDir, "check-runs.log");
+	const checkLog = join(project, "check-runs.log");
 	const check = {
 		check: "test",
 		argv: [

@@ -96,7 +96,8 @@ type EditorSubmitChat = Pick<
 	| "runningToolCalls"
 	| "submit"
 	| "whenSettled"
->;
+> &
+	Partial<Pick<ChatLoop, "resumeAutonomy">>;
 
 /** What the operator chose when a send-now found a tool still running. */
 export type SendNowChoice = "stop" | "wait" | "cancelled";
@@ -486,7 +487,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 	const submitEditorText = (text: string): void => {
 		const literalText = unguardPastedEditorOperator(text);
 		const trimmed = literalText.trim();
-		if (trimmed.length === 0) return;
+		if (trimmed.length === 0) {
+			// Enter on an empty composer continues a paused yolo run (ob-yolo D6).
+			if (deps.chat.resumeAutonomy?.() === true) deps.ui.requestRender();
+			return;
+		}
 		deps.collapseLaunchpadBeforeSubmit?.();
 		// An @ mention of a path, not an @agent steer: the token has a / or a dot.
 		if (/(?:^|\s)@[\w~-]*[./][\w./-]+/u.test(literalText)) deps.recordFeature?.("@");

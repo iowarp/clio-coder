@@ -459,6 +459,7 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			const cloned: MiddlewareEffect = { kind: "request_continuation", message: effect.message };
 			if (effect.note !== undefined) cloned.note = effect.note;
 			if (effect.toolFree === true) cloned.toolFree = true;
+			if (effect.reserved === "verification") cloned.reserved = "verification";
 			return cloned;
 		}
 		case "require_tool":

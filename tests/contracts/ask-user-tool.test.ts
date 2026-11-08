@@ -24,7 +24,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 type Reply = AskUserResult | ((questions: ReadonlyArray<AskUserQuestion>) => Promise<AskUserResult>);
 
-function fixture(replies: Reply[], autonomy: AutonomyLevel = "default", live = false) {
+function fixture(replies: Reply[], autonomy: AutonomyLevel = "default", live = false, admission?: AutonomyLevel) {
 	const shown: Array<ReadonlyArray<AskUserQuestion>> = [];
 	const presentations: unknown[] = [];
 	const fallbacks: unknown[] = [];
@@ -33,6 +33,7 @@ function fixture(replies: Reply[], autonomy: AutonomyLevel = "default", live = f
 		mcpCapabilities: false,
 		// The session wires the live autonomy into the tool; `live` does the same here.
 		...(live ? { getAutonomy: () => autonomy } : {}),
+		...(admission !== undefined ? { getAdmissionAutonomy: () => admission } : {}),
 		askUser: async (questions, options) => {
 			shown.push(questions);
 			presentations.push(options?.decisionPresentation);
@@ -346,6 +347,19 @@ describe("ask_user tool", () => {
 		const asked = fixture([{ answers: [{ question: "Q?", answer: "A" }] }], "default", true);
 		await asked.call({ questions: [{ question: "Q?" }] });
 		strictEqual(asked.shown.length, 1);
+	});
+
+	it("at contained yolo answers an outward round no at once, and an inward one as unconfined does", async () => {
+		const outward = fixture([], "yolo", true, "default");
+		const result = await outward.call({ exposure: "outward", questions: [CACHE_QUESTION] });
+		strictEqual(outward.shown.length, 0, "contained yolo never shows a round either");
+		deepStrictEqual(interviewOf(result).latest_answers, [
+			{ question: CACHE_QUESTION.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true },
+		]);
+		const inward = fixture([], "yolo", true, "default");
+		deepStrictEqual(interviewOf(await inward.call({ questions: [CACHE_QUESTION] })).latest_answers, [
+			{ question: CACHE_QUESTION.question, answer: "Capability tuple", options: ["Capability tuple"], auto: true },
+		]);
 	});
 
 	it("answers an unanswered outward round no, whatever the model listed first", async () => {

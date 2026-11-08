@@ -217,6 +217,7 @@ export function spawnSyncCommandRunner(): UserHookCommandRunner {
 			cwd: options.cwd ?? process.cwd(),
 			enabled: gitCommitAttributionEnabled(process.env),
 			evidence: {},
+			author: "human",
 		});
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		const result = spawnSync(command ?? "", args, {

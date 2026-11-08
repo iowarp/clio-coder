@@ -4892,12 +4892,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			{
 				id: "default",
 				name: "default",
-				description: "Supervised workspace edits with ordinary confirmation prompts.",
+				description:
+					"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.",
 			},
 			{
 				id: "yolo",
 				name: "yolo",
-				description: "Proceed without ordinary confirmation prompts. Hard blocks and damage-control asks remain active.",
+				description:
+					"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
 			},
 		],
 	});

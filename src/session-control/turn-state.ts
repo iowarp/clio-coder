@@ -15,7 +15,7 @@
  *   fields the module touches; the ones it only reads are `readonly`, so a
  *   new write is a type error until the view here says the module owns it.
  * - Continuation state (the middleware continuation request, its in-run
- *   carry, the per-prompt nudge cap, the yolo continuation count and the
+ *   carry, the per-prompt nudge caps, the yolo continuation count and the
  *   recorded turn stop) lives in `ContinuationState`. Its fields are private;
  *   modules change it only through its methods, and `continuation` itself is
  *   readonly, so the owner is never replaced.
@@ -118,6 +118,8 @@ export class ContinuationState {
 	#inRun = false;
 	/** One stalled-turn nudge per user prompt; reset when a real prompt arrives. */
 	#nudgeSpent = false;
+	/** The finish gate's reserved verification nudge, one per user prompt like the shared one. */
+	#verificationNudgeSpent = false;
 	/** Continuations spent since the operator's last prompt (#445). */
 	#yoloContinuations = 0;
 	/** A way this turn ended that nobody asked for and another turn could get past (#445). */
@@ -129,6 +131,10 @@ export class ContinuationState {
 
 	get nudgeSpent(): boolean {
 		return this.#nudgeSpent;
+	}
+
+	get verificationNudgeSpent(): boolean {
+		return this.#verificationNudgeSpent;
 	}
 
 	get yoloContinuations(): number {
@@ -144,13 +150,23 @@ export class ContinuationState {
 		this.#inRun = false;
 		this.#stop = null;
 		if (!kind.yoloContinuation) this.#yoloContinuations = 0;
-		if (!kind.requestContinuation) this.#nudgeSpent = false;
+		if (!kind.requestContinuation) {
+			this.#nudgeSpent = false;
+			this.#verificationNudgeSpent = false;
+		}
 	}
 
-	/** Middleware asks for one more request. False when this prompt's one nudge is already spent. */
-	request(): boolean {
-		if (this.#nudgeSpent) return false;
-		this.#nudgeSpent = true;
+	/**
+	 * Middleware asks for one more request. False when the nudge it draws on is
+	 * already spent this prompt: the finish gate's reserved verification nudge,
+	 * or else the shared one.
+	 */
+	request(reserved?: "verification"): boolean {
+		if (reserved === "verification") {
+			if (this.#verificationNudgeSpent) return false;
+			this.#verificationNudgeSpent = true;
+		} else if (this.#nudgeSpent) return false;
+		else this.#nudgeSpent = true;
 		this.#requested = true;
 		return true;
 	}
