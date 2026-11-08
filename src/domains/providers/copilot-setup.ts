@@ -7,6 +7,7 @@ import {
 	listCopilotSdkModels,
 } from "../../engine/ai.js";
 import { ensureCopilotSdk, resolveCopilotSdkEntry } from "../lifecycle/copilot-sdk-install.js";
+import { COPILOT_SDK_DEFAULT_MODEL } from "./runtimes/copilot/copilot-sdk.js";
 
 export interface CopilotSetupIo {
 	/** Absent when nobody can answer (headless, non-TTY); the SDK install is then named, never assumed. */
@@ -77,7 +78,7 @@ export async function detectCopilotLogin(timeoutMs: number): Promise<DetectedCop
 		try {
 			const account = await copilotSdkAccount();
 			const models = await listCopilotSdkModels();
-			const model = models[0]?.id;
+			const model = (models.find((row) => row.id === COPILOT_SDK_DEFAULT_MODEL) ?? models[0])?.id;
 			if (!model) return null;
 			return { account, model };
 		} catch {
