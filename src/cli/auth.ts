@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
@@ -11,10 +12,11 @@ import {
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "../domains/providers/auth/index.js";
-import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
+import { copilotAuthState, prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { askYesNo } from "./ask.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
@@ -98,10 +100,11 @@ function warnIfCredentialsDamaged(auth: ReturnType<typeof openAuthStorage>): voi
 function renderStatusRows(
 	rows: ReadonlyArray<ConnectableProviderRow>,
 	auth: ReturnType<typeof openAuthStorage>,
+	extraRows: ReadonlyArray<string[]> = [],
 ): string {
 	const targets = readSettings().targets;
-	return formatColumns(
-		rows.flatMap((row) => {
+	return formatColumns([
+		...rows.flatMap((row) => {
 			const status = row.status;
 			if (status === null) {
 				return [[row.entry.runtimeId, row.entry.label, "-", "unknown", "no auth probe available"]];
@@ -136,7 +139,8 @@ function renderStatusRows(
 			});
 			return [runtimeRow, ...targetRows];
 		}),
-	);
+		...extraRows,
+	]);
 }
 
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
@@ -399,6 +403,18 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 			printError(`unknown target or runtime: ${target}`);
 			return 2;
 		}
+		if (resolved.runtime.id === "copilot-sdk") {
+			// The credential is the official runtime's own login; ask the runtime who it is signed in as.
+			const copilot = await copilotAuthState(input.isTTY === true && output.isTTY === true);
+			printStatusLine(
+				resolved.authTarget.providerId,
+				resolved.runtime.displayName,
+				"seat",
+				copilot.present,
+				copilot.detail,
+			);
+			return copilot.present ? 0 : 1;
+		}
 		const status = statusForResolvedTarget(resolved, auth);
 		printStatusLine(
 			resolved.authTarget.providerId,
@@ -410,7 +426,22 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 		return status.available ? 0 : 1;
 	}
 
-	process.stdout.write(renderStatusRows(listConnectableProviderRows(), auth));
+	// Copilot signs in through its own CLI, so it is not a connectable runtime; with a target configured, its
+	// login is reported too. Without one, nothing starts the runtime.
+	const rows = listConnectableProviderRows();
+	const extraRows: string[][] = [];
+	const copilotRuntime = getRuntimeRegistry().get("copilot-sdk");
+	if (copilotRuntime && readSettings().targets.some((t) => t.runtime === copilotRuntime.id)) {
+		const copilot = await copilotAuthState(input.isTTY === true && output.isTTY === true);
+		extraRows.push([
+			copilotRuntime.id,
+			copilotRuntime.displayName,
+			"seat",
+			copilot.present ? "present" : "absent",
+			copilot.detail,
+		]);
+	}
+	process.stdout.write(renderStatusRows(rows, auth, extraRows));
 	return 0;
 }
 
@@ -489,7 +520,12 @@ async function loginCopilotSdk(): Promise<number> {
 	const rl = interactive ? createInterface({ input, output }) : null;
 	try {
 		const result = await prepareCopilotSdk({
-			...(rl ? { confirm: (question: string) => askYesNo(rl, question, false) } : {}),
+			...(rl
+				? {
+						confirm: (question: string) => askYesNo(rl, question, false),
+						signIn: () => offerCopilotSignIn(rl),
+					}
+				: {}),
 			print: (text) => process.stdout.write(`${text}\n`),
 		});
 		if (!result.ok) {
@@ -500,6 +536,31 @@ async function loginCopilotSdk(): Promise<number> {
 		return 0;
 	} finally {
 		rl?.close();
+	}
+}
+
+/**
+ * With no Copilot login, offer to run the official sign-in in this terminal: `copilot login` when the GitHub
+ * Copilot CLI is on PATH, else `gh auth login`. The sign-in is GitHub's own; Clio only starts it.
+ */
+async function offerCopilotSignIn(rl: ReturnType<typeof createInterface>): Promise<boolean> {
+	const copilot = findExecutableOnPath("copilot");
+	const gh = copilot ? null : findExecutableOnPath("gh");
+	const command = copilot ? { file: copilot, args: ["login"] } : gh ? { file: gh, args: ["auth", "login"] } : null;
+	if (!command) {
+		process.stdout.write(
+			"GitHub Copilot is not signed in, and neither the GitHub Copilot CLI (`copilot`) nor the GitHub CLI (`gh`) is on PATH. Install one, sign in with it, then run this again.\n",
+		);
+		return false;
+	}
+	const shown = copilot ? "copilot login" : "gh auth login";
+	if (!(await askYesNo(rl, `GitHub Copilot is not signed in. Run \`${shown}\` now?`, true))) return false;
+	rl.pause();
+	try {
+		const run = spawnSync(command.file, command.args, { stdio: "inherit" });
+		return run.status === 0;
+	} finally {
+		rl.resume();
 	}
 }
 

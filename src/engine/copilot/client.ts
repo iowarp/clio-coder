@@ -239,6 +239,14 @@ export async function copilotClient(): Promise<CopilotClient> {
 	return current.client;
 }
 
+/**
+ * Stop the shared runtime when nothing holds it, so the next use starts one that reads a login made since it
+ * started (an interactive `copilot login` run by `auth login copilot-sdk`).
+ */
+export function restartIdleCopilotClient(): void {
+	if (shared && holds === 0) invalidate(shared.client, "Restarted to read a new GitHub Copilot login.");
+}
+
 /** The GitHub account the runtime is signed in as, or a login-required error naming `copilot login`. */
 export function copilotAccount(): Promise<CopilotAccount> {
 	return held(async () => {
@@ -253,6 +261,8 @@ export function copilotAccount(): Promise<CopilotAccount> {
 export interface CopilotSignInStatus {
 	signedIn: boolean;
 	login?: string;
+	/** GitHub host of the login, `https://github.com` unless it is on GHE. */
+	host?: string;
 	/** Where the runtime found the login: `user` (a `copilot login`) or `gh-cli` (`gh auth login`). */
 	authType?: string;
 }
@@ -270,6 +280,7 @@ export async function probeCopilotSignIn(keychain: boolean): Promise<CopilotSign
 		return {
 			signedIn: status.isAuthenticated && Boolean(status.login),
 			...(status.login ? { login: status.login } : {}),
+			...(status.host ? { host: status.host } : {}),
 			...(status.authType ? { authType: status.authType } : {}),
 		};
 	} finally {

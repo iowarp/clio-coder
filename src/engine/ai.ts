@@ -77,6 +77,12 @@ export async function copilotSdkAccount() {
 	return client.copilotAccount();
 }
 
+/** Restart an idle Copilot runtime so it reads a login made after it started; a no-op before first use. */
+export async function copilotSdkRestartIdle(): Promise<void> {
+	const client = await import("./copilot/client.js");
+	client.restartIdleCopilotClient();
+}
+
 export const stream = engineStream;
 
 /**

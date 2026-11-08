@@ -18,6 +18,7 @@ import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
+import { copilotAuthState, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
 import { endpointCapacityFor } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
@@ -438,6 +439,36 @@ test("the signed-in account is the authorization: no Clio consent is asked, and 
 	const answered = await step({ messages: [user("hello")] });
 	strictEqual(answered.stopReason, "stop");
 	deepStrictEqual(answered.content, [{ type: "text", text: "hello" }]);
+});
+
+test("auth status names the account and host; a sign-in run by auth login is read by a restarted runtime", async () => {
+	deepStrictEqual(await copilotAuthState(false), { present: true, detail: "signed in as octo on github.com" });
+	const signedIn = fake().auth;
+	fake().auth = { isAuthenticated: false };
+	try {
+		const signedOut = await copilotAuthState(false);
+		strictEqual(signedOut.present, false);
+		match(signedOut.detail, /not signed in; run `copilot login`/);
+
+		await rejects(copilotSdkAccount(), /not signed in/);
+		const clientsBefore = fake().clients.length;
+		const printed: string[] = [];
+		const result = await prepareCopilotSdk({
+			print: (text) => printed.push(text),
+			signIn: async () => {
+				fake().auth = { isAuthenticated: true, login: "octo", host: "https://github.com" };
+				return true;
+			},
+		});
+		deepStrictEqual(result, { ok: true, account: { login: "octo", host: "https://github.com" } });
+		ok(fake().clients.length > clientsBefore, "the account is read from a runtime started after the sign-in");
+
+		fake().auth = { isAuthenticated: false };
+		const declined = await prepareCopilotSdk({ print: () => {}, signIn: async () => false });
+		strictEqual(declined.ok, false);
+	} finally {
+		fake().auth = signedIn;
+	}
 });
 
 test("a model the runtime does not serve fails naming the account's enabled models; an unlisted one it serves runs", async () => {
