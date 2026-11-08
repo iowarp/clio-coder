@@ -215,13 +215,28 @@ describe("arena blind diagnostics", () => {
 			second.facts.error = raw;
 			second.facts.check = { id: "unit", exitCode: 1, tail: `fail in ${raw}` };
 		}
+		const answer =
+			"Fixed /repo/.clio-coder/worktrees/compete/arena-x/candidate-2/src/foo.ts; log in /state/sessions/sess-abc.json, model gpt-6-luna";
+		if (second?.facts) second.facts.finalText = answer;
 		writeMatch(root, failed);
+		mkdirSync(join(root, id), { recursive: true });
+		writeFileSync(join(root, id, "contender-2.diff"), "+// tuned for gpt-6-luna via t2/gpt-6-luna\n");
 		const blind = arenaMatchView(root, failed, null);
-		const text = JSON.stringify([blind.error, ...blind.entries.map((entry) => [entry.error, entry.check])]);
+		assert.equal(
+			blind.entries[0]?.finalText,
+			"Fixed [worktree]/src/foo.ts; log in /state/sessions/[hidden].json, model [hidden]",
+		);
+		assert.equal(blind.entries[0]?.diff, "+// tuned for [hidden] via [hidden]\n");
+		const text = JSON.stringify([
+			blind.error,
+			...blind.entries.map((entry) => [entry.error, entry.check, entry.finalText, entry.diff]),
+		]);
 		assert.doesNotMatch(text, /\bt2\b|gpt-6-luna|sess-abc|candidate-2|arena-x|contender 2/);
 		assert.match(blind.entries[0]?.error ?? "", /target \[hidden\] not found .*model \[hidden\]\./);
 		const shown = arenaMatchView(root, failed, vote("A"), { reveal: true });
 		assert.equal(shown.entries[0]?.error, raw);
+		assert.equal(shown.entries[0]?.finalText, answer);
+		assert.match(shown.entries[0]?.diff ?? "", /gpt-6-luna via t2\/gpt-6-luna/);
 		assert.equal(shown.error, "contender 2 failed: target t2 not found");
 	});
 });
@@ -344,7 +359,7 @@ writeFileSync(join(cwd, "answer.txt"), model + "\\n");
 const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
-out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) }] } });
+out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) + " in " + cwd }] } });
 if (model === "slow") setTimeout(() => {}, 60_000);
 if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
 `;
@@ -409,7 +424,17 @@ describe("arena runner", () => {
 			assert.deepEqual(contender.facts?.diff, { files: 1, insertions: 1, deletions: 0 });
 			assert.match(contender.facts?.check?.tail ?? "", /check unit: pass/);
 		}
+		// Worktrees are numbered by blind slot, so a path an answer quotes repeats only its label.
+		for (const contender of result.contenders) {
+			const slot = result.order.indexOf(contender.index) + 1;
+			assert.ok(contender.facts?.finalText.endsWith(`candidate-${slot}`), contender.facts?.finalText);
+		}
 		const root = arenaRoot(repo);
+		const blindView = arenaMatchView(root, result, null);
+		for (const entry of blindView.entries) {
+			assert.match(entry.finalText, / in \[worktree\]$/);
+			assert.doesNotMatch(`${entry.finalText}\n${entry.diff}`, /\bm[12]\b|fake-m/);
+		}
 		assert.match(readFileSync(join(root, result.id, "contender-2.diff"), "utf8"), /\+m2/);
 		assert.equal(existsSync(join(repo, "answer.txt")), false, "the main checkout is untouched");
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
@@ -465,8 +490,12 @@ describe("arena runner", () => {
 			onProgress: (line) => progress.push(line),
 		});
 		assert.equal(result.status, "complete", result.error ?? "");
-		for (const contender of result.contenders)
-			assert.equal(contender.facts?.finalText, `wrote ${contender.model} for "--help"`);
+		for (const contender of result.contenders) {
+			assert.ok(
+				contender.facts?.finalText.startsWith(`wrote ${contender.model} for "--help" in `),
+				contender.facts?.finalText,
+			);
+		}
 		const finished = progress.filter((line) => line.startsWith("contender "));
 		assert.equal(finished.length, 3);
 		for (const line of finished) assert.match(line, /^contender [A-D] \w+$/);
