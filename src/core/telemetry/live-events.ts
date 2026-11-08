@@ -339,6 +339,15 @@ export interface TurnContinuedPayload {
 	at: number;
 }
 
+/** Published on `autonomy.open_decision`; `command` is clipped and redacted, and never reaches the journal. */
+export interface AutonomyOpenDecisionPayload {
+	tool: string;
+	kind: "judge-block" | "no-verdict" | "operator-only" | "outward-unnamed";
+	rule?: string;
+	seq: number;
+	command: string;
+}
+
 /** Published on `job.clock_resumed` when a job continues past its default clock (#445). */
 export interface JobClockResumedPayload {
 	jobId: string;

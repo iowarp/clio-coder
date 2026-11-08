@@ -69,6 +69,15 @@ function decisionOutcome(record: AccountabilityRecord): string | null {
 			return record.data.reason;
 		case "session.resumed":
 			return record.data.via;
+		case "autonomy.entered":
+			return record.data.confinement;
+		case "autonomy.open_decision":
+		case "autonomy.cap_reached":
+			return record.data.kind;
+		case "autonomy.resumed":
+			return "resumed";
+		case "autonomy.ended":
+			return record.data.reason;
 		case "approval.requested":
 			return null;
 	}

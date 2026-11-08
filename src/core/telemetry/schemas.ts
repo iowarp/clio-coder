@@ -1551,6 +1551,41 @@ export const TurnContinuedSchema = Type.Object(
 	},
 	closed,
 );
+/** Contained yolo's audit (ob-yolo D7): what ran on its own, what it left for the operator, and why it stopped. */
+const autonomyUsage = { toolCalls: count, activeMs: duration, tokens: count };
+export const AutonomyHaltKind = vocabulary(["calls", "minutes", "tokens", "judge"]);
+export const AutonomyEnteredSchema = Type.Object(
+	{
+		confinement: vocabulary(["contained", "unconfined"]),
+		capToolCalls: count,
+		capMinutes: count,
+		capTokens: count,
+	},
+	closed,
+);
+/** A call yolo refused because it needed the operator; the command stays live only. */
+export const AutonomyOpenDecisionSchema = Type.Object(
+	{
+		tool: ExistingId,
+		kind: vocabulary(["judge-block", "no-verdict", "operator-only", "outward-unnamed"]),
+		rule: Type.Optional(ExistingId),
+		seq: count,
+	},
+	closed,
+);
+export const AutonomyCapReachedSchema = Type.Object(
+	{ kind: AutonomyHaltKind, limit: Type.Optional(count), ...autonomyUsage, openDecisions: count },
+	closed,
+);
+export const AutonomyResumedSchema = Type.Object({ cleared: AutonomyHaltKind }, closed);
+export const AutonomyEndedSchema = Type.Object(
+	{
+		reason: vocabulary(["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]),
+		...autonomyUsage,
+		openDecisions: count,
+	},
+	closed,
+);
 export const StatusPhase = vocabulary([
 	"idle",
 	"preparing",

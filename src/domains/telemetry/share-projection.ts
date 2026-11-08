@@ -403,6 +403,12 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	},
 	"run.aborted": { ...keep("source", "elapsedMs"), runId: "id", startedAt: "id" },
 	"turn.aborted": keep("source"),
+	// The open decision's command is live only; a judge rule or ask rule id is the harness's or the operator's name.
+	"autonomy.entered": keep("confinement", "capToolCalls", "capMinutes", "capTokens"),
+	"autonomy.open_decision": { ...keep("kind", "seq"), tool: "tool", rule: "name" },
+	"autonomy.cap_reached": keep("kind", "limit", "toolCalls", "activeMs", "tokens", "openDecisions"),
+	"autonomy.resumed": keep("cleared"),
+	"autonomy.ended": keep("reason", "toolCalls", "activeMs", "tokens", "openDecisions"),
 	"job.clock_resumed": { ...keep("boundMs"), jobId: "id" },
 	"turn.continued": { ...keep("cause", "attempt", "cap"), jobId: "id" },
 	"agent.status_changed": {

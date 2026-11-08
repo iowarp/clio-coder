@@ -5,6 +5,7 @@ import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
 import type {
 	AgentStatusChangedPayload,
+	AutonomyOpenDecisionPayload,
 	BudgetAlertPayload,
 	CompactionPayload,
 	ConfigChangePayload,
@@ -423,6 +424,20 @@ export const EVENTS = {
 		scope: "session",
 		project: (p: TurnContinuedPayload) => pick(p, ["cause", "attempt", "cap", "jobId"]),
 	}),
+	"autonomy.entered": journal(S.AutonomyEnteredSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
+	"autonomy.open_decision": journal(S.AutonomyOpenDecisionSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		scope: "session",
+		project: (p: AutonomyOpenDecisionPayload) => pick(p, ["tool", "kind", "rule", "seq"]),
+	}),
+	"autonomy.cap_reached": journal(S.AutonomyCapReachedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		scope: "session",
+	}),
+	"autonomy.resumed": journal(S.AutonomyResumedSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
+	"autonomy.ended": journal(S.AutonomyEndedSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
 	"session.eggs_changed": live<{ sessionId: string | null; active: readonly string[] }>(),
 	"session.started": live<SessionStartPayload>(),
 	"session.ended": live<SessionEndPayload>(),

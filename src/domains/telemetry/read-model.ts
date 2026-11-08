@@ -2925,6 +2925,11 @@ export const ACCOUNTABILITY_EVENTS = [
 	"safety.judged",
 	"session.resumed",
 	"session.closed",
+	"autonomy.entered",
+	"autonomy.open_decision",
+	"autonomy.cap_reached",
+	"autonomy.resumed",
+	"autonomy.ended",
 ] as const satisfies readonly JournalEventName[];
 export type AccountabilityEventName = (typeof ACCOUNTABILITY_EVENTS)[number];
 export type AccountabilityRecord = TelemetryRecord<AccountabilityEventName>;
