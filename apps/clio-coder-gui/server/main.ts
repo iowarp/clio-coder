@@ -209,6 +209,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
 	const arena = new ArenaService(cli, workspaces, operations, env);
+	const settingsService = new SettingsService(reads, workspaces, ops, () => applyTurnCapacity());
 	// The user's limit, resolved where no project layer applies, since one server runs turns for every
 	// workspace. Read at startup and after the app writes it; until the first read the default holds.
 	const applyTurnCapacity = () =>
@@ -223,7 +224,6 @@ export async function main(args = process.argv.slice(2)) {
 					`[clio-coder:gui] Could not read interface.guiTurnCapacity; keeping ${supervisor.turnCapacity}: ${error instanceof Error ? error.message : String(error)}`,
 				),
 			);
-	const settingsService = new SettingsService(reads, workspaces, ops, applyTurnCapacity);
 	void applyTurnCapacity();
 	const setup = new SetupService(reads, env, workspaces);
 	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
