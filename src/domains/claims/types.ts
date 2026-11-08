@@ -27,6 +27,11 @@ export interface ClaimKeys {
 	command: string[];
 	/** Project-relative where the path lies inside the project, else absolute. */
 	paths: string[];
+	/**
+	 * The repository-relative run directory a sweep check judged (`verify(check="<id>/<run>")`, the verify result's
+	 * `details.run`). Sibling runs are separate subjects, so edges key on the check and this run together.
+	 */
+	run?: string;
 }
 
 /** A judged file's identity: path when the check named one, and the digest of the exact bytes judged. */

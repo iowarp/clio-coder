@@ -12,9 +12,11 @@ import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
 	bindHostVerificationHypotheses,
+	claimCheckLabel,
 	claimFromVerifyResult,
 	claimRecordId,
 	claimStatuses,
+	claimsDeliveryMessage,
 	claimsLogPath,
 	claimsProjectRoot,
 	contradictionConditions,
@@ -165,6 +167,47 @@ describe("claims ledger (#406)", () => {
 		assert.deepEqual(
 			[agreed, disagreed, afterCommit].map((item) => statuses.get(item.id)),
 			["superseded", "superseded", "standing"],
+		);
+	});
+
+	it("keeps sibling runs of one sweep check standing; a rerun of one run supersedes only that run (Q7)", () => {
+		const runClaim = (run: string, passed: boolean, commit: string, at: string) => {
+			const base = numericDetails(passed, passed ? "passed" : "failed");
+			const details = {
+				...base,
+				check: "decay-error",
+				run: `sweeps/decay/runs/${run}`,
+				declaredCommand: ["python3", "checks/decay_error.py", `sweeps/decay/runs/${run}`],
+				checkout: { commit, trackedTreeClean: true },
+			};
+			const built = claimFromVerifyResult({ details, project: "/p", at, source });
+			assert.ok(built);
+			return built;
+		};
+		const siblings = ["0", "1", "2", "3"].map((run, index) =>
+			runClaim(run, run !== "3", "c".repeat(40), `2026-11-06T00:00:0${index}.000Z`),
+		);
+		const sweepEdges = deriveClaimEdges({ claims: [], edges: [] }, siblings);
+		assert.deepEqual(sweepEdges, []);
+		assert.deepEqual(
+			siblings.map((claim) => claimCheckLabel(claim)),
+			["decay-error/0", "decay-error/1", "decay-error/2", "decay-error/3"],
+		);
+		assert.equal(claimsDeliveryMessage("decay-error", { records: siblings, edges: sweepEdges }), null);
+		const rerun = runClaim("3", true, "d".repeat(40), "2026-11-06T00:00:09.000Z");
+		const rerunEdges = deriveClaimEdges({ claims: siblings, edges: sweepEdges }, [rerun]);
+		assert.deepEqual(
+			rerunEdges.map((edge) => [edge.kind, edge.from, edge.to]),
+			[["supersedes", rerun.id, siblings[3]?.id]],
+		);
+		const statuses = claimStatuses([...siblings, rerun], rerunEdges);
+		assert.deepEqual(
+			[...siblings, rerun].map((claim) => statuses.get(claim.id)),
+			["standing", "standing", "standing", "superseded", "standing"],
+		);
+		match(
+			claimsDeliveryMessage("decay-error", { records: [...siblings, rerun], edges: rerunEdges }) ?? "",
+			/1 earlier claim was superseded/u,
 		);
 	});
 

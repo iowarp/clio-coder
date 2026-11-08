@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, posix, relative } from "node:path";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
 import type { NumericCompareReport } from "../../tools/verify/numeric.js";
 import type { ReproduceReport } from "../../tools/verify/reproduce.js";
@@ -9,6 +9,7 @@ import {
 	type ClaimConditions,
 	type ClaimDigestRef,
 	type ClaimKeys,
+	type ClaimRecord,
 	type ClaimRecordV1,
 	type ClaimSource,
 	NUMERIC_CLAIM_KEY_LIMIT,
@@ -162,6 +163,15 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 	return `${head}, ${commit}.`;
 }
 
+function checkLabel(check: string, run: string | undefined): string {
+	return run === undefined ? check : `${check}/${posix.basename(run)}`;
+}
+
+/** The name an operator called a claim's check by: `<id>/<run>` for one run of a sweep check, else the check id. */
+export function claimCheckLabel(claim: ClaimRecord): string {
+	return checkLabel(claim.keys.check, claim.keys.run);
+}
+
 /**
  * The digest of the judged-payload key the verified-outcome count uses, so a claim and an outcome name one judgement
  * alike. Kind, check id and every judged digest: rerunning on the same bytes is the same subject.
@@ -170,14 +180,19 @@ function subjectOf(check: string, report: ReproduceReport | NumericCompareReport
 	return sha256(judgedPayloadKey(check, report) ?? `${report.kind}\0${check}\0`);
 }
 
-function keysOf(check: string, conditions: ClaimConditions, declaredCommand: ReadonlyArray<string>): ClaimKeys {
+function keysOf(
+	check: string,
+	conditions: ClaimConditions,
+	declaredCommand: ReadonlyArray<string>,
+	run: string | undefined,
+): ClaimKeys {
 	const paths = new Set<string>();
 	if (conditions.kind === "reproduce") for (const input of conditions.inputs) paths.add(input.path);
 	if (conditions.reference?.path !== undefined) paths.add(conditions.reference.path);
 	// A reproduce check names the argv it ran with its interpreter resolved, on both channels; the declared argv is
 	// what a numeric-compare check runs on both. Either way the two channels key one check alike.
 	const command = conditions.kind === "reproduce" ? conditions.argv : declaredCommand;
-	return { check, command: [...command], paths: [...paths] };
+	return { check, command: [...command], paths: [...paths], ...(run !== undefined ? { run } : {}) };
 }
 
 function buildClaim(input: {
@@ -188,9 +203,10 @@ function buildClaim(input: {
 	conditions: ClaimConditions;
 	report: ReproduceReport | NumericCompareReport;
 	source: ClaimSource;
+	run?: string;
 }): ClaimRecordV1 {
 	const passed = input.report.passed;
-	const text = claimText(input.check, input.conditions, passed);
+	const text = claimText(checkLabel(input.check, input.run), input.conditions, passed);
 	const body: Omit<ClaimRecordV1, "id"> = {
 		v: CLAIM_RECORD_VERSION,
 		type: "claim",
@@ -200,7 +216,7 @@ function buildClaim(input: {
 		verdict: passed ? "agrees" : "disagrees",
 		text,
 		subject: subjectOf(input.check, input.report),
-		keys: keysOf(input.check, input.conditions, input.declaredCommand),
+		keys: keysOf(input.check, input.conditions, input.declaredCommand, input.run),
 		conditions: input.conditions,
 		source: input.source,
 		evidence: "grounded",
@@ -237,6 +253,7 @@ export function claimFromVerifyResult(input: {
 	if (report === null || check === null) return null;
 	// The verdict is the report's; a judgement word that disagrees with it is a result this reader does not trust.
 	if (report.passed !== (judgement.validation === "passed")) return null;
+	const run = typeof details.run === "string" && details.run.length > 0 ? details.run : undefined;
 	const declaredCommand = Array.isArray(details.declaredCommand)
 		? details.declaredCommand.filter((part): part is string => typeof part === "string")
 		: [];
@@ -252,6 +269,7 @@ export function claimFromVerifyResult(input: {
 		conditions,
 		report,
 		source: input.source,
+		...(run !== undefined ? { run } : {}),
 	});
 }
 

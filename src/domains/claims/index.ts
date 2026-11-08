@@ -1,6 +1,7 @@
 export type { SealedHostCheck } from "./capture.js";
 export {
 	canonicalClaimJson,
+	claimCheckLabel,
 	claimFromVerifyResult,
 	claimRecordId,
 	claimsFromHostVerification,

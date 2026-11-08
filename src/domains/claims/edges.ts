@@ -60,6 +60,14 @@ function pinnedConditions(claim: ClaimRecord): Record<string, unknown> | null {
 	};
 }
 
+/**
+ * What edges treat as one check: the check id, and for a sweep check the run it judged. Sibling runs of one sweep are
+ * separate subjects, so they never supersede or contradict each other; a rerun of the same run still does (Q7).
+ */
+function edgeIdentity(claim: ClaimRecord): string {
+	return claim.keys.run === undefined ? claim.keys.check : `${claim.keys.check}\0${claim.keys.run}`;
+}
+
 /** The digest of a claim's pinned conditions; equal keys mean opposite verdicts contradict. Null when unpinned. */
 export function claimConditionsKey(claim: ClaimRecord): string | null {
 	const pins = pinnedConditions(claim);
@@ -143,7 +151,8 @@ function edge(kind: ClaimEdgeRecordV1["kind"], from: ClaimRecord, to: ClaimRecor
  *
  * - `contradicts` the latest earlier claim with equal pinned conditions (`pinnedConditions`) when its verdict differs. Only a flip adds one,
  *   so a run of agreeing claims followed by a disagreeing one adds one edge, not one per agreement.
- * - `supersedes` every earlier claim of the same check and kind whose pinned conditions differ, unless already superseded.
+ * - `supersedes` every earlier claim of the same check, run and kind whose pinned conditions differ, unless already
+ *   superseded.
  *   Each claim is superseded at most once, so these edges never outnumber claims.
  */
 export function deriveClaimEdges(
@@ -157,7 +166,8 @@ export function deriveClaimEdges(
 	for (const claim of incoming) {
 		if (known.has(claim.id)) continue;
 		const key = claimConditionsKey(claim);
-		const sameCheck = claims.filter((earlier) => earlier.kind === claim.kind && earlier.keys.check === claim.keys.check);
+		const identity = edgeIdentity(claim);
+		const sameCheck = claims.filter((earlier) => earlier.kind === claim.kind && edgeIdentity(earlier) === identity);
 		const sameConditions = key === null ? [] : sameCheck.filter((earlier) => claimConditionsKey(earlier) === key);
 		const latest = sameConditions.at(-1);
 		if (latest !== undefined && latest.verdict !== claim.verdict) added.push(edge("contradicts", claim, latest));
@@ -211,7 +221,7 @@ export function overturnedAgreements(
 			(claim) =>
 				claim.verdict === "agrees" &&
 				claim.kind === later.kind &&
-				claim.keys.check === later.keys.check &&
+				edgeIdentity(claim) === edgeIdentity(later) &&
 				!superseded.has(claim.id) &&
 				claimConditionsKey(claim) === key,
 		);
