@@ -40,7 +40,7 @@ validate:
 
 The telemetry domain is the part of Clio Coder that records what a session and its runs did, reads those records back for inspection, and produces shareable copies of them. A reader needs this page when changing how a run or session is summarized, how the live view is fed, how a call journal is opened or subscribed to, or how the `telemetry share` and `telemetry import` flows select, filter and verify data.
 
-The module entry point is `src/domains/telemetry/index.ts`. It exports `TelemetryDomainModule`, which pairs the domain manifest with `createTelemetryBundle` from `extension.ts`, and it re-exports the read model, share, projection, journal path, fold and run-history helpers that other domains and the CLI import. Many modules import this index: the GUI server adapters, the CLI run and fleet commands, and dispatch (`src/domains/dispatch/extension.ts`, among others).
+The module entry point is `src/domains/telemetry/index.ts`. It exports `TelemetryDomainModule`, which pairs the domain manifest with `createTelemetryBundle` from `extension.ts`, and `createTelemetryDomain`, which the interactive composition root lists instead so it keeps the run-reader binder the published contract does not carry. It re-exports the read model, share, projection, journal path, fold and run-history helpers that other domains and the CLI import. Many modules import this index: the GUI server adapters, the CLI run and fleet commands, and dispatch (`src/domains/dispatch/extension.ts`, among others).
 
 ## Components
 

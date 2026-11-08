@@ -73,7 +73,7 @@ The `cliamp/` subdirectory is listed in the assigned scope but was not read for 
 
 ## Module factory and runtime contract
 
-`createMuxDomainModule` returns a `DomainModule<MuxContract>` whose `createExtension` calls `createMuxBundle(context, options)` from `src/domains/mux/extension.ts` (`src/domains/mux/index.ts:createMuxDomainModule`). The `extension.ts` body was not read, so how the bundle decides gating is not described here. The index file also re-exports the public surface: the contract types, `createMuxRuntime`, dock helpers, the socket client, the Yazi event stream and profile helpers, and `createYaziSession`.
+`createMuxDomainModule` returns a `DomainModule<"mux">` whose `createExtension` calls `createMuxBundle(context, options)` from `src/domains/mux/extension.ts` (`src/domains/mux/index.ts:createMuxDomainModule`). The `extension.ts` body was not read, so how the bundle decides gating is not described here. The index file also re-exports the public surface: the contract types, `createMuxRuntime`, dock helpers, the socket client, the Yazi event stream and profile helpers, and `createYaziSession`.
 
 `createMuxRuntime` takes a `MuxDetection`, a nullable `MuxClient`, an optional log and an optional clock (`src/domains/mux/contract.ts:MuxRuntimeOptions`). It constructs a dock controller only when all three hold: a client is present, the detection carries an anchor pane id, and the server reports the `layout.export` method through `muxSupportsMethod` (`src/domains/mux/contract.ts:createMuxRuntime`). It passes a `leaveZoom` callback only when the server supports `pane.zoom`. When any condition fails, the dock controller is `null` and the dock tier answers false or empty.
 

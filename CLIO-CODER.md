@@ -24,6 +24,7 @@ Clio Coder is a TypeScript/Node.js project. It is an open-source coding agent fo
 18. Never commit or push a path that `.gitignore` excludes: `scripts/git-guard.mjs` refuses the commit/push and check-hygiene's tracked-ignored rule fails; unstage with `git rm --cached <path>`.
 19. Do not move a published tag, rebuild a published candidate, or republish different bytes (`CONTRIBUTING.md`); publish order is npm first, then the GitHub tag/release, then promote `main` and `gh-pages`, resuming a partial failure from the original artifact.
 20. Provider usage in message/ledger payloads is immutable outside `src/engine/**`: rule12 in `tests/boundaries/check-boundaries.ts` forbids mutating it or putting usage-shaped fields on ledger payloads; keep Clio accounting beside the raw usage and link the call journal.
+21. A published domain contract carries no owner capability: middleware hook registration (`MiddlewareRegistrar`) and the telemetry run-reader binding go only to the composition that owns the domain, and `getContract(name)` takes its type from `DomainContractMap` in `src/core/domain-contracts.ts`, never from a type argument. Checked as `rule15` by `tests/boundaries/check-boundaries.ts`.
 
 ## Conventions
 

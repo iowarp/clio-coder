@@ -117,7 +117,7 @@ An effect returned at any other hook is dropped. `on_compaction` applies none. A
 One ordered table holds three registration tiers in one id namespace:
 
 - **Fixed.** The declarative rules from [rules.ts](../../src/domains/middleware/rules.ts): `nudge.stalled-turn` and `safety.untrusted-instructions`. They are immutable and always evaluate first.
-- **Host.** Coded registrations the composition root appends with `registerHook`. The first registration of an id wins.
+- **Host.** Coded registrations the composition root appends with `registerHook`. The first registration of an id wins. `registerHook`, the diagnostic sink and owned-set replacement live on the `MiddlewareRegistrar` that `createMiddlewareDomain` hands to the composition owning the domain; the published `MiddlewareContract` only runs hooks and reads the snapshot.
 - **Owned.** A registration set replaced as one unit under a strictly increasing generation. The only owner is `user-hooks`.
 
 Every registration whose hook and tool names match runs in table order and its effects accumulate. `priorEffects` carries earlier effects to later registrations in the same run, which is how the protected-artifacts guard absorbs `protect_path`. A registration with `toolNames` never matches an input that has no tool name. A throwing registration emits a diagnostic, contributes no effects, and later registrations still run.

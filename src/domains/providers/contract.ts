@@ -7,7 +7,7 @@ import type { ProbeModelStatus, ProbeSurfaceMap, RuntimeDescriptor } from "./typ
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 /**
- * Query-only surface exposed to other domains. Dispatch, chat-loop, TUI
+ * The surface published to other domains. Dispatch, chat-loop, TUI
  * overlays, and the CLI read provider state through this contract; no one
  * reaches into `extension.ts` or the runtime registry directly.
  */

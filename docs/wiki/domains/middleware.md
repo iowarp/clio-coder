@@ -8,7 +8,8 @@ sources:
   - "src/domains/middleware/hooks.ts"
   - "src/domains/middleware/extension.ts"
 symbols:
-  - "MiddlewareDomainModule"
+  - "createMiddlewareDomain"
+  - "MiddlewareRegistrar"
   - "runMiddlewareRegistrations"
   - "runMiddlewareAsyncRegistrations"
   - "registrationFromRuleDefinition"
@@ -40,7 +41,7 @@ The middleware domain is the ordered evaluation layer that runs at tool and turn
 - Turns declarative rule definitions into coded registrations through `registrationFromRuleDefinition`.
 - Validates and loads user-defined hooks (`prompt`, `effect`, and `command` kinds) in `src/domains/middleware/hooks.ts`, and converts each accepted hook into a registration with `userHookToRegistration`.
 
-`src/domains/middleware/index.ts` is the barrel and the domain entry. `MiddlewareDomainModule` pairs the manifest with `createMiddlewareBundle` from `src/domains/middleware/extension.ts`. That bundle constructs the registration table with the builtin rule definitions as its fixed tier and exposes `runHook`, `prepareRegistrationReplacement`, `replaceRegistrations`, and `ownedGeneration`. Its registration sink defaults to `writeMiddlewareDiagnosticToStderr` and is replaced by the composition root through the bundle options.
+`src/domains/middleware/index.ts` is the barrel and the domain entry. `createMiddlewareDomain` in `src/domains/middleware/extension.ts` returns the domain module and a handle to its `MiddlewareRegistrar`. The module calls `createMiddlewareBundle`, which constructs the registration table with the builtin rule definitions as its fixed tier. The loader publishes only the frozen `MiddlewareContract` (`runHook`, the awaited-hook runners and `snapshot`). `registerHook`, `setDiagnosticSink`, `prepareRegistrationReplacement`, `replaceRegistrations` and `ownedGeneration` stay on the registrar, which only the composition that owns the domain holds. The registration sink defaults to `writeMiddlewareDiagnosticToStderr` and is replaced by that composition through the bundle options or `setDiagnosticSink`.
 
 ## Registration model
 
