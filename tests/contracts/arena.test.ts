@@ -15,6 +15,7 @@ import {
 	blindOrder,
 	computeStandings,
 	listMatches,
+	contenderWrites,
 	readArenaStream,
 	readVote,
 	recordVote,
@@ -105,6 +106,16 @@ describe("arena stream facts", () => {
 		assert.equal(facts.totalTokens?.measured, 15);
 		assert.equal(facts.cost?.usd.unknownCount, 3);
 		assert.equal(facts.cost?.usd.measured, 0);
+	});
+
+	it("counts a file an extension tool wrote, which the stream reports as execute", () => {
+		const facts = readArenaStream(
+			frames({ type: "tool_execution_end", toolName: "extension_desk__record", actionClass: "execute", outcome: "ok" }),
+		);
+		assert.equal(facts.writes, 0);
+		assert.equal(contenderWrites(facts.writes, { files: 1, insertions: 25, deletions: 0 }), 1);
+		assert.equal(contenderWrites(3, { files: 1, insertions: 2, deletions: 0 }), 3, "edits to one file keep their count");
+		assert.equal(contenderWrites(0, null), 0, "a read-only contender has no diff");
 	});
 });
 

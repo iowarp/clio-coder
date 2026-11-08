@@ -126,6 +126,17 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 	return facts;
 }
 
+/**
+ * The writes a contender made. The stream counts the calls the policy classed
+ * as writes, but an extension tool runs as execute (a package may hold read
+ * and write tools under one fs.write grant) and a shell edit does too, so a
+ * contender whose only change came through one of those read as no writes
+ * beside a non-empty diff. A file in the saved diff was written at least once.
+ */
+export function contenderWrites(streamWrites: number, diff: ArenaDiffStat | null): number {
+	return Math.max(streamWrites, diff?.files ?? 0);
+}
+
 /** Read `git diff --numstat` output; a binary file counts as a file with no line counts. */
 export function readNumstat(numstat: string): ArenaDiffStat {
 	const stat: ArenaDiffStat = { files: 0, insertions: 0, deletions: 0 };

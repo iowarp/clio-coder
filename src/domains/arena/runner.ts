@@ -17,7 +17,7 @@ import {
 	settleCompeteGroupRun,
 } from "../../tools/compete-worktrees.js";
 import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
-import { readArenaStream, readNumstat } from "./facts.js";
+import { contenderWrites, readArenaStream, readNumstat } from "./facts.js";
 import { arenaRoot, contenderDiffPath, contenderStreamPath, matchDir, newArenaMatchId, writeMatch } from "./store.js";
 import {
 	ARENA_MAX_CONTENDERS,
@@ -198,7 +198,7 @@ async function runContender(
 		turns: stream.turns,
 		toolCalls: stream.toolCalls,
 		toolErrors: stream.toolErrors,
-		writes: stream.writes,
+		writes: contenderWrites(stream.writes, diff),
 		blocks: stream.blocks,
 		totalTokens: stream.totalTokens,
 		cost: stream.cost,
