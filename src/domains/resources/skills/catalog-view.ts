@@ -601,7 +601,7 @@ function pageNote(input: PageNoteInput): string {
 		const broadened = input.matchMode === "any" ? ", matched on any query word after no row matched them all" : "";
 		clauses.push(
 			input.total === 0
-				? `No skill matches "${boundQuery(input.query)}"; ${input.catalogTotal} are available unfiltered, so drop query to list them.`
+				? `No skill matches "${boundQuery(input.query)}" among ${input.catalogTotal}; drop query to list them once, and if none fits, continue without a skill.`
 				: `Filtered by "${boundQuery(input.query)}"${broadened}: ${input.total} of ${input.catalogTotal} rows match.`,
 		);
 	}
