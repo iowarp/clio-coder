@@ -15,6 +15,9 @@ import {
 import { FactSumSchema, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema } from "./id-schemas.js";
 import {
+	AutonomyEndReason,
+	AutonomyHaltKind,
+	AutonomyOpenDecisionKind,
 	CallSettledSchema,
 	EvidenceAssessedSchema,
 	EvidenceFindingsObjectSchema,
@@ -1289,6 +1292,24 @@ export const WhyStoppedSchema = Type.Object(
 		budget: Type.Array(BudgetEntrySchema),
 		/** Each account's latest journaled quota reading, the ones that reported a limit first. */
 		quota: Type.Array(QuotaEntrySchema),
+		/**
+		 * The session's yolo audit (ob-yolo D7): the halt still standing, how the last yolo stretch ended and the calls
+		 * it refused because they needed the operator. Absent when the journal holds no `autonomy.*` record.
+		 */
+		autonomy: Type.Optional(
+			Type.Object(
+				{
+					halt: Type.Union([
+						Type.Object({ at: UtcSchema, kind: AutonomyHaltKind, limit: Type.Optional(count) }, closed),
+						Type.Null(),
+					]),
+					ended: Type.Union([Type.Object({ at: UtcSchema, reason: AutonomyEndReason }, closed), Type.Null()]),
+					openDecisions: count,
+					kinds: Type.Array(Type.Object({ kind: AutonomyOpenDecisionKind, count }, closed)),
+				},
+				closed,
+			),
+		),
 		/** Rendered findings, most decisive first; every number in them also appears above. */
 		findings: Type.Array(Type.String()),
 	},

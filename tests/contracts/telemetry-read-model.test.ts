@@ -557,6 +557,51 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 	);
 });
 
+test("why-stopped names a yolo halt still standing and the open decisions it left (ob-yolo D7)", () => {
+	const ctx = { sessionId: "yolo-records", agent: { role: "main" as const, id: "yolo-records" } };
+	const at = (t: string) => ({ t: `2026-10-30T00:00:0${t}.000Z`, mono: 0 });
+	const usage = { toolCalls: 4, activeMs: 9000, tokens: 1200 };
+	const records: TelemetryRecord[] = [
+		makeTelemetryRecord(
+			"autonomy.entered",
+			{ confinement: "contained", capToolCalls: 4, capMinutes: 0, capTokens: 0 },
+			ctx,
+			at("0"),
+		),
+		makeTelemetryRecord("autonomy.cap_reached", { kind: "calls", limit: 2, ...usage, openDecisions: 0 }, ctx, at("1")),
+		makeTelemetryRecord("autonomy.resumed", { cleared: "calls" }, ctx, at("2")),
+		makeTelemetryRecord("autonomy.open_decision", { tool: "bash", kind: "operator-only", seq: 1 }, ctx, at("3")),
+		makeTelemetryRecord(
+			"autonomy.open_decision",
+			{ tool: "bash", kind: "judge-block", rule: "exfil", seq: 2 },
+			ctx,
+			at("4"),
+		),
+		makeTelemetryRecord("autonomy.open_decision", { tool: "write", kind: "judge-block", seq: 3 }, ctx, at("5")),
+		makeTelemetryRecord("autonomy.cap_reached", { kind: "judge", ...usage, openDecisions: 3 }, ctx, at("6")),
+		makeTelemetryRecord("autonomy.ended", { reason: "judge-streak", ...usage, openDecisions: 3 }, ctx, at("7")),
+	];
+	const why = whyStopped({ ...source, sessionId: "yolo-records", journal: { ...source.journal, records } }, now);
+	ok(Value.Check(WhyStoppedSchema, why), [...Value.Errors(WhyStoppedSchema, why)][0]?.message);
+	deepStrictEqual(why.autonomy, {
+		halt: { at: "2026-10-30T00:00:06.000Z", kind: "judge" },
+		ended: { at: "2026-10-30T00:00:07.000Z", reason: "judge-streak" },
+		openDecisions: 3,
+		kinds: [
+			{ kind: "operator-only", count: 1 },
+			{ kind: "judge-block", count: 2 },
+		],
+	});
+	deepStrictEqual(
+		why.findings.filter((line) => line.startsWith("Yolo")),
+		[
+			"Yolo ended the run at 2026-10-30T00:00:06.000Z: the safety judge blocked too many calls (judge-streak).",
+			"Yolo left 3 open decisions for the operator: 1 operator-only, 2 judge-block.",
+		],
+	);
+	strictEqual(whyStopped(source, now).autonomy, undefined);
+});
+
 test("the timeline carries tool, middleware, auth, prompt, context, System One and worker channel records (#434 §8)", () => {
 	const ctx = {
 		sessionId: "timeline-signals",

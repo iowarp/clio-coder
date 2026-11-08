@@ -1554,6 +1554,8 @@ export const TurnContinuedSchema = Type.Object(
 /** Contained yolo's audit (ob-yolo D7): what ran on its own, what it left for the operator, and why it stopped. */
 const autonomyUsage = { toolCalls: count, activeMs: duration, tokens: count };
 export const AutonomyHaltKind = vocabulary(["calls", "minutes", "tokens", "judge"]);
+export const AutonomyOpenDecisionKind = vocabulary(["judge-block", "no-verdict", "operator-only", "outward-unnamed"]);
+export const AutonomyEndReason = vocabulary(["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]);
 export const AutonomyEnteredSchema = Type.Object(
 	{
 		confinement: vocabulary(["contained", "unconfined"]),
@@ -1567,7 +1569,7 @@ export const AutonomyEnteredSchema = Type.Object(
 export const AutonomyOpenDecisionSchema = Type.Object(
 	{
 		tool: ExistingId,
-		kind: vocabulary(["judge-block", "no-verdict", "operator-only", "outward-unnamed"]),
+		kind: AutonomyOpenDecisionKind,
 		rule: Type.Optional(ExistingId),
 		seq: count,
 	},
@@ -1580,7 +1582,7 @@ export const AutonomyCapReachedSchema = Type.Object(
 export const AutonomyResumedSchema = Type.Object({ cleared: AutonomyHaltKind }, closed);
 export const AutonomyEndedSchema = Type.Object(
 	{
-		reason: vocabulary(["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]),
+		reason: AutonomyEndReason,
 		...autonomyUsage,
 		openDecisions: count,
 	},

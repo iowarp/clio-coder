@@ -3122,10 +3122,27 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const life = lifecycle(source, options);
 	const budget: BudgetEntry[] = [];
 	const latestQuota = new Map<string, QuotaEntry>();
+	let autonomy: NonNullable<WhyStoppedV1["autonomy"]> | undefined;
+	const decisionKinds = new Map<NonNullable<WhyStoppedV1["autonomy"]>["kinds"][number]["kind"], number>();
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
 		if (record.k === "budget.crossed" || record.k === "budget.held") budget.push(budgetEntry(analysis, record));
+		if (record.k.startsWith("autonomy.")) autonomy ??= { halt: null, ended: null, openDecisions: 0, kinds: [] };
+		if (autonomy === undefined) continue;
+		if (record.k === "autonomy.cap_reached")
+			autonomy.halt = {
+				at: record.t,
+				kind: record.data.kind,
+				...(record.data.limit !== undefined ? { limit: record.data.limit } : {}),
+			};
+		else if (record.k === "autonomy.resumed" || record.k === "autonomy.entered") autonomy.halt = null;
+		else if (record.k === "autonomy.ended") autonomy.ended = { at: record.t, reason: record.data.reason };
+		else if (record.k === "autonomy.open_decision") {
+			autonomy.openDecisions += 1;
+			decisionKinds.set(record.data.kind, (decisionKinds.get(record.data.kind) ?? 0) + 1);
+		}
 	}
+	if (autonomy !== undefined) autonomy.kinds = [...decisionKinds].map(([kind, n]) => ({ kind, count: n }));
 	for (const record of source.accountQuota ?? []) {
 		if (record.k === "quota.read") {
 			const account = `${record.data.provider}\u0000${record.data.targetId}`;
@@ -3205,6 +3222,16 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 	}
+	if (autonomy?.halt)
+		findings.push(
+			autonomy.halt.kind === "judge"
+				? `Yolo ended the run at ${autonomy.halt.at}: the safety judge blocked too many calls (judge-streak).`
+				: `Yolo paused at ${autonomy.halt.at} on its ${autonomy.halt.limit !== undefined ? `${renderCount(autonomy.halt.limit)}-` : ""}${autonomy.halt.kind === "calls" ? "call" : autonomy.halt.kind === "minutes" ? "minute" : "token"} cap (autonomous-cap).`,
+		);
+	if (autonomy && autonomy.openDecisions > 0)
+		findings.push(
+			`Yolo left ${renderCount(autonomy.openDecisions)} open ${autonomy.openDecisions === 1 ? "decision" : "decisions"} for the operator: ${autonomy.kinds.map((row) => `${renderCount(row.count)} ${row.kind}`).join(", ")}.`,
+		);
 	if (life.closed)
 		findings.push(`The session closed at ${life.closed.at}${life.closed.reason ? ` (${life.closed.reason})` : ""}.`);
 	else if (life.state === "ended-abnormally") findings.push("The session's process ended without closing it.");
@@ -3255,6 +3282,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				}
 			: null,
 		lastCalls,
+		...(autonomy !== undefined ? { autonomy } : {}),
 		causes: causeRows,
 		waits: waitRows,
 		cache,
