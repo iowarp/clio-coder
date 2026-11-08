@@ -26,6 +26,7 @@ import {
 	casResearchRef,
 	changedPaths,
 	checkoutDetached,
+	cleanWorktree,
 	commitWorktree,
 	createResearchRef,
 	gitFailure,
@@ -394,6 +395,10 @@ export async function runResearchCampaign(
 				commit = committed.head;
 				if (committed.leftOut.length > 0)
 					log(`iteration ${iteration}: left out check output ${committed.leftOut.join(", ")}`);
+				// Measure exactly the commit: whatever the agent left untracked or ignored, check output included,
+				// goes, so a file it planted in a check's output directory cannot steer the score. The checks
+				// recreate their own output.
+				cleanWorktree(worktree);
 			} catch (error) {
 				archive("agent-failed", `the change could not be committed: ${gitFailure(error)}`);
 				cleanup();

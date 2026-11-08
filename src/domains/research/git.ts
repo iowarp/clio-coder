@@ -95,6 +95,11 @@ export function withinEntries(path: string, entries: ReadonlySet<string>): boole
 	return false;
 }
 
+/** Remove every untracked and ignored file, so the worktree holds exactly its HEAD tree. */
+export function cleanWorktree(worktree: string): void {
+	git(worktree, ["clean", "-ffdxq"]);
+}
+
 /**
  * Commit everything the agent left in the worktree, untracked files included, on top of whatever it committed
  * itself, except untracked files `leaveOut` names. Returns HEAD afterwards, which equals `parent` when nothing

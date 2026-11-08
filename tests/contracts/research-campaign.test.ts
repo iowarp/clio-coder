@@ -702,6 +702,59 @@ describe("research review fixes", () => {
 		ok(view.iterations[1]?.detail?.includes("notes.txt"), view.iterations[1]?.detail);
 	});
 
+	// A learned check-output directory left planted files out of the commit, yet they stayed for measurement.
+	it("measures only the committed tree, so a file planted in a check's output or an ignored directory earns nothing", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const plantableScore =
+			"const fs=require('fs');fs.mkdirSync('.cache',{recursive:true});fs.writeFileSync('.cache/score.bin','x');" +
+			"for(const f of ['.cache/override.json','build/override.json'])if(fs.existsSync(f)){process.stdout.write(fs.readFileSync(f,'utf8'));process.exit(0)}" +
+			scoreJs;
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": plantableScore,
+			".gitignore": "build/\n",
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+		const campaign = openResearchCampaign({
+			cwd: repo,
+			objective: { check: "score", metric: "score", direction: "min", minImprovement: 0.05, trials: 3 },
+			gates: [],
+			scope: ["value.txt"],
+			budget: { maxIterations: 2, allowUnpriced: false },
+			allowNoisy: false,
+			keep: false,
+			agent: {},
+		});
+		const plant = (worktree: string, dir: string): void => {
+			mkdirSync(join(worktree, dir), { recursive: true });
+			writeFileSync(join(worktree, dir, "override.json"), JSON.stringify({ score: 1 }));
+		};
+		const edits: Array<(worktree: string) => void> = [
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "99\n");
+				plant(worktree, ".cache");
+			},
+			(worktree) => {
+				writeFileSync(join(worktree, "value.txt"), "98\n");
+				plant(worktree, "build");
+			},
+		];
+		let calls = 0;
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				edits[calls++]?.(request.worktree);
+				return done;
+			},
+		});
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["not-improved", "not-improved"],
+		);
+		strictEqual(git(repo, "rev-parse", campaign.ref), campaign.base);
+	});
+
 	it("withholds reference-agreement claims from research hypotheses of earlier campaigns on the same check", async (t) => {
 		const env = await isolateClioEnv("clio-coder-research-home-");
 		t.after(() => env.restore());
