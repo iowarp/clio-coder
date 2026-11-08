@@ -105,6 +105,8 @@ export interface HeadlessShutdownHooks {
 
 export interface HeadlessMainAgentOptions {
 	prompt: string;
+	/** The line the operator typed when `prompt` is its expansion; prompt_submit hooks judge this line. */
+	display?: { text: string; note?: string };
 	constraints?: TurnConstraints;
 	images?: ReadonlyArray<ImageContent>;
 	workingContextPaths?: ReadonlyArray<string>;
@@ -1105,6 +1107,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
+			...(options.display ? { display: options.display } : {}),
 			...(options.constraints ? { constraints: options.constraints } : {}),
 			hostRun: { runId, lineage: { parentRunId: null, rootRunId: runId, depth: 0, attempt: 0 } },
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),

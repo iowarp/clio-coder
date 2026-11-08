@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { narrowTurnConstraints, turnAllowsTool, turnDelegatesTool } from "../../src/core/turn-constraints.js";
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
-import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
+import { expandSubmitText, submitDisplay } from "../../src/domains/resources/submit-expansion.js";
 
 // A prompt template turn inherited the session's whole tool surface, so a host
 // could not scope one action to the tools it declares (WTF-P records
@@ -35,6 +36,66 @@ test("a template's allowed-tools become the expanded turn's constraint and only 
 
 		const plain = await expandSubmitText("/plain src", resources, root);
 		assert.equal(plain.constraints, undefined);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// Headless `run` submitted the expanded body with no display, so chat-loop handed prompt_submit hooks the body as
+// `typed` and an action-scoped permission keyed on `/name` was refused in run, campaigns and arena contenders.
+test("a headless run hands prompt_submit the typed /name line, not the template body", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-template-typed-"));
+	try {
+		const promptRoot = join(root, "prompts");
+		mkdirSync(promptRoot, { recursive: true });
+		writeFileSync(join(promptRoot, "review.md"), "Review $ARGUMENTS\nthen report\n");
+		const expansion = expandPromptTemplateInput(
+			"/review src",
+			loadPromptTemplates({ roots: [{ path: promptRoot, scope: "project", trusted: true }] }),
+		);
+		assert.ok(expansion.expanded);
+		const display = submitDisplay({
+			typed: "/review src",
+			parsedText: "/review src",
+			template: { name: expansion.template.name, text: expansion.text },
+			referencedPaths: [],
+			diagnostics: [],
+			cwd: root,
+		});
+		let handler: (event: unknown) => void = () => {};
+		const submitted: Array<{ text: string; options: { display?: { text: string } } | undefined }> = [];
+		const reply = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done." }] };
+		const stub: Record<string, unknown> = {
+			onEvent: (next: (event: unknown) => void) => {
+				handler = next;
+				return () => {};
+			},
+			getSessionId: () => null,
+			submit: async (text: string, options?: { display?: { text: string } }) => {
+				submitted.push({ text, options });
+				handler({ type: "agent_start" });
+				handler({ type: "message_end", message: reply });
+				handler({ type: "agent_end", messages: [reply] });
+			},
+			whenSettled: async () => {},
+			lastRunSnapshot: () => null,
+			isStreaming: () => false,
+		};
+		const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
+		await runHeadlessMainAgent(
+			chat as never,
+			{
+				prompt: expansion.text,
+				...(display ? { display } : {}),
+				mode: "json",
+				jsonEvents: "terminal",
+				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+			} as never,
+		);
+		assert.equal(submitted.length, 1);
+		assert.equal(submitted[0]?.text, "Review src\nthen report");
+		// chat-loop gives prompt_submit `typed: options.display?.text ?? text`.
+		assert.equal(submitted[0]?.options?.display?.text, "/review src");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

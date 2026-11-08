@@ -91,6 +91,32 @@ function attachmentNote(
 	return `${note[0]?.toUpperCase() ?? ""}${note.slice(1)}.`;
 }
 
+/**
+ * The operator's turn as the transcript paints it and as prompt_submit hooks judge it: the line they typed
+ * whenever a template or `@path` changed what the model receives. Headless `run` shares it with the terminal
+ * and ACP; without it a hook there saw the expanded body as typed and refused `/name` scoped actions.
+ */
+export function submitDisplay(input: {
+	typed: string;
+	/** The typed line with `/skill` requests taken out. */
+	parsedText: string;
+	template?: { name: string; text: string };
+	referencedPaths: ReadonlyArray<string>;
+	diagnostics: ReadonlyArray<{ type: string; message: string; path?: string }>;
+	cwd: string;
+}): { text: string; note?: string } | undefined {
+	const attached = attachmentNote(input.referencedPaths, input.diagnostics, input.cwd);
+	if (input.template)
+		return {
+			text: input.parsedText.trim(),
+			note: [
+				`expanded prompt template ${input.template.name} (${input.template.text.split("\n").length} lines)`,
+				...(attached ? [attached] : []),
+			].join("; "),
+		};
+	return attached ? { text: input.typed.trim(), note: attached } : undefined;
+}
+
 export interface SubmitExpansionOptions {
 	/** Aborts a slow attachment read; the expansion then rejects with the signal's reason. */
 	signal?: AbortSignal;
@@ -129,18 +155,16 @@ export async function expandSubmitText(
 		...(signal ? { signal } : {}),
 		...(onExtract ? { onExtract: (filePath: string) => onExtract(shortAttachmentPath(filePath, cwd)) } : {}),
 	});
-	const attached = attachmentNote(fileExpansion.referencedPaths, fileExpansion.diagnostics, cwd);
-	const display = promptExpansion?.expanded
-		? {
-				text: parsed.text.trim(),
-				note: [
-					`expanded prompt template ${promptExpansion.template.name} (${promptExpansion.text.split("\n").length} lines)`,
-					...(attached ? [attached] : []),
-				].join("; "),
-			}
-		: attached
-			? { text: text.trim(), note: attached }
-			: undefined;
+	const display = submitDisplay({
+		typed: text,
+		parsedText: parsed.text,
+		...(promptExpansion?.expanded
+			? { template: { name: promptExpansion.template.name, text: promptExpansion.text } }
+			: {}),
+		referencedPaths: fileExpansion.referencedPaths,
+		diagnostics: fileExpansion.diagnostics,
+		cwd,
+	});
 	return {
 		text: fileExpansion.text,
 		images: fileExpansion.images,

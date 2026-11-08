@@ -215,7 +215,7 @@ import {
 	installSkill,
 	modelVisibleSkills,
 } from "../domains/resources/index.js";
-import { expandSubmitText } from "../domains/resources/submit-expansion.js";
+import { expandSubmitText, submitDisplay } from "../domains/resources/submit-expansion.js";
 import { admissionAutonomy, containedYolo, effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import { createCitationGroundingRegistration } from "../domains/safety/citation-grounding.js";
 import { DEFAULT_RECENT_ENTRY_LIMIT } from "../domains/safety/finish-contract.js";
@@ -4359,9 +4359,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			chat.setToolCeiling?.([constraints]);
 			const images = [...(options.headless.images ?? []), ...fileExpansion.images];
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
+			// prompt_submit hooks judge the line the operator typed, as in the TUI and ACP.
+			const display = submitDisplay({
+				typed: options.headless.prompt,
+				parsedText: parsedSkillRequest.text,
+				...(promptExpansion?.expanded
+					? { template: { name: promptExpansion.template.name, text: promptExpansion.text } }
+					: {}),
+				referencedPaths: fileExpansion.referencedPaths,
+				diagnostics: fileExpansion.diagnostics,
+				cwd: process.cwd(),
+			});
 			startRunOutput();
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
+				...(display ? { display } : {}),
 				...(constraints ? { constraints } : {}),
 				...(images.length > 0 ? { images } : {}),
 				...(workingContextPaths.length > 0 ? { workingContextPaths } : {}),
