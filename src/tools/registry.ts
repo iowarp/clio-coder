@@ -2117,6 +2117,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 	};
 
+	const observeUnattendedRefusal = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		kind: OpenDecisionKind,
+		rule?: string,
+	): void => {
+		try {
+			deps.onUnattendedRefusal?.(call, decision, kind, rule);
+		} catch {
+			// An observer's failure never changes the denial or its bookkeeping.
+		}
+	};
+
 	const nextApprovalRequestId = (): string => `apr-${approvalRequestToken}-${++approvalRequestCounter}`;
 
 	const notifyPermissionRequired = (
@@ -2264,7 +2277,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					: {}),
 			};
 			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
-			if (unattended) deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "judge-block", judged.rule);
+			if (unattended) observeUnattendedRefusal(admissionCall, outcome.decision, "judge-block", judged.rule);
 			const verdict = withDenial(
 				{ kind: "blocked", reason: judged.refusal, decision: blocked },
 				"clio_policy",
@@ -2279,10 +2292,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
 				reasonCode: CONTAINED_YOLO_REASON_CODE,
 			});
-			if (outwardUnnamed) deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "outward-unnamed", judged.rule);
+			if (outwardUnnamed) observeUnattendedRefusal(admissionCall, outcome.decision, "outward-unnamed", judged.rule);
 			else if (judged.kind === "park")
-				deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "no-verdict", judged.cause);
-			else deps.onUnattendedRefusal?.(admissionCall, outcome.decision, "operator-only");
+				observeUnattendedRefusal(admissionCall, outcome.decision, "no-verdict", judged.cause);
+			else observeUnattendedRefusal(admissionCall, outcome.decision, "operator-only");
 			const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
 			return (
 				guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??

@@ -23,7 +23,11 @@ import {
 	createFinishContractRegistration,
 } from "../../src/domains/safety/finish-contract-registration.js";
 import { parseRigorOverride, rigorResolution } from "../../src/domains/safety/rigor.js";
-import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
+import {
+	createSafetyJudge,
+	type SafetyJudgeConfig,
+	type SafetyJudgeNote,
+} from "../../src/domains/safety/safety-judge.js";
 import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -34,7 +38,12 @@ import {
 } from "../../src/interactive/yolo-activation.js";
 import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
-import { createRegistry, type PermissionRequiredMeta, type ToolSpec } from "../../src/tools/registry.js";
+import {
+	createRegistry,
+	type PermissionRequiredMeta,
+	type RegistryDeps,
+	type ToolSpec,
+} from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const CONFIG: SafetyJudgeConfig = { enabled: true, target: "local", model: "m", environment: [], allow: [], deny: [] };
@@ -44,7 +53,10 @@ const UNRECOGNIZED = "./scripts/sync-assets --all";
  * The operator's main-session registry at contained yolo, wired as the
  * orchestrator wires it: admission at `default`, and asks never parked.
  */
-function containedRegistry(reply: () => string) {
+function containedRegistry(
+	reply: () => string,
+	observe: Pick<RegistryDeps, "onUnattendedRefusal"> & { note?: (note: SafetyJudgeNote) => void } = {},
+) {
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-contained-yolo-")));
 	let judged = 0;
 	const judge = createSafetyJudge({
@@ -56,12 +68,14 @@ function containedRegistry(reply: () => string) {
 		operatorMessages: () => ["sync the assets"],
 		session: () => "session-1",
 		consequences: () => [],
+		...(observe.note !== undefined ? { note: observe.note } : {}),
 	});
 	const registry = createRegistry({
 		safety: createWorkerSafety({ cwd }),
 		autonomy: () => admissionAutonomy("yolo", "contained"),
 		safetyJudge: judge,
 		unattendedAsks: () => true,
+		...(observe.onUnattendedRefusal !== undefined ? { onUnattendedRefusal: observe.onUnattendedRefusal } : {}),
 	});
 	const ran: string[] = [];
 	const tool = (name: ToolSpec["name"], extra: Partial<ToolSpec> = {}): ToolSpec => ({
@@ -124,6 +138,30 @@ test("contained yolo refuses a call the judge left without a verdict instead of 
 	strictEqual(repeat.kind, "blocked");
 	if (repeat.kind === "blocked") strictEqual(repeat.decision.policy?.reasonCode, "denied_repeat");
 	deepStrictEqual([ran, parks.length, judged()], [[], 0, 1]);
+});
+
+test("a throwing refusal observer never changes contained yolo's denial or its bookkeeping", async () => {
+	const { registry } = containedRegistry(() => "I am not sure.", {
+		onUnattendedRefusal: () => {
+			throw new Error("observer failed");
+		},
+	});
+	const call = { tool: ToolNames.Bash, args: { command: UNRECOGNIZED } };
+	const first = await registry.invoke(call, { turnId: "turn-1" });
+	strictEqual(first.kind, "blocked");
+	if (first.kind === "blocked") match(first.reason, /contained yolo runs without the operator/u);
+	const repeat = await registry.invoke(call, { turnId: "turn-1" });
+	strictEqual(repeat.kind, "blocked");
+	if (repeat.kind === "blocked") strictEqual(repeat.decision.policy?.reasonCode, "denied_repeat");
+
+	const blocked = containedRegistry(() => JSON.stringify({ verdict: "block", rule: "publish", reason: "uploads" }), {
+		onUnattendedRefusal: () => {
+			throw new Error("observer failed");
+		},
+	});
+	const verdict = await blocked.registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });
+	strictEqual(verdict.kind, "blocked");
+	if (verdict.kind === "blocked") strictEqual(verdict.denial?.code, "safety-judge:publish");
 });
 
 test("contained yolo refuses an operator-only ask without the judge or a card", async () => {
