@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
-import type { ClioSettings } from "../../core/config.js";
+import { type ClioSettings, readSettings } from "../../core/config.js";
+import { clioDataDir } from "../../core/xdg.js";
+import type { DispatchContract, DispatchRequest } from "../dispatch/contract.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { buildMemoryPromptSection } from "./prompt-section.js";
 import { loadMemoryRecordsSync } from "./store.js";
@@ -63,4 +65,44 @@ export function buildDispatchMemorySection(input: {
 		activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
 		activeAgent: { kind: "agent", key: input.route.agentId },
 	}).section;
+}
+
+/**
+ * Every attended dispatch path (the dispatch tool, slash commands, turn control)
+ * receives this one contract, so the durable memory section headless `run`
+ * builds is sealed here once rather than at each request builder. A request
+ * that already carries a section keeps it; an unreadable store sends none.
+ */
+export function withDispatchMemory(
+	contract: DispatchContract | undefined,
+	getSettings: () => Readonly<ClioSettings> | undefined,
+): DispatchContract | undefined {
+	if (contract === undefined) return undefined;
+	const withMemory = (request: DispatchRequest): DispatchRequest => {
+		if (request.memorySection !== undefined) return request;
+		const settings = getSettings() ?? readSettings();
+		let section = "";
+		try {
+			section = buildDispatchMemorySection({
+				dataDir: clioDataDir(),
+				cwd: process.cwd(),
+				...(request.cwd !== undefined ? { workerCwd: request.cwd } : {}),
+				settings,
+				route: {
+					agentId: request.agentId,
+					...(request.target !== undefined ? { target: request.target } : {}),
+					...(request.workerProfile !== undefined ? { workerProfile: request.workerProfile } : {}),
+					...(request.workerRuntime !== undefined ? { workerRuntime: request.workerRuntime } : {}),
+				},
+			});
+		} catch {
+			// Memory is advisory; a store that cannot be read must not block the dispatch.
+		}
+		return section.length > 0 ? { ...request, memorySection: section } : request;
+	};
+	return {
+		...contract,
+		dispatch: (request, observer, preparation) => contract.dispatch(withMemory(request), observer, preparation),
+		dispatchBatch: (requests, preparation) => contract.dispatchBatch(requests.map(withMemory), preparation),
+	};
 }

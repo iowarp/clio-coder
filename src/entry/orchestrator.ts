@@ -91,7 +91,7 @@ import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
 import type { ReadRecallPort } from "../domains/context/working-set/reread.js";
 import { createRereadRecallPort } from "../domains/context/working-set/reread.js";
-import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
+import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
@@ -120,10 +120,10 @@ import {
 	memoryRouteConfigured,
 	prepareBackgroundMemoryModel,
 } from "../domains/memory/background-route.js";
+import { withDispatchMemory } from "../domains/memory/dispatch-section.js";
 import { createGuardianStatePublisher } from "../domains/memory/guardian-state.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
-	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
@@ -182,20 +182,16 @@ import type { MuxContract } from "../domains/mux/index.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { agentRoleToolWarnings } from "../domains/providers/agent-role-warnings.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
-import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
+import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import {
-	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	createProvidersDomainModule,
 	isOrchestratorEligibleRuntime,
 	modelEndpointKey,
-	probeCapabilitiesForModel,
 	registerForegroundStream,
-	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 	resolveRuntimeTarget,
-	supportsAgentRoleTools,
 	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
 import {
@@ -208,6 +204,7 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { LOCAL_API_KEY_FALLBACK, resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
+import { resolveTarget, unpricedRunRoutes } from "../domains/providers/unpriced-routes.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import { anthropicQuotaNotice, onAnthropicQuotaChange } from "../domains/quota/index.js";
 import {
@@ -461,90 +458,6 @@ function applyHeadlessSettingsOverlay(
 	return next;
 }
 
-function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
-	if (!targetId) return null;
-	return providers.getTarget(targetId);
-}
-
-/**
- * The routes a `clio-coder run --max-cost-usd` run can reach whose cost is
- * unknown: the chat route, the compaction route, the default worker route,
- * every fleet profile (recipe pins in `fleet.agentProfiles` and coordinator
- * profile picks resolve to one), every roster member, and each configured
- * target at its default model, which a coordinator pin naming only a target
- * takes. Paid-request admission checks only known or estimated pricing, so
- * the cap cannot bound these; LiteLLM stays unknown until its target declares
- * `pricing`. A model a coordinator names one-off is not known at boot.
- */
-function unpricedRunRoutes(settings: Readonly<ClioSettings>, providers: ProvidersContract | undefined): string[] {
-	if (!providers) return [];
-	const routes: Array<{ target: string | null | undefined; model?: string | null | undefined }> = [
-		settings.chat,
-		settings.fleet.default,
-		...Object.values(settings.fleet.profiles),
-		...Object.values(settings.fleet.rosters).flatMap((roster) => roster.members),
-		...settings.targets.map((target) => ({ target: target.id })),
-	];
-	const compaction = settings.context.compaction.model;
-	if (compaction) {
-		try {
-			const selected = resolveModelReference(compaction, providers, { use: "chat" });
-			if (selected.ref && !selected.warning) routes.push(selected.ref);
-		} catch {
-			// An invalid compaction pattern fails compaction itself with its own message.
-		}
-	}
-	const unpriced = new Set<string>();
-	for (const route of routes) {
-		const target = resolveTarget(providers, route.target);
-		const runtime = target ? providers.getRuntime(target.runtime) : null;
-		const model = route.model ?? target?.defaultModel;
-		if (!target || !runtime || !model) continue;
-		if (resolveEffectivePricing(target, runtime, model).pricedBy === "none") unpriced.add(`${target.id}/${model}`);
-	}
-	return [...unpriced];
-}
-
-/**
- * Every attended dispatch path (the dispatch tool, slash commands, turn control)
- * receives this one contract, so the durable memory section headless `run`
- * builds is sealed here once rather than at each request builder. A request
- * that already carries a section keeps it; an unreadable store sends none.
- */
-function withDispatchMemory(
-	contract: DispatchContract | undefined,
-	getSettings: () => Readonly<ClioSettings> | undefined,
-): DispatchContract | undefined {
-	if (contract === undefined) return undefined;
-	const withMemory = (request: DispatchRequest): DispatchRequest => {
-		if (request.memorySection !== undefined) return request;
-		const settings = getSettings() ?? readSettings();
-		let section = "";
-		try {
-			section = buildDispatchMemorySection({
-				dataDir: clioDataDir(),
-				cwd: process.cwd(),
-				...(request.cwd !== undefined ? { workerCwd: request.cwd } : {}),
-				settings,
-				route: {
-					agentId: request.agentId,
-					...(request.target !== undefined ? { target: request.target } : {}),
-					...(request.workerProfile !== undefined ? { workerProfile: request.workerProfile } : {}),
-					...(request.workerRuntime !== undefined ? { workerRuntime: request.workerRuntime } : {}),
-				},
-			});
-		} catch {
-			// Memory is advisory; a store that cannot be read must not block the dispatch.
-		}
-		return section.length > 0 ? { ...request, memorySection: section } : request;
-	};
-	return {
-		...contract,
-		dispatch: (request, observer, preparation) => contract.dispatch(withMemory(request), observer, preparation),
-		dispatchBatch: (requests, preparation) => contract.dispatchBatch(requests.map(withMemory), preparation),
-	};
-}
-
 function settingsTargetRuntime(settings: Readonly<ClioSettings>, targetId: string | null | undefined): string | null {
 	if (!targetId) return null;
 	return settings.targets.find((entry) => entry.id === targetId)?.runtime ?? null;
@@ -616,52 +529,6 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 }
 
 const emitQuotaNotice = declareRuntimeNoticeProducer("anthropic-quota", ["stress"]);
-
-/**
- * Warn about a configured agent-role model the provider reports cannot call
- * tools. Selection already refuses these, so reaching here means the config
- * predates the check or was hand-edited; a run would otherwise fail later at
- * dispatch admission with a message that names a missing tool rather than the
- * model that cannot use any.
- */
-function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<ClioSettings>): string[] {
-	const roles: ReadonlyArray<{ label: string; target: string | null; model: string | null }> = [
-		{ label: "orchestrator", target: settings.chat.target, model: settings.chat.model },
-		{ label: "workers.default", target: settings.fleet.default.target, model: settings.fleet.default.model },
-	];
-	const warnings: string[] = [];
-	for (const role of roles) {
-		const targetId = role.target?.trim();
-		const wireModelId = role.model?.trim();
-		if (!targetId || !wireModelId) continue;
-		try {
-			const status = providers.list().find((entry) => entry.target.id === targetId);
-			if (!status) continue;
-			const capabilities = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase);
-			if (supportsAgentRoleTools(capabilities)) continue;
-			// A target that was never probed has reported nothing about this model:
-			// the flag is only the runtime's conservative floor. Dispatch admission
-			// probes the route itself before it refuses a worker.
-			const declared =
-				status.target.capabilities?.tools ??
-				providers.knowledgeBase?.lookup(wireModelId, status.runtime?.id ?? status.target.runtime)?.entry.capabilities
-					?.tools;
-			if (
-				declared === undefined &&
-				status.health.lastCheckAt === null &&
-				probeCapabilitiesForModel(status, wireModelId) === null
-			)
-				continue;
-			warnings.push(
-				`${role.label} model '${wireModelId}' on target '${targetId}' ${AGENT_ROLE_TOOLS_REQUIRED_REASON}. ` +
-					`Pick another model, or state the correction in a model-catalog.d entry if the provider's flag is wrong.`,
-			);
-		} catch {
-			// An unresolvable capability is not evidence of a missing one.
-		}
-	}
-	return warnings;
-}
 
 function readSessionEntriesForCompact(sessionId: string): SessionEntry[] {
 	const reader = openSession(sessionId);
