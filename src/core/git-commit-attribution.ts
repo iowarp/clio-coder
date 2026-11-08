@@ -564,14 +564,12 @@ function managedHooksDirectory(): string | null {
 	return directory;
 }
 
-/** Where the managed git shim lives; a sibling of the hooks directory so Git never reads it as a hook. */
-function managedGitShimDirectoryPath(): string {
-	return join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}-shim`);
-}
+/** Where the managed git shim lives: a sibling of the hooks directory, so Git never reads it as a hook. */
+const MANAGED_SHIM_DIRECTORY_PATTERN = /[\\/]git-hooks[\\/]v\d+-shim$/u;
 
 /** The installed git shim's directory, installed or repaired on use. */
 function managedGitShimDirectory(): string {
-	const directory = managedGitShimDirectoryPath();
+	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}-shim`);
 	const shim = join(directory, "git");
 	try {
 		if (readFileSync(shim, "utf8") === MANAGED_GIT_SHIM_SCRIPT) {
@@ -586,12 +584,15 @@ function managedGitShimDirectory(): string {
 	return directory;
 }
 
-/** `pathValue` without any entry naming the managed shim directory. */
+/**
+ * `pathValue` without any managed shim directory, of this or an earlier hook
+ * version. Matched by shape so stripping never resolves (and so creates) the
+ * state directory.
+ */
 function pathWithoutManagedShim(pathValue: string): string {
-	const shimDirectory = managedGitShimDirectoryPath();
 	return pathValue
 		.split(delimiter)
-		.filter((entry) => entry !== shimDirectory)
+		.filter((entry) => !MANAGED_SHIM_DIRECTORY_PATTERN.test(entry))
 		.join(delimiter);
 }
 
