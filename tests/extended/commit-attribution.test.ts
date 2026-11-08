@@ -300,7 +300,7 @@ describe("autonomous commit authorship", () => {
 	});
 
 	it("credits the human after an operator's hooks run in a repository Clio's hook does not own", async () => {
-		await withRepo((repo, git) => {
+		await withRepo((repo) => {
 			const env = autonomousSeam(repo);
 			const other = join(repo, "..", "other");
 			const hooks = join(repo, "..", "operator-hooks");
