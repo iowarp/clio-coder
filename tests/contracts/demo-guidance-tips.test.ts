@@ -210,6 +210,25 @@ describe("demo guidance tips", () => {
 		strictEqual(tipOf(guidance().turn(prompt, { tools: reads.slice(0, 7) })), undefined);
 	});
 
+	it("prefers a worker lesson over /view when a long turn qualifies for both", () => {
+		const reads = Array.from({ length: 12 }, (_, index) => ({
+			toolName: "read",
+			toolArgs: { path: `src/m${index}.ts` },
+		}));
+		match(
+			tipOf(guidance().turn("investigate the code in this repo", { tools: reads, end: { turnToolCalls: 12 } })) ?? "",
+			/\/run coder --read-only <task>/,
+		);
+		const commands = Array.from({ length: 15 }, (_, index) => ({
+			toolName: "bash",
+			toolArgs: { command: `make t${index}` },
+		}));
+		match(
+			tipOf(guidance().turn("fix the build", { tools: commands, end: { turnToolCalls: 15 } })) ?? "",
+			/\/run coder <task> hands a bounded task/,
+		);
+	});
+
 	it("starts a new session's budget and spacing afresh", () => {
 		const { turn } = guidance();
 		ok(tipOf(turn("btw, quick thing", { sessionId: "a" })));

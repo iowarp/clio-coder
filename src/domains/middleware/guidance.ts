@@ -34,6 +34,8 @@ export const TURNS_BETWEEN_TIPS = 3;
 const DIRECT_SCORE = 3;
 /** A question about one feature outranks the generic ask-Clio lesson, but not a direct match. */
 const SPECIFIC_SCORE = 2.5;
+/** A long turn that fits a worker outranks the generic /view lesson it also triggers. */
+const WORKER_SCORE = 1.5;
 
 export interface GuidanceTurn {
 	/** The operator's prompt for this turn. */
@@ -283,7 +285,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 			READ_ONLY_TASK.test(turn.prompt) &&
 			turn.writes === 0 &&
 			READ_TOOLS.reduce((sum, name) => sum + used(turn, name), 0) >= 8
-				? 1
+				? WORKER_SCORE
 				: 0,
 		text: () =>
 			"/run coder --read-only <task> sends an investigation to a worker that cannot change your files, and keeps this chat's context small.",
@@ -291,7 +293,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 	{
 		id: "dispatch",
 		feature: "/run",
-		score: (turn) => (turn.toolCalls >= 15 && used(turn, "dispatch") === 0 ? 1 : 0),
+		score: (turn) => (turn.toolCalls >= 15 && used(turn, "dispatch") === 0 ? WORKER_SCORE : 0),
 		text: (context) =>
 			`/run coder <task> hands a bounded task to a background worker while we keep talking${
 				context.keyFor("clio-coder.dispatchBoard.toggle")
