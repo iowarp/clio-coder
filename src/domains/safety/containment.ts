@@ -8,10 +8,10 @@ import { shellCommandSteps } from "./protected-artifacts.js";
  * exists, and a contained call needs no approval ask for what Clio cannot see
  * or bound in its command text, because the OS bounds where it writes and
  * hides the operator's credentials. A call leaves containment when it asks to
- * (`unsandboxed: true`) or when it reaches outward: publishing, a code host's
- * API, a cloud CLI or a network write all need the credentials the sandbox
- * hides, so they run unsandboxed after the ordinary default rails and the
- * safety judge.
+ * (`unsandboxed: true`), which always asks so the safety judge reviews it
+ * first, or when it reaches outward: publishing, a code host's API, a cloud
+ * CLI or a network write all need the credentials the sandbox hides, so they
+ * run unsandboxed after the ordinary default rails and the safety judge.
  */
 
 /** Code-host and cloud CLIs: every subcommand acts with credentials the sandbox hides. */

@@ -19,7 +19,8 @@ import {
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { editTool } from "../../src/tools/edit.js";
-import { createRegistry, type RegistryDeps } from "../../src/tools/registry.js";
+import { createRegistry, type RegistryDeps, type ToolSpec } from "../../src/tools/registry.js";
+import { createRunScriptTool } from "../../src/tools/run-script.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -124,6 +125,69 @@ test("a verify check that runs a command is contained at default like bash; list
 		{ check: undefined, sandboxed: false },
 	]);
 	deepStrictEqual(session.reviewed, []);
+});
+
+// ob-yolo Q7: a recognized command with unsandboxed: true ran unconfined at default with no review.
+test("unsandboxed: true asks at default even for a recognized command; the judge decides it first", async (t) => {
+	const cwd = workspace("clio-contained-escape-");
+	writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+	writeFileSync(join(cwd, "x.sh"), "echo hi\n");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const escapes: ClassifierCall[] = [
+		bash("npm test", { unsandboxed: true }),
+		{ tool: ToolNames.Verify, args: { check: "test", unsandboxed: true } },
+		{ tool: ToolNames.RunScript, args: { interpreter: "bash", script: "x.sh", unsandboxed: true } },
+	];
+	const session = (verdict: "skip" | "allow") => {
+		const ran: Array<{ tool: string; sandboxed: boolean }> = [];
+		const recorder = (spec: ToolSpec): ToolSpec => ({
+			...spec,
+			run: async (_args, options) => {
+				ran.push({ tool: spec.name, sandboxed: options?.shellSandbox !== undefined });
+				return { kind: "ok" as const, output: "" };
+			},
+		});
+		const judge = defaultSession(
+			cwd,
+			{ sandbox: true, snapshots: false },
+			{
+				safetyJudge: {
+					review: () =>
+						verdict === "skip"
+							? { kind: "skip" }
+							: { kind: "allow", rule: "operator-named", reason: "the operator asked for it", build: "t", latencyMs: 0 },
+					operatorApproved: () => {},
+				},
+			},
+		);
+		for (const spec of [bashTool, verifyTool, createRunScriptTool({ getWorkspaceRoot: () => cwd })])
+			judge.registry.register(recorder(spec));
+		return { registry: judge.registry, ran };
+	};
+	const unjudged = session("skip");
+	for (const call of escapes) {
+		const verdict = await unjudged.registry.invoke(call);
+		strictEqual(verdict.kind, "blocked", call.tool);
+		strictEqual(verdict.decision.policy?.reasonCode, "sandbox-escape", call.tool);
+	}
+	strictEqual(unjudged.ran.length, 0);
+	// The same calls without the flag run contained with no ask.
+	for (const call of escapes) {
+		const { unsandboxed: _, ...args } = call.args ?? {};
+		strictEqual((await unjudged.registry.invoke({ tool: call.tool, args })).kind, "ok", call.tool);
+	}
+	deepStrictEqual(
+		unjudged.ran.map((entry) => entry.sandboxed),
+		[true, true, true],
+	);
+	const allowed = session("allow");
+	for (const call of escapes) strictEqual((await allowed.registry.invoke(call)).kind, "ok", call.tool);
+	deepStrictEqual(
+		allowed.ran.map((entry) => entry.sandboxed),
+		[false, false, false],
+	);
 });
 
 test("with no sandbox backend the default rails still ask", async () => {

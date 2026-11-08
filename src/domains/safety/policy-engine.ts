@@ -349,6 +349,8 @@ interface DefaultResort {
 	snapshots: boolean;
 	/** The contained call runs in the read-only sandbox. */
 	readOnly?: true;
+	/** The call would run contained but asks to leave the sandbox with `unsandboxed: true`. */
+	leavesSandbox?: true;
 }
 
 /** A former hard block the operator's default turns into an ask, kept until the other rails have spoken. */
@@ -1357,6 +1359,20 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 						}
 					: { ...deferred, reasons: [...deferred.reasons, reason] };
 		}
+		// Leaving the sandbox is what containment exists to bound: a recognized
+		// command asks for it too, so the judge reads the operator's request
+		// first and an escape the operator named passes.
+		if (resort?.leavesSandbox === true) {
+			deferred =
+				deferred === null
+					? {
+							ruleId: SANDBOX_ESCAPE_RULE_ID,
+							reasonCode: SANDBOX_ESCAPE_RULE_ID,
+							reasons: [SANDBOX_ESCAPE_REASON],
+							policySource: "builtin-classifier",
+						}
+					: { ...deferred, reasons: [...deferred.reasons, SANDBOX_ESCAPE_REASON] };
+		}
 		// Every decision below settles the operator's default when it applies.
 		const settle = (decision: SafetyPolicyDecision): SafetyPolicyDecision =>
 			resort === undefined
@@ -1708,11 +1724,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const floor = floorBlock(call, callCwd, judgedCommand);
 		if (floor !== null) return blockDecision(baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
+		const leavesSandbox = scope.sandbox && call.args?.unsandboxed === true && runsProjectCommand(call, judgedCommand);
 		return evaluateCall(rawCall, posture, {
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
 			contained: scope.sandbox && containedShellCall(call, classification, judgedCommand),
 			snapshots: scope.snapshots,
 			...(scope.readOnly === true ? { readOnly: true as const } : {}),
+			...(leavesSandbox ? { leavesSandbox: true as const } : {}),
 		});
 	};
 
@@ -2672,6 +2690,12 @@ const LONE_GIT_DISCARD = /^git\s+(?:reset|checkout|restore|clean|stash)\s/u;
 
 /** Rule id of a workspace delete the operator's default asks for because no snapshot can undo it. */
 const DELETE_WITHOUT_SNAPSHOT_RULE_ID = "delete-without-snapshot";
+
+/** Rule id of the ask for a call the operator's default would contain that sets `unsandboxed: true`. */
+const SANDBOX_ESCAPE_RULE_ID = "sandbox-escape";
+
+const SANDBOX_ESCAPE_REASON =
+	"unsandboxed: true leaves the main-session sandbox, so the command runs as the operator with the operator's credentials and files; it runs only when the operator's request names this escape or the operator approves it";
 
 /**
  * Delete targets of a command that only a workspace snapshot could undo: a

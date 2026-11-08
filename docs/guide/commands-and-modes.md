@@ -878,7 +878,7 @@ Clio Coder has two autonomy levels. **default** contains shell work in an OS san
 
 Workers you dispatch inherit the level inside their own sandbox. At `default` the ordinary asks of native local workers go to the same safety judge (`fleet.permissions.mode: judge`); at `yolo` workers run the yolo way inside their dispatch scope. The exact rules are in the [safety model](../architecture/safety-model.md#what-runs-what-is-judged-what-blocks).
 
-When a command fails because of the sandbox, for example because it needs a credential or writes outside the writable roots, Clio can rerun it with `unsandboxed: true`, and a command outside the recognized set then goes to the safety judge. A directory your scripts and file edits should always be able to write belongs in `safety.scratchRoots` in your user settings. `clio-coder doctor` shows whether this host contains shell commands and where they may write.
+When a command fails because of the sandbox, for example because it needs a credential or writes outside the writable roots, Clio can rerun it with `unsandboxed: true`, and that call, recognized or not, goes to the safety judge, which lets it run when your request named the escape and otherwise asks you. A directory your scripts and file edits should always be able to write belongs in `safety.scratchRoots` in your user settings. `clio-coder doctor` shows whether this host contains shell commands and where they may write.
 
 ### Undoing file changes with /rewind
 
