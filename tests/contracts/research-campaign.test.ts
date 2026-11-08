@@ -634,4 +634,44 @@ describe("research review fixes", () => {
 			["protected"],
 		);
 	});
+
+	it("withholds reference-agreement claims from research hypotheses of earlier campaigns on the same check", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			"ref.json": '{"score":100}\n',
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					{
+						...commandCheck("score", ["node", "score.js"]),
+						kind: "numeric-compare",
+						reference: "ref.json",
+						tolerance: { absolute: 5 },
+					},
+				],
+			}),
+		});
+		// Each campaign's change matches the reference without improving: the claim agrees, the grade does not.
+		const ids: string[] = [];
+		for (const value of ["99\n", "98\n"]) {
+			const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false });
+			ids.push(campaign.id);
+			await runResearchCampaign(campaign, {
+				agent: async (request) => {
+					writeFileSync(join(request.worktree, "value.txt"), value);
+					return done;
+				},
+			});
+		}
+		const claims = readClaims(claimsProjectRoot(repo));
+		ok(claims.records.filter((claim) => claim.verdict === "agrees").length >= 2);
+		const first = claims.hypotheses.find((record) => record.slate.includes(ids[0] as string));
+		ok(first !== undefined);
+		const firstTests = claims.hypothesisTests.filter((test) => test.hypothesis === first.id);
+		ok(firstTests.length >= 2, "the second campaign's run is bound to the first campaign's hypothesis");
+		ok(claims.hypothesisTests.every((test) => test.outcome === "tested" && test.claim === undefined));
+	});
 });

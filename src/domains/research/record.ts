@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, sep } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ToolResult } from "../../tools/registry.js";
 import {
@@ -49,15 +49,21 @@ function slatePath(campaign: ResearchCampaign): string {
 	return join(campaignDir(campaign.project, campaign.id), "slate.json");
 }
 
-/** Ledger ids of every hypothesis record drafted from this campaign's slate: the research improvement hypotheses. */
-function researchHypothesisIds(campaign: ResearchCampaign): Set<string> {
-	const path = slatePath(campaign);
-	const projectRelative = relative(campaign.project, path).split(sep).join("/");
+/** A campaign slate, `.clio-coder/research/<id>/slate.json`, project-relative or absolute. */
+const RESEARCH_SLATE = /(?:^|\/)\.clio-coder\/research\/[^/]+\/slate\.json$/u;
+
+/**
+ * Ledger ids of every research improvement hypothesis in the project, from any campaign: drafted from a campaign
+ * slate with the `research-objective` criterion. Reference agreement is never evidence for one of them.
+ */
+function researchHypothesisIds(project: string): Set<string> {
 	return new Set(
-		readClaims(campaign.project)
+		readClaims(project)
 			.hypotheses.filter(
 				(record) =>
-					record.criterion.kind === "research-objective" && (record.slate === projectRelative || record.slate === path),
+					record.criterion.kind === "research-objective" &&
+					record.source.channel === "slate" &&
+					RESEARCH_SLATE.test(record.slate.split(sep).join("/")),
 			)
 			.map((record) => record.id),
 	);
@@ -171,7 +177,7 @@ export async function finishIterationRecord(input: {
 	if (claims.size > 0) await appendClaims([...claims.values()]);
 	// The research improvement hypothesis is tested without the claim: reference agreement is not evidence the change
 	// improved the metric. Any other hypothesis bound to a check keeps the claim as its evidence, as `verify` would.
-	const research = researchHypothesisIds(input.campaign);
+	const research = researchHypothesisIds(input.campaign.project);
 	const runs: CheckRun[] = input.outcomes.flatMap((outcome) => {
 		const bound = input.bindings.get(outcome.check) ?? [];
 		const claim = claims.get(outcome.check);
