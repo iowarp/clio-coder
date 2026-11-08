@@ -110,4 +110,17 @@ describe("run --verify shutdown", () => {
 		strictEqual(alive(pid), false);
 		strictEqual(result?.passed, false);
 	});
+
+	it("fails a check killed at the output cap even when it traps TERM and exits 0", async () => {
+		const results = await runHeadlessVerifyChecks(
+			{
+				checks: [{ id: "noisy", command: "trap 'exit 0' TERM; head -c 20000000 /dev/zero; exit 0" }],
+				timeoutMs: 60_000,
+				credited: () => new Set(),
+			},
+			fakeShutdown().hooks,
+		);
+		strictEqual(results[0]?.exitCode, 0);
+		strictEqual(results[0]?.passed, false);
+	});
 });

@@ -81,7 +81,7 @@ export async function runHeadlessVerifyChecks(
 				id: check.id,
 				command: check.command,
 				exitCode: run.exitCode,
-				passed: run.exitCode === 0 && run.error === null && !run.timedOut,
+				passed: run.exitCode === 0 && run.error === null && !run.timedOut && !run.outputCapped,
 				durationMs: Math.round(performance.now() - started),
 				timedOut: run.timedOut,
 				ranAfterLastEdit: credited.has(check.id),
