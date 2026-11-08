@@ -124,6 +124,8 @@ export interface SafetyJudgementInput {
 	operatorMessages?: number;
 	/** Set when a tool result reading turned this `allow` into a park, so the record does not read as a call that ran. */
 	screened?: "parked";
+	/** Set when a sandbox escape was allowed under a rule other than operator-named and so went to the operator. */
+	unnamedEscape?: "parked";
 }
 
 export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"safety.judged"> {
@@ -141,6 +143,7 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 		...(input.noVerdict !== undefined ? { noVerdict: input.noVerdict } : {}),
 		...(input.operatorMessages !== undefined ? { operatorMessages: input.operatorMessages } : {}),
 		...(input.screened !== undefined ? { screened: input.screened } : {}),
+		...(input.unnamedEscape !== undefined ? { unnamedEscape: input.unnamedEscape } : {}),
 	};
 }
 

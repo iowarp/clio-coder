@@ -10,7 +10,8 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { createSafetyPolicyEngine, type OperatorDefaultScope } from "../../src/domains/safety/policy-engine.js";
-import { operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
+import { createSafetyJudge, operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
+import { asksToLeaveSandbox } from "../../src/domains/safety/sandbox-escape.js";
 import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js";
 import {
 	createWorkspaceSnapshots,
@@ -188,6 +189,65 @@ test("unsandboxed: true asks at default even for a recognized command; the judge
 		allowed.ran.map((entry) => entry.sandboxed),
 		[false, false, false],
 	);
+});
+
+// ob-yolo batch7: a judge allowed npm test unsandboxed as task-local on a repository file's say-so.
+test("a sandbox escape runs only when the judge finds the operator named it", async (t) => {
+	const cwd = workspace("clio-escape-named-");
+	writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const escapes = [bash("npm test", { unsandboxed: true }), bash("rm -rf build", { unsandboxed: true })];
+	const session = (rule: string) => {
+		const ran: boolean[] = [];
+		const reviewed: SafetyJudgeSubject[] = [];
+		const judge = createSafetyJudge({
+			config: () => ({ enabled: true, target: "local", model: "m", environment: [], allow: [], deny: [] }),
+			complete: async () => ({ text: JSON.stringify({ verdict: "allow", rule, reason: "serves the task" }) }),
+			operatorMessages: () => ["fix the tests"],
+			session: () => "s",
+			consequences: () => [],
+		});
+		const { registry } = defaultSession(
+			cwd,
+			{ sandbox: true, snapshots: false },
+			{
+				safetyJudge: {
+					review: (subject) => {
+						reviewed.push(subject);
+						return judge.review(subject);
+					},
+					operatorApproved: () => {},
+				},
+			},
+		);
+		registry.register({
+			...bashTool,
+			run: async (_args, options) => {
+				ran.push(options?.shellSandbox !== undefined);
+				return { kind: "ok" as const, output: "" };
+			},
+		});
+		return { registry, ran, reviewed };
+	};
+	const inferred = session("task-local");
+	for (const call of escapes) {
+		const verdict = await inferred.registry.invoke(call);
+		strictEqual(verdict.kind, "blocked", String(call.args?.command));
+	}
+	deepStrictEqual(inferred.ran, []);
+	// The delete asks under its own rule; the escape rides along as a reason.
+	deepStrictEqual(
+		inferred.reviewed.map((subject) => [subject.decision.policy?.ruleId, asksToLeaveSandbox(subject.decision)]),
+		[
+			["sandbox-escape", true],
+			["delete-without-snapshot", true],
+		],
+	);
+	const named = session("operator-named");
+	for (const call of escapes) strictEqual((await named.registry.invoke(call)).kind, "ok", String(call.args?.command));
+	deepStrictEqual(named.ran, [false, false]);
 });
 
 test("with no sandbox backend the default rails still ask", async () => {
