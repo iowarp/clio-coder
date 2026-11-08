@@ -5,7 +5,8 @@
  * `clio-coder.hypothesis-slate.v1`), whose success criterion names the objective check. Before the checks run, the
  * iteration's run identity is started against the objective and gate checks, so the hypothesis is bound to this run.
  * After they run, every judged check (numeric-compare, reproduce) yields a claim from Clio's own execution, and the
- * hypothesis is marked tested in the ledger without a claim. A claim's reference agreement says the output still
+ * research hypothesis is marked tested in the ledger without a claim (other project hypotheses bound to the same check
+ * keep the claim as their evidence). A claim's reference agreement says the output still
  * matches; it says nothing about whether the change improved the metric, so it never supports or refutes the
  * hypothesis. Whether it held is the research grade's call (`researchHypothesisVerdict`): the journal records it, and
  * `research report` recomputes the grade from the raw samples. The ledger only lets a judged claim support or refute,
@@ -13,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ToolResult } from "../../tools/registry.js";
 import {
@@ -28,6 +29,7 @@ import {
 	claimFromVerifyResult,
 	HYPOTHESIS_SLATE_SCHEMA,
 	hypothesesFromSlate,
+	readClaims,
 } from "../claims/index.js";
 import { campaignDir, samplesName } from "./store.js";
 import type { ResearchCampaign, ResearchGrade, ResearchHypothesisVerdict } from "./types.js";
@@ -45,6 +47,20 @@ function researchRunIdentity(campaign: ResearchCampaign, iteration: number): Che
 
 function slatePath(campaign: ResearchCampaign): string {
 	return join(campaignDir(campaign.project, campaign.id), "slate.json");
+}
+
+/** Ledger ids of every hypothesis record drafted from this campaign's slate: the research improvement hypotheses. */
+function researchHypothesisIds(campaign: ResearchCampaign): Set<string> {
+	const path = slatePath(campaign);
+	const projectRelative = relative(campaign.project, path).split(sep).join("/");
+	return new Set(
+		readClaims(campaign.project)
+			.hypotheses.filter(
+				(record) =>
+					record.criterion.kind === "research-objective" && (record.slate === projectRelative || record.slate === path),
+			)
+			.map((record) => record.id),
+	);
 }
 
 interface SlateEntry {
@@ -153,14 +169,20 @@ export async function finishIterationRecord(input: {
 		if (claim !== null) claims.set(outcome.check, claim);
 	}
 	if (claims.size > 0) await appendClaims([...claims.values()]);
-	// No claim on the test: reference agreement is not evidence the change improved the metric.
-	const runs: CheckRun[] = input.outcomes.map((outcome) => ({
-		check: outcome.check,
-		hypotheses: input.bindings.get(outcome.check) ?? [],
-		execution: outcome.execution,
-		source,
-		at: input.at,
-	}));
+	// The research improvement hypothesis is tested without the claim: reference agreement is not evidence the change
+	// improved the metric. Any other hypothesis bound to a check keeps the claim as its evidence, as `verify` would.
+	const research = researchHypothesisIds(input.campaign);
+	const runs: CheckRun[] = input.outcomes.flatMap((outcome) => {
+		const bound = input.bindings.get(outcome.check) ?? [];
+		const claim = claims.get(outcome.check);
+		const base = { check: outcome.check, execution: outcome.execution, source, at: input.at };
+		const ours = bound.filter((id) => research.has(id));
+		const others = bound.filter((id) => !research.has(id));
+		return [
+			...(ours.length > 0 ? [{ ...base, hypotheses: ours }] : []),
+			...(others.length > 0 ? [{ ...base, hypotheses: others, ...(claim !== undefined ? { claim } : {}) }] : []),
+		];
+	});
 	await appendHypothesisTests(input.campaign.project, runs);
 	return { claims };
 }
