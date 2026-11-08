@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	background,
 	backgroundStatus,
 	installBackground,
 	preferBackground,
@@ -170,6 +171,27 @@ test("background preparation is atomic and refuses foreign services, linked cred
 		),
 		/canonical/,
 	);
+});
+
+test("background setup on a host without systemd reports it unavailable instead of failing", async (t) => {
+	const lines: string[] = [];
+	t.mock.method(console, "log", (line: string) => lines.push(line));
+	const exitCode = process.exitCode;
+	t.after(() => {
+		process.exitCode = exitCode;
+	});
+	for (const [platform, command, code] of [
+		["darwin", "status", undefined],
+		["win32", "uninstall", undefined],
+		["darwin", "install", 2],
+	] as const) {
+		process.exitCode = undefined;
+		await background([command], launch, platform);
+		assert.equal(process.exitCode, code, `${platform} ${command}`);
+		const report = JSON.parse(lines.pop() ?? "{}");
+		assert.equal(report.status, "unavailable");
+		assert.match(report.reason, new RegExp(`not available on ${platform === "darwin" ? "macOS" : "Windows"}`));
+	}
 });
 
 test("persistent mode cannot accidentally become transient and service control accepts only fixed Clio units", () => {

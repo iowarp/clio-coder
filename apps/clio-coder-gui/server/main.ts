@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
+import { backgroundCapability } from "../contracts/launch-capability.js";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
 import {
@@ -275,7 +276,7 @@ export async function main(args = process.argv.slice(2)) {
 					? "Clio Coder runs while this terminal stays open. Press Ctrl+C to stop it."
 					: "Clio Coder stops after it has been idle. Press Ctrl+C to stop it now.",
 			);
-			if (backgroundAbsent && process.platform === "linux")
+			if (backgroundAbsent && backgroundCapability(process.platform).available)
 				hint(
 					"For a stable address that survives this terminal and installs as an app: clio-coder gui background install --open",
 				);

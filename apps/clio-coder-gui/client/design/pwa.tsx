@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { backgroundCapability } from "../../contracts/launch-capability.js";
 import { forgetBrowser, rememberBrowser, rememberedTokenKey } from "../api/token.js";
 
 type InstallPrompt = Event & { prompt(): Promise<unknown>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
@@ -97,6 +98,7 @@ export function AppPreferencesPanel({
 	const [note, setNote] = useState("");
 	const [forgetting, setForgetting] = useState(false);
 	const message = note || pwa.message;
+	const background = platform === undefined ? undefined : backgroundCapability(platform);
 	return (
 		<div className="pwa-controls">
 			<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
@@ -173,15 +175,15 @@ export function AppPreferencesPanel({
 			) : (
 				<div className="app-dialog__launch">
 					<p>This window's server belongs to the terminal that started it, and its address changes each time it starts.</p>
-					{platform?.startsWith("linux") ? (
+					{background?.available ? (
 						<p>
 							For one address from login that this browser can install as an app, run{" "}
 							<code>clio-coder gui background install --open</code> in a terminal. Afterwards <code>clio-coder gui</code>{" "}
 							reopens it.
 						</p>
-					) : (
-						<p>Keeping Clio Coder at one address from login currently needs Linux with a systemd user session.</p>
-					)}
+					) : background ? (
+						<p>{background.reason}</p>
+					) : null}
 				</div>
 			)}
 			{message && <p role="status">{message}</p>}

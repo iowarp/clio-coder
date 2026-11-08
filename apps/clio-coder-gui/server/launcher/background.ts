@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, unlink, w
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import { backgroundCapability } from "../../contracts/launch-capability.js";
 import { getVersionInfo, resolveClioDirs } from "../clio/http-shims.js";
 import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
 import { controlService, openApp } from "../process-policy.js";
@@ -167,8 +168,8 @@ export async function installBackground(
 	ready: Ready = waitForLocalServer,
 	options: { handover?: boolean; probe?: typeof findLocalServer } = {},
 ) {
-	if (process.platform !== "linux")
-		throw new Error("Background setup currently requires Linux with a systemd user session.");
+	const capability = backgroundCapability(process.platform);
+	if (!capability.available) throw new Error(capability.reason);
 	await mkdir(directory, { recursive: true, mode: 0o700 });
 	const info = await lstat(directory);
 	if (
@@ -371,7 +372,7 @@ export async function preferBackground(
 	version?: string,
 	launch?: LaunchPaths,
 ): Promise<BackgroundPreference> {
-	if (platform !== "linux") return { kind: "absent" };
+	if (!backgroundCapability(platform).available) return { kind: "absent" };
 	let state: Awaited<ReturnType<typeof owned>>;
 	try {
 		state = await owned(directory);
@@ -493,9 +494,7 @@ export async function startCurrentBackground(
 	return started;
 }
 
-export async function background(args: string[], launch: LaunchPaths) {
-	if (process.platform !== "linux")
-		throw new Error("Background setup currently requires Linux with a systemd user session.");
+export async function background(args: string[], launch: LaunchPaths, platform: string = process.platform) {
 	const { values, positionals } = parseArgs({
 		args,
 		allowPositionals: true,
@@ -523,6 +522,14 @@ export async function background(args: string[], launch: LaunchPaths) {
 		throw new Error("--if-idle applies to background restart only.");
 	if (command !== "install" && values.handover !== undefined)
 		throw new Error("--handover applies to background install only.");
+	const capability = backgroundCapability(platform);
+	if (!capability.available) {
+		// An unsupported host is a capability report, not a failure: status, stop and uninstall have nothing
+		// to act on and succeed; an action that would set up or open the app exits 2 so a script can tell.
+		console.log(JSON.stringify({ status: "unavailable", reason: capability.reason }, null, 2));
+		if (!["status", "stop", "uninstall"].includes(command ?? "")) process.exitCode = 2;
+		return;
+	}
 	const directory = values.directory ?? join(resolveClioDirs().state, "gui/background");
 	if (!isAbsolute(directory) || resolve(directory) !== directory)
 		throw new Error("--directory must be an absolute normalized path.");
