@@ -288,7 +288,7 @@ describe("degraded-inference error propagation", () => {
 describe("runtime notice producers", () => {
 	it("every RuntimeNoticeKind has a declared producer", async () => {
 		registerClioApiProviders();
-		// The background memory route declares its producer in the orchestrator.
+		// The orchestrator's graph declares the background memory route's producers and the quota producer.
 		await import("../../src/entry/orchestrator.js");
 		const produced = new Set([...runtimeNoticeProducers().values()].flatMap((kinds) => [...kinds]));
 		const orphaned = RUNTIME_NOTICE_KINDS.filter((kind) => !produced.has(kind));

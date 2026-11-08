@@ -16,6 +16,10 @@ import {
 	releaseCapacityLease,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import { createDispatchReservation, releaseDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
+import {
+	createBackgroundMemoryModelClient,
+	createBackgroundMemoryRouting,
+} from "../../src/domains/memory/background-route.js";
 import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryStepUsage } from "../../src/domains/memory/task-memory-policy.js";
@@ -35,7 +39,6 @@ import {
 	registerEngineApiProvider,
 	registerEngineFauxProvider,
 } from "../../src/engine/api-registry.js";
-import { createBackgroundMemoryModelClient, createBackgroundMemoryRouting } from "../../src/entry/orchestrator.js";
 import { bindTaskMemoryLifecycle } from "../../src/entry/task-memory-lifecycle.js";
 import { holdEventLoop } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
