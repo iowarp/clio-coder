@@ -134,6 +134,26 @@ function mcpLaunchOptions(options: ToolInvokeOptions | undefined): McpLaunchOpti
 	};
 }
 
+/**
+ * Prepend a line to the text the model reads while the output stays the
+ * capability's bytes, the projection withApprovalNote uses for a grant. A
+ * stale catalog the model just read is fixed by what it reads next, not by
+ * the data a chain or a display takes from the output (K9).
+ */
+function withModelLine(result: ToolResult, line: string): ToolResult {
+	const note = `${line}\n`;
+	const text = result.modelContext ?? (result.kind === "ok" ? result.output : result.message);
+	const disposition = result.details?.resultDisposition;
+	const details =
+		isRecord(disposition) && typeof disposition.contextBytes === "number"
+			? {
+					...result.details,
+					resultDisposition: { ...disposition, contextBytes: disposition.contextBytes + Buffer.byteLength(note) },
+				}
+			: result.details;
+	return { ...result, modelContext: `${note}${text}`, ...(details === undefined ? {} : { details }) };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -883,13 +903,20 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			const result = nestedBlockedResult(verdict);
 			return { ...result, details: { ...result.details, ...(admission ? { chainAdmission: admission } : {}) } };
 		}
-		return nestedExecutedResult(
-			{
-				...verdict.result,
-				details: { ...verdict.result.details, capability: spec.name, ...(admission ? { chainAdmission: admission } : {}) },
+		// A successful call still answers the stale catalog the model read. A chain
+		// step keeps its result as later steps bind it; the chain says the line once.
+		const changed =
+			verdict.result.kind === "ok" && isMcpToolName(spec.name) ? (deps.mcp?.takeCatalogChange(spec.name) ?? null) : null;
+		const executed: ToolResult = {
+			...verdict.result,
+			details: {
+				...verdict.result.details,
+				capability: spec.name,
+				...(admission ? { chainAdmission: admission } : {}),
+				...(changed !== null && allowDirect ? { catalogChange: changed } : {}),
 			},
-			verdict,
-		);
+		};
+		return nestedExecutedResult(changed !== null && !allowDirect ? withModelLine(executed, changed) : executed, verdict);
 	};
 
 	return {
@@ -921,7 +948,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 					},
 					options,
 				);
-				return nestedChainResult(result, executed);
+				const changes = [
+					...new Set(
+						executed.flatMap((step) => (typeof step.details?.catalogChange === "string" ? [step.details.catalogChange] : [])),
+					),
+				];
+				return nestedChainResult(changes.length > 0 ? withModelLine(result, changes.join("\n")) : result, executed);
 			}
 			return { kind: "error", message: `gateway: op must be ${GATEWAY_OPS.join(", ")}; got '${op}'` };
 		},

@@ -23,6 +23,7 @@ import {
 } from "../../src/domains/gateway/mcp/index.js";
 import { mcpCatalogPath } from "../../src/domains/gateway/mcp/metadata-cache.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareHookRegistration } from "../../src/domains/middleware/runtime.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
@@ -31,6 +32,7 @@ import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../../src/tools/registry.js";
+import { toolResultContextText } from "../../src/tools/result-disposition.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -93,13 +95,16 @@ function wire(
 	wrapClient?: (client: McpClient) => McpClient,
 	pollBudget?: { soft: number; hard: number },
 	labelSafety?: (safety: SafetyContract) => Pick<RegistryDeps, "safety" | "flow">,
+	hooks: MiddlewareHookRegistration[] = [],
 ): Wired {
 	const clients: McpClient[] = [];
 	const parks: string[] = [];
 	const safety = createWorkerSafety({ cwd: scene.project });
 	const middleware = createMiddlewareBundle({
-		registrations:
-			pollBudget === undefined ? [] : [createLoopGuardRegistration({ safety, turnToolCallBudget: pollBudget })],
+		registrations: [
+			...(pollBudget === undefined ? [] : [createLoopGuardRegistration({ safety, turnToolCallBudget: pollBudget })]),
+			...hooks,
+		],
 	}).contract;
 	const registry = createRegistry({
 		safety,
@@ -849,6 +854,117 @@ describe("gateway MCP capabilities", () => {
 		const marker = (failed.servers as Array<Record<string, unknown>>).find((entry) => entry.id === "marker");
 		strictEqual(marker?.status, "failed");
 		ok(typeof failed.refresh === "string" && failed.refresh.includes("mcp server marker failed"), String(failed.refresh));
+	});
+
+	it("says a changed catalog on the first call that succeeds, in what the model reads and not in the bytes (K9)", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const record = async (): Promise<void> => {
+			const wired = wire(scene);
+			open.push(wired.source);
+			await wired.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } });
+			await wired.source.close();
+		};
+		// Kit's p3 case: the server was upgraded and its echo gained an optional group_by.
+		const upgrade = (client: McpClient): McpClient => {
+			const listTools = client.listTools.bind(client);
+			client.listTools = async (signal) => {
+				const listing = await listTools(signal);
+				return {
+					...listing,
+					tools: listing.tools.map((tool) =>
+						tool.name !== "echo"
+							? tool
+							: {
+									...tool,
+									inputSchema: {
+										...tool.inputSchema,
+										properties: {
+											...((tool.inputSchema.properties as Record<string, unknown> | undefined) ?? {}),
+											group_by: { type: "string" },
+										},
+									},
+								},
+					),
+				};
+			};
+			return client;
+		};
+		const line = "fake catalog changed since recorded: echo schema changed; describe it again";
+		const bytes = JSON.stringify({ text: "hi" });
+
+		await record();
+		const upgraded = wire(scene, "yolo", false, upgrade);
+		open.push(upgraded.source);
+		const described = payloadOf(
+			await upgraded.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }),
+		);
+		ok(!("group_by" in (described.parameters as { properties: Record<string, unknown> }).properties), "find shows A");
+		const call = await upgraded.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { text: "hi" } },
+		});
+		if (call.kind !== "ok" || call.result.kind !== "ok") throw new Error(JSON.stringify(call));
+		strictEqual(call.result.output, bytes, "the output stays the server's bytes");
+		strictEqual(toolResultContextText(call.result).split("\n")[0], line);
+		const next = await upgraded.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { text: "hi" } },
+		});
+		if (next.kind !== "ok" || next.result.kind !== "ok") throw new Error(JSON.stringify(next));
+		ok(!toolResultContextText(next.result).includes("catalog changed"), "the line is said once");
+		await upgraded.source.close();
+
+		// A hook note on the gateway call keeps the line the model reads.
+		await record();
+		const annotate: MiddlewareHookRegistration = {
+			id: "note",
+			description: "note",
+			hooks: ["after_tool"],
+			evaluate: () => [{ kind: "annotate_tool_result", message: "checked", severity: "info" }],
+		};
+		const hooked = wire(scene, "yolo", false, upgrade, undefined, undefined, [annotate]);
+		open.push(hooked.source);
+		const noted = await hooked.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { text: "hi" } },
+		});
+		if (noted.kind !== "ok" || noted.result.kind !== "ok") throw new Error(JSON.stringify(noted));
+		const read = toolResultContextText(noted.result);
+		strictEqual(read.split("\n")[0], line);
+		ok(read.includes("checked"), read);
+		ok(noted.result.output.startsWith(bytes), noted.result.output);
+		await hooked.source.close();
+
+		// In a chain the later step binds the first step's bytes, and the chain says the line once.
+		await record();
+		const chained = wire(scene, "yolo", false, upgrade);
+		open.push(chained.source);
+		const chain = await chained.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: {
+				op: "chain",
+				steps: [
+					{ id: "a", capability: ECHO, args: { text: "hi" } },
+					{ id: "b", capability: ECHO, args: { text: { $from: "a", path: ["json", "text"] } } },
+				],
+			},
+		});
+		if (chain.kind !== "ok" || chain.result.kind !== "ok") throw new Error(JSON.stringify(chain));
+		const steps = chain.result.details?.chainResults as Array<{
+			id: string;
+			result: { content: Array<{ text: string }> };
+		}>;
+		deepStrictEqual(
+			steps.map((step) => [step.id, step.result.content[0]?.text]),
+			[
+				["a", bytes],
+				["b", bytes],
+			],
+		);
+		const seen = toolResultContextText(chain.result);
+		strictEqual(seen.split("\n")[0], line);
+		strictEqual(seen.split(line).length, 2, "said once for the chain");
 	});
 
 	it("starts for a read-only turn only servers trusted as read or called for a tool the operator classes read", async () => {

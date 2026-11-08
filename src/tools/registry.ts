@@ -3490,16 +3490,39 @@ function applyToolResultEffects(
 	const prefix = !bannered && annotations.includes(warning) ? `${warning}\n\n` : "";
 	const remaining = annotations.filter((annotation) => annotation !== warning);
 	const suffix = remaining.length > 0 ? `${TOOL_RESULT_NOTES_SEPARATOR}${remaining.join("\n")}` : "";
+	// A nested result already shaped keeps its model projection, which can say
+	// more than the output (a catalog change line); the notes go on both.
+	const projected = annotatedProjection(result, prefix, suffix);
 	if (result.kind === "ok") {
 		const annotated: ToolResult = { kind: "ok", output: `${prefix}${result.output}${suffix}` };
-		if (result.details !== undefined) annotated.details = result.details;
+		if (projected.details !== undefined) annotated.details = projected.details;
+		if (projected.modelContext !== undefined) annotated.modelContext = projected.modelContext;
 		if (result.terminate === true) annotated.terminate = true;
 		if (result.images !== undefined) annotated.images = result.images;
 		return withHostNotes(annotated, [...inherited, ...remaining]);
 	}
 	const annotated: ToolResult = { kind: "error", message: `${prefix}${result.message}${suffix}` };
-	if (result.details !== undefined) annotated.details = result.details;
+	if (projected.details !== undefined) annotated.details = projected.details;
+	if (projected.modelContext !== undefined) annotated.modelContext = projected.modelContext;
 	return withHostNotes(annotated, [...inherited, ...remaining]);
+}
+
+function annotatedProjection(
+	result: ToolResult,
+	prefix: string,
+	suffix: string,
+): { modelContext?: string; details?: ToolResultDetails } {
+	if (result.modelContext === undefined) return result.details === undefined ? {} : { details: result.details };
+	const modelContext = `${prefix}${result.modelContext}${suffix}`;
+	const disposition = result.details?.resultDisposition;
+	const details =
+		disposition !== null && typeof disposition === "object" && "contextBytes" in disposition
+			? {
+					...result.details,
+					resultDisposition: { ...disposition, contextBytes: Buffer.byteLength(modelContext) },
+				}
+			: result.details;
+	return details === undefined ? { modelContext } : { modelContext, details };
 }
 
 /**
