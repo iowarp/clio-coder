@@ -1,7 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
@@ -23,7 +23,9 @@ afterEach(() => restoreDispatchState());
 function project(checks: ReadonlyArray<{ id: string; command: string[] }>): string {
 	const stateDir = process.env.CLIO_CODER_STATE_DIR;
 	ok(stateDir);
-	const root = join(stateDir, "project");
+	// Beside Clio's state root, not in it: host checks run in the main-session
+	// sandbox, which keeps Clio's own directories read-only.
+	const root = join(dirname(stateDir), "project");
 	mkdirSync(join(root, ".clio-coder"), { recursive: true });
 	writeFileSync(join(root, "input.txt"), "base\n");
 	writeFileSync(
@@ -91,7 +93,9 @@ it("refuses a dispatch whose host check the direct verify call would not admit, 
 		process.chdir(previousCwd);
 	}
 
-	const cwdLog = join(root, "..", "check-cwd.log");
+	// The check runs in the main-session sandbox rooted at the task worktree, so
+	// it records its cwd inside the tree it may write.
+	const cwdLog = "check-cwd.log";
 	let finish!: (result: SpawnedWorkerResult) => void;
 	const done = new Promise<SpawnedWorkerResult>((resolve) => {
 		finish = resolve;
@@ -144,7 +148,7 @@ it("refuses a dispatch whose host check the direct verify call would not admit, 
 		const receipt = await handle.finalPromise;
 		const worktree = receipt.worktree?.path;
 		ok(worktree !== undefined, JSON.stringify(receipt.worktree));
-		const checkedCwd = readFileSync(cwdLog, "utf8");
+		const checkedCwd = readFileSync(join(worktree, cwdLog), "utf8");
 		ok(!relative(worktree, checkedCwd).startsWith(".."), `check ran in ${checkedCwd}, worktree ${worktree}`);
 		strictEqual(receipt.hostVerification?.checks[0]?.tree?.root, worktree);
 	} finally {
