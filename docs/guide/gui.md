@@ -31,7 +31,7 @@ clio-coder gui launcher install|status|uninstall
 A bare `clio-coder gui` picks between two kinds of server:
 
 - **The background app**, when this installation has one installed (Linux only). `gui` starts the service if it is stopped, waits for it to answer (up to 15 seconds), prints the launch link, opens the app when a browser opens (under WSL an app window that is already open is focused and, when `--path` names a page, shown that page, see [One app window](#one-app-window)) and returns the terminal. If the running app reports a different Clio Coder version and is idle, `gui` restarts it first. If the app is busy, `gui` prints a line naming both versions and the command that restarts it.
-- **A private server** for this terminal. It listens on `127.0.0.1` on a free port, prints its launch link on stdout and runs until Ctrl+C. SIGINT and SIGTERM close the server, stop every owned ACP child and exit.
+- **A private server** for this terminal. It listens on `127.0.0.1` on a free port, prints its launch link on stdout and runs until Ctrl+C. SIGINT, SIGTERM and SIGHUP (the terminal closing) close the server, stop every owned ACP child and exit.
 
 `gui` falls back to a private server with a printed reason when the background app's files cannot be verified, when the background app belongs to another Clio Coder installation, or when the service manager will not start it. It changes nothing in those cases.
 
@@ -242,7 +242,7 @@ The ACP child reports its capabilities in `initialize`, and the client enables a
 
 ## Shell layout
 
-The shell has two modes. Work mode shows tasks (conversations) grouped by workspace, with Home, the workspace task lists and a Library link. Settings mode holds everything a person inspects or configures: the settings pages, Library, Toolchain, System, Usage, Traces, Fleet and Evidence. Both use one resizable left rail and a main area. Work mode adds a right sidebar. At 1440 pixels of width and wider the right sidebar docks beside the work and resizes by dragging its edge. Narrower, it opens over the task as a slide-over. At 760 pixels or narrower the left rail becomes a drawer. The left rail resizes by dragging its edge and collapses with `Ctrl/Cmd+\`.
+The shell has two modes. Work mode shows tasks (conversations) grouped by workspace, with Home, the workspace task lists and a Library link. Settings mode holds everything a person inspects or configures: the settings pages, Library, Toolchain, System, Usage, Traces, Fleet, Evidence, Research and Arena. Both use one resizable left rail and a main area. Work mode adds a right sidebar. At 1440 pixels of width and wider the right sidebar docks beside the work and resizes by dragging its edge. Narrower, it opens over the task as a slide-over. At 760 pixels or narrower the left rail becomes a drawer. The left rail resizes by dragging its edge and collapses with `Ctrl/Cmd+\`.
 
 ### Left rail
 
@@ -444,12 +444,32 @@ Settings pages write only the user layer, through the same validated writer as `
 
 ## Arena page
 
-The Arena page (`/arena`) runs [`clio-coder arena`](research-and-arena.md#arena-blind-side-by-side-comparison) for the project chosen in `Project context`. The server runs the CLI as a child process, so a match from the GUI and one from a terminal are the same record under `.clio-coder/arena/`. The rail has no link to it; the command palette lists it as `Arena`.
+The Arena page (`/arena`) runs [`clio-coder arena`](research-and-arena.md#arena-blind-side-by-side-comparison) for the project chosen in `Project context`. The server runs the CLI as a child process, so a match from the GUI and one from a terminal are the same record under `.clio-coder/arena/`. It is a Settings mode page listed in the rail under Activity, and the command palette lists it as `Arena`.
 
 - **New match** takes a prompt and 2 to 4 contenders. Each contender is a target picked from the configured connections plus a model id. It also takes an optional suite and check, and each contender's timeout (600 seconds by default). The form has no spend cap; use `arena run --max-cost-usd` in a terminal for one. While the match runs, the form shows its progress and a `Cancel match` button. A cancelled match keeps its partial record in the list.
 - **The match list** shows every match with its contender count, status, suite and vote, or `awaiting your vote`.
 - **A match** shows one column per blind label with the answer, the diff, the counts and the check result. Before a vote, the same identifying details are hidden and redacted as in `arena show`. The vote panel offers `A is better` (and so on for each label), `Tie` and `All bad`, with an optional note. After the vote, the names are revealed. `Change vote` replaces it, and the journal keeps the earlier one.
 - **Standings** count wins, losses, ties and both-bad votes per target/model. They show a score once a contender has 5 votes.
+
+## Research page
+
+The Research page (`/research`) runs `clio-coder research` for one project, chosen in its `Project context` picker. It is a Settings mode page listed in the rail under Activity, and the command palette lists it as `Research`. See [Research: a verified hill climb](research-and-arena.md#research-a-verified-hill-climb) for what a campaign does.
+
+The campaign list shows the project's campaigns newest first, from `research list`, with each one's objective, state or stop reason and how many iterations were kept. Selecting one opens it from `research status <id>`:
+
+- What the campaign froze when it opened: the objective, the budget and spend, the gates, the scope, the protected paths, the research branch with its best commit, and the agent's target and model.
+- The A/A line: whether the base measured against itself was quiet or noisy, with its grade.
+- A best-so-far chart. It starts at the A/A base median and steps only at a ratchet, so the line moves only toward the objective.
+- The iteration timeline. Each iteration shows its outcome (ratcheted, or archived with the reason), its grade, its gates, its commit, its hypothesis verdict, its cost and the files it changed.
+- Regrade, which runs `research report <id>` and shows each recomputed grade and whether it agrees with the journal. A disagreement is a result shown on the page, not an error.
+
+Amounts are rendered by the server with the same renderer as the terminal, and an unknown cost reads as unknown, never as zero.
+
+New campaign opens a form for `research start`. The check is picked from the project's verifier catalog and the target from its connections. The form also takes the metric, the direction, the minimum improvement, the trial pairs, the gates, the scope globs (one per line, so a brace glob such as `src/**/*.{ts,tsx}` keeps its commas), the iteration, wall and cost caps, `--allow-unpriced`, a goal, and a model. The agent runs at the default autonomy. The page never offers yolo, `--keep` or `--allow-noisy`, and the server refuses a goal or scope that starts with a dash.
+
+A started campaign runs as an operation that the page follows live. Its progress lines fill a run log, and the page selects the campaign once its first line names it. A workspace runs one campaign at a time, because concurrent benchmarks distort each other's measurements: while one runs, New campaign is disabled and the server refuses another start with 409. The campaign list names the running operation, so the page picks the run log and Stop campaign up again after it was left, reloaded or opened in another window. Stop campaign cancels the operation: the server sends SIGTERM, the CLI archives the iteration in flight as interrupted, journals the stop and removes its worktrees, and SIGKILL follows only if that takes longer than 15 seconds. A campaign without a wall cap is stopped the same way after 12 hours, and one with a cap 5 minutes past it if the CLI has not stopped by then. Shutting the GUI down stops every running campaign this way. The open campaign view refreshes every 3 seconds while the campaign runs.
+
+The page reads and writes through four routes: `GET /api/workspaces/:id/research/campaigns`, `GET /api/workspaces/:id/research/campaigns/:campaignId`, `GET /api/workspaces/:id/research/campaigns/:campaignId/report`, and `POST /api/workspaces/:id/research/campaigns`, which returns `202` with an operation id.
 
 ## Permissions and approvals
 
