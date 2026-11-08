@@ -123,6 +123,48 @@ async function run(bin: string, args: string[], cwd: string, env: NodeJS.Process
 	});
 }
 
+/**
+ * Runs npm without blocking the event loop, so the test's own timeout stays
+ * the one hang guard: when it fires, `signal` aborts and kills npm. A
+ * synchronous call with a shorter private limit capped the registry-bound
+ * install at half the budget (packument revalidation once npm's cache is over
+ * five minutes old) and hid where the time went. On failure the error carries
+ * the elapsed time and npm's http log, which names a stalled registry request.
+ */
+async function npm(args: string[], cwd: string, signal: AbortSignal): Promise<string> {
+	// A direct npm process on Windows avoids a shell and releases its handles when killed.
+	const [command, prefix] =
+		process.platform === "win32"
+			? [process.execPath, [join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")]]
+			: ["npm", []];
+	const started = Date.now();
+	const child = spawn(command, [...prefix, ...args, "--loglevel=http"], {
+		cwd,
+		signal,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	child.stdout.on("data", (text: string) => {
+		stdout += text;
+	});
+	child.stderr.on("data", (text: string) => {
+		stderr += text;
+	});
+	const outcome = await new Promise<{ code: number | null; error?: Error }>((resolve) => {
+		child.once("error", (error) => resolve({ code: null, error }));
+		child.once("close", (code) => resolve({ code }));
+	});
+	if (outcome.code === 0) return stdout;
+	const reason = outcome.error ? outcome.error.message : `exit ${outcome.code}`;
+	const message = `npm ${args[0]} failed (${reason}) after ${Date.now() - started}ms\n${stderr.slice(-8000)}`;
+	// Once the test has timed out its rejection is no longer reported, so the log is printed.
+	if (signal.aborted) console.error(message);
+	throw new Error(message);
+}
+
 function emittedFilesContaining(packageRoot: string, marker: string | RegExp): Set<string> {
 	const matches = new Set<string>();
 	for (const entry of readdirSync(join(packageRoot, "dist"), { recursive: true, withFileTypes: true })) {
@@ -632,14 +674,15 @@ function coveredFiles(directory: string): Set<string> {
 
 describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
-	// with normal registry freshness checks after dependency upgrades;
+	// with normal registry freshness checks after dependency upgrades: npm pack
+	// and install share this whole budget through the test's abort signal, and
 	// the CLI subprocesses below retain their separate 20-second timeout.
 	// The graphical checks below start two installed servers and run four
 	// coverage-traced CLI invocations, which is why the budget grew from 120s.
 	// Cold Windows installs need more time to extract the package and dependencies.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
 		timeout: process.platform === "win32" ? 480_000 : 180_000,
-	}, async () => {
+	}, async (t) => {
 		const work = mkdtempSync(join(tmpdir(), "clio-coder-installed-package-"));
 		const prefix = join(work, "prefix");
 		const foreign = join(work, "foreign-project");
@@ -651,36 +694,24 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			mkdirSync(coverage, { recursive: true });
 			const packed = process.env.CLIO_CODER_RELEASE_TARBALL
 				? [{ filename: process.env.CLIO_CODER_RELEASE_TARBALL }]
-				: (JSON.parse(
-						execFileSync("npm", ["pack", "--json", "--silent", "--pack-destination", work], {
-							cwd: ROOT,
-							shell: process.platform === "win32",
-							encoding: "utf8",
-							stdio: ["ignore", "pipe", "ignore"],
-						}),
-					) as Array<{ filename?: string }>);
+				: (JSON.parse(await npm(["pack", "--json", "--pack-destination", work], ROOT, t.signal)) as Array<{
+						filename?: string;
+					}>);
 			strictEqual(packed.length, 1, "npm pack must produce one tarball");
 			const filename = packed[0]?.filename;
 			ok(filename);
-			execFileSync(
-				process.platform === "win32" ? process.execPath : "npm",
+			await npm(
 				[
-					// A direct npm process releases its handles when the timeout kills it.
-					...(process.platform === "win32" ? [join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js")] : []),
 					"install",
 					"--prefix",
 					prefix,
 					"--package-lock=false",
 					"--no-audit",
 					"--no-fund",
-					"--loglevel=error",
 					process.env.CLIO_CODER_RELEASE_TARBALL ?? join(work, filename),
 				],
-				{
-					cwd: prefix,
-					stdio: "pipe",
-					timeout: process.platform === "win32" ? 300_000 : 90_000,
-				},
+				prefix,
+				t.signal,
 			);
 
 			const packageRoot = join(prefix, "node_modules", "@iowarp", "clio-coder");
