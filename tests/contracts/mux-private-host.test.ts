@@ -118,17 +118,39 @@ describe("private pane host layout (POSIX)", () => {
 			rmSync(scratch, { recursive: true, force: true });
 		});
 		const state = join(scratch, "s");
+		// The harness tmp root may be long enough that a Clio root cannot hold the socket; apply the same budget.
+		const fits = (dir: string) => Buffer.byteLength(join(dir, `${session}-client.sock`)) <= 100;
+		const stateRun = join(state, "mux", "run");
 		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", uid, { state, cache: join(scratch, "c") }), [
-			join(state, "mux", "run"),
-			join(scratch, "c", "run"),
+			...[stateRun, join(scratch, "c", "run")].filter(fits),
 			`/tmp/clio-coder-${uid}`,
 		]);
+		if (!fits(stateRun)) {
+			t.skip("tmp root too long for a socket under the state root");
+			return;
+		}
 		const layout = createPosixHostPlatform({ platform: "linux", stateDir: () => state }).hostLayout({
 			session,
 			env: { XDG_RUNTIME_DIR: fenced },
 		});
-		equal(layout.socketPath, join(state, "mux", "run", `${session}.sock`));
-		equal(statSync(join(state, "mux", "run", "c")).mode & 0o777, 0o700);
+		equal(layout.socketPath, join(stateRun, `${session}.sock`));
+		equal(statSync(join(stateRun, "c")).mode & 0o777, 0o700);
+	});
+
+	it("drops a Clio root whose socket path would be too long", () => {
+		const session = "clio-coder-c";
+		// "/mux/run/clio-coder-c-client.sock" is 33 bytes, so a 67-byte state root lands exactly on the 100-byte budget.
+		const fitting = `/${"s".repeat(66)}`;
+		const tooLong = `${fitting}x`;
+		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", 7, { state: fitting, cache: "/c" }), [
+			join(fitting, "mux", "run"),
+			"/c/run",
+			"/tmp/clio-coder-7",
+		]);
+		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", 7, { state: tooLong, cache: "/c" }), [
+			"/c/run",
+			"/tmp/clio-coder-7",
+		]);
 	});
 
 	it("lays out a private root, socket and shim, and hands the operator's XDG roots to the shim", (t) => {
