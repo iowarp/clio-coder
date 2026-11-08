@@ -1,6 +1,48 @@
+# Clio Coder public site: https://coder.iowarp.ai
+# Discovery is the goal. Search engines and AI crawlers, including model
+# training and AI search crawlers, are welcome and named below so the policy
+# is explicit. Every agent follows the same rules: the whole site, styles and
+# scripts included, except the build's documentation manifest.
+# A summary for language models is at /llms.txt and the full text at /llms-full.txt.
+
+# Search engines
+User-agent: Googlebot
+User-agent: Googlebot-Image
+User-agent: Bingbot
+User-agent: DuckDuckBot
+User-agent: Applebot
+User-agent: YandexBot
+User-agent: Baiduspider
+User-agent: Naverbot
+User-agent: Yeti
+# AI training, AI search, and assistant fetchers
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: anthropic-ai
+User-agent: Google-Extended
+User-agent: Google-CloudVertexBot
+User-agent: Applebot-Extended
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: CCBot
+User-agent: Meta-ExternalAgent
+User-agent: Meta-ExternalFetcher
+User-agent: Amazonbot
+User-agent: Bytespider
+User-agent: cohere-ai
+User-agent: cohere-training-data-crawler
+User-agent: MistralAI-User
+User-agent: DuckAssistBot
+User-agent: YouBot
+User-agent: AI2Bot
+User-agent: Diffbot
+# Everyone else
 User-agent: *
+Disallow: /content/docs-manifest.json
 Allow: /
-Disallow: /cards/
-Disallow: /content/
 
 Sitemap: https://coder.iowarp.ai/sitemap.xml
