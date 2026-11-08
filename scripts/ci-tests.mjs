@@ -63,6 +63,7 @@ export const coreTests = [
 	"configure-clio-tool",
 	"settings-authority",
 	"settings-controls",
+	"project-settings-save",
 	"mcp-config-trust",
 	"url-userinfo-hold",
 	"url-credential-surfaces",
