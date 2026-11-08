@@ -146,8 +146,8 @@ export function ArenaPage({ client }: { client: Client }) {
 										</tbody>
 									</table>
 									<p className="panel-note">
-										{standings.data.votedMatches} of {standings.data.matches} matches have a vote. An Elo rating appears
-										once a contender has {standings.data.minVotesForScore} votes.
+										{standings.data.votedMatches} of {standings.data.matches} matches have a vote. An Elo rating appears once a
+										contender has {standings.data.minVotesForScore} votes.
 									</p>
 								</>
 							)}
