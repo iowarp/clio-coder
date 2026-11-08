@@ -28,8 +28,13 @@ interface ToolCall {
 	args: Record<string, unknown>;
 	/** The surface's call id, which pairs the call with its end event. */
 	id?: string;
-	/** How the call returned: its error flag and the tool result's details. */
-	settled?: { isError: boolean; details: Record<string, unknown> };
+	/**
+	 * How the call returned: its error flag and the tool result's details.
+	 * `truncated` marks an ACP `rawOutput` over the 32 KiB record cap, which
+	 * arrives as `{truncated, bytes}` with no details; `resettleFromLedger`
+	 * fills those in from the session ledger before scoring.
+	 */
+	settled?: { isError: boolean; details: Record<string, unknown>; truncated?: true };
 }
 
 interface RunRecord {
@@ -425,10 +430,20 @@ function normalizeTool(name: string, args: Record<string, unknown>): ToolCall {
 }
 
 /** Records how the call `id` returned on its first terminal event, and returns it. */
-function settle(tools: ToolCall[], id: unknown, isError: unknown, result: unknown): ToolCall | undefined {
+function settle(
+	tools: ToolCall[],
+	id: unknown,
+	isError: unknown,
+	result: unknown,
+	truncated = false,
+): ToolCall | undefined {
 	const tool = tools.find((t) => t.id !== undefined && t.id === id);
 	if (tool === undefined || tool.settled !== undefined) return undefined;
-	tool.settled = { isError: isError === true, details: asRecord(asRecord(result).details) };
+	tool.settled = {
+		isError: isError === true,
+		details: asRecord(asRecord(result).details),
+		...(truncated ? { truncated: true as const } : {}),
+	};
 	return tool;
 }
 
@@ -524,11 +539,11 @@ async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 	return driven;
 }
 
-/** Model calls and token usage from the run's session ledger, the same record for both surfaces. */
-function ledgerUsage(home: string): Pick<Driven, "modelCalls" | "inputTokens" | "outputTokens" | "cacheReadTokens"> {
+/** Every complete entry of every session ledger in the run's home. */
+function ledgerEntries(home: string): Record<string, unknown>[] {
 	const sessions = join(home, "state", "sessions");
-	const usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
-	if (!existsSync(sessions)) return usage;
+	const entries: Record<string, unknown>[] = [];
+	if (!existsSync(sessions)) return entries;
 	for (const workspace of readdirSync(sessions)) {
 		for (const session of readdirSync(join(sessions, workspace))) {
 			const ledger = join(sessions, workspace, session, "current.jsonl");
@@ -542,16 +557,50 @@ function ledgerUsage(home: string): Pick<Driven, "modelCalls" | "inputTokens" | 
 					// A run stopped early can leave a torn last line; the complete entries still count.
 					continue;
 				}
-				if (entry.kind !== "message" || entry.role !== "assistant") continue;
-				const u = asRecord(asRecord(entry.payload).usage);
-				usage.modelCalls += 1;
-				usage.inputTokens += Number(u.input ?? 0);
-				usage.outputTokens += Number(u.output ?? 0);
-				usage.cacheReadTokens += Number(u.cacheRead ?? 0);
+				entries.push(entry);
 			}
 		}
 	}
+	return entries;
+}
+
+/** Model calls and token usage from the run's session ledger, the same record for both surfaces. */
+function ledgerUsage(
+	entries: Record<string, unknown>[],
+): Pick<Driven, "modelCalls" | "inputTokens" | "outputTokens" | "cacheReadTokens"> {
+	const usage = { modelCalls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+	for (const entry of entries) {
+		if (entry.kind !== "message" || entry.role !== "assistant") continue;
+		const u = asRecord(asRecord(entry.payload).usage);
+		usage.modelCalls += 1;
+		usage.inputTokens += Number(u.input ?? 0);
+		usage.outputTokens += Number(u.output ?? 0);
+		usage.cacheReadTokens += Number(u.cacheRead ?? 0);
+	}
 	return usage;
+}
+
+/**
+ * Restores the details an ACP record over the 32 KiB wire cap elided, from the
+ * unbounded tool result the session ledger kept for the same call. Without it a
+ * large but successful result (a dispatch with many receipts) scores as failed.
+ */
+function resettleFromLedger(entries: Record<string, unknown>[], tools: ToolCall[]): void {
+	const results = new Map<string, Record<string, unknown>>();
+	for (const entry of entries) {
+		if (entry.role !== "tool_result") continue;
+		const payload = asRecord(entry.payload);
+		if (typeof payload.toolCallId === "string") results.set(payload.toolCallId, payload);
+	}
+	for (const tool of tools) {
+		if (tool.settled?.truncated !== true || tool.id === undefined) continue;
+		const payload = results.get(tool.id);
+		if (payload === undefined) continue;
+		tool.settled = {
+			isError: tool.settled.isError || payload.isError === true,
+			details: asRecord(asRecord(payload.result).details),
+		};
+	}
 }
 
 async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: NodeJS.ProcessEnv): Promise<Driven> {
@@ -647,6 +696,7 @@ async function driveAcp(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 				update.toolCallId,
 				output.isError === true || update.status === "failed",
 				output.result,
+				output.truncated === true,
 			);
 			if (tool !== undefined && evalCase.stopAfter?.(tool) === true && !driven.stoppedEarly) {
 				driven.stoppedEarly = true;
@@ -766,6 +816,10 @@ function rescore(dir: string): void {
 	for (const record of records) {
 		const evalCase = CASES.find((c) => c.id === record.caseId);
 		if (evalCase === undefined) continue;
+		resettleFromLedger(
+			ledgerEntries(join(runsDir, `${record.caseId}-${record.surface}-${record.rep}`, "home")),
+			record.tools,
+		);
 		record.checks = evalCase.score({ tools: record.tools, finalText: record.finalText });
 		record.pass = record.error === null && Object.values(record.checks).every(Boolean);
 		writeFileSync(
@@ -828,7 +882,9 @@ async function main(): Promise<void> {
 				const driven =
 					surface === "run" ? await driveRun(opts, evalCase, project, env) : await driveAcp(opts, evalCase, project, env);
 				const latencyMs = performance.now() - started;
-				Object.assign(driven, ledgerUsage(join(runDir, "home")));
+				const ledger = ledgerEntries(join(runDir, "home"));
+				Object.assign(driven, ledgerUsage(ledger));
+				resettleFromLedger(ledger, driven.tools);
 				const checks = evalCase.score({ tools: driven.tools, finalText: driven.finalText });
 				const pass = driven.error === null && Object.values(checks).every(Boolean);
 				const record: RunRecord = {
