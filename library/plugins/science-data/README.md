@@ -31,7 +31,9 @@ pack makes the server untrusted again.
 | `parquet` | none | `read` |
 
 A `read` tool runs without asking at `default` and `yolo`. A `destructive` tool
-asks at `default`, and a headless run denies it. Trust a server without
+asks at `default`. The safety judge reviews the ask first, reading only your
+prompt, so a headless run that asks for a grouped file can still write one; a
+headless run denies what the judge does not allow. Trust a server without
 `--action-class`: the per-tool map already classifies every tool it ships, and
 a tool a later clio-kit release adds stays `unknown`, which asks.
 
