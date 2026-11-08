@@ -1,12 +1,27 @@
 /**
- * Shared mutable state for one chat loop instance.
+ * Shared state for one chat loop instance, and who may touch which part.
  *
  * `createChatLoop` composes single-owner turn modules (runtime, context,
- * persistence, queues, recovery, middleware). They coordinate through this
- * one heap object instead of closure captures, so each concern can live in
- * its own file while the loop keeps exactly one copy of every turn fact.
- * Fields are grouped by the module that owns writes; everything is readable
- * by every module.
+ * persistence, queues, recovery, middleware, prewarm). They coordinate
+ * through this one heap object instead of closure captures, so each concern
+ * can live in its own file while the loop keeps exactly one copy of every
+ * turn fact.
+ *
+ * Ownership:
+ * - `chat-loop.ts` is the composer and the only module that holds the whole
+ *   `ChatTurnState`; it opens and settles turns and resets per-turn fields.
+ * - Every other module receives its own view declared below
+ *   (`TurnRuntimeState`, `TurnMiddlewareState`, ...). A view names only the
+ *   fields the module touches; the ones it only reads are `readonly`, so a
+ *   new write is a type error until the view here says the module owns it.
+ * - Continuation state (the middleware continuation request, its in-run
+ *   carry, the per-prompt nudge cap, the yolo continuation count and the
+ *   recorded turn stop) lives in `ContinuationState`. Its fields are private;
+ *   modules change it only through its methods, and `continuation` itself is
+ *   readonly, so the owner is never replaced.
+ * - `rule16` in `tests/boundaries/check-boundaries.ts` holds both halves: no
+ *   module but these two names `ChatTurnState`, and nothing outside this file
+ *   assigns a continuation field.
  */
 
 import type { ClioSettings } from "../core/config.js";
@@ -279,6 +294,95 @@ export interface ChatTurnState {
 }
 
 /**
+ * A module's slice of the turn state: what it only reads comes through
+ * `Readonly`, what it writes stays mutable, and nothing else is visible.
+ */
+type TurnStateView<Reads extends keyof ChatTurnState, Writes extends keyof ChatTurnState = never> = Readonly<
+	Pick<ChatTurnState, Exclude<Reads, Writes>>
+> &
+	Pick<ChatTurnState, Writes>;
+
+/** turn-runtime: builds or swaps the runtime, runs the stream, and owns its watchdog and tool-prose scan. */
+export type TurnRuntimeState = TurnStateView<
+	| "activeInterruptByOperator"
+	| "activeInterruptReason"
+	| "activeUserTurnId"
+	| "continuation"
+	| "lastRunSnapshot"
+	| "replayedContextMessages"
+	| "routeMove"
+	| "streaming"
+	| "synthesisToolLock"
+	| "toolBudgetLock",
+	| "modelRequest"
+	| "refreshModelRequest"
+	| "runtime"
+	| "streamStallReason"
+	| "streamStallStage"
+	| "toolMarkupRepromptTurnId"
+	| "toolProseAbortReason"
+	| "toolProseAssessedChars"
+	| "turnToolCalls"
+	| "turnToolNames"
+>;
+
+/** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
+export type TurnMiddlewareState = TurnStateView<
+	| "activeInterruptReason"
+	| "activeUserTurnId"
+	| "continuation"
+	| "currentTurnConstraints"
+	| "lastTurnId"
+	| "synthesisToolLock"
+	| "toolBudgetLock"
+	| "turnSharedWorkerNote"
+	| "turnToolCalls"
+	| "turnToolNames",
+	"toolProseAbortReason"
+>;
+
+/** turn-context: reads the turn for compaction and memory; owns the replayed provider context. */
+export type TurnContextState = TurnStateView<
+	| "activeSkillSurface"
+	| "activeUserTurnId"
+	| "currentPendingSkillPolicy"
+	| "lastMainRequest"
+	| "lastTurnId"
+	| "runtime"
+	| "streaming",
+	"replayedContextMessages"
+>;
+
+/** turn-persistence: owns the ledger cursor, the filed user turn and the interrupt's closing records. */
+export type TurnPersistenceState = TurnStateView<
+	"activeInterruptReason" | "runtime",
+	| "activeUserTurnId"
+	| "interruptedAssistantMessage"
+	| "interruptedCall"
+	| "lastTurnId"
+	| "synthesisToolLock"
+	| "toolBudgetLock"
+>;
+
+/** turn-recovery: owns the route move and consumes the stall watchdog's reason. */
+export type TurnRecoveryState = TurnStateView<
+	"activeInterruptReason" | "continuation",
+	"routeMove" | "routeMoveSeat" | "streamStallReason" | "streamStallStage"
+>;
+
+/** The stall reclassification seam: consumes the watchdog's reason. */
+export type StallAbortState = TurnStateView<"activeInterruptReason", "streamStallReason" | "streamStallStage">;
+
+/** The stall rewrite seam: reads the watchdog's reason without consuming it. */
+export type StallAbortReadState = TurnStateView<"activeInterruptReason" | "streamStallReason" | "streamStallStage">;
+
+/** turn-queues: reads whether a run is out and steers its runtime; continuation only through the owner. */
+export type TurnQueuesState = TurnStateView<"continuation" | "runtime" | "streaming">;
+
+/** turn-prewarm: stays out of a live turn and parents its ledger row under the cursor. */
+export type TurnPrewarmState = TurnStateView<"lastTurnId" | "streaming">;
+
+/**
  * The thinking level argument is ignored: the agent state owns the level and
  * turn state keeps no copy. The parameter stays optional because existing test
  * call sites still pass one, and removing it from them is test work.
@@ -321,7 +425,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 }
 
 /** Consume callback-written accounting after the provider settles, outside submit's narrowing (#430). */
-export function takeInterruptedCall(state: ChatTurnState): ChatTurnState["interruptedCall"] {
+export function takeInterruptedCall(state: TurnStateView<never, "interruptedCall">): ChatTurnState["interruptedCall"] {
 	const interrupted = state.interruptedCall;
 	state.interruptedCall = null;
 	return interrupted;

@@ -101,7 +101,7 @@ import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } 
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
-import type { AgentRuntime, ChatLoopTarget, ChatTurnState, PreInvocationStage } from "./turn-state.js";
+import type { AgentRuntime, ChatLoopTarget, PreInvocationStage, TurnRuntimeState } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
@@ -251,7 +251,7 @@ export interface TurnRuntimeDeps {
 	onMemoryRequestSubmitted?: ((messages: readonly AgentMessage[], systemPrompt?: string) => void) | undefined;
 	turnIdentity?: () => unknown;
 	interactiveGuidance?: boolean;
-	state: ChatTurnState;
+	state: TurnRuntimeState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
 	gatewayCapabilityNames?: (() => ReadonlyArray<string>) | undefined;
 	getSettings: () => Readonly<ClioSettings>;

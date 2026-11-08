@@ -34,7 +34,7 @@ import {
 import { boundRefusedPrompt } from "./session-replay-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, StallAbortReadState, StallAbortState, TurnRecoveryState } from "./turn-state.js";
 
 export type RetryStatusPhase = "scheduled" | "waiting" | "retrying" | "moved" | "cancelled" | "exhausted" | "recovered";
 
@@ -88,7 +88,7 @@ export interface TurnRecoveryDeps {
 	auth?: ProvidersContract["auth"];
 	turnSignal?: () => AbortSignal | undefined;
 	turnIdentity?: () => unknown;
-	state: ChatTurnState;
+	state: TurnRecoveryState;
 	persistence: TurnPersistence;
 	context: TurnContext;
 	retrySettings: () => RetrySettings;
@@ -159,7 +159,7 @@ export interface TurnRecovery {
  * without emitting that event and consumes the watchdog reason in either case.
  */
 export function reclassifyStallAbort(
-	state: ChatTurnState,
+	state: StallAbortState,
 	failure: TerminalAssistantFailure,
 ): TerminalAssistantFailure {
 	const reason = state.streamStallReason;
@@ -178,7 +178,7 @@ export function reclassifyStallAbort(
 
 /** Rewrite the provider's terminal abort object before its event is emitted and persisted. */
 export function rewriteStallAbortMessage(
-	state: ChatTurnState,
+	state: StallAbortReadState,
 	message: AgentMessage,
 	reason = state.streamStallReason,
 	stage = state.streamStallStage,

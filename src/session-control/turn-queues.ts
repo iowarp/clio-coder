@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatTurnState } from "./turn-state.js";
+import type { TurnQueuesState } from "./turn-state.js";
 
 type EngineAgent = ReturnType<typeof createEngineAgent>["agent"];
 
@@ -111,7 +111,7 @@ export function heldQueueNotice(count: number): string {
 }
 
 export interface TurnQueuesDeps {
-	state: ChatTurnState;
+	state: TurnQueuesState;
 	emitQueueUpdateEvent: (messages: QueuedChatMessage[]) => void;
 	/** An operator stop or an unstarted prompt left this many entries held. Falls back to a plain notice. */
 	emitQueueHeld?: (count: number) => void;

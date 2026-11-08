@@ -30,11 +30,11 @@ import type { AgentMessage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { NoticeSource } from "./notice-source.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, TurnMiddlewareState } from "./turn-state.js";
 
 export interface TurnMiddlewareDeps {
 	memoryContentGuard?: ((content?: string) => () => boolean) | undefined;
-	state: ChatTurnState;
+	state: TurnMiddlewareState;
 	middleware?: MiddlewareContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
 	session?: SessionContract | undefined;

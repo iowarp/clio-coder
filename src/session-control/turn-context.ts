@@ -178,7 +178,7 @@ import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { createReplayMessageConverter, extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
-import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
+import type { AgentRuntime, TurnContextState } from "./turn-state.js";
 
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
 /** The summarizer streams a delta every few milliseconds; the rail needs a few redraws a second. */
@@ -203,7 +203,7 @@ export interface TurnContextDeps {
 	headless?: boolean;
 	/** False when no operator message can arrive mid-run; the prompt then omits steering guidance. */
 	liveSteering?: boolean;
-	state: ChatTurnState;
+	state: TurnContextState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	session?: SessionContract | undefined;
