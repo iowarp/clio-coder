@@ -2,6 +2,39 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Since 0.7.0-rc.1, Clio closes three sandbox escapes, uses a GitHub Copilot subscription the way it uses ChatGPT and Claude subscriptions, sets itself up with your approval, teaches itself to newcomers, answers questions about itself from its own docs, and signs its commits as a GitHub App bot.
+
+### Upgrade notes
+
+- `verify` runs a project's checks in the main-session sandbox at autonomy default, as `bash` does, so a trojan test helper can no longer delete files outside the workspace or read `.env` through it. Dispatch host verification runs a worker's declared checks, sealed `reproduce` runs included, in the same sandbox.
+- At default, `unsandboxed: true` always asks (`sandbox-escape`), even for a recognized command such as `npm test`; the safety judge lets it run when your request named the escape. Under yolo, `safety.sandbox: required` sandboxes every command default would contain, not only script files, and refuses `unsandboxed: true`.
+- A model can no longer change Clio's settings by running Clio's own `configure`, `targets`, `auth` or other settings commands, in any launcher form, sandboxed or not. Read forms still work, and your own `!` shell line is never blocked.
+- A `copilot-sdk` target works like the ChatGPT and Claude subscriptions: the account signed in with `copilot login` is the authorization, and Clio no longer asks for or records a separate per-account consent. Headless `run`, workers and fresh homes use the login directly. The `copilot-sdk-consent.json` file rc.1 wrote is deleted by the `2026-11-07-remove-copilot-consent` migration.
+- Commit trailers name Clio's GitHub App bot, `Clio Coder <353922063+clio-coder-agent[bot]@users.noreply.github.com>`, so GitHub shows its avatar on commits Clio helped write. The managed commit hook moves to v5, and an existing `clio-coder@iowarp.ai` trailer is folded into the bot identity.
+
+### Setup and Copilot
+
+- Clio can set itself up: ask it to add a target or change a setting, and it proposes the exact change with `configure_clio`. You approve the diff on a card before anything is saved. Headless, read-only and yolo runs only propose, and list the steps for you to run. Every saved change is logged to `settings-changes.jsonl` in the state directory.
+- `clio-coder auth status copilot-sdk` names the signed-in Copilot account and host, and plain `auth status` includes Copilot when a target exists. In a terminal, `auth login copilot-sdk`, `configure` and the onboarding wizard offer to run `copilot login` when there is no login. `targets`, `configure --list` and `doctor` name the `copilot login` instead of `none`.
+- Copilot setup and onboarding default to `gpt-6-luna` when the account lists it, instead of `auto`.
+- A Copilot model the runtime serves but does not list (Gemini 3.8 Flash on the 1.0.26 runtime) runs when named on its target: `run --target <copilot> --model gemini-3.8-flash` or `--model <copilot>/gemini-3.8-flash`.
+- Guided setup's subscription choice names GitHub Copilot, and `configure --api-key-env VAR` warns when `VAR` is not set in the current shell.
+
+### Learning Clio
+
+- Demo mode teaches `/usage`, `/doctor`, skills, the Library, the autonomy key and read-only or background workers when a turn shows they would help: two tips per session for newcomers, then one. Footer tips and key hints retire as you learn them, first run shows a welcome tip, and `/help` has a "Learning Clio" topic that says how to turn tips off.
+- Questions about Clio in headless `clio-coder run` sessions go to the bundled docs (`clio_docs`) instead of grepping the docs tree, and answers name the docs pages they rest on. The model checks the skill catalog before specialized work and sends independent reviews to one parallel dispatch without reading every file first. `pnpm run eval:onboarding` measures this live across the headless and ACP surfaces.
+- The README leads with one harness for every model, a three-step start and an exact install path for AI agents; the docs map gains a "Your first hour" path.
+
+### Fixes
+
+- A headless `clio-coder run` no longer drops the answer from stdout when the citation check's follow-up holds only corrections.
+- `clio-coder targets fleet` shows the fleet default set by `targets use --fleet-model`, with its source; `--json` prints `{ "default", "profiles" }`.
+- `library install` names `--with-requirements` when it refuses a missing requirement.
+- System One's direct OpenRouter calls send `X-OpenRouter-Categories: cli-agent`, as engine turns already did.
+
 ## 0.7.0-rc.1 - 2026-11-07
 
 Clio Coder 0.7.0 is built for research work that has to hold up. The `data` tool reads HDF5, NetCDF and Parquet and summarizes their arrays. A new `reproduce` check kind reruns a computation from sha256-pinned inputs in a clean environment and judges the results against a tolerance, and every judged `reproduce` or `numeric-compare` check is recorded in a per-project claims ledger that names contradictions and superseded results and offers them to the agent when a task touches the check (#406). `/usage` and the exit summary count tokens and cost per verified outcome, and `clio-coder telemetry insights` sorts sessions into research task categories and autonomy levels. Four library packs cover HPC, science data, literature and life science, and `ask_user` can mark a choice that only the operator makes. GitHub Copilot becomes a target through the official Copilot SDK. Compaction summarizes inside a cached prefix when that is cheaper, the desktop app opens a fleet node's own GUI over SSH, command output masks credential shapes, more URL credential forms stay hidden (#448), streaming answers repaint less (#428), every key follows one keyboard model, and the package is smaller. Carried memory must match the task before it reaches the prompt, `/oracle` asks a model of another family and says how independent its answer is, compaction carries harness-measured facts beside its summary, and the desktop app gives each browser its own credential and one controlling client per session. Terminal panes come from a pinned herdr that the installers provision and Clio hosts privately on Linux, macOS and Windows, with no setup question.
