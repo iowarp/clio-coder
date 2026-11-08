@@ -93,6 +93,7 @@ import {
 } from "../domains/claims/index.js";
 import { ConfigDomainModule, createConfigDomainModule, diffSettings } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
+import { liveHistoryBudget } from "../domains/context/budget/inspection.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
@@ -1501,31 +1502,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (session) beforeTurnRecorded(session);
 	};
 	const memoryActiveEntries = createMemorySessionProjection(() => session);
-	/**
-	 * The main route's live history capacity after fixed prompt and reserves,
-	 * and how much of it the conversation occupies. Null while the live budget
-	 * is unavailable or only a persisted measurement exists.
-	 */
-	const liveHistoryBudget = (): { usable: number; used: number } | null => {
-		const budget = chat.inspectLiveBudget();
-		if (
-			budget.status !== "available" ||
-			budget.view.historical ||
-			!budget.view.breakdown ||
-			budget.view.outputReserveTokens === null
-		)
-			return null;
-		const view = budget.view;
-		return {
-			usable:
-				(view.effectiveWindow ?? 0) -
-				(view.outputReserveTokens ?? 0) -
-				(view.breakdown?.systemPromptTokens ?? 0) -
-				(view.breakdown?.toolSchemaTokens ?? 0) -
-				64,
-			used: (view.breakdown?.messageTokens ?? 0) + (view.breakdown?.pendingUserTokens ?? 0),
-		};
-	};
+	const liveHistory = (): { usable: number; used: number } | null => liveHistoryBudget(chat.inspectLiveBudget());
 	memoryOwner.configure({
 		stateDir: clioStateDir,
 		dataDir: clioDataDir,
@@ -1565,9 +1542,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...projection.observation,
 			};
 		},
-		usableHistoryTokens: () => liveHistoryBudget()?.usable ?? 0,
+		usableHistoryTokens: () => liveHistory()?.usable ?? 0,
 		historyPressure: () => {
-			const live = liveHistoryBudget();
+			const live = liveHistory();
 			return live === null || live.usable <= 0 ? null : live.used / live.usable;
 		},
 		client: createBackgroundMemoryRouting(

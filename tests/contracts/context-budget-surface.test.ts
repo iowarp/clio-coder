@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import type { BudgetInspection } from "../../src/domains/context/budget/inspection.js";
+import { type BudgetInspection, liveHistoryBudget } from "../../src/domains/context/budget/inspection.js";
 import type { LiveBudgetView } from "../../src/domains/context/budget/live-view.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -530,5 +530,27 @@ describe("native budget inspection through the registered context tool", () => {
 
 		ok(Buffer.byteLength(limited.output) <= 1024);
 		deepStrictEqual(files(env.dir), beforeFiles);
+	});
+});
+
+describe("liveHistoryBudget", () => {
+	it("subtracts the fixed prompt, reserve and margin from the window and counts only live history", () => {
+		const view = {
+			historical: false,
+			effectiveWindow: 32_768,
+			outputReserveTokens: 4096,
+			breakdown: { systemPromptTokens: 3000, toolSchemaTokens: 2000, messageTokens: 1200, pendingUserTokens: 300 },
+		} as LiveBudgetView;
+		const available: BudgetInspection = { status: "available", capability: "native", view };
+		deepStrictEqual(liveHistoryBudget(available), { usable: 32_768 - 4096 - 3000 - 2000 - 64, used: 1500 });
+		strictEqual(
+			liveHistoryBudget({ status: "available", capability: "native", view: { ...view, historical: true } }),
+			null,
+		);
+		strictEqual(
+			liveHistoryBudget({ status: "available", capability: "native", view: { ...view, outputReserveTokens: null } }),
+			null,
+		);
+		strictEqual(liveHistoryBudget({ status: "unavailable", reason: "no runtime" }), null);
 	});
 });
