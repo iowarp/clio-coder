@@ -95,9 +95,28 @@ export function withinEntries(path: string, entries: ReadonlySet<string>): boole
 	return false;
 }
 
-/** Remove every untracked and ignored file, so the worktree holds exactly its HEAD tree. */
-export function cleanWorktree(worktree: string): void {
-	git(worktree, ["clean", "-ffdxq"]);
+/**
+ * Untracked and ignored entries of a worktree, repository-relative; a wholly untracked or ignored directory is one
+ * `dir/` entry. Taken before the agent runs, it is the environment a candidate keeps (an installed `node_modules`).
+ */
+export function environmentEntries(worktree: string): string[] {
+	return git(worktree, ["status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=normal", "--no-renames"])
+		.split("\0")
+		.filter((entry) => entry.startsWith("?? ") || entry.startsWith("!! "))
+		.map((entry) => entry.slice(3));
+}
+
+/** An exclude pattern that matches exactly one repository-relative entry. */
+function exactPattern(entry: string): string {
+	return `/${entry.replace(/[\\*?[\]]/gu, (char) => `\\${char}`)}`;
+}
+
+/**
+ * Remove every untracked and ignored file except the `keep` entries, so the worktree holds its HEAD tree plus the
+ * environment it had before the agent ran.
+ */
+export function cleanWorktree(worktree: string, keep: ReadonlyArray<string> = []): void {
+	git(worktree, ["clean", "-ffdxq", ...keep.flatMap((entry) => ["-e", exactPattern(entry)])]);
 }
 
 /**

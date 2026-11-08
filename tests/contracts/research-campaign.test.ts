@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -22,6 +23,7 @@ import {
 	hypothesesFromSlate,
 	readClaims,
 } from "../../src/domains/claims/index.js";
+import { cleanWorktree, environmentEntries } from "../../src/domains/research/git.js";
 import {
 	type AgentRunner,
 	type AgentRunResult,
@@ -753,6 +755,56 @@ describe("research review fixes", () => {
 			["not-improved", "not-improved"],
 		);
 		strictEqual(git(repo, "rev-parse", campaign.ref), campaign.base);
+	});
+
+	it("ratchets a candidate whose gate needs the project's installed, ignored node_modules", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			".gitignore": "node_modules/\n",
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [commandCheck("score", ["node", "score.js"]), commandCheck("dep", ["node", "-e", "require('dep')"])],
+			}),
+		});
+		mkdirSync(join(repo, "node_modules/dep"), { recursive: true });
+		writeFileSync(join(repo, "node_modules/dep/index.js"), "module.exports = 1;\n");
+		const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false }, ["dep"]);
+		await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				writeFileSync(join(request.worktree, "value.txt"), "50\n");
+				return done;
+			},
+		});
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["ratcheted"],
+		);
+	});
+
+	it("cleans a candidate back to its commit plus the environment it had before the agent ran", () => {
+		const repo = scratchRepo({ "value.txt": "1\n", ".gitignore": "node_modules/\nbuild/\n" });
+		mkdirSync(join(repo, "node_modules/dep"), { recursive: true });
+		writeFileSync(join(repo, "node_modules/dep/index.js"), "1\n");
+		mkdirSync(join(repo, "odd[1]*"), { recursive: true });
+		writeFileSync(join(repo, "odd[1]*/kept.txt"), "1\n");
+		const environment = environmentEntries(repo);
+		deepStrictEqual([...environment].sort(), ["node_modules/", "odd[1]*/"]);
+		// What the agent leaves: a new ignored install, a planted file, and a file beside the kept environment.
+		mkdirSync(join(repo, "build"));
+		writeFileSync(join(repo, "build/override.json"), "{}");
+		mkdirSync(join(repo, ".cache"));
+		writeFileSync(join(repo, ".cache/override.json"), "{}");
+		// Unescaped, the kept `odd[1]*/` would be a glob that also keeps this directory.
+		mkdirSync(join(repo, "odd1x"));
+		writeFileSync(join(repo, "odd1x/planted.txt"), "planted\n");
+		cleanWorktree(repo, environment);
+		ok(existsSync(join(repo, "node_modules/dep/index.js")));
+		ok(existsSync(join(repo, "odd[1]*/kept.txt")));
+		for (const gone of ["build", ".cache", "odd1x"]) strictEqual(existsSync(join(repo, gone)), false, gone);
 	});
 
 	it("withholds reference-agreement claims from research hypotheses of earlier campaigns on the same check", async (t) => {

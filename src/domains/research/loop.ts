@@ -29,6 +29,7 @@ import {
 	cleanWorktree,
 	commitWorktree,
 	createResearchRef,
+	environmentEntries,
 	gitFailure,
 	removeResearchWorktree,
 	researchWorktreeParent,
@@ -340,6 +341,7 @@ export async function runResearchCampaign(
 			const worktree = join(researchWorktreeParent(root), `research-${campaign.id}-${name}`);
 			addResearchWorktree(root, worktree, best);
 			openWorktrees.add(worktree);
+			const environment = environmentEntries(worktree);
 			journal({ type: "iteration-started", at: at(), iteration, parent: best, worktree });
 			log(`iteration ${iteration}: agent run in ${worktree}`);
 			const archive = (reason: ResearchArchiveReason, detail: string): void => {
@@ -395,10 +397,10 @@ export async function runResearchCampaign(
 				commit = committed.head;
 				if (committed.leftOut.length > 0)
 					log(`iteration ${iteration}: left out check output ${committed.leftOut.join(", ")}`);
-				// Measure exactly the commit: whatever the agent left untracked or ignored, check output included,
-				// goes, so a file it planted in a check's output directory cannot steer the score. The checks
-				// recreate their own output.
-				cleanWorktree(worktree);
+				// Measure the commit in the environment the worktree had before the agent ran: whatever the agent
+				// left untracked or ignored, check output and installs included, goes, so a file it planted cannot
+				// steer the score. The checks recreate their own output.
+				cleanWorktree(worktree, environment);
 			} catch (error) {
 				archive("agent-failed", `the change could not be committed: ${gitFailure(error)}`);
 				cleanup();
