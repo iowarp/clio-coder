@@ -31,7 +31,7 @@ const DECISIONS_ENV = "CLIO_CODER_COMMIT_DECISIONS";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 4;
+const MANAGED_HOOK_VERSION = 5;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();

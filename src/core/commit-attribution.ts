@@ -7,23 +7,20 @@
  */
 
 /**
- * PLACEHOLDER: slug of the IOWarp-owned GitHub App whose bot account would be
- * Clio's commit identity. `clio-coder` is an unrelated user's login, and an
- * App may not take an existing account's name, so confirm the registered slug.
+ * Slug of the IOWarp-owned GitHub App `Clio-Coder-Agent`, whose bot account
+ * is Clio's commit identity. `clio-coder` is an unrelated user's login.
  */
 const CLIO_GITHUB_APP_SLUG = "clio-coder-agent";
 
 /**
- * PLACEHOLDER until the IOWarp org creates the App: the account id of the
- * App's bot user, read with `gh api users/<slug>%5Bbot%5D --jq .id`. It is not
- * the App id. GitHub links a trailer to an account only by email, and a bot
- * account answers to `<id>+<slug>[bot]@users.noreply.github.com`. While this
- * is null, trailers name `clio-coder@iowarp.ai`, which renders once a GitHub
- * account verifies it. Setting it changes the managed hook script, so bump
- * `MANAGED_HOOK_VERSION` (`src/core/git-commit-attribution.ts`) in the same
- * commit.
+ * Account id of the App's bot user, read with
+ * `gh api users/<slug>%5Bbot%5D --jq .id`; it is not the App id. GitHub links a
+ * trailer to an account only by email, and a bot account answers to
+ * `<id>+<slug>[bot]@users.noreply.github.com`. Changing it changes the managed
+ * hook script, so bump `MANAGED_HOOK_VERSION`
+ * (`src/core/git-commit-attribution.ts`) in the same commit.
  */
-const CLIO_GITHUB_BOT_USER_ID: number | null = null;
+const CLIO_GITHUB_BOT_USER_ID: number | null = 353922063;
 
 const IOWARP_COMMIT_EMAIL = "clio-coder@iowarp.ai";
 
