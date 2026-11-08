@@ -117,16 +117,16 @@ import {
 	createBackgroundMemoryRouting,
 	createMemoryFlowAdmission,
 	memoryObservationCapacity,
+	memoryRouteConfigured,
 	prepareBackgroundMemoryModel,
 } from "../domains/memory/background-route.js";
+import { createGuardianStatePublisher } from "../domains/memory/guardian-state.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
 	buildDispatchMemorySection,
 	canonicalMemoryRepositoryIdentity,
-	completedLessonSource,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
-	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
 	MemoryRuntime,
 	markMemoryOffRecording,
@@ -146,6 +146,7 @@ import {
 	demotedMemoryIds,
 	readRecallUseLedger,
 } from "../domains/memory/recall-use.js";
+import { createMemorySessionProjection } from "../domains/memory/session-projection.js";
 import { readMemoryStoreSnapshot } from "../domains/memory/store.js";
 import {
 	deleteTaskBankSnapshot,
@@ -171,7 +172,7 @@ import {
 	MiddlewareDomainModule,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
-import type { MemoryGuardian, MemoryGuardianState } from "../domains/middleware/memory-guardian.js";
+import type { MemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
@@ -263,7 +264,7 @@ import type { SessionContract, SessionMeta } from "../domains/session/contract.j
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import { observationCheckpoint, observationSourceUnits, SessionDomainModule } from "../domains/session/index.js";
+import { SessionDomainModule } from "../domains/session/index.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -1634,33 +1635,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// reports turn boundaries and step activity to the guardian.
 	let memoryGuardian: MemoryGuardian | null = null;
 	let isChatStreaming: () => boolean = () => false;
-	let publishedGuardianState: MemoryGuardianState | null = null;
-	/**
-	 * The one guardian state every surface projects: a boundary step the
-	 * middleware launched counts as reviewing even though the guardian did not
-	 * start it.
-	 */
-	const currentGuardianState = (): MemoryGuardianState => {
-		const state = memoryOwner.contract.guardianState();
-		return state !== "off" && memoryOwner.contract.interventionStatus().stepInFlight ? "reviewing" : state;
-	};
-	const publishGuardianState = (): void => {
-		const state = currentGuardianState();
-		if (state === publishedGuardianState) return;
-		publishedGuardianState = state;
-		const sessionId = session?.current()?.id ?? null;
-		bus.emit(
-			"memory.guardian_changed",
-			{ sessionId, state },
-			sessionId ? { sessionId, agent: { role: "memory", id: sessionId } } : undefined,
-		);
-	};
+	const guardianState = createGuardianStatePublisher(memoryOwner.contract, bus, () => session?.current()?.id ?? null);
 	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
 		workspaceRoot: memoryWorkspaceRoot,
 		onTurnBoundary: (kind) => memoryGuardian?.wake(kind === "end" ? "turn-end" : "turn-start"),
 		onStepActivity: () => {
-			publishGuardianState();
+			guardianState.publish();
 			memoryGuardian?.wake("step-settled");
 		},
 		onEnvelope: (envelope) => memoryTrace.record(envelope),
@@ -1698,11 +1679,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			takeRecalled: () => memoryOwner.takeTurnRecalledMemory(),
 		}),
 	);
-	const memoryRouteAvailable = (): boolean => {
-		const settings = effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings();
-		const route = resolveMemoryRoute(settings);
-		return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
-	};
+	const memoryRouteAvailable = (): boolean =>
+		memoryRouteConfigured(effectiveSettingsForDispatch?.() ?? config?.get() ?? readSettings());
 	memoryGuardian = memoryOwner.startGuardian({
 		// A headless run exits after its turn, so there is no idle time to use.
 		enabled: () => options.headless === undefined && memoryRouteAvailable(),
@@ -1730,19 +1708,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		workspaceRoot: memoryWorkspaceRoot,
 		telemetry: historyReviews.telemetry,
-		onStateChange: publishGuardianState,
+		onStateChange: guardianState.publish,
 	});
-	let memoryProjection: {
-		sessionId: string;
-		pinned: string | null;
-		entries: readonly SessionEntry[];
-		active: readonly SessionEntry[];
-		lesson: ReturnType<typeof completedLessonSource>;
-		observation: {
-			checkpoint: ReturnType<typeof observationCheckpoint>;
-			units: ReturnType<typeof observationSourceUnits>;
-		};
-	} | null = null;
 	const memoryEnabledNow = (): boolean =>
 		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
 	const beforeTurnRecorded = (target: SessionContract): void => {
@@ -1751,36 +1718,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const beforeShellEntryRecorded = (): void => {
 		if (session) beforeTurnRecorded(session);
 	};
-	const memoryActiveEntries = () => {
-		const meta = session?.current();
-		if (!meta || !session) return null;
-		const entries = session.readEntries();
-		const pinned = meta.pinnedLeafTurnId ?? null;
-		// Session's frozen snapshot changes on append, replacement or external writes. A /tree pin is separate authority.
-		if (
-			memoryProjection?.entries !== entries ||
-			memoryProjection.sessionId !== meta.id ||
-			memoryProjection.pinned !== pinned
-		) {
-			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined));
-			const checkpointIndex = active.reduce(
-				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
-				-1,
-			);
-			memoryProjection = {
-				sessionId: meta.id,
-				pinned,
-				entries,
-				active,
-				lesson: completedLessonSource(active, meta.cwd),
-				observation: {
-					checkpoint: observationCheckpoint(active),
-					units: observationSourceUnits(active.slice(checkpointIndex + 1)),
-				},
-			};
-		}
-		return memoryProjection;
-	};
+	const memoryActiveEntries = createMemorySessionProjection(() => session);
 	/**
 	 * The main route's live history capacity after fixed prompt and reserves,
 	 * and how much of it the conversation occupies. Null while the live budget
@@ -4785,7 +4723,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 				),
 				stepInFlight: memoryIntervention.stepInFlight(),
-				guardian: currentGuardianState(),
+				guardian: guardianState.current(),
 				observations: memoryOwner.contract.observationStatus(),
 				retention: memoryOwner.contract.retentionStatus(),
 				promptSelection: memoryOwner.contract.promptSelection?.() ?? null,

@@ -729,3 +729,9 @@ export function createBackgroundMemoryRouting(
 		},
 	};
 }
+
+/** Memory is on and its route names both a target and a model. */
+export function memoryRouteConfigured(settings: Readonly<ClioSettings>): boolean {
+	const route = resolveMemoryRoute(settings);
+	return settings.context.memory.enabled && Boolean(route.target?.trim()) && Boolean(route.model?.trim());
+}
