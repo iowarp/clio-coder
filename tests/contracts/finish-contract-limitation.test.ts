@@ -1,4 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { FINISH_CONTRACT_EVIDENCE_TAGS } from "../../src/domains/evidence/finish-contract-map.js";
@@ -6,6 +9,7 @@ import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
 	assessFinishContract,
+	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
@@ -280,6 +284,51 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			];
 			const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
 			strictEqual(assessment.reason, isError ? "unvalidated_mutation" : "validation_evidence");
+		}
+	});
+
+	it("credits a declared check the model ran whole through the shell after its last edit, and nothing looser", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-declared-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		mkdirSync(join(root, ".clio-coder"));
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			"version: 2\nchecks:\n  - id: calc\n    description: calc adds\n    command: [python3, -c, 'import calc; assert calc.add(2, 3) == 5']\n    cwd: .\n    timeoutMs: 60000\n    tags: []\n",
+		);
+		const sessionVerifiers = [{ id: "run-acceptance", command: "./acceptance.sh --strict && echo done" }];
+		const assess = (command: string, isError = false, beforeEdit = false) => {
+			const run = [toolCall("sh-1", ToolNames.Bash, { command }), toolResult("sh-1", ToolNames.Bash, isError)];
+			const edit = mutationWindow().slice(1);
+			const entries = [
+				userMessage("user-1"),
+				...(beforeEdit ? [...run, ...edit] : [...edit, ...run]),
+				assistantMessage("assistant-1", "Fixed."),
+			];
+			return assessFinishContract({
+				sessionEntries: entries,
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				sessionVerifiers,
+			});
+		};
+		const passed = assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5' && echo OK`);
+		strictEqual(passed.reason, "validation_evidence");
+		deepStrictEqual(passed.verificationScope?.passedChecks, ["calc"]);
+		strictEqual(assess("cd . && ./acceptance.sh  --strict && echo done && ls").reason, "validation_evidence");
+		for (const unproven of [
+			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, true),
+			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true),
+			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5' | tee log`),
+			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5' || true`),
+			assess(`python3 -c 'import calc; assert calc.add(2, 3)'`),
+			assess("./acceptance.sh --strict"),
+			assess("./acceptance.sh --strict && echo $DONE"),
+		]) {
+			strictEqual(unproven.reason, "unvalidated_mutation");
+			strictEqual(
+				unproven.kind === "engage" ? unproven.message : "",
+				`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: run-acceptance, calc.`,
+			);
 		}
 	});
 

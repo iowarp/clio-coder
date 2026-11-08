@@ -24,6 +24,7 @@ import { withPluginDiscoveryPass } from "../domains/plugins/index.js";
 import {
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_DECLARED_CHECKS_PREFIX,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
 } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -233,11 +234,24 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			appendMiddlewareReminderEntry(message, severity, source, false);
 			return;
 		}
-		if (message === FINISH_CONTRACT_ADVISORY_MESSAGE && severity === "warn") {
+		if (message.startsWith(FINISH_CONTRACT_ADVISORY_MESSAGE) && severity === "warn") {
 			// The finish decision is already in the evidence ledger. Surface the
 			// warning to the operator without posing it as a new user instruction
-			// or carrying stale advice into the next model turn.
-			deps.emitFooterNotice("warning", "Clio changed files but ran no check on them afterwards", "finish.unverified");
+			// or carrying stale advice into the next model turn. When the workspace
+			// declares checks, name the one to run rather than leave a bare warning.
+			const declared = message
+				.slice(FINISH_CONTRACT_ADVISORY_MESSAGE.length)
+				.replace(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, "")
+				.replace(/\.$/u, "")
+				.split(", ")
+				.filter((id) => id.length > 0);
+			deps.emitFooterNotice(
+				"warning",
+				declared.length > 0
+					? `Clio changed files but ran no check on them afterwards; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
+					: "Clio changed files but ran no check on them afterwards",
+				"finish.unverified",
+			);
 			return;
 		}
 		if (

@@ -4,7 +4,12 @@ import { isNonSourcePath, isProsePath } from "../../core/test-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
-import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
+import {
+	type DeclaredCheckSourceRef,
+	loadProjectVerifierCatalog,
+	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
+	resolveProjectVerifierExecutionCwd,
+} from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
@@ -19,6 +24,12 @@ import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Report the change as unverified. Run checks only within the operator's authorized scope; this advisory does not authorize tests, scripts, or additional tools.";
+
+/**
+ * Appended to the advisory when the workspace declares checks the turn did not
+ * run in a form the contract can credit; the footer turns it into a `verify` hint.
+ */
+export const FINISH_CONTRACT_DECLARED_CHECKS_PREFIX = " Declared checks: ";
 
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
@@ -98,8 +109,17 @@ export type FinishContractAssessment =
 			verificationScope?: FinishContractVerificationScope;
 	  };
 
+/** A check declared for this session that has no project catalog entry, such as `run --verify`. */
+export interface SessionVerifier {
+	id: string;
+	/** A shell command string, run through the platform shell. */
+	command: string;
+}
+
 export interface FinishContractInput {
 	sessionEntries?: ReadonlyArray<unknown>;
+	/** Checks declared for this session only (`run --verify`); they join the project catalog's. */
+	sessionVerifiers?: ReadonlyArray<SessionVerifier>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
 	rigor?: Rigor;
@@ -217,7 +237,8 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 	}
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
-	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot);
+	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
+	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot, declared);
 	const limitations = collectLimitationEvidence(window);
 	let quality: QualityFinding[] = [];
 	if (input.workspaceRoot) {
@@ -302,13 +323,102 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 		return { kind: "ok", reason: "deletion_only", evidence: [], mutatedPaths };
 	}
 
+	const declaredIds = [...new Set(declared.map((check) => check.id))];
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message: FINISH_CONTRACT_ADVISORY_MESSAGE,
+		message:
+			declaredIds.length > 0
+				? `${FINISH_CONTRACT_ADVISORY_MESSAGE}${FINISH_CONTRACT_DECLARED_CHECKS_PREFIX}${declaredIds.join(", ")}.`
+				: FINISH_CONTRACT_ADVISORY_MESSAGE,
 		evidence: [],
 		mutatedPaths,
 	};
+}
+
+/** A declared check as the `&&` segments a shell run must contain, in the cwd it must run from. */
+interface DeclaredVerifierCommand {
+	id: string;
+	segments: string[][];
+	cwd: string;
+}
+
+/**
+ * Plain `command` checks of the project catalog plus the session's own. A
+ * numeric, perf or reproduce check judges more than an exit code, and a sweep
+ * check never runs bare, so running their command through the shell proves
+ * nothing and they are left out.
+ */
+function declaredVerifierCommands(
+	workspaceRoot: string | undefined,
+	sessionVerifiers: ReadonlyArray<SessionVerifier> | undefined,
+): DeclaredVerifierCommand[] {
+	if (workspaceRoot === undefined) return [];
+	const root = resolve(workspaceRoot);
+	const declared: DeclaredVerifierCommand[] = [];
+	for (const verifier of sessionVerifiers ?? []) {
+		const segments = shellAndSegments(verifier.command);
+		if (segments !== null) declared.push({ id: verifier.id, segments, cwd: root });
+	}
+	try {
+		const loaded = loadProjectVerifierCatalog(root);
+		for (const check of loaded.ok ? (loaded.source?.checks ?? []) : []) {
+			if (check.kind !== "command" || check.runs !== undefined) continue;
+			const cwd = resolveProjectVerifierExecutionCwd(check.cwd, root);
+			if (cwd instanceof Error) continue;
+			declared.push({ id: check.id, segments: [check.command], cwd: resolve(cwd) });
+		}
+	} catch {
+		// An unreadable catalog declares nothing the shell could be credited for.
+	}
+	return declared;
+}
+
+/**
+ * The literal words of each segment of a pure `&&` chain, or null when the
+ * command is anything else. Exit 0 of such a chain means every segment exited
+ * 0, which `;`, `||`, pipes, redirections and background jobs do not promise.
+ * Any word the shell would expand ($, backticks, substitutions, `~`, globs) is
+ * refused too, since its literal text is not what ran.
+ */
+function shellAndSegments(command: string): string[][] | null {
+	const segments: string[][] = [[]];
+	for (const token of scanShellLike(command)) {
+		const current = segments[segments.length - 1] as string[];
+		if (token.operator) {
+			if (token.value !== "&&" || current.length === 0) return null;
+			segments.push([]);
+			continue;
+		}
+		if (token.substitutions?.length || token.hiddenContent || token.ansiCQuoted || token.homeRelative) return null;
+		const raw = command.slice(token.start, token.end);
+		if (/[$`]/u.test(raw) && !/^'[^']*'$/u.test(raw)) return null;
+		if (!token.quoted && /[*?[]/u.test(token.value)) return null;
+		current.push(token.value);
+	}
+	return segments.every((segment) => segment.length > 0) ? segments : null;
+}
+
+/** The declared check a successful shell command ran whole, as a contiguous run of its `&&` segments. */
+function declaredVerifierRun(
+	command: string,
+	cwd: unknown,
+	workspaceRoot: string | undefined,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+): DeclaredVerifierCommand | null {
+	if (declared.length === 0 || workspaceRoot === undefined) return null;
+	const segments = shellAndSegments(command);
+	if (segments === null) return null;
+	const ranIn = resolve(workspaceRoot, typeof cwd === "string" && cwd.length > 0 ? cwd : ".");
+	const same = (left: string[], right: string[]) =>
+		left.length === right.length && left.every((word, index) => word === right[index]);
+	for (const check of declared) {
+		if (check.cwd !== ranIn) continue;
+		for (let start = 0; start + check.segments.length <= segments.length; start += 1) {
+			if (check.segments.every((segment, offset) => same(segment, segments[start + offset] as string[]))) return check;
+		}
+	}
+	return null;
 }
 
 function isClioConfigurationPath(path: string, workspaceRoot: string | undefined): boolean {
@@ -531,13 +641,20 @@ function collectValidationEvidence(
 	recent: ReadonlyArray<unknown>,
 	acceptanceChecks: ReadonlySet<string>,
 	workspaceRoot: string | undefined,
+	declared: ReadonlyArray<DeclaredVerifierCommand> = [],
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
+	const declaredRuns = new Map<string, ToolCallEvidenceCandidate>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
+	const entries = capabilityEntries(recent);
+	const mutations = declared.length > 0 ? mutationPositions(entries) : [];
+	// A declared check run through the shell counts only after the last edit by any other call.
+	const afterLastEdit = (index: number, toolCallId: string | null) =>
+		mutations.every((mutation) => mutation.index < index || mutation.toolCallId === toolCallId);
 
-	for (const entry of capabilityEntries(recent)) {
+	for (const [index, entry] of entries.entries()) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
 		if (protectedArtifact !== null) {
 			pushEvidence(evidence, seen, protectedArtifact);
@@ -547,6 +664,12 @@ function collectValidationEvidence(
 		const call = bashValidationCall(entry, acceptanceChecks, workspaceRoot);
 		if (call !== null) {
 			toolCalls.set(call.toolCallId, call);
+			continue;
+		}
+
+		const declaredRun = bashDeclaredVerifierCall(entry, workspaceRoot, declared);
+		if (declaredRun !== null) {
+			declaredRuns.set(declaredRun.toolCallId, declaredRun);
 			continue;
 		}
 
@@ -574,10 +697,16 @@ function collectValidationEvidence(
 			if (candidate !== undefined) {
 				pushEvidence(evidence, seen, validationEvidence(candidate, entry));
 			}
+			const declaredCandidate = declaredRuns.get(resultId);
+			if (declaredCandidate !== undefined && afterLastEdit(index, resultId)) {
+				pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
+			}
 			continue;
 		}
 
-		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
+		const bashExecution =
+			bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot) ??
+			(afterLastEdit(index, null) ? bashExecutionDeclaredEvidence(entry, workspaceRoot, declared) : null);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
 	}
 
@@ -633,6 +762,78 @@ function bashValidationCall(
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
 	return candidate;
+}
+
+/** A model `bash` call whose command runs a declared check whole; credited when its result succeeds. */
+function bashDeclaredVerifierCall(
+	entry: unknown,
+	workspaceRoot: string | undefined,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+): ToolCallEvidenceCandidate | null {
+	if (declared.length === 0) return null;
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null || stringFromFirst(payload, ["name", "toolName", "tool"]) !== "bash") return null;
+	const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+	if (typeof args?.command !== "string") return null;
+	const execution = workspaceValidationCommand(args.command, args.cwd, workspaceRoot);
+	if (execution === null) return null;
+	const check = declaredVerifierRun(execution.command, execution.cwd, workspaceRoot, declared);
+	if (check === null) return null;
+	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+	if (toolCallId === null) return null;
+	const turnId = turnIdOf(entry);
+	return {
+		toolCallId,
+		command: `${execution.command.trim()} (declared check ${check.id})`,
+		check: check.id,
+		...(turnId !== null ? { turnId } : {}),
+	};
+}
+
+/** An operator `!` run of a declared check, which carries its own exit code. */
+function bashExecutionDeclaredEvidence(
+	entry: unknown,
+	workspaceRoot: string | undefined,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+): FinishContractEvidence | null {
+	if (declared.length === 0) return null;
+	const record = asRecord(entry);
+	if (record?.kind !== "bashExecution" || typeof record.command !== "string") return null;
+	if (record.cancelled === true || record.exitCode !== 0) return null;
+	const execution = workspaceValidationCommand(record.command, record.cwd, workspaceRoot);
+	if (execution === null) return null;
+	const check = declaredVerifierRun(execution.command, execution.cwd, workspaceRoot, declared);
+	if (check === null) return null;
+	const turnId = turnIdOf(entry);
+	return {
+		kind: "validation_command",
+		summary: `validation command passed: ${execution.command.trim()} (declared check ${check.id})`,
+		check: check.id,
+		...(turnId !== null ? { turnId } : {}),
+	};
+}
+
+/** Where in the window each successful mutation settled, keyed by the call that made it. */
+function mutationPositions(entries: ReadonlyArray<unknown>): Array<{ index: number; toolCallId: string | null }> {
+	const calls = new Set<string>();
+	const positions: Array<{ index: number; toolCallId: string | null }> = [];
+	for (const [index, entry] of entries.entries()) {
+		const bashMutation = bashExecutionMutationPaths(entry);
+		if (bashMutation !== null) {
+			if (bashMutation.paths.length > 0) positions.push({ index, toolCallId: null });
+			continue;
+		}
+		const call = mutatingToolCall(entry);
+		if (call !== null) {
+			calls.add(call.toolCallId);
+			continue;
+		}
+		const resultId = successfulToolResultId(entry);
+		if (resultId !== null && calls.has(resultId)) positions.push({ index, toolCallId: resultId });
+	}
+	return positions;
 }
 
 function dispatchEvidenceCall(entry: unknown): ToolCallEvidenceCandidate | null {
