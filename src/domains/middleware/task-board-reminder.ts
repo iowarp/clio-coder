@@ -1,5 +1,6 @@
+import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import { type MiddlewareEffect, metadataNumber } from "./types.js";
+import { type MiddlewareEffect, metadataNumber, turnCanCallTool } from "./types.js";
 
 /**
  * Task-board reminder for explicitly enumerated multi-step requests. The
@@ -83,6 +84,9 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 
 			const steps = countEnumeratedSteps(input.text);
 			if (steps < 3) return NO_EFFECTS;
+			// A turn that cannot call tasks would spend its steps hunting for it.
+			// The shot is kept for a later enumerated turn that can.
+			if (!turnCanCallTool(input, ToolNames.Tasks)) return NO_EFFECTS;
 			spentForActiveSession = true;
 
 			// A turn already carrying an operator-chosen skill flows through that

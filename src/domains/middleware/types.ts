@@ -230,6 +230,17 @@ export function metadataString(input: MiddlewareHookInput, key: string): string 
 	return typeof value === "string" ? value : null;
 }
 
+/**
+ * Whether the turn can call `tool`, read from the host's active capability
+ * list: the attached and gateway-reachable tools the turn's constraints admit
+ * (`turnAllowsTool`). A hook that was not told reads as available, so a host
+ * without the list keeps the behavior it had before the check.
+ */
+export function turnCanCallTool(input: MiddlewareHookInput, tool: string): boolean {
+	const names = metadataString(input, "activeCapabilityNames") ?? metadataString(input, "activeToolNames");
+	return names === null || names.split(",").some((name) => name.trim() === tool);
+}
+
 export function isMiddlewareHook(value: string): value is MiddlewareHook {
 	return (MIDDLEWARE_HOOKS as ReadonlyArray<string>).includes(value);
 }

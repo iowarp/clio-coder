@@ -2,6 +2,7 @@ import { isPlanCloseQuestion, isPlanOnlyRequest } from "../../core/plan-request.
 import { ToolNames } from "../../core/tool-names.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
+import { turnCanCallTool } from "./types.js";
 
 // Pasted documents are evidence, not operator intent (#431).
 const PLAN_REQUEST = /\bplan(?:s|ning)?\b/iu;
@@ -60,7 +61,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 				closed = false;
 				const reminder = pending;
 				pending = null;
-				if (!deps.canAsk()) return [];
+				if (!deps.canAsk() || !turnCanCallTool(input, ToolNames.AskUser)) return [];
 				if (
 					reminder !== null &&
 					reminder.sessionId === input.sessionId &&

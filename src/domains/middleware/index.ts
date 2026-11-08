@@ -164,6 +164,7 @@ export {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	MIDDLEWARE_HOOKS,
 	MIDDLEWARE_REMINDER_SEVERITIES,
+	turnCanCallTool,
 } from "./types.js";
 export type {
 	MiddlewareEffectValidationResult,

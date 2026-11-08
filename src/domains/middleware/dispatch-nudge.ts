@@ -9,6 +9,7 @@ import { isTerminalRunEnvelope, type RunOutcome } from "../dispatch/types.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "./types.js";
+import { turnCanCallTool } from "./types.js";
 
 /**
  * Detached-dispatch collection nudge, packaged as a turn_end hook
@@ -157,7 +158,8 @@ export function createReadOnlyExplorationNudgeRegistration(deps: { workspaceRoot
 						advice === null ||
 						advice.sessionId !== input.sessionId ||
 						performance.now() - advice.at >= EXPLORATION_ADVISORY_IDLE_MS ||
-						(input.metadata?.requestContinuation !== true && !EXPLORATION_FOLLOW_UP.test(input.text?.trim() ?? ""))
+						(input.metadata?.requestContinuation !== true && !EXPLORATION_FOLLOW_UP.test(input.text?.trim() ?? "")) ||
+						!turnCanCallTool(input, ToolNames.Dispatch)
 					)
 						return [];
 					// The count belongs to the turn that ended; this turn only follows it up (#431).

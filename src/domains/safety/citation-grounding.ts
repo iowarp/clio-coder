@@ -26,7 +26,12 @@
 
 import { ToolNames } from "../../core/tool-names.js";
 import { resolveReadPath } from "../../tools/path-utils.js";
-import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
+import {
+	type MiddlewareEffect,
+	type MiddlewareHookInput,
+	type MiddlewareHookRegistration,
+	turnCanCallTool,
+} from "../middleware/index.js";
 import { mutationPathsForTool } from "./finish-contract.js";
 
 export const CITATION_GROUNDING_REGISTRATION_ID = "assessor.citation-grounding";
@@ -261,7 +266,12 @@ export function createCitationGroundingRegistration(
 			if (stopReason !== undefined && stopReason !== "stop") return [];
 			// The nudge asks for a re-read; with tools off it would force a call
 			// the loop guard blocks, so the answer stands as written.
-			if (input.metadata?.toolsLocked === true) return [];
+			if (
+				input.metadata?.toolsLocked === true ||
+				!turnCanCallTool(input, ToolNames.Read) ||
+				!turnCanCallTool(input, ToolNames.Grep)
+			)
+				return [];
 			const text = input.text ?? "";
 			if (evidence.readUnnumbered.size === 0 || text.trim().length === 0) return [];
 			// One nudge per operator turn: the answer after it passes as written.

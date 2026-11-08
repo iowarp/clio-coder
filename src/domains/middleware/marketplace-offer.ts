@@ -18,7 +18,7 @@ import {
 } from "../resources/skills/promotion.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSubstantiveUserTurn } from "./skills-reminder.js";
-import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber } from "./types.js";
+import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCanCallTool } from "./types.js";
 
 /**
  * Marketplace self-promotion offer. When the operator's request needs
@@ -330,6 +330,13 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
 			if (offersPaused) return NO_EFFECTS;
+			// The in-turn offer runs through context and ask_user; a turn that
+			// cannot call both keeps the match for a later turn that can.
+			if (
+				deps.interactive !== false &&
+				(!turnCanCallTool(input, ToolNames.AskUser) || !turnCanCallTool(input, ToolNames.Context))
+			)
+				return NO_EFFECTS;
 			const match = bestMatch(input.text ?? "");
 			if (!match) return NO_EFFECTS;
 			offeredNames.add(match.entry.name);
