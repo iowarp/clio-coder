@@ -454,7 +454,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 	},
 	[ToolNames.Limitation]: {
-		objective: "Record what the turn could not verify and why as a ledger receipt.",
+		objective: "Record a needed check that could not run here, and why.",
 		uiLabel: "Limitation",
 		retrySafety: "idempotent",
 		resultSizePolicy: {

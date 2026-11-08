@@ -46,7 +46,7 @@ function normalizePaths(value: unknown): string[] | null {
 export const limitationTool: ToolSpec = {
 	name: ToolNames.Limitation,
 	description:
-		"Record what this turn could not verify and why: call it once before your final reply when you changed files but could not run validation. The receipt stands in for validation evidence at the finish gate.",
+		"Record a check this turn needed but could not run here, and why: call it once before your final reply, including when you changed files but could not run validation. The receipt stands in for validation evidence at the finish gate.",
 	parameters: Type.Object({
 		scope: Type.String({ description: "What could not be verified, in one sentence." }),
 		reason: StringEnum(LIMITATION_REASONS, {
