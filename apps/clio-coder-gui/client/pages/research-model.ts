@@ -277,7 +277,7 @@ export function researchRequest(draft: ResearchDraft): { request: ResearchStartR
 	if (!Number.isInteger(trials) || trials < 2 || trials > 100)
 		return { problem: "Trials is a whole number of pairs from 2 to 100." };
 	const scope = draft.scope
-		.split(/[\n,]/)
+		.split("\n")
 		.map((glob) => glob.trim())
 		.filter(Boolean);
 	if (scope.some((glob) => glob.startsWith("-") || glob.length > 256))

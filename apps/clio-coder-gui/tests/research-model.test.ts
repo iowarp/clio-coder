@@ -124,14 +124,15 @@ test("the form sends only a request the contract accepts", () => {
 	});
 	const full = researchRequest({
 		...draft,
-		scope: "src/**, lib/*.py\n",
+		scope: "src/**/*.{ts,tsx}\n  lib/*.py\n\n",
 		maxCostUsd: "2",
 		goal: "  make\n it   faster ",
 		target: "litellm",
 		model: "mini/qwen3.8-27b-iq4r-v4",
 	});
 	assert.ok("request" in full);
-	assert.deepEqual(full.request.scope, ["src/**", "lib/*.py"]);
+	// One glob per line: a comma belongs to a brace glob, never splits it.
+	assert.deepEqual(full.request.scope, ["src/**/*.{ts,tsx}", "lib/*.py"]);
 	assert.equal(full.request.goal, "make it faster");
 	assert.equal(full.request.model, "mini/qwen3.8-27b-iq4r-v4");
 

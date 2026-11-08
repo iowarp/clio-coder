@@ -520,8 +520,13 @@ function NewCampaign({
 					))}
 				</div>
 				<label>
-					Scope (globs a candidate may change, comma separated; empty means any unprotected file)
-					<input value={draft.scope} placeholder="src/**/*.py" onChange={(event) => set({ scope: event.target.value })} />
+					Scope (globs a candidate may change, one per line; empty means any unprotected file)
+					<textarea
+						rows={3}
+						value={draft.scope}
+						placeholder={"src/**/*.{ts,tsx}\nlib/*.py"}
+						onChange={(event) => set({ scope: event.target.value })}
+					/>
 				</label>
 			</fieldset>
 			<fieldset disabled={running}>
