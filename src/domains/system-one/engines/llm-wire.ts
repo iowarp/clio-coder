@@ -73,6 +73,7 @@ const THINKING_OFF: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 const OPENROUTER_HEADERS = {
 	"HTTP-Referer": "https://github.com/iowarp/clio-coder",
 	"X-OpenRouter-Title": "Clio Coder",
+	"X-OpenRouter-Categories": "cli-agent",
 };
 
 /** Whether the runtime answers chat completions directly. */

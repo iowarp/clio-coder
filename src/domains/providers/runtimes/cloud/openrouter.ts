@@ -11,6 +11,7 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_HEADERS = {
 	"HTTP-Referer": "https://github.com/iowarp/clio-coder",
 	"X-OpenRouter-Title": "Clio Coder",
+	"X-OpenRouter-Categories": "cli-agent",
 };
 
 const defaultCapabilities: CapabilityFlags = {

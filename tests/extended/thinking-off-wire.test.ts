@@ -303,4 +303,30 @@ describe("System One's thinking switch reaches the wire", () => {
 		strictEqual(bodies[0]?.reasoning_effort, "none");
 		deepStrictEqual(bodies[0]?.chat_template_kwargs, { enable_thinking: false });
 	});
+
+	it("names Clio and its OpenRouter app category on the direct chat wire", async (t) => {
+		const headers: Headers[] = [];
+		const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+			headers.push(new Headers(init?.headers));
+			return new Response(JSON.stringify({ choices: [{ message: { content: "A" } }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		});
+		t.after(() => fetchMock.mock.restore());
+		const channel = createHttpChannel({
+			engine: "test",
+			target: { id: "router", runtime: "openrouter" } as never,
+			runtime: { id: "openrouter", auth: "none" } as never,
+			model: "m",
+			baseUrl: "https://openrouter.ai/api/v1",
+			host: { auth: undefined, credentialsPresent: () => new Set<string>() } as never,
+			signal: new AbortController().signal,
+		});
+		await channel.batch({ system: "s", user: "u" }, {}, 1);
+		strictEqual(headers.length, 1);
+		strictEqual(headers[0]?.get("http-referer"), "https://github.com/iowarp/clio-coder");
+		strictEqual(headers[0]?.get("x-openrouter-title"), "Clio Coder");
+		strictEqual(headers[0]?.get("x-openrouter-categories"), "cli-agent");
+	});
 });
