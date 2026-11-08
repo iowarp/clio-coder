@@ -442,6 +442,15 @@ A draft whose first character is `/` and that has one line opens the slash palet
 
 Settings pages write only the user layer, through the same validated writer as `/settings`. Pages that read one project's records or resolve its settings name it in a `Project context` picker, and a link to a project that is no longer open says so and asks for another. The application hides terminal-only controls (smooth streaming, interface mode, scrollbar, terminal progress, pane ratios and keybindings), shows terminal pane and desktop-notification settings read-only, and asks for confirmation before settings that expose project resource roots, delete run journals or load plugin packages. Structured collections without a guided editor are read-only and point to `/settings` in a terminal. Review settings (`safety.review.*`) apply to terminal sessions only, because ACP runs never fire the review.
 
+## Arena page
+
+The Arena page (`/arena`) runs [`clio-coder arena`](research-and-arena.md#arena-blind-side-by-side-comparison) for the project chosen in `Project context`. The server runs the CLI as a child process, so a match from the GUI and one from a terminal are the same record under `.clio-coder/arena/`. The rail has no link to it; the command palette lists it as `Arena`.
+
+- **New match** takes a prompt and 2 to 4 contenders. Each contender is a target picked from the configured connections plus a model id. It also takes an optional suite and check, and each contender's timeout (600 seconds by default). The form has no spend cap; use `arena run --max-cost-usd` in a terminal for one. While the match runs, the form shows its progress and a `Cancel match` button. A cancelled match keeps its partial record in the list.
+- **The match list** shows every match with its contender count, status, suite and vote, or `awaiting your vote`.
+- **A match** shows one column per blind label with the answer, the diff, the counts and the check result. Before a vote, the same identifying details are hidden and redacted as in `arena show`. The vote panel offers `A is better` (and so on for each label), `Tie` and `All bad`, with an optional note. After the vote, the names are revealed. `Change vote` replaces it, and the journal keeps the earlier one.
+- **Standings** count wins, losses, ties and both-bad votes per target/model. They show a score once a contender has 5 votes.
+
 ## Permissions and approvals
 
 An approval is the child's `session/request_permission` request, shown as a card pinned above the transcript. The card does not trap focus; the person can keep reading while it waits. The server holds one pending permission per session and checks it against the active tool call before showing it. A request that does not match an in-progress tool call and a pair of one-time choices is refused, fails the turn and retires that session's child.

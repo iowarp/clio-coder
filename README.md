@@ -280,6 +280,13 @@ checks and keeps the results as evidence; `clio-coder evidence list` and
 `/view` show them. A `reproduce` check reruns an analysis from sha256-pinned
 inputs, and `clio-coder claims` lists what was supported or refuted.
 
+**Climb a metric, compare models.** `clio-coder research` runs Clio's agent
+in worktrees to move one measured number, such as wall time, and keeps a change
+only when interleaved trials and a bootstrap interval show a real gain and every
+gate check passes. `clio-coder arena` runs one prompt on 2 to 4 models, shows
+their work blind, and builds standings from your votes. See
+[research and arena](docs/guide/research-and-arena.md).
+
 **Read scientific data.** The `data` tool inspects HDF5, NetCDF, and Parquet
 files with summary statistics, so the agent reasons about real outputs instead
 of guessing.

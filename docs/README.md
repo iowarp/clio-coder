@@ -103,6 +103,7 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
 | What System One sends, where it can only tighten, and what it cannot tell you | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
+| Improve a measured metric with verified research campaigns, and compare models blind in the arena with vote-based standings | [Research and Arena](guide/research-and-arena.md) |
 | The `/view` artifact viewer | [Observability](architecture/observability.md#view) |
 | Run evidence assessments, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
 | Telemetry events, per-scope journals, capture modes and consent, objects, seals and bundles, verify, share and import, retention, and the read model | [Telemetry](architecture/telemetry.md) |

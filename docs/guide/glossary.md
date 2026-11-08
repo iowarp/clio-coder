@@ -321,3 +321,11 @@ This document defines the core architectural concepts and terminology used throu
 ### 80. Sweep
 - **Definition**: A Slurm parameter sweep run as one experiment by the `hpc-sweep` skill: a job array planned from a sweep file, dry-run by default, submitted only on the operator's word, checked run by run with a verify catalog check that declares `runs`, and tabulated with every run's verdict. See [Parameter sweeps](slurm.md#parameter-sweeps).
 - **Owning Type**: The `runs` field of a verify catalog check in [catalog.ts](../../src/tools/verify/catalog.ts).
+
+### 81. Research campaign
+- **Definition**: A budgeted hill climb started by `clio-coder research start` on one metric of one verifier check. Each iteration runs Clio's agent in a fresh worktree. The change is kept on the branch `clio/research/<id>` only when interleaved trials and a seeded bootstrap interval show an improvement over the current best and every gate check passes. The campaign's spec, journal and raw samples are stored under `.clio-coder/research/<id>/`, and `research report` regrades them. See [Research and Arena](research-and-arena.md#research-a-verified-hill-climb).
+- **Owning Type**: `ResearchCampaign` in [types.ts](../../src/domains/research/types.ts).
+
+### 82. Arena match
+- **Definition**: One prompt run by `clio-coder arena run` on 2 to 4 target/model contenders, each in its own worktree. They are shown under blind labels in a seeded order until you vote. Standings are built from those votes and never from a model's judgment. See [Research and Arena](research-and-arena.md#arena-blind-side-by-side-comparison).
+- **Owning Type**: `ArenaMatch` in [types.ts](../../src/domains/arena/types.ts).
