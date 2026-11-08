@@ -92,6 +92,7 @@ export const coreTests = [
 	"doctor-unknown-runtime",
 	"plugin-engine",
 	"claims-ledger",
+	"arena",
 	"cli-leaf-help",
 	"mux-platform-win32",
 	"keyboard-model",
