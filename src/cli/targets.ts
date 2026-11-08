@@ -786,6 +786,17 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 	// Same merged trusted view dispatch resolves profiles from; see runProfileBindings.
 	const { settings, sources } = readLayeredSettings(process.cwd());
 	const byId = new Map(settings.targets.map((target) => [target.id, target] as const));
+	const fleetDefault = settings.fleet.default;
+	const defaultTarget = fleetDefault.target ? byId.get(fleetDefault.target) : undefined;
+	const defaultRow = fleetDefault.target
+		? {
+				target: fleetDefault.target,
+				runtime: defaultTarget?.runtime ?? null,
+				model: fleetDefault.model,
+				thinkingLevel: fleetDefault.thinkingLevel,
+				source: settingsSourceFor(sources, "fleet.default.target"),
+			}
+		: null;
 	const rows = Object.entries(settings.fleet.profiles).map(([name, profile]) => {
 		const target = profile.target ? byId.get(profile.target) : undefined;
 		return {
@@ -798,8 +809,16 @@ function runFleet(args: ReadonlyArray<string>, usage = "clio-coder targets fleet
 		};
 	});
 	if (json) {
-		process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify({ default: defaultRow, profiles: rows }, null, 2)}\n`);
 		return 0;
+	}
+	if (defaultRow) {
+		const model = defaultRow.model ?? "the target's default";
+		process.stdout.write(
+			`fleet default: target ${defaultRow.target} (${defaultRow.runtime ?? "unknown runtime"}), model ${model}, thinking ${defaultRow.thinkingLevel}, from ${defaultRow.source}\n`,
+		);
+	} else {
+		process.stdout.write("fleet default: not set. run `clio-coder targets use <id> --fleet-model <model>` to set it.\n");
 	}
 	if (rows.length === 0) {
 		process.stdout.write("no fleet profiles configured. run `clio-coder targets profile <name> <id>` to add one.\n");

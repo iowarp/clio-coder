@@ -897,6 +897,9 @@ has the settings details.
   points at the official `copilot login` plus a target on the `copilot-sdk`
   runtime. A credential stored under `github-copilot` is ignored, and
   `COPILOT_GITHUB_TOKEN` no longer supplies a `github-copilot` key. See [GitHub Copilot](configuration-and-targets.md#github-copilot).
+- **`clio-coder targets fleet --json`.** It prints an object,
+  `{ "default": ..., "profiles": [...] }`, instead of the bare profile array;
+  read the profiles from `.profiles`.
 
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:

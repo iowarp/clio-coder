@@ -371,7 +371,7 @@ for the Sophia and Metis URLs and model IDs.
 | `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. With `--target <id>` it probes only that target. |
 | `clio-coder targets add` | Run target setup. |
 | `clio-coder targets use <id>` | Without role flags, set chat and fleet to the target default or shared `--model`; preserve memory. With `--orchestrator-model`, `--background-model`, `--fleet-target` or `--fleet-model`, change only the named roles. `--model` supplies a fallback only for a selected role that needs one. See [command contracts](commands-and-modes.md#cli-commands). |
-| `clio-coder targets fleet [--json]` | Show the worker (fleet) routing. Alias `workers`. |
+| `clio-coder targets fleet [--json]` | Show the worker (fleet) routing: the fleet default and every profile. Alias `workers`. |
 | `clio-coder targets profile <subcommand>` | Use `list`, `set <name> <id> [--model] [--thinking]`, `remove <name> [--force]`, `rename`, `bind <agentId> <profileName>`, `unbind <agentId>`, or `bindings` for worker routes and agent bindings. Alias `worker`. |
 | `clio-coder targets remove <id>`, `rename <old> <new>`, `convert <id> --runtime <runtimeId>` | Maintain target entries. |
 

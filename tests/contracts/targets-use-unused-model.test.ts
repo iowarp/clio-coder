@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { runTargetsCommand } from "../../src/cli/targets.js";
-import { TargetUseRefusal, useTargetInSettings } from "../../src/core/config.js";
+import { TargetUseRefusal, updateSettings, useTargetInSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -104,4 +104,44 @@ it("lists an agent binding kept only in trusted project-local settings", async (
 	const coder = rows.find((row) => row.agentId === "coder");
 	strictEqual(coder?.profile, "local-fast");
 	strictEqual(coder?.source, "project.local");
+});
+
+async function stdoutOf(args: string[]): Promise<{ code: number; output: string }> {
+	const written: string[] = [];
+	const original = process.stdout.write.bind(process.stdout);
+	process.stdout.write = ((chunk: string | Uint8Array) => {
+		written.push(String(chunk));
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		const code = await runTargetsCommand(args);
+		return { code, output: written.join("") };
+	} finally {
+		process.stdout.write = original;
+	}
+}
+
+it("shows the fleet default that targets use --fleet-model sets, with no profiles configured", async () => {
+	updateSettings((value) => {
+		value.targets = [{ id: "blade", runtime: "litellm", url: "http://127.0.0.1:9", defaultModel: "dynamo/main" }];
+	});
+	const unset = await stdoutOf(["fleet"]);
+	strictEqual(unset.code, 0);
+	match(unset.output, /^fleet default: not set\. run `clio-coder targets use <id> --fleet-model <model>`/mu);
+
+	updateSettings((value) => {
+		value.fleet.default = { target: "blade", model: "dynamo/fast", thinkingLevel: "off" };
+	});
+	const text = await stdoutOf(["fleet"]);
+	match(text.output, /^fleet default: target blade \(litellm\), model dynamo\/fast, thinking off, from user$/mu);
+	match(text.output, /no fleet profiles configured/u);
+	const json = JSON.parse((await stdoutOf(["fleet", "--json"])).output) as {
+		default: { target: string; model: string | null; source: string } | null;
+		profiles: unknown[];
+	};
+	deepStrictEqual(
+		{ target: json.default?.target, model: json.default?.model, source: json.default?.source },
+		{ target: "blade", model: "dynamo/fast", source: "user" },
+	);
+	deepStrictEqual(json.profiles, []);
 });
