@@ -262,11 +262,10 @@ function turnPolicy(
 	input: string,
 	root: string,
 	armed: PendingSkillToolPolicy | undefined,
-	readOnly = false,
 ): PendingSkillToolPolicy | undefined {
 	const list = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
 	const requests = parsePendingSkillRequests(input, list, { cwd: root }).pendingSkillRequests;
-	return withModelSkillActivation(createPendingSkillToolPolicy(requests) ?? armed, modelMayActivateSkills(readOnly));
+	return withModelSkillActivation(createPendingSkillToolPolicy(requests) ?? armed, modelMayActivateSkills());
 }
 
 let explicitPaths: string[] = [];
@@ -879,21 +878,6 @@ describe("model skill activation by autonomy level", () => {
 			strictEqual(recorded.at(-1)?.reasonCode, "skill_surface");
 		});
 	}
-
-	it("keeps activation operator-gated on a read-only run", async () => {
-		const root = scratchRoot();
-		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
-		const context = contextToolFor(root);
-		const policy = turnPolicy("look at the failing test", root, undefined, true);
-		deepStrictEqual(skillSurfaceNames(policy), []);
-		const refused = await context.run({ scope: "skills", name: "interview" }, invokeOptions(policy));
-		strictEqual(refused.kind, "error");
-		if (refused.kind === "error") {
-			match(refused.message, /only the operator can activate a skill/u);
-			match(refused.message, /Suggested skill: \/skill/u);
-			deepStrictEqual(refused.details?.refusal, { subject: "skill", name: "interview", kind: "operator-only" });
-		}
-	});
 
 	it("still refuses an uninstalled marketplace skill at yolo", async () => {
 		const root = scratchRoot();

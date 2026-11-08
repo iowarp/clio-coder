@@ -128,9 +128,13 @@ export interface AutonomyMappingOptions {
 	readOutsideWorkspace?: boolean;
 }
 
-/** A read-only dispatch does not let the model activate skills. */
-export function modelMayActivateSkills(readOnly = false): boolean {
-	return !readOnly;
+/**
+ * Loading a skill reads its body and can only narrow the tool surface, so a
+ * read-only run may load one too; read-only still refuses every later call
+ * that is not a read.
+ */
+export function modelMayActivateSkills(): boolean {
+	return true;
 }
 
 /**

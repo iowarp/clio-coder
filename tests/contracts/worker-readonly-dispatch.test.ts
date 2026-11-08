@@ -166,9 +166,9 @@ test("read-only admission denies mutation, steering, and outside reads without p
 			baseActionClass: "read",
 			run: async () => ({ kind: "ok", output: "skill activated" }),
 		});
+		// Loading a skill reads it and can only narrow the surface, so read-only admits it.
 		const skill = await registry.invoke({ tool: ToolNames.Context, args: { scope: "skills", name: "example" } });
-		strictEqual(skill.kind, "blocked");
-		if (skill.kind === "blocked") match(skill.reason, /this run is read-only/u);
+		strictEqual(skill.kind, "ok");
 		strictEqual(parked, false);
 	} finally {
 		env.restore();

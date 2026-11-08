@@ -43,7 +43,7 @@ The `operating.skill-installs` fragment ([skill-installs.md](../../src/domains/p
 - `/skill` is an interactive command, not a shell command.
 - Do not bypass integrity, import trust or workspace trust checks.
 
-Activation is separate from installation. In `default` and `yolo` the model loads a matching ready skill itself through `context(scope="skills", name="<name>")` and follows its workflow and tool restrictions. A read-only dispatched run cannot activate skills. Loading narrows allowed tools and can never grant a tool the host disallows.
+Activation is separate from installation. In `default` and `yolo` the model loads a matching ready skill itself through `context(scope="skills", name="<name>")` and follows its workflow and tool restrictions. A read-only run can load a skill too; read-only still refuses every call the skill asks for that is not a read. Loading narrows allowed tools and can never grant a tool the host disallows.
 
 ## Marketplace offers
 

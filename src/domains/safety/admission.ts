@@ -323,10 +323,6 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	return deny("read_only", `${tool} denied: this run is read-only (${disposition.reason})`, disposition.decision);
 }
 
-function activatesSkill(call: ClassifierCall): boolean {
-	return call.tool === ToolNames.Context && call.args?.scope === "skills" && typeof call.args?.name === "string";
-}
-
 function admit(input: AdmissionInput): AdmissionDisposition {
 	const principal = input.principal;
 	const level: AutonomyLevel =
@@ -403,8 +399,7 @@ function admit(input: AdmissionInput): AdmissionDisposition {
 		) ||
 			input.confirmationRuleId !== undefined ||
 			readOutside ||
-			netAsk !== undefined ||
-			activatesSkill(call))
+			netAsk !== undefined)
 	) {
 		return deny("read_only", `${call.tool} denied: this run is read-only`, decision);
 	}

@@ -751,7 +751,8 @@ is still visible, while a ref also retrieves historical results behind a summary
 Omit both for bounded discovery. An unchanged successful reread records recall
 provenance while returning the current read body. Workspace returns the cached
 session git/project snapshot and requires a bound session. Skills list or activate
-installed skills in `default` and `yolo`; read-only runs cannot activate them, and
+installed skills in `default` and `yolo`, and in read-only runs, where loading
+only reads the skill and every later non-read call stays refused;
 recipe-bound workers can load only their declared skills. Recall retrieves evicted
 observations without changing the eviction marker. Workspace, settings, and
 skills use a 50KB cap.
