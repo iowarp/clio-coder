@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { runArenaCommand } from "../../src/cli/arena.js";
+import { parseRunCliArgs } from "../../src/cli/args.js";
 import {
 	type ArenaMatch,
 	ArenaRevealRefused,
@@ -193,6 +195,87 @@ describe("arena votes and reveal", () => {
 	});
 });
 
+describe("arena blind diagnostics", () => {
+	it("redacts contender identities, sessions and worktrees from errors before a vote and keeps them raw after", () => {
+		const root = join(mkdtempSync(join(tmpdir(), "clio-coder-arena-")), "arena");
+		const id = "20260101-000000-feed";
+		const raw =
+			"target t2 not found in settings.targets; model gpt-6-luna. session sess-abc at /r/.clio-coder/worktrees/arena-x/candidate-2 on clio-coder/compete/arena-x/2 (contender 2)";
+		const failed = match(
+			id,
+			[
+				["t1", "m1"],
+				["t2", "gpt-6-luna"],
+			],
+			{ order: [1, 0], error: "contender 2 failed: target t2 not found" },
+		);
+		const second = failed.contenders[1];
+		if (second?.facts) {
+			second.facts.sessionId = "sess-abc";
+			second.facts.error = raw;
+			second.facts.check = { id: "unit", exitCode: 1, tail: `fail in ${raw}` };
+		}
+		writeMatch(root, failed);
+		const blind = arenaMatchView(root, failed, null);
+		const text = JSON.stringify([blind.error, ...blind.entries.map((entry) => [entry.error, entry.check])]);
+		assert.doesNotMatch(text, /\bt2\b|gpt-6-luna|sess-abc|candidate-2|arena-x|contender 2/);
+		assert.match(blind.entries[0]?.error ?? "", /target \[hidden\] not found .*model \[hidden\]\./);
+		const shown = arenaMatchView(root, failed, vote("A"), { reveal: true });
+		assert.equal(shown.entries[0]?.error, raw);
+		assert.equal(shown.error, "contender 2 failed: target t2 not found");
+	});
+});
+
+describe("arena vote lock", () => {
+	it("lets exactly one of several concurrent processes land a first vote", async () => {
+		const base = mkdtempSync(join(tmpdir(), "clio-coder-arena-lock-"));
+		const root = join(base, "arena");
+		const id = "20260101-000000-1111";
+		writeMatch(
+			root,
+			match(id, [
+				["t1", "m1"],
+				["t2", "m2"],
+			]),
+		);
+		const go = join(base, "go");
+		const script = join(base, "voter.mjs");
+		const store = resolve("src/domains/arena/store.ts");
+		writeFileSync(
+			script,
+			`import { existsSync } from "node:fs";
+const { recordVote } = await import(${JSON.stringify(store)});
+while (!existsSync(${JSON.stringify(go)})) await new Promise((r) => setTimeout(r, 5));
+try { recordVote(${JSON.stringify(root)}, ${JSON.stringify(id)}, { choice: process.argv[2], note: null, replace: false }); console.log("ok"); }
+catch (error) { console.log("refused " + error.message); }
+`,
+		);
+		const voters = ["A", "B", "tie", "A", "B", "both-bad"].map(
+			(choice) =>
+				new Promise<string>((done, fail) => {
+					const child = spawn(process.execPath, ["--import", "tsx", script, choice], {
+						stdio: ["ignore", "pipe", "inherit"],
+					});
+					let out = "";
+					child.stdout.on("data", (chunk) => {
+						out += chunk;
+					});
+					child.on("error", fail);
+					child.on("close", () => done(out.trim()));
+				}),
+		);
+		await new Promise((r) => setTimeout(r, 1500));
+		writeFileSync(go, "");
+		const outcomes = await Promise.all(voters);
+		assert.equal(outcomes.filter((line) => line === "ok").length, 1, outcomes.join("\n"));
+		assert.ok(
+			outcomes.every((line) => line === "ok" || /already has a vote/.test(line)),
+			outcomes.join("\n"),
+		);
+		assert.equal(readFileSync(join(root, "votes.jsonl"), "utf8").trim().split("\n").length, 1);
+	});
+});
+
 describe("arena standings", () => {
 	it("tallies wins, ties and both-bad, and scores only past the vote floor", () => {
 		const pair = (n: number) =>
@@ -226,21 +309,44 @@ describe("arena standings", () => {
 		assert.ok(few.standings.every((s) => s.score === null));
 		assert.equal(computeStandings(entries, "other").standings.length, 0);
 	});
+	it("fits to convergence, so a longer unbeaten record never scores lower", () => {
+		const record = (wins: number) =>
+			computeStandings(
+				Array.from({ length: wins }, (_, n) => ({
+					match: match(`20260101-000000-${String(n).padStart(4, "0")}`, [
+						["x", "strong"],
+						["y", "weak"],
+					]),
+					vote: vote("A"),
+				})),
+			).standings;
+		const scores = [10, 100, 1000].map((wins) => record(wins).map((s) => s.score as number));
+		for (const [winner = Number.NaN, loser = Number.NaN] of scores) {
+			assert.ok(Number.isFinite(winner) && Number.isFinite(loser));
+			assert.equal(winner + loser, 2000, "the anchored fit is symmetric about 1000");
+		}
+		assert.ok((scores[0]?.[0] as number) < (scores[1]?.[0] as number), `10-0 ${scores[0]} vs 100-0 ${scores[1]}`);
+		assert.ok((scores[1]?.[0] as number) < (scores[2]?.[0] as number), `100-0 ${scores[1]} vs 1000-0 ${scores[2]}`);
+	});
 });
 
 const FAKE_CLIO = `
-const { writeFileSync } = require("node:fs");
+const { unlinkSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
 if (args[0] === "verifiers") { console.log("check " + args[2] + ": pass"); process.exit(0); }
 const cwd = args[args.indexOf("--cwd") + 1];
 const model = args[args.indexOf("--model") + 1];
+const end = args.indexOf("--");
+const prompt = end === -1 ? null : args.slice(end + 1).join(" ");
+if (process.env.ARENA_PID_DIR) writeFileSync(join(process.env.ARENA_PID_DIR, model + ".pid"), String(process.pid));
 writeFileSync(join(cwd, "answer.txt"), model + "\\n");
 const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
 out({ type: "tool_execution_end", actionClass: "write", outcome: "ok", isError: false });
-out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model }] } });
+out({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "wrote " + model + " for " + JSON.stringify(prompt) }] } });
 if (model === "slow") setTimeout(() => {}, 60_000);
+if (model === "breaker") setTimeout(() => unlinkSync(process.env.ARENA_BREAK), 800);
 `;
 
 function scratchRepo(): { base: string; repo: string; fake: string; gitIn: (...args: string[]) => Buffer } {
@@ -308,5 +414,94 @@ describe("arena runner", () => {
 		assert.equal(existsSync(join(repo, "answer.txt")), false, "the main checkout is untouched");
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 		assert.equal(gitIn("branch", "--list", "clio-coder/compete/*").toString().trim(), "");
+	});
+	it("stops the other contenders when one fails outright and cleans up only after both settle", async () => {
+		const { base, repo, fake, gitIn } = scratchRepo();
+		const pids = join(base, "pids");
+		mkdirSync(pids);
+		const env: Record<string, string> = { ARENA_PID_DIR: pids };
+		const started = Date.now();
+		const result = await runArenaMatch({
+			cwd: repo,
+			prompt: "hang",
+			contenders: [
+				{ target: "t", model: "slow" },
+				{ target: "t", model: "breaker" },
+			],
+			timeoutSeconds: 120,
+			clio: { file: process.execPath, args: [fake] },
+			env,
+			// The breaker removes its own stream file, so reading it back throws while "slow" still runs.
+			onStarted: (begun) => {
+				env.ARENA_BREAK = join(arenaRoot(repo), begun.id, "contender-2.ndjson");
+			},
+		});
+		assert.equal(result.status, "failed");
+		assert.match(result.error ?? "", /ENOENT/);
+		assert.ok(Date.now() - started < 30_000, "the slow sibling was stopped, not waited out");
+		assert.ok(result.contenders.every((contender) => contender.status !== "running" && contender.status !== "pending"));
+		const slow = Number(readFileSync(join(pids, "slow.pid"), "utf8"));
+		assert.throws(() => process.kill(slow, 0), /ESRCH/);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
+	it("passes a prompt that looks like a flag as text and names only blind labels in progress", async () => {
+		const { repo, fake } = scratchRepo();
+		const progress: string[] = [];
+		const result = await runArenaMatch({
+			cwd: repo,
+			prompt: "--help",
+			contenders: [
+				{ target: "t", model: "m1" },
+				{ target: "t", model: "m2" },
+				{ target: "t", model: "m3" },
+			],
+			// A seed whose order is not the input order, so a label and an input position differ.
+			seed: Array.from({ length: 50 }, (_, n) => n).find((n) => blindOrder(3, n).join("") !== "012") as number,
+			timeoutSeconds: 30,
+			readOnly: true,
+			clio: { file: process.execPath, args: [fake] },
+			env: {},
+			onProgress: (line) => progress.push(line),
+		});
+		assert.equal(result.status, "complete", result.error ?? "");
+		for (const contender of result.contenders)
+			assert.equal(contender.facts?.finalText, `wrote ${contender.model} for "--help"`);
+		const finished = progress.filter((line) => line.startsWith("contender "));
+		assert.equal(finished.length, 3);
+		for (const line of finished) assert.match(line, /^contender [A-D] \w+$/);
+		const labels = finished.map((line) => line.split(" ")[1]).sort();
+		assert.deepEqual(labels, ["A", "B", "C"]);
+	});
+});
+
+describe("prompts that start with a dash", () => {
+	it("run reads everything after -- as task text", () => {
+		const parsed = parseRunCliArgs(["--target", "t", "--", "--read-only", "--continue", "@notes.md"]);
+		assert.deepEqual(parsed.messages, ["--read-only", "--continue", "@notes.md"]);
+		assert.notEqual(parsed.readOnly, true);
+		assert.notEqual(parsed.help, true);
+		assert.deepEqual(parseRunCliArgs(["--", "- fix bug"]).messages, ["- fix bug"]);
+	});
+
+	it("arena does not read --help after -- as a request for help", async () => {
+		const write = process.stdout.write;
+		let out = "";
+		process.stdout.write = ((chunk: string) => {
+			out += chunk;
+			return true;
+		}) as typeof process.stdout.write;
+		const errWrite = process.stderr.write;
+		process.stderr.write = (() => true) as typeof process.stderr.write;
+		try {
+			const code = await runArenaCommand(["show", "--", "--help"]);
+			assert.notEqual(code, 0);
+			assert.doesNotMatch(out, /Usage:/);
+			assert.equal(await runArenaCommand(["show", "--help", "--", "x"]), 0);
+			assert.match(out, /Usage:/);
+		} finally {
+			process.stdout.write = write;
+			process.stderr.write = errWrite;
+		}
 	});
 });
