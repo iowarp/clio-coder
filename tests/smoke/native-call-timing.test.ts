@@ -62,6 +62,9 @@ test("built native timing includes delayed response headers", async () => {
 			TMPDIR: scratch.dir,
 			NODE_ENV: "test",
 			CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
+			// Yolo resolves high rigor, whose finish nudge would add a third call;
+			// that gate is covered by tests/contracts/contained-yolo.test.ts.
+			CLIO_CODER_RIGOR: "normal",
 		};
 		const workspace = join(scratch.dir, "workspace");
 		mkdirSync(workspace);
