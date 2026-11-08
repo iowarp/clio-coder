@@ -1,6 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import {
+	closeSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	realpathSync,
+	unlinkSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
@@ -119,13 +130,31 @@ function refuseUndeclaredCheck(cwd: string, id: string): void {
  * A contender's worktree is cut from HEAD, so a catalog the project keeps untracked or ignored is not in it, and a
  * tracked one may be stale beside the operator's edits. The check is judged by the source project's catalog: it is
  * copied in before the contender starts and again before the check runs, over anything the contender left there.
+ * This runs outside the sandbox, so it never follows a link the worktree holds: a directory on the way that is a link
+ * (committed or planted) refuses the copy, and whatever sits at the catalog path, a link included, is removed and
+ * the file created fresh.
  */
-function copySourceCatalog(sourceCwd: string, contenderCwd: string): void {
+function copySourceCatalog(sourceCwd: string, worktree: string, contenderCwd: string): void {
 	const source = join(sourceCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
 	if (!existsSync(source)) return;
-	const target = join(contenderCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
-	mkdirSync(dirname(target), { recursive: true });
-	copyFileSync(source, target);
+	const parts = relative(worktree, join(contenderCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH))
+		.split(sep)
+		.filter((part) => part.length > 0);
+	const name = parts.pop();
+	if (name === undefined || parts.includes("..")) throw new Error(`the verifier catalog is outside the worktree`);
+	let dir = realpathSync(worktree);
+	for (const part of parts) {
+		dir = join(dir, part);
+		const stat = lstatSync(dir, { throwIfNoEntry: false });
+		if (stat === undefined) mkdirSync(dir);
+		else if (!stat.isDirectory())
+			throw new Error(
+				`refusing to copy the verifier catalog: ${relative(worktree, dir)} is not a directory in the worktree`,
+			);
+	}
+	const target = join(dir, name);
+	if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) unlinkSync(target);
+	writeFileSync(target, readFileSync(source), { flag: "wx" });
 }
 
 async function runCheck(input: ArenaRunInput, cwd: string, id: string): Promise<ArenaCheckFact> {
@@ -205,7 +234,7 @@ async function runContender(
 	}
 	if (input.check) {
 		try {
-			if (place.worktree !== null) copySourceCatalog(resolve(input.cwd), place.cwd);
+			if (place.worktree !== null) copySourceCatalog(resolve(input.cwd), place.worktree, place.cwd);
 			check = await runCheck(input, place.cwd, input.check);
 		} catch (caught) {
 			check = { id: input.check, exitCode: null, tail: errorText(caught) };
@@ -295,7 +324,13 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 				const slot = blindSlot(match, contender.index);
 				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, slot, base.sha);
 				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path });
-				if (input.check) copySourceCatalog(cwd, join(worktree.path, sub));
+				if (input.check) {
+					try {
+						copySourceCatalog(cwd, worktree.path, join(worktree.path, sub));
+					} catch {
+						// The copy before the check repeats this and reports a refusal as the check's result.
+					}
+				}
 				registerCompeteGroupRun(ownership, { runId: `${id}-${slot}`, pid: null, runtimeKind: "subprocess" });
 			}
 		} else {

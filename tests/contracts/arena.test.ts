@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -514,6 +514,55 @@ describe("arena runner", () => {
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 		assert.equal(gitIn("branch", "--list", "clio-coder/compete/*").toString().trim(), "");
 	});
+	it("never writes the catalog through a link the worktree holds from HEAD", async () => {
+		const { base, repo, fake, gitIn } = scratchRepo();
+		const run = () =>
+			runArenaMatch({
+				cwd: repo,
+				prompt: "write your model name",
+				contenders: [
+					{ target: "t", model: "m1" },
+					{ target: "t", model: "m2" },
+				],
+				timeoutSeconds: 30,
+				check: "unit",
+				clio: { file: process.execPath, args: [fake] },
+				env: {},
+			});
+		// HEAD links the catalog file to a file outside the repository; the checkout holds a real catalog.
+		const victim = join(base, "victim.txt");
+		writeFileSync(victim, "keep me\n");
+		mkdirSync(join(repo, ".clio-coder"));
+		symlinkSync(victim, join(repo, ".clio-coder/verifiers.yaml"));
+		gitIn("add", "-f", ".clio-coder/verifiers.yaml");
+		gitIn("commit", "-qm", "link the catalog");
+		rmSync(join(repo, ".clio-coder/verifiers.yaml"));
+		writeFileSync(join(repo, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
+		const linkedFile = await run();
+		assert.equal(readFileSync(victim, "utf8"), "keep me\n");
+		for (const contender of linkedFile.contenders) assert.match(contender.facts?.check?.tail ?? "", /check unit: pass/);
+
+		// HEAD links the catalog's directory outside the repository: the copy is refused, nothing lands there.
+		const outside = join(base, "outside");
+		mkdirSync(outside);
+		gitIn("rm", "-q", "--cached", ".clio-coder/verifiers.yaml");
+		rmSync(join(repo, ".clio-coder"), { recursive: true });
+		symlinkSync(outside, join(repo, ".clio-coder"));
+		gitIn("add", "-f", ".clio-coder");
+		gitIn("commit", "-qm", "link the catalog directory");
+		rmSync(join(repo, ".clio-coder"));
+		mkdirSync(join(repo, ".clio-coder"));
+		writeFileSync(join(repo, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
+		const linkedDir = await run();
+		assert.equal(existsSync(join(outside, "verifiers.yaml")), false);
+		for (const contender of linkedDir.contenders)
+			assert.match(
+				contender.facts?.check?.tail ?? "",
+				/refusing to copy the verifier catalog: \.clio-coder is not a directory/,
+			);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
 	it("refuses a --check the source project does not declare before any contender starts", async () => {
 		const { repo, fake, gitIn } = scratchRepo();
 		await assert.rejects(
