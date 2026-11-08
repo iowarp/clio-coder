@@ -156,19 +156,34 @@ test("an attempt queued for capacity launches at the dispatcher's live level, no
 	}
 });
 
-test("a dispatcher that leaves yolo during launch preparation spawns its worker without the yolo grant", async () => {
-	const env = await isolateClioEnv("clio-ceiling-prep-");
+/**
+ * Dispatches one unconfined-yolo attempt whose launch preparation (opening the owner's telemetry session) runs
+ * `duringPrep` with setters for the dispatcher's live level and its current settings, and returns the spawned spec
+ * and the receipt.
+ */
+async function dispatchAcrossLaunchPrep(
+	prefix: string,
+	duringPrep: (change: { level(next: "default" | "yolo"): void; settings(next: typeof DEFAULT_SETTINGS): void }) => void,
+) {
+	const env = await isolateClioEnv(prefix);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.safety.autonomy = "yolo";
 	settings.safety.yoloConfinement = "unconfined";
 	settings.safety.yoloUnconfinedAccepted = true;
+	let current = settings;
 	let live: "default" | "yolo" = "yolo";
 	let prepared = false;
 	const stub = dispatchStubContext({ settings });
-	// Opening the owner's telemetry session is one of the waits between capacity admission and spawn.
 	const telemetry = {
 		acquireTelemetrySession: async () => {
-			live = "default";
+			duringPrep({
+				level: (next) => {
+					live = next;
+				},
+				settings: (next) => {
+					current = next;
+				},
+			});
 			await new Promise((resolve) => setTimeout(resolve, 20));
 			prepared = true;
 			return undefined;
@@ -181,6 +196,7 @@ test("a dispatcher that leaves yolo during launch preparation spawns its worker 
 		{ ...stub, getContract },
 		{
 			operatorAutonomy: () => live,
+			getSettings: () => current,
 			spawnWorker: (spec): SpawnedWorker => {
 				specs.push(spec);
 				return {
@@ -206,17 +222,35 @@ test("a dispatcher that leaves yolo during launch preparation spawns its worker 
 			ownerSessionCwdHash: "owner-cwd",
 		});
 		const receipt = await handle.finalPromise;
-		ok(prepared, "the dispatcher dropped to default inside launch preparation");
+		ok(prepared, "the dispatcher changed inside launch preparation");
 		const spec = specs[0];
 		ok(spec);
-		strictEqual(spec.permit.allowance.executeAutonomy, undefined);
 		strictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).permit.digest, spec.permit.digest);
-		strictEqual(receipt.safety?.permit?.executeAutonomy, undefined);
 		strictEqual(receipt.safety?.permit?.digest, spec.permit.digest);
+		return { spec, receipt };
 	} finally {
 		await bundle.extension.stop?.();
 		env.restore();
 	}
+}
+
+test("a dispatcher that leaves unconfined yolo during launch preparation spawns its worker without the yolo grant", async () => {
+	const dropped = await dispatchAcrossLaunchPrep("clio-ceiling-prep-level-", (change) => change.level("default"));
+	strictEqual(dropped.spec.permit.allowance.executeAutonomy, undefined);
+	strictEqual(dropped.receipt.safety?.permit?.executeAutonomy, undefined);
+	// Still yolo, but now contained: contained yolo admits as default and grants no worker yolo.
+	const contained = await dispatchAcrossLaunchPrep("clio-ceiling-prep-confinement-", (change) => {
+		const next = structuredClone(DEFAULT_SETTINGS);
+		next.safety.autonomy = "yolo";
+		next.safety.yoloConfinement = "contained";
+		change.settings(next);
+	});
+	strictEqual(contained.spec.permit.allowance.executeAutonomy, undefined);
+	strictEqual(contained.receipt.safety?.permit?.executeAutonomy, undefined);
+	// Nothing changed: the grant stands.
+	const kept = await dispatchAcrossLaunchPrep("clio-ceiling-prep-kept-", () => {});
+	strictEqual(kept.spec.permit.allowance.executeAutonomy, "yolo");
+	strictEqual(kept.receipt.safety?.permit?.executeAutonomy, "yolo");
 });
 
 /** The JSON document production dispatch writes for a default coder run. */

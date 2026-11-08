@@ -7281,14 +7281,15 @@ export function createDispatchBundle(
 		// preparation, both of which may wait. A dispatcher that left yolo
 		// meanwhile launches its worker without the yolo grant, and every record
 		// from then on carries the narrowed permit. Checked here and again right
-		// before spawn, after the last wait.
+		// before spawn, after the last wait, against fresh settings: the live
+		// level and the live confinement, since contained yolo grants no yolo.
+		let specAutonomySettings = withLiveAutonomy(lifecycle.settings);
 		const narrowPermitToLiveLevel = (): boolean => {
-			if (
-				lifecycle.permit.allowance.executeAutonomy !== "yolo" ||
-				operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)) === "yolo"
-			)
-				return false;
+			if (lifecycle.permit.allowance.executeAutonomy !== "yolo") return false;
+			const launch = withLiveAutonomy(getEffectiveSettings() ?? lifecycle.settings);
+			if (operatorAdmissionAutonomy(launch) === "yolo") return false;
 			lifecycle.permit = withoutExecuteAutonomy(lifecycle.permit);
+			specAutonomySettings = launch;
 			return true;
 		};
 		narrowPermitToLiveLevel();
@@ -7384,11 +7385,11 @@ export function createDispatchBundle(
 						budget: lifecycle.budget,
 						...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 						workerPermissionResponder:
-							options?.workerPermissionResponder === true && !operatorContainedYolo(withLiveAutonomy(lifecycle.settings)),
+							options?.workerPermissionResponder === true && !operatorContainedYolo(specAutonomySettings),
 						permit: lifecycle.permit,
 						...(grantAttempt !== undefined ? { grantAttempt } : {}),
 						...(judgeRouted ? { judgeResponder: judgeReachable } : {}),
-						mainAutonomy: operatorAdmissionAutonomy(withLiveAutonomy(lifecycle.settings)),
+						mainAutonomy: operatorAdmissionAutonomy(specAutonomySettings),
 						...(options?.workerHooks ? { extensionHooks: options.workerHooks.declarations() } : {}),
 					},
 					config ?? undefined,
