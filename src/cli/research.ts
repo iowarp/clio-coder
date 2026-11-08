@@ -31,6 +31,7 @@ worktree under .clio-coder/worktrees/ at the current best commit, measures the
 change against that commit with interleaved trials, and keeps it only when
 the median moves by at least --min-improvement and a bootstrap 95% interval
 (2,000 resamples, recorded seed) excludes zero, and every --gate check passes.
+A judged objective (numeric-compare) is a gate too: it must match its reference.
 A kept change moves the branch clio/research/<id> by compare-and-swap; your
 own branch is never touched.
 
@@ -50,7 +51,8 @@ start options:
   --scope <glob>            files a change may touch; repeatable (default: any unprotected file)
   --gate <id>               check that must pass on every candidate; repeatable
   --goal <text>             extra direction for the agent
-  --max-wall-minutes <M>    hard stop on wall time, passed down as run --timeout
+  --max-wall-minutes <M>    campaign-wide deadline: ends the agent run, measurement or
+                            gate in flight, and nothing after it is ratcheted
   --max-cost-usd <X>        hard stop on spend summed from each run's cost, passed down as run --max-cost-usd
   --allow-unpriced          keep going when a run's spend is unknown (the cost cap then cannot bind)
   --allow-noisy             run even when the A/A check calls a change
@@ -60,7 +62,9 @@ start options:
 
 Unknown spend is never counted as zero: with --max-cost-usd and without
 --allow-unpriced, a run whose cost is unknown stops the campaign as
-budget-unenforceable. Ctrl-C stops the campaign cleanly and journals it.
+budget-unenforceable. Ctrl-C, SIGTERM and SIGHUP stop the campaign cleanly:
+the agent run is stopped and awaited, the stop is journaled and the worktrees
+are removed.
 
 Everything lands under .clio-coder/research/<id>/: campaign.json (the frozen
 spec and checks), journal.jsonl (one event per step) and samples/ (the raw
@@ -70,7 +74,7 @@ checks (numeric-compare, reproduce) also record claims, and each measured
 iteration records the agent's plan as a hypothesis; see clio-coder claims.
 
 Exit codes: 0 when a budget cap ended the campaign, 1 on an error, a noisy
-A/A check or unenforceable spend, 2 on a usage error, 130 when interrupted.`;
+A/A check or unenforceable spend, 2 on a usage error, 130 on Ctrl-C, 143 on SIGTERM, 129 on SIGHUP.`;
 
 interface StartFlags {
 	check?: string;
@@ -190,8 +194,41 @@ function viewJson(view: ResearchCampaignView): Record<string, unknown> {
 	};
 }
 
-function exitFor(outcome: ResearchRunOutcome): number {
-	if (outcome.reason === "stopped") return 130;
+const STOP_SIGNALS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
+type StopSignal = keyof typeof STOP_SIGNALS;
+
+/**
+ * Stop the campaign on SIGINT, SIGTERM or SIGHUP the same way: abort the controller so the loop stops the agent
+ * child, waits for it, journals `stopped` and removes the worktrees. Returns the exit code the first signal implies
+ * (130, 143 or 129) and a dispose that takes the listeners off again.
+ */
+export function installResearchStopSignals(
+	controller: AbortController,
+	log: (line: string) => void,
+): { received: () => StopSignal | null; exitCode: () => number; dispose: () => void } {
+	let received: StopSignal | null = null;
+	const handlers = (Object.keys(STOP_SIGNALS) as StopSignal[]).map((name) => {
+		const handler = (): void => {
+			if (received === null) {
+				received = name;
+				log(`${name} received; stopping after the current step`);
+			}
+			controller.abort();
+		};
+		process.on(name, handler);
+		return [name, handler] as const;
+	});
+	return {
+		received: () => received,
+		exitCode: () => STOP_SIGNALS[received ?? "SIGINT"],
+		dispose: () => {
+			for (const [name, handler] of handlers) process.off(name, handler);
+		},
+	};
+}
+
+function exitFor(outcome: ResearchRunOutcome, stopCode: number): number {
+	if (outcome.reason === "stopped") return stopCode;
 	if (outcome.reason === "max-iterations" || outcome.reason === "max-wall-minutes" || outcome.reason === "max-cost-usd")
 		return 0;
 	return 1;
@@ -239,11 +276,7 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 	};
 	log(`opened at ${campaign.base.slice(0, 12)} on ${campaign.ref.replace("refs/heads/", "")}`);
 	const controller = new AbortController();
-	const interrupt = (): void => {
-		if (!controller.signal.aborted) log("interrupt received; stopping after the current step");
-		controller.abort();
-	};
-	process.on("SIGINT", interrupt);
+	const stops = installResearchStopSignals(controller, log);
 	let outcome: ResearchRunOutcome;
 	try {
 		outcome = await runResearchCampaign(campaign, {
@@ -252,11 +285,11 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 			signal: controller.signal,
 		});
 	} finally {
-		process.off("SIGINT", interrupt);
+		stops.dispose();
 	}
 	const view = summarizeCampaign(campaign.project, campaign.id);
 	console.log(json ? JSON.stringify(viewJson(view), null, 2) : campaignStatusLines(view).join("\n"));
-	return exitFor(outcome);
+	return exitFor(outcome, stops.exitCode());
 }
 
 export async function runResearchCommand(args: string[]): Promise<number> {
