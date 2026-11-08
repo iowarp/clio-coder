@@ -4,9 +4,10 @@
 
 `@earendil-works__pi-tui@1.5.0.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch has fourteen hunks in nine `dist/` files and applies to the
+unpatched.** The patch has seventeen hunks in ten `dist/` files and applies to the
 published, unmodified 1.5.0 package. It carries the semantic edit and search
-operations that stock 1.5.0 keeps private and the regular-screen render memo.
+operations that stock 1.5.0 keeps private, the regular-screen render memo and the
+kept-rows hook that lets that memo skip rows Clio vouches for.
 Everything else earlier
 revisions patched is now stock Pi or an engine module, as
 [recorded below](#what-was-removed). The table lists every
@@ -21,6 +22,7 @@ hunk total.
 | 2: `tui-alt-screen.d.ts`, `tui-alt-screen.js` | `TuiAltScreen.isSearchFocused` and `undoSearchQuery`; `scrollToPrompt`, `toggleSearch`, `closeSearch` and `navigateSearch` made public | Clio's input router sends Escape, undo, prompt navigation and match navigation to the current owner, including the native search overlay. | Search focus and these methods are private. The public viewport scroll methods cannot query or manipulate search ownership or its undo history, and `getScreenLines()` exposes painted rows, not search state. |
 | 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
 | 1: `tui-main-screen.js` | `TuiMainScreen.doRender` OSC 133 strip | Run the marker strip only on a row that starts with `\x1b]133;`, so a frame makes no regex call for any other row. The pattern is anchored at the row start, so the output is unchanged. | Stock 1.5.0 calls `replace` with the anchored pattern on every row of every frame, which cost 3.25 ms of a frame while a 500 KB reply streamed (#428). The call sits inside `doRender`, so no subclass can skip it. |
+| 3: `tui-main-screen.d.ts`, `tui-main-screen.js` | `TuiMainScreen.keptRenderedRows` (protected hook, 0 by default) and `keptLeadingRows` | A subclass may report how many leading rendered rows are the very strings of the last frame's. `doRender` clamps that count to rows outside both frames' viewports, at an unchanged size and with no overlay, then takes those rows as the last frame stripped, reset and resolved them: the OSC 133 strip rewrites its own array in place from the first row not kept, `applyLineResets` copies the kept rows' output and image flags, and the diff loop starts below them. Clio's `InstrumentedTuiMainScreen` answers from the root's count (`src/interactive/kept-rows.ts`). | The strip, the reset memo's compare and the diff loop each visited every row of a 500 KB transcript on every frame although only the last rows change, and they sit inside `doRender`. A keystroke frame at reply-500k went from 1.19 ms to 0.13 ms p50 ([measured below](#measured-cost-of-the-kept-rows-hook)). |
 
 The semantic operations call Pi's existing editing and search implementation;
 they do not replace it. Consumers are the terminal lease, input router, editor
@@ -137,6 +139,22 @@ memo stays in effect. The patch leaves that step stock.
   typecheck and test suite were not run against them. None is submitted or
   accepted. Equivalent official APIs may have different names.
 
+### Measured cost of the kept-rows hook
+
+`scripts/bench-tui.ts` (regular screen, 120x40, 400 turns plus the reply, 120 frames, Node 24.20, medians of five
+repeats per run, two runs interleaved against the patch without the hook on a shared 24-core host at a one-minute load
+average of 17 to 22) gives these p50 frame times, before then after, one pair per run:
+
+| Workload | Streamed-token frame | Keystroke frame (`--echo`) |
+| --- | --- | --- |
+| reply-500k | 2.90 and 4.00 ms to 0.91 and 0.72 ms | 1.94 and 1.95 ms to 0.087 and 0.080 ms |
+| reply-100k | 0.78 and 0.65 ms to 0.27 and 0.15 ms | 0.51 and 0.46 ms to 0.031 and 0.034 ms |
+
+Bytes written per frame are unchanged (128 streamed, 151 keystroke), and `--verify` finds 0 mismatching frames for every
+workload in both modes. A keystroke frame no longer grows with the transcript. A streamed-token frame still does,
+because three layers of Clio's chat panel each copy the reply's rows into a new array per frame (the settled split, the
+gutter and the panel's tail), which the panel's promise never to mutate a returned array requires.
+
 ## Distribution, verification and removal
 
 The build bundles the patched JavaScript. npm consumers do not need pnpm to
@@ -152,6 +170,8 @@ ordering through the gate), `tests/contracts/tui-view-ergonomics.test.ts`
 (whole-query undo and the Unicode kill ring on `Input.applyEdit`), and the
 installed-package test, which drives the bundled executable. These cover the
 semantic edit and search hunks and the gate. No Clio test pins the render memo;
+`node --import tsx scripts/bench-tui.ts --workload reply-500k --mode regular --verify` (add `--echo` for keystroke
+frames) checks the kept-rows hook against a fresh render of the same frames and must report 0 mismatches;
 to check a rebase or a removal, rerun a probe that drives
 Clio's chat panel over a fake terminal on a transcript of about 22.9k rows and
 compare frame time and garbage per frame with the figures above. Patch applicability or a
