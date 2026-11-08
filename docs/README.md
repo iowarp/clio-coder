@@ -17,13 +17,11 @@ docs/
 └── wiki/            Generated development reference, v0.1
 ```
 
-Clio reads the authored Markdown in this directory directly from its installed
-package. The website serves a generated snapshot of the guides listed in
-`site/public-docs.json` (a source-checkout file), so a guide that is not listed
-there is bundled with Clio Coder and absent from the website. The
-[GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a developing source
-reference with independent v0.1 versioning. Use the architecture guides and
-current source for implementation decisions.
+Clio reads this Markdown from its installed package. The website serves only
+the guides listed in `site/public-docs.json`. The
+[GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a generated source
+reference (v0.1); for implementation decisions, use the architecture guides and
+current source.
 
 ## Start here
 
@@ -42,12 +40,9 @@ current source for implementation decisions.
 
 ## Your first hour
 
-Each step names one command and the section to read next. Skip what you
-already know.
-
 1. **Install and connect.** Run the installer, then `clio-coder` in a project.
-   The first launch opens setup: pick what you already have, and the first
-   connection you save (a *target*) becomes the model for chat and workers.
+   Setup opens on first launch; the first connection you save (a *target*)
+   serves chat and workers.
    Read [First-run flow](guide/configuration-and-targets.md#first-run-flow);
    if it fails, see [Install and startup](guide/troubleshooting.md#install-and-startup).
 2. **Check the install.** `clio-coder doctor` lists problems first and
@@ -69,10 +64,8 @@ already know.
 7. **Add your field's tools.** `clio-coder library search <topic>` finds packs
    such as `plugin:hpc`. See [Science packs](guide/resource-library.md#science-packs).
 
-`/resume` continues an earlier conversation. Scripts and CI use
-`clio-coder run`; see [Headless run flags](guide/commands-and-modes.md#headless-run-flags).
-The [GUI guide](guide/gui.md) covers the browser interface, which runs the same
-setup.
+Scripts and CI use `clio-coder run` ([Headless run flags](guide/commands-and-modes.md#headless-run-flags));
+the [GUI guide](guide/gui.md) covers the browser interface.
 
 ## Using Clio Coder day to day
 
