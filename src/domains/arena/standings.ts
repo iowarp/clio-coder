@@ -22,7 +22,7 @@ export interface ArenaStandings {
 	standings: ArenaStanding[];
 }
 
-export function contenderIdentity(contender: { target: string; model: string }): string {
+function contenderIdentity(contender: { target: string; model: string }): string {
 	return `${contender.target}/${contender.model}`;
 }
 
