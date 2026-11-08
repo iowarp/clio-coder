@@ -90,6 +90,12 @@ The static checker validates the link graph, anchors, metadata, source provenanc
 
 Responsive images and square browser icons are generated from approved originals with `python3 site/image-variants.py`; `image-variants.json` records the hashes and sizes. Every build verifies these assets and adds responsive image attributes. The full-size viewer capture loads only when opened. The performance check measures cold-cache mobile FCP, LCP, layout shift, and initial asset transfers at 2Mbps download, 100ms latency, and 4x CPU slowdown. It writes `/tmp/clio-site-review/performance.json` and enforces documented budgets. Run it without another browser audit in parallel. These local measurements do not represent field Core Web Vitals.
 
+## Search and crawler outputs
+
+The build writes `sitemap.xml`, `robots.txt`, `llms.txt`, and `llms-full.txt` from the same records as the pages. Each sitemap entry carries a `lastmod` from the last commit that touched the page sources; a build outside a git checkout omits it rather than guessing. `robots.txt` names the major search and AI crawlers, allows every page and asset, and blocks only the internal docs manifest. `llms.txt` is a short Markdown index of every docs, tutorial, and research page; `llms-full.txt` carries their full Markdown with absolute links and a `Source:` line per page.
+
+Every page has a structured data graph (WebSite, Organization, WebPage, breadcrumbs, and the article or software type that fits), and the home page adds a FAQPage built from its questions. Social previews are real product captures: `python3 site/image-variants.py --social` renders a 1200x630 PNG for every tutorial cover plus the default GUI capture into `assets/social/`, recorded in `social-images.json`. Hreflang alternates are not used because the site has one language. `check.py` enforces sitemap coverage and format, redirect exclusion, preview size, FAQ coverage, the robots policy, and llms link coverage.
+
 `node site/build.mjs --out <directory>` supports an alternative output path. It refuses to replace a nonempty directory without its ownership marker. Output contains only published HTML, selected browser scripts and styles, product assets, fonts and licenses, search metadata, and the source manifest.
 
 ## Deployment

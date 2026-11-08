@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix, resolve } from "node:path";
@@ -65,6 +66,36 @@ for (const item of articles) {
 }
 const redirects = JSON.parse(await read("redirects.json"));
 const imageVariants = JSON.parse(await read("image-variants.json"));
+const social = JSON.parse(await read("social-images.json"));
+for (const [id, item] of Object.entries(social.images)) {
+	if (!captures[id] || item.source !== captures[id].original || !/^assets\/social\/[a-z0-9-]+\.png$/.test(item.path))
+		throw new Error(`Social preview ${id} must be generated from its capture; run python3 site/image-variants.py.`);
+	if (
+		createHash("sha256")
+			.update(await readFile(join(root, item.path)))
+			.digest("hex") !== item.sha256
+	)
+		throw new Error(`Social preview changed; regenerate image variants: ${item.path}`);
+}
+for (const item of articles)
+	if (item.cover && !social.images[item.cover])
+		throw new Error(`Article ${item.slug} has no social preview; run python3 site/image-variants.py --social.`);
+if (!social.images[social.default]) throw new Error("The default social preview is missing.");
+// Sitemap lastmod and article dateModified come from the last commit that
+// touched a page's sources. Without Git history (a deploy snapshot) they are omitted.
+function lastModified(files) {
+	try {
+		return (
+			execFileSync("git", ["log", "-1", "--format=%cI", "--", ...files], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim() || null
+		);
+	} catch {
+		return null;
+	}
+}
 for (const [source, item] of Object.entries(imageVariants)) {
 	for (const asset of [{ path: source, sha256: item.sha256 }, ...item.variants]) {
 		if (!/^assets\/[a-z0-9/.-]+$/.test(asset.path)) throw new Error("Invalid responsive asset path.");
@@ -155,13 +186,53 @@ function responsiveImages(html, path) {
 // in a meta tag. frame-ancestors is not honored there and cannot be restored.
 const contentSecurityPolicy =
 	"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
-function head(path, title, description, type = "WebPage") {
+const titleSuffix = / — Clio Coder(?: docs)?$/;
+const organization = {
+	"@type": "Organization",
+	"@id": "https://iowarp.ai/#organization",
+	name: "IOWarp",
+	alternateName: "iowarp.ai",
+	url: "https://iowarp.ai/",
+	logo: { "@type": "ImageObject", url: `${product.origin}/assets/brand/iowarp-mark.png` },
+	sameAs: ["https://github.com/iowarp"],
+};
+const plainText = (html) =>
+	html
+		.replace(/<[^>]+>/g, "")
+		.replace(/&(amp|lt|gt|quot|#39);/g, (_, name) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[name])
+		.replace(/\s+/g, " ")
+		.trim();
+// The overview's question list is a real FAQ; its structured data is read from the same HTML.
+const faq = [
+	...((await read("index.html")).match(/<div class="faq-items">([\s\S]*?)<\/div><\/div>/)?.[1] ?? "").matchAll(
+		/<details><summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g,
+	),
+].map(([, question, answer]) => ({
+	"@type": "Question",
+	name: plainText(question),
+	acceptedAnswer: { "@type": "Answer", text: plainText(answer) },
+}));
+if (faq.length < 3) throw new Error("The overview FAQ was not found; structured FAQ data would be empty.");
+function head(path, title, description, type = "WebPage", { lastmod = null, preview = social.default } = {}) {
 	const url = `${product.origin}${path}`;
 	const article = articles.find((item) => item.url === path);
+	const image = social.images[preview];
+	const imageUrl = `${product.origin}/${image.path}`;
+	const imageAlt = captures[preview].alt;
 	const graph = {
 		"@context": "https://schema.org",
 		"@graph": [
-			{ "@type": "WebSite", "@id": `${product.origin}/#site`, name: "Clio Coder", url: `${product.origin}/` },
+			{
+				"@type": "WebSite",
+				"@id": `${product.origin}/#site`,
+				name: "Clio Coder",
+				url: `${product.origin}/`,
+				description: product.description,
+				inLanguage: "en",
+				publisher: { "@id": organization["@id"] },
+				copyrightHolder: { "@id": organization["@id"] },
+				copyrightYear: 2026,
+			},
 			{
 				"@type": type,
 				"@id": `${url}#page`,
@@ -170,19 +241,24 @@ function head(path, title, description, type = "WebPage") {
 				url,
 				isPartOf: { "@id": `${product.origin}/#site` },
 				inLanguage: "en",
+				primaryImageOfPage: { "@type": "ImageObject", url: imageUrl, width: image.width, height: image.height },
+				...(lastmod ? { dateModified: lastmod } : {}),
 			},
+			organization,
 		],
 	};
 	const page = graph["@graph"][1];
 	if (type === "Article" || type === "TechArticle") {
-		page.headline = title.replace(/ — Clio Coder(?: tutorials| research| docs)?$/, "");
+		page.headline = title.replace(titleSuffix, "");
 		page.mainEntityOfPage = url;
 		page.author = {
-			"@type": article?.author === "The Clio team" || !article ? "Organization" : "Person",
-			name: article?.author ?? "The Clio team",
+			"@type": !article || /\bteam$/i.test(article.author) ? "Organization" : "Person",
+			name: article?.author ?? "The Clio Coder team",
 			url: `${product.origin}/#project`,
 		};
-		page.image = `${product.origin}${article?.image ?? "/assets/social-card.png"}`;
+		page.publisher = { "@id": organization["@id"] };
+		page.image = [imageUrl, ...(article?.image ? [`${product.origin}${article.image}`] : [])];
+		page.about = { "@id": `${product.origin}/#application` };
 	}
 	if (path !== "/" && path !== "/404.html") {
 		const parent = path.startsWith("/docs/")
@@ -193,7 +269,7 @@ function head(path, title, description, type = "WebPage") {
 		const crumbs = [
 			{ name: "Clio Coder", path: "/" },
 			...(parent ? [parent] : []),
-			{ name: title.replace(/ — Clio Coder(?: tutorials| research| docs)?$/, ""), path },
+			{ name: title.replace(titleSuffix, ""), path },
 		];
 		graph["@graph"].push({
 			"@type": "BreadcrumbList",
@@ -216,33 +292,46 @@ function head(path, title, description, type = "WebPage") {
 			version: product.version,
 			license: `${repository}/blob/main/LICENSE`,
 			author: { "@type": "Person", name: "Anthony Kougkas" },
+			publisher: { "@id": organization["@id"] },
+			targetProduct: { "@id": `${url}#application` },
 		});
 		graph["@graph"].push({
 			"@type": "SoftwareApplication",
 			"@id": `${url}#application`,
 			name: product.name,
 			url,
-			description,
+			description: product.description,
 			applicationCategory: "DeveloperApplication",
+			applicationSubCategory: "Coding agent",
 			operatingSystem: "Linux, macOS, Windows",
 			softwareVersion: product.publishedVersion,
 			downloadUrl: "https://www.npmjs.com/package/@iowarp/clio-coder",
+			installUrl: `${url}#start`,
+			softwareHelp: { "@type": "CreativeWork", url: `${product.origin}/docs.html` },
 			license: `${repository}/blob/main/LICENSE`,
-			image: `${product.origin}/assets/social-card.png`,
+			isAccessibleForFree: true,
+			publisher: { "@id": organization["@id"] },
+			image: imageUrl,
+			screenshot: ["gui-task", "tui-verify"].map((id) => ({
+				"@type": "ImageObject",
+				url: `${product.origin}/${captures[id].original}`,
+				caption: captures[id].alt,
+			})),
 		});
+		graph["@graph"].push({ "@type": "FAQPage", "@id": `${url}#questions`, mainEntity: faq });
 	}
 
 	return `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
-<link rel="canonical" href="${url}"><link rel="alternate" hreflang="en" href="${url}"><link rel="alternate" hreflang="x-default" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
+<link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${product.origin}/assets/social-card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${product.origin}/assets/social-card.png"><meta name="twitter:image:alt" content="Clio Coder. An open-source coding agent for scientific software.">
-<meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
+<meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
 }
-function shell(html, path, title, description, type) {
+function shell(html, path, title, description, type, options) {
 	const active = path.startsWith("/docs/")
 		? "/docs.html"
 		: (articles.find((item) => item.url === path)?.collection.listing ?? path);
@@ -251,7 +340,7 @@ function shell(html, path, title, description, type) {
 	);
 	let number = 0;
 	const result = html
-		.replace("<!-- site-head -->", head(path, title, description, type))
+		.replace("<!-- site-head -->", head(path, title, description, type, options))
 		.replace("<!-- site-header -->", header)
 		.replace("<!-- site-footer -->", footer)
 		.replaceAll("<!-- version -->", escapeHtml(product.version))
@@ -392,26 +481,29 @@ function directive(name, args, inner, render) {
 			throw new Error(`Unknown guide directive: ${name}`);
 	}
 }
+// Resolves a Markdown link in a public source to its page on this site or, for
+// anything not published here, to the pinned repository file.
+function linkTarget(href, sourcePath, image = false) {
+	if (/^(?:https?:|mailto:|\/)/i.test(href)) return href;
+	if (href.startsWith("#"))
+		return !anchors.has(sourcePath) || anchors.get(sourcePath).has(href.slice(1))
+			? href
+			: `${repository}/blob/${ref}/${sourcePath}${href}`;
+	const [file, hash] = href.split("#");
+	const normalized = posix.normalize(posix.join(posix.dirname(sourcePath), file));
+	const url = sourceMap.get(normalized);
+	if (url && (!hash || anchors.get(normalized)?.has(hash))) return `${url}${hash ? `#${hash}` : ""}`;
+	if (image && normalized.startsWith("assets/")) {
+		const known = {
+			"assets/screenshots/tui-boot.webp": "/assets/tui-boot.webp",
+		};
+		if (known[normalized]) return known[normalized];
+	}
+	return `${repository}/blob/${ref}/${normalized}${hash ? `#${hash}` : ""}`;
+}
 function renderMarkdown(markdown, sourcePath, guide = false) {
 	const ids = new Map();
-	const target = (href, image = false) => {
-		if (/^(?:https?:|mailto:|\/)/i.test(href)) return href;
-		if (href.startsWith("#"))
-			return !anchors.has(sourcePath) || anchors.get(sourcePath).has(href.slice(1))
-				? href
-				: `${repository}/blob/${ref}/${sourcePath}${href}`;
-		const [file, hash] = href.split("#");
-		const normalized = posix.normalize(posix.join(posix.dirname(sourcePath), file));
-		const url = sourceMap.get(normalized);
-		if (url && (!hash || anchors.get(normalized)?.has(hash))) return `${url}${hash ? `#${hash}` : ""}`;
-		if (image && normalized.startsWith("assets/")) {
-			const known = {
-				"assets/screenshots/tui-boot.webp": "/assets/tui-boot.webp",
-			};
-			if (known[normalized]) return known[normalized];
-		}
-		return `${repository}/blob/${ref}/${normalized}${hash ? `#${hash}` : ""}`;
-	};
+	const target = (href, image = false) => linkTarget(href, sourcePath, image);
 	const renderer = new marked.Renderer();
 	renderer.heading = function ({ tokens, depth }) {
 		const text = this.parser.parseInline(tokens);
@@ -447,14 +539,27 @@ function renderMarkdown(markdown, sourcePath, guide = false) {
 		)
 		.replace(/<\/table>/g, "</table></div>");
 }
-async function writePage(path, html, title, description, type) {
+// A guide's excerpt is short; its first sentence of body text makes the search
+// snippet say what the page covers, without running far past what a result shows.
+function docDescription(item, markdown) {
+	const paragraph = marked
+		.lexer(markdown)
+		.find((token) => token.type === "paragraph" && token.text.trim() !== item.excerpt);
+	const sentence = paragraph ? plainText(marked.parseInline(paragraph.text)).match(/^.+?[.!?](?=\s|$)/)?.[0] : null;
+	const echo = item.excerpt.toLowerCase().replace(/\.$/, "").split(" ").slice(-4).join(" ");
+	return sentence && !sentence.toLowerCase().includes(echo) && item.excerpt.length + sentence.length < 200
+		? `${item.excerpt} ${sentence}`
+		: item.excerpt;
+}
+async function writePage(path, html, title, description, type, { sources = [], preview } = {}) {
 	const file = join(out, path === "/" ? "index.html" : path.slice(1));
 	await mkdir(dirname(file), { recursive: true });
-	const result = shell(html, path, title, description, type);
+	const lastmod = sources.length ? lastModified(sources) : null;
+	const result = shell(html, path, title, description, type, { lastmod, ...(preview ? { preview } : {}) });
 	if (/<!--\s*(?:site-|doc-|tutorial-|source-|version)/.test(result))
 		throw new Error(`Unresolved template slot in ${path}`);
 	await writeFile(file, result);
-	if (path !== "/404.html") urls.push(path);
+	if (path !== "/404.html") urls.push({ path, lastmod });
 }
 
 const marker = ".clio-coder-site-build";
@@ -497,6 +602,8 @@ for (const name of [
 	"social-square-light.png",
 ])
 	await cp(join(root, "assets", name), join(out, "assets", name));
+await mkdir(join(out, "assets/social"), { recursive: true });
+for (const item of Object.values(social.images)) await cp(join(root, item.path), join(out, item.path));
 for (const item of Object.values(captures))
 	for (const path of [item.image, item.original]) {
 		await mkdir(dirname(join(out, path)), { recursive: true });
@@ -522,8 +629,10 @@ await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manif
 await writePage(
 	"/",
 	await read("index.html"),
-	"Clio Coder — an open-source coding agent for scientific software",
-	"Clio Coder reads, edits, and runs checks in your repository with local or cloud models you choose, from the terminal or a local desktop app in alpha. Built for scientific software and everyday engineering.",
+	"Clio Coder — open-source coding agent for science and HPC",
+	product.description,
+	"WebPage",
+	{ sources: ["index.html"] },
 );
 await writePage(
 	"/404.html",
@@ -573,7 +682,16 @@ for (const item of index) {
 	};
 	let html = template;
 	for (const [name, value] of Object.entries(slots)) html = html.replaceAll(`<!-- ${name} -->`, value);
-	await writePage(docUrl(item.path), html, `${item.title} — Clio Coder docs`, item.excerpt, "TechArticle");
+	await writePage(
+		docUrl(item.path),
+		html,
+		`${item.title} — Clio Coder docs`,
+		docDescription(item, markdown),
+		"TechArticle",
+		{
+			sources: [`content/docs/${item.path}`, item.summary ? `content/doc-summaries/${item.summary}` : `../${item.source}`],
+		},
+	);
 }
 const search = index.map(
 	({
@@ -647,9 +765,10 @@ for (const item of articles) {
 	await writePage(
 		item.url,
 		html,
-		`${item.title} — Clio Coder ${item.collection.label.toLowerCase()}`,
+		item.title.includes("Clio Coder") ? item.title : `${item.title} — Clio Coder`,
 		item.description,
 		"Article",
+		{ sources: [`${folder}/${item.source}`], ...(item.cover ? { preview: item.cover } : {}) },
 	);
 }
 for (const collection of collections) {
@@ -667,6 +786,8 @@ for (const collection of collections) {
 		collection.id === "tutorials"
 			? "Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces."
 			: "Open research questions in Clio Coder: what is known and measured so far, a first experiment for each, and how the team, students, and outside researchers can join.",
+		"WebPage",
+		{ sources: [collection.listing.slice(1), `content/${collection.id}.json`] },
 	);
 }
 
@@ -680,11 +801,128 @@ for (const [path, target] of Object.entries(redirects)) {
 }
 await writeFile(
 	join(out, "sitemap.xml"),
-	`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((path) => `  <url><loc>${product.origin}${escapeHtml(path)}</loc></url>`).join("\n")}\n</urlset>\n`,
+	`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(({ path, lastmod }) => `  <url><loc>${product.origin}${escapeHtml(path)}</loc>${lastmod ? `<lastmod>${lastmod}</lastmod>` : ""}</url>`).join("\n")}\n</urlset>\n`,
 );
 await cp(join(root, "robots.txt"), join(out, "robots.txt"));
+
+// llms.txt (llmstxt.org) indexes the public pages for language models, and
+// llms-full.txt carries their Markdown sources with links resolved to this site.
+// Both are generated from the same records as the pages and contain no dates.
+const absolute = (href) => (href.startsWith("/") ? `${product.origin}${href}` : href);
+function plainDirectives(markdown) {
+	const lines = markdown.split("\n");
+	const result = [];
+	for (let i = 0; i < lines.length; i++) {
+		const open = lines[i].match(/^:::\s*([a-z]+)(?:\s+(.*))?$/);
+		if (!open) {
+			result.push(lines[i]);
+			continue;
+		}
+		const inner = directiveBody(lines, i);
+		i += inner.length + 1;
+		const [name, args] = [open[1], (open[2] ?? "").trim()];
+		const body = plainDirectives(inner.join("\n")).trim();
+		const labelled = (label) => `**${args || label}**${body ? `\n\n${body}` : ""}`;
+		const block = {
+			needs: () => `## ${args || "Before you start"}\n\n${body}`,
+			prompt: () => `**${args || "Ask Clio"}**\n\n${body.replace(/^/gm, "> ")}`,
+			result: () => labelled("What you should see"),
+			limits: () => labelled("Boundaries"),
+			note: () => labelled("Note"),
+			next: () => labelled("Next steps"),
+			capture: () =>
+				[
+					...args
+						.split(/\s+/)
+						.filter(Boolean)
+						.map((id) => `![${captures[id].alt}](/${captures[id].image})\n\n*${captures[id].caption}*`),
+					...(body ? [body] : []),
+				].join("\n\n"),
+			diagram: () => {
+				const item = guideDiagrams[args];
+				const stages = item.stages.map(
+					(stage, n) =>
+						`${n + 1}. ${stage.label}${stage.place ? ` (${stage.place})` : ""}${stage.body ? `: ${stage.body}` : ""}${stage.via ? ` Moves from the previous stage: ${stage.via}.` : ""}`,
+				);
+				return `**${item.title}**\n\n${stages.join("\n")}\n\n*${item.caption}*`;
+			},
+		}[name];
+		result.push("", block ? block() : body, "");
+	}
+	return result.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+function llmMarkdown(markdown, sourcePath, pageUrl) {
+	return plainDirectives(markdown)
+		.split(/(^```[\s\S]*?^```)/m)
+		.map((part, i) =>
+			i % 2
+				? part
+				: part.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, bang, label, href, title) => {
+						const resolved = linkTarget(href, sourcePath, Boolean(bang));
+						return `${bang}[${label}](${resolved.startsWith("#") ? `${pageUrl}${resolved}` : absolute(resolved)}${title})`;
+					}),
+		)
+		.join("")
+		.trim();
+}
+const published = articles.filter((item) => !item.draft);
+const llmsSummary = `# Clio Coder
+
+> ${product.description}
+
+Clio Coder reads, edits, and runs checks in your repository. It records what passed, what failed, and what was never checked. Connect a local model server, an institutional endpoint, a subscription, or a cloud API, and switch models with one command. The installer needs no root and works on HPC login nodes.
+
+- Install on macOS, Linux, or WSL: \`curl -fsSL ${product.origin}/install.sh | sh\`
+- Install with npm (Node.js 22.19 or newer): \`npm install -g @iowarp/clio-coder\`
+- Connect a model in a project: \`clio-coder configure\`; then run \`clio-coder\` for the terminal or \`clio-coder gui --open\` for the desktop alpha.
+- Current release: v${product.publishedVersion}. Source: ${repository}. License: Apache 2.0.`;
+const llmsLink = (title, url, note) => `- [${title}](${absolute(url)})${note ? `: ${note}` : ""}`;
+await writeFile(
+	join(out, "llms.txt"),
+	`${[
+		llmsSummary,
+		...groups.map(
+			(group) =>
+				`## ${group}\n\n${index
+					.filter((doc) => doc.group === group)
+					.map((doc) => llmsLink(doc.title, docUrl(doc.path), doc.excerpt))
+					.join("\n")}`,
+		),
+		...collections.map(
+			(collection) =>
+				`## ${collection.label}\n\n${published
+					.filter((item) => item.collection === collection)
+					.map((item) => llmsLink(item.title, item.url, item.description))
+					.join("\n")}`,
+		),
+		`## Optional\n\n${[
+			llmsLink("Full text", "/llms-full.txt", "every guide, tutorial, and research page above as Markdown in one file"),
+			llmsLink("Overview", "/", "capabilities, models, installation, and common questions"),
+			llmsLink("Source repository", repository, "code, issues, and the full upstream guides"),
+			llmsLink("npm package", "https://www.npmjs.com/package/@iowarp/clio-coder"),
+			llmsLink("License", `${repository}/blob/main/LICENSE`, "Apache 2.0"),
+		].join("\n")}`,
+	].join("\n\n")}\n`,
+);
+const fullSections = [];
+for (const item of index) {
+	const url = absolute(docUrl(item.path));
+	fullSections.push({ url, text: llmMarkdown(await read(`content/docs/${item.path}`), item.source, url) });
+}
+for (const item of published) {
+	const url = absolute(item.url);
+	const markdown = llmMarkdown(await read(`${item.folder}/${item.source}`), `site/${item.folder}/${item.source}`, url);
+	fullSections.push({ url, text: `# ${item.title}\n\n> ${item.description}\n\n${markdown}` });
+}
+const llmsFull = `${llmsSummary}
+
+This file holds the public Clio Coder guides (documentation for v${source.version}), tutorials, and research pages as Markdown. Each section names the page it comes from.
+
+${fullSections.map(({ url, text }) => `---\n\nSource: ${url}\n\n${text}`).join("\n\n")}
+`;
+await writeFile(join(out, "llms-full.txt"), llmsFull);
 console.log(
-	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${research.length} research pages).`,
+	`Built ${urls.length} public pages (${index.length} guides, ${tutorials.length} tutorials, ${research.length} research pages); llms-full.txt is ${Buffer.byteLength(llmsFull)} bytes.`,
 );
 
 // Stable bootstraps follow released assets even while the rest of the site awaits a redeploy.

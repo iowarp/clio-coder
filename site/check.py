@@ -2,6 +2,7 @@
 """Check generated pages, metadata, assets, and the internal link graph."""
 import json
 import re
+import struct
 import sys
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
@@ -26,6 +27,13 @@ for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/bann
     if (root / private).exists():
         errors.append(f'Private or legacy brand asset entered the public output: {private}')
 public_copyright = json.loads((site / 'design-system.json').read_text())['copyright']
+
+
+def png_size(path):
+    header = path.read_bytes()[:24]
+    if header[:8] != b'\x89PNG\r\n\x1a\n':
+        return None
+    return struct.unpack('>II', header[16:24])
 
 
 class Page(HTMLParser):
@@ -123,9 +131,38 @@ if manifest_paths != index_paths:
 if any(path == 'wiki' or path.startswith('wiki/') for path in manifest_paths if isinstance(path, str)):
     errors.append('Generated Wiki content entered the product documentation manifest')
 
-urls = [e.text for e in ET.parse(root / 'sitemap.xml').findall('.//{*}loc')]
+sitemap = ET.parse(root / 'sitemap.xml').getroot()
+if sitemap.tag != '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset':
+    errors.append('sitemap.xml must be a sitemaps.org 0.9 urlset')
+urls = []
+for entry in sitemap:
+    loc = entry.find('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')
+    lastmod = entry.find('{http://www.sitemaps.org/schemas/sitemap/0.9}lastmod')
+    if entry.tag != '{http://www.sitemaps.org/schemas/sitemap/0.9}url' or loc is None or not loc.text.startswith(origin + '/'):
+        errors.append('Sitemap entries must be url elements with an absolute loc on the site origin')
+        continue
+    if lastmod is not None and not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})', lastmod.text or ''):
+        errors.append(f'{loc.text}: sitemap lastmod is not a W3C datetime')
+    urls.append(loc.text)
 if len(urls) != len(set(urls)):
     errors.append('Sitemap contains duplicate URLs')
+# Every published HTML page is either a public page listed in the sitemap, the
+# 404 page, or a generated redirect that names its target as canonical.
+redirects = json.loads((site / 'redirects.json').read_text())
+for file in sorted(root.rglob('*.html')):
+    path = '/' + file.relative_to(root).as_posix()
+    url = origin + ('/' if path == '/index.html' else path)
+    if path in redirects:
+        text = file.read_text()
+        target = redirects[path]
+        target_path, _, target_anchor = target.partition('#')
+        target_file = root / ('index.html' if target_path == '/' else target_path.lstrip('/'))
+        if url in urls or '<meta name="robots" content="noindex">' not in text or f'<link rel="canonical" href="{origin}{target}">' not in text:
+            errors.append(f'{path}: redirect must be noindex, name its target as canonical, and stay out of the sitemap')
+        if not target_file.is_file() or (target_anchor and f'id="{target_anchor}"' not in target_file.read_text()):
+            errors.append(f'{path}: redirect target {target} does not exist')
+    elif path != '/404.html' and url not in urls:
+        errors.append(f'{path}: published page is missing from the sitemap')
 pages = {}
 for collection in ('tutorials', 'research'):
     for item in json.loads((site / f'content/{collection}.json').read_text()):
@@ -150,17 +187,25 @@ for url in [*urls, origin + '/404.html']:
     pages[path] = page
     if page.canonical != url:
         errors.append(f'{path}: canonical {page.canonical} differs from sitemap {url}')
-    if page.lang != 'en' or page.alternates != {'en': url, 'x-default': url}:
-        errors.append(f'{path}: missing or inconsistent language metadata')
+    if page.lang != 'en' or page.alternates:
+        errors.append(f'{path}: the page must declare lang="en" and no hreflang alternates (the site is not localized)')
     if page.webmanifest != '/site.webmanifest':
         errors.append(f'{path}: missing web manifest')
     if path == '/404.html' and page.robots != 'noindex':
         errors.append('404 must be noindex')
     if not page.title or not page.description:
         errors.append(f'{path}: missing title or description')
-    for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description)]:
+    for key, value in [('og:title', page.title), ('twitter:title', page.title), ('og:description', page.description), ('twitter:description', page.description), ('og:url', url)]:
         if page.social.get(key) != value:
             errors.append(f'{path}: {key} does not match page metadata')
+    preview = page.social.get('og:image') or ''
+    preview_file = root / urlsplit(preview).path.lstrip('/')
+    if not preview.startswith(origin + '/') or page.social.get('twitter:image') != preview or not preview_file.is_file():
+        errors.append(f'{path}: og:image must be a published image on this site, shared with twitter:image')
+    elif png_size(preview_file) != (1200, 630) or (page.social.get('og:image:width'), page.social.get('og:image:height')) != ('1200', '630'):
+        errors.append(f'{path}: og:image must be a 1200x630 PNG with matching declared dimensions')
+    if not page.social.get('og:image:alt') or page.social.get('twitter:image:alt') != page.social.get('og:image:alt'):
+        errors.append(f'{path}: social preview needs the same alt text for og and twitter')
     if page.doc_path and page.doc_source != f"{repository}/blob/{link_ref}/{doc_sources.get(page.doc_path)}":
         errors.append(f'{path}: source link points to the wrong document')
     if page.doc_path and (
@@ -230,10 +275,58 @@ if not (root / '.nojekyll').is_file():
 for installer in ('install.sh', 'install.ps1', 'install.cmd'):
     if f'/{installer}' in (root / 'sitemap.xml').read_text():
         errors.append(f'{installer} must not be listed in the sitemap')
+faq = next((node for node in json.loads(''.join(pages['/'].jsonld))['@graph'] if node.get('@type') == 'FAQPage'), None)
+if not faq or len(faq['mainEntity']) != (root / 'index.html').read_text().count('<details><summary>'):
+    errors.append('The overview FAQ structured data must list every question on the page')
+robots = (root / 'robots.txt').read_text()
+for agent in ('Googlebot', 'Bingbot', 'GPTBot', 'OAI-SearchBot', 'ClaudeBot', 'Google-Extended', 'PerplexityBot', 'CCBot', 'Applebot-Extended', '*'):
+    if f'User-agent: {agent}\n' not in robots:
+        errors.append(f'robots.txt must name {agent} explicitly')
+if len(re.findall(r'^User-agent:', robots, re.M)) and robots.count('\nAllow: /\n') != 1:
+    errors.append('robots.txt must keep one shared group that allows the site')
+for line in re.findall(r'^Disallow:\s*(\S*)', robots, re.M):
+    if line in ('', '/') or line.startswith(('/css', '/js', '/assets', '/docs', '/tutorials', '/research', '/llms')):
+        errors.append(f'robots.txt must not block pages, styles, scripts, or assets: Disallow: {line}')
+
+
+def site_links(text, label):
+    """Every link to this site in a Markdown file must reach a published file and anchor."""
+    found = set()
+    for href in re.findall(r'\]\((https://[^)\s]+)', text):
+        url = urlsplit(href)
+        if url.netloc != urlsplit(origin).netloc:
+            continue
+        target = unquote(url.path)
+        file = root / ('index.html' if target == '/' else target.lstrip('/'))
+        if not file.is_file():
+            errors.append(f'{label}: link to a missing page {href}')
+        elif url.fragment and target in pages and unquote(url.fragment) not in pages[target].ids:
+            errors.append(f'{label}: link to a missing anchor {href}')
+        found.add(origin + url.path)
+    return found
+
+
+articles = [u for u in urls if urlsplit(u).path.startswith(('/docs', '/tutorials/', '/research/'))]
+llms = (root / 'llms.txt').read_text()
+if not llms.startswith('# Clio Coder\n\n> ') or '\n## ' not in llms:
+    errors.append('llms.txt must open with an H1, a blockquote summary, and H2 link sections')
+linked = site_links(llms, 'llms.txt')
+for url in articles:
+    if url not in linked:
+        errors.append(f'llms.txt does not link {url}')
+if origin + '/llms-full.txt' not in linked:
+    errors.append('llms.txt must link llms-full.txt')
+full = (root / 'llms-full.txt').read_text()
+site_links(full, 'llms-full.txt')
+for url in articles:
+    if f'\nSource: {url}\n' not in full:
+        errors.append(f'llms-full.txt is missing {url}')
+if re.search(r'^:::', full, re.M):
+    errors.append('llms-full.txt contains an unconverted guide directive')
 for path in pages:
     if re.search(r'<p>:::', (root / ('index.html' if path == '/' else path.lstrip('/'))).read_text()):
         errors.append(f'{path}: an unconverted guide directive reached the page')
 if errors:
     print('\n'.join(errors))
     sys.exit(1)
-print(f'Checked {len(pages)} pages: unique titles, canonical URLs, structured data, rendered docs, assets, and internal links.')
+print(f'Checked {len(pages)} pages: unique titles, canonical URLs, social previews, structured data, rendered docs, assets, internal links, sitemap coverage, robots.txt, and llms.txt.')
