@@ -500,7 +500,7 @@ Capture runs in the main session only. A main-thread `verify` result is recorded
 Edges are derived under the lock at append time and compare no text ([edges.ts](../../src/domains/claims/edges.ts)). Each kind pins its conditions: for `numeric-compare` the commit, argv, reference and tolerance; for `reproduce` the commit, argv and working directory, reference, input digests, tolerance, comparison, seed, environment and platform (kernel release and Clio version excluded). The judged output is never pinned. A new claim:
 
 - `contradicts` the latest earlier claim with equal pins when the two verdicts differ. Only a flip adds an edge, so several agreements followed by one disagreement add one edge. The working tree of a `numeric-compare` claim is not pinned, so an uncommitted edit at the same commit can still contradict, and the edge sentence says how the trees differed.
-- `supersedes` every earlier claim of the same check and kind whose pins differ, such as a new commit or new input digests, unless it is already superseded.
+- `supersedes` every earlier claim of the same check, run and kind whose pins differ, such as a new commit or new input digests, unless it is already superseded.
 
 A claim with no recorded commit has no pins, so it can be superseded but never contradicted. A claim's status is `superseded` when any supersedes edge targets it, otherwise `contested` when it sits on either end of a contradicts edge, otherwise `standing`.
 
