@@ -199,6 +199,8 @@ always give the same ratings. A win beats every other contender in the match, `t
 
 The GUI's Arena page runs the same commands. It has a New match form with live progress and Cancel, blind columns with
 answers, diffs and check output, a vote panel, and standings. See [Graphical application](gui.md#arena-page).
+The Research page browses a project's campaigns with their iteration timeline, regrades one, and starts or stops a
+campaign, one per project at a time. See [Graphical application](gui.md#research-page).
 
 ## Where things are stored
 
