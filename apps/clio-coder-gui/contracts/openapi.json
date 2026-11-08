@@ -34720,6 +34720,80 @@
 							"$ref": "#/components/schemas/Object_at_kind_limitReached_4c311aad"
 						}
 					},
+					"autonomy": {
+						"type": "object",
+						"required": ["halt", "ended", "openDecisions", "kinds"],
+						"properties": {
+							"halt": {
+								"anyOf": [
+									{
+										"type": "object",
+										"required": ["at", "kind"],
+										"properties": {
+											"at": {
+												"type": "string",
+												"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+											},
+											"kind": {
+												"enum": ["calls", "minutes", "tokens", "judge"]
+											},
+											"limit": {
+												"type": "integer",
+												"minimum": 0
+											}
+										},
+										"additionalProperties": false
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"ended": {
+								"anyOf": [
+									{
+										"type": "object",
+										"required": ["at", "reason"],
+										"properties": {
+											"at": {
+												"type": "string",
+												"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+											},
+											"reason": {
+												"enum": ["autonomous-cap", "judge-streak", "shutdown", "left-yolo", "session-changed"]
+											}
+										},
+										"additionalProperties": false
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"openDecisions": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"kinds": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"required": ["kind", "count"],
+									"properties": {
+										"kind": {
+											"enum": ["judge-block", "no-verdict", "operator-only", "outward-unnamed"]
+										},
+										"count": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"additionalProperties": false
+					},
 					"findings": {
 						"type": "array",
 						"items": {
