@@ -62,12 +62,15 @@ async function stdoutAfterCitationCheck(answer: string, reply: string, mode: "te
 	}) as typeof process.stdout.write;
 	process.stderr.write = (() => true) as typeof process.stderr.write;
 	try {
-		await runHeadlessMainAgent(chat as never, {
-			prompt: "x",
-			mode,
-			...(mode === "json" ? { jsonEvents: "terminal" as const } : {}),
-			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
-		} as never);
+		await runHeadlessMainAgent(
+			chat as never,
+			{
+				prompt: "x",
+				mode,
+				...(mode === "json" ? { jsonEvents: "terminal" as const } : {}),
+				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+			} as never,
+		);
 	} finally {
 		process.stdout.write = write;
 		process.stderr.write = writeError;
