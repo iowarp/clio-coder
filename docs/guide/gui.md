@@ -449,7 +449,7 @@ The Arena page (`/arena`) runs [`clio-coder arena`](research-and-arena.md#arena-
 - **New match** takes a prompt and 2 to 4 contenders. Each contender is a target picked from the configured connections plus a model id. It also takes an optional suite and check, and each contender's timeout (600 seconds by default). The form has no spend cap; use `arena run --max-cost-usd` in a terminal for one. While the match runs, the form shows its progress and a `Cancel match` button. A cancelled match keeps its partial record in the list.
 - **The match list** shows every match with its contender count, status, suite and vote, or `awaiting your vote`.
 - **A match** shows one column per blind label with the answer, the diff, the counts and the check result. Before a vote, the same identifying details are hidden and redacted as in `arena show`. The vote panel offers `A is better` (and so on for each label), `Tie` and `All bad`, with an optional note. After the vote, the names are revealed. `Change vote` replaces it, and the journal keeps the earlier one.
-- **Standings** count wins, losses, ties and both-bad votes per target/model. They show a score once a contender has 5 votes.
+- **Standings** count wins, losses, ties and both-bad votes per target/model. They show an Elo rating once a contender has 5 votes.
 
 ## Research page
 

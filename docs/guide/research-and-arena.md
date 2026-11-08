@@ -160,8 +160,10 @@ the target, model, duration, tokens and cost, and redacts identifying text such 
 `--reveal` before a vote is refused. One vote counts per match. `--replace` changes it, and the journal keeps both. The
 choices are a label, `tie` or `both-bad`.
 
-`standings` counts wins, losses, ties and both-bad votes per target/model. Once an identity has 5 votes, it also shows a
-Bradley-Terry score, fitted to convergence on an Elo-like scale. A fit that does not converge shows no score.
+`standings` counts wins, losses, ties and both-bad votes per target/model. Once an identity has 5 votes, it also shows an
+Elo rating. Every identity starts at 1000, and the votes are replayed in match order with K 32, so the same records
+always give the same ratings. A win beats every other contender in the match, `tie` is a draw between each pair, and
+`both-bad` leaves ratings alone. In a 3- or 4-way match, K is split across the opponents.
 
 ### In the GUI
 

@@ -16,6 +16,6 @@ Kept changes go to the branch `clio/research/<id>`; your own branch is never tou
 
 ## Compare models blind
 
-`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds a Bradley-Terry score once a model has 5 votes. Clio never grades a contender. The desktop app's Arena page runs the same commands.
+`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds a Elo rating once a model has 5 votes. Clio never grades a contender. The desktop app's Arena page runs the same commands.
 
 Research and the arena are new in 0.7.0. Neither runs at autonomy `yolo`, and a stopped campaign cannot be resumed yet.
