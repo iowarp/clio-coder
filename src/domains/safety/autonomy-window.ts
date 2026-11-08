@@ -179,7 +179,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	const usage = (): AutonomyUsage => ({
 		toolCalls,
 		tokens,
-		activeMs: activeMs + (turnStart === null ? 0 : Math.max(0, now() - turnStart)),
+		activeMs: Math.round(activeMs + (turnStart === null ? 0 : Math.max(0, now() - turnStart))),
 	});
 	const latch = (next: AutonomyHalt): void => {
 		if (halt !== null) return;
