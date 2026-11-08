@@ -140,7 +140,9 @@ function captureDiff(
 		if (stat?.isFile() === true && readFileSync(target).equals(copied.bytes))
 			pathspec.push(`:(exclude,literal)${copied.path}`);
 	}
-	git(worktree, ["add", "-A", ...pathspec]);
+	// Staging takes no exclude: git refuses an exclude that names an ignored path, and a project that ignores
+	// `.clio-coder/` still gets the catalog copied in. The exclusions apply only to the diffs read below.
+	git(worktree, ["add", "-A", "--", "."]);
 	const patch = git(worktree, ["diff", "--cached", "--no-color", "--no-ext-diff", baseline, ...pathspec]);
 	safeResourceWrite(diffPath, patch);
 	return readNumstat(git(worktree, ["diff", "--cached", "--numstat", baseline, ...pathspec]));

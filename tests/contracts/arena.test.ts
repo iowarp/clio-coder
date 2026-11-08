@@ -516,6 +516,40 @@ describe("arena runner", () => {
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 		assert.equal(gitIn("branch", "--list", "clio-coder/compete/*").toString().trim(), "");
 	});
+	it("captures the diff when the project gitignores .clio-coder/", async () => {
+		const { repo, fake, gitIn } = scratchRepo();
+		writeFileSync(join(repo, ".gitignore"), ".clio-coder/\n");
+		mkdirSync(join(repo, "sub"));
+		writeFileSync(join(repo, "sub/README"), "sub\n");
+		gitIn("add", "-A");
+		gitIn("commit", "-qm", "ignore the clio-coder dir");
+		for (const project of [repo, join(repo, "sub")]) {
+			mkdirSync(join(project, ".clio-coder"), { recursive: true });
+			writeFileSync(join(project, ".clio-coder/verifiers.yaml"), UNIT_CATALOG);
+			const result = await runArenaMatch({
+				cwd: project,
+				prompt: "write your model name",
+				contenders: [
+					{ target: "t", model: "m1" },
+					{ target: "t", model: "m2" },
+				],
+				timeoutSeconds: 30,
+				check: "unit",
+				clio: { file: process.execPath, args: [fake] },
+				env: {},
+			});
+			assert.equal(result.status, "complete", result.error ?? "");
+			for (const contender of result.contenders) {
+				assert.equal(contender.error ?? null, null);
+				assert.deepEqual(contender.facts?.diff, { files: 1, insertions: 1, deletions: 0 });
+				assert.match(contender.facts?.check?.tail ?? "", /check unit: pass/);
+			}
+			const diff = readFileSync(join(arenaRoot(repo), result.id, "contender-1.diff"), "utf8");
+			assert.match(diff, /answer\.txt/);
+			assert.doesNotMatch(diff, /verifiers\.yaml/);
+		}
+	});
+
 	it("never writes the catalog through a link the worktree holds from HEAD", async () => {
 		const { base, repo, fake, gitIn } = scratchRepo();
 		const run = () =>
