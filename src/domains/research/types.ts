@@ -80,7 +80,14 @@ export type ResearchArchiveReason =
 	| "measure-failed"
 	| "gate-failed"
 	| "not-improved"
-	| "ratchet-lost";
+	| "ratchet-lost"
+	/** The wall budget ran out before the iteration was graded; nothing after the deadline is ratcheted. */
+	| "deadline"
+	/** The operator stopped the campaign (Ctrl-C, SIGTERM or SIGHUP) before the iteration was graded. */
+	| "interrupted";
+
+/** What the research grade says about an iteration's hypothesis. */
+export type ResearchHypothesisVerdict = "supported" | "refuted" | "inconclusive";
 
 export type ResearchStopReason =
 	| "max-iterations"
@@ -141,7 +148,15 @@ export type ResearchJournalEvent =
 	| { type: "graded"; at: string; iteration: number; grade: ResearchGrade; gates: ResearchGateResult[] }
 	| { type: "ratcheted"; at: string; iteration: number; from: string; to: string }
 	| { type: "archived"; at: string; iteration: number; reason: ResearchArchiveReason; detail: string }
-	| { type: "recorded"; at: string; iteration: number; hypothesis: string | null; claims: string[] }
+	| {
+			type: "recorded";
+			at: string;
+			iteration: number;
+			hypothesis: string | null;
+			/** The hypothesis judged by the research grade: improved supports it, regressed refutes it, anything else is inconclusive. */
+			verdict?: ResearchHypothesisVerdict;
+			claims: string[];
+	  }
 	| { type: "stopped"; at: string; reason: ResearchStopReason; detail: string; best: string };
 
 export type ResearchJournalEventType = ResearchJournalEvent["type"];

@@ -1,19 +1,31 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { runResearchCommand } from "../../src/cli/research.js";
+import { installResearchStopSignals, runResearchCommand } from "../../src/cli/research.js";
 import { claimsProjectRoot, readClaims } from "../../src/domains/claims/index.js";
 import {
 	type AgentRunner,
+	type AgentRunResult,
 	aaIsNoisy,
 	budgetStop,
 	costFromPricing,
 	grade,
+	type ObjectiveValue,
 	openResearchCampaign,
 	parseJournal,
+	type ResearchCampaign,
 	recomputeCampaign,
 	runResearchCampaign,
 	summarizeCampaign,
@@ -196,6 +208,8 @@ describe("research campaign", () => {
 		ok(claims.records.some((claim) => claim.keys.check === "sane"));
 		strictEqual(claims.hypotheses.length, 1);
 		strictEqual(claims.hypothesisTests.length, 1);
+		strictEqual(claims.hypothesisTests[0]?.outcome, "tested");
+		strictEqual(view.iterations[0]?.hypothesisVerdict, "supported");
 
 		const out: string[] = [];
 		t.mock.method(console, "log", (line: unknown) => out.push(String(line)));
@@ -231,5 +245,225 @@ describe("research campaign", () => {
 		} finally {
 			process.chdir(cwd);
 		}
+	});
+});
+
+const done: AgentRunResult = {
+	exitCode: 0,
+	sessionId: null,
+	outcome: "completed",
+	summary: "Hypothesis: a smaller value lowers the score",
+	cost: { kind: "free" },
+};
+
+function worktreeCount(repo: string): number {
+	return git(repo, "worktree", "list", "--porcelain")
+		.split("\n")
+		.filter((line) => line.startsWith("worktree ")).length;
+}
+
+function commandCheck(id: string, command: string[]): Record<string, unknown> {
+	return { id, description: id, kind: "command", command, cwd: ".", timeoutMs: 30_000, tags: [] };
+}
+
+const scoreJs =
+	"process.stdout.write(JSON.stringify({score:Number(require('fs').readFileSync('value.txt','utf8'))}))\n";
+
+function openScore(repo: string, budget: ResearchCampaign["budget"], gates: string[] = []): ResearchCampaign {
+	return openResearchCampaign({
+		cwd: repo,
+		objective: { check: "score", metric: "score", direction: "min", minImprovement: 0.05, trials: 3 },
+		gates,
+		scope: [],
+		budget,
+		allowNoisy: false,
+		keep: false,
+		agent: {},
+	});
+}
+
+describe("research review fixes", () => {
+	it("stops at the wall deadline inside the agent run and while measuring, and never ratchets after it", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+		const measure =
+			(calls: { n: number }, jumpAt: number, time: { ms: number }) =>
+			async (_check: unknown, _metric: string, worktree: string): Promise<ObjectiveValue> => {
+				calls.n += 1;
+				if (calls.n === jumpAt) time.ms = 61_000;
+				return { ok: true, value: worktree.endsWith("-base") ? 100 : 50 };
+			};
+		for (const phase of ["agent", "measure"] as const) {
+			const campaign = openScore(repo, { maxIterations: 3, maxWallMinutes: 1, allowUnpriced: false });
+			const time = { ms: 0 };
+			const calls = { n: 0 };
+			const outcome = await runResearchCampaign(campaign, {
+				agent: async (request) => {
+					writeFileSync(join(request.worktree, "value.txt"), "50\n");
+					if (phase === "agent") time.ms = 61_000;
+					return done;
+				},
+				// Six A/A runs, then the deadline passes on the second candidate pair.
+				measure: measure(calls, phase === "measure" ? 9 : -1, time),
+				clock: () => time.ms,
+			});
+			strictEqual(outcome.reason, "max-wall-minutes", phase);
+			strictEqual(calls.n, phase === "agent" ? 6 : 9, phase);
+			const view = summarizeCampaign(campaign.project, campaign.id);
+			deepStrictEqual(
+				view.iterations.map((iteration) => iteration.outcome),
+				["deadline"],
+				phase,
+			);
+			strictEqual(view.ratchets, 0, phase);
+			strictEqual(git(repo, "rev-parse", campaign.ref), campaign.base, phase);
+			strictEqual(worktreeCount(repo), 1, phase);
+		}
+	});
+
+	it("protects a repo-local executable, the target of a named symlink, and symlinks that reach either", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"tools/impl.js": `#!/usr/bin/env node\n${scoreJs}`,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["./score.js"])] }),
+		});
+		chmodSync(join(repo, "tools/impl.js"), 0o755);
+		symlinkSync("tools/impl.js", join(repo, "score.js"));
+		git(repo, "add", "-A");
+		git(repo, "commit", "-q", "-m", "bench");
+		const campaign = openScore(repo, { maxIterations: 4, allowUnpriced: false });
+		ok(campaign.protected.includes("score.js"), campaign.protected.join(","));
+		ok(campaign.protected.includes("tools/impl.js"), campaign.protected.join(","));
+		const edits: Array<(worktree: string) => void> = [
+			(worktree) => writeFileSync(join(worktree, "tools/impl.js"), "process.stdout.write('{\"score\":0}')\n"),
+			(worktree) => symlinkSync("tools/impl.js", join(worktree, "alias.js")),
+			(worktree) => symlinkSync("tools", join(worktree, "toolbox")),
+			(worktree) => symlinkSync("../../outside.js", join(worktree, "escape.js")),
+		];
+		let calls = 0;
+		const outcome = await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				edits[calls++]?.(request.worktree);
+				return done;
+			},
+		});
+		strictEqual(outcome.reason, "max-iterations");
+		deepStrictEqual(
+			summarizeCampaign(campaign.project, campaign.id).iterations.map((iteration) => iteration.outcome),
+			["protected", "protected", "protected", "protected"],
+		);
+	});
+
+	it("keeps a judged objective as a gate and judges the hypothesis by the grade, not reference agreement", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			"ref.json": '{"score":100}\n',
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					{
+						...commandCheck("score", ["node", "score.js"]),
+						kind: "numeric-compare",
+						reference: "ref.json",
+						tolerance: { absolute: 5 },
+					},
+				],
+			}),
+		});
+		const campaign = openScore(repo, { maxIterations: 2, allowUnpriced: false }, ["score"]);
+		deepStrictEqual(campaign.gates, ["score"]);
+		strictEqual(campaign.checks.length, 1);
+		// Iteration 1 improves the metric but leaves the reference; iteration 2 matches it without improving.
+		const values = ["50\n", "99\n"];
+		let calls = 0;
+		const outcome = await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				writeFileSync(join(request.worktree, "value.txt"), values[calls++] ?? "100\n");
+				return done;
+			},
+		});
+		strictEqual(outcome.reason, "max-iterations");
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["gate-failed", "not-improved"],
+		);
+		strictEqual(view.iterations[0]?.grade?.verdict, "improved");
+		strictEqual(view.iterations[0]?.gates[0]?.check, "score");
+		strictEqual(view.iterations[0]?.gates[0]?.passed, false);
+		strictEqual(git(repo, "rev-parse", campaign.ref), campaign.base);
+		const claims = readClaims(claimsProjectRoot(repo));
+		const agreeing = claims.records.find((claim) => claim.verdict === "agrees");
+		ok(agreeing !== undefined, "iteration 2's reference comparison agrees");
+		// Every bound hypothesis is only marked tested; the agreeing claim supports none of them.
+		ok(claims.hypothesisTests.length >= 2);
+		ok(claims.hypothesisTests.every((test) => test.outcome === "tested"));
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.hypothesisVerdict),
+			["supported", "inconclusive"],
+		);
+	});
+
+	it("stops on SIGTERM and SIGHUP like Ctrl-C: the child run ends, the stop is journaled, the worktrees go", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		for (const [name, code] of [
+			["SIGTERM", 143],
+			["SIGHUP", 129],
+			["SIGINT", 130],
+		] as const) {
+			const before = process.listenerCount(name);
+			const controller = new AbortController();
+			const stops = installResearchStopSignals(controller, () => {});
+			strictEqual(process.listenerCount(name), before + 1);
+			process.emit(name, name);
+			ok(controller.signal.aborted, name);
+			strictEqual(stops.received(), name);
+			strictEqual(stops.exitCode(), code);
+			stops.dispose();
+			strictEqual(process.listenerCount(name), before);
+		}
+
+		const repo = scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+		const campaign = openScore(repo, { maxIterations: 3, allowUnpriced: false });
+		const controller = new AbortController();
+		const stops = installResearchStopSignals(controller, () => {});
+		t.after(() => stops.dispose());
+		let childEnded = false;
+		const outcome = await runResearchCampaign(campaign, {
+			signal: controller.signal,
+			agent: (request) =>
+				new Promise((resolve) => {
+					request.signal?.addEventListener("abort", () => {
+						childEnded = true;
+						resolve({ ...done, exitCode: 130, outcome: "interrupted" });
+					});
+					process.emit("SIGTERM", "SIGTERM");
+				}),
+		});
+		strictEqual(outcome.reason, "stopped");
+		ok(childEnded);
+		strictEqual(stops.exitCode(), 143);
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		strictEqual(view.stop?.reason, "stopped");
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["interrupted"],
+		);
+		strictEqual(worktreeCount(repo), 1);
 	});
 });

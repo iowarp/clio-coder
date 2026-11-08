@@ -5,9 +5,11 @@
  * `clio-coder.hypothesis-slate.v1`), whose success criterion names the objective check. Before the checks run, the
  * iteration's run identity is started against the objective and gate checks, so the hypothesis is bound to this run.
  * After they run, every judged check (numeric-compare, reproduce) yields a claim from Clio's own execution, and the
- * hypothesis is tested: supported or refuted only by a judged claim of its named check, otherwise marked tested. The
- * research verdict itself (improved or not, with its interval) is the journal's, recomputed by `research report`; it is
- * never written as a claim, because a claim must come from a judged verifier execution.
+ * hypothesis is marked tested in the ledger without a claim. A claim's reference agreement says the output still
+ * matches; it says nothing about whether the change improved the metric, so it never supports or refutes the
+ * hypothesis. Whether it held is the research grade's call (`researchHypothesisVerdict`): the journal records it, and
+ * `research report` recomputes the grade from the raw samples. The ledger only lets a judged claim support or refute,
+ * so the grade is never written there as one.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -28,7 +30,14 @@ import {
 	hypothesesFromSlate,
 } from "../claims/index.js";
 import { campaignDir, samplesName } from "./store.js";
-import type { ResearchCampaign } from "./types.js";
+import type { ResearchCampaign, ResearchGrade, ResearchHypothesisVerdict } from "./types.js";
+
+/** The hypothesis verdict a research grade implies: improved supports, regressed refutes, anything else is inconclusive. */
+export function researchHypothesisVerdict(grade: ResearchGrade | null): ResearchHypothesisVerdict {
+	if (grade?.verdict === "improved") return "supported";
+	if (grade?.verdict === "regressed") return "refuted";
+	return "inconclusive";
+}
 
 function researchRunIdentity(campaign: ResearchCampaign, iteration: number): CheckRunIdentity {
 	return { channel: "verify", sessionId: null, toolCallId: `research:${campaign.id}:${samplesName(iteration)}` };
@@ -144,17 +153,14 @@ export async function finishIterationRecord(input: {
 		if (claim !== null) claims.set(outcome.check, claim);
 	}
 	if (claims.size > 0) await appendClaims([...claims.values()]);
-	const runs: CheckRun[] = input.outcomes.map((outcome) => {
-		const claim = claims.get(outcome.check);
-		return {
-			check: outcome.check,
-			hypotheses: input.bindings.get(outcome.check) ?? [],
-			execution: outcome.execution,
-			...(claim !== undefined ? { claim } : {}),
-			source,
-			at: input.at,
-		};
-	});
+	// No claim on the test: reference agreement is not evidence the change improved the metric.
+	const runs: CheckRun[] = input.outcomes.map((outcome) => ({
+		check: outcome.check,
+		hypotheses: input.bindings.get(outcome.check) ?? [],
+		execution: outcome.execution,
+		source,
+		at: input.at,
+	}));
 	await appendHypothesisTests(input.campaign.project, runs);
 	return { claims };
 }

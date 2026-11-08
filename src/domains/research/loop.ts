@@ -7,9 +7,9 @@
  * journal before the next begins. Budget stops are checked before each iteration, and an abort writes `stopped`.
  */
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readClioVersion } from "../../core/package-root.js";
+import { clampTimerDelayMs } from "../../core/timers.js";
 import type { ToolResult } from "../../tools/registry.js";
 import { gitCheckoutRoot } from "../../tools/task-worktree.js";
 import {
@@ -36,15 +36,21 @@ import {
 } from "./git.js";
 import { aaIsNoisy, grade } from "./grader.js";
 import {
+	changeReachesProtected,
 	filesNamedByCheck,
 	inScope,
 	measurePairs,
 	type ObjectiveValue,
 	runGateIn,
 	runObjective,
-	touchesProtected,
 } from "./measure.js";
-import { beginIterationRecord, type CheckOutcome, executionOf, finishIterationRecord } from "./record.js";
+import {
+	beginIterationRecord,
+	type CheckOutcome,
+	executionOf,
+	finishIterationRecord,
+	researchHypothesisVerdict,
+} from "./record.js";
 import {
 	appendJournal,
 	newResearchCampaignId,
@@ -114,12 +120,14 @@ export function openResearchCampaign(input: OpenCampaignInput): ResearchCampaign
 		throw new ResearchOpenError(
 			`check '${objectiveCheck.id}' is a reproduce check; an objective must print a numeric payload (command, numeric-compare or perf-budget); use it as a --gate`,
 		);
-	const gates = [...new Set(input.gates)].filter((id) => id !== objectiveCheck.id).map(find);
-	const exists = (relative: string): boolean => existsSync(join(root, relative));
+	// A --gate naming the objective stays a gate, and a judged objective is always one: its reference comparison must
+	// pass before a candidate can ratchet. The check itself is frozen once.
+	const gateIds = [...new Set([...(judgedKind(objectiveCheck) ? [objectiveCheck.id] : []), ...input.gates])];
+	const gates = gateIds.filter((id) => id !== objectiveCheck.id).map(find);
 	const protectedPaths = [
 		PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
-		...filesNamedByCheck(objectiveCheck, exists),
-		...gates.flatMap((check) => filesNamedByCheck(check, exists)),
+		...filesNamedByCheck(objectiveCheck, root),
+		...gates.flatMap((check) => filesNamedByCheck(check, root)),
 	];
 	const project = claimsProjectRoot(root);
 	const now = input.now ?? new Date();
@@ -132,7 +140,7 @@ export function openResearchCampaign(input: OpenCampaignInput): ResearchCampaign
 		createdAt: now.toISOString(),
 		project,
 		objective: { ...input.objective },
-		gates: gates.map((check) => check.id),
+		gates: gateIds,
 		scope: [...input.scope],
 		protected: [...new Set(protectedPaths)].sort(),
 		budget: { ...input.budget },
@@ -188,6 +196,7 @@ export interface ResearchRunOutcome {
 	iterations: number;
 }
 
+/** A check whose run is judged into a claim: its result is a pass or fail against a reference, not just an exit code. */
 function judgedKind(check: DeclaredCheck): boolean {
 	return check.kind === "numeric-compare" || check.kind === "reproduce";
 }
@@ -207,14 +216,37 @@ export async function runResearchCampaign(
 	const clock = deps.clock ?? (() => performance.now());
 	const now = deps.now ?? (() => new Date());
 	const log = deps.log ?? (() => {});
-	const signal = deps.signal;
+	const operator = deps.signal;
 	const root = campaign.project;
 	const project = campaign.project;
 	const at = (): string => now().toISOString();
 	const journal = (event: ResearchJournalEvent): void => appendJournal(project, campaign.id, event);
-	const [objectiveCheck, ...gateChecks] = campaign.checks as [DeclaredCheck, ...DeclaredCheck[]];
+	const objectiveCheck = campaign.checks[0] as DeclaredCheck;
+	const gateIds = new Set(campaign.gates);
+	if (judgedKind(objectiveCheck)) gateIds.add(objectiveCheck.id);
+	const gateChecks = [...gateIds].flatMap((id) => campaign.checks.filter((check) => check.id === id));
 	const metric = campaign.objective.metric;
 	const started = clock();
+	// One signal for every phase: the operator's stop, or the campaign-wide wall deadline. Every agent run,
+	// measurement and gate is cut off by it, and nothing graded after it is ratcheted.
+	const wallMs = campaign.budget.maxWallMinutes === undefined ? undefined : campaign.budget.maxWallMinutes * 60_000;
+	const control = new AbortController();
+	const signal = control.signal;
+	let deadlineHit = false;
+	const onOperatorAbort = (): void => control.abort(operator?.reason);
+	if (operator?.aborted) control.abort(operator.reason);
+	else operator?.addEventListener("abort", onOperatorAbort, { once: true });
+	const deadlineTimer =
+		wallMs === undefined
+			? undefined
+			: setTimeout(
+					() => {
+						deadlineHit = true;
+						control.abort(new Error("research wall deadline"));
+					},
+					Math.max(1, clampTimerDelayMs(wallMs)),
+				);
+	deadlineTimer?.unref?.();
 	const costs: ResearchCost[] = [];
 	let best = campaign.base;
 	let iterations = 0;
@@ -226,7 +258,19 @@ export async function runResearchCampaign(
 		log(`stopped: ${reason}: ${detail}`);
 		return { reason, detail, best, iterations };
 	};
-	const aborted = (): boolean => signal?.aborted === true;
+	const stoppedByOperator = (): boolean => operator?.aborted === true;
+	const pastDeadline = (): boolean => deadlineHit || (wallMs !== undefined && clock() - started >= wallMs);
+	/** Why the campaign must stop now, if it must: the operator first, then the wall deadline. */
+	const halt = (): { reason: "stopped" | "max-wall-minutes"; archive: ResearchArchiveReason } | null => {
+		if (stoppedByOperator()) return { reason: "stopped", archive: "interrupted" };
+		if (pastDeadline()) return { reason: "max-wall-minutes", archive: "deadline" };
+		return null;
+	};
+	const aborted = (): boolean => signal.aborted || halt() !== null;
+	const haltDetail = (phase: string): string =>
+		stoppedByOperator()
+			? `interrupted ${phase}`
+			: `the ${campaign.budget.maxWallMinutes} minute wall budget ran out ${phase}`;
 
 	try {
 		addResearchWorktree(root, baseWorktree, best);
@@ -234,8 +278,13 @@ export async function runResearchCampaign(
 
 		// A/A: base against base, the same number of pairs an iteration takes.
 		log(`A/A check: ${campaign.objective.trials} interleaved pairs of '${objectiveCheck.id}' on the base`);
-		const aa = await measurePairs(campaign.objective.trials, () => measure(objectiveCheck, metric, baseWorktree, signal));
-		if (aborted()) return finish("stopped", "interrupted during the A/A check");
+		const aa = await measurePairs(
+			campaign.objective.trials,
+			() => measure(objectiveCheck, metric, baseWorktree, signal),
+			aborted,
+		);
+		const aaHalt = halt();
+		if (aaHalt !== null) return finish(aaHalt.reason, haltDetail("during the A/A check"));
 		if (!aa.ok) return finish("error", `the objective check failed on the base: ${aa.reason}`);
 		const aaSamples = writeSamples(project, campaign.id, {
 			iteration: "aa",
@@ -265,8 +314,10 @@ export async function runResearchCampaign(
 		for (;;) {
 			const state = { iterations, elapsedMs: clock() - started, costs };
 			const stop = budgetStop(campaign.budget, state);
+			const loopHalt = halt();
+			if (loopHalt?.reason === "stopped") return finish("stopped", "interrupted");
 			if (stop !== null) return finish(stop.reason, stop.detail);
-			if (aborted()) return finish("stopped", "interrupted");
+			if (loopHalt !== null) return finish(loopHalt.reason, haltDetail("before the next iteration"));
 			iterations += 1;
 			const iteration = iterations;
 			const name = samplesName(iteration);
@@ -287,7 +338,7 @@ export async function runResearchCampaign(
 				...(campaign.agent.model !== undefined ? { model: campaign.agent.model } : {}),
 				...(limits.timeoutSeconds !== undefined ? { timeoutSeconds: limits.timeoutSeconds } : {}),
 				...(limits.maxCostUsd !== undefined ? { maxCostUsd: limits.maxCostUsd } : {}),
-				...(signal !== undefined ? { signal } : {}),
+				signal,
 			});
 			costs.push(run.cost);
 			journal({
@@ -305,10 +356,11 @@ export async function runResearchCampaign(
 				removeResearchWorktree(root, worktree);
 				openWorktrees.delete(worktree);
 			};
-			if (aborted()) {
-				archive("agent-failed", "interrupted during the agent run");
+			const agentHalt = halt();
+			if (agentHalt !== null) {
+				archive(agentHalt.archive, haltDetail("during the agent run"));
 				cleanup();
-				return finish("stopped", "interrupted");
+				return finish(agentHalt.reason, haltDetail("during the agent run"));
 			}
 			if (run.exitCode !== 0) {
 				archive("agent-failed", `the agent run exited ${run.exitCode ?? "by signal"}: ${firstLine(run.summary)}`);
@@ -339,7 +391,7 @@ export async function runResearchCampaign(
 				continue;
 			}
 			seenTrees.add(tree);
-			const touched = changed.filter((path) => touchesProtected(path, campaign.protected));
+			const touched = changed.filter((path) => changeReachesProtected(worktree, path, campaign.protected));
 			if (touched.length > 0) {
 				archive("protected", `changed protected path(s): ${touched.join(", ")}`);
 				cleanup();
@@ -368,17 +420,31 @@ export async function runResearchCampaign(
 
 			// MEASURE
 			log(`iteration ${iteration}: measuring ${campaign.objective.trials} interleaved pairs`);
-			const pairs = await measurePairs(campaign.objective.trials, (side) =>
-				measure(objectiveCheck, metric, side === "base" ? baseWorktree : worktree, signal),
+			const pairs = await measurePairs(
+				campaign.objective.trials,
+				(side) => measure(objectiveCheck, metric, side === "base" ? baseWorktree : worktree, signal),
+				aborted,
 			);
 			const outcomes: CheckOutcome[] = [];
-			if (!pairs.ok) {
+			const measureHalt = halt();
+			if (!pairs.ok || measureHalt !== null) {
 				outcomes.push({ check: objectiveCheck.id, execution: aborted() ? "aborted" : "failed" });
 				await recorder.finish({ campaign, iteration, at: at(), bindings: begun.bindings, outcomes });
-				journal({ type: "recorded", at: at(), iteration, hypothesis: begun.hypothesis, claims: [] });
-				archive("measure-failed", pairs.reason);
+				journal({
+					type: "recorded",
+					at: at(),
+					iteration,
+					hypothesis: begun.hypothesis,
+					verdict: researchHypothesisVerdict(null),
+					claims: [],
+				});
+				if (measureHalt !== null) {
+					archive(measureHalt.archive, haltDetail("while measuring"));
+					cleanup();
+					return finish(measureHalt.reason, haltDetail("while measuring"));
+				}
+				archive("measure-failed", pairs.ok ? "measurement incomplete" : pairs.reason);
 				cleanup();
-				if (aborted()) return finish("stopped", "interrupted while measuring");
 				continue;
 			}
 			const samples = writeSamples(project, campaign.id, {
@@ -400,16 +466,18 @@ export async function runResearchCampaign(
 				resamples: campaign.resamples,
 			});
 			const objectiveOutcome: CheckOutcome = { check: objectiveCheck.id, execution: "succeeded" };
-			if (judgedKind(objectiveCheck)) {
-				const judged = await gate(worktree, objectiveCheck, signal);
-				objectiveOutcome.result = judged;
-				objectiveOutcome.execution = executionOf(judged);
+			let objectiveJudged: ToolResult | undefined;
+			if (gateIds.has(objectiveCheck.id)) {
+				objectiveJudged = await gate(worktree, objectiveCheck, signal);
+				objectiveOutcome.result = objectiveJudged;
+				objectiveOutcome.execution = executionOf(objectiveJudged);
 			}
 			outcomes.push(objectiveOutcome);
 			const gates: ResearchGateResult[] = [];
 			for (const check of gateChecks) {
-				const judged = await gate(worktree, check, signal);
-				outcomes.push({ check: check.id, execution: executionOf(judged), result: judged });
+				const isObjective = check.id === objectiveCheck.id && objectiveJudged !== undefined;
+				const judged = isObjective ? (objectiveJudged as ToolResult) : await gate(worktree, check, signal);
+				if (!isObjective) outcomes.push({ check: check.id, execution: executionOf(judged), result: judged });
 				gates.push({
 					check: check.id,
 					passed: judged.kind === "ok",
@@ -430,11 +498,18 @@ export async function runResearchCampaign(
 				at: at(),
 				iteration,
 				hypothesis: begun.hypothesis,
+				verdict: researchHypothesisVerdict(result),
 				claims: [...recorded.claims.values()].map((claim) => claim.id),
 			});
 			log(`iteration ${iteration}: ${describeGrade(result)}`);
 
-			// RATCHET
+			// RATCHET, only before the deadline and only with every gate, the judged objective included, passing.
+			const gradeHalt = halt();
+			if (gradeHalt !== null) {
+				archive(gradeHalt.archive, haltDetail("before the ratchet"));
+				cleanup();
+				return finish(gradeHalt.reason, haltDetail("before the ratchet"));
+			}
 			const failedGates = gates.filter((entry) => !entry.passed);
 			if (failedGates.length > 0) {
 				archive(
@@ -454,11 +529,12 @@ export async function runResearchCampaign(
 				archive("ratchet-lost", `${campaign.ref} no longer points at ${best}; something else moved it`);
 			}
 			cleanup();
-			if (aborted()) return finish("stopped", "interrupted");
 		}
 	} catch (error) {
 		return finish("error", error instanceof Error ? error.message : String(error));
 	} finally {
+		if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+		operator?.removeEventListener("abort", onOperatorAbort);
 		if (!campaign.keep)
 			for (const path of openWorktrees) {
 				try {

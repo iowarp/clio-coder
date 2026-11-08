@@ -4,7 +4,8 @@
  * read with the numeric-compare payload parser. Gate checks run through `runProjectCheck` itself, so their results,
  * judgements and claims are exactly what `verify` would produce in that worktree.
  */
-import { posix } from "node:path";
+import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
 import type { ToolResult } from "../../tools/registry.js";
 import { type DeclaredCheck, resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
@@ -71,11 +72,15 @@ export async function runObjective(
 export async function measurePairs(
 	trials: number,
 	measure: (side: "base" | "candidate") => Promise<ObjectiveValue>,
+	/** Checked before every run: true ends the measurement there (an operator stop or the wall deadline). */
+	stop: () => boolean = () => false,
 ): Promise<{ ok: true; pairs: Array<{ base: number; candidate: number }> } | { ok: false; reason: string }> {
 	const pairs: Array<{ base: number; candidate: number }> = [];
 	for (let trial = 0; trial < trials; trial++) {
+		if (stop()) return { ok: false, reason: `stopped before base run ${trial + 1}` };
 		const base = await measure("base");
 		if (!base.ok) return { ok: false, reason: `base run ${trial + 1}: ${base.reason}` };
+		if (stop()) return { ok: false, reason: `stopped before candidate run ${trial + 1}` };
 		const candidate = await measure("candidate");
 		if (!candidate.ok) return { ok: false, reason: `candidate run ${trial + 1}: ${candidate.reason}` };
 		pairs.push({ base: base.value, candidate: candidate.value });
@@ -98,26 +103,71 @@ export async function runGateIn(worktree: string, check: DeclaredCheck, signal?:
 	}
 }
 
-/** Repository-relative files a check's argv names, as they exist in `root`: those are protected from the agent. */
-export function filesNamedByCheck(check: DeclaredCheck, exists: (relative: string) => boolean): string[] {
+/** `target` as a repository-relative posix path under `rootReal`, or null when it lies outside. */
+function insideRoot(rootReal: string, target: string): string | null {
+	const rel = relative(rootReal, target);
+	if (rel.startsWith("..") || isAbsolute(rel)) return null;
+	return rel.split(sep).join("/");
+}
+
+/**
+ * Repository-relative files a check's argv names, as they exist in `root`: those are protected from the agent. Every
+ * argv entry counts, the executable included, so a repo-local `./bench.py` is protected as much as `python3 bench.py`.
+ * A named path that is a symlink also protects what it resolves to inside the repository.
+ */
+export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] {
 	const named = new Set<string>();
+	const rootReal = realpathSync(root);
 	const base = check.cwd === "." || check.cwd.length === 0 ? "" : check.cwd;
-	const candidates = [...check.command.slice(1)];
+	const candidates = [...check.command];
 	if (check.numeric?.reference !== undefined) candidates.push(check.numeric.reference);
 	if (check.perf?.baseline !== undefined) candidates.push(check.perf.baseline);
 	for (const arg of candidates) {
 		if (arg.startsWith("-") || arg.includes("\0")) continue;
 		for (const relative of [posix.normalize(posix.join(base, arg)), posix.normalize(arg)]) {
 			if (relative.startsWith("../") || posix.isAbsolute(relative) || relative === ".") continue;
-			if (exists(relative)) named.add(relative);
+			const full = join(root, relative);
+			if (!existsSync(full)) continue;
+			named.add(relative);
+			const resolved = insideRoot(rootReal, realpathSync(full));
+			if (resolved !== null && resolved.length > 0) named.add(resolved);
 		}
 	}
 	return [...named].sort();
 }
 
-/** Whether `path` is or lies under a protected path. */
+/** Whether `path`, normalized, is or lies under a protected path. */
 export function touchesProtected(path: string, protectedPaths: ReadonlyArray<string>): boolean {
-	return protectedPaths.some((entry) => path === entry || path.startsWith(`${entry}/`));
+	const normalized = posix.normalize(path);
+	return protectedPaths.some((entry) => normalized === entry || normalized.startsWith(`${entry}/`));
+}
+
+/**
+ * Whether a changed path in `worktree` reaches a protected file: it names one, or it is a symlink whose target (as
+ * written, and as resolved) is, contains or lies under a protected path, or leaves the worktree.
+ */
+export function changeReachesProtected(worktree: string, path: string, protectedPaths: ReadonlyArray<string>): boolean {
+	if (touchesProtected(path, protectedPaths)) return true;
+	const full = join(worktree, posix.normalize(path));
+	let link: string;
+	try {
+		if (!lstatSync(full).isSymbolicLink()) return false;
+		link = readlinkSync(full);
+	} catch {
+		return false;
+	}
+	const rootReal = realpathSync(worktree);
+	const targets = [resolve(realpathSync(dirname(full)), link)];
+	try {
+		targets.push(realpathSync(full));
+	} catch {
+		// A dangling link is judged by what it names.
+	}
+	return targets.some((target) => {
+		const rel = insideRoot(rootReal, target);
+		if (rel === null || rel.length === 0) return true;
+		return touchesProtected(rel, protectedPaths) || protectedPaths.some((entry) => entry.startsWith(`${rel}/`));
+	});
 }
 
 export function inScope(path: string, scope: ReadonlyArray<string>): boolean {

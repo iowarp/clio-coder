@@ -12,6 +12,7 @@ import type {
 	ResearchCost,
 	ResearchGateResult,
 	ResearchGrade,
+	ResearchHypothesisVerdict,
 	ResearchJournalEvent,
 	ResearchStopReason,
 } from "./types.js";
@@ -29,6 +30,7 @@ export interface ResearchIterationView {
 	outcome: "ratcheted" | ResearchArchiveReason | "running";
 	detail: string;
 	hypothesis: string | null;
+	hypothesisVerdict: ResearchHypothesisVerdict | null;
 	claims: string[];
 }
 
@@ -74,6 +76,7 @@ export function foldJournal(
 					outcome: "running",
 					detail: "",
 					hypothesis: null,
+					hypothesisVerdict: null,
 					claims: [],
 				});
 				break;
@@ -112,6 +115,7 @@ export function foldJournal(
 				const view = at(event.iteration);
 				if (view === undefined) break;
 				view.hypothesis = event.hypothesis;
+				view.hypothesisVerdict = event.verdict ?? null;
 				view.claims = event.claims;
 				break;
 			}
