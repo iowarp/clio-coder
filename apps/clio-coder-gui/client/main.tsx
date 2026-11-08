@@ -255,6 +255,13 @@ const router = createBrowserRouter([
 				},
 			},
 			{
+				path: "/research",
+				lazy: async () => {
+					const { ResearchPage } = await import("./pages/research.js");
+					return { element: <ResearchPage client={client} /> };
+				},
+			},
+			{
 				path: "/machines",
 				lazy: async () => {
 					const { MachinesPage } = await import("./pages/machines.js");

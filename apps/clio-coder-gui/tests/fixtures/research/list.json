@@ -1,0 +1,517 @@
+{
+	"project": "/scratch/repo",
+	"campaigns": [
+		{
+			"id": "r20261108-120739-d20d",
+			"state": "stopped",
+			"stop": { "reason": "max-iterations", "detail": "ran 2 of 2 iterations", "at": "2026-11-08T12:09:02.511Z" },
+			"best": "6af8f20fdee10753e85c1fe6f074fa0a7964198c",
+			"ratchets": 1,
+			"spend": { "usd": 0, "unknownRuns": 2, "estimated": false },
+			"aa": {
+				"grade": {
+					"verdict": "inconclusive",
+					"classification": "improved",
+					"baseMedian": 141.06718900438864,
+					"candidateMedian": 125.50564800039865,
+					"delta": -0.11031297294444467,
+					"ci": { "low": -0.2685135651132086, "high": 0.25932566140959207 },
+					"seed": 2969543574,
+					"resamples": 2000
+				},
+				"noisy": false,
+				"allowed": true,
+				"samples": "samples/aa.json"
+			},
+			"iterations": [
+				{
+					"iteration": 1,
+					"parent": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+					"commit": "6af8f20fdee10753e85c1fe6f074fa0a7964198c",
+					"changed": ["stats.py"],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "1zmgpm4a493b",
+						"outcome": "succeeded",
+						"summary": "The `correct` check passes with all three values matching the reference exactly.\n\nHypothesis: Replaced the O(n\u00b2) insertion-sort in `median` with built-in `sorted()` (Timsort, C-speed) and the O(n\u00b2) list-membership loop in `distinct` with a set comprehension (`len(set(xs))`). Both were the dominant costs on 3000 values; the new implementations produce identical results for all inputs.\nPrediction: wall_ms should drop by well over 10% \u2014 the two quadratic loops (each ~4.5M+ comparisons in Python bytecode) are replaced by C-implemented sort and hashing, so total time should fall to roughly a third of the original."
+					},
+					"cost": { "kind": "unknown", "reason": "5 call(s) had no price for their model" },
+					"samples": "samples/it-0001.json",
+					"grade": {
+						"verdict": "improved",
+						"classification": "improved",
+						"baseMedian": 129.17976001335774,
+						"candidateMedian": 0.6576209998456761,
+						"delta": -0.9949092566840372,
+						"ci": { "low": -0.9964570822372962, "high": -0.9923557452093661 },
+						"seed": 2969543575,
+						"resamples": 2000
+					},
+					"gates": [
+						{
+							"check": "correct",
+							"passed": true,
+							"execution": "succeeded",
+							"summary": "numeric-compare passed: 3 key(s) within tolerance",
+							"claim": "a3b07215cdb1c083489c676fe69134b2f40d428a97ebc2c2713bf2d47018ae5a"
+						}
+					],
+					"outcome": "ratcheted",
+					"detail": "405d368742a5 -> 6af8f20fdee1",
+					"hypothesis": "1d98332c6a161d2ca3a7069b62acaac65670e9937de1a13863faea7ad1a20d24",
+					"hypothesisVerdict": null,
+					"claims": ["a3b07215cdb1c083489c676fe69134b2f40d428a97ebc2c2713bf2d47018ae5a"]
+				},
+				{
+					"iteration": 2,
+					"parent": "6af8f20fdee10753e85c1fe6f074fa0a7964198c",
+					"commit": "6af8f20fdee10753e85c1fe6f074fa0a7964198c",
+					"changed": [],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "bf89yixjayzf",
+						"outcome": "succeeded",
+						"summary": "[Clio Coder] loop guard: tool calls were disabled for the rest of this turn, but the reply contained only tool-call markup, which cannot run and was removed. The turn stopped without a usable answer."
+					},
+					"cost": { "kind": "unknown", "reason": "14 call(s) had no price for their model" },
+					"samples": null,
+					"grade": null,
+					"gates": [],
+					"outcome": "no-op",
+					"detail": "the agent left no change",
+					"hypothesis": null,
+					"hypothesisVerdict": null,
+					"claims": []
+				}
+			],
+			"campaign": {
+				"version": 1,
+				"id": "r20261108-120739-d20d",
+				"createdAt": "2026-11-08T12:07:39.725Z",
+				"project": "/scratch/repo",
+				"objective": { "check": "bench", "metric": "wall_ms", "direction": "min", "minImprovement": 0.1, "trials": 5 },
+				"gates": ["correct"],
+				"scope": ["stats.py"],
+				"protected": [".clio-coder/verifiers.yaml", "bench.py", "check.py", "tests/reference/stats.json"],
+				"budget": { "maxIterations": 2, "allowUnpriced": false, "maxWallMinutes": 20 },
+				"allowNoisy": false,
+				"keep": false,
+				"agent": { "autonomy": "default", "goal": "make stats.py faster without changing any answer" },
+				"base": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+				"ref": "refs/heads/clio/research/r20261108-120739-d20d",
+				"checks": [
+					{
+						"id": "bench",
+						"description": "Wall time of stats.py on 3000 values (min is better)",
+						"command": ["python3", "bench.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["perf"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "command"
+					},
+					{
+						"id": "correct",
+						"description": "stats.py answers match the reference on a holdout input",
+						"command": ["python3", "check.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["scientific"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "numeric-compare",
+						"numeric": { "reference": "tests/reference/stats.json", "tolerance": { "relative": 1e-9 } }
+					}
+				],
+				"checkDigest": "eb644b32729987be9a75068af1d87cd7722dc5457faba90fbbc0d9519f70a51f",
+				"seed": 2969543574,
+				"resamples": 2000,
+				"clioVersion": "0.7.0"
+			},
+			"unreadableJournalLines": 0
+		},
+		{
+			"id": "r20261108-120921-31df",
+			"state": "stopped",
+			"stop": {
+				"reason": "budget-unenforceable",
+				"detail": "1 agent run(s) reported unknown spend, so the $0.50 cap cannot be enforced; pass --allow-unpriced to continue on the iteration and wall caps",
+				"at": "2026-11-08T12:09:43.105Z"
+			},
+			"best": "ed898722abf291379482c866aa4d3f68fe4b1337",
+			"ratchets": 1,
+			"spend": { "usd": 0, "unknownRuns": 1, "estimated": false },
+			"aa": {
+				"grade": {
+					"verdict": "unchanged",
+					"classification": "unchanged",
+					"baseMedian": 126.58824100799393,
+					"candidateMedian": 126.07207399560139,
+					"delta": -0.004077527330203978,
+					"ci": { "low": -0.19621949239203462, "high": 0.3650904588662931 },
+					"seed": 1695755690,
+					"resamples": 2000
+				},
+				"noisy": false,
+				"allowed": true,
+				"samples": "samples/aa.json"
+			},
+			"iterations": [
+				{
+					"iteration": 1,
+					"parent": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+					"commit": "ed898722abf291379482c866aa4d3f68fe4b1337",
+					"changed": ["stats.py"],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "3s9b23b46wde",
+						"outcome": "succeeded",
+						"summary": "The change is done and verified: the `correct` check passes (all three values match the reference within tolerance), and the bench went from ~145 ms to ~0.5 ms locally.\n\nWhat I changed in `stats.py` only:\n- `mean`: replaced the manual Python loop with builtin `sum(xs)` (C-level accumulation).\n- `median`: replaced insertion sort (O(n\u00b2) list inserts) with builtin `sorted(xs)` (Timsort, C).\n- `distinct`: replaced the O(n\u00b2) linear-scan membership test with `len(set(xs))` (hash set, C).\n\nAll three are behavior-preserving for this input: same ordering semantics (`sorted` is stable and matches the insertion-sort order), same float results (verified against the reference JSON at 1e-9 tolerance), and the bench's single call to each function covers all three.\n\nHypothesis: Replaced the pure-Python O(n\u00b2) insertion sort, linear-scan distinctness check, and manual sum loop with C-implemented builtins (`sorted`, `set`, `sum`), which dominate the ~145 ms wall time on 3000 values.\nPrediction: wall_ms drops from ~145 ms to well under 1 ms (roughly 99% lower), far exceeding the 5% target, with the correct check still passing since outputs are bit-identical to the reference."
+					},
+					"cost": { "kind": "unknown", "reason": "6 call(s) had no price for their model" },
+					"samples": "samples/it-0001.json",
+					"grade": {
+						"verdict": "improved",
+						"classification": "improved",
+						"baseMedian": 108.45361099927686,
+						"candidateMedian": 0.4801789909834042,
+						"delta": -0.9955724942068862,
+						"ci": { "low": -0.9957496020920327, "high": -0.9947854313176165 },
+						"seed": 1695755691,
+						"resamples": 2000
+					},
+					"gates": [
+						{
+							"check": "correct",
+							"passed": true,
+							"execution": "succeeded",
+							"summary": "numeric-compare passed: 3 key(s) within tolerance",
+							"claim": "7050507033b18519131004510cec9e7cb5e58f27099314d4e0e2eda262dfff9b"
+						}
+					],
+					"outcome": "ratcheted",
+					"detail": "405d368742a5 -> ed898722abf2",
+					"hypothesis": "4ac5f10acd7e7287ae56bdd929a578c222ae7292b737fcb6e661fba7d844f36c",
+					"hypothesisVerdict": null,
+					"claims": ["7050507033b18519131004510cec9e7cb5e58f27099314d4e0e2eda262dfff9b"]
+				}
+			],
+			"campaign": {
+				"version": 1,
+				"id": "r20261108-120921-31df",
+				"createdAt": "2026-11-08T12:09:21.007Z",
+				"project": "/scratch/repo",
+				"objective": { "check": "bench", "metric": "wall_ms", "direction": "min", "minImprovement": 0.05, "trials": 5 },
+				"gates": ["correct"],
+				"scope": ["stats.py"],
+				"protected": [".clio-coder/verifiers.yaml", "bench.py", "check.py", "tests/reference/stats.json"],
+				"budget": { "maxIterations": 3, "allowUnpriced": false, "maxCostUsd": 0.5 },
+				"allowNoisy": false,
+				"keep": false,
+				"agent": { "autonomy": "default", "goal": "make mean() faster" },
+				"base": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+				"ref": "refs/heads/clio/research/r20261108-120921-31df",
+				"checks": [
+					{
+						"id": "bench",
+						"description": "Wall time of stats.py on 3000 values (min is better)",
+						"command": ["python3", "bench.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["perf"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "command"
+					},
+					{
+						"id": "correct",
+						"description": "stats.py answers match the reference on a holdout input",
+						"command": ["python3", "check.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["scientific"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "numeric-compare",
+						"numeric": { "reference": "tests/reference/stats.json", "tolerance": { "relative": 1e-9 } }
+					}
+				],
+				"checkDigest": "eb644b32729987be9a75068af1d87cd7722dc5457faba90fbbc0d9519f70a51f",
+				"seed": 1695755690,
+				"resamples": 2000,
+				"clioVersion": "0.7.0"
+			},
+			"unreadableJournalLines": 0
+		},
+		{
+			"id": "r20261108-123812-bacf",
+			"state": "stopped",
+			"stop": { "reason": "max-iterations", "detail": "ran 2 of 2 iterations", "at": "2026-11-08T12:38:59.516Z" },
+			"best": "b84d069e885a6924e529bd8aac4687c3815df6b5",
+			"ratchets": 1,
+			"spend": { "usd": 0, "unknownRuns": 2, "estimated": false },
+			"aa": {
+				"grade": {
+					"verdict": "unchanged",
+					"classification": "unchanged",
+					"baseMedian": 140.69627500430215,
+					"candidateMedian": 144.90787300746888,
+					"delta": 0.029933969488800945,
+					"ci": { "low": -0.05694059937156332, "high": 0.11529023187505939 },
+					"seed": 3636582100,
+					"resamples": 2000
+				},
+				"noisy": false,
+				"allowed": true,
+				"samples": "samples/aa.json"
+			},
+			"iterations": [
+				{
+					"iteration": 1,
+					"parent": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+					"commit": "b84d069e885a6924e529bd8aac4687c3815df6b5",
+					"changed": ["stats.py"],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "2srpavgj97yi",
+						"outcome": "succeeded",
+						"summary": "Done. The change is in `stats.py` only: `median` now uses built-in `sorted()` instead of an O(n\u00b2) insertion loop, and `distinct` uses a `set` instead of an O(n\u00b2) list membership scan. `mean` is unchanged (its sequential sum already matches the reference exactly).\n\nEvidence:\n- `correct` check passes: all 3 keys within tolerance (worst rel=0).\n- One-off local bench comparison: baseline ~156 ms \u2192 changed code ~0.70 ms (~99.6% lower), far above the required 5%.\n\nHypothesis: Replacing the O(n\u00b2) insertion-sort median and O(n\u00b2) list-membership distinct with built-in `sorted()` (Timsort, C-level) and a hash set eliminates the quadratic work that dominated wall time at n=3000.\nPrediction: wall_ms drops by roughly two orders of magnitude (from ~156 ms to well under 1 ms), comfortably exceeding the required 5% relative reduction while `correct` still passes."
+					},
+					"cost": { "kind": "unknown", "reason": "8 call(s) had no price for their model" },
+					"samples": "samples/it-0001.json",
+					"grade": {
+						"verdict": "improved",
+						"classification": "improved",
+						"baseMedian": 121.22125198948197,
+						"candidateMedian": 0.6369220063788816,
+						"delta": -0.9947457892413606,
+						"ci": { "low": -0.9954184258353851, "high": -0.993465128355562 },
+						"seed": 3636582101,
+						"resamples": 2000
+					},
+					"gates": [
+						{
+							"check": "correct",
+							"passed": true,
+							"execution": "succeeded",
+							"summary": "numeric-compare passed: 3 key(s) within tolerance",
+							"claim": "b382a5f1102de13808d51f360a97d978db094d6fe2de1a9f4c449e2105c1cef3"
+						}
+					],
+					"outcome": "ratcheted",
+					"detail": "405d368742a5 -> b84d069e885a",
+					"hypothesis": "2cf4e3e9f933c6eb0ae8fd6b0869385c9890727d19c78471614328b47063aa10",
+					"hypothesisVerdict": "supported",
+					"claims": ["b382a5f1102de13808d51f360a97d978db094d6fe2de1a9f4c449e2105c1cef3"]
+				},
+				{
+					"iteration": 2,
+					"parent": "b84d069e885a6924e529bd8aac4687c3815df6b5",
+					"commit": "8384073a98003add0fa4f04695d26d857d5d66ee",
+					"changed": ["stats.py"],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "1lhbi7zo2v5l",
+						"outcome": "succeeded",
+						"summary": "Done. Only `stats.py` was modified; the `correct` check passes (all three keys within tolerance, zero difference vs reference), and a single local bench run shows ~0.64 ms wall time.\n\nWhat changed in `stats.py`:\n- `mean`: replaced the Python-level accumulation loop with built-in `sum()` \u2014 C-level summation over the list is roughly 2x faster than the per-element Python loop (measured locally: ~35 \u00b5s \u2192 ~17.5 \u00b5s on the bench input).\n- `median`: kept `sorted()` but trimmed bytecode noise \u2014 one `len()` call, bit-shift/`& 1` instead of `//` and `%`, and `* 0.5` instead of `/ 2` for the even case (tiny gain: ~175 \u00b5s \u2192 ~172 \u00b5s).\n- `distinct`: replaced the manual set-building loop with `len(set(xs))` \u2014 C-level set construction is faster than per-element Python `add` calls (~106 \u00b5s \u2192 ~83 \u00b5s locally).\n\nAll three variants were verified to produce bit-identical results to the reference on the holdout input used by `check.py`, so behavior is unchanged.\n\nHypothesis: Replacing the Python-level loops in mean and distinct with C-implemented built-ins (sum, set constructor) and trimming bytecode operations in median removes interpreter overhead from every operation the benchmark times, while keeping results bit-identical.\nPrediction: wall_ms drops roughly 10\u201325% below the current code's ~0.7 ms (to around 0.5\u20130.6 ms), comfortably above the required 5% relative improvement, with the correct check still passing."
+					},
+					"cost": { "kind": "unknown", "reason": "7 call(s) had no price for their model" },
+					"samples": "samples/it-0002.json",
+					"grade": {
+						"verdict": "unchanged",
+						"classification": "unchanged",
+						"baseMedian": 0.7266239990713075,
+						"candidateMedian": 0.6964560016058385,
+						"delta": -0.041518030651377366,
+						"ci": { "low": -0.24581558489240002, "high": 0.05865153426523079 },
+						"seed": 3636582102,
+						"resamples": 2000
+					},
+					"gates": [
+						{
+							"check": "correct",
+							"passed": true,
+							"execution": "succeeded",
+							"summary": "numeric-compare passed: 3 key(s) within tolerance",
+							"claim": "acbd871beb3db8138dffa9cc05b4c7e64ecda8a03e40974552ae5b360db7fe0a"
+						}
+					],
+					"outcome": "not-improved",
+					"detail": "unchanged, median delta -4.15%, 95% CI [-24.58%, +5.87%]",
+					"hypothesis": "694d6a62b24c2ab680dd52cda1ef8bda94692a2526a9e808f93af61caa2e78dc",
+					"hypothesisVerdict": "inconclusive",
+					"claims": ["acbd871beb3db8138dffa9cc05b4c7e64ecda8a03e40974552ae5b360db7fe0a"]
+				}
+			],
+			"campaign": {
+				"version": 1,
+				"id": "r20261108-123812-bacf",
+				"createdAt": "2026-11-08T12:38:12.906Z",
+				"project": "/scratch/repo",
+				"objective": { "check": "bench", "metric": "wall_ms", "direction": "min", "minImprovement": 0.05, "trials": 3 },
+				"gates": ["correct"],
+				"scope": ["stats.py"],
+				"protected": [".clio-coder/verifiers.yaml", "bench.py", "check.py", "tests/reference/stats.json"],
+				"budget": { "maxIterations": 2, "allowUnpriced": false },
+				"allowNoisy": false,
+				"keep": false,
+				"agent": { "autonomy": "default" },
+				"base": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+				"ref": "refs/heads/clio/research/r20261108-123812-bacf",
+				"checks": [
+					{
+						"id": "bench",
+						"description": "Wall time of stats.py on 3000 values (min is better)",
+						"command": ["python3", "bench.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["perf"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "command"
+					},
+					{
+						"id": "correct",
+						"description": "stats.py answers match the reference on a holdout input",
+						"command": ["python3", "check.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["scientific"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "numeric-compare",
+						"numeric": { "reference": "tests/reference/stats.json", "tolerance": { "relative": 1e-9 } }
+					}
+				],
+				"checkDigest": "eb644b32729987be9a75068af1d87cd7722dc5457faba90fbbc0d9519f70a51f",
+				"seed": 3636582100,
+				"resamples": 2000,
+				"clioVersion": "0.7.0"
+			},
+			"unreadableJournalLines": 0
+		},
+		{
+			"id": "r20261108-123902-22f8",
+			"state": "stopped",
+			"stop": { "reason": "stopped", "detail": "interrupted during the agent run", "at": "2026-11-08T12:39:49.725Z" },
+			"best": "5774d5ee319192acc60ee1a144fa346153e1f984",
+			"ratchets": 1,
+			"spend": { "usd": 0, "unknownRuns": 2, "estimated": false },
+			"aa": {
+				"grade": {
+					"verdict": "unchanged",
+					"classification": "unchanged",
+					"baseMedian": 136.02285800152458,
+					"candidateMedian": 137.02458899933845,
+					"delta": 0.0073644313355233125,
+					"ci": { "low": -0.1949494866030684, "high": 0.04515272500313083 },
+					"seed": 228042350,
+					"resamples": 2000
+				},
+				"noisy": false,
+				"allowed": true,
+				"samples": "samples/aa.json"
+			},
+			"iterations": [
+				{
+					"iteration": 1,
+					"parent": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+					"commit": "5774d5ee319192acc60ee1a144fa346153e1f984",
+					"changed": ["stats.py"],
+					"agent": {
+						"exitCode": 0,
+						"sessionId": "1cn6y7vf52dj",
+						"outcome": "succeeded",
+						"summary": "The change is done and validated: `check.py` output now matches `tests/reference/stats.json` exactly (mean 2256.943333333333, median 2244.0, distinct 2833), so the `correct` gate holds.\n\nWhat changed in `stats.py`:\n- `median`: replaced the O(n\u00b2) insertion sort with C-implemented `sorted(xs)` (Timsort, O(n log n)). The same elements are produced, just via a different algorithm \u2014 no rounding difference.\n- `distinct`: replaced the O(n\u00b2) list-membership loop with `len(set(xs))` \u2014 exact same count, no floating-point arithmetic involved.\n\nThe old code did roughly 4.5M comparisons plus ~4.5M list inserts for median and ~9M membership scans for distinct on the 3000-element bench input; both are now C-speed. `mean` was left untouched (it's already a tight loop, and any change there risks altering the reference value).\n\nHypothesis: Replacing the O(n\u00b2) insertion sort in `median` with built-in `sorted()` and the O(n\u00b2) list membership scan in `distinct` with a `set` eliminates the dominant costs on the 3000-element bench input, cutting wall_ms by well over 5% while producing bit-identical results (verified against tests/reference/stats.json).\nPrediction: wall_ms drops from ~1\u20132 ms to well under 1 ms \u2014 roughly a 90%+ reduction, far exceeding the required 5.0%."
+					},
+					"cost": { "kind": "unknown", "reason": "5 call(s) had no price for their model" },
+					"samples": "samples/it-0001.json",
+					"grade": {
+						"verdict": "improved",
+						"classification": "improved",
+						"baseMedian": 155.4628860030789,
+						"candidateMedian": 0.677529998938553,
+						"delta": -0.9956418537159722,
+						"ci": { "low": -0.996316101052372, "high": -0.9954110447378979 },
+						"seed": 228042351,
+						"resamples": 2000
+					},
+					"gates": [
+						{
+							"check": "correct",
+							"passed": true,
+							"execution": "succeeded",
+							"summary": "numeric-compare passed: 3 key(s) within tolerance",
+							"claim": "ea95f0631ce55b35aa5fbfc5c3d4d20657e52051c14a2aca7f469f49b0a6ad27"
+						}
+					],
+					"outcome": "ratcheted",
+					"detail": "405d368742a5 -> 5774d5ee3191",
+					"hypothesis": "b4cf1b98a2d8c2425dae86eae6f2528d9dede1f81c93e2de2e579825ff9e26c7",
+					"hypothesisVerdict": "supported",
+					"claims": ["ea95f0631ce55b35aa5fbfc5c3d4d20657e52051c14a2aca7f469f49b0a6ad27"]
+				},
+				{
+					"iteration": 2,
+					"parent": "5774d5ee319192acc60ee1a144fa346153e1f984",
+					"commit": null,
+					"changed": [],
+					"agent": {
+						"exitCode": 130,
+						"sessionId": "17pwzvwi0z2q",
+						"outcome": "canceled",
+						"summary": "clio-coder run: interrupted before the turn completed"
+					},
+					"cost": { "kind": "unknown", "reason": "6 call(s) had no price for their model" },
+					"samples": null,
+					"grade": null,
+					"gates": [],
+					"outcome": "interrupted",
+					"detail": "interrupted during the agent run",
+					"hypothesis": null,
+					"hypothesisVerdict": null,
+					"claims": []
+				}
+			],
+			"campaign": {
+				"version": 1,
+				"id": "r20261108-123902-22f8",
+				"createdAt": "2026-11-08T12:39:02.939Z",
+				"project": "/scratch/repo",
+				"objective": { "check": "bench", "metric": "wall_ms", "direction": "min", "minImprovement": 0.05, "trials": 3 },
+				"gates": ["correct"],
+				"scope": ["stats.py"],
+				"protected": [".clio-coder/verifiers.yaml", "bench.py", "check.py", "tests/reference/stats.json"],
+				"budget": { "maxIterations": 2, "allowUnpriced": false },
+				"allowNoisy": false,
+				"keep": false,
+				"agent": { "autonomy": "default" },
+				"base": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+				"ref": "refs/heads/clio/research/r20261108-123902-22f8",
+				"checks": [
+					{
+						"id": "bench",
+						"description": "Wall time of stats.py on 3000 values (min is better)",
+						"command": ["python3", "bench.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["perf"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "command"
+					},
+					{
+						"id": "correct",
+						"description": "stats.py answers match the reference on a holdout input",
+						"command": ["python3", "check.py"],
+						"cwd": ".",
+						"timeoutMs": 60000,
+						"tags": ["scientific"],
+						"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+						"kind": "numeric-compare",
+						"numeric": { "reference": "tests/reference/stats.json", "tolerance": { "relative": 1e-9 } }
+					}
+				],
+				"checkDigest": "eb644b32729987be9a75068af1d87cd7722dc5457faba90fbbc0d9519f70a51f",
+				"seed": 228042350,
+				"resamples": 2000,
+				"clioVersion": "0.7.0"
+			},
+			"unreadableJournalLines": 0
+		}
+	]
+}

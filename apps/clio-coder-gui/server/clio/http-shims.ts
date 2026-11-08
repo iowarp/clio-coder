@@ -8,6 +8,7 @@ export {
 	renderCount,
 	renderFact,
 	renderUsdLimit,
+	renderUsdSpend,
 } from "../../../../src/core/telemetry/render.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";

@@ -380,3 +380,17 @@ for (const [path, expected] of [
 		for (const link of links) assert.deepEqual([...link.searchParams], [["workspace", expected]]);
 	});
 }
+
+for (const path of ["/research", "/arena"]) {
+	test(`settings rail lists ${path} under Activity and marks it current there`, () => {
+		const html = render(
+			queries(),
+			`${path}?workspace=workspace-a`,
+			<SettingsSidebar activeWorkspaceId="workspace-a" onNavigate={() => {}} onHelp={() => {}} />,
+		);
+		const link = new RegExp(`<a[^>]*href="${path}\\?workspace=workspace-a"[^>]*>`);
+		const activity = html.slice(html.indexOf(">Activity<"));
+		assert.match(activity, link);
+		assert.match(activity.match(link)?.[0] ?? "", /aria-current="page"/);
+	});
+}

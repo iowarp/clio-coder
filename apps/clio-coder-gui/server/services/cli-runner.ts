@@ -79,8 +79,10 @@ export class CliRunner {
 					reject(failure);
 					return;
 				}
-				// A completed fleet preflight exits 1 for negative evidence and still emits its JSON record.
-				if (code !== 0 && !(command.kind === "machines.check" && code === 1)) {
+				// A completed fleet preflight exits 1 for negative evidence and still emits its JSON record; so does a
+				// research report whose recomputed grades disagree with the journal.
+				const recordOnOne = command.kind === "machines.check" || command.kind === "research.report";
+				if (code !== 0 && !(recordOnOne && code === 1)) {
 					reject(
 						new AppProblem(
 							"operation_failed",

@@ -46,6 +46,18 @@ export const routes = {
 	arenaStandings: { name: "arenaStandings", method: "GET", path: "/api/workspaces/:id/arena/standings" },
 	arenaStart: { name: "arenaStart", method: "POST", path: "/api/workspaces/:id/arena/matches" },
 	arenaVote: { name: "arenaVote", method: "POST", path: "/api/workspaces/:id/arena/matches/:matchId/vote" },
+	researchCampaigns: { name: "researchCampaigns", method: "GET", path: "/api/workspaces/:id/research/campaigns" },
+	researchCampaign: {
+		name: "researchCampaign",
+		method: "GET",
+		path: "/api/workspaces/:id/research/campaigns/:campaignId",
+	},
+	researchReport: {
+		name: "researchReport",
+		method: "GET",
+		path: "/api/workspaces/:id/research/campaigns/:campaignId/report",
+	},
+	researchStart: { name: "researchStart", method: "POST", path: "/api/workspaces/:id/research/campaigns" },
 	evidenceList: { name: "evidenceList", method: "GET", path: "/api/evidence" },
 	evidenceDetail: { name: "evidenceDetail", method: "GET", path: "/api/evidence/:id" },
 	runRecordVerify: { name: "runRecordVerify", method: "POST", path: "/api/workspaces/:id/runs/:runId/verify" },

@@ -1,0 +1,181 @@
+{
+	"id": "r20261108-123902-22f8",
+	"state": "stopped",
+	"stop": { "reason": "stopped", "detail": "interrupted during the agent run", "at": "2026-11-08T12:39:49.725Z" },
+	"best": "5774d5ee319192acc60ee1a144fa346153e1f984",
+	"ratchets": 1,
+	"spend": { "usd": 0, "unknownRuns": 2, "estimated": false },
+	"aa": {
+		"grade": {
+			"verdict": "unchanged",
+			"classification": "unchanged",
+			"baseMedian": 136.02285800152458,
+			"candidateMedian": 137.02458899933845,
+			"delta": 0.0073644313355233125,
+			"ci": { "low": -0.1949494866030684, "high": 0.04515272500313083 },
+			"seed": 228042350,
+			"resamples": 2000
+		},
+		"noisy": false,
+		"allowed": true,
+		"samples": "samples/aa.json"
+	},
+	"iterations": [
+		{
+			"iteration": 1,
+			"parent": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+			"commit": "5774d5ee319192acc60ee1a144fa346153e1f984",
+			"changed": ["stats.py"],
+			"agent": {
+				"exitCode": 0,
+				"sessionId": "1cn6y7vf52dj",
+				"outcome": "succeeded",
+				"summary": "The change is done and validated: `check.py` output now matches `tests/reference/stats.json` exactly (mean 2256.943333333333, median 2244.0, distinct 2833), so the `correct` gate holds.\n\nWhat changed in `stats.py`:\n- `median`: replaced the O(n\u00b2) insertion sort with C-implemented `sorted(xs)` (Timsort, O(n log n)). The same elements are produced, just via a different algorithm \u2014 no rounding difference.\n- `distinct`: replaced the O(n\u00b2) list-membership loop with `len(set(xs))` \u2014 exact same count, no floating-point arithmetic involved.\n\nThe old code did roughly 4.5M comparisons plus ~4.5M list inserts for median and ~9M membership scans for distinct on the 3000-element bench input; both are now C-speed. `mean` was left untouched (it's already a tight loop, and any change there risks altering the reference value).\n\nHypothesis: Replacing the O(n\u00b2) insertion sort in `median` with built-in `sorted()` and the O(n\u00b2) list membership scan in `distinct` with a `set` eliminates the dominant costs on the 3000-element bench input, cutting wall_ms by well over 5% while producing bit-identical results (verified against tests/reference/stats.json).\nPrediction: wall_ms drops from ~1\u20132 ms to well under 1 ms \u2014 roughly a 90%+ reduction, far exceeding the required 5.0%."
+			},
+			"cost": { "kind": "unknown", "reason": "5 call(s) had no price for their model" },
+			"samples": "samples/it-0001.json",
+			"grade": {
+				"verdict": "improved",
+				"classification": "improved",
+				"baseMedian": 155.4628860030789,
+				"candidateMedian": 0.677529998938553,
+				"delta": -0.9956418537159722,
+				"ci": { "low": -0.996316101052372, "high": -0.9954110447378979 },
+				"seed": 228042351,
+				"resamples": 2000
+			},
+			"gates": [
+				{
+					"check": "correct",
+					"passed": true,
+					"execution": "succeeded",
+					"summary": "numeric-compare passed: 3 key(s) within tolerance",
+					"claim": "ea95f0631ce55b35aa5fbfc5c3d4d20657e52051c14a2aca7f469f49b0a6ad27"
+				}
+			],
+			"outcome": "ratcheted",
+			"detail": "405d368742a5 -> 5774d5ee3191",
+			"hypothesis": "b4cf1b98a2d8c2425dae86eae6f2528d9dede1f81c93e2de2e579825ff9e26c7",
+			"hypothesisVerdict": "supported",
+			"claims": ["ea95f0631ce55b35aa5fbfc5c3d4d20657e52051c14a2aca7f469f49b0a6ad27"]
+		},
+		{
+			"iteration": 2,
+			"parent": "5774d5ee319192acc60ee1a144fa346153e1f984",
+			"commit": null,
+			"changed": [],
+			"agent": {
+				"exitCode": 130,
+				"sessionId": "17pwzvwi0z2q",
+				"outcome": "canceled",
+				"summary": "clio-coder run: interrupted before the turn completed"
+			},
+			"cost": { "kind": "unknown", "reason": "6 call(s) had no price for their model" },
+			"samples": null,
+			"grade": null,
+			"gates": [],
+			"outcome": "interrupted",
+			"detail": "interrupted during the agent run",
+			"hypothesis": null,
+			"hypothesisVerdict": null,
+			"claims": []
+		}
+	],
+	"campaign": {
+		"version": 1,
+		"id": "r20261108-123902-22f8",
+		"createdAt": "2026-11-08T12:39:02.939Z",
+		"project": "/scratch/repo",
+		"objective": { "check": "bench", "metric": "wall_ms", "direction": "min", "minImprovement": 0.05, "trials": 3 },
+		"gates": ["correct"],
+		"scope": ["stats.py"],
+		"protected": [".clio-coder/verifiers.yaml", "bench.py", "check.py", "tests/reference/stats.json"],
+		"budget": { "maxIterations": 2, "allowUnpriced": false },
+		"allowNoisy": false,
+		"keep": false,
+		"agent": { "autonomy": "default" },
+		"base": "405d368742a53c85a5eda0e2a4696fd94ba992f2",
+		"ref": "refs/heads/clio/research/r20261108-123902-22f8",
+		"checks": [
+			{
+				"id": "bench",
+				"description": "Wall time of stats.py on 3000 values (min is better)",
+				"command": ["python3", "bench.py"],
+				"cwd": ".",
+				"timeoutMs": 60000,
+				"tags": ["perf"],
+				"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+				"kind": "command"
+			},
+			{
+				"id": "correct",
+				"description": "stats.py answers match the reference on a holdout input",
+				"command": ["python3", "check.py"],
+				"cwd": ".",
+				"timeoutMs": 60000,
+				"tags": ["scientific"],
+				"source": { "kind": "project-catalog", "path": "/scratch/repo/.clio-coder/verifiers.yaml" },
+				"kind": "numeric-compare",
+				"numeric": { "reference": "tests/reference/stats.json", "tolerance": { "relative": 1e-9 } }
+			}
+		],
+		"checkDigest": "eb644b32729987be9a75068af1d87cd7722dc5457faba90fbbc0d9519f70a51f",
+		"seed": 228042350,
+		"resamples": 2000,
+		"clioVersion": "0.7.0"
+	},
+	"unreadableJournalLines": 0,
+	"recomputed": [
+		{
+			"of": "aa",
+			"samples": "samples/aa.json",
+			"journal": {
+				"verdict": "unchanged",
+				"classification": "unchanged",
+				"baseMedian": 136.02285800152458,
+				"candidateMedian": 137.02458899933845,
+				"delta": 0.0073644313355233125,
+				"ci": { "low": -0.1949494866030684, "high": 0.04515272500313083 },
+				"seed": 228042350,
+				"resamples": 2000
+			},
+			"recomputed": {
+				"verdict": "unchanged",
+				"classification": "unchanged",
+				"baseMedian": 136.02285800152458,
+				"candidateMedian": 137.02458899933845,
+				"delta": 0.0073644313355233125,
+				"ci": { "low": -0.1949494866030684, "high": 0.04515272500313083 },
+				"seed": 228042350,
+				"resamples": 2000
+			},
+			"agrees": true
+		},
+		{
+			"of": 1,
+			"samples": "samples/it-0001.json",
+			"journal": {
+				"verdict": "improved",
+				"classification": "improved",
+				"baseMedian": 155.4628860030789,
+				"candidateMedian": 0.677529998938553,
+				"delta": -0.9956418537159722,
+				"ci": { "low": -0.996316101052372, "high": -0.9954110447378979 },
+				"seed": 228042351,
+				"resamples": 2000
+			},
+			"recomputed": {
+				"verdict": "improved",
+				"classification": "improved",
+				"baseMedian": 155.4628860030789,
+				"candidateMedian": 0.677529998938553,
+				"delta": -0.9956418537159722,
+				"ci": { "low": -0.996316101052372, "high": -0.9954110447378979 },
+				"seed": 228042351,
+				"resamples": 2000
+			},
+			"agrees": true
+		}
+	],
+	"agrees": true
+}

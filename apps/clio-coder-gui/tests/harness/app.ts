@@ -19,6 +19,7 @@ import { LibraryService } from "../../server/services/library.js";
 import { MachineAttachments } from "../../server/services/machine-attach.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { ReportsService } from "../../server/services/reports.js";
+import { ResearchService } from "../../server/services/research.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService, turnCapacitySetting } from "../../server/services/settings.js";
 import { SetupService } from "../../server/services/setup.js";
@@ -90,6 +91,7 @@ export async function harness(
 		hub,
 		env,
 	});
+	const research = new ResearchService(cli, workspaces, operations, env);
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
@@ -106,6 +108,7 @@ export async function harness(
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
 		arena: new ArenaService(cli, workspaces, operations, env),
+		research,
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),
 		sessions,
@@ -169,13 +172,14 @@ export async function harness(
 		cli,
 		hub,
 		operations,
+		research,
 		app,
 		request,
 		post,
 		exchange,
 		client,
 		close: async () => {
-			await Promise.all([supervisor.shutdown(), cli.close(), setup.close(), attachments.stopAll()]);
+			await Promise.all([supervisor.shutdown(), research.close(), cli.close(), setup.close(), attachments.stopAll()]);
 			await Promise.all([reads.close(), ops.close()]);
 			await home.close();
 		},

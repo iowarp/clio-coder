@@ -103,6 +103,10 @@ const paths = {
 	bolt: "M13 2.5 4.5 13.5H11l-1 8 8.5-11H12Z",
 	layers: "M12 2.5 3 7.5l9 5 9-5ZM3 12l9 5 9-5M3 16.5l9 5 9-5",
 	listChecks: "M3 6.5 4.5 8l3-3M3 12.5 4.5 14l3-3M3 18.5 4.5 20l3-3M11 6.5h10M11 12.5h10M11 18.5h10",
+	/** A best-so-far line that only steps toward the objective. */
+	research: "M3 21h18M4 17h4v-4h4V9h4V5h4",
+	/** Contenders side by side. */
+	arena: `${box(3, 4, 7, 16) + box(14, 4, 7, 16)}M5.5 9h2M16.5 9h2`,
 } as const;
 
 export type IconName = keyof typeof paths;

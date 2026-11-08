@@ -17,6 +17,7 @@ import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
 import { type MachineAttachmentsApi, machinesRoutes } from "./http/routes-machines.js";
 import { reportRoutes } from "./http/routes-reports.js";
+import { researchRoutes } from "./http/routes-research.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { settingsRoutes } from "./http/routes-settings.js";
 import { systemRoutes } from "./http/routes-system.js";
@@ -38,6 +39,7 @@ import type { MachinesService } from "./services/machines.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
 import type { ReportsService } from "./services/reports.js";
+import type { ResearchService } from "./services/research.js";
 import { SessionControls } from "./services/session-control.js";
 import type { SessionService } from "./services/sessions.js";
 import type { SettingsService } from "./services/settings.js";
@@ -71,6 +73,7 @@ export function createApp(options: {
 	library: LibraryService;
 	reports: ReportsService;
 	arena: ArenaService;
+	research: ResearchService;
 	evidence: EvidenceService;
 	sessions: SessionService;
 	/** The ids this host has served. Process-wide: a loopback listener serves one operator. */
@@ -162,6 +165,7 @@ export function createApp(options: {
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
 	reportRoutes(app, hub, options.reports);
 	arenaRoutes(app, hub, options.arena);
+	researchRoutes(app, hub, options.research);
 	evidenceRoutes(app, hub, options.evidence, artifacts);
 	sessionRoutes(app, hub, options.sessions, new Commands(), controls, options.snapshotHold);
 	app.all("/api/*", (context) => {

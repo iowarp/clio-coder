@@ -7,7 +7,7 @@ const GROUPS = [
 	{
 		label: "Research activity",
 		detail: "Work, results and recorded evidence",
-		sections: ["fleet", "traces", "evidence", "usage"],
+		sections: ["fleet", "traces", "evidence", "research", "arena", "usage"],
 	},
 	{
 		label: "Settings",
@@ -25,6 +25,8 @@ const KEYWORDS: Readonly<Record<string, string>> = {
 	toolchain: "tools executables install setup",
 	traces: "replay timeline execution events",
 	evidence: "reports records findings provenance checks",
+	research: "hill climb optimize metric benchmark campaign ratchet",
+	arena: "compare models vote blind side by side",
 	fleet: "agents delegation workers teamwork",
 	library: "recipes plugins extensions verifiers",
 	safety: "permissions approvals spending limits",

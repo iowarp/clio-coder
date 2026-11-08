@@ -69,6 +69,11 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 		meaning:
 			"Run one prompt on two to four models side by side with their names hidden, vote for the better result, and see the standings.",
 	},
+	"/research": {
+		title: "Research",
+		meaning:
+			"Run a research hill climb: Clio's agent changes an isolated worktree, each change is measured against the best so far, and only changes that beat noise are kept.",
+	},
 	"/library": {
 		title: "Library",
 		meaning: "Available agents, skills, resources, extensions and checks, with their trust and scope.",

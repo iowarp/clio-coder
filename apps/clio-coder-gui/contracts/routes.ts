@@ -66,6 +66,13 @@ import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
+import {
+	ResearchCampaign,
+	ResearchCampaignId,
+	ResearchCampaigns,
+	ResearchReport,
+	ResearchStartRequest,
+} from "./research.js";
 import { routes as runtimeRoutes } from "./runtime-routes.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
 import { SessionOverview } from "./session-overview.js";
@@ -365,6 +372,36 @@ export const routes = {
 		response: ArenaVote,
 		summary: "Record the human's blind vote for a finished match; a second vote must replace explicitly.",
 		...runtimeRoutes.arenaVote,
+	}),
+	researchCampaigns: defineRoute({
+		...get,
+		params: operationParams,
+		response: ResearchCampaigns,
+		summary: "Research campaigns in this workspace, newest first, with their objective, stop reason and ratchets.",
+		...runtimeRoutes.researchCampaigns,
+	}),
+	researchCampaign: defineRoute({
+		...get,
+		params: Type.Object({ id: Id, campaignId: ResearchCampaignId }, { additionalProperties: false }),
+		response: ResearchCampaign,
+		summary: "One research campaign: its frozen objective, the A/A check and every iteration as journaled.",
+		...runtimeRoutes.researchCampaign,
+	}),
+	researchReport: defineRoute({
+		...get,
+		params: Type.Object({ id: Id, campaignId: ResearchCampaignId }, { additionalProperties: false }),
+		response: ResearchReport,
+		summary: "Regrade every measurement of a campaign from its raw samples and say whether each agrees with the journal.",
+		...runtimeRoutes.researchReport,
+	}),
+	researchStart: defineRoute({
+		...post,
+		params: operationParams,
+		body: ResearchStartRequest,
+		response: Accepted,
+		summary:
+			"Run a research hill climb in isolated worktrees as a cancellable operation; cancelling stops it like Ctrl-C.",
+		...runtimeRoutes.researchStart,
 	}),
 	evidenceList: defineRoute({
 		...get,

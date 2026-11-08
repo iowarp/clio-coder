@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { ArenaChoice, ArenaMatchId, ArenaNote, ArenaStartRequest } from "../contracts/arena.js";
 import { Id } from "../contracts/common.js";
 import { MachineAdd, MachineId } from "../contracts/machines.js";
+import { ResearchCampaignId, ResearchStartRequest } from "../contracts/research.js";
 import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
@@ -37,6 +38,10 @@ export const CliCommand = Type.Union([
 		closed,
 	),
 	Type.Object({ kind: Type.Literal("arena.run"), request: ArenaStartRequest }, closed),
+	Type.Object({ kind: Type.Literal("research.list") }, closed),
+	Type.Object({ kind: Type.Literal("research.status"), id: ResearchCampaignId }, closed),
+	Type.Object({ kind: Type.Literal("research.report"), id: ResearchCampaignId }, closed),
+	Type.Object({ kind: Type.Literal("research.start"), request: ResearchStartRequest }, closed),
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
@@ -128,6 +133,42 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 					...(request.check ? ["--check", request.check] : []),
 					"--",
 					request.prompt,
+				],
+				output: "json",
+			};
+		}
+		case "research.list":
+			return { argv: ["research", "list", "--json"], output: "json" };
+		case "research.status":
+			return { argv: ["research", "status", input.id, "--json"], output: "json" };
+		case "research.report":
+			return { argv: ["research", "report", input.id, "--json"], output: "json" };
+		case "research.start": {
+			const request = input.request;
+			// Every value follows its own option; the contract keeps scope globs and the goal from starting with a dash.
+			return {
+				argv: [
+					"research",
+					"start",
+					"--json",
+					"--check",
+					request.check,
+					"--metric",
+					request.metric,
+					"--direction",
+					request.direction,
+					"--max-iterations",
+					String(request.maxIterations),
+					...(request.minImprovement !== undefined ? ["--min-improvement", String(request.minImprovement)] : []),
+					...(request.trials !== undefined ? ["--trials", String(request.trials)] : []),
+					...request.gates.flatMap((gate) => ["--gate", gate]),
+					...request.scope.flatMap((glob) => ["--scope", glob]),
+					...(request.maxWallMinutes !== undefined ? ["--max-wall-minutes", String(request.maxWallMinutes)] : []),
+					...(request.maxCostUsd !== undefined ? ["--max-cost-usd", String(request.maxCostUsd)] : []),
+					...(request.allowUnpriced ? ["--allow-unpriced"] : []),
+					...(request.goal ? ["--goal", request.goal] : []),
+					...(request.target ? ["--target", request.target] : []),
+					...(request.model ? ["--model", request.model] : []),
 				],
 				output: "json",
 			};

@@ -34,6 +34,7 @@ import { MachineAttachments } from "./services/machine-attach.js";
 import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
+import { ResearchService } from "./services/research.js";
 import { SessionService } from "./services/sessions.js";
 import { SettingsService, turnCapacitySetting } from "./services/settings.js";
 import { SetupService } from "./services/setup.js";
@@ -209,6 +210,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces);
 	const cli = new CliRunner(env);
 	const arena = new ArenaService(cli, workspaces, operations, env);
+	const research = new ResearchService(cli, workspaces, operations, env);
 	const settingsService = new SettingsService(reads, workspaces, ops, () => applyTurnCapacity());
 	// The user's limit, resolved where no project layer applies, since one server runs turns for every
 	// workspace. Read at startup and after the app writes it; until the first read the default holds.
@@ -260,6 +262,7 @@ export async function main(args = process.argv.slice(2)) {
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
 		arena,
+		research,
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),
 		sessions,
@@ -348,7 +351,14 @@ export async function main(args = process.argv.slice(2)) {
 		process.removeListener("SIGTERM", stop);
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
-		await Promise.all([supervisor.shutdown(), arena.close(), cli.close(), setup.close(), attachments.stopAll()]);
+		await Promise.all([
+			supervisor.shutdown(),
+			arena.close(),
+			research.close(),
+			cli.close(),
+			setup.close(),
+			attachments.stopAll(),
+		]);
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 		try {
