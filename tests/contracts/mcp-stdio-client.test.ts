@@ -792,6 +792,13 @@ describe("mcp stdio client, modern protocol and tasks extension", () => {
 		await waitFor(() => countOf(c, "tasks/get task-1") === 3);
 	});
 
+	it("reports the installed Clio Coder version in clientInfo", async () => {
+		const c = client("modern");
+		await c.initialize();
+		const pkg = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string };
+		deepStrictEqual(JSON.parse((await c.callTool("client-info", {})).text), { name: "clio-coder", version: pkg.version });
+	});
+
 	it("reports a failed task as the server's JSON-RPC error", async () => {
 		const c = client("modern");
 		const error = await rejectsWithCode(

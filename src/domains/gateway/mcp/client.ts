@@ -23,6 +23,7 @@ import { spawn } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { readClioVersion } from "../../../core/package-root.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../../core/safe-exec.js";
 import { planSandboxedSpawn } from "../../../core/sandbox/worker-process.js";
 import { clampTimerDelayMs, sleep } from "../../../core/timers.js";
@@ -45,7 +46,6 @@ import {
 } from "./protocol.js";
 
 export const MCP_CLIENT_NAME = "clio-coder";
-export const DEFAULT_MCP_CLIENT_VERSION = "0.5.1";
 export const DEFAULT_INITIALIZE_TIMEOUT_MS = 15_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const DEFAULT_STDERR_TAIL_BYTES = 16 * 1024;
@@ -81,6 +81,7 @@ export interface McpServerSpec {
 export interface McpClientOptions {
 	/** Containment root for the server's cwd; a cwd outside it, by path or by symlink, is refused before spawn. */
 	workspaceRoot: string;
+	/** Version reported in clientInfo; defaults to the installed Clio Coder version. */
 	clientVersion?: string;
 	initializeTimeoutMs?: number;
 	requestTimeoutMs?: number;
@@ -493,7 +494,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	const maxOutboundBytes = Math.max(MIN_OUTBOUND_BYTES, options.maxOutboundBytes ?? DEFAULT_MAX_OUTBOUND_BYTES);
 	const killGraceMs = clampTimerDelayMs(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
 	const teardownBoundMs = clampTimerDelayMs(options.teardownBoundMs ?? DEFAULT_TEARDOWN_BOUND_MS);
-	const clientVersion = options.clientVersion ?? DEFAULT_MCP_CLIENT_VERSION;
+	const clientVersion = options.clientVersion ?? readClioVersion();
 	const framer = createLineFramer(options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES);
 
 	let status: McpClientStatus = "idle";

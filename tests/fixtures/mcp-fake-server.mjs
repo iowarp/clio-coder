@@ -283,6 +283,11 @@ function handleModern(message) {
 			});
 			return;
 		case "tools/call": {
+			if (message.params?.name === "client-info") {
+				const info = JSON.stringify(meta?.["io.modelcontextprotocol/clientInfo"] ?? null);
+				reply(message.id, { resultType: "complete", content: [{ type: "text", text: info }] });
+				return;
+			}
 			if (message.params?.name !== "task") {
 				handleToolCall(message.id, message.params);
 				return;
