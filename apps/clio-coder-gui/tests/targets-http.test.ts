@@ -50,7 +50,7 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 		assert.doesNotMatch(JSON.stringify(listed), /fixture-header-secret|must-be-stripped|apiKey/);
 		const routing = await json(await h.request(`${path}/routing`), Routing);
 		const cliProfiles = await h.cli.run({ kind: "routing.profiles" }, cwd);
-		assert.deepEqual(routing.profiles, cliProfiles);
+		assert.deepEqual(routing.profiles, (cliProfiles as { profiles: unknown }).profiles);
 		assert.deepEqual(routing.bindings, [
 			{ agentId: "coder", profile: "local", target: "fixture-target", model: null, resolved: true },
 		]);

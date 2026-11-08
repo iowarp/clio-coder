@@ -156,7 +156,8 @@ export class TargetsService {
 			this.runner.run({ kind: "routing.bindings" }, workspace.path),
 		]);
 		const models = items(rawModels),
-			profiles = items(rawProfiles),
+			// `targets profile list --json` reads `{ default, profiles }`; the fleet default is not a named profile.
+			profiles = items(object(rawProfiles).profiles),
 			bindings = items(rawBindings);
 		const result = {
 			models: models.slice(0, 2000).map((value) => {
