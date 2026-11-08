@@ -291,6 +291,8 @@ function checkCiScripts(): void {
 		fail("ci-scripts", "ci (22) tests the qualified artifact");
 	if (ci.jobs?.platform?.if !== `\${{ inputs.platforms }}`)
 		fail("ci-scripts", "platform boot checks are explicitly requested");
+	if (ci.jobs?.["browser-smoke"]?.if !== `\${{ github.event_name == 'workflow_dispatch' && inputs.browser }}`)
+		fail("ci-scripts", "the browser smoke is explicitly requested");
 	if (
 		release.jobs?.release?.needs !== "preflight" ||
 		release.jobs?.release?.environment !== "release" ||

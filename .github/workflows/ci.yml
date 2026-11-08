@@ -19,6 +19,10 @@ on:
         description: Also boot the same package on Windows and macOS
         default: false
         type: boolean
+      browser:
+        description: Also run the GUI browser smoke in Chrome (opt-in, not a required check)
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -166,6 +170,39 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.sha }}
           CANDIDATE_DIRECTORY: ${{ runner.temp }}/candidate
         run: node scripts/release-candidate.mjs smoke --directory "$CANDIDATE_DIRECTORY" --sha "$CANDIDATE_SHA"
+
+  browser-smoke:
+    name: browser smoke
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.browser }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Use runner scratch for temporary files
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm --filter @iowarp/clio-coder-gui build
+      - name: Drive the GUI in the runner's Chrome
+        run: pnpm --filter @iowarp/clio-coder-gui smoke:browser --chrome /usr/bin/google-chrome --out "$RUNNER_TEMP/browser-smoke"
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # Kept outside the *-<sha> pattern the rehearsal jobs merge into the candidate.
+          name: browser-smoke-output
+          path: ${{ runner.temp }}/browser-smoke
+          if-no-files-found: ignore
+          retention-days: 14
 
   rehearsal-preflight:
     if: ${{ inputs.rehearse }}
