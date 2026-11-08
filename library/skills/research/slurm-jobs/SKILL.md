@@ -56,8 +56,10 @@ scheduler.
 
 On a trusted user-scope declaration with the id `slurm`, `slurm_list`,
 `slurm_describe` and `slurm_cluster` are reads and run without asking, so
-polling costs no approval. `slurm_submit` and `slurm_cancel` ask every time, and
-a headless run denies them: report that the run needs an operator and stop. A
+polling costs no approval. `slurm_submit` and `slurm_cancel` ask every time. The
+safety judge reviews each ask against the operator's messages; a headless run
+denies what the judge does not allow, so then report that the run needs an
+operator and stop. A
 project declaration or another server id follows its own action class, so its
 reads may ask too.
 

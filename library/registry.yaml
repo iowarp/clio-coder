@@ -415,7 +415,7 @@ entries:
       online launch to build its environment before it runs offline."
     version: 0.2.0
     sourceUrl: plugins/hpc
-    sha256: 4f9555f7b20404a146471498e4302fd304dfb3ab2af67a313cded97dbba2e58c
+    sha256: f1d8e2663c225b59d3ba2b6c5b25ae69d73892484ee7484303c1f752e2466992
     requires:
       - skill:slurm-jobs
     provides:
@@ -939,7 +939,7 @@ entries:
       - is the queue busy
     version: 0.2.0
     sourceUrl: skills/research/slurm-jobs
-    sha256: 753d197d9f2c9ab99b4be78e073754eb9137f624b511864f6dd3823547905e3d
+    sha256: c7a0c887835b7948aba87040fdcaeb31f764b37c92c15490447a03bb4d8ccf09
     provides:
       - kind: skill
         name: slurm-jobs

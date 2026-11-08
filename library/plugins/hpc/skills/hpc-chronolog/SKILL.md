@@ -113,7 +113,9 @@ servers:
 ```
 
 chronolog-mcp 4.0 declares no tool annotations. Without `toolActionClasses`, every
-call is `unknown`: it asks at `default`, and a headless run denies it.
+call is `unknown`: it asks at `default`. The safety judge reviews the ask first,
+reading only the operator's messages, and a headless run denies what the judge
+does not allow.
 
 Clio gives an MCP server only a small set of safe environment variables, so
 anything the server needs (`CHRONOLOG_MCP_IDENTITY`, `CHRONOLOG_CHRONICLE`,

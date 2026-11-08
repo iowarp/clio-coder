@@ -112,6 +112,8 @@ export interface SafetyJudgementInput {
 	workerRunId?: string;
 	/** The rule that made admission ask. */
 	askRule?: string;
+	/** Characters of the MCP tool description the judge's prompt carried; absent for any other tool. */
+	toolDescriptionChars?: number;
 	/** `none` is no verdict (see `noVerdict`); `escalated` is a call handed to the operator unjudged. */
 	verdict: EventPayload<"safety.judged">["verdict"];
 	/** The rule the judge named; its reason prose goes to the transcript note, never the journal. */
@@ -136,6 +138,7 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 		latencyMs: Math.max(0, Math.round(input.latencyMs)),
 		...(input.workerRunId !== undefined ? { workerRunId: input.workerRunId } : {}),
 		...(input.askRule !== undefined ? { askRule: input.askRule } : {}),
+		...(input.toolDescriptionChars !== undefined ? { toolDescriptionChars: input.toolDescriptionChars } : {}),
 		// The judge writes the rule name; a bounded slice keeps an overlong answer from voiding the record.
 		...(input.rule ? { rule: input.rule.slice(0, 128) } : {}),
 		...(input.target !== undefined ? { target: input.target } : {}),

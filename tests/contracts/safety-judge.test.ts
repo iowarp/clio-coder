@@ -7,7 +7,7 @@ import { type ClioSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import {
@@ -34,6 +34,7 @@ function answer(verdict: "allow" | "block", rule: string, reason: string): strin
 function judgedRegistry(reply: (user: string) => string | Promise<string>, operator: string[] = ["sync the assets"]) {
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-safety-judge-")));
 	const prompts: Array<{ system: string; user: string }> = [];
+	const records: SafetyJudgementInput[] = [];
 	const complete: SafetyJudgeCompletion = async (request) => {
 		prompts.push({ system: request.system, user: request.user });
 		return { text: await reply(request.user) };
@@ -44,6 +45,7 @@ function judgedRegistry(reply: (user: string) => string | Promise<string>, opera
 		operatorMessages: () => operator,
 		session: () => "session-1",
 		consequences: () => [],
+		record: (input) => records.push(input),
 	});
 	const registry = createRegistry({
 		safety: createWorkerSafety({ cwd }),
@@ -64,7 +66,7 @@ function judgedRegistry(reply: (user: string) => string | Promise<string>, opera
 	registry.register(bash);
 	const parks: Array<{ tool: string; meta: PermissionRequiredMeta }> = [];
 	registry.onPermissionRequired((call, _decision, meta) => parks.push({ tool: call.tool, meta }));
-	return { registry, ran, parks, prompts };
+	return { registry, ran, parks, prompts, records };
 }
 
 test("an allow runs the call without parking it", async () => {
@@ -205,6 +207,38 @@ test("the judge reads the operator's messages and the call, never assistant text
 	match(user, /rule that asked: bash-unrecognized/u);
 	doesNotMatch(user, /ASSISTANT-PROSE|TOOL-OUTPUT|abc123secret/u);
 	match(prompts[0]?.system ?? "", /rewrite-history: force-push or rewrite shared history/u);
+});
+
+test("the judge reads a gateway MCP tool's trusted class and description beside its arguments", async () => {
+	const { registry, prompts, records } = judgedRegistry(
+		() => answer("block", "operator-deny", "It writes a file the operator forbade."),
+		["Group data.csv by g with the pandas MCP tool. Do not create or change any files."],
+	);
+	registry.register({
+		name: "mcp_pandas__groupby_operations" as ToolName,
+		description:
+			"Group data by columns. Writes output_file or <input>_grouped.csv.\nLocal MCP server pandas (plugin scope), trusted with action class destructive.",
+		parameters: {} as ToolSpec["parameters"],
+		baseActionClass: "destructive",
+		async run() {
+			return { kind: "ok", output: "grouped" };
+		},
+	});
+	const verdict = await registry.invoke({
+		tool: "mcp_pandas__groupby_operations",
+		args: { file_path: "data.csv", group_by: ["g"] },
+	});
+	strictEqual(verdict.kind, "blocked");
+	const user = prompts[0]?.user ?? "";
+	match(user, /MCP tool, trusted with action class destructive/u);
+	match(user, /tool description, as the MCP server and Clio's trust record state it/u);
+	match(user, /Writes output_file or <input>_grouped\.csv\. Local MCP server pandas/u);
+	ok((records.at(-1)?.toolDescriptionChars ?? 0) > 0);
+
+	// A built-in tool carries no description line and no count.
+	await registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });
+	doesNotMatch(prompts[1]?.user ?? "", /tool description/u);
+	strictEqual(records.at(-1)?.toolDescriptionChars, undefined);
 });
 
 test("the judge reads the call's own turn when the session leaf lags, and never an abandoned /tree branch", async () => {

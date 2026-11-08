@@ -2198,10 +2198,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 		let pending: SafetyJudgeOutcome | Promise<SafetyJudgeOutcome>;
 		try {
+			const mcpSpec = isMcpToolName(call.tool) ? tools.get(call.tool as ToolName) : undefined;
 			pending = judge.review({
 				tool: call.tool,
 				args: call.args,
 				decision: outcome.decision,
+				...(mcpSpec !== undefined
+					? { mcpTool: { actionClass: mcpSpec.baseActionClass, description: mcpSpec.description } }
+					: {}),
 				...(outcome.source !== undefined ? { source: outcome.source } : {}),
 				approvalAuthority: outcome.approvalAuthority,
 				...(outcome.planScale === true ? { dispatchPlan: true } : {}),

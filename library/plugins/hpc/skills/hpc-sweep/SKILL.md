@@ -109,9 +109,10 @@ Only on the operator's word. Make exactly the submission `plan.json` names, with
 its `array` expression unchanged: the `%N` suffix is the sweep's concurrency
 cap, and dropping it lets every run start at once. For `submit: jobs`, keep at
 most `concurrency` jobs submitted and not terminal, and submit the next only
-when one finishes. The Slurm server asks for approval on every submission; a
-headless run at `default` denies it, so report that the sweep needs an operator
-and stop. Record the job id verbatim at once.
+when one finishes. The Slurm server asks for approval on every submission. At
+`default` the safety judge reviews it against the operator's messages, and a
+headless run denies what the judge does not allow; then report that the sweep
+needs an operator and stop. Record the job id verbatim at once.
 
 ## Phase 3 - Monitor
 

@@ -1674,6 +1674,7 @@ export const SafetyJudgedSchema = Type.Object(
 		latencyMs: duration,
 		workerRunId: Type.Optional(ExistingId),
 		askRule: Type.Optional(ExistingId),
+		toolDescriptionChars: Type.Optional(count),
 		rule: Type.Optional(ExistingId),
 		target: Type.Optional(ExistingId),
 		model: Type.Optional(ExistingId),
