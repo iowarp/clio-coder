@@ -349,6 +349,7 @@ export async function main(args = process.argv.slice(2)) {
 		idle?.stop();
 		process.removeListener("SIGINT", stop);
 		process.removeListener("SIGTERM", stop);
+		process.removeListener("SIGHUP", stop);
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
 		await Promise.all([
@@ -390,6 +391,8 @@ export async function main(args = process.argv.slice(2)) {
 	};
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);
+	// A closed terminal must not orphan detached children such as research campaigns.
+	process.once("SIGHUP", stop);
 	if (values.tokenStdin) {
 		// The parent holds stdin open for the server's lifetime; its end means the parent is gone.
 		process.stdin.once("end", stop);

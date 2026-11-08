@@ -53,60 +53,62 @@ test("static assets and install paths refuse symlink escape", async (t) => {
 	assert.equal(await readFile(join(root, "secret"), "utf8"), "must never be served");
 });
 
-test("checkout launcher binds loopback, serves authenticated meta, and exits on SIGTERM", {
-	timeout: 15000,
-}, async (t) => {
-	// Building the client is a separate acceptance step; this test supplies a tiny
-	// app-local static fixture only when the checkout has no build yet.
-	const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
-	let temporary = false;
-	try {
-		await readFile(join(clientDir, "index.html"));
-	} catch {
-		temporary = true;
-		await mkdir(clientDir, { recursive: true });
-		await writeFile(join(clientDir, "index.html"), "<h1>Fixture client</h1>");
-	}
-	t.after(async () => {
-		if (temporary) await rm(clientDir, { recursive: true, force: true });
-	});
-	const child = spawn(process.execPath, ["--import", "tsx", "server/main.ts", "--fixture"], {
-		cwd: fileURLToPath(new URL("../", import.meta.url)),
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	t.after(() => {
-		if (child.exitCode === null) child.kill("SIGKILL");
-	});
-	const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
-	const url = await new Promise<string>((resolve, reject) => {
-		let output = "";
-		child.stdout.on("data", (chunk) => {
-			output += String(chunk);
-			const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/);
-			if (match) resolve(match[0]);
+for (const signal of ["SIGTERM", "SIGHUP"] as const)
+	test(`checkout launcher binds loopback, serves authenticated meta, and exits cleanly on ${signal}`, {
+		timeout: 15000,
+	}, async (t) => {
+		// Building the client is a separate acceptance step; this test supplies a tiny
+		// app-local static fixture only when the checkout has no build yet.
+		const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
+		let temporary = false;
+		try {
+			await readFile(join(clientDir, "index.html"));
+		} catch {
+			temporary = true;
+			await mkdir(clientDir, { recursive: true });
+			await writeFile(join(clientDir, "index.html"), "<h1>Fixture client</h1>");
+		}
+		t.after(async () => {
+			if (temporary) await rm(clientDir, { recursive: true, force: true });
 		});
-		child.once("error", reject);
-		child.once("exit", () => reject(new Error("Server exited before printing a URL")));
-	});
-	const launch = new URL(url);
-	const token = new URLSearchParams(launch.hash.slice(1)).get("token");
-	const get = (headers: Record<string, string>) =>
-		new Promise<{ status?: number; data: string }>((resolve, reject) => {
-			const req = request(new URL("/api/meta", launch), { headers }, (response) => {
-				let data = "";
-				response.on("data", (chunk) => {
-					data += String(chunk);
-				});
-				response.on("end", () => resolve({ ...(response.statusCode ? { status: response.statusCode } : {}), data }));
+		const child = spawn(process.execPath, ["--import", "tsx", "server/main.ts", "--fixture"], {
+			cwd: fileURLToPath(new URL("../", import.meta.url)),
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		t.after(() => {
+			if (child.exitCode === null) child.kill("SIGKILL");
+		});
+		const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+		const url = await new Promise<string>((resolve, reject) => {
+			let output = "";
+			child.stdout.on("data", (chunk) => {
+				output += String(chunk);
+				const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/);
+				if (match) resolve(match[0]);
 			});
-			req.on("error", reject);
-			req.end();
+			child.once("error", reject);
+			child.once("exit", () => reject(new Error("Server exited before printing a URL")));
 		});
-	assert.equal((await get({})).status, 401);
-	assert.equal((await get({ Host: "example.com" })).status, 421);
-	// The launch token opens only the exchange; the credential it buys reads meta.
-	assert.equal((await get({ Authorization: `Bearer ${token}` })).status, 401);
-	assert.equal((await get({ Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` })).status, 200);
-	child.kill("SIGTERM");
-	assert.equal(await exited, 0);
-});
+		const launch = new URL(url);
+		const token = new URLSearchParams(launch.hash.slice(1)).get("token");
+		const get = (headers: Record<string, string>) =>
+			new Promise<{ status?: number; data: string }>((resolve, reject) => {
+				const req = request(new URL("/api/meta", launch), { headers }, (response) => {
+					let data = "";
+					response.on("data", (chunk) => {
+						data += String(chunk);
+					});
+					response.on("end", () => resolve({ ...(response.statusCode ? { status: response.statusCode } : {}), data }));
+				});
+				req.on("error", reject);
+				req.end();
+			});
+		assert.equal((await get({})).status, 401);
+		assert.equal((await get({ Host: "example.com" })).status, 421);
+		// The launch token opens only the exchange; the credential it buys reads meta.
+		assert.equal((await get({ Authorization: `Bearer ${token}` })).status, 401);
+		assert.equal((await get({ Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` })).status, 200);
+		child.kill(signal);
+		// Exit code 0 means the awaited close path ran; an unhandled signal exits with null.
+		assert.equal(await exited, 0);
+	});
