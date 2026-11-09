@@ -1,10 +1,11 @@
-import { deepStrictEqual, equal, ok } from "node:assert/strict";
+import { deepStrictEqual, equal, ok, throws } from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
+import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { startExtensionHost } from "../../src/entry/extension-host.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
@@ -47,6 +48,19 @@ function installRuntime(dir: string, id: string, runtime: Record<string, unknown
 	ok(installExtension(root, { cwd, scope: "user" }).extension?.loadable);
 	return cwd;
 }
+
+test("an api 2 tool is write class only in a package that may write the workspace and run no program", () => {
+	const runtime = (permissions: Record<string, unknown>) =>
+		parseExtensionRuntimeV2({
+			api: 2,
+			entrypoint: "extension.mjs",
+			tools: [{ name: "record", description: "Record", actionClass: "write", inputSchema: { type: "object" } }],
+			permissions,
+		});
+	equal(runtime({ fs: { write: ["notes"] } }).tools[0]?.actionClass, "write");
+	throws(() => runtime({ fs: { write: ["notes"] }, exec: true }), /can be write only/u);
+	throws(() => runtime({ fs: { write: ["store"] } }), /can be write only/u);
+});
 
 test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, an interview fails closed at once", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");

@@ -229,7 +229,7 @@ function parseTools(value: unknown): ExtensionRuntimeToolDeclaration[] {
 			name,
 			description: text(raw.description, `${path}.description`, 1000),
 			inputSchema: schema as Record<string, unknown>,
-			actionClass: choice(raw.actionClass, `${path}.actionClass`, ["read", "execute"], "execute"),
+			actionClass: choice(raw.actionClass, `${path}.actionClass`, ["read", "write", "execute"], "execute"),
 			timeoutMs: milliseconds(
 				raw.timeoutMs,
 				`${path}.timeoutMs`,
@@ -398,9 +398,17 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 	if (usesWorkspaceEvents && declaration.workspaces.length === 0)
 		fail("runtime.events", "names a workspace event but the package declares no workspace");
 	const writesBeyondStore = declaration.permissions.fs.write.some((root) => root !== "store");
-	for (const [index, tool] of declaration.tools.entries())
+	for (const [index, tool] of declaration.tools.entries()) {
 		if (tool.actionClass === "read" && (declaration.permissions.exec || writesBeyondStore))
 			fail(`runtime.tools[${index}].actionClass`, "cannot be read in a package that may execute or write files");
+		// A write-class tool is admitted as a file change, so its runtime must be unable to run
+		// programs and must hold a workspace root to change.
+		if (tool.actionClass === "write" && (declaration.permissions.exec || !writesBeyondStore))
+			fail(
+				`runtime.tools[${index}].actionClass`,
+				"can be write only in a package that declares a workspace fs.write root and no exec",
+			);
+	}
 	return declaration;
 }
 

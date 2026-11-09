@@ -34,8 +34,12 @@ export interface ExtensionRuntimeToolDeclaration {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
-	/** `read` is admitted only when the package declares neither exec nor a write root beyond its store. */
-	actionClass: "read" | "execute";
+	/**
+	 * `read` is admitted only when the package declares neither exec nor a write root beyond its store;
+	 * `write` only when it declares a workspace write root and no exec, so its runtime can change files
+	 * but run no program.
+	 */
+	actionClass: "read" | "write" | "execute";
 	timeoutMs: number;
 }
 
