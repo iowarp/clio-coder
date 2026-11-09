@@ -108,11 +108,32 @@ for them.
 | Path (Linux default) | Contents |
 | --- | --- |
 | `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
-| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. Each activation also removes other versions older than seven days that no local process is using, on a local Linux filesystem only; everywhere else they stay until `uninstall`, because a running session may still load code from the version it started with. Runtimes stay until that uninstall too. |
+| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. See [Pruning](#pruning-versions-and-runtimes) for when the others go. |
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. |
-| `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
+| `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session naming its version and Node, which pruning and `uninstall` check before they remove anything. Receipts whose local process is gone are removed. |
 | `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
-| `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. |
+| `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. On Linux and macOS each activation points it at the current Node; on Windows it keeps the Node of the first install, because `cmd.exe` rereads a running `.cmd` file. |
+
+#### Pruning versions and runtimes
+
+Every activation (install, `upgrade`, a background update and `--rollback`) prunes the
+install root with one rule on every platform. It keeps the current and previous
+versions, a desktop manager's version, the launcher's helper and every version or
+Node named by a live session receipt, a running build record, the graphical
+background service, or a process of the current user that runs from the root
+(`/proc` on Linux, `ps` on macOS, CIM on Windows). When that inventory is complete,
+everything else goes at once, including a same-version reinstall. When it is not,
+such as on a network filesystem or with an unreadable receipt, versions and runtimes
+from the last seven days and the newest three stay. A file Windows has locked is
+skipped and retried at the next activation. The installer prints what it removed and
+kept, for example
+`[install] removed 15 unused versions (2.8 GB), 0 runtimes; kept 0.6.2 (current), 0.6.2-rc.3 (previous)`.
+To preview or run it by hand, under the install lock:
+
+```bash
+node ~/.local/share/clio-coder-install/versions/<current>/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs \
+  prune ~/.local/share/clio-coder-install --dry-run [--json]
+```
 
 The install root sits beside the data root rather than inside it, so
 `clio-coder reset` and `uninstall --keep-config` never delete the Node that runs
@@ -612,8 +633,9 @@ checking that it starts, and turns background updates off until you turn them on
 with the installer's `--auto-update`. It runs the installer's `--rollback` (`-Rollback`) and
 needs an installer install: any other layout exits 2 with
 `Rollback works only for native installer installs, made by install.sh or install.ps1`,
-and an npm, pnpm or Bun layout also gets the owning manager's command for a chosen
-version. An installer install with no previous version fails up front with
+and an npm, pnpm or Bun layout also gets the owning manager's command. That command names
+the exact version this home ran before its last version change, from `upgradedFrom` in the
+state root's `home.json`, or `<version>` when none is recorded. An installer install with no previous version fails up front with
 `No previous version is installed, so there is nothing to roll back to` and exits 1,
 with or without `--dry-run`. Otherwise `--dry-run` prints
 `Would switch the launcher from <current> to <previous> and turn background updates off.`
@@ -723,6 +745,21 @@ and exit 1, and `gui` will not take it over.
 An incomplete post-install step makes the bootstrap installer exit nonzero and
 print the migration retry command. The package remains installed;
 `doctor --fix` alone does not apply migrations.
+
+#### Tracking and moving between install methods
+
+`clio-coder doctor`, `clio-coder paths` (the `tracking` row) and `clio-coder upgrade --dry-run`
+say what an installer install follows, for example `follows latest` or
+`pinned to 0.7.1 since 2026-11-09 (installed from a package file); release with clio-coder upgrade --channel latest`.
+
+`clio-coder upgrade --post-install`, which every installer runs, tidies up after a move to
+another method:
+
+| Move | What post-install does |
+| --- | --- |
+| Installer to a source checkout, npm, pnpm or Bun | Names the installer root left behind with its size and the command `clio-coder uninstall --inactive`, and warns when that root's launcher still comes first on `PATH`. `clio-coder doctor` warns about the same root. |
+| Any method, with the graphical background app installed from another one | Moves the app to this installation, as `clio-coder gui background install --handover` does. While it has active work the move is refused, and the command to run later is printed. |
+| A newer version of the same installation | Prints `clio-coder gui background restart` for the background app, as before. |
 
 #### Upgrade notice
 
@@ -946,7 +983,8 @@ roots and files that survive are listed too (`Survives: ...`). After a `--settin
 removes all four roots (config, data, state, cache) and the launcher:
 
 ```bash
-clio-coder uninstall [--keep-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+clio-coder uninstall [--keep-binary] [--keep-package] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+clio-coder uninstall --inactive [--dry-run] [--force] [--json]
 ```
 
 Preview first, then remove:
@@ -967,28 +1005,42 @@ another running session, an unverifiable graphical installation or a failed dele
 root: one alive on this host, or one on another host whose heartbeat is under 180 seconds old. `--force` does not override
 this, and `--dry-run` lists the sessions and exits 0. Close them or run `clio-coder session terminate <id>`.
 
-Owned graphical background services are stopped and disabled first, and their desktop launchers are
+Clio's private pane hosts (the herdr servers under the state root's `mux/` directory) are stopped
+first on Linux and macOS; one that does not stop is listed as kept. Owned graphical background services are stopped and disabled next, and their desktop launchers are
 removed using the app's ownership manifests. A build with no graphical application cannot verify them,
 so uninstall leaves them and the state root's `gui` directory in place and prints
 `clio-coder gui background uninstall && clio-coder gui launcher uninstall` to run from a build that has it.
 
 An installer root this binary does not run from, left behind when the launcher moved to a
 checkout or a package manager, is listed as `Inactive install` and removed the same way;
-`--keep-binary` keeps it. For an installer install, uninstall also removes the managed Node and
+`--keep-binary` keeps it. `clio-coder uninstall --inactive` removes only such roots and the
+installer launcher that still names them, and keeps every home, the running installation and
+the desktop app. It refuses with exit 1 while a process runs from the root, naming each one
+(`pid N (launched from it)`, or `pid N@host` for another host), and cannot combine with a `--keep-*` flag. For an installer install, uninstall also removes the managed Node and
 every installed version: only what the installer created inside the install root
 (`runtime/`, `versions/`, `launchers/`, `.active/`, `install.json` and its ownership
 marker), then the root itself if nothing else is left in it. It takes the
 installer's lock first and refuses while another session started from that
 install is still running (`Another native session (pid N) is still running; close it before uninstalling`).
-Shell startup files that mention Clio Coder are reported as `Shell config` rows, never edited. The
-candidates are the files `install.sh --modify-path` writes: `~/.bashrc`, `~/.zshrc`,
+The `PATH` block `install.sh --modify-path` appended for this launcher's directory, the
+`# added by clio-coder install.sh` line and the exact `export PATH=...` or `fish_add_path` line
+after it, is removed with the launcher and kept with it under `--keep-binary`. Any other line
+in a shell startup file that mentions Clio Coder is reported as a `Shell config` row and never
+edited. The candidates are the files `install.sh --modify-path` writes: `~/.bashrc`, `~/.zshrc`,
 `$ZDOTDIR/.zshrc` when `ZDOTDIR` is absolute, `~/.profile`, and fish's `config.fish` under an
 absolute `$XDG_CONFIG_HOME` or `~/.config`. A file is reported when it contains `clio-coder` or
-`CLIO_CODER`. On Windows, where a running `node.exe`
+`CLIO_CODER`. On Windows, the user `PATH` entry `install.ps1` added is removed whenever its
+manifest records `pathAdded`. On Windows, where a running `node.exe`
 is locked, the launcher and runtime are removed a few seconds after the command exits. A 0.5.9
 package installed by this installer cannot remove the managed files; after every
 session exits, delete the launcher and the install root's `runtime/`,
 `versions/` and `install.json` by hand.
+
+For an npm global install on Linux or macOS, uninstall runs
+`npm uninstall -g --prefix <prefix> @iowarp/clio-coder` last; `--keep-package` or
+`--keep-binary` keeps the package. npm can leave an empty `@iowarp` directory in the prefix.
+Every run ends with `Removed:` and `Kept, and why:` lists, which `--json` reports as `removed`
+and `kept`.
 
 `--dry-run` prints the roots and the optional launcher action without changing
 anything, and enumerates the same resolved absolute paths the real run would
@@ -1099,10 +1151,11 @@ If you are removing Clio Coder completely from your system, verify that all cate
 2.  **Local Source Bin Link**:
     *   `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`
 3.  **Global Bin Links**:
-    *   `clio-coder` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
+    *   A pnpm or Bun global package: uninstall prints the manager's remove command. An npm global package is removed by uninstall unless you kept it.
 4.  **Installer Root** (installer installs only; `clio-coder uninstall` removes it):
     *   `~/.local/share/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `%LOCALAPPDATA%\clio-coder\install` on Windows, or the `--install-dir` you chose.
-    *   A `PATH` line the installer appended to a shell startup file under `--modify-path` (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.profile`, or fish's `config.fish`); uninstall reports such files and never edits them.
+    *   An installer root no longer in use after a move to another method: `clio-coder uninstall --inactive` removes it.
+    *   Only lines you edited yourself in a shell startup file; uninstall removes the exact `PATH` block `--modify-path` added and reports any other line that mentions Clio Coder.
 5.  **Desktop App** (only if you installed it):
     *   Run `clio-coder gui background uninstall` and `clio-coder gui launcher uninstall`, which `uninstall` also does for an app whose ownership it can verify.
 6.  **Per-Repository State**:
