@@ -139,7 +139,7 @@ export const alreadyPublished = (stderr) =>
  * The next step from real state. Facts:
  *   mode: "release" | "rehearse"
  *   tree: { clean, branch, versionsAgree, mainAncestor, readiness: string[] }
- *   local: { node22, node24 }           both Node majors passed for this commit and tarball
+ *   local: { wanted, node22, node24 }   --local asked for local runs; both Node majors passed for this commit
  *   pushed: boolean                     target branch head on origin is the candidate
  *   ci: { state, jobs, artifacts } | null
  *   releaseRun: { state, jobs } | null  release.yml run for this candidate
@@ -177,8 +177,8 @@ export function nextStep(facts, receipt) {
 		if (!tree.versionsAgree) return stop("package.json, the GUI manifest and the ACP registry versions must agree");
 		if (!tree.mainAncestor) return stop("origin/main is not an ancestor of the candidate");
 		if (tree.readiness.length) return stop(`release readiness failed:\n${tree.readiness.join("\n")}`);
-		// Both Node majors before any push (item 1): CI is not the first place a runtime difference shows.
-		if (!facts.local.node24 || !facts.local.node22)
+		// CI is the qualifier; local Node 22 and 24 runs are opt-in (--local) and skipped for a green CI run.
+		if (facts.local.wanted && facts.ci?.state !== "success" && (!facts.local.node24 || !facts.local.node22))
 			return { step: "qualify", missing: ["22", "24"].filter((major) => !facts.local[`node${major}`]) };
 		return { step: "push" };
 	}

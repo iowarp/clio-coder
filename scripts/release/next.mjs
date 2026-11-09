@@ -36,6 +36,7 @@ import {
 	previousTag,
 	publicProven,
 	publishArgs,
+	QUALIFICATION_JOBS,
 	rerunStarted,
 	runState,
 	tmpdirProblem,
@@ -52,9 +53,9 @@ const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const POSITIONS = {
 	release: [
 		["ready", "clean version branch, versions agree, main is an ancestor", "seconds"],
-		["local-qualified", "Node 22 and 24 tests and install boot, concurrent", "~10 min, once per candidate"],
+		["local-qualified", "opt-in (--local): Node 22 and 24 tests and install boot", "~5 min, skipped for green CI"],
 		["pushed", "origin version branch at the candidate", "seconds"],
-		["ci-qualified", "ci.yml prepare, ci (22), ci (24); a rehearsal's run is reused", "~8 min, once per candidate"],
+		["ci-qualified", "ci.yml prepare, ci (22), ci (24); reuses any green run", "~8 min, or 0 reused"],
 		["finish-checked", "release.yml preflight green, release job awaiting approval", "~1 min"],
 		["npm-accepted", "owner's npm publish of the qualified tarball", "~1 min, owner"],
 		["published", "release job: tag, GitHub release, main, website", "~2 min after approval; npm may add ~15"],
@@ -63,7 +64,7 @@ const POSITIONS = {
 	],
 	rehearse: [
 		["ready", "clean version branch, versions agree, main is an ancestor", "seconds"],
-		["local-qualified", "Node 22 and 24 tests and install boot, concurrent", "~10 min, once per candidate"],
+		["local-qualified", "opt-in (--local): Node 22 and 24 tests and install boot", "~5 min, skipped for green CI"],
 		["pushed", "temporary rehearse/* branch at the candidate", "seconds"],
 		["ci-qualified", "ci.yml with rehearsal and macOS boot (Windows with --windows)", "~9 min, reused by the release"],
 		["finish-checked", "release.yml check run: real preflight and finish check", "~1 min"],
@@ -80,7 +81,7 @@ function proven(mode, facts, receipt) {
 	const branchOk = mode === "rehearse" || /^v\d{3}$/u.test(tree.branch);
 	const ready =
 		facts.pushed || (branchOk && tree.clean && tree.versionsAgree && tree.mainAncestor && !tree.readiness.length);
-	const local = facts.local.node22 && facts.local.node24;
+	const local = !facts.local.wanted || facts.ci?.state === "success" || (facts.local.node22 && facts.local.node24);
 	if (mode === "rehearse")
 		return [
 			ready,
@@ -300,10 +301,13 @@ function readTree(commit) {
 
 export async function readFacts(mode, receipt, context) {
 	const { commit } = receipt;
-	const candidateReady = existsSync(join(context.candidate, "candidate.json"));
-	const local = Object.fromEntries(
-		QUALIFIED_MAJORS.map((major) => [`node${major}`, candidateReady && qualifiedOn(context.candidate, commit, major)]),
-	);
+	const candidateReady = context.local && existsSync(join(context.candidate, "candidate.json"));
+	const local = {
+		wanted: Boolean(context.local),
+		...Object.fromEntries(
+			QUALIFIED_MAJORS.map((major) => [`node${major}`, candidateReady && qualifiedOn(context.candidate, commit, major)]),
+		),
+	};
 	const head = git("rev-parse", "HEAD");
 	const scratch = receipt.rehearsal?.branch;
 	const pushed =
@@ -311,11 +315,17 @@ export async function readFacts(mode, receipt, context) {
 
 	const own = new Set([receipt.ciRun?.id, receipt.releaseRun?.id, ...(receipt.rehearsal?.runs ?? [])].filter(Boolean));
 	if (!receipt.ciRun) {
-		// A lost receipt adopts the newest successful qualification of this exact commit.
-		const reusable = runsOn("ci.yml", commit).find((record) => record.conclusion === "success");
+		// Any green qualification of this exact commit (a rehearsal's included) is reused: no local runs, no dispatch.
+		const reusable = runsOn("ci.yml", commit).find(
+			(record) =>
+				record.conclusion === "success" &&
+				QUALIFICATION_JOBS.every((name) => latestJob(getRun(record.id).jobs, name)?.conclusion === "success") &&
+				artifactsPresent(record.id, commit),
+		);
 		if (reusable) {
 			receipt.ciRun = { id: reusable.id, attempt: reusable.run_attempt };
 			own.add(reusable.id);
+			recordEvent(receipt, "reuse-ci", "done", { id: reusable.id });
 		}
 	}
 	const foreignRuns = ["ci.yml", "release.yml"]
@@ -653,6 +663,7 @@ export async function main(argv = process.argv.slice(2)) {
 		options: {
 			rehearse: { type: "boolean" },
 			windows: { type: "boolean" },
+			local: { type: "boolean" },
 			state: { type: "string" },
 			record: { type: "string" },
 			replay: { type: "string" },
@@ -662,7 +673,7 @@ export async function main(argv = process.argv.slice(2)) {
 	});
 	if (values.help) {
 		console.log(
-			"pnpm run release:next            release the version branch's head, resuming where it stands\npnpm run release:next --rehearse  full non-public rehearsal on a temporary rehearse/* branch\npnpm run release:next status      print the positions and exit (read-only)\n  --record <file>                  save every GitHub and npm read to <file>\n  --replay <file>                  read GitHub and npm from <file> offline; prints the next step, writes nothing",
+			"pnpm run release:next            release the version branch's head, resuming where it stands\npnpm run release:next --rehearse  full non-public rehearsal on a temporary rehearse/* branch\npnpm run release:next status      print the positions and exit (read-only)\n  --local                          also qualify on local Node 22 and 24 before the push\n  --record <file>                  save every GitHub and npm read to <file>\n  --replay <file>                  read GitHub and npm from <file> offline; prints the next step, writes nothing",
 		);
 		return;
 	}
@@ -699,6 +710,7 @@ export async function main(argv = process.argv.slice(2)) {
 			state,
 			candidate,
 			windows: Boolean(values.windows),
+			local: Boolean(values.local),
 			channel,
 			name: pkg.name,
 			tag: `v${pkg.version}`,

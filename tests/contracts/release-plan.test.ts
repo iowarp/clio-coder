@@ -71,13 +71,15 @@ describe("release decisions", () => {
 		strictEqual(draftAction({ release: null, tagCommit: "b".repeat(40) }, commit).action, "stop");
 	});
 
-	it("qualifies on both Node majors before any push", async () => {
+	it("lets CI qualify, runs local Node majors only with --local, and skips them for a green CI run", async () => {
 		const { nextStep } = await import(planModule);
-		deepStrictEqual(nextStep(facts({ pushed: false, local: { node22: false, node24: true } }), {}), {
+		const fresh = { pushed: false, ci: null };
+		strictEqual(nextStep(facts({ ...fresh, local: { wanted: false } }), {}).step, "push");
+		deepStrictEqual(nextStep(facts({ ...fresh, local: { wanted: true, node22: false, node24: true } }), {}), {
 			step: "qualify",
 			missing: ["22"],
 		});
-		strictEqual(nextStep(facts({ pushed: false }), {}).step, "push");
+		strictEqual(nextStep(facts({ pushed: false, local: { wanted: true } }), {}).step, "push");
 	});
 
 	it("offers npm publish only after the release preflight passed and the job awaits approval", async () => {
