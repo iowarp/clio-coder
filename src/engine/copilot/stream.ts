@@ -531,7 +531,9 @@ class Step {
 	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
 	onDetach: ((step: Step) => void) | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
-	onFinish: ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[] }) => void) | null = null;
+	onFinish:
+		| ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[]; toolNames: string[] }) => void)
+		| null = null;
 
 	constructor(
 		private readonly stream: AssistantMessageEventStream,
@@ -782,7 +784,10 @@ class Step {
 			this.stream.push({ type: "error", reason: stop, error: this.message });
 		}
 		this.stream.end(this.message);
-		this.onFinish?.({ stop, toolCallIds });
+		const toolNames = this.message.content
+			.filter((block): block is ToolCall => block.type === "toolCall")
+			.map((block) => block.name);
+		this.onFinish?.({ stop, toolCallIds, toolNames });
 	}
 }
 
@@ -1072,8 +1077,16 @@ async function runStep(
 			}
 			return { premiumRequests, nanoAiu };
 		};
-		step.onFinish = ({ stop, toolCallIds }) => {
+		const declared = new Set(tools.map((tool) => tool.name));
+		step.onFinish = ({ stop, toolCallIds, toolNames }) => {
 			active.busy = false;
+			if (stop === "toolUse" && toolNames.some((name) => !declared.has(name))) {
+				// Copilot answers a call to a tool it was never given ("does not exist") and its run goes on without
+				// Clio, while Clio's loop may still run that name (a gateway capability called directly). The two
+				// transcripts have diverged, so delivering Clio's result would leave both sides waiting on each other.
+				remove(active, "Copilot answered a tool call it was not given; the next call reseeds from Clio's transcript");
+				return;
+			}
 			if (stop === "toolUse" || stop === "stop") {
 				active.synced = [...prints, `a:${toolCallIds.join(",")}`];
 				active.state = stop === "toolUse" ? "awaiting-tools" : "idle";

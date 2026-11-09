@@ -146,6 +146,14 @@ class FakeSession {
 			this.emit("assistant.message", { messageId: "u1", apiCallId: "copilot-call-1", content: "", toolRequests: [{ toolCallId: "call_first", name, arguments: {} }] });
 			return;
 		}
+		if (prompt.includes("op:undeclared") && !prompt.includes("<conversation-history>")) {
+			// As the live runtime does when the model names a tool it was never given: it answers that call itself
+			// ("does not exist") and goes on to its next model call, which parks on a declared tool.
+			this.usage({ model: "fake-model", apiCallId: "call-u", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 1 });
+			this.emit("assistant.message", { messageId: "u1", apiCallId: "call-u", content: "", toolRequests: [{ toolCallId: "call_hidden", name: "monitor", arguments: {} }] });
+			void this.callTool("call_own");
+			return;
+		}
 		if (prompt.includes("op:late-usage")) { await this.lateUsageTool("call_late", "late-a", "late-a", "late-a-next"); return; }
 		if (prompt.includes("op:late-anon")) { await this.lateUsageTool("call_anon", null, null, null); return; }
 		if (prompt.includes("op:reasoning-only")) {
@@ -598,6 +606,25 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 		source: "provider",
 	});
 	strictEqual(firstSettled.pricing.usd.kind, "unknown", "a seat call never renders a dollar price");
+});
+
+test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {
+	disposeCopilotConversations("undeclared-session");
+	const before = fake().sessions.length;
+	const context: Context = { systemPrompt: "You are Clio.", tools: [readTool], messages: [user("op:undeclared")] };
+	const first = await step(context, "undeclared-session");
+	strictEqual(first.stopReason, "toolUse");
+	const diverged = fake().sessions.at(-1) as FakeSession & { aborted?: boolean };
+	const result = { ...toolResult("call_hidden", "the worker found a stencil bug"), toolName: "monitor" };
+	const second = await settledWithinTurns(
+		step({ ...context, messages: [...context.messages, first, result] }, "undeclared-session"),
+	);
+	ok(second !== "pending", "the next call must not wait on a Copilot run that already answered the call itself");
+	strictEqual(second.stopReason, "stop");
+	strictEqual(diverged.aborted, true, "the diverged Copilot run is closed");
+	strictEqual(fake().sessions.length, before + 2, "the next call opens a fresh session");
+	match(fake().sessions.at(-1)?.prompts[0] ?? "", /the worker found a stencil bug/);
+	disposeCopilotConversations("undeclared-session");
 });
 
 test("a reminder-only follow-up rides on the tool result; a steer is sent once and never replayed", async () => {
