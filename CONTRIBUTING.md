@@ -145,8 +145,9 @@ To cut a release:
    A passed Node major is reused. Qualification uses `nvm`'s newest install of
    each major unless `release-candidate.mjs qualify` gets `--node22`/`--node24`.
 3. Rehearse. `--rehearse` pushes a temporary `rehearse/*` branch and dispatches
-   one `ci.yml` run with the publisher's rehearsal and the macOS and Windows
-   boots. It then runs `release.yml` in `check` mode (the real preflight and
+   one `ci.yml` run with the publisher's rehearsal and the macOS boot (add
+   `--windows` for the Windows boot; Windows is otherwise proven on a native
+   clone). It then runs `release.yml` in `check` mode (the real preflight and
    finish check, never the release job). It creates, verifies and deletes a
    never-published draft release `rehearse-<nonce>`, prints the exact
    `npm publish` with a dry run, cancels its runs and deletes the branch. It

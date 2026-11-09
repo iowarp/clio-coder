@@ -65,7 +65,7 @@ const POSITIONS = {
 		["ready", "clean version branch, versions agree, main is an ancestor", "seconds"],
 		["local-qualified", "Node 22 and 24 tests and install boot, concurrent", "~10 min, once per candidate"],
 		["pushed", "temporary rehearse/* branch at the candidate", "seconds"],
-		["ci-qualified", "ci.yml with rehearsal and macOS/Windows boot jobs", "~9 min, reused by the release"],
+		["ci-qualified", "ci.yml with rehearsal and macOS boot (Windows with --windows)", "~9 min, reused by the release"],
 		["finish-checked", "release.yml check run: real preflight and finish check", "~1 min"],
 		["drafted", "draft release rehearse-<nonce> created, verified, deleted", "~1 min"],
 		["stubbed", "npm publish --dry-run of the qualified tarball", "seconds"],
@@ -434,7 +434,7 @@ async function perform(step, facts, receipt, context) {
 			const id = await dispatch(
 				"ci.yml",
 				ref,
-				{ sha: commit, version_branch: receipt.branch, rehearse, platforms: rehearse },
+				{ sha: commit, version_branch: receipt.branch, rehearse, platforms: rehearse, windows: context.windows },
 				title,
 			);
 			receipt.ciRun = { id, attempt: 1 };
@@ -599,7 +599,12 @@ function progress(facts) {
 export async function main(argv = process.argv.slice(2)) {
 	const { values, positionals } = parseArgs({
 		args: argv.filter((argument) => argument !== "--"),
-		options: { rehearse: { type: "boolean" }, state: { type: "string" }, help: { type: "boolean" } },
+		options: {
+			rehearse: { type: "boolean" },
+			windows: { type: "boolean" },
+			state: { type: "string" },
+			help: { type: "boolean" },
+		},
 		allowPositionals: true,
 	});
 	if (values.help) {
@@ -638,6 +643,7 @@ export async function main(argv = process.argv.slice(2)) {
 			mode,
 			state,
 			candidate,
+			windows: Boolean(values.windows),
 			channel,
 			name: pkg.name,
 			tag: `v${pkg.version}`,

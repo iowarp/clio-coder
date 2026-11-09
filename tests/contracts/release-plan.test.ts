@@ -279,6 +279,17 @@ describe("release workflows", () => {
 		ok(workflow.jobs.prepare.steps.some((step: { run?: string }) => step.run?.includes("rehearse/*")));
 	});
 
+	it("boots macOS with platforms and Windows only when asked", () => {
+		const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8"));
+		const matrix: string = workflow.jobs.platform.strategy.matrix.os;
+		const inputs = workflow.on.workflow_dispatch.inputs;
+		strictEqual(inputs.windows.default, true, "the old release flow keeps both boots");
+		const choose = (windows: boolean) =>
+			JSON.parse(matrix.match(windows ? /'(\[[^']*windows[^']*\])'/u : /\|\| '(\[[^']*\])'/u)?.[1] ?? "[]");
+		deepStrictEqual(choose(true), ["windows-latest", "macos-latest"]);
+		deepStrictEqual(choose(false), ["macos-latest"]);
+	});
+
 	it("lets a descendant finish, waits for npm, and never publishes from a check run", () => {
 		const workflow = parse(readFileSync(".github/workflows/release.yml", "utf8"));
 		ok(!JSON.stringify(workflow.jobs.preflight.steps).includes('test \\"$CANDIDATE_SHA\\" = \\"$GITHUB_SHA\\"'));

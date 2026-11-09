@@ -20,6 +20,10 @@ on:
         description: Also boot the same package on Windows and macOS
         default: false
         type: boolean
+      windows:
+        description: With platforms, also boot on Windows (release:next skips it; Windows is verified on a native clone)
+        default: true
+        type: boolean
       browser:
         description: Also run the GUI browser smoke in Chrome (opt-in, not a required check)
         default: false
@@ -169,7 +173,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: ${{ fromJSON(inputs.windows && '["windows-latest","macos-latest"]' || '["macos-latest"]') }}
     steps:
       - name: Use runner scratch for temporary files
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
