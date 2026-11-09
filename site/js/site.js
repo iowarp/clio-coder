@@ -318,23 +318,29 @@
 		for (const el of document.querySelectorAll("[data-reveal]")) el.dataset.reveal = "visible";
 	}
 	if (!reduced.matches && "IntersectionObserver" in window) {
+		// The observer's first report classifies each element from layout the browser
+		// already computed: anything that starts above the fold is left alone, the rest
+		// waits hidden until it scrolls in. Measuring here would force a reflow.
+		const seen = new WeakSet();
 		reveals = new IntersectionObserver(
 			(entries) => {
-				for (const entry of entries)
-					if (entry.isIntersecting) {
-						entry.target.dataset.reveal = "visible";
-						reveals.unobserve(entry.target);
-					}
+				for (const entry of entries) {
+					const el = entry.target;
+					const first = !seen.has(el);
+					seen.add(el);
+					if (first && entry.boundingClientRect.top < entry.rootBounds.bottom) reveals.unobserve(el);
+					else if (entry.isIntersecting) {
+						el.dataset.reveal = "visible";
+						reveals.unobserve(el);
+					} else if (first) el.dataset.reveal = "pending";
+				}
 			},
 			{ threshold: 0.08, rootMargin: "0px 0px -32px 0px" },
 		);
 		for (const el of document.querySelectorAll(
 			".section-heading, .interface-grid, .model-routes, .workflow-grid, .tutorial-card, .project-section, .guide-step, .guide-capture, .guide-sequence, .guide-diagram, .guide-result",
-		)) {
-			if (el.getBoundingClientRect().top < innerHeight - 32) continue;
-			el.dataset.reveal = "pending";
+		))
 			reveals.observe(el);
-		}
 	}
 	reduced.addEventListener("change", () => {
 		if (reduced.matches) finishReveals();
