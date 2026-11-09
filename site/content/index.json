@@ -311,6 +311,10 @@
     "headings": [
       "What it is",
       "Name a route",
+      "The two consult forms",
+      "The judge screen",
+      "Declare an engine",
+      "When it fails",
       "What to expect"
     ]
   },
@@ -324,7 +328,10 @@
     "summary": "information-flow.md",
     "headings": [
       "What it does",
-      "Declare and approve"
+      "Declare and approve",
+      "Example policy",
+      "What acquires a label",
+      "Read a refusal and recover"
     ]
   },
   {
@@ -337,7 +344,12 @@
     "summary": "semantic-context.md",
     "headings": [
       "What it does",
-      "Set it up and search"
+      "Set it up and search",
+      "Configure the embedding model",
+      "Register inboxes",
+      "Search and ask",
+      "Change the model",
+      "When something fails"
     ]
   },
   {
@@ -349,7 +361,9 @@
     "summary": "agents.md",
     "headings": [
       "See the agents",
-      "Add your own"
+      "Shipped agents",
+      "Add your own",
+      "What validation rejects"
     ]
   }
 ]
