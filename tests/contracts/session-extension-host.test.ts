@@ -7,9 +7,11 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { startExtensionHost } from "../../src/entry/extension-host.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { buildExtensionRuntimeToolSpecs } from "../../src/tools/extension-runtime-tools.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const script = `let opened = 0;
@@ -60,6 +62,34 @@ test("an api 2 tool is write class only in a package that may write the workspac
 	equal(runtime({ fs: { write: ["notes"] } }).tools[0]?.actionClass, "write");
 	throws(() => runtime({ fs: { write: ["notes"] }, exec: true }), /can be write only/u);
 	throws(() => runtime({ fs: { write: ["store"] } }), /can be write only/u);
+});
+
+test("admission decides an api 2 tool by its declared class, not the extension name's execute floor", async (t) => {
+	const env = await isolateClioEnv("clio-coder-session-host-");
+	t.after(() => env.restore());
+	const cwd = installRuntime(
+		env.dir,
+		"noter",
+		{
+			tools: [{ name: "note", description: "Write a note", actionClass: "write", inputSchema: { type: "object" } }],
+			permissions: { fs: { write: ["notes"] } },
+		},
+		`export default (api) => { api.tool("note", () => ({ text: "noted" })); };\n`,
+	);
+	const [note] = buildExtensionRuntimeToolSpecs(
+		listInstalledExtensions(cwd, { all: true }),
+		createExtensionRuntimeHookBridge(),
+	);
+	ok(note);
+	const safety = createWorkerSafety({ cwd });
+	const classes: string[] = [];
+	const registry = createRegistry({
+		safety: { ...safety, decisions: { recordToolCall: (input) => classes.push(input.classification.actionClass) } },
+		autonomy: () => "default",
+	});
+	registry.register(note);
+	await registry.invoke({ tool: note.name, args: {} });
+	deepStrictEqual(classes, ["write"]);
 });
 
 test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, an interview fails closed at once", async (t) => {

@@ -24,7 +24,7 @@ import type { SandboxEnvPolicy, UnixSocketMode } from "../core/sandbox/types.js"
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import { withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { ToolName } from "../core/tool-names.js";
-import { isMcpToolName, ToolNames } from "../core/tool-names.js";
+import { isHarnessExtensionToolName, isMcpToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { toolSurfaceSources, turnAllowsTool } from "../core/turn-constraints.js";
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
@@ -2870,12 +2870,27 @@ function prepareAdmissionCall(spec: ToolSpec | undefined, call: ClassifierCall):
 }
 
 function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolSpec, readOnly = false): SafetyDecision {
-	if (decision.classification.actionClass !== "unknown") return decision;
+	if (decision.classification.actionClass !== "unknown" && !declaredRuntimeExtensionTool(decision, spec))
+		return decision;
 	const classification = {
 		actionClass: readOnly ? (spec.readOnlyActionClass ?? spec.baseActionClass) : spec.baseActionClass,
 		reasons: [`registered tool: ${spec.name}`],
 	};
 	return { ...decision, classification };
+}
+
+/**
+ * An extension runtime tool (no `safetyCall` projection) whose name the
+ * classifier floored to execute. Its install-approved manifest declares the
+ * class, which the runtime schema limits to what its permissions allow.
+ */
+function declaredRuntimeExtensionTool(decision: SafetyDecision, spec: ToolSpec): boolean {
+	return (
+		decision.classification.actionClass === "execute" &&
+		spec.safetyCall === undefined &&
+		spec.sourceInfo?.extension !== undefined &&
+		isHarnessExtensionToolName(spec.name)
+	);
 }
 
 /** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
