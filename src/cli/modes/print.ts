@@ -45,7 +45,7 @@ import {
 	AUTONOMY_JUDGE_STREAK_EXIT_CODE,
 	type AutonomyHalt,
 	type AutonomyReport,
-	autonomyHaltNotice,
+	headlessHaltNotice,
 	JUDGE_STREAK_REASON,
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
@@ -1293,7 +1293,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// A yolo pause ends the run on purpose, whatever the cancelled turn left behind; a signal still outranks it.
 	const halt = terminal.exitCode !== 0 && !termination.isShuttingDown() ? (options.autonomyHalt?.() ?? null) : null;
 	if (halt !== null) {
-		const failureMessage = `clio-coder run: ${autonomyHaltNotice(halt, "headless", options.autonomy?.()?.openDecisions)}`;
+		const failureMessage = `clio-coder run: ${headlessHaltNotice(halt, options.autonomy?.() ?? null)}`;
 		terminal = {
 			exitCode: halt.kind === "judge" ? AUTONOMY_JUDGE_STREAK_EXIT_CODE : AUTONOMOUS_CAP_EXIT_CODE,
 			outcome: "failed",

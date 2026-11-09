@@ -457,3 +457,15 @@ export function autonomyHaltNotice(
 				: `another ${halt.limit} minutes`;
 	return `yolo paused: ${halt.detail} (${spent}). Enter on an empty prompt continues for ${again}; a new message also continues.${left}`;
 }
+
+/**
+ * The headless run's closing notice. The halt's usage was taken when it latched, before the call that crossed the line
+ * (or calls already in flight) settled, so the notice counts from the report the run ends with.
+ */
+export function headlessHaltNotice(halt: AutonomyHalt, report: AutonomyReport | null): string {
+	return autonomyHaltNotice(
+		report === null ? halt : { ...halt, usage: report.usage },
+		"headless",
+		report?.openDecisions,
+	);
+}

@@ -18,6 +18,7 @@ import {
 	autonomyHaltNotice,
 	createAutonomyWindow,
 	describeOpenDecision,
+	headlessHaltNotice,
 	OPEN_DECISION_LIMIT,
 	settledCallTokens,
 } from "../../src/domains/safety/autonomy-window.js";
@@ -364,6 +365,22 @@ test("a pending judge halt is dropped when its turn settles, the operator speaks
 	fx.window.reopen();
 	fx.window.haltFor("judge", "4 blocks this session");
 	strictEqual(fx.halts.length, 2, "a worker's escalation halts at once");
+});
+
+test("the headless halt notice counts the call that crossed the line, as the report does", () => {
+	const fx = windowFixture({ toolCalls: 0, minutes: 0, tokens: 0 });
+	fx.window.turnStarted();
+	fx.window.toolCall();
+	fx.window.toolCall();
+	fx.window.haltFor("judge", "3 blocks in a row", true);
+	fx.window.openDecision({ tool: "bash", command: "git push", kind: "judge-block" });
+	fx.window.toolCall();
+	const [halt] = fx.halts;
+	ok(halt !== undefined);
+	const report = fx.window.report(true);
+	strictEqual(report?.usage.toolCalls, 3);
+	match(headlessHaltNotice(halt, report), /after 3 tool calls,/u);
+	match(headlessHaltNotice(halt, null), /after 2 tool calls,/u);
 });
 
 test("the exit summary closes a yolo session with its window, its halt and the decisions it left", () => {
