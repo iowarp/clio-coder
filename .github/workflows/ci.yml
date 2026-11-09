@@ -1,4 +1,5 @@
 name: ci
+run-name: ${{ inputs.nonce || format('ci {0}', inputs.sha) }}
 
 on:
   workflow_dispatch:
@@ -8,7 +9,7 @@ on:
         required: true
         type: string
       rehearse:
-        description: Rehearse publication without public writes (ci-scratch-* only)
+        description: Rehearse publication without public writes (ci-scratch-* or rehearse/* only)
         default: false
         type: boolean
       version_branch:
@@ -23,6 +24,10 @@ on:
         description: Also run the GUI browser smoke in Chrome (opt-in, not a required check)
         default: false
         type: boolean
+      nonce:
+        description: Caller's unique run name, so the caller finds this run without comparing clocks
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -47,7 +52,7 @@ jobs:
         run: |
           test "$CANDIDATE_SHA" = "$GITHUB_SHA"
           if test "$REHEARSE" = true; then
-            case "$GITHUB_REF_NAME" in ci-scratch-*) ;; *) exit 1 ;; esac
+            case "$GITHUB_REF_NAME" in ci-scratch-*|rehearse/*) ;; *) exit 1 ;; esac
           fi
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -113,7 +118,7 @@ jobs:
     needs: prepare
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     steps:
       - name: Use runner scratch for temporary files
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -124,17 +129,33 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Native search tools
+        run: sudo apt-get install --yes --no-install-recommends ripgrep fd-find
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: candidate-${{ inputs.sha }}
           path: ${{ runner.temp }}/candidate
+      # The same tests as ci (22): 0.7.0 passed a Node 24-only check and failed on Node 22.
+      - name: Selected contracts, GUI behavior, and installed package on Node 24
+        env:
+          CANDIDATE_SHA: ${{ inputs.sha }}
+        run: node scripts/release-candidate.mjs test --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --results test-results-24.json
       - name: Boot the qualified package on Node 24
         env:
           CANDIDATE_SHA: ${{ inputs.sha }}
         run: node scripts/release-candidate.mjs smoke --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: results24-${{ inputs.sha }}
+          path: ${{ runner.temp }}/candidate/test-results-24.json
+          if-no-files-found: error
+          retention-days: 30
 
   platform:
     name: boot (${{ matrix.os }})

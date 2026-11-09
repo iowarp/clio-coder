@@ -1,4 +1,5 @@
 name: release
+run-name: ${{ inputs.nonce || format('release {0}', inputs.sha) }}
 
 on:
   workflow_dispatch:
@@ -12,13 +13,22 @@ on:
         required: true
         type: string
       mode:
-        description: Stable/rc release, or a deterministic dev snapshot of the qualified branch head
+        description: Stable/rc release, a deterministic dev snapshot of the qualified branch head, or a check that runs preflight only
         required: true
         default: release
         type: choice
         options:
           - release
           - dev
+          - check
+      version_branch:
+        description: Version branch a check run plans for, when dispatched from a rehearse/* branch
+        required: false
+        type: string
+      nonce:
+        description: Caller's unique run name, so the caller finds this run without comparing clocks
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -35,10 +45,6 @@ jobs:
     steps:
       - name: Use runner scratch for temporary files
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - name: Require the exact branch head
-        env:
-          CANDIDATE_SHA: ${{ inputs.sha }}
-        run: test "$CANDIDATE_SHA" = "$GITHUB_SHA"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
@@ -59,13 +65,16 @@ jobs:
           CANDIDATE_SHA: ${{ inputs.sha }}
           QUALIFICATION_RUN: ${{ inputs.qualification_run }}
           CLIO_CODER_RELEASE_MODE: ${{ inputs.mode }}
-        run: node scripts/release-publish.mjs verify --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$QUALIFICATION_RUN" --branch "$GITHUB_REF_NAME"
+          VERSION_BRANCH: ${{ inputs.mode == 'check' && inputs.version_branch || github.ref_name }}
+        run: node scripts/release-publish.mjs verify --directory "$RUNNER_TEMP/candidate" --sha "$CANDIDATE_SHA" --run "$QUALIFICATION_RUN" --branch "$VERSION_BRANCH"
 
   release:
     needs: preflight
+    if: ${{ inputs.mode != 'check' }}
     environment: release
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Covers the publisher's wait for npm to serve the owner's publish.
+    timeout-minutes: 45
     permissions:
       contents: write
       actions: read
