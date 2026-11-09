@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { processBirthToken } from "../../src/core/process-identity.js";
 import { acquireCheckoutWriterLease } from "../../src/domains/dispatch/checkout-writer-lease.js";
 import {
 	claimCompeteGroup,
@@ -132,6 +133,23 @@ test("the writer lease refuses an overlapping writer from another dispatch call 
 		acquireCheckoutWriterLease({ checkout: root }).release();
 		detached.release();
 		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }).release();
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a holderless read-only lease neither refuses nor is refused by another live process (#420)", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const other = { pid: process.ppid, processBirthToken: processBirthToken(process.ppid) ?? "unknown" };
+	try {
+		const readOnly = acquireCheckoutWriterLease({ checkout: root });
+		const writer = acquireCheckoutWriterLease({
+			checkout: root,
+			...other,
+			holder: { group: "other", roots: null, isolated: false, agentId: "coder" },
+		});
+		acquireCheckoutWriterLease({ checkout: root }).release();
+		writer.release();
+		readOnly.release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

@@ -157,19 +157,19 @@ export function acquireCheckoutWriterLease(input: {
 }): CheckoutWriterLease {
 	const checkout = canonicalCheckout(input.checkout);
 	const path = checkoutWriterLeasePath(checkout);
-	const holder = input.holder === undefined ? undefined : { ...input.holder };
+	// The cross-process record below is exclusive, so a holderless request never takes it (#420).
+	if (input.holder === undefined) return { checkout, path, bindRun: () => {}, release: () => {} };
+	const holder = { ...input.holder };
 	const bindRun = (runId: string): void => {
-		if (holder !== undefined) holder.runId = runId;
+		holder.runId = runId;
 	};
 	const local = held.get(checkout);
 	if (local !== undefined && (input.pid === undefined || input.pid === process.pid)) {
-		if (holder !== undefined) {
-			for (const existing of local.holders) {
-				if (holdersConflict(existing, holder))
-					throw new Error(writerConflictMessage(checkout, existing, holder, input.operatorStarted === true));
-			}
-			local.holders.add(holder);
+		for (const existing of local.holders) {
+			if (holdersConflict(existing, holder))
+				throw new Error(writerConflictMessage(checkout, existing, holder, input.operatorStarted === true));
 		}
+		local.holders.add(holder);
 		local.count += 1;
 		let released = false;
 		return {
@@ -179,7 +179,7 @@ export function acquireCheckoutWriterLease(input: {
 			release: () => {
 				if (released) return;
 				released = true;
-				if (holder !== undefined) local.holders.delete(holder);
+				local.holders.delete(holder);
 				releaseCheckoutWriterLease(checkout);
 			},
 		};
@@ -203,9 +203,7 @@ export function acquireCheckoutWriterLease(input: {
 		atomicWrite(path, JSON.stringify(record, null, 2));
 	});
 	const entry =
-		ownerPid === process.pid
-			? { count: 1, path, holders: new Set<CheckoutWriterHolder>(holder === undefined ? [] : [holder]) }
-			: undefined;
+		ownerPid === process.pid ? { count: 1, path, holders: new Set<CheckoutWriterHolder>([holder]) } : undefined;
 	if (entry !== undefined) {
 		held.set(checkout, entry);
 		installExitHooks();
@@ -218,7 +216,7 @@ export function acquireCheckoutWriterLease(input: {
 		release: () => {
 			if (released) return;
 			released = true;
-			if (holder !== undefined) entry?.holders.delete(holder);
+			entry?.holders.delete(holder);
 			if (ownerPid === process.pid) releaseCheckoutWriterLease(checkout);
 			else releaseLeaseRecord(path, checkout, ownerPid, token);
 		},
