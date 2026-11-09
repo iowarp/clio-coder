@@ -1797,6 +1797,20 @@ test("a loop's result notices name its task and leave the job id to the line tha
 	} as const;
 	const [finished] = loopTransitionNotices(previous, job);
 	strictEqual(finished?.text, 'loop "check the build" finished: 2 runs done');
+	const waited = { ...job, spec: { ...job.spec, until: { path: ["done"], op: "eq", value: true } } } as JobRecord;
+	const [unmet] = loopTransitionNotices(previous, waited);
+	deepStrictEqual(unmet, {
+		level: "warn",
+		text: 'loop "check the build" stopped: 2 runs used up before its condition matched',
+	});
+	const failing = {
+		...job,
+		history: [{ evidence: { outcome: "failed", summary: "provider down" } }],
+	} as unknown as JobRecord;
+	strictEqual(
+		loopTransitionNotices(previous, failing)[0]?.text,
+		'loop "check the build" ended after 2 runs; the last did not finish: provider down',
+	);
 	const [paused] = loopTransitionNotices(previous, { ...job, state: "paused", reason: null });
 	strictEqual(paused?.text, `loop "check the build" is paused. /loop resume ${job.id} restarts its schedule`);
 });

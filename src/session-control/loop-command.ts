@@ -758,11 +758,30 @@ function reportedOf(job: JobRecord): ReportedJob {
 	};
 }
 
+/** Why the job's final run, or the continuation that took it over, did not succeed; null when it did. */
+function lastRunUnfinished(job: JobRecord): string | null {
+	const delivery = job.delivery;
+	if (delivery?.continuation !== undefined)
+		return delivery.state === "delivered" ? null : (delivery.reason ?? `continuation ${delivery.state}`);
+	const last = job.history.at(-1)?.evidence;
+	return last && last.outcome !== "succeeded" && last.outcome !== "noop" ? last.summary || last.outcome : null;
+}
+
 function endedNotice(job: JobRecord): LoopNotice {
 	const runs = `${job.starts} run${job.starts === 1 ? "" : "s"}`;
 	switch (job.reason) {
-		case "count":
+		case "count": {
+			// Running out of starts is not success when the job waited on a condition or its last run failed (#450).
+			if (job.spec.until)
+				return { level: "warn", text: `loop ${loopLabel(job)} stopped: ${runs} used up before its condition matched` };
+			const unfinished = lastRunUnfinished(job);
+			if (unfinished !== null)
+				return {
+					level: "warn",
+					text: `loop ${loopLabel(job)} ended after ${runs}; the last did not finish: ${preview(unfinished, SUMMARY_CHARS)}`,
+				};
 			return { level: "success", text: `loop ${loopLabel(job)} finished: ${runs} done` };
+		}
 		case "condition":
 			return { level: "success", text: `loop ${loopLabel(job)} ended: condition met after ${runs}` };
 		case "deadline":
