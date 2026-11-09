@@ -70,13 +70,13 @@ describe("headless approval wording in the session prompt", () => {
 		});
 	}
 
-	// #407: nothing parks at yolo, so neither sentence about parking renders.
+	// #407: nothing parks at yolo, so neither sentence about parking renders. Yolo is contained by default.
 	it("says nothing about approval-required calls at yolo, headless or attached", () => {
 		for (const inputs of [{ headless: true }, {}]) {
 			const section = safetySection("yolo", inputs);
 			ok(!section.includes(HEADLESS_SESSION_APPROVAL_SEMANTICS), section);
 			ok(!section.includes(SESSION_APPROVAL_SEMANTICS), section);
-			match(section, /nothing stops for approval and nobody answers questions/);
+			match(section, /nothing waits for the operator, and a call the judge does not allow is refused instead of asked/);
 		}
 	});
 });
@@ -151,8 +151,10 @@ describe("interactive-only guidance in the session prompt", () => {
 			match(prompt, /Follow the neighboring tests.*fail on the untouched code/u);
 			match(prompt, /map each clause to evidence in your diff or a check you ran/u);
 			match(prompt, /a clause without evidence is unfinished/iu);
-			match(prompt, /not done/u);
 		}
+		// A headless main session records an unprovable clause with limitation; a worker names it in its summary.
+		match(main(true), /finish it or record it with limitation/u);
+		match(worker, /name it in `summary` as not done/u);
 		const attended = main(false);
 		strictEqual(attended.includes("reproduction test"), false);
 		strictEqual(attended.includes("map each clause"), false);
