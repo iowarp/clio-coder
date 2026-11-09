@@ -376,6 +376,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		reasonCode: "token",
 		policySource: "name",
 		policyHash: "id",
+		confirmationRuleId: "name",
 	},
 	"approval.requested": {
 		...keep("timeoutMs", "fallback", "escalation", "approvalAuthority", "forwardedByMain", "reviewer"),

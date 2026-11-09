@@ -1464,6 +1464,8 @@ export const ToolDecidedSchema = Type.Object(
 		reasonCode: Type.Optional(ExistingId),
 		policySource: Type.Optional(ExistingId),
 		policyHash: Type.Optional(ExistingId),
+		/** The confirmation rule (for example slurm-allocation) that raised an ask, apart from the policy's own rule. */
+		confirmationRuleId: Type.Optional(ExistingId),
 	},
 	closed,
 );

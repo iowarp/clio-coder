@@ -51,6 +51,7 @@ import type { OpenDecisionKind } from "../domains/safety/autonomy-window.js";
 import { mainCallExposure } from "../domains/safety/call-consequence.js";
 import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { DecisionPresentation } from "../domains/safety/decision-presentation.js";
 import { type DenialLayer, repeatedDenialReason, type ToolDenial } from "../domains/safety/denial.js";
 import type { GitHookDriftGuard, GitHookDriftReport } from "../domains/safety/hook-drift.js";
@@ -2022,6 +2023,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(overrides?.requestId !== undefined ? { requestId: overrides.requestId } : {}),
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
+			...confirmationRuleOf(decision),
 		});
 	};
 

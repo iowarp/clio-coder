@@ -4,6 +4,7 @@ import type { EventPayload } from "../../core/telemetry/events.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { QualityFinding } from "../../tools/verify/quality-policy.js";
+import type { SafetyDecision } from "./contract.js";
 import type { FinishContractReason, FinishContractVerificationScope } from "./finish-contract.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 import type { Rigor } from "./rigor.js";
@@ -32,6 +33,15 @@ export interface ToolDecisionInput {
 	 * misstate why the call was denied.
 	 */
 	reasonCode?: string;
+	/** The confirmation rule that raised the ask, when one did. */
+	confirmationRuleId?: string;
+}
+
+/** The confirmation rule an ask carries, spread into a {@link ToolDecisionInput}. */
+export function confirmationRuleOf(decision: SafetyDecision | undefined): { confirmationRuleId?: string } {
+	return decision?.kind === "ask" && decision.confirmationRuleId !== undefined
+		? { confirmationRuleId: decision.confirmationRuleId }
+		: {};
 }
 
 export function toolDecidedPayload(input: ToolDecisionInput): EventPayload<"tool.decided"> {
@@ -50,6 +60,7 @@ export function toolDecidedPayload(input: ToolDecisionInput): EventPayload<"tool
 		...(reasonCode !== undefined ? { reasonCode } : {}),
 		...(policySource !== undefined ? { policySource } : {}),
 		...(input.policy?.policyHash !== undefined ? { policyHash: input.policy.policyHash } : {}),
+		...(input.confirmationRuleId !== undefined ? { confirmationRuleId: input.confirmationRuleId } : {}),
 	};
 }
 

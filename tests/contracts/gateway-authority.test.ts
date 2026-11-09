@@ -3,10 +3,13 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../../src/core/telemetry/context.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { ToolDecidedSchema } from "../../src/core/telemetry/schemas.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
 import type { ToolDecisionInput } from "../../src/domains/safety/decision-events.js";
@@ -329,5 +332,31 @@ describe("direct and gateway invocation preserve the same authority", () => {
 			artifacts.map((artifact) => ({ path: artifact.path, tool: artifact.tool, kind: artifact.artifactKind })),
 			[{ path: join(cwd, "notes", "REPORT.md"), tool: ToolNames.Artifact, kind: "report" }],
 		);
+	});
+
+	it("records which confirmation rule raised an ask on its tool.decided row", async () => {
+		const rows: ToolDecisionInput[] = [];
+		const audit: DecisionRecord[] = [];
+		const cwd = scratch();
+		const registry = createRegistry({
+			safety: auditing(createWorkerSafety({ cwd }), rows, audit),
+			autonomy: () => "default",
+		});
+		registry.register({
+			name: "mcp_slurm__submit_slurm_job" as ToolName,
+			description: "Submit a Slurm job.",
+			parameters: Type.Object({}),
+			baseActionClass: "execute",
+			confirmationRuleId: "slurm-allocation",
+			async run() {
+				return { kind: "ok", output: "submitted" };
+			},
+		});
+		registry.onPermissionRequired(() => registry.cancelParkedCalls("denied by the test"));
+		await registry.invoke({ tool: "mcp_slurm__submit_slurm_job", args: {} });
+		const asked = audit.find((row) => row.decision === "permission_requested");
+		strictEqual(asked?.confirmationRuleId, "slurm-allocation", JSON.stringify(audit));
+		// A record without the field still reads.
+		strictEqual(Value.Check(ToolDecidedSchema, { tool: "bash", actionClass: "execute", decision: "allowed" }), true);
 	});
 });

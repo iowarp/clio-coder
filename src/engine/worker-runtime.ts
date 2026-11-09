@@ -18,6 +18,7 @@ import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../domains/context/worker/recall.js";
 import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
@@ -2211,6 +2212,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 				...(disposition === "permission_requested" ? { requestId: meta.requestId } : {}),
 				...(rule !== undefined ? { ruleId: rule, reasonCode: rule, policySource: "fleet-permissions" } : {}),
+				...confirmationRuleOf(decision),
 			});
 		};
 		if (escalationConfig) {
