@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Check generated pages, metadata, assets, and the internal link graph."""
+import base64
+import hashlib
 import json
 import re
 import struct
@@ -186,6 +188,11 @@ for url in [*urls, origin + '/404.html']:
         errors.append(f'{path}: a link has no href, so crawlers cannot follow it')
     if public_copyright not in source:
         errors.append(f'{path}: public copyright wording is missing')
+    policy = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', source)
+    for script in re.findall(r'<script>(.*?)</script>', source, re.S):
+        digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+        if not policy or f"'sha256-{digest}'" not in policy.group(1) or 'unsafe-inline' in policy.group(1):
+            errors.append(f'{path}: an inline script is not allowed by its exact hash in the page policy')
     first_card = re.search(r'<a class="tutorial-card"[^>]*><img [^>]*>', source)
     if first_card and ('loading="lazy"' in first_card.group(0) or 'fetchpriority="high"' not in first_card.group(0)):
         errors.append(f'{path}: the first listing image is the likely LCP element and must load eagerly with high priority')

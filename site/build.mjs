@@ -245,10 +245,13 @@ function responsiveImages(html, path) {
 			.replace(/ decoding="async"(?=[\s\S]* decoding="async")/, "");
 	});
 }
+// The theme must apply before first paint, and an external script would block
+// rendering for a round trip. It is inlined and allowed by its exact hash.
+const themeScript = (await read("js/theme.js")).trim();
+const themeHash = `'sha256-${createHash("sha256").update(themeScript).digest("base64")}'`;
 // GitHub Pages sends no custom headers, so the policy nginx used to send rides
 // in a meta tag. frame-ancestors is not honored there and cannot be restored.
-const contentSecurityPolicy =
-	"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
+const contentSecurityPolicy = `default-src 'self'; script-src 'self' ${themeHash} https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'`;
 // Whitespace and comment removal only; strings are copied untouched, and spaces
 // around operators such as + and - stay, so calc() and selectors keep meaning.
 function minifyCss(css) {
@@ -425,7 +428,7 @@ function head(
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
 <link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<link rel="stylesheet" href="/css/site.css"><script>${themeScript}</script>
 <meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
@@ -749,7 +752,7 @@ await mkdir(join(out, "css"));
 await writeFile(join(out, "css/site.css"), minifyCss(`${await read("css/brand.css")}\n${await read("css/site.css")}`));
 await writeFile(join(out, "css/landing.css"), minifyCss(await read("css/landing.css")));
 await mkdir(join(out, "js"));
-for (const name of ["theme.js", "site.js", "docs.js", "redirect.js", "landing.js"])
+for (const name of ["site.js", "docs.js", "redirect.js", "landing.js"])
 	await cp(join(root, "js", name), join(out, "js", name));
 await mkdir(join(out, "content"));
 await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -1110,9 +1113,12 @@ await writeFile(join(out, ".clio-coder-redirects.conf"), `${nginxRedirects}\n`);
 
 await writeFile(
 	join(out, ".clio-coder-revision.conf"),
-	values.revision
-		? `add_header X-Clio-Site-Revision "${values.revision}" always;\n`
-		: "# Local preview has no deployed revision.\n",
+	// The blade's policy must allow the inlined theme script by the same hash.
+	`add_header Content-Security-Policy "${contentSecurityPolicy}" always;\n${
+		values.revision
+			? `add_header X-Clio-Site-Revision "${values.revision}" always;\n`
+			: "# Local preview has no deployed revision.\n"
+	}`,
 );
 
 await writeFile(

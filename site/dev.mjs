@@ -38,8 +38,10 @@ const mime = {
 	".svg": "image/svg+xml",
 	".woff2": "font/woff2",
 };
-const csp =
-	"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
+// The built pages inline the theme script; allow exactly the hashes they declare.
+let scriptHashes = "";
+const devCsp = () =>
+	`default-src 'self'; script-src 'self'${scriptHashes}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'`;
 function run(command, args) {
 	return new Promise((done, reject) => {
 		const child = spawn(command, args, { cwd: site, stdio: "inherit" });
@@ -71,6 +73,8 @@ async function build() {
 			if (error.code !== "ENOENT") throw error;
 		}
 		await rename(next, out);
+		const page = await readFile(join(out, "index.html"), "utf8");
+		scriptHashes = [...new Set(page.match(/'sha256-[A-Za-z0-9+/=]+'/g) ?? [])].map((hash) => ` ${hash}`).join("");
 		await rm(previous, { recursive: true, force: true });
 		for (const client of clients) client.write("data: reload\n\n");
 		console.log(`Clio preview updated ${new Date().toLocaleTimeString()}`);
@@ -89,7 +93,7 @@ const redirects = JSON.parse(await readFile(join(site, "redirects.json"), "utf8"
 const server = createServer(async (request, response) => {
 	response.setHeader("Cache-Control", "no-store");
 	response.setHeader("X-Content-Type-Options", "nosniff");
-	response.setHeader("Content-Security-Policy", csp);
+	response.setHeader("Content-Security-Policy", devCsp());
 	response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
 	response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 	try {
