@@ -542,7 +542,7 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 	const cases = [
 		"https://user:ZQXJZQXJ@host/repo.git",
 		`https://user:ZQXJZQXJ@host/${"y".repeat(400)}`,
-		"AKIAZQXJZQXJZQXJZQXJ",
+		["AKIA", "ZQXJZQXJZQXJZQXJ"].join(""),
 		"password: ZQXJZQXJ",
 		"password = ZQXJZQXJ",
 		"Authorization: Bearer ZQXJ1ZQXJ",

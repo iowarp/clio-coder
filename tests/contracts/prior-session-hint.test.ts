@@ -74,18 +74,20 @@ it("redacts secret-shaped text the prior-session line quotes from another sessio
 		const now = Date.now();
 		const at = new Date(now - 60_000).toISOString();
 		writeFileSync(join(dir, "meta.json"), JSON.stringify({ id: "earlier", cwd, createdAt: at, endedAt: at }));
+		// Built from parts so secret scanners do not read the AWS documentation example key as a leak.
+		const awsKey = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
 		const turns = [0, 1].map((index) => ({
 			kind: "message",
 			turnId: `t${index}`,
 			parentTurnId: null,
 			timestamp: at,
 			role: "user",
-			payload: { text: "use AKIAIOSFODNN7EXAMPLE, MY_API_KEY=hunter2value, --token tokenvalue1 PASSWD=abc123" },
+			payload: { text: `use ${awsKey}, MY_API_KEY=hunter2value, --token tokenvalue1 PASSWD=abc123` },
 		}));
 		writeFileSync(join(dir, "current.jsonl"), `${turns.map((turn) => JSON.stringify(turn)).join("\n")}\n`);
 		const facts = sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n");
 		match(facts, /Last recorded session here/);
-		doesNotMatch(facts, /AKIAIOSFODNN7EXAMPLE|hunter2value|tokenvalue1|abc123/);
+		doesNotMatch(facts, new RegExp(`${awsKey}|hunter2value|tokenvalue1|abc123`));
 	} finally {
 		env.restore();
 	}

@@ -31,7 +31,7 @@ import {
 	writeShare,
 } from "../../src/domains/telemetry/share.js";
 
-const SECRET = "sk-proj-0123456789abcdefghijklmnop";
+const SECRET = ["sk-proj", "0123456789abcdefghijklmnop"].join("-");
 const HOST = "operator-laptop.example";
 // What a run said about itself, a private handbook path and its username, and a passphrase that matches no value
 // pattern: none may leave below research, in a record or in an object (#434).

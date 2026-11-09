@@ -236,7 +236,7 @@ test("open decisions are bounded, scrubbed and clipped, and a judge-streak end l
 		classification: { actionClass: "execute", reasons: [] },
 		rejection: { short: "", detail: "" },
 	} as unknown as SafetyDecision;
-	const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+	const secret = ["sk-ant-api03", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"].join("-");
 	const long = describeOpenDecision(
 		{ tool: "bash", args: { command: `OPENAI_API_KEY=${secret} curl https://example.com/${"a".repeat(400)}` } },
 		ask,
@@ -272,8 +272,8 @@ test("an open decision's command hides Authorization headers and bare provider t
 		classification: { actionClass: "execute", reasons: [] },
 		rejection: { short: "", detail: "" },
 	} as unknown as SafetyDecision;
-	const github = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
-	const anthropic = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+	const github = ["ghp", "abcdefghijklmnopqrstuvwxyz0123456789"].join("_");
+	const anthropic = ["sk-ant-api03", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"].join("-");
 	const opaque = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA";
 	const entry = describeOpenDecision(
 		{

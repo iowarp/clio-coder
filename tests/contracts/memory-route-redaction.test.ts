@@ -16,6 +16,9 @@ import { RedactedStringProjection } from "../../src/domains/safety/redaction.js"
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { observationSourceUnits } from "../../src/domains/session/memory-source.js";
 
+// Built from parts so secret scanners do not read the AWS documentation example key as a leak.
+const AWS_KEY = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
+
 const entry = (turnId: string, role: string, payload: unknown): SessionEntry =>
 	({
 		kind: "message",
@@ -28,8 +31,8 @@ const entry = (turnId: string, role: string, payload: unknown): SessionEntry =>
 
 const task = (command: string, id: string): SessionEntry[] => [
 	entry(`${id}-u`, "user", {
-		text: `run it, key AKIAIOSFODNN7EXAMPLE`,
-		operatorText: "run it, key AKIAIOSFODNN7EXAMPLE",
+		text: `run it, key ${AWS_KEY}`,
+		operatorText: `run it, key ${AWS_KEY}`,
 	}),
 	entry(`${id}-c`, "tool_call", { toolCallId: id, name: "bash", args: { command } }),
 	entry(`${id}-r`, "tool_result", {
@@ -41,9 +44,9 @@ const task = (command: string, id: string): SessionEntry[] => [
 ];
 
 it("keeps bare secrets from a memory route without letting redacted text ground a lesson", () => {
-	const secret = completedLessonSource(task("node scripts/deploy.mjs AKIAIOSFODNN7EXAMPLE", "secret"), "/repo");
+	const secret = completedLessonSource(task(`node scripts/deploy.mjs ${AWS_KEY}`, "secret"), "/repo");
 	ok(secret);
-	doesNotMatch(secret.text, /AKIAIOSFODNN7EXAMPLE/);
+	doesNotMatch(secret.text, new RegExp(AWS_KEY));
 	match(secret.text, /ok: node scripts\/deploy\.mjs \[redacted:aws-access-key\]/);
 	deepStrictEqual([...secret.succeededCommands], [], "text the operator never ran proves nothing");
 
@@ -59,7 +62,7 @@ it("keeps bare secrets from a memory route without letting redacted text ground 
 const _uncleared: TaskMemoryModelRequest["userPrompt"] = "raw";
 void _uncleared;
 
-const SECRETS = "AKIAIOSFODNN7EXAMPLE ghp_abcdefghijklmnopqrstuvwxyz0123 https://user:hunter2hunter2@host/x";
+const SECRETS = `${AWS_KEY} ghp_abcdefghijklmnopqrstuvwxyz0123 https://user:hunter2hunter2@host/x`;
 const RAW = /AKIAIOSFODNN7EX|ghp_abcdefg|hunter2hunter2/;
 
 it("observation and reflection requests carry no raw secret", async () => {
@@ -123,10 +126,10 @@ it("redacts before cutting, so a cut leaves no partial secret", async () => {
 		});
 	await policy(`${"x".repeat(2000 - "https://u:hunter2hunter2".length)}https://u:hunter2hunter2@host/a`);
 	doesNotMatch(prompt, /hunter2/);
-	await policy(`${"x".repeat(2000 - 15)} AKIAIOSFODNN7EXAMPLE`);
+	await policy(`${"x".repeat(2000 - 15)} ${AWS_KEY}`);
 	doesNotMatch(prompt, /AKIA/);
 	const memory = createMemoryInterventionRegistration({ bank: new TaskMemoryBank(), getModelClient: () => client });
-	memory.evaluate({ hook: "turn_start", sessionId: "s", text: `${"y".repeat(2000 - 15)} AKIAIOSFODNN7EXAMPLE` });
+	memory.evaluate({ hook: "turn_start", sessionId: "s", text: `${"y".repeat(2000 - 15)} ${AWS_KEY}` });
 	await memory.runPromptedStep({ deterministicTrigger: true });
 	doesNotMatch(prompt, /AKIA/);
 });
@@ -146,7 +149,7 @@ it("keeps a whole variable reference, with a host only as URL userinfo, and noth
 	for (const [text, secret] of [
 		["password: a$ABCDEFGHIJ", "a$ABCDEFGHIJ"],
 		['"api_key": "x$ABCDEFGHIJKLMN"', "x$ABCDEFGHIJKLMN"],
-		["deploy $AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"],
+		[`deploy $${AWS_KEY}`, AWS_KEY],
 		["deploy --token hunter2hunter2 now", "hunter2hunter2"],
 		["PASSWD=abc123 then go", "abc123"],
 		["password: $AB@hunter2hunter2", "hunter2hunter2"],
@@ -180,8 +183,8 @@ it("a structured prompt hides what tool arguments hide, and property names carry
 	deepStrictEqual(json({ env: { DB_PASS: "hunter2hunter2" } }), { env: { DB_PASS: "[redacted]" } });
 	deepStrictEqual(json({ token: ["hunter2hunter2"] }), { token: "[redacted]" });
 	deepStrictEqual(json({ password: { value: "hunter2hunter2" } }), { password: "[redacted]" });
-	deepStrictEqual(json({ env: { AKIAIOSFODNN7EXAMPLE: "x" } }), { env: { "[redacted:aws-access-key]": "[redacted]" } });
-	deepStrictEqual(json({ a: [{ AKIAIOSFODNN7EXAMPLE: 1 }] }), { a: [{ "[redacted:aws-access-key]": 1 }] });
+	deepStrictEqual(json({ env: { [AWS_KEY]: "x" } }), { env: { "[redacted:aws-access-key]": "[redacted]" } });
+	deepStrictEqual(json({ a: [{ [AWS_KEY]: 1 }] }), { a: [{ "[redacted:aws-access-key]": 1 }] });
 	deepStrictEqual(json({ author: "Ada", authority: "x", co_author: "Bo" }), {
 		author: "Ada",
 		authority: "x",
@@ -213,9 +216,9 @@ it("display redaction stays linear on the shapes that once stalled it", () => {
 });
 
 it("a bound before redaction takes a token it lands inside whole", () => {
-	const text = "aaa AKIAIOSFODNN7EXAMPLE rest";
+	const text = `aaa ${AWS_KEY} rest`;
 	strictEqual(headForRedaction(text, 100), text);
 	strictEqual(headForRedaction(text, 10), "aaa");
-	strictEqual(headForRedaction(text, 24), "aaa AKIAIOSFODNN7EXAMPLE");
+	strictEqual(headForRedaction(text, 24), `aaa ${AWS_KEY}`);
 	strictEqual(headForRedaction("x".repeat(50), 10), "");
 });
