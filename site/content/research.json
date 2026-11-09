@@ -2,7 +2,7 @@
   {
     "slug": "system-one-decisions",
     "title": "Can a small decision model improve an agent's work?",
-    "description": "System One's open questions: evaluating on trajectories, forming better questions, and bringing or one day training a model, with what is measured so far and a first experiment.",
+    "description": "Open questions on System One: evaluating on trajectories, asking better questions, and bringing a decision model, with a first experiment.",
     "category": "Decision models",
     "time": "12 min",
     "author": "The Clio Coder team",

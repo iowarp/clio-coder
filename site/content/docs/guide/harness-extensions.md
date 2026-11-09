@@ -1,4 +1,4 @@
-# Extensions
+# Write and install extensions
 
 Install and write extensions that declare what they may do.
 

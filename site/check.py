@@ -241,6 +241,12 @@ if len({p.title for p in pages.values()}) != len(pages):
     errors.append('Page titles are not unique')
 if len({p.description for p in pages.values()}) != len(pages):
     errors.append('Page descriptions are not unique')
+# Search results cut longer titles and descriptions; very short descriptions get replaced.
+for path, page in pages.items():
+    if len(page.title) > 65:
+        errors.append(f'{path}: title is {len(page.title)} characters; keep it within 65')
+    if not 70 <= len(page.description) <= 160:
+        errors.append(f'{path}: description is {len(page.description)} characters; keep it between 70 and 160')
 for path, page in pages.items():
     for ref in page.refs:
         url = urlsplit(urljoin(origin + path, ref))

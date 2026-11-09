@@ -166,7 +166,7 @@
   {
     "slug": "add-skills-and-plugins-deliberately",
     "title": "Add skills and plugins deliberately",
-    "description": "Preview a project-scoped skill or plugin, inspect its package pin, and load the resources your task needs without treating an installation as a permission grant.",
+    "description": "Preview a project skill or plugin, inspect its package pin, and load only what your task needs; installing is not a permission grant.",
     "category": "Skills and plugins",
     "time": "5 min",
     "author": "The Clio Coder team",
@@ -266,8 +266,8 @@
   },
   {
     "slug": "semantic-context-and-recordings",
-    "title": "Search your project by meaning and record worker runs",
-    "description": "Index code, memory, evidence, and registered experiment folders with a local embedding model, and attach a redacted terminal recording to a dispatched worker's evidence.",
+    "title": "Search by meaning and record worker runs",
+    "description": "Index code, memory, and experiment folders with a local embedding model, and attach a redacted terminal recording to a worker's evidence.",
     "category": "Context",
     "time": "5 min",
     "author": "The Clio Coder team",

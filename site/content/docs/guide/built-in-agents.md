@@ -1,4 +1,4 @@
-# Agents
+# Built-in and custom agents
 
 See the agents you can dispatch and add your own.
 

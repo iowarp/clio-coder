@@ -84,7 +84,7 @@
     {
       "path": "guide/harness-extensions.md",
       "source": "docs/guide/harness-extensions.md",
-      "sha256": "90ad0edcd636444ecca86923913a1342c301e852e5aca72bcabf8371d3ccce7b",
+      "sha256": "e543be30280678e41d51ebe9e6571f71cd19fe690fcedb52c6da47e3cf8ccc14",
       "sourceSha256": "d50d9fed346e381083ac2d11fef3cb23a64aabec466812881859420842ec18fd"
     },
     {
@@ -138,7 +138,7 @@
     {
       "path": "guide/system-one.md",
       "source": "docs/guide/system-one.md",
-      "sha256": "48061b95923b035c9e4030383f5af1a9f837be6ed2bcb6fa4f13e803b82b9657",
+      "sha256": "4960cc5fb76afc1812e8d087636d771880185acd718245a088659d282617391f",
       "sourceSha256": "3f5365729f4fbe1aeb9de8f0ccdb610fc5075771c1cb9b3303552446d48a650c"
     },
     {
@@ -156,7 +156,7 @@
     {
       "path": "guide/built-in-agents.md",
       "source": "docs/guide/built-in-agents.md",
-      "sha256": "1387d7c168d6614878902cc7cc3498c8054057cddf22718414e3583a0ed7ba69",
+      "sha256": "25ac40632c6bb676c161baf31291d832a15d6ab15cd467e2ba9e87764fb042b2",
       "sourceSha256": "f686063a20d623d84aa0222f2e097144542f7798ab02128f57372cd142b4f783"
     }
   ]

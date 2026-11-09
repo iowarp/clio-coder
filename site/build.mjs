@@ -35,8 +35,24 @@ if (values.review)
 		tutorials.push({ ...item, draft: true });
 const research = JSON.parse(await read("content/research.json"));
 const collections = [
-	{ id: "tutorials", label: "Tutorials", listing: "/learn.html", items: tutorials },
-	{ id: "research", label: "Research", listing: "/research.html", items: research },
+	{
+		id: "tutorials",
+		label: "Tutorials",
+		listing: "/learn.html",
+		items: tutorials,
+		title: "Tutorials for local models, HPC, and agents — Clio Coder",
+		description:
+			"Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces.",
+	},
+	{
+		id: "research",
+		label: "Research",
+		listing: "/research.html",
+		items: research,
+		title: "Research: open questions on coding agents — Clio Coder",
+		description:
+			"Open research questions in Clio Coder: what is measured so far, a first experiment for each, and how students and outside researchers can join.",
+	},
 ];
 const articles = collections.flatMap((collection) =>
 	collection.items.map((item) => ({
@@ -569,7 +585,9 @@ function renderMarkdown(markdown, sourcePath, guide = false) {
 }
 // A guide's excerpt is short; its first sentence of body text makes the search
 // snippet say what the page covers, without running far past what a result shows.
+// An explicit catalog description replaces that when the pair reads poorly.
 function docDescription(item, markdown) {
+	if (item.description) return item.description;
 	const paragraph = marked
 		.lexer(markdown)
 		.find((token) => token.type === "paragraph" && token.text.trim() !== item.excerpt);
@@ -734,6 +752,7 @@ const search = index.map(
 		stripDetails: _strip,
 		includeIntro: _intro,
 		summary: _summary,
+		description: _description,
 		...item
 	}) => ({
 		path,
@@ -827,10 +846,8 @@ for (const collection of collections) {
 	await writePage(
 		collection.listing,
 		(await read(collection.listing.slice(1))).replace("<!-- tutorial-cards -->", cards),
-		`${collection.label} — Clio Coder`,
-		collection.id === "tutorials"
-			? "Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces."
-			: "Open research questions in Clio Coder: what is known and measured so far, a first experiment for each, and how the team, students, and outside researchers can join.",
+		collection.title,
+		collection.description,
 		"WebPage",
 		{ sources: [collection.listing.slice(1), `content/${collection.id}.json`] },
 	);
