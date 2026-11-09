@@ -119,6 +119,7 @@
 		"release:readiness": "node scripts/release-readiness.mjs",
 		"release": "node scripts/release.mjs",
 		"release:rehearse": "node scripts/release.mjs --rehearse",
+		"release:next": "node scripts/release/next.mjs",
 		"install:local": "bash scripts/install-local.sh",
 		"prepublishOnly": "node -e \"throw new Error('Use pnpm run release; publication requires the approved GitHub release job.')\"",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
