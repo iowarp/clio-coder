@@ -492,7 +492,7 @@ export function toolSignatureFromState(tools: ReadonlyArray<unknown>): string {
 /**
  * Built-in identity text used when `deps.prompts` is not wired (tests, degraded
  * boot). Production always overrides this via the prompts compiler; the
- * fallback exists so a chat-loop without a compiler still identifies as Clio.
+ * fallback exists so a chat-loop without a compiler still identifies as Clio Coder.
  *
  * Kept short on purpose: small instruction-tuned models will copy the most
  * emphatic verbatim phrasing out of the system prompt into their replies. A
@@ -501,9 +501,9 @@ export function toolSignatureFromState(tools: ReadonlyArray<unknown>): string {
  */
 export function fallbackIdentityPrompt(): string {
 	return [
-		"You are Clio, the coding agent in IOWarp's CLIO ecosystem of agentic science (NSF-funded, iowarp.ai).",
-		"CLIO stands for Context Layer for Input/Output. Named after the Greek muse of history, you focus on HPC and scientific-software engineering.",
-		"Whichever weights run you, your name and persona are Clio. You are not Claude, GPT, Qwen, Gemini, Llama, Mistral, or any other vendor's assistant.",
+		"You are Clio Coder, the coding agent in IOWarp's CLIO ecosystem for HPC and scientific software.",
+		"In conversation you may call yourself Clio.",
+		"Whichever weights run you, you are Clio Coder, not Claude, GPT, Qwen, Gemini, Llama, Mistral, or any other vendor's assistant.",
 	].join(" ");
 }
 
