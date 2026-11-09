@@ -1555,3 +1555,28 @@ test("a worker's stream reaches the feed file held when it dies and whole when i
 		env.restore();
 	}
 });
+
+test("a quoted secret that holds spaces stays hidden one-shot, in every frame and across appends", () => {
+	const words = /firstpart|midpart|secondpart/u;
+	for (const quote of ['"', "'"]) {
+		for (const text of [
+			`PASSWORD=${quote}firstpart secondpart${quote} ./sync`,
+			`deploy --token=${quote}firstpart secondpart${quote} now`,
+			`curl -H ${quote}Authorization: Basic firstpart secondpart${quote} x`,
+			`db:\n  password: ${quote}firstpart midpart secondpart${quote}\n  host: h`,
+		]) {
+			const oneShot = redactSecretString(text);
+			ok(!words.test(oneShot), oneShot);
+			for (let at = 1; at <= text.length; at += 1) {
+				const frame = redactStreamingSecretString(text.slice(0, at));
+				ok(!words.test(frame), frame);
+				const projection = new RedactedStringProjection();
+				const shown = `${projection.project(text.slice(0, at))}\n${projection.project(text)}`;
+				ok(!words.test(shown), shown);
+				strictEqual(projection.project(text, true), oneShot);
+			}
+		}
+	}
+	strictEqual(redactSecretString('author: "Jane Doe"'), 'author: "Jane Doe"');
+	strictEqual(redactSecretString('token: "$GITHUB_TOKEN"'), 'token: "$GITHUB_TOKEN"');
+});

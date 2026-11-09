@@ -287,10 +287,102 @@ export function redactUrlCredentials(value: string): string {
 	return redactSecretUrlParams(out.replace(URL_USERNAME_TOKEN_RE, "[redacted]"));
 }
 
+// The word-wise rules stop at whitespace, so a quoted value with spaces showed past its first word, as
+// `PASSWORD="first second"` showed `second"`. A quoted value stays on one line and the bound keeps a hold on an open one
+// cheap. A header keeps its scheme word. Names are whole words, as for URL parameters, so `author: "Jane Doe"` stays.
+const QUOTED_SECRET_CHARS = 1024;
+const QUOTED_HEADER_HEAD = String.raw`\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?`;
+const QUOTED_VALUE_LEAD = String.raw`--?([A-Za-z0-9_-]+)(?:=|\s+)|\b([A-Za-z0-9_.-]+)\s*[=:]\s*`;
+const QUOTED_HEADER_RE = new RegExp(
+	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
+	"giu",
+);
+const QUOTED_VALUE_RE = new RegExp(
+	String.raw`(${QUOTED_VALUE_LEAD})(["'])((?:(?!\4).){0,${QUOTED_SECRET_CHARS}})\4`,
+	"gu",
+);
+const QUOTED_HEADER_LEAD_RE = new RegExp(`(["'])${QUOTED_HEADER_HEAD}`, "giu");
+const QUOTED_VALUE_OPEN_RE = new RegExp(`(?:${QUOTED_VALUE_LEAD})(["'])`, "gu");
+const AWAITING_QUOTED_VALUE_RE = /(?:--?([A-Za-z0-9_-]+)\s+|\b([A-Za-z0-9_.-]+)\s*[=:]\s*)$/u;
+// Every secret name holds one of these, so other text skips both scans, which a whitespace-free token pays on every frame.
+const QUOTED_SECRET_WORD_RE = /pass|pwd|secret|token|key|auth|credential/iu;
+// `.` in the patterns above stops at these, so a quoted value never spans them.
+const LINE_BREAK_RE = /[\n\r\u2028\u2029]/u;
+
+/** Redact whole quoted credential values: `NAME="a b"`, `--token 'a b'`, `"Authorization: Basic a b"`. */
+export function redactQuotedSecrets(
+	text: string,
+	isSecretName: (name: string) => boolean = isSecretUrlParamName,
+): string {
+	if ((!text.includes('"') && !text.includes("'")) || !QUOTED_SECRET_WORD_RE.test(text)) return text;
+	const headers = text.replace(QUOTED_HEADER_RE, (match, quote: string, head: string, name: string, value: string) =>
+		isSecretName(name) && value.length > 0 ? `${quote}${head}[redacted]${quote}` : match,
+	);
+	return headers.replace(
+		QUOTED_VALUE_RE,
+		(match, lead: string, flag: string | undefined, key: string | undefined, quote: string, value: string) => {
+			if (!isSecretName(flag ?? key ?? "") || value.length === 0 || value === "[redacted]") return match;
+			return isEnvReference(`${quote}${value}${quote}`) ? match : `${lead}${quote}[redacted]${quote}`;
+		},
+	);
+}
+
+/**
+ * The quoted secret value the end of this text leaves open: where its lead and its value start. Every match ahead of it
+ * closes on its line, so the scan steps past each closing quote and stays linear.
+ */
+function openQuotedSecret(text: string): { lead: number; value: number } | null {
+	if (!QUOTED_SECRET_WORD_RE.test(text)) return null;
+	let lineStart = text.length;
+	while (lineStart > 0 && !LINE_BREAK_RE.test(text.charAt(lineStart - 1))) lineStart -= 1;
+	let open: { lead: number; value: number } | null = null;
+	for (const lead of [QUOTED_HEADER_LEAD_RE, QUOTED_VALUE_OPEN_RE]) {
+		const scan = new RegExp(lead);
+		scan.lastIndex = lineStart;
+		for (let match = scan.exec(text); match !== null; match = scan.exec(text)) {
+			const header = lead === QUOTED_HEADER_LEAD_RE;
+			const quote = (header ? match[1] : match[3]) ?? '"';
+			const name = (header ? match[2] : (match[1] ?? match[2])) ?? "";
+			const value = match.index + match[0].length;
+			const close = text.indexOf(quote, value);
+			if (close >= 0 && close - value <= QUOTED_SECRET_CHARS) {
+				scan.lastIndex = close + 1;
+				continue;
+			}
+			if (close < 0 && text.length - value <= QUOTED_SECRET_CHARS && isSecretUrlParamName(name)) {
+				if (open === null || match.index < open.lead) open = { lead: match.index, value };
+				break;
+			}
+			scan.lastIndex = match.index + 1;
+		}
+	}
+	return open;
+}
+
+/** What a frame shows of text that may still close a quoted secret: its lead, never its value. */
+function holdOpenQuotedSecret(value: string): string {
+	const open = openQuotedSecret(value);
+	return open === null ? value : value.slice(0, open.value);
+}
+
+/**
+ * Where text must stop for a later piece to be redacted with the lead of a quoted secret: an open value, or a secret name
+ * still waiting for its quote, as `password: ` does before `"a b"` arrives. Null when nothing waits.
+ */
+function quotedSecretLeadStart(text: string): number | null {
+	const open = openQuotedSecret(text);
+	const awaiting = AWAITING_QUOTED_VALUE_RE.exec(text.slice(-128));
+	const waits =
+		awaiting !== null && isSecretUrlParamName(awaiting[1] ?? awaiting[2] ?? "") ? text.length - awaiting[0].length : null;
+	if (open === null) return waits;
+	return waits === null ? open.lead : Math.min(open.lead, waits);
+}
+
 function redactPlainSecretString(value: string): string {
 	return redactSecretFlags(
-		redactUrlCredentials(value).replace(SECRET_ASSIGNMENT_RE, (match, prefix: string, secret: string) =>
-			redactUnlessEnvReference(match, prefix, secret),
+		redactUrlCredentials(redactQuotedSecrets(value)).replace(
+			SECRET_ASSIGNMENT_RE,
+			(match, prefix: string, secret: string) => redactUnlessEnvReference(match, prefix, secret),
 		),
 	);
 }
@@ -547,7 +639,7 @@ export function dropShortCutHead(text: string, guard: CutHeadGuard): string {
  * an error no later text can resolve it, so the last frame reads like the open one (#446).
  */
 export function redactStreamingSecretString(value: string, completed = false): string {
-	return redactSecretString(completed ? value : holdUnresolvedUserinfo(value));
+	return redactSecretString(completed ? value : holdUnresolvedUserinfo(holdOpenQuotedSecret(value)));
 }
 
 /** {@link redactStreamingSecretString} under the URL rule alone, for model prose an operator reads (#446). */
@@ -681,7 +773,12 @@ export class RedactedStringProjection {
 	private joined: string[] = [];
 	private loose: string[] = [];
 
-	constructor(private readonly redact: (value: string) => string = redactSecretString) {}
+	/** Only the wider rule redacts quoted secrets, so only it holds one open across appends. */
+	private readonly holdsQuoted: boolean;
+
+	constructor(private readonly redact: (value: string) => string = redactSecretString) {
+		this.holdsQuoted = redact === redactSecretString;
+	}
 
 	/** How much of the last projection later appends leave as it is: the redacted tokens already closed. */
 	get settledLength(): number {
@@ -757,6 +854,12 @@ export class RedactedStringProjection {
 		for (const match of tail.matchAll(tokens)) {
 			if (!match[0].includes("-")) through = match.index + match[0].length;
 		}
+		// A quoted secret's lead and value reach one redaction together, so an open one stays uncommitted from its token.
+		const lead = this.holdsQuoted && through > 0 ? quotedSecretLeadStart(tail.slice(0, through)) : null;
+		if (lead !== null) {
+			through = lead;
+			while (through > 0 && !/\s/u.test(tail.charAt(through - 1))) through -= 1;
+		}
 		if (through > 0) {
 			const piece = this.redact(tail.slice(0, through));
 			this.prefix += piece;
@@ -770,7 +873,9 @@ export class RedactedStringProjection {
 		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
 		const open = tail.slice(through);
 		this.uncommitted = open;
-		this.openText = this.redact(completed ? open : holdUnresolvedUserinfo(open));
+		this.openText = this.redact(
+			completed ? open : holdUnresolvedUserinfo(this.holdsQuoted ? holdOpenQuotedSecret(open) : open),
+		);
 		this.text = this.prefix + this.openText;
 		this.source = source;
 		this.completed = completed;
