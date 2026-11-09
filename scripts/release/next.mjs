@@ -77,7 +77,9 @@ function proven(mode, facts, receipt) {
 	const ci = facts.ci?.state === "success" && facts.ci.artifacts;
 	const r = receipt.rehearsal ?? {};
 	const tree = facts.tree;
-	const ready = facts.pushed || (tree.clean && tree.versionsAgree && tree.mainAncestor && !tree.readiness.length);
+	const branchOk = mode === "rehearse" || /^v\d{3}$/u.test(tree.branch);
+	const ready =
+		facts.pushed || (branchOk && tree.clean && tree.versionsAgree && tree.mainAncestor && !tree.readiness.length);
 	const local = facts.local.node22 && facts.local.node24;
 	if (mode === "rehearse")
 		return [
