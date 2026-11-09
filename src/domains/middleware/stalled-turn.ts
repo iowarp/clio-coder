@@ -11,7 +11,10 @@ export const STALLED_TURN_REQUEST_CONTINUATION_MESSAGE =
 export const SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE =
 	"You ended your turn on a skill suggestion without doing the task. The suggestion line has already made the offer and only the operator loads a skill, so the skill choice needs nothing from them before you proceed. Continue the already-authorized task now without the skill. This continuation is not an operator answer to any other question: if the remaining work is a proposal awaiting an explicit operator go-ahead, park it on the task board and say so instead of implementing.";
 
-const INTENT_PATTERN = /\b(let me|i['’]ll|i will|i am going to|i['’]m going to|now i|next i|let's|let us)\b/i;
+// "Right now I'm running on the copilot target" describes a state, not an intent; "now I'm going to" still
+// matches through its own alternative.
+const INTENT_PATTERN =
+	/\b(let me|i['’]ll|i will|i am going to|i['’]m going to|now i(?!['’]m\b|\s+am\b)|next i|let's|let us)\b/i;
 
 // Bare stems only. Inflected forms are derived below so that "running",
 // "checking", and "verifies" count as the same announced action as "run".

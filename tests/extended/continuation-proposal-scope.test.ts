@@ -71,6 +71,13 @@ describe("continuation heuristics preserve proposal-only scope (#365)", () => {
 		match(STALLED_TURN_REQUEST_CONTINUATION_MESSAGE, /waiting for the user/);
 	});
 
+	it("does not read a reply describing where it runs now as an announced action", () => {
+		const sentence =
+			"Right now I'm running on the copilot target with the claude-sonnet-5.5 model, working in your heat-solver workspace.";
+		strictEqual(shouldRequestStalledTurnContinuation(textTurnEnd(sentence)), false);
+		strictEqual(shouldRequestStalledTurnContinuation(textTurnEnd("Now I'm going to run npm test.")), true);
+	});
+
 	it("never fires once a tool ran or the turn did not stop normally, whatever the sentence says", () => {
 		const announcement = AFFIRMATIVE_ANNOUNCEMENTS[0] ?? "";
 		strictEqual(
