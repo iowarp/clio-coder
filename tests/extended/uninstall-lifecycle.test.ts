@@ -8,6 +8,7 @@ import { installRootFinding } from "../../src/cli/doctor-state-size.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { inactiveInstallerRecord, inspectInstallation } from "../../src/domains/lifecycle/install-method.js";
+import { installRootHolders } from "../../src/domains/lifecycle/install-plan.js";
 import { createLifecycleHome, type LifecycleHome, runInHome, writeLiveSession } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
@@ -468,6 +469,24 @@ describe("contracts/uninstall-lifecycle", () => {
 				return 0;
 			});
 			strictEqual(code, 0, stdout);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("finds a session recorded by the resolved path of a root named through a symlink", () => {
+		const temp = home();
+		try {
+			const real = join(temp.root, "real-root");
+			const link = join(temp.root, "link-root");
+			mkdirSync(join(real, "versions", "0.6.2"), { recursive: true });
+			symlinkSync(real, link);
+			mkdirSync(join(temp.stateDir, "running-builds"), { recursive: true });
+			writeFileSync(
+				join(temp.stateDir, "running-builds", "4242.json"),
+				JSON.stringify({ pid: 4242, host: "other-host", surface: "gui", root: join(real, "versions", "0.6.2") }),
+			);
+			ok(installRootHolders(link, temp.stateDir).some((holder) => holder.startsWith("pid 4242@other-host")));
 		} finally {
 			temp.cleanup();
 		}

@@ -7,6 +7,7 @@ import {
 	type Installation,
 	type InstallerRecord,
 	inactiveInstallerRecord,
+	realPathOf,
 } from "./install-method.js";
 
 /** Why background updates are off for an installer install; see nativeAutoUpdatePolicy. */
@@ -80,7 +81,11 @@ function alive(pid: number): boolean {
  * user whose command line or working directory lies inside it.
  */
 export function installRootHolders(root: string, state = resolveClioDirs().state): string[] {
-	const inside = `${root}${sep}`;
+	// Records and /proc carry resolved paths; the manifest may name the root through a symlink.
+	const spellings = [...new Set([root, realPathOf(root)])];
+	const insideAny = (text: string) => spellings.some((spelling) => text.includes(`${spelling}${sep}`));
+	const atOrUnder = (path: string) =>
+		spellings.some((spelling) => path === spelling || path.startsWith(`${spelling}${sep}`));
 	const holders: string[] = [];
 	const own = new Set([process.pid, Number(process.env.CLIO_CODER_LAUNCHER_PID)]);
 	const json = (file: string): Record<string, unknown> | null => {
@@ -102,7 +107,7 @@ export function installRootHolders(root: string, state = resolveClioDirs().state
 	for (const name of existsSync(builds) ? readdirSync(builds) : []) {
 		const build = json(join(builds, name));
 		const pid = Number(build?.pid);
-		if (!build || typeof build.root !== "string" || !build.root.startsWith(inside) || own.has(pid)) continue;
+		if (!build || typeof build.root !== "string" || !atOrUnder(build.root) || own.has(pid)) continue;
 		if (build.host !== hostname()) holders.push(`pid ${pid}@${String(build.host)} (${String(build.surface)})`);
 		else if (alive(pid)) holders.push(`pid ${pid} (${String(build.surface)} session)`);
 	}
@@ -120,7 +125,7 @@ export function installRootHolders(root: string, state = resolveClioDirs().state
 				if (statSync(`/proc/${name}`).uid !== process.getuid?.()) continue;
 				const command = readFileSync(`/proc/${name}/cmdline`, "utf8");
 				const cwd = readlinkSync(`/proc/${name}/cwd`);
-				if (command.includes(inside) || cwd.startsWith(inside) || cwd === root)
+				if (insideAny(command) || atOrUnder(cwd))
 					holders.push(`pid ${pid} (${command.split("\0")[0]})`);
 			} catch {
 				/* The process exited or is not inspectable. */

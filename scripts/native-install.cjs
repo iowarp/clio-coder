@@ -282,12 +282,20 @@ function prune(root, options = {}) {
 			if (kind === "launchers" ? !info.isFile() || !name.endsWith(".cjs") : !info.isDirectory()) continue;
 			if (kind === "runtime" && !name.startsWith("node-v")) continue;
 			if (kind === "versions" && packageName(file) !== "@iowarp/clio-coder") continue;
+			// Service files, session records and /proc carry resolved paths, the manifest the
+			// logical ones; behind a symlinked home both spellings must protect the entry.
+			let real = file;
+			try {
+				real = fs.realpathSync(file);
+			} catch {}
+			const spellings = real === file ? [file] : [file, real];
 			entries.push({
 				kind,
 				name,
 				path: file,
 				mtimeMs: info.mtimeMs,
-				needle: norm(kind === "launchers" ? file : file + path.sep),
+				needles: spellings.map((spelling) => norm(kind === "launchers" ? spelling : spelling + path.sep)),
+				exact: spellings.map(norm),
 			});
 		}
 	}
@@ -302,7 +310,10 @@ function prune(root, options = {}) {
 		if (typeof text !== "string" || !text) return;
 		const haystack = norm(text);
 		for (const entry of entries)
-			if (!kept.has(entry.path) && (haystack.includes(entry.needle) || haystack === norm(entry.path)))
+			if (
+				!kept.has(entry.path) &&
+				(entry.needles.some((needle) => haystack.includes(needle)) || entry.exact.includes(haystack))
+			)
 				kept.set(entry.path, why);
 	};
 	for (const extra of options.keep ?? []) protect(extra, "being activated");

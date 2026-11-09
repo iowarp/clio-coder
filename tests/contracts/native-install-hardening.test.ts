@@ -185,6 +185,49 @@ test("without a complete process inventory, prune keeps the last week and the ne
 	assert.equal(result.kept.find((entry) => entry.name === "0.6.3")?.why, "recent");
 });
 
+test("prune keeps what the GUI service names by its resolved path when the root is reached through a symlink", {
+	skip: process.platform === "win32",
+}, (t) => {
+	const f = fixture(t);
+	const gui = f.prefix("0.5.9");
+	const unused = f.prefix("0.5.7");
+	mkdirSync(join(f.root, "runtime", "node-v24.1.0"), { recursive: true });
+	const link = `${f.root}-link`;
+	symlinkSync(f.root, link);
+	t.after(() => rmSync(link, { force: true }));
+	f.save({
+		...f.record,
+		current: join(link, "versions/0.6.1"),
+		previous: join(link, "versions/0.6.0"),
+		node: join(link, "runtime/node"),
+	});
+	const state = join(f.root, "home", "state");
+	mkdirSync(join(state, "gui/background"), { recursive: true });
+	writeFileSync(
+		join(state, "gui/background/server.json"),
+		JSON.stringify({ packageRoot: join(gui, suffix), launch: { node: join(f.root, "runtime/node-v24.1.0/node") } }),
+	);
+	for (const [name, value] of [
+		["HOME", join(f.root, "home")],
+		["CLIO_CODER_STATE_DIR", state],
+		["XDG_CONFIG_HOME", join(f.root, "home/config")],
+		["XDG_DATA_HOME", join(f.root, "home/data")],
+	] as const) {
+		const saved = process.env[name];
+		process.env[name] = value;
+		t.after(() => {
+			if (saved === undefined) delete process.env[name];
+			else process.env[name] = saved;
+		});
+	}
+	const result = lifecycle.prune(link, { inventory: () => ({ complete: true, texts: [] }) });
+	assert.equal(result.proof, true);
+	assert.equal(existsSync(gui), true, "the GUI's version stays");
+	assert.equal(existsSync(join(f.root, "runtime/node-v24.1.0")), true, "the GUI's Node stays");
+	assert.equal(existsSync(unused), false);
+	assert.equal(existsSync(f.record.current), true);
+});
+
 test("activation moves a POSIX launcher to the new Node and collects the old runtime", {
 	skip: process.platform === "win32",
 }, (t) => {
