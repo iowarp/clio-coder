@@ -56,7 +56,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `chat.retry.baseDelayMs` | `2000` | Integer at least 0. First retry delay. | next turn |
 | `chat.retry.maxDelayMs` | `60000` | Integer at least 0. Longest delay of Clio's own backoff. A wait the provider states is honored in full, up to one hour per request. | next turn |
 | `chat.retry.streamStallMs` | `180000` | Integer at least 0. Silence mid-stream past this many ms aborts the call and retries. | next turn |
-| `chat.retry.firstTokenStallMs` | `600000` | Integer at least 0. Silence allowed before the first token; `0` never aborts a call that has not started streaming. | next turn |
+| `chat.retry.firstTokenStallMs` | `600000` | Integer at least 0. Silence allowed before the first token on a local, self-hosted or protocol endpoint, which may need to load a model; a hosted (cloud or subscription) route holds its first token to `streamStallMs`. `0` never aborts a call that has not started streaming, on any route. | next turn |
 | `chat.steering.triage.enabled` | `false` | Boolean, experimental. A bound System One route, or else a side model, reads queued steering messages once the queue settles: an unrelated task waits for the end of the turn and a confident stop may interrupt the run. | next turn |
 | `chat.steering.triage.target` | `null` | Target id for the side-model triage round; `null` uses a bound System One route, or the session's active target when none is bound. Naming a target keeps the side model. | next turn |
 | `chat.steering.triage.model` | `null` | Wire model id on that target; cleared when `target` is `null`. | next turn |

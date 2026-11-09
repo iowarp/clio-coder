@@ -5,7 +5,7 @@ import { ACTION_BY_COMMAND } from "../../domains/config/keybindings.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
-import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
+import type { CapabilityFlags, ProvidersContract, RuntimeTier } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
 import { effectiveYoloConfinement } from "../../domains/safety/autonomy.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
@@ -159,6 +159,11 @@ export interface FooterDashboardRenderState {
 	telemetry: FooterTelemetry;
 	tick: number;
 	now: number;
+}
+
+function routeTier(providers: ProvidersContract, targetId: string | null | undefined): RuntimeTier | undefined {
+	const target = targetId ? providers.getTarget(targetId) : null;
+	return target ? providers.getRuntime(target.runtime)?.tier : undefined;
 }
 
 function statusText(status: AgentStatus | undefined, now: number, width: number, frame: number): string | null {
@@ -380,6 +385,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						now,
 						normalizeRetrySettings(settings?.chat?.retry),
 						routeFirstOutput(deps.getTelemetry?.(), settings?.chat?.target, settings?.chat?.model),
+						routeTier(deps.providers, settings?.chat?.target),
 					)
 				: null,
 			demo: settings ? interfaceGuidanceEnabled(settings.interface) : true,

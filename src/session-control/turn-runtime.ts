@@ -26,6 +26,7 @@ import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
 import { requestStructure } from "../engine/request-structure.js";
+import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { prefixBlocksOf } from "./prefix-blocks.js";
@@ -1397,11 +1398,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// it can emit anything, which is minutes of healthy quiet; a stream
 					// that already produced output and stops is a wedged slot.
 					const awaitingFirstToken = apiCallStartedAt !== null && apiCallFirstDeltaAt === null;
-					if (awaitingFirstToken && retry.firstTokenStallMs <= 0) {
+					const firstTokenLimitMs = awaitingFirstToken
+						? firstTokenStallLimitMs(retry, deps.providers.getRuntime(localRuntime.runtimeId)?.tier)
+						: null;
+					if (awaitingFirstToken && firstTokenLimitMs === null) {
 						armStallTimer(retry.streamStallMs);
 						return;
 					}
-					const stallMs = awaitingFirstToken ? Math.max(retry.firstTokenStallMs, retry.streamStallMs) : retry.streamStallMs;
+					const stallMs = firstTokenLimitMs ?? retry.streamStallMs;
 					const idleMs = performance.now() - lastActivityAt;
 					if (idleMs < stallMs) {
 						armStallTimer(stallMs - idleMs);

@@ -277,7 +277,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"retry.streamStallMs":
 		"The timer resets whenever text arrives. If it expires, Clio can retry according to the retry settings above.",
 	"retry.firstTokenStallMs":
-		"Time allowed before the first text arrives. Choose 0 to wait indefinitely; useful for models that need to load first.",
+		"Time allowed before the first text arrives from a local or self-hosted endpoint, which may need to load a model first. Hosted services use the mid-stream wait. Choose 0 to wait indefinitely on every route.",
 	"library.catalog":
 		"Absolute path, or blank for the catalog in your config directory. The catalog is the index `clio-coder library` reads; installed resources land in the usual skill and resource roots either way. Default: blank.",
 	"library.remote":

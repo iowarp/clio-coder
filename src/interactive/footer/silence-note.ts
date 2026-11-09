@@ -1,5 +1,7 @@
 import type { RetrySettings } from "../../core/defaults.js";
+import type { RuntimeTier } from "../../domains/providers/index.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
+import { firstTokenStallLimitMs } from "../../session-control/chat-loop-policy.js";
 import type { AgentStatus } from "../../session-control/status-types.js";
 import { computeWatchdogTier } from "../status/index.js";
 import { formatCompactMs } from "../theme/index.js";
@@ -67,10 +69,10 @@ function age(ms: number): string {
 }
 
 /** Which of Clio's two silence limits governs the phase, read the way the stall timer in the turn runtime applies them. */
-function silenceLimitMs(firstOutput: boolean, retry: RetrySettings): number | null {
+function silenceLimitMs(firstOutput: boolean, retry: RetrySettings, tier: RuntimeTier | undefined): number | null {
 	if (retry.streamStallMs <= 0) return null;
 	if (!firstOutput) return retry.streamStallMs;
-	return retry.firstTokenStallMs <= 0 ? null : Math.max(retry.firstTokenStallMs, retry.streamStallMs);
+	return firstTokenStallLimitMs(retry, tier);
 }
 
 /**
@@ -84,13 +86,14 @@ export function silenceNoteForms(
 	now: number,
 	retry: RetrySettings,
 	history: RouteFirstOutput | null,
+	tier?: RuntimeTier,
 ): readonly string[] | null {
 	const phase = status.phase === "stuck" ? status.resumePhase : status.phase;
 	const silentMs = Math.max(0, now - status.lastMeaningfulAt);
 	if (computeWatchdogTier(silentMs) < 3) return null;
 	const waiting = phase === "waiting_model" || (phase === "retrying" && status.retry?.stage === "attempt");
 	if (!waiting && phase !== "thinking" && phase !== "writing") return null;
-	const limit = silenceLimitMs(waiting, retry);
+	const limit = silenceLimitMs(waiting, retry, tier);
 	const ends =
 		limit === null ? "Clio has no time limit on this call" : `Clio ends this call after ${age(limit)} of silence`;
 	const endsShort = limit === null ? "No time limit" : `Clio ends this call at ${age(limit)}`;

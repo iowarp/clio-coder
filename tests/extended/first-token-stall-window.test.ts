@@ -5,7 +5,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext, DomainName } from "../../src/core/domain-loader.js";
 import type { BudgetAlertPayload } from "../../src/core/telemetry/live-events.js";
-import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
+import type { ProvidersContract, RuntimeDescriptor, RuntimeTier } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
@@ -90,7 +90,12 @@ interface BudgetFixture {
 	retry?: boolean;
 }
 
-function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: BudgetFixture) {
+function fixture(
+	mode: "cold" | "wedged",
+	firstTokenDelayMs = 0,
+	budget?: BudgetFixture,
+	tier: RuntimeTier = "protocol",
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -118,6 +123,7 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 	const runtime: RuntimeDescriptor = {
 		...litellm,
 		id: runtimeId,
+		tier,
 		auth: "none",
 		defaultCapabilities: capabilities,
 		synthesizeModel: () => ({ ...model, contextWindow: 131072, maxTokens: 4096 }),
@@ -189,6 +195,22 @@ it("a cold backend that is silent past the mid-stream window before its first to
 		await f.loop.whenSettled();
 		strictEqual(f.text(), "COLD_START_ANSWER");
 		strictEqual(f.wire.calls(), 1, "the healthy call was not aborted and retried");
+	} finally {
+		f.loop.dispose();
+		f.wire.dispose();
+		await f.loop.whenSettled();
+	}
+});
+
+it("a hosted route has no model to load, so a call that never starts is held to the mid-stream window", {
+	timeout: 20_000,
+}, async () => {
+	const f = fixture("cold", 1_500, undefined, "cloud");
+	try {
+		await f.loop.submit("hello");
+		await f.loop.whenSettled();
+		strictEqual(f.text(), "", "the call was aborted before its first token");
+		match(JSON.stringify(f.events), /stream stalled: no first token from stall-fixture/u);
 	} finally {
 		f.loop.dispose();
 		f.wire.dispose();
