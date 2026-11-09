@@ -121,6 +121,9 @@ describe("workspace snapshots", () => {
 		readOnly(true);
 		try {
 			const untouched = listing();
+			// A preview is the first call after the switch, and staging later.txt needs a new object.
+			const preview = await snapshots.preview(before.record.n);
+			ok(preview.kind === "plan" && preview.plan.remove.includes("later.txt"), JSON.stringify(preview));
 			const taken = await snapshots.snapshot({
 				reason: "pre-delete",
 				tool: ToolNames.Bash,
@@ -131,6 +134,10 @@ describe("workspace snapshots", () => {
 			deepStrictEqual(taken.record.pins, []);
 			deepStrictEqual(taken.unpinned, ["branch run"]);
 			ok(taken.pinNote?.includes("cannot be written"), taken.pinNote);
+			// Self-contained: the borrowed blob of old_notes.txt is in the private store too.
+			execFileSync("git", ["--git-dir", common, "cat-file", "-e", `${taken.record.commit}:old_notes.txt`], {
+				env: { ...process.env, GIT_OBJECT_DIRECTORY: path.join(stateDir, "snapshots", "s-ro", "objects") },
+			});
 			rmSync(path.join(linked, "old_notes.txt"));
 			rmSync(path.join(linked, "later.txt"));
 			const restored = await snapshots.restore(taken.record.n);

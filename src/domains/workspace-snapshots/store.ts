@@ -457,6 +457,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		deadline: number,
 	): Promise<{ tree: string; skipped: SnapshotSkip[] }> => {
 		mkdirSync(dir, { recursive: true });
+		// Every staging decides where objects go, so a preview in a read-only
+		// repository works before any snapshot has switched the session over.
+		if (
+			!existsSync(privateObjects) &&
+			!(canCreateIn(path.join(repo.commonDir, "objects")) && canCreateIn(path.join(repo.commonDir, "refs")))
+		)
+			mkdirSync(privateObjects, { recursive: true });
 		// Only this session writes its private index, under the session lock, so
 		// a lock file is what a killed Git left behind.
 		rmSync(`${indexFile}.lock`, { force: true });
@@ -524,13 +531,6 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		const log = readLog(dir);
 		if (log !== null && log.workspace !== repo.root)
 			throw new SnapshotUnavailableError(`this session's snapshots belong to ${log.workspace}`);
-		mkdirSync(dir, { recursive: true });
-		if (
-			!existsSync(privateObjects) &&
-			!(canCreateIn(path.join(repo.commonDir, "objects")) && canCreateIn(path.join(repo.commonDir, "refs")))
-		)
-			mkdirSync(privateObjects, { recursive: true });
-		const isPrivate = existsSync(privateObjects);
 		// Refs are read beside staging: neither touches the other's state, and a
 		// failed read costs only the pins, never the snapshot or the call.
 		const [staged, refs] = await Promise.all([
@@ -544,6 +544,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				(error: unknown) => ({ state: null, note: `refs not pinned: ${errorText(error)}` }),
 			),
 		]);
+		const isPrivate = existsSync(privateObjects);
 		const pinsAt = (n: number): SnapshotPin[] =>
 			refs.state === null || isPrivate ? [] : snapshotPins(SNAPSHOT_REF_PREFIX, sessionId, n, refs.state);
 		// A private snapshot pins nothing, so every ref the call puts at risk is reported unheld.
@@ -591,6 +592,17 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				}),
 			)
 		).stdout.trim();
+		if (isPrivate) {
+			// Staging reuses objects the repository already has, which its gc may
+			// prune once nothing there reaches them, so each private snapshot copies
+			// what earlier private snapshots do not already hold into its own pack.
+			const held = (log?.snapshots ?? []).filter((old) => old.ref === undefined).map((old) => `^${old.commit}`);
+			mkdirSync(path.join(privateObjects, "pack"), { recursive: true });
+			await runGit(
+				["pack-objects", "-q", "--revs", path.join(privateObjects, "pack", "pack")],
+				objects(repo, { cwd: repo.root, deadline, input: `${[commit, ...held].join("\n")}\n` }),
+			);
+		}
 		// A private snapshot needs no ref to survive: no repository gc reaches Clio Coder's state.
 		const ref = isPrivate ? undefined : `${SNAPSHOT_REF_PREFIX}/${sessionId}/${n}`;
 		if (ref !== undefined) await runGit(["update-ref", ref, commit], { cwd: repo.root, deadline });
