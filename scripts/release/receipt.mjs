@@ -73,8 +73,7 @@ export function acquireLock(
 			if (holder.host !== host || isAlive(holder.pid)) throw new LockHeld(holder);
 			// The holder died on this host without releasing; its receipt events say how far it got.
 			if (takeover !== null) throw new LockHeld(holder);
-			takeover = holder;
-			rmSync(path, { force: true });
+			takeover = takeOver(directory, path, draft, holder);
 		}
 	} finally {
 		rmSync(draft, { force: true });
@@ -86,6 +85,31 @@ export function acquireLock(
 			if (readJson(path)?.pid === pid) rmSync(path, { force: true });
 		},
 	};
+}
+
+const sameHolder = (a, b) => a?.host === b.host && a?.pid === b.pid && a?.startedAt === b.startedAt;
+
+/**
+ * Replaces a dead holder's lock. Two operators can both see it dead, so takeovers are serialized
+ * by an exclusive `lock.takeover` link and the holder is re-read inside it: only the operator
+ * that still finds the same dead record removes it. Returns that holder, or null if it changed.
+ */
+function takeOver(directory, path, draft, holder) {
+	const guard = join(directory, "lock.takeover");
+	try {
+		linkSync(draft, guard);
+	} catch (error) {
+		if (error.code !== "EEXIST") throw error;
+		// Another takeover is in its few-millisecond window, or it died there; never guess which.
+		throw new LockHeld({ ...(readJson(guard) ?? holder), command: `taking over the lock (remove ${guard} if stale)` });
+	}
+	try {
+		if (!sameHolder(readJson(path), holder)) return null;
+		rmSync(path, { force: true });
+		return holder;
+	} finally {
+		rmSync(guard, { force: true });
+	}
 }
 
 export const receiptPath = (directory, version) => join(directory, `v${version}.json`);

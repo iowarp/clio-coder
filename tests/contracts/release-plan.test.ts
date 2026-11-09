@@ -225,6 +225,30 @@ describe("release ownership", () => {
 			rmSync(state, { recursive: true, force: true });
 		}
 	});
+
+	it("lets only one of two operators take over a dead holder's lock", async () => {
+		const { acquireLock, LockHeld } = await import(receiptModule);
+		const state = mkdtempSync(join(tmpdir(), "clio-release-lock-"));
+		const lock = join(state, "lock");
+		try {
+			writeFileSync(lock, JSON.stringify({ host: "h", pid: 101, startedAt: "t0" }));
+			// While this operator decides pid 101 is dead, another one completes its takeover.
+			const isAlive = (pid: number) => {
+				if (pid !== 101) return true;
+				writeFileSync(lock, JSON.stringify({ host: "h", pid: 200, startedAt: "t1" }));
+				return false;
+			};
+			throws(() => acquireLock(state, "release", { pid: 300, host: "h", isAlive }), LockHeld);
+			strictEqual(JSON.parse(readFileSync(lock, "utf8")).pid, 200);
+			// A takeover already in progress is never second-guessed.
+			writeFileSync(lock, JSON.stringify({ host: "h", pid: 101, startedAt: "t0" }));
+			writeFileSync(join(state, "lock.takeover"), JSON.stringify({ host: "h", pid: 400 }));
+			throws(() => acquireLock(state, "release", { pid: 301, host: "h", isAlive: () => false }), LockHeld);
+			strictEqual(JSON.parse(readFileSync(lock, "utf8")).pid, 101);
+		} finally {
+			rmSync(state, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("release workflows", () => {
