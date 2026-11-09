@@ -4,6 +4,7 @@ import { evaluateSkillToolSurface } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
+import { isTaskGateCall } from "../../tools/verify/task-gates.js";
 import type { ActionClass, ClassifierCall } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
@@ -209,7 +210,8 @@ export type AdmissionDenyCode =
 	| "tool_scope"
 	| "skills_disabled"
 	| "skill_surface"
-	| "git_destructive";
+	| "git_destructive"
+	| "task_gate";
 
 export type AdmissionAskSource = "safety-net" | "tool-confirmation" | "autonomy" | "git-policy" | "session-consent";
 
@@ -318,9 +320,20 @@ function readOnlyRun(input: AdmissionInput): boolean {
  */
 export function evaluateAdmission(input: AdmissionInput): AdmissionDisposition {
 	const disposition = admit(input);
-	if (disposition.kind !== "ask" || !readOnlyRun(input)) return disposition;
+	if (disposition.kind !== "ask") return disposition;
 	const tool = input.capability?.tool ?? input.effects[0]?.tool ?? "unknown";
-	return deny("read_only", `${tool} denied: this run is read-only (${disposition.reason})`, disposition.decision);
+	if (readOnlyRun(input)) {
+		return deny("read_only", `${tool} denied: this run is read-only (${disposition.reason})`, disposition.decision);
+	}
+	// Whoever answered would see a check id, not the argv the task wrote.
+	if ([input.capability, ...input.effects].some((call) => call !== undefined && isTaskGateCall(call.tool, call.args))) {
+		return deny(
+			"task_gate",
+			`${tool} task gate not run: ${disposition.reason}. A task gate never asks for approval; report it unverified with this reason`,
+			disposition.decision,
+		);
+	}
+	return disposition;
 }
 
 function admit(input: AdmissionInput): AdmissionDisposition {

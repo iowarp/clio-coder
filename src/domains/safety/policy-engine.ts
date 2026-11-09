@@ -1610,12 +1610,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Unrecognized checks are left to the autonomy mapping: default asks,
 			// while yolo admits them headlessly.
 			if (bash.kind === "block") return blockDecision(base, bash);
-			const scanned =
-				call.projection === "mcp-server"
-					? mcpExecutePolicy(bash)
-					: verifyResolution?.kind === "task"
-						? taskGatePolicy(bash, verifyResolution.confined)
-						: bash;
+			const scanned = call.projection === "mcp-server" ? mcpExecutePolicy(bash) : bash;
 			if (scanned.kind === "ask") return settle(askDecision(base, scanned));
 			return settle(allowDecision(base, scanned));
 		}
@@ -1762,9 +1757,47 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return { ...decision, shellSandbox };
 	};
 
+	const taskGateUnderJudgment = (call: ClassifierCall): { command: string; confined: boolean } | null => {
+		const args = prepareVerifyArguments(call.args ?? {});
+		const resolution = resolveVerifyCall(cwd, args);
+		if (resolution.kind !== "task") return null;
+		const argv = verifyResolutionArgv(resolution, args, cwd);
+		return argv === null ? null : { command: argv.join(" "), confined: resolution.confined };
+	};
+
+	/**
+	 * A verifier's task gate is judged as the bash call of its argv, through
+	 * every rail bash meets, so task text never buys an argv more authority than
+	 * bash has. A gate never asks: whoever would answer sees only a check id.
+	 */
+	const evaluateTaskGate = (
+		rawCall: ClassifierCall,
+		gate: { command: string; confined: boolean },
+		posture: string | undefined,
+		scope: OperatorScope | undefined,
+	): SafetyPolicyDecision => {
+		const callCwd = typeof rawCall.args?.cwd === "string" ? { cwd: rawCall.args.cwd } : {};
+		const bash = evaluateScoped({ tool: ToolNames.Bash, args: { command: gate.command, ...callCwd } }, posture, scope);
+		const named = { ...bash, tool: ToolNames.Verify, command: gate.command };
+		if (bash.kind === "allow") return taskGatePolicy(named, gate.confined);
+		if (bash.kind === "block") return named;
+		const { rejection: _rejection, ...rest } = named;
+		return blockDecision(rest, {
+			...rest,
+			ruleId: TASK_GATE_REFUSED_RULE_ID,
+			reasonCode: TASK_GATE_REFUSED_RULE_ID,
+			reasons: [
+				`task gate \`${gate.command}\` would ask as bash (${bash.ruleId ?? bash.reasonCode}); a task gate never asks, so it does not run: report it unverified with this reason`,
+				...bash.reasons,
+			],
+		});
+	};
+
 	const engine: SafetyPolicyEngine = {
 		evaluate(rawCall, posture, scope) {
-			const decision = evaluateScoped(rawCall, posture, scope);
+			const gate = rawCall.tool === ToolNames.Verify ? taskGateUnderJudgment(rawCall) : null;
+			const decision =
+				gate === null ? evaluateScoped(rawCall, posture, scope) : evaluateTaskGate(rawCall, gate, posture, scope);
 			// A judge's allow runs the asked call without a second admission, so an
 			// ask counts as well as an allow; the refresh waits for the next typed write.
 			if (decision.kind !== "block" && mayRewriteGitConfig(rawCall, decision, cwd)) gitControlsStale = true;
@@ -2282,6 +2315,9 @@ function evaluateBashPolicy(
 
 /** Rule id of a verifier's task gate the scan passed, run in a sandbox that writes nothing. */
 export const TASK_GATE_RULE_ID = "verify-task-gate";
+
+/** Rule id of a task gate refused because bash would have asked for the same argv. */
+export const TASK_GATE_REFUSED_RULE_ID = "verify-task-gate-asks";
 
 /**
  * A gate the verifier's dispatched task names. The scan's rails still block or

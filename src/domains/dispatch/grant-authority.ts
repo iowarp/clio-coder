@@ -2,6 +2,8 @@ import type { WorkerPermissionMode } from "../../core/defaults.js";
 import { isMcpToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool, workerTurnConstraints } from "../../core/turn-constraints.js";
+import { resolveVerifyCall } from "../../tools/verify/resolve.js";
+import { prepareVerifyArguments } from "../../tools/verify/surface.js";
 import type { ActionClass, Classification } from "../safety/action-classifier.js";
 import { evaluateAdmission } from "../safety/admission.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
@@ -55,6 +57,11 @@ function effectEvaluable(record: GrantRecord): boolean {
 	return true;
 }
 
+function mainResolvesVerify(cwd: string, args: Record<string, unknown> | undefined): boolean {
+	const kind = resolveVerifyCall(cwd, prepareVerifyArguments(args ?? {})).kind;
+	return kind === "catalog" || kind === "package" || kind === "toolchain" || kind === "frontend";
+}
+
 function inPermit(record: GrantRecord, tool: string): boolean {
 	return record.permitTools.includes(tool);
 }
@@ -75,6 +82,11 @@ export function evaluateMainGrant(input: MainGrantInput): MainGrantVerdict {
 	}
 	if (!turnDelegatesTool(input.turnConstraints, effect.tool)) {
 		return { kind: "deny", reason: `${effect.tool} is outside the operator's delegation ceiling for this turn` };
+	}
+	// A worker's verify can name a check only it resolves, such as a task gate;
+	// here that reads as running nothing, so the argv it runs goes unseen.
+	if (effect.tool === ToolNames.Verify && !mainResolvesVerify(record.cwd, effect.args)) {
+		return { kind: "deny", reason: "the main agent cannot see the command this verify call runs, so it grants nothing" };
 	}
 	if (autonomy !== "yolo") {
 		return attended

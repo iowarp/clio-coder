@@ -194,6 +194,13 @@ export function findTaskGate(check: string): TaskGate | RejectedTaskGate | null 
 	);
 }
 
+/** True for a verify call that names one of this worker's task gates, runnable or not. */
+export function isTaskGateCall(tool: string, args: Record<string, unknown> | undefined): boolean {
+	if (!state.active || tool !== "verify") return false;
+	const check = args?.check;
+	return typeof check === "string" && findTaskGate(check) !== null;
+}
+
 /** The check projection a gate runs as; its evidence names the task as its source. */
 export function taskGateCheck(gate: TaskGate): DeclaredCheck {
 	return {

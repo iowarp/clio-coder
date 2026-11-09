@@ -129,7 +129,7 @@ import {
 	gatewayChainReceipts,
 } from "../tools/surface.js";
 import type { TaskWorktree } from "../tools/task-worktree.js";
-import { clearTaskGates, configureTaskGates } from "../tools/verify/task-gates.js";
+import { clearTaskGates, configureTaskGates, isTaskGateCall } from "../tools/verify/task-gates.js";
 import {
 	type AgentLedgerPort,
 	canonicalJson,
@@ -2272,6 +2272,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (activeEscalation !== null) return;
 			const requestId = meta.requestId;
 			const authority: ApprovalAuthority = grantBinding === undefined ? "operator" : meta.approvalAuthority;
+			if (isTaskGateCall(call.tool, call.args)) {
+				recordPermissionDecision("denied", "approval:task-gate");
+				// A decider would see a check id, not the argv the task wrote.
+				const reason = `permission denied by policy: ${call.tool} task gate needs ${actionClass} confirmation and a task gate never asks; report it unverified with this reason`;
+				emit({
+					type: "clio_coder_permission_resolved",
+					payload: { tool: call.tool, actionClass, mode: "deny", source: "policy", requestId, reason, authority },
+				} as ClioWorkerEvent);
+				registry.cancelParkedCall(requestId, reason);
+				return;
+			}
 			if (grantBinding !== undefined && authority === "operator" && operatorUnattended) {
 				recordPermissionDecision("denied", "approval:operator-unavailable");
 				// Only a person clears an operator rail, and nobody can answer here.

@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -119,7 +119,42 @@ describe("verifier task gates", () => {
 			effects: [{ tool: ToolNames.Verify, args: { check: "gate-1" } }],
 			safety: createWorkerSafety({ cwd: root }),
 		});
-		notStrictEqual(admitted.kind, "allow");
+		strictEqual(admitted.kind === "deny" && admitted.code, "task_gate");
+	});
+
+	it("judges a gate as bash would judge its argv, or stricter, and never lets a gate ask", () => {
+		const root = enter({});
+		const home = homedir();
+		const rank = { allow: 0, ask: 1, block: 2 } as const;
+		const yoloScope = { scratchRoots: [], scriptSandbox: "unsandboxed" as const };
+		for (const command of [
+			"unlink .git/index",
+			`tee ${home}/.bashrc`,
+			"npm install -g left-pad",
+			"pip install --user requests",
+			`touch ${home}/.config/autostart/x`,
+		]) {
+			for (const confined of [false, true]) {
+				configureTaskGates(`Run \`${command}\`.`, { confined });
+				const engine = createSafetyPolicyEngine({ cwd: root });
+				for (const [posture, scope] of [
+					[undefined, undefined],
+					["yolo", yoloScope],
+				] as const) {
+					const bash = engine.evaluate({ tool: ToolNames.Bash, args: { command } }, posture, scope);
+					const gate = engine.evaluate({ tool: ToolNames.Verify, args: { check: "gate-1" } }, posture, scope);
+					ok(rank[gate.kind] >= rank[bash.kind], `${command}: gate ${gate.kind} is looser than bash ${bash.kind}`);
+					notStrictEqual(gate.kind, "ask", `${command}: a gate asked`);
+				}
+				const admitted = evaluateAdmission({
+					principal: "worker",
+					effects: [{ tool: ToolNames.Verify, args: { check: "gate-1" } }],
+					safety: createWorkerSafety({ cwd: root }),
+				});
+				notStrictEqual(admitted.kind, "ask", `${command}: worker admission asked`);
+				notStrictEqual(admitted.kind, "allow", `${command}: worker admission allowed`);
+			}
+		}
 	});
 
 	it("a read-only worker runs a gate only inside a sandbox that writes nothing, else says unverified", async () => {
