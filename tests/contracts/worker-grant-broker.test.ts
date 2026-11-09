@@ -19,7 +19,7 @@ import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
 import { startWorkerRun, type WorkerRunHandle, type WorkerRunInput } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import type { WorkerGrantRequestFrame } from "../../src/worker/protocol.js";
+import { CONTROL_FRAME_PREFIX, parseControlFrame, type WorkerGrantRequestFrame } from "../../src/worker/protocol.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../src/worker/spec-contract.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -262,6 +262,45 @@ describe("safety judge worker grants (fleet.permissions.mode=judge)", () => {
 		broker.dispose();
 	});
 
+	it("gives the judge a worker MCP call's trust class and description, as on the main path", async () => {
+		const tool = "mcp_slurm__submit_slurm_job";
+		const mcpTool = { actionClass: "execute", description: "Submit a batch job to the Slurm queue." };
+		const effect = grantEffectDescriptor(tool, { script: "job.sh" });
+		const frame: WorkerGrantRequestFrame = {
+			requestId: "perm-1",
+			attemptToken: TOKEN,
+			attempt: 0,
+			tool,
+			actionClass: "execute",
+			authority: "main",
+			argDigest: grantEffectDigest(effect),
+			effect,
+			summary: `${tool} requires execute confirmation`,
+			reasons: [],
+			timeoutMs: 60_000,
+			mcpTool,
+		};
+		const parsed = parseControlFrame(
+			`${CONTROL_FRAME_PREFIX}${JSON.stringify({ kind: "grant_request", request: frame })}`,
+		);
+		ok(parsed.ok && parsed.value.kind === "grant_request", JSON.stringify(parsed));
+		deepStrictEqual(parsed.value.request.mcpTool, mcpTool);
+		const { broker } = brokerWithLog();
+		const record = opened(broker, {
+			tool,
+			argDigest: frame.argDigest,
+			effect,
+			permitTools: [tool],
+			summary: frame.summary,
+			mcpTool,
+		});
+		const seen = fakeJudge(() => judgeAnswer("block", "unclear", "No operator message names a Slurm job."));
+		await evaluateJudgedGrant({ record, autonomy: "default", safety: createWorkerSafety(), judge: seen.judge });
+		const prompt = seen.prompts[0] ?? "";
+		ok(prompt.includes("MCP tool, trusted with action class execute"), prompt);
+		ok(prompt.includes("Submit a batch job to the Slurm queue."), prompt);
+		broker.dispose();
+	});
 	it("never judges an operator-authority ask and shares the session's escalation count", async () => {
 		const { broker } = brokerWithLog();
 		const safety = createWorkerSafety();

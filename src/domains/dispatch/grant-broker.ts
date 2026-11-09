@@ -73,6 +73,8 @@ export interface GrantRequestInput {
 	 * then does not yield for it.
 	 */
 	reviewer?: "safety-judge";
+	/** An MCP tool's trust class and registered description, as the worker's grant request carried them. */
+	mcpTool?: { actionClass: string; description: string };
 }
 
 export interface GrantRecord extends GrantRequestInput {

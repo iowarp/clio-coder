@@ -1,5 +1,5 @@
 import type { WorkerPermissionMode } from "../../core/defaults.js";
-import { ToolNames } from "../../core/tool-names.js";
+import { isMcpToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnDelegatesTool, workerTurnConstraints } from "../../core/turn-constraints.js";
 import type { ActionClass, Classification } from "../safety/action-classifier.js";
@@ -226,6 +226,8 @@ export async function evaluateJudgedGrant(input: JudgedGrantInput): Promise<Judg
 			decision,
 			source: "autonomy",
 			approvalAuthority: "main",
+			// The same features the main path gives the judge for its own MCP calls.
+			...(record.mcpTool !== undefined && isMcpToolName(effect.tool) ? { mcpTool: record.mcpTool } : {}),
 			...(record.toolCallId !== undefined ? { toolCallId: record.toolCallId } : {}),
 			...(input.signal !== undefined ? { signal: input.signal } : {}),
 			worker: { runId: record.runId, agentId: record.agentId },

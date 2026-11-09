@@ -577,6 +577,12 @@ export interface WorkerGrantRequestFrame {
 	axis?: string;
 	timeoutMs: number;
 	toolCallId?: string;
+	/**
+	 * For an MCP tool, the class its trust record gives it and its registered
+	 * description, so the main session's judge reads the worker's call as it
+	 * reads its own. Features of the tool, never a decision input.
+	 */
+	mcpTool?: { actionClass: string; description: string };
 }
 
 export type WorkerControlFrame =
@@ -884,6 +890,7 @@ function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestF
 	const consequence = parseGrantConsequence(record.consequence);
 	const axis = boundedText(record.axis, 256);
 	const toolCallId = boundedText(record.toolCallId, 256);
+	const mcpTool = parseGrantMcpTool(record.mcpTool);
 	return {
 		ok: true,
 		value: {
@@ -902,8 +909,17 @@ function parseGrantRequest(value: unknown): FrameParseResult<WorkerGrantRequestF
 			...(axis !== null ? { axis } : {}),
 			timeoutMs,
 			...(toolCallId !== null ? { toolCallId } : {}),
+			...(mcpTool !== null ? { mcpTool } : {}),
 		},
 	};
+}
+
+function parseGrantMcpTool(value: unknown): { actionClass: string; description: string } | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	const actionClass = boundedText(record.actionClass, 64);
+	const description = boundedText(record.description);
+	return actionClass === null || description === null ? null : { actionClass, description };
 }
 
 /**

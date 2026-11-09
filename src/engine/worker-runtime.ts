@@ -58,7 +58,7 @@ import {
 } from "../core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
-import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { isMcpToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import {
 	internalHelperResultSchema,
 	type ObservedReadRanges,
@@ -188,6 +188,19 @@ import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TO
 const GRANT_REQUEST_FRAME_BUDGET_BYTES = 14 * 1024;
 
 /** Exact call and enforced permission conditions; never reuse an answer across asking axes. */
+/** Bound on the description a grant frame carries; the judge reads fewer characters still. */
+const GRANT_MCP_DESCRIPTION_CHARS = 1000;
+
+/** An MCP tool's trust class and registered description for a worker's grant request, else undefined. */
+function workerMcpToolFeatures(
+	tool: string,
+	spec: { baseActionClass: string; description: string } | undefined,
+): { actionClass: string; description: string } | undefined {
+	if (!isMcpToolName(tool) || spec === undefined) return undefined;
+	const description = spec.description.trim().slice(0, GRANT_MCP_DESCRIPTION_CHARS);
+	return description.length === 0 ? undefined : { actionClass: spec.baseActionClass, description };
+}
+
 export function workerPermissionCacheKey(call: ClassifierCall, decision: SafetyDecision, axis: string): string {
 	return canonicalJson({
 		tool: call.tool,
@@ -2341,10 +2354,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				const fits = Buffer.byteLength(JSON.stringify(frame), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
 				// The display sentences ride along only when they leave the frame inside
 				// the budget, so card text can never be what drops a grant's effect.
-				const withConsequence = consequence.length > 0 ? { ...frame, consequence } : frame;
-				const carriesConsequence =
-					Buffer.byteLength(JSON.stringify(withConsequence), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
-				input.emitGrantRequest?.(fits ? (carriesConsequence ? withConsequence : frame) : { ...frame, effect: null });
+				const within = (candidate: WorkerGrantRequestFrame): boolean =>
+					Buffer.byteLength(JSON.stringify(candidate), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
+				// An MCP tool's class and description are what the main session's judge
+				// reads the call by; they ride before the card text, under the same rule.
+				const mcpTool = workerMcpToolFeatures(call.tool, registry.get(call.tool as ToolName));
+				const withMcpTool = mcpTool !== undefined && within({ ...frame, mcpTool }) ? { ...frame, mcpTool } : frame;
+				const withConsequence = consequence.length > 0 ? { ...withMcpTool, consequence } : withMcpTool;
+				input.emitGrantRequest?.(
+					fits ? (within(withConsequence) ? withConsequence : withMcpTool) : { ...frame, effect: null },
+				);
 			}
 			recordPermissionDecision("permission_requested");
 			return;

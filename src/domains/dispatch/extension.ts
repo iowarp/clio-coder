@@ -7528,6 +7528,7 @@ export function createDispatchBundle(
 					? { deadlineAt: now() + workerApprovalCeilingMs(request.timeoutMs), windowMs: request.timeoutMs }
 					: { deadlineAt: now() + Math.max(1_000, request.timeoutMs - GRANT_DEADLINE_MARGIN_MS) }),
 				...(judgeReachable && request.authority === "main" ? { reviewer: "safety-judge" as const } : {}),
+				...(request.mcpTool !== undefined ? { mcpTool: request.mcpTool } : {}),
 			});
 			if (!opened.ok) {
 				denyAtOnce(opened.reason);
