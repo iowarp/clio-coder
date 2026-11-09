@@ -150,6 +150,19 @@ describe("release decisions", () => {
 		strictEqual(nextStep(facts({ npm: served, releaseRun: failed, published: false }), {}).step, "rerun-release");
 	});
 
+	it("stops after one post-release pass when an item failed", async () => {
+		const { postFailures } = await import(planModule);
+		deepStrictEqual(
+			postFailures({
+				main: { status: "done", note: "fast-forwarded" },
+				issues: { status: "failed", note: "gh: rate limited" },
+				branch: { status: "skipped", note: "declined" },
+			}),
+			["issues: gh: rate limited"],
+		);
+		deepStrictEqual(postFailures(undefined), []);
+	});
+
 	it("rehearses without public writes and always tears down", async () => {
 		const { nextStep } = await import(planModule);
 		strictEqual(nextStep(facts({ mode: "rehearse" }), {}).step, "check-release");

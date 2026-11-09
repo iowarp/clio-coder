@@ -32,6 +32,7 @@ import {
 	ciCandidateDirectory,
 	latestJob,
 	nextStep,
+	postFailures,
 	publicProven,
 	publishArgs,
 	rerunStarted,
@@ -566,7 +567,13 @@ async function perform(step, facts, receipt, context) {
 				log: (line) => console.log(`  ${line}`),
 			};
 			receipt.post = await context.post.postRelease(postContext(receipt, context), io);
-			return recordEvent(receipt, "post", "done");
+			const failed = postFailures(receipt.post);
+			recordEvent(receipt, "post", failed.length ? "failed" : "done", { failed });
+			if (failed.length)
+				throw new Error(
+					`The release is public; ${failed.length} post-release item(s) failed. Fix them and run pnpm run release:next again:\n  ${failed.join("\n  ")}`,
+				);
+			return;
 		}
 		default:
 			throw new Error(`No action for step ${step.step}.`);

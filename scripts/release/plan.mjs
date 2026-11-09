@@ -115,6 +115,15 @@ export function publicProven({
 	return finishingHeads.includes(mainHead) && branchHead === null;
 }
 
+/**
+ * Post-release items that failed in the last pass, as `id: note` lines. A failed item stays
+ * pending, so the command stops after one pass instead of retrying it forever.
+ */
+export const postFailures = (results) =>
+	Object.entries(results ?? {})
+		.filter(([, result]) => result?.status === "failed")
+		.map(([id, result]) => `${id}: ${result.note}`);
+
 /** npm refuses a second publish of an existing version with this message; same bytes mean accepted. */
 export const alreadyPublished = (stderr) =>
 	/cannot publish over the previously published versions/u.test(String(stderr));
