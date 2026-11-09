@@ -420,6 +420,40 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				}
 			: call;
 
+	/**
+	 * Retention for the private object store, which no `git gc` reaches. Each
+	 * private snapshot adds a pack and loose objects, so once the store holds more
+	 * packs than the session keeps snapshots it is rewritten as one pack of what
+	 * the retained private snapshots reach, and everything else is deleted. Runs
+	 * under the session lock right after a commit of the private index's tree,
+	 * so every object the index names is in the new pack.
+	 */
+	const compactPrivateObjects = async (
+		repo: Repository,
+		retained: ReadonlyArray<WorkspaceSnapshotRecord>,
+		deadline: number,
+	): Promise<void> => {
+		const packDir = path.join(privateObjects, "pack");
+		const packs = readdirSync(packDir).filter((name) => /^pack-[0-9a-f]+\.pack$/u.test(name));
+		if (packs.length <= keep) return;
+		const commits = [...new Set(retained.filter((record) => record.ref === undefined).map((record) => record.commit))];
+		if (commits.length === 0) return;
+		const written = (
+			await runGit(
+				["pack-objects", "-q", "--revs", path.join(packDir, "pack")],
+				objects(repo, { cwd: repo.root, deadline, input: `${commits.join("\n")}\n` }),
+			)
+		).stdout.trim();
+		if (!/^[0-9a-f]{40,64}$/u.test(written)) throw new SnapshotUnavailableError("git pack-objects returned no pack");
+		for (const name of readdirSync(packDir)) {
+			if (/^pack-[0-9a-f]+\.[a-z]+$/u.test(name) && !name.startsWith(`pack-${written}.`))
+				rmSync(path.join(packDir, name), { force: true });
+		}
+		for (const name of readdirSync(privateObjects)) {
+			if (/^[0-9a-f]{2}$/u.test(name)) rmSync(path.join(privateObjects, name), { recursive: true, force: true });
+		}
+	};
+
 	/** Copy the operator's index so the first snapshot inherits its stat cache instead of rehashing every file. */
 	const seedIndex = async (repo: Repository, deadline: number): Promise<"copy" | "head" | "empty"> => {
 		try {
@@ -526,6 +560,8 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 	const snapshotLocked = async (
 		request: WorkspaceSnapshotRequest,
 		deadline: number,
+		/** A dropped private snapshot that must stay readable: the target of the rewind this snapshot precedes. */
+		protect?: WorkspaceSnapshotRecord,
 	): Promise<{ record: WorkspaceSnapshotRecord; reused: boolean; pinNote: string | null; unpinned: string[] }> => {
 		const repo = await resolveRepository(cwd, deadline);
 		const log = readLog(dir);
@@ -654,6 +690,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			);
 		} catch {
 			// Retention is best effort; the age prune removes what is left.
+		}
+		if (isPrivate && dropped.some((old) => old.ref === undefined)) {
+			try {
+				await compactPrivateObjects(repo, [...snapshots, ...(protect !== undefined ? [protect] : [])], deadline);
+			} catch {
+				// Retention is best effort; the next compaction or the age prune removes what is left.
+			}
 		}
 		return { record, reused: false, pinNote, unpinned: unpinnedRefs(request.refs, heldState, pinsAt(n), pins) };
 	};
@@ -833,7 +876,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		const target = findRecord(n);
 		let pre: WorkspaceSnapshotRecord;
 		try {
-			pre = (await snapshotLocked({ reason: "pre-rewind" }, performance.now() + timeoutMs)).record;
+			pre = (await snapshotLocked({ reason: "pre-rewind" }, performance.now() + timeoutMs, target)).record;
 		} catch (error) {
 			return { kind: "unavailable", reason: `no pre-rewind snapshot, so nothing was changed: ${errorText(error)}` };
 		}

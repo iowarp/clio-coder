@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
@@ -148,6 +148,47 @@ describe("workspace snapshots", () => {
 			strictEqual(existsSync(path.join(linked, "later.txt")), false);
 			strictEqual(readFileSync(path.join(linked, "old_notes.txt"), "utf8"), "notes\n");
 			strictEqual(listing(), untouched);
+		} finally {
+			readOnly(false);
+		}
+	});
+
+	it("prunes the private object store to what the retained private snapshots reach", async () => {
+		const linked = path.join(env.dir, "linked");
+		git(repo, "worktree", "add", "-q", linked, "-b", "run");
+		const common = path.join(repo, ".git");
+		const privateObjects = path.join(stateDir, "snapshots", "s-ro", "objects");
+		const snapshots = createWorkspaceSnapshots({ stateDir, sessionId: "s-ro", cwd: linked, keep: 2 });
+		const readOnly = (on: boolean) =>
+			execFileSync("chmod", ["-R", on ? "a-w" : "u+w", path.join(common, "objects"), path.join(common, "refs")]);
+		const has = (object: string) => {
+			try {
+				execFileSync("git", ["--git-dir", common, "cat-file", "-e", object], {
+					env: { ...process.env, GIT_OBJECT_DIRECTORY: privateObjects },
+					stdio: "ignore",
+				});
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		readOnly(true);
+		try {
+			const taken: string[] = [];
+			for (const content of ["one", "two", "three", "four"]) {
+				writeFileSync(path.join(linked, "work.txt"), `${content}\n`);
+				const outcome = await snapshots.snapshot({ reason: "turn-start" });
+				ok(outcome.kind === "taken" && outcome.record.ref === undefined, JSON.stringify(outcome));
+				taken.push(outcome.record.commit);
+			}
+			const blobOne = execFileSync("git", ["hash-object", "--stdin"], { input: "one\n", encoding: "utf8" }).trim();
+			ok(!has(taken[0] ?? "") && !has(blobOne), "the dropped snapshot's objects are gone from the private store");
+			ok(has(`${taken[3]}:work.txt`) && has(`${taken[2]}:work.txt`));
+			ok(readdirSync(path.join(privateObjects, "pack")).filter((name) => name.endsWith(".pack")).length <= 2);
+			// The pre-rewind snapshot drops snapshot 3 from the log, yet the rewind to it still reads its objects.
+			writeFileSync(path.join(linked, "work.txt"), "edited\n");
+			ok((await snapshots.restore(3)).kind === "restored");
+			strictEqual(readFileSync(path.join(linked, "work.txt"), "utf8"), "three\n");
 		} finally {
 			readOnly(false);
 		}
