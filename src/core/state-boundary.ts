@@ -1,5 +1,15 @@
 import type { Stats } from "node:fs";
-import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+	closeSync,
+	constants,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readSync,
+	realpathSync,
+} from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -69,6 +79,35 @@ export function readRegularFileSync(path: string): Buffer {
 	try {
 		if (!fstatSync(fd).isFile()) throw new Error(`${path} is not a regular file`);
 		return readFileSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
+ * The bytes of a regular file from an offset the caller picks once it has the open file's stats, opened as
+ * `readRegularFileSync` opens it. A start past the end reads nothing.
+ */
+export function readRegularFileFromSync(
+	path: string,
+	startFor: (stats: Stats) => number,
+): { bytes: Buffer; start: number; stats: Stats } {
+	const fd = openSync(path, constants.O_RDONLY | NOFOLLOW);
+	try {
+		const stats = fstatSync(fd);
+		if (!stats.isFile()) throw new Error(`${path} is not a regular file`);
+		const start = Math.min(Math.max(0, startFor(stats)), stats.size);
+		const chunks: Buffer[] = [];
+		let position = start;
+		for (;;) {
+			// The size stat saw first, then whatever a writer appended since, as a cold `readFileSync` would.
+			const chunk = Buffer.allocUnsafe(position < stats.size ? stats.size - position : 64 * 1024);
+			const read = readSync(fd, chunk, 0, chunk.length, position);
+			if (read === 0) break;
+			chunks.push(chunk.subarray(0, read));
+			position += read;
+		}
+		return { bytes: Buffer.concat(chunks), start, stats };
 	} finally {
 		closeSync(fd);
 	}

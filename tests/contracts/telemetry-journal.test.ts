@@ -628,6 +628,54 @@ test("a line this process wrote reads back unvalidated only while its bytes are 
 	}
 });
 
+test("a repeated sync read folds only new bytes and still equals a cold read across rotation and truncation", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const live = join(sessionDirectory, "journal.jsonl");
+	const same = async (label: string) => {
+		const cached = readCallJournalSync(sessionDirectory);
+		deepStrictEqual(cached, await readCallJournal(sessionDirectory), label);
+		return cached;
+	};
+	const journal = await openCallJournal({ directory: sessionDirectory, context, writer, segmentBytes: 1 });
+	try {
+		telemetryHub().emit("session.opened", {}, context);
+		await journal.flush();
+		const first = await same("first read");
+		for (let n = 0; n < 3; n += 1) {
+			telemetryHub().emit("session.resumed", { via: "resume" }, context);
+			await journal.flush();
+		}
+		ok(
+			(await readdir(sessionDirectory)).some((name) => /^journal\.\d{10}\.jsonl$/.test(name)),
+			"the journal rotated",
+		);
+		const rotated = await same("after appends and a rotation");
+		ok(rotated.records.length > first.records.length);
+		// The rotated file is the one first read, renamed: its fold is reused, not parsed again.
+		strictEqual(rotated.records[0]?.record, first.records[0]?.record);
+	} finally {
+		await journal.close();
+	}
+	try {
+		const bytes = await readFile(live);
+		const lastLine = bytes.lastIndexOf(0x0a, bytes.length - 2) + 1;
+		await appendFile(live, bytes.subarray(lastLine, lastLine + 20));
+		strictEqual((await same("a torn tail")).damaged, 1);
+		await appendFile(live, bytes.subarray(lastLine + 20));
+		strictEqual((await same("the tail completed")).damaged, 0);
+		await writeFile(live, bytes.subarray(0, lastLine));
+		await same("truncated in place");
+		await writeFile(live, bytes);
+		await same("restored");
+		const edited = Buffer.from(bytes);
+		edited[edited.length - 12] = edited[edited.length - 12] === 0x30 ? 0x31 : 0x30;
+		await writeFile(live, edited);
+		strictEqual((await same("the last line rewritten at the same size")).damaged, 1);
+	} finally {
+		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
 test("a segment header says what its mode admits, and a mode change opens a new segment in place (#434)", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	let capture = STANDARD_CAPTURE;

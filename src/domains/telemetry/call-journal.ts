@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
-import { readRegularFile, readRegularFileSync } from "../../core/state-boundary.js";
+import { readRegularFile, readRegularFileFromSync } from "../../core/state-boundary.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE, sameTelemetryCapture } from "../../core/telemetry/capture.js";
@@ -842,9 +842,17 @@ export function appendPersistedTelemetry(result: CallJournalRead, batch: { bytes
 function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: ClockOrigin): void {
 	const scan = scanTelemetrySegment(bytes);
 	if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
-	let origin: ClockOrigin | undefined = continuing;
 	if (continuing) result.writer = continuing;
-	for (const row of scan.rows) {
+	foldSegmentRows(result, scan.rows, continuing);
+}
+
+/** Fold scanned rows from `origin`; returns the origin the next row would take, so a later scan can continue. */
+function foldSegmentRows(
+	result: CallJournalRead,
+	rows: SegmentScan["rows"],
+	origin: ClockOrigin | undefined,
+): ClockOrigin | undefined {
+	for (const row of rows) {
 		if (row.kind === "header") {
 			origin = row.header.clockOrigin;
 			result.writer = origin;
@@ -857,6 +865,55 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: 
 			result.skipped += 1;
 		}
 	}
+	return origin;
+}
+
+/**
+ * One journal file's fold up to its last complete line, keyed by the file's identity so a rotation's rename keeps it.
+ * Scanning is line-local, so folding the bytes from `offset` onto this state equals a cold scan of the whole file.
+ */
+interface CachedSegment {
+	offset: number;
+	/** The bytes just before `offset`: a rewrite in place that kept the size must not pass for the same file. */
+	tail: Buffer;
+	origin: ClockOrigin | undefined;
+	/** This file alone, as a cold read of its bytes would count it; `damaged` is 0 or 1. */
+	read: CallJournalRead;
+}
+
+const CACHED_TAIL_BYTES = 64;
+// Directories whose folds this process keeps; each holds the records a cold read would return anyway.
+const CACHED_DIRECTORIES_MAX = 16;
+const journalCache = new Map<string, Map<string, CachedSegment>>();
+
+function readCachedSegment(path: string, files: Map<string, CachedSegment>, seen: Map<string, CachedSegment>) {
+	let entry: CachedSegment | undefined;
+	let key = "";
+	const read = (reuse: boolean) =>
+		readRegularFileFromSync(path, (stats) => {
+			key = `${stats.dev}:${stats.ino}`;
+			entry = reuse ? files.get(key) : undefined;
+			// A file shorter than the folded prefix was truncated or replaced: fold it again from the start.
+			if (entry && stats.size < entry.offset) entry = undefined;
+			return entry ? entry.offset - entry.tail.length : 0;
+		});
+	let bytes = read(true);
+	if (entry && !bytes.bytes.subarray(0, entry.tail.length).equals(entry.tail)) bytes = read(false);
+	const start = entry ? entry.tail.length : 0;
+	const state: CachedSegment = entry ?? {
+		offset: 0,
+		tail: Buffer.alloc(0),
+		origin: undefined,
+		read: { records: [], skipped: 0, damaged: 0 },
+	};
+	const scan = scanTelemetrySegment(bytes.bytes.subarray(start));
+	state.origin = foldSegmentRows(state.read, scan.rows, state.origin);
+	state.read.damaged = scan.corruptOffset !== null || scan.tornTailBytes > 0 ? 1 : 0;
+	const end = start + scan.validBytes;
+	state.offset = bytes.start + end;
+	state.tail = Buffer.from(bytes.bytes.subarray(Math.max(0, end - CACHED_TAIL_BYTES), end));
+	seen.set(key, state);
+	return state;
 }
 
 /** Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434). */
@@ -868,12 +925,32 @@ export function readCallJournalSync(directory: string): CallJournalRead {
 		try {
 			files = names();
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				journalCache.delete(directory);
+				return result;
+			}
 			throw error;
 		}
+		const cached = journalCache.get(directory) ?? new Map<string, CachedSegment>();
+		const seen = new Map<string, CachedSegment>();
 		try {
-			for (const file of files) appendReadSegment(result, readRegularFileSync(join(directory, file)));
-			if (files.join("\n") === names().join("\n")) return result;
+			for (const file of files) {
+				const segment = readCachedSegment(join(directory, file), cached, seen).read;
+				for (const record of segment.records) result.records.push(record);
+				result.skipped += segment.skipped;
+				result.damaged += segment.damaged;
+				if (segment.modes) result.modes = [...(result.modes ?? []), ...segment.modes];
+				if (segment.writer) result.writer = segment.writer;
+			}
+			if (files.join("\n") === names().join("\n")) {
+				journalCache.delete(directory);
+				journalCache.set(directory, seen);
+				for (const oldest of journalCache.keys()) {
+					if (journalCache.size <= CACHED_DIRECTORIES_MAX) break;
+					journalCache.delete(oldest);
+				}
+				return result;
+			}
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
