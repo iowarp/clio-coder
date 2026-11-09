@@ -488,6 +488,50 @@ describe("job ownership, scheduling and execution settlement", () => {
 		strictEqual(jobIsComplete(expired), true);
 		strictEqual(expired.delivery?.state, "dropped");
 	});
+	it("lets a follow-up that already started finish past the deadline (#450)", async () => {
+		let followUp: AbortSignal | undefined;
+		let finish: (() => void) | undefined;
+		const host = make({
+			run: async (context) => {
+				strictEqual(context.start(), true);
+				return { outcome: "succeeded", json: { status: "completed" } };
+			},
+			deliver: async (context) => {
+				strictEqual(context.start(), true);
+				followUp = context.signal;
+				await new Promise<void>((resolve) => {
+					finish = resolve;
+					releaseOnCleanup.push(resolve);
+				});
+				return { outcome: "succeeded" };
+			},
+		});
+		const created = await host.create(
+			{
+				...input(),
+				deadlineAt: clock + 5000,
+				until: { path: ["status"], op: "eq", value: "completed" },
+				onMatch: { kind: "main_turn", prompt: "Analyze the observed result" },
+			},
+			owner,
+		);
+		clock += 1000;
+		host.tick();
+		await settle();
+		clock += 1000;
+		host.tick();
+		await settle();
+		strictEqual(present(host.get(created.id, owner)).delivery?.state, "running");
+		clock += 5000;
+		host.tick();
+		await settle();
+		strictEqual(present(followUp).aborted, false);
+		present(finish)();
+		await settle();
+		const done = present(host.get(created.id, owner));
+		strictEqual(done.reason, "condition");
+		strictEqual(done.delivery?.state, "delivered");
+	});
 	it("admits through the parent registry and refuses model-supplied authority", async () => {
 		const host = make();
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: scratch.dir }) });

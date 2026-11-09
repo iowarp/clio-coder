@@ -47,6 +47,11 @@ interface LiveExecution {
 	promise: Promise<void>;
 }
 const POLL_MS = 250;
+/**
+ * for_ms bounds polling and when a follow-up may start. A follow-up turn already running has its own clock;
+ * cancelling it at the deadline stopped the work it was doing and relabelled a met condition as a deadline (#450).
+ */
+const deadlineMayEnd = (job: JobRecord): boolean => job.delivery?.state !== "running";
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -260,6 +265,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			if (execution && !execution.abort.signal.aborted) due = Math.min(due, now() + execution.timeoutAt - spanNow());
 			if (
 				!jobIsComplete(job) &&
+				deadlineMayEnd(job) &&
 				job.spec.deadlineAt !== null &&
 				job.reason !== "deadline" &&
 				(job.persistenceError === null || (execution && !execution.abort.signal.aborted))
@@ -345,7 +351,12 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		if (result.cleanupUnresolved === true) cleanupBlocked = true;
 		if (job.persistenceError !== null) return;
 		// A completion microtask may run before an already-due timer callback (#411).
-		if (!execution.abort.signal.aborted && job.spec.deadlineAt !== null && now() >= job.spec.deadlineAt) {
+		if (
+			!execution.abort.signal.aborted &&
+			execution.kind === "run" &&
+			job.spec.deadlineAt !== null &&
+			now() >= job.spec.deadlineAt
+		) {
 			job = terminal(id, "deadline");
 		} else if (!execution.abort.signal.aborted && spanNow() >= execution.timeoutAt) {
 			abortLive(id, executionTimeoutReason(job, execution.kind), "timed_out");
@@ -597,6 +608,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 					const execution = live.get(id);
 					if (
 						!jobIsComplete(job) &&
+						deadlineMayEnd(job) &&
 						job.spec.deadlineAt !== null &&
 						now() >= job.spec.deadlineAt &&
 						job.reason !== "deadline"
