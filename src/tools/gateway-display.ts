@@ -67,6 +67,8 @@ export interface GatewayChainStep {
 	/** The arguments the step executed with, after result bindings resolved. */
 	args: Record<string, unknown>;
 	isError: boolean;
+	/** The step's own span; 0 for a step whose binding failed, since it never ran. */
+	durationMs?: number;
 	/** `{content, details}`: the step's bounded output and its own result details. */
 	result: Record<string, unknown>;
 	/** Registry admission for a step that reached it; absent when it failed before admission. */
@@ -125,6 +127,7 @@ export function gatewayChainSteps(toolName: string, result: unknown): GatewayCha
 					isError: true,
 					result: child.result,
 					bindingError: child.bindingError,
+					...durationOf(child),
 				},
 			];
 		}
@@ -139,6 +142,7 @@ export function gatewayChainSteps(toolName: string, result: unknown): GatewayCha
 				args: child.args,
 				isError: child.isError === true || childDetails?.kind === "error",
 				result: child.result,
+				...durationOf(child),
 				...(outcome === "ok" || outcome === "error" || outcome === "blocked" ? { outcome } : {}),
 				...(typeof admission?.decision === "string" ? { decision: admission.decision } : {}),
 				...(typeof admission?.actionClass === "string" ? { actionClass: admission.actionClass } : {}),
@@ -148,6 +152,11 @@ export function gatewayChainSteps(toolName: string, result: unknown): GatewayCha
 			},
 		];
 	});
+}
+
+function durationOf(child: Record<string, unknown>): { durationMs?: number } {
+	const value = child.durationMs;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? { durationMs: value } : {};
 }
 
 export interface PlannedChainStep {

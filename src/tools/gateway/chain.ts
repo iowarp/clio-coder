@@ -199,6 +199,8 @@ export async function runGatewayChain(
 			step.capability !== ToolNames.Context
 		);
 	};
+	/** Each step's own span, so `run --json` gives a chain step's end frame the duration a direct call's carries. */
+	const durations = new Map<string, number>();
 	const execute = async (step: Step): Promise<void> => {
 		let args: Record<string, unknown>;
 		try {
@@ -210,6 +212,7 @@ export async function runGatewayChain(
 			boundary = `step ${step.id} failed; review its evidence before continuing`;
 			return;
 		}
+		const started = performance.now();
 		try {
 			executedArgs.set(step.id, args);
 			const result = await deps.call(step.capability, args, {
@@ -238,6 +241,8 @@ export async function runGatewayChain(
 		} catch (error) {
 			results.set(step.id, { kind: "error", message: error instanceof Error ? error.message : String(error) });
 			boundary = `step ${step.id} failed; review its evidence before continuing`;
+		} finally {
+			durations.set(step.id, Math.round(Math.max(0, performance.now() - started)));
 		}
 	};
 	while (results.size < steps.length && boundary === undefined) {
@@ -314,6 +319,7 @@ export async function runGatewayChain(
 						capability: step.capability,
 						isError: true,
 						bindingError,
+						durationMs: 0,
 						requestedArgs: step.args,
 						result: {
 							content: [{ type: "text", text: projectedOutput(step, result) }],
@@ -330,6 +336,7 @@ export async function runGatewayChain(
 					capability: step.capability,
 					args,
 					isError: result.kind === "error",
+					durationMs: durations.get(step.id) ?? 0,
 					result: {
 						content: [{ type: "text", text: projectedOutput(step, result) }],
 						details: { ...result.details, kind: result.kind },

@@ -63,6 +63,7 @@ const chainResult = {
 				capability: "grep",
 				args: { pattern: "TODO", path: "src" },
 				isError: false,
+				durationMs: 12,
 				result: {
 					content: [{ type: "text", text: "src/a.ts:1:TODO" }],
 					details: { kind: "ok", ...admitted("read", "ok") },
@@ -73,6 +74,7 @@ const chainResult = {
 				capability: "bash",
 				args: bashArgs,
 				isError: true,
+				durationMs: 340,
 				result: {
 					content: [{ type: "text", text: "boom\nbash: command failed (exit 1)" }],
 					details: { kind: "error", exitCode: 1, ...admitted("execute", "error") },
@@ -203,6 +205,7 @@ test("json stream: a chain's end frame is followed by a start/end pair per settl
 			result: grep?.result,
 			isError: false,
 			via: "gateway",
+			durationMs: 12,
 			outcome: "ok",
 			actionClass: "read",
 			decision: "allowed",
@@ -223,6 +226,7 @@ test("json stream: a chain's end frame is followed by a start/end pair per settl
 			result: bash?.result,
 			isError: true,
 			via: "gateway",
+			durationMs: 340,
 			outcome: "error",
 			actionClass: "execute",
 			decision: "allowed",

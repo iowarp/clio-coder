@@ -281,6 +281,7 @@ function chainStepFrames(
 			result: step.result,
 			isError: step.isError,
 			via: VIA_GATEWAY,
+			...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
 			...(step.outcome !== undefined ? { outcome: step.outcome } : {}),
 			...(step.actionClass !== undefined ? { actionClass: step.actionClass } : {}),
 			...(step.decision !== undefined ? { decision: step.decision } : {}),
