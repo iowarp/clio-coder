@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -232,6 +232,10 @@ describe("gateway MCP capabilities", () => {
 		await overridden.source.refresh("fake");
 		strictEqual(overridden.registry.get("mcp_fake__sleep" as ToolName)?.baseActionClass, "unknown");
 		strictEqual(overridden.registry.get("mcp_fake__fail" as ToolName)?.baseActionClass, "execute");
+		match(
+			overridden.source.authorityNote("mcp_fake__sleep") ?? "",
+			/trusted with action class execute; this tool runs as unknown: every call asks/u,
+		);
 	});
 
 	it("classifies an MCP tool trust first, for every caller, through one function", () => {

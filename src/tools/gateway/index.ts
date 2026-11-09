@@ -656,7 +656,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				`The catalog this came from is incomplete; list the server again with gateway(op="find", server="${metadata.serverId}", refresh=true).`,
 			);
 		}
-		const mcpNote = deps.mcp?.authorityNote(metadata.name);
+		const mcpNote = deps.mcp?.authorityNote(metadata.name, metadata.actionClass);
 		if (mcpNote) authority.push(mcpNote);
 		return {
 			name: metadata.name,
@@ -754,7 +754,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				`Extension${spec.sourceInfo?.extension ? ` ${spec.sourceInfo.extension.contentDigest.slice(0, 12)}` : ""}: an installed command run with JSON input on the workspace; its argv is classified like a bash command, and running it does not sandbox it.`,
 			);
 		}
-		const mcpNote = kind === "mcp" ? deps.mcp?.authorityNote(spec.name) : null;
+		const mcpNote = kind === "mcp" ? deps.mcp?.authorityNote(spec.name, spec.baseActionClass) : null;
 		if (mcpNote) authority.push(mcpNote);
 		const examples = gatewayExamples(spec, "", 3, allowed);
 		const advanced = direct ? advancedDirectParameters(spec) : null;

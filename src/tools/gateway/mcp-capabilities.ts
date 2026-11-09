@@ -26,7 +26,7 @@ import {
 	resolveMcpServers,
 	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
-import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../domains/safety/contract.js";
 import { mcpServerPolicyRefusal } from "../../domains/safety/denial.js";
 import { mcpTransportIdentity } from "../../domains/safety/information-flow.js";
@@ -249,8 +249,12 @@ export interface McpCapabilitySource {
 	 * its recorded catalog, handed out once, or null.
 	 */
 	takeCatalogChange(name: string): string | null;
-	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
-	authorityNote(name: string): string | null;
+	/**
+	 * One sentence of provenance and authority for describe, or null for a name this source does not own.
+	 * `actionClass` is the class describe shows for the tool (a worker's sealed class); absent, the
+	 * tool's own class is resolved from the declaration and its listing.
+	 */
+	authorityNote(name: string, actionClass?: ActionClass): string | null;
 	/**
 	 * The declared server that owns `name` under the longest-prefix rule, or
 	 * null when no declaration owns it. Callers that scope results to one server
@@ -1255,20 +1259,39 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			delete owner.catalogChange;
 			return line;
 		},
-		authorityNote(name) {
+		authorityNote(name, shownClass) {
 			const owner = ownerOf(name);
 			if (owner === null) return null;
 			const { declaration } = owner;
 			if (declaration.scope === "client") {
 				return `Local stdio MCP server ${declaration.id}, supplied by the ACP client for this session. Calls use the unknown action class, ask at default autonomy, and run at yolo. The server closes with the session.`;
 			}
-			return `Local stdio MCP server ${declaration.id} (${declaration.scope} scope, declared in ${declaration.path}), trusted with action class ${declaration.trust.actionClass}: ${
-				declaration.trust.actionClass === "unknown"
-					? "every call asks for approval and read-only denies it"
-					: declaration.trust.actionClass === "execute"
+			// The server's trust class is only its default: toolActionClasses and
+			// the Slurm defaults class tools one by one (K5), so the note names the
+			// class this tool is admitted under and any confirmation rule it carries.
+			const toolName = name.slice(`mcp_${declaration.id}__`.length);
+			const listed =
+				owner.tools.find((entry) => entry.name === toolName) ??
+				cachedCatalog(owner)?.tools.find((entry) => entry.name === toolName);
+			const actionClass =
+				shownClass ?? mcpToolActionClass(declaration, { name: toolName, annotations: listed?.annotations ?? null });
+			const serverClass = declaration.trust.actionClass;
+			const effect =
+				actionClass === "read"
+					? "calls run as reads at every autonomy level"
+					: actionClass === "execute"
 						? "calls are admitted like an unrecognized shell command"
-						: "calls run as reads at every autonomy level"
-			}; ${launchConfinement()}.`;
+						: actionClass === "destructive"
+							? "every call asks at default, runs at yolo, and read-only denies it"
+							: "every call asks for approval and read-only denies it";
+			const rule = mcpToolConfirmationRule(declaration, toolName);
+			const confirmation =
+				rule === null
+					? ""
+					: `; the ${rule} confirmation rule also asks the operator before every call below yolo, and read-only denies it`;
+			return `Local stdio MCP server ${declaration.id} (${declaration.scope} scope, declared in ${declaration.path}), trusted with action class ${serverClass}${
+				actionClass === serverClass ? "" : `; this tool runs as ${actionClass}`
+			}: ${effect}${confirmation}; ${launchConfinement()}.`;
 		},
 		ownerIdOf(name) {
 			return ownerOf(name)?.declaration.id ?? null;
