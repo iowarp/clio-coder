@@ -79,8 +79,11 @@ Do not manufacture dates for intermediate stages.
 
 New writing uses its actual publication date. Historical release notes and
 milestones use verified event dates. A newly authored guide about an old feature
-is still newly authored. The current builder does not emit article publication
-dates; do not imply a historical publishing record that it does not establish.
+is still newly authored. The builder takes article and guide dates from Git:
+`datePublished` is the commit that first added the page's source at its public
+path, and `dateModified` and the visible "Updated" date are the last commit that
+changed it. Do not imply a historical publishing record that Git does not
+establish.
 
 ## Comparisons and adoption
 

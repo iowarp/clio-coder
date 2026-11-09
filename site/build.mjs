@@ -130,6 +130,33 @@ function lastModified(files) {
 		return null;
 	}
 }
+// The first commit that added any of a page's sources at its public path. Older
+// drafts elsewhere were not published, so renames are not followed.
+function firstPublished(files) {
+	try {
+		const dates = execFileSync("git", ["log", "--diff-filter=A", "--format=%cI", "--", ...files], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		})
+			.split("\n")
+			.filter(Boolean);
+		return dates.length ? dates.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a)) : null;
+	} catch {
+		return null;
+	}
+}
+// The visible date is the commit's own calendar day, so no time zone shifts it.
+function updatedOn(lastmod) {
+	const [year, month, day] = lastmod.slice(0, 10).split("-").map(Number);
+	const label = new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+		year: "numeric",
+		month: "long",
+		day: "numeric",
+		timeZone: "UTC",
+	});
+	return `<time datetime="${lastmod}">${label}</time>`;
+}
 for (const [source, item] of Object.entries(imageVariants)) {
 	for (const asset of [{ path: source, sha256: item.sha256 }, ...item.variants]) {
 		if (!/^assets\/[a-z0-9/.-]+$/.test(asset.path)) throw new Error("Invalid responsive asset path.");
@@ -247,7 +274,13 @@ const faq = [
 	acceptedAnswer: { "@type": "Answer", text: plainText(answer) },
 }));
 if (faq.length < 3) throw new Error("The overview FAQ was not found; structured FAQ data would be empty.");
-function head(path, title, description, type = "WebPage", { lastmod = null, preview = social.default } = {}) {
+function head(
+	path,
+	title,
+	description,
+	type = "WebPage",
+	{ lastmod = null, published = null, preview = social.default } = {},
+) {
 	const url = `${product.origin}${path}`;
 	const article = articles.find((item) => item.url === path);
 	const image = social.images[preview];
@@ -276,6 +309,7 @@ function head(path, title, description, type = "WebPage", { lastmod = null, prev
 				isPartOf: { "@id": `${product.origin}/#site` },
 				inLanguage: "en",
 				primaryImageOfPage: { "@type": "ImageObject", url: imageUrl, width: image.width, height: image.height },
+				...(published ? { datePublished: published } : {}),
 				...(lastmod ? { dateModified: lastmod } : {}),
 			},
 			organization,
@@ -361,7 +395,7 @@ function head(path, title, description, type = "WebPage", { lastmod = null, prev
 <link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
 }
@@ -601,7 +635,20 @@ async function writePage(path, html, title, description, type, { sources = [], p
 	const file = join(out, path === "/" ? "index.html" : path.slice(1));
 	await mkdir(dirname(file), { recursive: true });
 	const lastmod = sources.length ? lastModified(sources) : null;
-	const result = shell(html, path, title, description, type, { lastmod, ...(preview ? { preview } : {}) });
+	const first = lastmod && type !== "WebPage" ? firstPublished(sources.filter((file) => file !== "product.json")) : null;
+	const published =
+		first && Date.parse(first) <= Date.parse(lastmod) ? first : lastmod && type !== "WebPage" ? lastmod : null;
+	const dated = html
+		.replace(
+			"<!-- updated-fact -->",
+			lastmod ? `<div><dt class="eyebrow">Updated</dt><dd>${updatedOn(lastmod)}</dd></div>` : "",
+		)
+		.replace("<!-- updated-line -->", lastmod ? `<span>Updated ${updatedOn(lastmod)}</span>` : "");
+	const result = shell(dated, path, title, description, type, {
+		lastmod,
+		published,
+		...(preview ? { preview } : {}),
+	});
 	if (/<!--\s*(?:site-|doc-|tutorial-|source-|version)/.test(result))
 		throw new Error(`Unresolved template slot in ${path}`);
 	await writeFile(file, result);
@@ -790,7 +837,8 @@ for (const item of articles) {
 		["Basis", item.basis ?? "Documented workflow"],
 	]
 		.map(([label, value]) => `<div><dt class="eyebrow">${label}</dt><dd>${escapeHtml(value)}</dd></div>`)
-		.join("");
+		.join("")
+		.concat("<!-- updated-fact -->");
 	const cover = item.cover
 		? captureFigure(item.cover)
 				.replace('class="guide-capture"', 'class="guide-capture guide-cover"')

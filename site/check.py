@@ -5,6 +5,7 @@ import re
 import struct
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
@@ -224,6 +225,12 @@ for url in [*urls, origin + '/404.html']:
             crumbs = next(node for node in graph if node.get('@type') == 'BreadcrumbList')['itemListElement']
             if [item['position'] for item in crumbs] != list(range(1, len(crumbs) + 1)) or crumbs[-1]['item'] != url:
                 errors.append(f'{path}: structured breadcrumbs are not a valid path to this page')
+        if entity.get('@type') in ('Article', 'TechArticle') and entity.get('dateModified'):
+            modified, published = entity['dateModified'], entity.get('datePublished')
+            if not published or datetime.fromisoformat(published) > datetime.fromisoformat(modified):
+                errors.append(f'{path}: datePublished must exist and not follow dateModified')
+            if f'<time datetime="{modified}">' not in source:
+                errors.append(f'{path}: the visible Updated date differs from dateModified')
         if path.startswith(('/tutorials/', '/research/')) and (entity.get('@type') != 'Article' or not entity.get('headline') or not entity.get('author')):
             errors.append(f'{path}: tutorial article metadata is incomplete')
         if path == '/':
