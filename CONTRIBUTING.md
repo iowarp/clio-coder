@@ -184,6 +184,11 @@ new candidate commit; do not rebuild a previously qualified commit.
 Prereleases use npm `beta` and a GitHub prerelease, and keep the development
 branch, stable `main`, and stable site.
 
+To check the command without CI, `release:next status --record <file>` saves
+every GitHub and npm read, and `release:next --replay <file>` decides the next
+step from that file offline and writes nothing. The release contract tests walk
+every rehearse and release position this way.
+
 `pnpm run release` and `pnpm run release:rehearse` remain as the previous
 interactive flow and use the same hardened publisher. Prove Windows changes on
 a native Windows clone with `core.autocrlf=false` before pushing them.
