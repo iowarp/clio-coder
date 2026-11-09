@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
@@ -12,7 +12,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { installResearchStopSignals, runResearchCommand } from "../../src/cli/research.js";
@@ -43,11 +43,17 @@ import {
 	parseAgentRunFrames,
 	parseJournal,
 	type ResearchCampaign,
+	ResearchResumeError,
+	readJournal,
 	recomputeCampaign,
+	researchElapsedMs,
+	resumeResearchCampaign,
 	runResearchCampaign,
 	summarizeCampaign,
 } from "../../src/domains/research/index.js";
+import { runObjective } from "../../src/domains/research/measure.js";
 import { effectiveYoloConfinement, YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
+import type { DeclaredCheck } from "../../src/tools/verify/catalog.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
@@ -1055,5 +1061,167 @@ describe("research review fixes", () => {
 		const firstTests = claims.hypothesisTests.filter((test) => test.hypothesis === first.id);
 		ok(firstTests.length >= 2, "the second campaign's run is bound to the first campaign's hypothesis");
 		ok(claims.hypothesisTests.every((test) => test.outcome === "tested" && test.claim === undefined));
+	});
+});
+
+describe("research resume", () => {
+	const scoreRepo = (): string =>
+		scratchRepo({
+			"value.txt": "100\n",
+			"score.js": scoreJs,
+			".clio-coder/verifiers.yaml": JSON.stringify({ version: 2, checks: [commandCheck("score", ["node", "score.js"])] }),
+		});
+	const counting = (counter: { runs: number }) => (check: DeclaredCheck, metric: string, worktree: string) => {
+		counter.runs += 1;
+		return runObjective(check, metric, worktree);
+	};
+
+	it("counts wall time from each start to its stop, or to the last event of a run that died", () => {
+		const t0 = Date.parse("2026-01-01T00:00:00.000Z");
+		const at = (seconds: number): string => new Date(t0 + seconds * 1000).toISOString();
+		strictEqual(
+			researchElapsedMs([
+				{ type: "opened", at: at(0), base: "b", ref: "r" },
+				{ type: "stopped", at: at(60), reason: "stopped", detail: "", best: "b" },
+				{ type: "resumed", at: at(120), best: "b", iterations: 1, elapsedMs: 60_000, interrupted: [] },
+				{ type: "iteration-started", at: at(150), iteration: 2, parent: "b", worktree: "w" },
+				{ type: "resumed", at: at(300), best: "b", iterations: 2, elapsedMs: 90_000, interrupted: [2] },
+				{ type: "stopped", at: at(310), reason: "max-iterations", detail: "", best: "b" },
+			]),
+			100_000,
+		);
+	});
+
+	it("continues a stopped campaign at its next iteration from the kept commit, without a second A/A check", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scoreRepo();
+		const campaign = openScore(repo, { maxIterations: 3, allowUnpriced: false });
+		const controller = new AbortController();
+		const first = { runs: 0 };
+		let calls = 0;
+		const outcome = await runResearchCampaign(campaign, {
+			signal: controller.signal,
+			measure: counting(first),
+			agent: async (request) => {
+				calls += 1;
+				if (calls === 1) {
+					writeFileSync(join(request.worktree, "value.txt"), "50\n");
+					return done;
+				}
+				controller.abort();
+				return { ...done, exitCode: 130, outcome: "interrupted" };
+			},
+		});
+		strictEqual(outcome.reason, "stopped");
+		const kept = summarizeCampaign(campaign.project, campaign.id).best;
+		strictEqual(git(repo, "show", `${kept}:value.txt`), "50");
+
+		const second = { runs: 0 };
+		const parents: string[] = [];
+		const resumed = await resumeResearchCampaign(campaign, {
+			measure: counting(second),
+			agent: async (request) => {
+				parents.push(git(request.worktree, "rev-parse", "HEAD"));
+				writeFileSync(join(request.worktree, "value.txt"), "20\n");
+				return done;
+			},
+		});
+		strictEqual(resumed.reason, "max-iterations");
+		deepStrictEqual(parents, [kept]);
+		// One run on the best commit to learn the check output, then the iteration's pairs; no A/A pairs.
+		strictEqual(second.runs, 1 + 2 * campaign.objective.trials);
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["ratcheted", "interrupted", "ratcheted"],
+		);
+		strictEqual(view.stop?.reason, "max-iterations");
+		strictEqual(git(repo, "show", `${view.best}:value.txt`), "20");
+		const events = readJournal(campaign.project, campaign.id).events;
+		strictEqual(events.filter((event) => event.type === "aa").length, 1);
+		strictEqual(events.filter((event) => event.type === "resumed").length, 1);
+		strictEqual(worktreeCount(repo), 1);
+
+		await rejects(
+			resumeResearchCampaign(campaign, { agent: async () => done }),
+			(error: Error) => error instanceof ResearchResumeError && /budget is spent \(max-iterations/u.test(error.message),
+		);
+	});
+
+	it("refuses a campaign another process holds, then recovers one whose process died mid-iteration", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scoreRepo();
+		const campaign = openScore(repo, { maxIterations: 2, allowUnpriced: false });
+		const controller = new AbortController();
+		await runResearchCampaign(campaign, {
+			signal: controller.signal,
+			agent: async () => {
+				controller.abort();
+				return { ...done, exitCode: 130, outcome: "interrupted" };
+			},
+		});
+		// What a killed process leaves: no archive or stop for the iteration in flight, and its worktrees on disk.
+		const dir = join(campaign.project, ".clio-coder", "research", campaign.id);
+		const journalPath = join(dir, "journal.jsonl");
+		const lines = readFileSync(journalPath, "utf8").trim().split("\n");
+		writeFileSync(journalPath, `${lines.filter((line) => !/"type":"(archived|stopped)"/u.test(line)).join("\n")}\n`);
+		const leftover = join(repo, ".clio-coder", "worktrees", `research-${campaign.id}-base`);
+		git(repo, "worktree", "add", "--detach", "--quiet", leftover, campaign.base);
+		strictEqual(summarizeCampaign(campaign.project, campaign.id).state, "running");
+
+		const lockPath = join(dir, "run.lock");
+		writeFileSync(lockPath, `${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: null })}\n`);
+		const cwd = process.cwd();
+		const errors: string[] = [];
+		t.mock.method(process.stderr, "write", (chunk: unknown) => {
+			errors.push(String(chunk));
+			return true;
+		});
+		process.chdir(repo);
+		try {
+			strictEqual(await runResearchCommand(["resume", campaign.id]), 1);
+			strictEqual(await runResearchCommand(["resume"]), 2);
+		} finally {
+			process.chdir(cwd);
+		}
+		ok(
+			errors.some((line) => line.includes(`is already running in process ${process.pid}`)),
+			errors.join("\n"),
+		);
+		rmSync(lockPath);
+
+		const outcome = await resumeResearchCampaign(campaign, { agent: async () => done });
+		strictEqual(outcome.reason, "max-iterations");
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["interrupted", "no-op"],
+		);
+		ok(!existsSync(lockPath));
+		strictEqual(worktreeCount(repo), 1);
+	});
+
+	it("refuses when something else moved the research branch", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scoreRepo();
+		const campaign = openScore(repo, { maxIterations: 2, allowUnpriced: false });
+		const controller = new AbortController();
+		await runResearchCampaign(campaign, {
+			signal: controller.signal,
+			agent: async () => {
+				controller.abort();
+				return { ...done, exitCode: 130, outcome: "interrupted" };
+			},
+		});
+		writeFileSync(join(repo, "value.txt"), "1\n");
+		git(repo, "commit", "-qam", "elsewhere");
+		git(repo, "update-ref", campaign.ref, "HEAD");
+		await rejects(
+			resumeResearchCampaign(campaign, { agent: async () => done }),
+			(error: Error) => error instanceof ResearchResumeError && /something else moved it/u.test(error.message),
+		);
 	});
 });

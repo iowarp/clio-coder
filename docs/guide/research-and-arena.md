@@ -144,6 +144,20 @@ clio-coder research report <id>       # regrade every verdict from the raw sampl
 exits 1 when any grade disagrees with the journal, so a campaign can be audited after the fact. In the terminal UI,
 `/research` shows the same campaigns and timelines read-only.
 
+### Resume a stopped campaign
+
+```bash
+clio-coder research resume <id>
+```
+
+`research resume` picks a campaign up where its journal ends: one you stopped, one the wall budget or an error ended, or
+one whose process died. The spec and budget stay the same, and the iterations, spend and wall time already used count
+against it. The A/A check is not run again; the objective runs once on the best commit and every gate runs there too, so
+the output the checks create is known before the next iteration commits. An iteration no run finished is archived as
+`interrupted`, and the journal gets a `resumed` event. Resume is refused while another process runs the campaign
+(`.clio-coder/research/<id>/run.lock`), when its A/A check called a change, when its budget is already spent, and when
+something other than the campaign moved `clio/research/<id>`.
+
 Research also writes to the [claims ledger](../architecture/evidence-and-memory.md#claims-ledger):
 - Judged gates (`numeric-compare`, `reproduce`) append claims.
 - Each measured iteration records the agent's hypothesis and prediction.
@@ -206,7 +220,7 @@ campaign, one per project at a time. See [Graphical application](gui.md#research
 
 | What | Where |
 | --- | --- |
-| Research campaigns | `.clio-coder/research/<id>/`: `campaign.json` (the frozen spec, checks with their digest, seed and Clio version), `journal.jsonl`, `samples/` and `slate.json` |
+| Research campaigns | `.clio-coder/research/<id>/`: `campaign.json` (the frozen spec, checks with their digest, seed and Clio version), `journal.jsonl`, `samples/`, `slate.json` and, while a run holds it, `run.lock` |
 | Research worktrees | `.clio-coder/worktrees/research-<id>-base/` and `research-<id>-it-NNNN/`, removed after grading unless `--keep` |
 | Research results | The branch `clio/research/<id>` |
 | Arena matches | `.clio-coder/arena/<match-id>/`: `match.json`, each contender's `contender-N.ndjson` stream and `contender-N.diff`, and `vote.json` |
@@ -216,8 +230,8 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
 ## Limits
 
-- Research optimizes one metric of one check at a time and runs one candidate per iteration. Resuming a stopped campaign,
-  parameter sweeps and parallel candidates are not in 0.7.0.
+- Research optimizes one metric of one check at a time and runs one candidate per iteration. Parameter sweeps and
+  parallel candidates are not in 0.7.0. `research resume` keeps the campaign's budget; it cannot raise it.
 - `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs. The pin also reaches every `clio-coder` such a run starts from bash, and setting it to another value does not widen it.
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
 - Arena contenders do not inherit your whole environment. Each gets the safe command variables (`PATH`, `HOME`, `USER`,
@@ -238,7 +252,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
 | Command | 0 | 1 | 2 | Signals |
 | --- | --- | --- | --- | --- |
-| `research start` | A budget cap ended the campaign | An error, a noisy A/A check, or unenforceable spend | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
+| `research start`, `research resume` | A budget cap ended the campaign | An error, a noisy A/A check, unenforceable spend, or a refused resume | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
 | `research report` | Every regrade agrees with the journal | A regrade disagrees, or the campaign is missing | Usage | |
 | `arena run` | Every contender finished | The match failed | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
 | `arena show`, `vote` | Done | Unknown match, reveal before a vote, or a second vote without `--replace` | Usage | |

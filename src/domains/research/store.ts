@@ -27,6 +27,7 @@ const JOURNAL_TYPES = new Set<ResearchJournalEvent["type"]>([
 	"archived",
 	"recorded",
 	"stopped",
+	"resumed",
 ]);
 
 export function isResearchCampaignId(id: string): boolean {

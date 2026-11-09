@@ -7,8 +7,10 @@
  * journal before the next begins. Budget stops are checked before each iteration, and an abort writes `stopped`.
  */
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readClioVersion } from "../../core/package-root.js";
+import { StateFileLockTimeoutError, withStateFileLock } from "../../core/state-file-lock.js";
 import { clampTimerDelayMs } from "../../core/timers.js";
 import type { ToolResult } from "../../tools/registry.js";
 import { gitCheckoutRoot } from "../../tools/task-worktree.js";
@@ -57,8 +59,10 @@ import {
 	finishIterationRecord,
 	researchHypothesisVerdict,
 } from "./record.js";
+import { planResearchResume, type ResearchResumeState } from "./resume.js";
 import {
 	appendJournal,
+	campaignDir,
 	newResearchCampaignId,
 	readJournal,
 	samplesName,
@@ -213,10 +217,114 @@ function firstLine(text: string): string {
 	return (text.split("\n").find((line) => line.trim().length > 0) ?? "").trim().slice(0, 300);
 }
 
+/** The campaign is running in another process, or its journal says it cannot go on. */
+export class ResearchResumeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ResearchResumeError";
+	}
+}
+
+/**
+ * Hold `<campaign>/run.lock` for the whole run, so a second `start` or `resume` of the same campaign is refused rather
+ * than racing it. The lock records the owner's pid and birth token; one left by a process that died is reclaimed.
+ */
+async function withCampaignRun<T>(campaign: ResearchCampaign, fn: () => Promise<T>): Promise<T> {
+	const target = join(campaignDir(campaign.project, campaign.id), "run");
+	try {
+		return await withStateFileLock(target, fn, { timeoutMs: 0, note: `research ${campaign.id}` });
+	} catch (error) {
+		if (!(error instanceof StateFileLockTimeoutError)) throw error;
+		let owner = "another process";
+		try {
+			const pid = (JSON.parse(readFileSync(`${target}.lock`, "utf8")) as { pid?: unknown }).pid;
+			if (typeof pid === "number") owner = `process ${pid}`;
+		} catch {
+			// The holder finished between the refusal and this read; the message still holds.
+		}
+		throw new ResearchResumeError(`campaign ${campaign.id} is already running in ${owner}; stop it first`);
+	}
+}
+
+/**
+ * Remove what a run that did not finish left in `.clio-coder/worktrees/`: always the base worktree, which the next run
+ * recreates at the best commit, and every iteration worktree unless the campaign keeps them.
+ */
+function pruneCampaignWorktrees(campaign: ResearchCampaign): void {
+	const root = campaign.project;
+	const parent = researchWorktreeParent(root);
+	if (!existsSync(parent)) return;
+	const base = `research-${campaign.id}-base`;
+	for (const name of readdirSync(parent)) {
+		if (!name.startsWith(`research-${campaign.id}-`) || (campaign.keep && name !== base)) continue;
+		const path = join(parent, name);
+		try {
+			removeResearchWorktree(root, path);
+		} catch {
+			// Not a registered worktree any more; the directory alone would block `git worktree add`.
+		}
+		rmSync(path, { recursive: true, force: true });
+	}
+}
+
 /** Run the A/A check and the iterations until a budget stop, an abort or an error. */
 export async function runResearchCampaign(
 	campaign: ResearchCampaign,
 	deps: ResearchLoopDeps,
+): Promise<ResearchRunOutcome> {
+	return withCampaignRun(campaign, () => runCampaignLoop(campaign, deps, null));
+}
+
+/**
+ * Pick a stopped or abandoned campaign up again where its journal ends. Refused while another process runs it, when
+ * its A/A check called a change, when its budget is already spent, or when something else moved its branch.
+ * Iterations no run finished are archived as interrupted, a `resumed` event records what carried over, and the loop
+ * continues at the next iteration from the best commit with the same budget.
+ */
+export async function resumeResearchCampaign(
+	campaign: ResearchCampaign,
+	deps: ResearchLoopDeps,
+): Promise<ResearchRunOutcome> {
+	return withCampaignRun(campaign, async () => {
+		const project = campaign.project;
+		let refHead: string | null;
+		try {
+			refHead = resolveCommit(project, campaign.ref);
+		} catch {
+			refHead = null;
+		}
+		const plan = planResearchResume(campaign, readJournal(project, campaign.id).events, refHead);
+		if (!plan.ok) throw new ResearchResumeError(`cannot resume ${campaign.id}: ${plan.reason}`);
+		pruneCampaignWorktrees(campaign);
+		const at = (deps.now ?? (() => new Date()))().toISOString();
+		for (const iteration of plan.interrupted)
+			appendJournal(project, campaign.id, {
+				type: "archived",
+				at,
+				iteration,
+				reason: "interrupted",
+				detail: "the campaign process ended before this iteration finished",
+			});
+		const { best, iterations, elapsedMs } = plan.state;
+		appendJournal(project, campaign.id, {
+			type: "resumed",
+			at,
+			best,
+			iterations,
+			elapsedMs,
+			interrupted: plan.interrupted,
+		});
+		deps.log?.(
+			`resumed at ${best.slice(0, 12)} after ${iterations} iteration(s) and ${(elapsedMs / 60_000).toFixed(1)} minute(s)${plan.interrupted.length > 0 ? `; archived unfinished iteration(s) ${plan.interrupted.join(", ")}` : ""}`,
+		);
+		return runCampaignLoop(campaign, deps, plan.state);
+	});
+}
+
+async function runCampaignLoop(
+	campaign: ResearchCampaign,
+	deps: ResearchLoopDeps,
+	resume: ResearchResumeState | null,
 ): Promise<ResearchRunOutcome> {
 	const measure = deps.measure ?? runObjective;
 	const gate = deps.gate ?? runGateIn;
@@ -235,6 +343,9 @@ export async function runResearchCampaign(
 	const gateChecks = [...gateIds].flatMap((id) => campaign.checks.filter((check) => check.id === id));
 	const metric = campaign.objective.metric;
 	const started = clock();
+	// Wall time earlier runs of a resumed campaign already used.
+	const priorMs = resume?.elapsedMs ?? 0;
+	const elapsed = (): number => priorMs + clock() - started;
 	// One signal for every phase: the operator's stop, or the campaign-wide wall deadline. Every agent run,
 	// measurement and gate is cut off by it, and nothing graded after it is ratcheted.
 	const wallMs = campaign.budget.maxWallMinutes === undefined ? undefined : campaign.budget.maxWallMinutes * 60_000;
@@ -252,12 +363,12 @@ export async function runResearchCampaign(
 						deadlineHit = true;
 						control.abort(new Error("research wall deadline"));
 					},
-					Math.max(1, clampTimerDelayMs(wallMs)),
+					Math.max(1, clampTimerDelayMs(wallMs - priorMs)),
 				);
 	deadlineTimer?.unref?.();
-	const costs: ResearchCost[] = [];
-	let best = campaign.base;
-	let iterations = 0;
+	const costs: ResearchCost[] = [...(resume?.costs ?? [])];
+	let best = resume?.best ?? campaign.base;
+	let iterations = resume?.iterations ?? 0;
 	const baseWorktree = join(researchWorktreeParent(root), `research-${campaign.id}-base`);
 	const openWorktrees = new Set<string>();
 	// Untracked files the declared checks create when they run (interpreter caches, build output). An agent that runs
@@ -274,7 +385,7 @@ export async function runResearchCampaign(
 		return { reason, detail, best, iterations };
 	};
 	const stoppedByOperator = (): boolean => operator?.aborted === true;
-	const pastDeadline = (): boolean => deadlineHit || (wallMs !== undefined && clock() - started >= wallMs);
+	const pastDeadline = (): boolean => deadlineHit || (wallMs !== undefined && elapsed() >= wallMs);
 	/** Why the campaign must stop now, if it must: the operator first, then the wall deadline. */
 	const halt = (): { reason: "stopped" | "max-wall-minutes"; archive: ResearchArchiveReason } | null => {
 		if (stoppedByOperator()) return { reason: "stopped", archive: "interrupted" };
@@ -292,48 +403,58 @@ export async function runResearchCampaign(
 		openWorktrees.add(baseWorktree);
 		const baseUntracked = untrackedEntries(baseWorktree);
 
-		// A/A: base against base, the same number of pairs an iteration takes.
-		log(`A/A check: ${campaign.objective.trials} interleaved pairs of '${objectiveCheck.id}' on the base`);
-		const aa = await measurePairs(
-			campaign.objective.trials,
-			() => measure(objectiveCheck, metric, baseWorktree, signal),
-			aborted,
-		);
-		const aaHalt = halt();
-		if (aaHalt !== null) return finish(aaHalt.reason, haltDetail("during the A/A check"));
-		if (!aa.ok) return finish("error", `the objective check failed on the base: ${aa.reason}`);
-		const aaSamples = writeSamples(project, campaign.id, {
-			iteration: "aa",
-			metric,
-			baseCommit: best,
-			candidateCommit: best,
-			pairs: aa.pairs,
-		});
-		const aaGrade = grade({
-			direction: campaign.objective.direction,
-			minImprovement: campaign.objective.minImprovement,
-			base: aa.pairs.map((pair) => pair.base),
-			candidate: aa.pairs.map((pair) => pair.candidate),
-			seed: campaign.seed,
-			resamples: campaign.resamples,
-		});
-		const noisy = aaIsNoisy(aaGrade);
-		journal({ type: "aa", at: at(), samples: aaSamples, grade: aaGrade, noisy, allowed: !noisy || campaign.allowNoisy });
-		log(`A/A: ${aaLabel(aaGrade)} (${describeGrade(aaGrade, campaign.objective)})`);
-		if (noisy && !campaign.allowNoisy)
-			return finish(
-				"noisy",
-				`the A/A check already calls a change (${describeGrade(aaGrade, campaign.objective)}); raise --trials, quiet the machine, or pass --allow-noisy`,
+		if (resume?.aaDone) {
+			// The journal keeps the A/A grade. One objective run on the best commit re-learns the output it creates,
+			// which a dead process held only in memory.
+			log(`learning check output: one run of '${objectiveCheck.id}' and the gates on ${best.slice(0, 12)}`);
+			const once = await measure(objectiveCheck, metric, baseWorktree, signal);
+			const onceHalt = halt();
+			if (onceHalt !== null) return finish(onceHalt.reason, haltDetail("while running the objective on the best commit"));
+			if (!once.ok) return finish("error", `the objective check failed on the best commit: ${once.reason}`);
+		} else {
+			// A/A: base against base, the same number of pairs an iteration takes.
+			log(`A/A check: ${campaign.objective.trials} interleaved pairs of '${objectiveCheck.id}' on the base`);
+			const aa = await measurePairs(
+				campaign.objective.trials,
+				() => measure(objectiveCheck, metric, baseWorktree, signal),
+				aborted,
 			);
+			const aaHalt = halt();
+			if (aaHalt !== null) return finish(aaHalt.reason, haltDetail("during the A/A check"));
+			if (!aa.ok) return finish("error", `the objective check failed on the base: ${aa.reason}`);
+			const aaSamples = writeSamples(project, campaign.id, {
+				iteration: "aa",
+				metric,
+				baseCommit: best,
+				candidateCommit: best,
+				pairs: aa.pairs,
+			});
+			const aaGrade = grade({
+				direction: campaign.objective.direction,
+				minImprovement: campaign.objective.minImprovement,
+				base: aa.pairs.map((pair) => pair.base),
+				candidate: aa.pairs.map((pair) => pair.candidate),
+				seed: campaign.seed,
+				resamples: campaign.resamples,
+			});
+			const noisy = aaIsNoisy(aaGrade);
+			journal({ type: "aa", at: at(), samples: aaSamples, grade: aaGrade, noisy, allowed: !noisy || campaign.allowNoisy });
+			log(`A/A: ${aaLabel(aaGrade)} (${describeGrade(aaGrade, campaign.objective)})`);
+			if (noisy && !campaign.allowNoisy)
+				return finish(
+					"noisy",
+					`the A/A check already calls a change (${describeGrade(aaGrade, campaign.objective)}); raise --trials, quiet the machine, or pass --allow-noisy`,
+				);
+		}
 		// Each gate runs once on the base too, so what it creates is known before the first iteration commits.
 		for (const check of gateChecks) if (check.id !== objectiveCheck.id) await gate(baseWorktree, check, signal);
 		const learnHalt = halt();
 		if (learnHalt !== null) return finish(learnHalt.reason, haltDetail("while running the gates on the base"));
 		learnArtifacts(baseWorktree, baseUntracked);
 
-		const seenTrees = new Set([treeOf(root, best)]);
+		const seenTrees = new Set([treeOf(root, campaign.base), treeOf(root, best), ...(resume?.seenTrees ?? [])]);
 		for (;;) {
-			const state = { iterations, elapsedMs: clock() - started, costs };
+			const state = { iterations, elapsedMs: elapsed(), costs };
 			const stop = budgetStop(campaign.budget, state);
 			const loopHalt = halt();
 			if (loopHalt?.reason === "stopped") return finish("stopped", "interrupted");

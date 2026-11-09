@@ -10,9 +10,12 @@ import {
 	type ResearchAutonomy,
 	type ResearchCampaignView,
 	type ResearchDirection,
+	ResearchResumeError,
 	type ResearchRunOutcome,
+	readCampaign,
 	recomputeCampaign,
 	researchProjectRoot,
+	resumeResearchCampaign,
 	runResearchCampaign,
 	summarizeCampaign,
 } from "../domains/research/index.js";
@@ -22,6 +25,7 @@ import { installStopSignals, type StopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
   clio-coder research start --check <id> --metric <key> --direction min|max --max-iterations <N> [options]
+  clio-coder research resume <id> [--json]
   clio-coder research status [<id>] [--json]
   clio-coder research report <id> [--json]
   clio-coder research list [--json]
@@ -77,6 +81,14 @@ budget-unenforceable. Ctrl-C, SIGTERM and SIGHUP stop the campaign cleanly:
 the agent run is stopped and awaited, the stop is journaled and the worktrees
 are removed.
 
+resume picks a stopped campaign up again where its journal ends, with the
+same spec and budget: the iteration count, spend and wall time already used
+carry over, the A/A check is not run again (the objective runs once on the
+best commit to learn what the checks create, and every gate does too), and an
+iteration no run finished is archived as interrupted. It is refused while
+another process runs the campaign, when its A/A check called a change, when
+its budget is already spent, or when something else moved clio/research/<id>.
+
 Everything lands under .clio-coder/research/<id>/: campaign.json (the frozen
 spec and checks), journal.jsonl (one event per step) and samples/ (the raw
 measurements). report regrades every iteration from those samples with the
@@ -85,7 +97,7 @@ checks (numeric-compare, reproduce) also record claims, and each measured
 iteration records the agent's plan as a hypothesis; see clio-coder claims.
 
 Exit codes: 0 when a budget cap ended the campaign, 1 on an error, a noisy
-A/A check or unenforceable spend, 2 on a usage error, 130 on Ctrl-C, 143 on SIGTERM, 129 on SIGHUP.`;
+A/A check, unenforceable spend or a refused resume, 2 on a usage error, 130 on Ctrl-C, 143 on SIGTERM, 129 on SIGHUP.`;
 
 interface StartFlags {
 	check?: string;
@@ -268,27 +280,73 @@ async function start(args: ReadonlyArray<string>, json: boolean): Promise<number
 		printError(`research start: ${error instanceof Error ? error.message : String(error)}`);
 		return 1;
 	}
-	const log = (line: string): void => {
-		process.stderr.write(`research ${campaign.id}: ${line}\n`);
-	};
+	const log = campaignLog(campaign.id);
 	log(
 		`opened at ${campaign.base.slice(0, 12)} on ${campaign.ref.replace("refs/heads/", "")}, agent autonomy ${campaign.agent.autonomy === "yolo" ? "yolo (contained)" : "default"}`,
 	);
+	return driveCampaign(campaign, json, log, runResearchCampaign);
+}
+
+function campaignLog(id: string): (line: string) => void {
+	return (line) => {
+		process.stderr.write(`research ${id}: ${line}\n`);
+	};
+}
+
+/** Run or resume the campaign under the stop signals, then print its status and map the outcome to an exit code. */
+async function driveCampaign(
+	campaign: ReturnType<typeof readCampaign>,
+	json: boolean,
+	log: (line: string) => void,
+	run: typeof runResearchCampaign,
+): Promise<number> {
 	const controller = new AbortController();
 	const stops = installResearchStopSignals(controller, log);
 	let outcome: ResearchRunOutcome;
 	try {
-		outcome = await runResearchCampaign(campaign, {
+		outcome = await run(campaign, {
 			agent: createSpawnAgentRunner(),
 			log,
 			signal: controller.signal,
 		});
+	} catch (error) {
+		if (!(error instanceof ResearchResumeError)) throw error;
+		printError(`research: ${error.message}`);
+		return 1;
 	} finally {
 		stops.dispose();
 	}
 	const view = summarizeCampaign(campaign.project, campaign.id);
 	console.log(json ? JSON.stringify(viewJson(view), null, 2) : campaignStatusLines(view).join("\n"));
 	return exitFor(outcome, stops.exitCode());
+}
+
+async function resume(operands: ReadonlyArray<string>, json: boolean): Promise<number> {
+	const usage = HELP.split("\n")[2];
+	const [id, extra] = operands;
+	if (id === undefined || extra !== undefined) {
+		printError("research resume: name one campaign id", usage);
+		return 2;
+	}
+	if (!isResearchCampaignId(id)) {
+		printError(`research resume: '${id}' is not a campaign id (r<yyyymmdd>-<hhmmss>-<hex>)`, usage);
+		return 2;
+	}
+	let campaign: ReturnType<typeof readCampaign>;
+	try {
+		campaign = readCampaign(researchProjectRoot(process.cwd()), id);
+	} catch (error) {
+		printError(`research resume: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+	if (campaign.agent.autonomy === "yolo") {
+		const refusal = containedYoloRefusal("research");
+		if (refusal !== null) {
+			printError(`research resume: ${refusal}`);
+			return 2;
+		}
+	}
+	return driveCampaign(campaign, json, campaignLog(campaign.id), resumeResearchCampaign);
 }
 
 export async function runResearchCommand(args: string[]): Promise<number> {
@@ -300,10 +358,11 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 	const rest = args.filter((arg) => arg !== "--json");
 	const [action = "list", ...operands] = rest;
 	if (action === "start") return start(operands, json);
+	if (action === "resume") return resume(operands, json);
 	const project = researchProjectRoot(process.cwd());
 	if (action === "list") {
 		if (operands.length > 0) {
-			printError(`research list: unexpected argument '${operands[0]}'`, HELP.split("\n")[4]);
+			printError(`research list: unexpected argument '${operands[0]}'`, HELP.split("\n")[5]);
 			return 2;
 		}
 		const views = listCampaigns(project);
@@ -333,7 +392,7 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 		if (operands.length > 1 || (action === "report" && operands.length === 0)) {
 			printError(
 				`research ${action}: name ${action === "report" ? "one campaign id" : "at most one campaign id"}`,
-				HELP.split("\n")[action === "report" ? 3 : 2],
+				HELP.split("\n")[action === "report" ? 4 : 3],
 			);
 			return 2;
 		}

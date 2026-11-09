@@ -144,6 +144,10 @@ export function foldJournal(
 				stop = { reason: event.reason, detail: event.detail, at: event.at };
 				best = event.best;
 				break;
+			case "resumed":
+				stop = null;
+				best = event.best;
+				break;
 			case "opened":
 				break;
 		}

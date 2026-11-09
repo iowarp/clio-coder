@@ -179,7 +179,13 @@ export type ResearchJournalEvent =
 			verdict?: ResearchHypothesisVerdict;
 			claims: string[];
 	  }
-	| { type: "stopped"; at: string; reason: ResearchStopReason; detail: string; best: string };
+	| { type: "stopped"; at: string; reason: ResearchStopReason; detail: string; best: string }
+	/**
+	 * `research resume` picked the campaign up again from the journal: the iteration count, the best commit and the
+	 * wall time already used carry over, and `interrupted` lists the iterations it archived because no earlier run
+	 * finished them.
+	 */
+	| { type: "resumed"; at: string; best: string; iterations: number; elapsedMs: number; interrupted: number[] };
 
 export type ResearchJournalEventType = ResearchJournalEvent["type"];
 
