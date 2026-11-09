@@ -4,8 +4,10 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runGuiCommand } from "../../src/cli/gui.js";
+import { installRootFinding } from "../../src/cli/doctor-state-size.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { inactiveInstallerRecord, inspectInstallation } from "../../src/domains/lifecycle/install-method.js";
 import { createLifecycleHome, type LifecycleHome, runInHome, writeLiveSession } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
@@ -425,6 +427,47 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(byLabel.get("Data")?.status, "remove");
 			strictEqual(byLabel.get("State")?.path, temp.stateDir);
 			strictEqual(byLabel.get("Launcher")?.status, "absent");
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("treats the running installer root as active when a symlink leads to it", async () => {
+		const temp = home();
+		try {
+			const real = join(temp.root, "real-share");
+			const link = join(temp.root, "link-share");
+			mkdirSync(real, { recursive: true });
+			symlinkSync(real, link);
+			// install.sh records the logical paths it was given; the running entry resolves to the real ones.
+			const root = join(link, "clio-coder-install");
+			const current = join(root, "versions", "0.6.2");
+			const pkg = join(real, "clio-coder-install", "versions", "0.6.2", "lib", "node_modules", "@iowarp", "clio-coder");
+			mkdirSync(join(pkg, "dist", "cli"), { recursive: true });
+			writeFileSync(join(pkg, "dist", "cli", "index.js"), "");
+			writeFileSync(join(pkg, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.6.2"}');
+			writeFileSync(
+				join(root, "install.json"),
+				JSON.stringify({
+					schema: 2,
+					kind: "clio-coder-installer",
+					current,
+					node: join(root, "runtime", "node-v24", "bin", "node"),
+					launcher: launcherPath(temp),
+				}),
+			);
+			const running = inspectInstallation(
+				join(current, "lib", "node_modules", "@iowarp", "clio-coder", "dist", "cli", "index.js"),
+			);
+			strictEqual(running.kind, "installer");
+			// Even a caller that missed the manifest never calls the root it runs from inactive.
+			temp.env.CLIO_CODER_INSTALL_DIR = root;
+			const { code, stdout } = await runInHome(temp, async () => {
+				strictEqual(inactiveInstallerRecord({ ...running, kind: "npm", installer: undefined }), null);
+				strictEqual(installRootFinding({ ...running, kind: "npm", installer: undefined }), null);
+				return 0;
+			});
+			strictEqual(code, 0, stdout);
 		} finally {
 			temp.cleanup();
 		}

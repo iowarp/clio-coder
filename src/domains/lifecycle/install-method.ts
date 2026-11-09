@@ -82,6 +82,30 @@ export interface Installation {
 	installer?: InstallerRecord;
 }
 
+/** The resolved path; a missing tail is kept as written under its nearest resolved ancestor. */
+export function realPathOf(path: string): string {
+	const absolute = resolve(path);
+	try {
+		return realpathSync(absolute);
+	} catch {
+		const parent = dirname(absolute);
+		return parent === absolute ? absolute : join(realPathOf(parent), basename(absolute));
+	}
+}
+
+function strictlyInside(parent: string, child: string): boolean {
+	const rel = relative(parent, child);
+	return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** True when `child` is `parent` or inside it, comparing resolved paths so a symlinked home matches. */
+export function pathWithin(parent: string, child: string): boolean {
+	const real = realPathOf(parent);
+	const target = realPathOf(child);
+	const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
+	return fold(real) === fold(target) || strictlyInside(fold(real), fold(target));
+}
+
 /** The installer manifest under `installRoot`, or null when there is none or it is not ours. */
 export function readInstallerRecord(installRoot: string): InstallerRecord | null {
 	let raw: unknown;
@@ -94,10 +118,12 @@ export function readInstallerRecord(installRoot: string): InstallerRecord | null
 	const record = raw as Record<string, unknown>;
 	if (record.schema !== 1 && record.schema !== 2) return null;
 	const text = (key: string): string => (typeof record[key] === "string" ? (record[key] as string) : "");
-	const owned = (folder: string, file: string) => {
-		const rel = relative(join(installRoot, folder), file);
-		return isAbsolute(file) && rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-	};
+	// install.sh records logical paths; a root reached through a symlinked ~/.local or HOME
+	// still owns them when they resolve inside it.
+	const owned = (folder: string, file: string) =>
+		isAbsolute(file) &&
+		(strictlyInside(join(installRoot, folder), file) ||
+			strictlyInside(realPathOf(join(installRoot, folder)), realPathOf(file)));
 	if (!owned("versions", text("current")) || !owned("runtime", text("node"))) return null;
 	if (text("previous") && !owned("versions", text("previous"))) return null;
 	if (text("kind") !== INSTALLER_MANIFEST_KIND || text("current") === "" || text("node") === "") return null;
@@ -158,7 +184,17 @@ export function launcherPathFor(installation: Installation, env: NodeJS.ProcessE
  * `paths`, `doctor` and `uninstall` have to name it or it is invisible.
  */
 export function inactiveInstallerRecord(installation: Installation): InstallerRecord | null {
-	return installation.installer ? null : readInstallerRecord(defaultInstallRoot());
+	if (installation.installer) return null;
+	const record = readInstallerRecord(defaultInstallRoot());
+	// A root this binary runs from is never inactive, whatever path spelling reached it.
+	if (
+		record === null ||
+		pathWithin(record.root, installation.root) ||
+		pathWithin(record.root, installation.entry) ||
+		pathWithin(record.root, process.execPath)
+	)
+		return null;
+	return record;
 }
 
 /** The package root inside an installer prefix. */
