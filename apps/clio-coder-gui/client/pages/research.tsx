@@ -299,7 +299,7 @@ function CampaignBody({ client, workspaceId, view }: { client: Client; workspace
 					</div>
 				))}
 			</dl>
-			<p className={`research-aa${view.aa?.noisy ? " research-error" : ""}`}>{aaLine(view.aa)}</p>
+			<p className={`research-aa${view.aa?.noisy ? " research-error" : ""}`}>{aaLine(view.aa, view.campaign.objective)}</p>
 			{chart && (
 				<figure className="research-chart">
 					<figcaption>

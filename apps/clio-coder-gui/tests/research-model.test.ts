@@ -7,6 +7,7 @@ import {
 	campaignFacts,
 	campaignFromProgress,
 	curveChart,
+	describeGrade,
 	emptyResearchDraft,
 	followedOperation,
 	iterationRows,
@@ -69,6 +70,43 @@ test("timeline rows, the A/A line and summaries say what happened in words", () 
 	assert.equal(summaries[0]?.id, "r20261108-123902-22f8", "newest first");
 	assert.match(summaryMeta(summaries[0] as never), /· 1 of 2 kept$/);
 	assert.equal(summaryMeta({ id: "r20261108-000000-0000", error: "bad journal" }), "unreadable: bad journal");
+});
+
+test("an unchanged grade outside zero reads as the CLI names it: below threshold or a small regression", () => {
+	const grade = (low: number, high: number) => ({
+		verdict: "unchanged" as const,
+		delta: (low + high) / 2,
+		ci: { low, high },
+	});
+	const cases = [
+		[
+			grade(-0.03, -0.01),
+			{ direction: "min" as const, minImprovement: 0.05 },
+			/^below threshold \(-2\.00% vs required -5\.00%\)/,
+		],
+		[
+			grade(0.01, 0.03),
+			{ direction: "min" as const, minImprovement: 0.05 },
+			/^small regression \(\+2\.00%, inside the ±5\.00% threshold\)/,
+		],
+		[
+			grade(0.01, 0.03),
+			{ direction: "max" as const, minImprovement: 0.05 },
+			/^below threshold \(\+2\.00% vs required \+5\.00%\)/,
+		],
+		[grade(-0.01, 0.03), { direction: "min" as const, minImprovement: 0.05 }, /^unchanged, /],
+	] as const;
+	for (const [g, objective, label] of cases) {
+		assert.match(describeGrade(g, objective), label);
+	}
+	const view = byId("r20261108-123812-bacf");
+	const objective = { ...view.campaign.objective, direction: "min" as const, minImprovement: 0.05 };
+	const row = iterationRows({
+		...view,
+		campaign: { ...view.campaign, objective },
+		iterations: view.iterations.map((it) => (it.grade ? { ...it, grade: { ...it.grade, ...grade(-0.03, -0.01) } } : it)),
+	})[0];
+	assert.match(row?.grade ?? "", /^below threshold/);
 });
 
 test("money on the page is what the server rendered with Clio's own renderer", () => {

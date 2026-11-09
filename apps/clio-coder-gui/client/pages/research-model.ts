@@ -19,11 +19,34 @@ const signed = (value: number) => `${value >= 0 ? "+" : ""}${(value * 100).toFix
 export const percent = (value: number | null) => (value === null ? "n/a" : signed(value));
 export const shortSha = (sha: string | null) => (sha ? sha.slice(0, 12) : "none");
 
-/** The same words `research status` prints for a grade. */
-export function describeGrade(grade: Pick<ResearchGrade, "verdict" | "delta" | "ci">): string {
+type GradeObjective = Pick<ResearchCampaign["campaign"]["objective"], "direction" | "minImprovement">;
+
+/**
+ * The same words `research status` prints for a grade (`src/domains/research/format.ts`). Given the objective, an
+ * `unchanged` verdict whose interval excludes zero is named for what it is: a real move smaller than the minimum
+ * improvement, toward better or worse.
+ */
+export function describeGrade(
+	grade: Pick<ResearchGrade, "verdict" | "delta" | "ci">,
+	objective?: GradeObjective,
+): string {
 	const delta = grade.delta === null ? "delta n/a" : `median delta ${signed(grade.delta)}`;
 	const ci = grade.ci === null ? "CI n/a" : `95% CI [${signed(grade.ci.low)}, ${signed(grade.ci.high)}]`;
-	return `${grade.verdict}, ${delta}, ${ci}`;
+	return `${gradeLabel(grade, objective)}, ${delta}, ${ci}`;
+}
+
+function gradeLabel(
+	grade: Pick<ResearchGrade, "verdict" | "delta" | "ci">,
+	objective: GradeObjective | undefined,
+): string {
+	const { ci, delta } = grade;
+	if (grade.verdict !== "unchanged" || objective === undefined || ci === null || delta === null) return grade.verdict;
+	if (ci.low <= 0 && ci.high >= 0) return grade.verdict;
+	const better = objective.direction === "min" ? ci.high < 0 : ci.low > 0;
+	const required = objective.direction === "min" ? -objective.minImprovement : objective.minImprovement;
+	return better
+		? `below threshold (${signed(delta)} vs required ${signed(required)})`
+		: `small regression (${signed(delta)}, inside the ±${(objective.minImprovement * 100).toFixed(2)}% threshold)`;
 }
 
 export interface Fact {
@@ -64,10 +87,10 @@ export function campaignFacts(view: ResearchCampaign): Fact[] {
 }
 
 /** The A/A check: base against itself, which says how much of a difference is only noise. */
-export function aaLine(aa: ResearchCampaign["aa"]): string {
+export function aaLine(aa: ResearchCampaign["aa"], objective?: GradeObjective): string {
 	if (aa === null) return "The A/A check has not run yet.";
 	const verdict = aa.noisy ? (aa.allowed ? "noisy (allowed)" : "noisy, so the campaign stopped") : "quiet";
-	return `A/A ${verdict}: ${describeGrade(aa.grade)}`;
+	return `A/A ${verdict}: ${describeGrade(aa.grade, objective)}`;
 }
 
 const OUTCOME: Readonly<Record<ResearchIteration["outcome"], string>> = {
@@ -106,7 +129,7 @@ export function iterationRows(view: ResearchCampaign): IterationRow[] {
 		label: `it-${String(iteration.iteration).padStart(4, "0")}`,
 		outcome: OUTCOME[iteration.outcome],
 		ratcheted: iteration.outcome === "ratcheted",
-		grade: iteration.grade ? describeGrade(iteration.grade) : "not graded",
+		grade: iteration.grade ? describeGrade(iteration.grade, view.campaign.objective) : "not graded",
 		gates:
 			iteration.gates.length > 0
 				? iteration.gates.map((gate) => `${gate.check} ${gate.passed ? "pass" : "fail"}`).join(", ")
@@ -201,7 +224,7 @@ export type RegradeLine = { of: string; text: string; agrees: boolean };
 export function regradeLines(report: ResearchReport): RegradeLine[] {
 	return report.recomputed.map((entry) => ({
 		of: entry.of === "aa" ? "A/A" : `it-${String(entry.of).padStart(4, "0")}`,
-		text: describeGrade(entry.recomputed),
+		text: describeGrade(entry.recomputed, report.campaign.objective),
 		agrees: entry.agrees,
 	}));
 }
