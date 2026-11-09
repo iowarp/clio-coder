@@ -1,5 +1,6 @@
 import { resolveClioDirs } from "../core/xdg.js";
 import { inspectInstallation } from "../domains/lifecycle/install-method.js";
+import { describeTracking } from "../domains/lifecycle/install-plan.js";
 import {
 	type DeferredUpgrade,
 	planSelfUpgrade,
@@ -102,7 +103,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					return;
 				}
 				if (plan.status === "pinned") {
-					const pinned = `This install is pinned to ${plan.pin}, so /upgrade leaves it there. To follow its channel again, run:`;
+					const pinned = `This install is ${describeTracking(plan.installation)}, so /upgrade leaves it there. To follow its channel again, run:`;
 					deps.notify("info", `${pinned}\n${plan.command}`, "lifecycle:upgrade-pinned");
 					deps.record?.("info", pinned);
 					deps.record?.("info", plan.command);

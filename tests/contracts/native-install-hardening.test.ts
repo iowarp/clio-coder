@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { activatedPackageRoot, pendingInstalledVersion } from "../../src/core/running-build.js";
+import { describeTracking } from "../../src/domains/lifecycle/install-plan.js";
 
 const helper = fileURLToPath(new URL("../../scripts/native-install.cjs", import.meta.url));
 const lifecycle = createRequire(import.meta.url)(helper) as {
@@ -216,6 +217,66 @@ test("activation moves a POSIX launcher to the new Node and collects the old run
 	const c = activate(second, candidate("0.6.4"));
 	assert.equal(c.status, 0, c.stderr);
 	assert.equal(existsSync(join(f.root, "runtime/node-v24.0.0-linux-x64")), process.platform !== "linux");
+});
+
+test("a pin records where it came from and keeps its first date across reinstalls of the same pin", {
+	skip: process.platform === "win32",
+}, (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.root, "runtime/node-v24.0.0-linux-x64/bin"), { recursive: true });
+	const node = join(f.root, "runtime/node-v24.0.0-linux-x64/bin/node");
+	symlinkSync(process.execPath, node);
+	rmSync(join(f.root, "install.json"));
+	const activate = (version: string, pin: string, source: string) => {
+		const dir = f.prefix(version);
+		mkdirSync(join(dir, suffix, "dist/cli"), { recursive: true });
+		writeFileSync(join(dir, suffix, "dist/cli/index.js"), `console.log(${JSON.stringify(version)});`);
+		const result = f.run("activate", node, "24", "linux-x64", dir, f.record.launcher, "latest", pin, "0", "0", source);
+		assert.equal(result.status, 0, result.stderr);
+		return JSON.parse(readFileSync(join(f.root, "install.json"), "utf8"));
+	};
+	const first = activate("0.6.2", "0.6.2", "package-file");
+	assert.equal(first.pinSource, "package-file");
+	const again = activate("0.6.2-again", "0.6.2", "version-flag");
+	assert.deepEqual([again.pinSource, again.pinnedAt], [first.pinSource, first.pinnedAt]);
+	const released = activate("0.6.3", "-", "version-flag");
+	assert.deepEqual([released.versionPin, released.pinSource, released.pinnedAt], ["", "", ""]);
+	assert.equal(f.run("rollback").status, 0);
+	const rolled = JSON.parse(readFileSync(join(f.root, "install.json"), "utf8"));
+	assert.equal(rolled.pinSource, "");
+});
+
+test("one tracking phrase names a pin, its origin and how to release it, or what the install follows", () => {
+	const installer = {
+		root: "/i",
+		node: "/i/runtime/n/bin/node",
+		nodeVersion: "24",
+		nodeBuild: "linux-x64",
+		current: "/i/versions/0.6.2",
+		previous: null,
+		launcher: "/b/clio-coder",
+		channel: "latest",
+	};
+	const base = { kind: "installer" as const, root: "/r", entry: "/r/e", prefix: "/i/versions/0.6.2" };
+	assert.equal(
+		describeTracking(
+			{ ...base, installer: { ...installer, versionPin: "0.6.2", installedAt: "2026-10-09T01:02:03Z" } },
+			{ windows: false },
+		),
+		"pinned to 0.6.2 since 2026-10-09 (install.sh --version 0.6.2); release with clio-coder upgrade --channel latest",
+	);
+	assert.match(
+		describeTracking({ ...base, installer: { ...installer, versionPin: "0.6.1", pinSource: "rollback" } }),
+		/^pinned to 0\.6\.1 \(upgrade --rollback\)/,
+	);
+	assert.equal(
+		describeTracking({ ...base, installer }, { autoUpdate: { enabled: false, blocker: "setting" } }),
+		"follows latest; background updates off (setting)",
+	);
+	assert.equal(
+		describeTracking({ kind: "npm", root: "/r", entry: "/r/e", prefix: "/p" }),
+		"npm global; follows latest through npm",
+	);
 });
 
 test("malformed liveness receipts withdraw the proof", { skip: process.platform !== "linux" }, (t) => {

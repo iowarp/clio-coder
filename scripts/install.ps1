@@ -325,7 +325,8 @@ function Install-ClioCoder {
 		$auto = if ($Options.NoAutoUpdate -or $env:CLIO_CODER_AUTO_UPDATE -eq "0") { "0" } elseif ($env:CLIO_CODER_AUTO_UPDATE -eq "1") { "1" } else { "preserve" }
 		if ($Options.AutoUpdate) { $auto = "1" }
 		$post = if ($Options.NoPostInstall) { "0" } else { "1" }
-		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post
+		$pinSource = if ($Options.Package) { "package-file" } else { "version-flag" }
+		& $node $helper activate $installRoot $node $nodeVersion $build $final $launcher $Options.Channel $pin $auto $post $pinSource
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		if ($LASTEXITCODE -ne 0) { New-Item -ItemType File -Force -Path (Join-Path $final ".clio-coder-refused-candidate") | Out-Null }
 		if ($LASTEXITCODE -ne 0) {

@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
+import { validateSettingsFile } from "../core/config.js";
 import { clioProjectRoot } from "../core/project-root.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import {
@@ -8,6 +9,8 @@ import {
 	inspectInstallation,
 	launcherPathFor,
 } from "../domains/lifecycle/install-method.js";
+import { describeTracking } from "../domains/lifecycle/install-plan.js";
+import { nativeAutoUpdatePolicy } from "../domains/lifecycle/native-update.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder paths [--json]
@@ -18,6 +21,7 @@ of re-implementing the resolution rules.
 
   config, data, state, cache   the four per-user roots
   install    the installer root, and whether this binary runs from it
+  tracking   what this installation follows or is pinned to
   launcher   the clio-coder launcher that belongs to this installation
   project    where a new project .clio-coder/ entry goes from here. Each existing
              entry comes from the nearest .clio-coder/ that has it, up to the
@@ -54,6 +58,13 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 	const install = installation.installer?.root ?? inactiveInstallerRecord(installation)?.root ?? defaultInstallRoot();
 	const installActive = installation.installer !== undefined;
 	const launcher = launcherPathFor(installation);
+	let setting = true;
+	try {
+		setting = validateSettingsFile().settings.interface.autoUpdate;
+	} catch {
+		// doctor reports an unreadable settings file; the default applies here.
+	}
+	const tracking = describeTracking(installation, { autoUpdate: nativeAutoUpdatePolicy(installation, setting) });
 	const project = clioProjectRoot(process.cwd());
 	if (json) {
 		process.stdout.write(
@@ -67,6 +78,7 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 					installActive,
 					launcher,
 					project,
+					tracking,
 				},
 				null,
 				2,
@@ -86,6 +98,7 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 		["state", `${dirs.state}${absent(dirs.state)}`],
 		["cache", `${dirs.cache}${absent(dirs.cache)}`],
 		["install", `${install}${installNote}`],
+		["tracking", tracking],
 		["launcher", `${launcher}${launcherNote(launcher)}`],
 		["project", `${project}${existsSync(join(project, ".clio-coder")) ? "" : "  (no .clio-coder/ yet)"}`],
 	];

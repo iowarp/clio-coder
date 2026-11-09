@@ -56,6 +56,11 @@ export interface InstallerRecord {
 	launcher: string;
 	channel: string;
 	versionPin?: string;
+	/** How the pin was set: an exact --version, a --package file, or a rollback. */
+	pinSource?: "version-flag" | "package-file" | "rollback";
+	/** ISO time the pin was set; older manifests fall back to installedAt. */
+	pinnedAt?: string;
+	installedAt?: string;
 	autoUpdate?: boolean;
 	manager?: string;
 	pathAdded?: boolean;
@@ -106,6 +111,9 @@ export function readInstallerRecord(installRoot: string): InstallerRecord | null
 		launcher: text("launcher"),
 		channel: text("channel") || "latest",
 		versionPin: text("versionPin"),
+		pinSource: (["version-flag", "package-file", "rollback"] as const).find((value) => value === text("pinSource")),
+		pinnedAt: text("pinnedAt"),
+		installedAt: text("installedAt"),
 		autoUpdate: record.autoUpdate === true,
 		manager: text("manager"),
 		pathAdded: record.pathAdded === true,

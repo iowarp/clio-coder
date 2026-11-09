@@ -995,9 +995,13 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	helper="$final_prefix/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
 	[ -f "$helper" ] || fail "candidate has no managed lifecycle helper; previous install remains active. Run: clio-coder doctor --fix"
 	pin=""
+	pin_source=version-flag
 	case "$version_spec" in [0-9]* | v[0-9]*) pin="$installed_version" ;; esac
-	if [ -n "$package_file" ]; then pin="$installed_version"; fi
-	"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" </dev/null || {
+	if [ -n "$package_file" ]; then
+		pin="$installed_version"
+		pin_source=package-file
+	fi
+	"$node_bin" "$helper" activate "$install_root" "$node_bin" "$node_version" "$node_build" "$final_prefix" "$launcher" "$channel" "$pin" "$auto_update" "$post_install" "$pin_source" </dev/null || {
 		: >"$final_prefix/$FAILED_CANDIDATE_MARK"
 		active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$(manifest_field current)/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" || active_version=""
 		if [ -n "$active_version" ] && ! version_ge "${installed_version%%-*}" "${active_version%%-*}"; then

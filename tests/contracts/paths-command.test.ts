@@ -30,12 +30,14 @@ test("paths names the installer root, the launcher and the project, and creates 
 		"installActive",
 		"launcher",
 		"project",
+		"tracking",
 	]);
 	strictEqual(paths.config, temp.configDir);
 	strictEqual(paths.install, join(temp.root, ".local", "share", "clio-coder-install"));
 	strictEqual(paths.installActive, false);
 	strictEqual(paths.launcher, join(temp.binDir, "clio-coder"));
 	strictEqual(paths.project, realpathSync(repo));
+	strictEqual(paths.tracking, "source checkout; follows its git branch and pnpm run build");
 	strictEqual(existsSync(temp.configDir), false, "paths is read-only");
 });
 

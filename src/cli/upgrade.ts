@@ -18,6 +18,7 @@ import {
 	npmUpgradeInvocation,
 	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
+import { describeTracking } from "../domains/lifecycle/install-plan.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
 import {
 	compareReleaseVersions,
@@ -641,7 +642,7 @@ export async function runUpgradeCommand(
 	presenter.step(`State dir: ${shortenPath(stateDir)}`);
 	const unpin = pin === null ? null : installerUnpinCommand(installation, opts.channel);
 	if (unpin !== null) {
-		presenter.note(`This install is pinned to ${pin}, so upgrade and background updates leave it there.`);
+		presenter.note(`This install is ${describeTracking(installation)}. Upgrade and background updates leave it there.`);
 		presenter.commandAdvice(`To follow the ${opts.channel} channel again, with background updates, run:`, unpin);
 	}
 

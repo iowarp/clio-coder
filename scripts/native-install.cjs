@@ -469,6 +469,13 @@ function describePrune(result) {
 	return lines;
 }
 
+// A pin keeps the origin and time it was first set; reinstalling the same pin is not a new pin.
+function pinRecord(old, pin, source) {
+	if (!pin) return { pinSource: "", pinnedAt: "" };
+	if (old?.versionPin === pin && old.pinSource) return { pinSource: old.pinSource, pinnedAt: old.pinnedAt || "" };
+	return { pinSource: source, pinnedAt: new Date().toISOString() };
+}
+
 function packageName(prefix) {
 	try {
 		const file = path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "package.json");
@@ -629,6 +636,7 @@ async function main() {
 					previousNodeVersion: old.nodeVersion,
 					previousNodeBuild: old.nodeBuild,
 					versionPin: pin,
+					...pinRecord(old, pin, "rollback"),
 					autoUpdate: false,
 				},
 				null,
@@ -643,7 +651,7 @@ async function main() {
 		return;
 	}
 	if (action !== "activate") throw new Error(`Unknown installer action ${action}`);
-	let [node, nodeVersion, nodeBuild, current, launcher, channel, pin, autoUpdate, postInstall] = args;
+	let [node, nodeVersion, nodeBuild, current, launcher, channel, pin, autoUpdate, postInstall, pinSource] = args;
 	if (process.env.CLIO_CODER_BACKGROUND_UPDATE === "1") {
 		if (
 			old?.current !== process.env.CLIO_CODER_BACKGROUND_CURRENT ||
@@ -729,6 +737,7 @@ async function main() {
 				pathAdded: old?.pathAdded === true,
 				pathEntry: old?.pathEntry || "",
 				versionPin: pin === "-" ? "" : pin,
+				...pinRecord(old, pin === "-" ? "" : pin, pinSource || "version-flag"),
 				autoUpdate: autoUpdate === "1" && (!pin || pin === "-"),
 				installedAt: new Date().toISOString(),
 			},

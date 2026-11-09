@@ -31,6 +31,7 @@ import { telemetryJournalFiles, telemetrySessionsDirectory } from "../telemetry/
 import { cacheReport } from "../telemetry/read-model.js";
 import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
+import { describeTracking } from "./install-plan.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
 import { nativeAutoUpdatePolicy } from "./native-update.js";
 import { readStateInfoResult } from "./state.js";
@@ -361,7 +362,11 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined) {
 		if (!["npm", "pnpm", "bun"].includes(installation.kind))
-			return { ok: true, name: "install method", detail: `${installation.kind} (${installation.root})` };
+			return {
+				ok: true,
+				name: "install method",
+				detail: `${installation.kind} (${installation.root}; ${describeTracking(installation)})`,
+			};
 		// #436: a user-writable package-manager prefix updates after the session quits.
 		let setting = true;
 		try {
@@ -391,7 +396,7 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 			ok: true,
 			...((last && !last.ok) || wait ? { level: "warn" as const } : {}),
 			name: "install method",
-			detail: `${installation.kind} (${installation.root}; update after exit ${off ? `off (${off})` : "on"}${lastText}${waitText})`,
+			detail: `${installation.kind} (${installation.root}; ${describeTracking(installation)}; update after exit ${off ? `off (${off})` : "on"}${lastText}${waitText})`,
 		};
 	}
 	const stale = record.current !== installation.prefix ? `; the launcher now runs ${record.current}` : "";
@@ -404,7 +409,7 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 		// The settings row reports an unreadable file; the policy falls back to the default.
 	}
 	const policy = nativeAutoUpdatePolicy(installation, setting);
-	const autoUpdate = policy?.enabled ? "; auto-update on" : `; auto-update off (${policy?.blocker ?? "installer"})`;
+	const tracking = `; ${describeTracking(installation, { autoUpdate: policy })}`;
 	const last = readLastBackgroundUpdate(installation, resolveClioDirs().cache);
 	const lastUpdate = last
 		? `; last background update ${new Date(last.at).toISOString()}: ${last.ok ? `ok v${last.from} -> v${last.to}` : `failed v${last.to}: ${last.detail}`}`
@@ -413,7 +418,7 @@ function installMethodFinding(installation: Installation): DoctorFinding {
 		ok: true,
 		...(stale || foreignNode || (last && !last.ok) ? { level: "warn" as const } : {}),
 		name: "install method",
-		detail: `installer (prefix ${installation.prefix ?? installation.root}; runtime Node v${record.nodeVersion} ${record.nodeBuild} at ${record.node}${stale}${foreignNode}${autoUpdate}${lastUpdate})`,
+		detail: `installer (prefix ${installation.prefix ?? installation.root}; runtime Node v${record.nodeVersion} ${record.nodeBuild} at ${record.node}${stale}${foreignNode}${tracking}${lastUpdate})`,
 	};
 }
 
