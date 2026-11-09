@@ -887,8 +887,9 @@ for (const collection of collections) {
 	const cards = articles
 		.filter((item) => item.collection === collection)
 		.map(
-			(item) =>
-				`<a class="tutorial-card" href="${item.url}">${item.image ? `<img src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" loading="lazy" decoding="async">` : ""}<p class="eyebrow">${escapeHtml(item.category)} / ${escapeHtml(item.time)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.description)}</p>${item.status ? `<p class="caption"><span class="chapter">${escapeHtml(item.status)}</span></p>` : ""}<span class="text-link">Read ${collection.id === "tutorials" ? "the tutorial" : "the article"} <span aria-hidden="true">↗</span></span></a>`,
+			// The first card image is the listing's largest above-the-fold content.
+			(item, position) =>
+				`<a class="tutorial-card" href="${item.url}">${item.image ? `<img src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}"${position === 0 ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async">` : ""}<p class="eyebrow">${escapeHtml(item.category)} / ${escapeHtml(item.time)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.description)}</p>${item.status ? `<p class="caption"><span class="chapter">${escapeHtml(item.status)}</span></p>` : ""}<span class="text-link">Read ${collection.id === "tutorials" ? "the tutorial" : "the article"} <span aria-hidden="true">↗</span></span></a>`,
 		)
 		.join("\n");
 	await writePage(

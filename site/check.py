@@ -186,6 +186,9 @@ for url in [*urls, origin + '/404.html']:
         errors.append(f'{path}: a link has no href, so crawlers cannot follow it')
     if public_copyright not in source:
         errors.append(f'{path}: public copyright wording is missing')
+    first_card = re.search(r'<a class="tutorial-card"[^>]*><img [^>]*>', source)
+    if first_card and ('loading="lazy"' in first_card.group(0) or 'fetchpriority="high"' not in first_card.group(0)):
+        errors.append(f'{path}: the first listing image is the likely LCP element and must load eagerly with high priority')
     page.title = page.title.strip()
     pages[path] = page
     if page.canonical != url:
