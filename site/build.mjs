@@ -249,6 +249,35 @@ function responsiveImages(html, path) {
 // in a meta tag. frame-ancestors is not honored there and cannot be restored.
 const contentSecurityPolicy =
 	"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
+// Whitespace and comment removal only; strings are copied untouched, and spaces
+// around operators such as + and - stay, so calc() and selectors keep meaning.
+function minifyCss(css) {
+	let result = "";
+	let text = "";
+	const flush = () => {
+		result += text
+			.replace(/\s+/g, " ")
+			.replace(/ ?([{};,>]) ?/g, "$1")
+			.replace(/: /g, ":")
+			.replace(/;}/g, "}");
+		text = "";
+	};
+	for (let i = 0; i < css.length; ) {
+		if (css.startsWith("/*", i)) {
+			const end = css.indexOf("*/", i + 2);
+			i = end < 0 ? css.length : end + 2;
+			text += " ";
+		} else if (css[i] === '"' || css[i] === "'") {
+			let end = i + 1;
+			while (end < css.length && css[end] !== css[i]) end += css[end] === "\\" ? 2 : 1;
+			flush();
+			result += css.slice(i, end + 1);
+			i = end + 1;
+		} else text += css[i++];
+	}
+	flush();
+	return `${result.trim()}\n`;
+}
 const titleSuffix = / — Clio Coder(?: docs)?$/;
 const organization = {
 	"@type": "Organization",
@@ -396,7 +425,7 @@ function head(
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
 <link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
+<link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
 <meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
@@ -715,7 +744,10 @@ for (const asset of JSON.parse(await read("animation-assets.json"))) {
 	}
 }
 await mkdir(join(out, "css"));
-for (const name of ["brand.css", "site.css", "landing.css"]) await cp(join(root, "css", name), join(out, "css", name));
+// One render-blocking stylesheet: the generated tokens, then the site styles, in
+// the order the two separate files cascaded.
+await writeFile(join(out, "css/site.css"), minifyCss(`${await read("css/brand.css")}\n${await read("css/site.css")}`));
+await writeFile(join(out, "css/landing.css"), minifyCss(await read("css/landing.css")));
 await mkdir(join(out, "js"));
 for (const name of ["theme.js", "site.js", "docs.js", "redirect.js", "landing.js"])
 	await cp(join(root, "js", name), join(out, "js", name));
@@ -909,7 +941,7 @@ for (const [path, target] of Object.entries(redirects)) {
 	await mkdir(dirname(file), { recursive: true });
 	await writeFile(
 		file,
-		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to Clio Coder</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to Clio Coder →</a></p></main></body></html>`,
+		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to Clio Coder</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to Clio Coder →</a></p></main></body></html>`,
 	);
 }
 await writeFile(
