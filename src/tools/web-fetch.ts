@@ -137,16 +137,22 @@ function safeFromCodePoint(code: number, original: string): string {
 	return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : original;
 }
 
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+	nbsp: " ",
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+};
+
+// One pass, so a decoded `&` never starts another entity: `&amp;lt;` reads as `&lt;`, not `<`.
 function decodeEntities(value: string): string {
-	return value
-		.replace(/&#(\d+);/g, (m, code: string) => safeFromCodePoint(Number(code), m))
-		.replace(/&#x([0-9a-f]+);/gi, (m, code: string) => safeFromCodePoint(Number.parseInt(code, 16), m))
-		.replace(/&nbsp;/gi, " ")
-		.replace(/&amp;/gi, "&")
-		.replace(/&lt;/gi, "<")
-		.replace(/&gt;/gi, ">")
-		.replace(/&quot;/gi, '"')
-		.replace(/&#39;|&apos;/gi, "'");
+	return value.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(nbsp|amp|lt|gt|quot|apos));/gi, (m, dec, hex, named) => {
+		if (dec !== undefined) return safeFromCodePoint(Number(dec), m);
+		if (hex !== undefined) return safeFromCodePoint(Number.parseInt(hex, 16), m);
+		return NAMED_ENTITIES[String(named).toLowerCase()] ?? m;
+	});
 }
 
 function stripTags(value: string): string {
@@ -185,14 +191,14 @@ function absolutizeUrl(href: string, baseUrl: string): string {
 function removeBoilerplate(html: string): string {
 	return html
 		.replace(/<!--[\s\S]*?-->/g, " ")
-		.replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-		.replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-		.replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
-		.replace(/<template\b[\s\S]*?<\/template>/gi, " ")
-		.replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
-		.replace(/<canvas\b[\s\S]*?<\/canvas>/gi, " ")
-		.replace(/<iframe\b[\s\S]*?<\/iframe>/gi, " ")
-		.replace(/<form\b[\s\S]*?<\/form>/gi, " ");
+		.replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, " ")
+		.replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, " ")
+		.replace(/<noscript\b[\s\S]*?<\/noscript\b[^>]*>/gi, " ")
+		.replace(/<template\b[\s\S]*?<\/template\b[^>]*>/gi, " ")
+		.replace(/<svg\b[\s\S]*?<\/svg\b[^>]*>/gi, " ")
+		.replace(/<canvas\b[\s\S]*?<\/canvas\b[^>]*>/gi, " ")
+		.replace(/<iframe\b[\s\S]*?<\/iframe\b[^>]*>/gi, " ")
+		.replace(/<form\b[\s\S]*?<\/form\b[^>]*>/gi, " ");
 }
 
 function scoreContent(fragment: string): number {

@@ -279,7 +279,7 @@ async function validateHtmlScripts(
 	checks: FrontendCheck[],
 	options: ValidationOptions,
 ): Promise<void> {
-	const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/giu;
+	const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/giu;
 	let count = 0;
 	for (let match = scriptRe.exec(content); match !== null; match = scriptRe.exec(content)) {
 		count += 1;
