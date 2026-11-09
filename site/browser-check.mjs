@@ -171,6 +171,11 @@ try {
 	await page.locator(".nav-more a").last().focus();
 	await page.keyboard.press("Tab");
 	await page.waitForFunction(() => !document.querySelector(".nav-more").open);
+	assert.match(
+		(await page.locator('.media-dialog [data-media="original"]').getAttribute("href")) ?? "",
+		/\.png$/,
+		"The screenshot viewer's original link has an href before it opens",
+	);
 	await page.locator(".capture-link").click();
 	await page.waitForFunction(
 		() =>

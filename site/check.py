@@ -182,6 +182,8 @@ for url in [*urls, origin + '/404.html']:
     page = Page(path)
     source = file.read_text()
     page.feed(source)
+    if re.search(r'<a(?![^>]*\shref=)(?:\s[^>]*)?>', source):
+        errors.append(f'{path}: a link has no href, so crawlers cannot follow it')
     if public_copyright not in source:
         errors.append(f'{path}: public copyright wording is missing')
     page.title = page.title.strip()
