@@ -107,6 +107,7 @@ export function newReceipt({ version, commit, branch, nonce, owner }) {
 		releaseRun: null,
 		draftId: null,
 		npm: null,
+		rehearsal: null,
 		post: {},
 		events: [],
 	};

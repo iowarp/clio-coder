@@ -91,7 +91,9 @@ describe("release decisions", () => {
 		const waiting = releaseRun("waiting", { status: "completed", conclusion: "success" }, { status: "waiting" });
 		strictEqual(nextStep(facts({ releaseRun: waiting }), {}).step, "publish-npm");
 		// Once npm accepted the bytes the publish is never offered again, even while npm serves nothing.
-		strictEqual(nextStep(facts({ releaseRun: waiting }), { npm: { accepted: true } }).step, "wait-npm");
+		strictEqual(nextStep(facts({ releaseRun: waiting }), { npm: { accepted: true } }).step, "approve-release");
+		const timedOut = releaseRun("failure", { status: "completed", conclusion: "success" }, { status: "completed" });
+		strictEqual(nextStep(facts({ releaseRun: timedOut }), { npm: { accepted: true } }).step, "wait-npm");
 	});
 
 	it("stops on different published bytes and forwards tags after verification", async () => {
@@ -105,8 +107,11 @@ describe("release decisions", () => {
 
 	it("rehearses without public writes and always tears down", async () => {
 		const { nextStep } = await import(planModule);
-		strictEqual(nextStep(facts({ mode: "rehearse" }), {}).step, "publish-stub");
-		strictEqual(nextStep(facts({ mode: "rehearse" }), { rehearsal: { stubbed: true } }).step, "teardown");
+		strictEqual(nextStep(facts({ mode: "rehearse" }), {}).step, "check-release");
+		const stubbed = { checked: true, drafted: true, stubbed: true };
+		strictEqual(nextStep(facts({ mode: "rehearse" }), { rehearsal: stubbed }).step, "teardown");
+		const finished = facts({ mode: "rehearse", pushed: false, ci: null });
+		strictEqual(nextStep(finished, { rehearsal: { ...stubbed, tornDown: true } }).step, "done");
 	});
 
 	it("reports an environment approval as waiting", async () => {

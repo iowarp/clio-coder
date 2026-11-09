@@ -89,10 +89,12 @@ export const alreadyPublished = (stderr) =>
  *   tagsBehind: string[]
  *   postPending: string[]
  *   foreignRuns: number[]               in-flight runs on this commit that the receipt does not own
- * Receipt: { npm: { accepted } | null, rehearsal: { stubbed, tornDown } | undefined }
+ * Receipt: { npm: { accepted } | null, rehearsal: { checked, drafted, stubbed, tornDown } | null }
  */
 export function nextStep(facts, receipt) {
 	const stop = (reason) => ({ step: "stop", reason });
+	// A rehearsal ends with its branch deleted, so a finished one is read from the receipt alone.
+	if (facts.mode === "rehearse" && receipt.rehearsal?.tornDown) return { step: "done" };
 	if (facts.foreignRuns.length)
 		return stop(
 			`run ${facts.foreignRuns.join(", ")} on this commit belongs to another operator; let it finish or cancel it there`,
@@ -125,9 +127,10 @@ export function nextStep(facts, receipt) {
 	if (!ci.artifacts)
 		return stop("qualification artifacts expired; qualify a new candidate commit, never rebuild this one");
 	if (facts.mode === "rehearse") {
+		if (!receipt.rehearsal?.checked) return { step: "check-release" };
+		if (!receipt.rehearsal?.drafted) return { step: "draft-rehearsal" };
 		if (!receipt.rehearsal?.stubbed) return { step: "publish-stub" };
-		if (!receipt.rehearsal?.tornDown) return { step: "teardown" };
-		return { step: "done" };
+		return { step: "teardown" };
 	}
 	const accepted = facts.npm.served || receipt.npm?.accepted === true;
 	const run = facts.releaseRun;
@@ -145,10 +148,11 @@ export function nextStep(facts, receipt) {
 		if (["queued", "pending", "in_progress"].includes(run.state)) return { step: "watch-release" };
 		return { step: "rerun-release" };
 	}
+	// The release job waits for npm itself, so the owner may approve while npm propagates.
+	if (run?.state === "waiting") return { step: "approve-release" };
+	if (["queued", "pending", "in_progress"].includes(run?.state)) return { step: "watch-release" };
 	if (!facts.npm.served) return { step: "wait-npm" };
 	if (!run || run.state === "absent") return { step: "dispatch-release" };
-	if (run.state === "waiting") return { step: "approve-release" };
-	if (["queued", "pending", "in_progress"].includes(run.state)) return { step: "watch-release" };
 	if (run.state !== "success") return { step: "rerun-release" };
 	return stop("the release run passed but the public state does not verify; inspect it before any retry");
 }
