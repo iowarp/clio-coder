@@ -23,8 +23,8 @@ import {
 } from "./commit-attribution.js";
 import type { GitCommitAuthorSetting } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
-import { installGitShimLauncher } from "./git-shim-launcher.js";
 import { internalGitArgv } from "./internal-git.js";
+import { installWindowsLauncher, windowsLaunchFile } from "./windows-launcher.js";
 import { clioStateDir } from "./xdg.js";
 
 /** Effective `attribution.gitCommits` for child-process seams. Internal state, not an operator override. */
@@ -616,7 +616,7 @@ const MANAGED_GIT_SHIM_NODE_NAME = "git-shim.cjs";
  * The shim's decision and git lookup in JavaScript, for Windows. cmd.exe,
  * PowerShell, any `shell: true` spawn and a plain CreateProcess of `git` find
  * the native launcher `git.exe` in the shim directory before the real git
- * (`src/core/git-shim-launcher.ts`); Git Bash runs the POSIX `git` beside it.
+ * (`src/core/windows-launcher.ts`); Git Bash runs the POSIX `git` beside it.
  * The launcher passes the caller's command line unchanged to Node, which
  * splits it with the same MSVCRT rules `git.exe` uses and re-quotes it for
  * `git.exe` the same way. Where the launcher is missing, `git.cmd` forwards
@@ -880,7 +880,10 @@ function managedGitShimDirectory(): { directory: string; launcherIssue: string |
 	];
 	const withLauncher = () => ({
 		directory,
-		launcherIssue: process.platform === "win32" ? installGitShimLauncher(directory, process.execPath) : null,
+		launcherIssue:
+			process.platform === "win32"
+				? installWindowsLauncher(directory, "git", windowsLaunchFile(process.execPath, [nodeShim]))
+				: null,
 	});
 	try {
 		for (const [path, script] of files) if (readFileSync(path, "utf8") !== script) throw new Error("stale");

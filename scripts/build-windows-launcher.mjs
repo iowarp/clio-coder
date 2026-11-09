@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Builds and checks the native Windows git launchers in assets/git-shim/.
+// Builds and checks the native Windows launcher in assets/windows-launcher/,
+// installed as the managed shim's git.exe and as the installer's clio-coder.exe.
 //
-//   node scripts/build-git-shim.mjs --verify-pins   committed binaries match the pins in src/ (no compiler)
-//   node scripts/build-git-shim.mjs --check         rebuild with the pinned zig and compare byte for byte
-//   node scripts/build-git-shim.mjs --write         rebuild into assets/git-shim/ and print the pins
+//   node scripts/build-windows-launcher.mjs --verify-pins   committed binaries match pins.json (no compiler)
+//   node scripts/build-windows-launcher.mjs --check         rebuild with the pinned zig and compare byte for byte
+//   node scripts/build-windows-launcher.mjs --write         rebuild into assets/windows-launcher/ and update pins.json
 //
 // --zig <path> uses that zig binary (it must report ZIG_VERSION). Otherwise the
 // pinned zig release is downloaded, checked against its SHA-256 and unpacked
@@ -17,8 +18,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SOURCE = join(ROOT, "assets", "git-shim", "launcher.c");
-const PIN_FILE = join(ROOT, "src", "core", "git-shim-launcher.ts");
+const ASSETS = join(ROOT, "assets", "windows-launcher");
+const SOURCE = join(ASSETS, "launcher.c");
+const PIN_FILE = join(ASSETS, "pins.json");
 const ZIG_VERSION = "0.17.1";
 const ZIG_RELEASES = {
 	"linux-x64": ["x86_64-linux", "3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a"],
@@ -29,20 +31,19 @@ const ZIG_RELEASES = {
 const TARGETS = { x64: "x86_64-windows-gnu", arm64: "aarch64-windows-gnu" };
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const assetPath = (arch) => join(ROOT, "assets", "git-shim", `win32-${arch}`, "git.exe");
+const assetPath = (arch) => join(ASSETS, `win32-${arch}`, "launcher.exe");
 
 function fail(message) {
-	process.stderr.write(`build-git-shim: ${message}\n`);
+	process.stderr.write(`build-windows-launcher: ${message}\n`);
 	process.exit(1);
 }
 
 function readPins() {
-	const text = readFileSync(PIN_FILE, "utf8");
+	const recorded = existsSync(PIN_FILE) ? JSON.parse(readFileSync(PIN_FILE, "utf8")) : {};
 	const pins = {};
 	for (const arch of Object.keys(TARGETS)) {
-		const match = new RegExp(`\\b${arch}: "([0-9a-f]{64})"`).exec(text);
-		if (match === null) fail(`no ${arch} pin in ${PIN_FILE}`);
-		pins[arch] = match[1];
+		const pin = recorded[arch];
+		pins[arch] = typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin) ? pin : "missing";
 	}
 	return pins;
 }
@@ -55,7 +56,7 @@ async function pinnedZig(scratch) {
 	const zig = join(directory, `zig-${name}-${ZIG_VERSION}`, "zig");
 	if (existsSync(zig)) return zig;
 	const url = `https://ziglang.org/download/${ZIG_VERSION}/zig-${name}-${ZIG_VERSION}.tar.xz`;
-	process.stderr.write(`build-git-shim: downloading ${url}\n`);
+	process.stderr.write(`build-windows-launcher: downloading ${url}\n`);
 	const response = await fetch(url);
 	if (!response.ok) fail(`${url}: HTTP ${response.status}`);
 	const bytes = Buffer.from(await response.arrayBuffer());
@@ -107,39 +108,37 @@ async function main() {
 			const actual = existsSync(assetPath(arch)) ? sha256(readFileSync(assetPath(arch))) : "missing";
 			if (actual !== pin) fail(`${assetPath(arch)} is ${actual}, pinned ${pin}`);
 		}
-		process.stdout.write("git launchers match their pins\n");
+		process.stdout.write("windows launchers match their pins\n");
 		return;
 	}
 
-	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-git-shim-"));
+	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-windows-launcher-"));
 	try {
 		const zig = zigFlag >= 0 ? resolve(argv[zigFlag + 1] ?? fail("--zig needs a path")) : await pinnedZig(scratch);
 		const version = execFileSync(zig, ["version"], { encoding: "utf8" }).trim();
 		if (version !== ZIG_VERSION) fail(`zig ${version} found; the launchers are pinned to zig ${ZIG_VERSION}`);
 		let mismatched = false;
 		for (const arch of Object.keys(TARGETS)) {
-			const built = build(zig, arch, join(scratch, `git-${arch}.exe`), join(scratch, "cache"));
+			const built = build(zig, arch, join(scratch, `launcher-${arch}.exe`), join(scratch, "cache"));
 			const digest = sha256(built);
 			if (mode === "--write") {
 				mkdirSync(dirname(assetPath(arch)), { recursive: true });
 				writeFileSync(assetPath(arch), built);
 				process.stdout.write(`${arch}: "${digest}" (${built.length} bytes)\n`);
-				if (digest !== pins[arch]) {
-					mismatched = true;
-					process.stderr.write(`build-git-shim: update the ${arch} pin in ${PIN_FILE}\n`);
-				}
+				pins[arch] = digest;
 				continue;
 			}
 			const committed = existsSync(assetPath(arch)) ? readFileSync(assetPath(arch)) : null;
 			if (committed === null || !committed.equals(built) || digest !== pins[arch]) {
 				mismatched = true;
 				process.stderr.write(
-					`build-git-shim: ${arch} rebuilt ${digest}, committed ${committed === null ? "missing" : sha256(committed)}, pinned ${pins[arch]}\n`,
+					`build-windows-launcher: ${arch} rebuilt ${digest}, committed ${committed === null ? "missing" : sha256(committed)}, pinned ${pins[arch]}\n`,
 				);
 			}
 		}
+		if (mode === "--write") writeFileSync(PIN_FILE, `${JSON.stringify(pins, null, "\t")}\n`);
 		if (mismatched) process.exit(1);
-		if (mode === "--check") process.stdout.write("git launchers rebuild byte for byte and match their pins\n");
+		if (mode === "--check") process.stdout.write("windows launchers rebuild byte for byte and match their pins\n");
 	} finally {
 		rmSync(scratch, { recursive: true, force: true });
 	}

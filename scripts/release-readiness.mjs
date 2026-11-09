@@ -116,7 +116,7 @@ try {
 	checkVersions();
 	run("documentation snapshot", "python3", ["site/sync-docs.py", "--check"]);
 	run("media assets", "python3", ["scripts/media-assets.py", "--check"]);
-	run("windows git launcher pins", process.execPath, ["scripts/build-git-shim.mjs", "--verify-pins"]);
+	run("windows launcher pins", process.execPath, ["scripts/build-windows-launcher.mjs", "--verify-pins"]);
 	scratch = mkdtempSync(join(tmpdir(), "clio-release-readiness-"));
 	const output = join(scratch, "public");
 	run("isolated website build", process.execPath, ["site/build.mjs", "--out", output]);

@@ -16,12 +16,12 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm library:pin` / `pnpm skills:pin` | Refresh generated catalogs. Library pinning also fetches blessed remote packages. |
 | `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
 | `pnpm herdr:pin` | Fetch and verify the selected Herdr release and its schema. |
-| `node scripts/build-git-shim.mjs --verify-pins` / `--check` / `--write` | Check the committed Windows `git.exe` launchers against their pinned SHA-256; rebuild them from `assets/git-shim/launcher.c` with the pinned zig and compare byte for byte; or rebuild and write them. `--check` and `--write` download zig into `TMPDIR` unless `--zig <path>` names one. |
+| `node scripts/build-windows-launcher.mjs --verify-pins` / `--check` / `--write` | Check the committed native Windows launchers (installed as the git shim's `git.exe` and the installer's `clio-coder.exe`) against `assets/windows-launcher/pins.json`; rebuild them from `assets/windows-launcher/launcher.c` with the pinned zig and compare byte for byte; or rebuild them and rewrite the pins. `--check` and `--write` download zig into `TMPDIR` unless `--zig <path>` names one. |
 | `pnpm hooks:install` | Install guards against committing ignored files. |
 | `node scripts/export-github-wiki.mjs --from <wiki> --to <checkout>` | Render a complete generated wiki into a GitHub wiki checkout, replacing its pages. It refuses partial generations, broken links and private material, and never commits or pushes. |
 | `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
 | `sh scripts/install.sh --dry-run` | Preview the Unix managed installer, which accepts Clio 0.6.0 or newer. Actual installation downloads and activates a package. |
-| `pnpm release:readiness` | Check public versions, documentation provenance, media, the Windows git launcher pins and an isolated website build. |
+| `pnpm release:readiness` | Check public versions, documentation provenance, media, the Windows launcher pins and an isolated website build. |
 | `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact; reuse qualification for the same clean commit. |
 | `pnpm release:rehearse` | Exercise qualification/publication checks without publishing a package or release. Uses a temporary remote branch with explicit interactive approval. |
 | `pnpm release` | Qualify, publish npm as the owner, request protected GitHub publication, then offer owner dist-tag forwarding and local cleanup. |

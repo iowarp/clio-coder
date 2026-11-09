@@ -122,7 +122,7 @@ const SIZE_BUDGETS = [
 			!path.includes("/") ||
 			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
 			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs", "assets/clio-mark-gui.webp"].includes(path) ||
-			path.startsWith("assets/git-shim/") ||
+			path.startsWith("assets/windows-launcher/") ||
 			SHIPPED_SCRIPTS.has(path),
 		// The 0.7.0 candidate measured 1,820,298 bytes; the rule would raise this to 2.5 MB, so it stays at 2.0 MB.
 		maxBytes: 2_000_000,

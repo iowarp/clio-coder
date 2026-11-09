@@ -21,8 +21,8 @@ import {
 	setGitCommitAuthorSetting,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../src/core/git-commit-attribution.js";
-import { installGitShimLauncher } from "../../src/core/git-shim-launcher.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { installWindowsLauncher, windowsLaunchFile } from "../../src/core/windows-launcher.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
 import { commitWorktreePath } from "../../src/tools/task-worktree.js";
@@ -436,27 +436,37 @@ describe("autonomous commit authorship", () => {
 		}
 	});
 
-	it("installs the native Windows git launcher only from bytes that match its pin", () => {
+	it("installs the native Windows launcher only from bytes that match its pin", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-git-launcher-"));
 		try {
 			const shimDirectory = join(root, "shim");
 			mkdirSync(shimDirectory);
-			const node = "C:\\Program Files\\nodejs\\node.exe";
+			const launchFile = windowsLaunchFile("C:\\Program Files\\nodejs\\node.exe", [
+				"C:\\Users\\A B\\git-shim.cjs",
+				"C:\\x\\",
+			]);
+			strictEqual(launchFile, 'C:\\Program Files\\nodejs\\node.exe\n"C:\\Users\\A B\\git-shim.cjs" C:\\x\\\n');
 			const launcher = join(shimDirectory, "git.exe");
-			const shipped = readFileSync(join(resolvePackageRoot(), "assets", "git-shim", "win32-x64", "git.exe"));
-			strictEqual(installGitShimLauncher(shimDirectory, node, { arch: "x64" }), null);
+			const shipped = readFileSync(join(resolvePackageRoot(), "assets", "windows-launcher", "win32-x64", "launcher.exe"));
+			strictEqual(installWindowsLauncher(shimDirectory, "git", launchFile, { arch: "x64" }), null);
 			ok(readFileSync(launcher).equals(shipped));
-			strictEqual(readFileSync(join(shimDirectory, "git-shim.node"), "utf8"), `${node}\n`);
+			strictEqual(readFileSync(join(shimDirectory, "git.launch"), "utf8"), launchFile);
 
 			// An altered package launcher is never installed, and a stale one is removed so git.cmd takes over.
-			const altered = join(root, "package", "assets", "git-shim", "win32-x64");
+			const altered = join(root, "package", "assets", "windows-launcher", "win32-x64");
 			mkdirSync(altered, { recursive: true });
-			writeFileSync(join(altered, "git.exe"), Buffer.concat([shipped, Buffer.from([0])]));
+			writeFileSync(join(altered, "launcher.exe"), Buffer.concat([shipped, Buffer.from([0])]));
 			writeFileSync(launcher, "stale");
-			const issue = installGitShimLauncher(shimDirectory, node, { arch: "x64", packageRoot: join(root, "package") });
+			const issue = installWindowsLauncher(shimDirectory, "git", launchFile, {
+				arch: "x64",
+				packageRoot: join(root, "package"),
+			});
 			match(issue ?? "", /does not match its pinned SHA-256/);
 			strictEqual(existsSync(launcher), false);
-			match(installGitShimLauncher(shimDirectory, node, { arch: "ia32" }) ?? "", /no git launcher is built for ia32/);
+			match(
+				installWindowsLauncher(shimDirectory, "git", launchFile, { arch: "ia32" }) ?? "",
+				/no Windows launcher is built for ia32/,
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
