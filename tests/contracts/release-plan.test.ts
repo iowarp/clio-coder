@@ -162,6 +162,9 @@ describe("release decisions", () => {
 		strictEqual(nextStep(finished, { rehearsal: failed }).step, "push");
 		strictEqual(nextStep(facts({ mode: "rehearse" }), { rehearsal: failed }).step, "draft-rehearsal");
 		strictEqual(nextStep(finished, { rehearsal: { tornDown: true } }).step, "push");
+		const throwaway = { clean: true, branch: "rehearse-071", versionsAgree: true, mainAncestor: true, readiness: [] };
+		strictEqual(nextStep({ ...finished, tree: throwaway }, {}).step, "push");
+		strictEqual(nextStep(facts({ pushed: false, tree: throwaway }), {}).step, "stop");
 	});
 
 	it("reports an environment approval as waiting", async () => {

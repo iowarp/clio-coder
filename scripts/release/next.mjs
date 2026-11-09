@@ -37,6 +37,7 @@ import {
 	rerunStarted,
 	runState,
 	tmpdirProblem,
+	versionBranch,
 } from "./plan.mjs";
 import { acquireLock, LockHeld, loadReceipt, newReceipt, recordEvent, saveReceipt } from "./receipt.mjs";
 
@@ -617,7 +618,8 @@ export async function main(argv = process.argv.slice(2)) {
 		receipt ??= newReceipt({
 			version: pkg.version,
 			commit: head,
-			branch: git("branch", "--show-current"),
+			// The publisher plans for the version branch; a rehearsal may run from a throwaway branch.
+			branch: mode === "rehearse" ? versionBranch(pkg.version) : git("branch", "--show-current"),
 			nonce: randomBytes(3).toString("hex"),
 			owner: process.env.USER ?? "unknown",
 		});

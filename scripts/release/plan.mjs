@@ -72,6 +72,12 @@ export function draftAction({ release, tagCommit }, commit) {
 	return { action: "publish" };
 }
 
+/** The version branch a version releases from: `0.7.1` and `0.7.1-rc.0` -> `v071`. */
+export function versionBranch(version) {
+	const [major, minor, patch] = version.split("-")[0].split(".");
+	return `v${major}${minor}${patch}`;
+}
+
 /** Where release:next keeps the ci.yml run's `candidate-<sha>` artifact. */
 export const ciCandidateDirectory = (state, ciRun) => join(state, `ci-${ciRun.id}`);
 
@@ -149,7 +155,9 @@ export function nextStep(facts, receipt) {
 	if (!facts.pushed) {
 		const tree = facts.tree;
 		if (!tree.clean) return stop("commit the candidate first; the tree must be clean");
-		if (!/^v\d{3}$/u.test(tree.branch)) return stop("start from the version branch, such as v071");
+		// A rehearsal pushes only a scratch branch, so it may start from any local branch.
+		if (facts.mode !== "rehearse" && !/^v\d{3}$/u.test(tree.branch))
+			return stop("start from the version branch, such as v071");
 		if (!tree.versionsAgree) return stop("package.json, the GUI manifest and the ACP registry versions must agree");
 		if (!tree.mainAncestor) return stop("origin/main is not an ancestor of the candidate");
 		if (tree.readiness.length) return stop(`release readiness failed:\n${tree.readiness.join("\n")}`);
