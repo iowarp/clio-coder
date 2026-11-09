@@ -106,6 +106,13 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 - `clio-coder targets fleet` shows the fleet default set by `targets use --fleet-model`, with its source; `--json` prints `{ "default", "profiles" }`.
 - `library install` names `--with-requirements` when it refuses a missing requirement.
 - System One's direct OpenRouter calls send `X-OpenRouter-Categories: cli-agent`, as engine turns already did.
+- The built-in read-only recipes (architect, coder `--read-only`, debugger, verifier) run on claude-sdk targets: the `context`, `artifact` and `verify` tools reach a claude-sdk worker, and a refusal no longer suggests a recipe that is refused too.
+- Reminders and nudges that name a tool (the task board, plan close, the marketplace offer, the exploration follow-up and the citation nudge) are sent only when that tool is callable in the turn, so `--allow-tools` runs no longer hunt for a tool they cannot call.
+- `gateway find` lists a declared MCP server whose catalog was never recorded instead of answering with nothing, flags a recorded catalog that may be stale, and the first successful call to a server whose live tool list changed says so to the model.
+- A `copilot-sdk` target admits 4 concurrent requests by default instead of 1, so a Copilot chat can dispatch workers; `maxConcurrentRequests` still overrides it, and a full endpoint's refusal names it.
+- `clio-coder doctor` describes yolo's confinement the way a yolo run resolves it, so contained yolo is no longer reported as unsandboxed.
+- Under `clio-coder acp --read-only`, a refused write says the operator started the server read-only and must restart it without the flag, instead of pointing at a client ceiling.
+- The agent sends file, search, git and test work to the typed tools (`read`, `grep`, `git`, `verify`) instead of `bash`.
 
 ### Internal
 
