@@ -21,7 +21,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `node scripts/export-github-wiki.mjs --from <wiki> --to <checkout>` | Render a complete generated wiki into a GitHub wiki checkout, replacing its pages. It refuses partial generations, broken links and private material, and never commits or pushes. |
 | `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
 | `sh scripts/install.sh --dry-run` | Preview the Unix managed installer, which accepts Clio 0.6.0 or newer. Actual installation downloads and activates a package. |
-| `pnpm release:readiness` | Check public versions, documentation provenance, media and an isolated website build. |
+| `pnpm release:readiness` | Check public versions, documentation provenance, media, the Windows git launcher pins and an isolated website build. |
 | `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact; reuse qualification for the same clean commit. |
 | `pnpm release:rehearse` | Exercise qualification/publication checks without publishing a package or release. Uses a temporary remote branch with explicit interactive approval. |
 | `pnpm release` | Qualify, publish npm as the owner, request protected GitHub publication, then offer owner dist-tag forwarding and local cleanup. |

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Read-only local readiness across package, website, docs, and media surfaces. */
+/** Read-only local readiness across package, website, docs, media, and committed-binary surfaces. */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,6 +116,7 @@ try {
 	checkVersions();
 	run("documentation snapshot", "python3", ["site/sync-docs.py", "--check"]);
 	run("media assets", "python3", ["scripts/media-assets.py", "--check"]);
+	run("windows git launcher pins", process.execPath, ["scripts/build-git-shim.mjs", "--verify-pins"]);
 	scratch = mkdtempSync(join(tmpdir(), "clio-release-readiness-"));
 	const output = join(scratch, "public");
 	run("isolated website build", process.execPath, ["site/build.mjs", "--out", output]);
