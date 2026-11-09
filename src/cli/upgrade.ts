@@ -507,11 +507,17 @@ export async function runUpgradeCommand(
 		const record = installation.installer;
 		if (method !== "installer" || !record) {
 			presenter.fail("Rollback works only for native installer installs, made by install.sh or install.ps1");
-			if (method === "npm" || method === "pnpm" || method === "bun")
+			if (method === "npm" || method === "pnpm" || method === "bun") {
+				// The state record keeps the version this home ran before its last version change.
+				const previous = readStateInfo()?.upgradedFrom;
+				const known = previous !== undefined && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(previous) && previous !== before;
 				presenter.commandAdvice(
-					"Install the version you want with the original package manager:",
-					installationCommand(installation, "upgrade", "<version>"),
+					known
+						? `Install the previous version, ${previous}, with the original package manager:`
+						: "Install the version you want with the original package manager:",
+					installationCommand(installation, "upgrade", known ? previous : "<version>"),
 				);
+			}
 			presenter.finish();
 			return 2;
 		}

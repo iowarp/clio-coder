@@ -344,7 +344,19 @@ test("rollback refuses manager-owned installs before any child command", (t) => 
 	const result = f.run(["--rollback", "--json"]);
 	assert.equal(result.status, 2, result.stdout + result.stderr);
 	assert.match(result.stdout, /native installer/i);
+	assert.match(result.stdout, /@iowarp\/clio-coder@<version>/);
 	assert.throws(f.calls, /ENOENT/);
+
+	// Once the home records the version it ran before, the advice names it exactly.
+	mkdirSync(join(f.home.dir, "state"), { recursive: true });
+	writeFileSync(
+		join(f.home.dir, "state/home.json"),
+		JSON.stringify({ version: "0.7.1-dev", upgradedFrom: "0.6.9", platform: "linux", nodeVersion: "v24" }),
+	);
+	const named = f.run(["--rollback"]);
+	assert.equal(named.status, 2, named.stdout + named.stderr);
+	assert.match(named.stdout, /previous version, 0\.6\.9/);
+	assert.match(named.stdout, /npm install -g --prefix .* @iowarp\/clio-coder@0\.6\.9/);
 });
 
 test("upgrade refuses while another registered session runs from an npm prefix the deferred wrapper owns", async (t) => {
