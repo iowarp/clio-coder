@@ -254,6 +254,23 @@ describe("contracts/uninstall-lifecycle", () => {
 			ok(existsSync(current));
 			rmSync(holder, { recursive: true });
 
+			// A stopped graphical service still starts from the root, so --inactive refuses until it moves.
+			const units = join(temp.root, ".config", "systemd", "user");
+			mkdirSync(units, { recursive: true });
+			const unit = join(units, "clio-coder-gui-0123456789ab.service");
+			writeFileSync(unit, `[Service]\nExecStart="${join(current, "lib/node_modules/@iowarp/clio-coder/x.js")}"\n`);
+			const background = join(temp.stateDir, "gui", "background");
+			mkdirSync(background, { recursive: true });
+			writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: join(current, "lib") }));
+			const stranded = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			strictEqual(stranded.code, 1, stranded.stdout);
+			match(stranded.stdout, /clio-coder-gui-0123456789ab\.service starts it from\s+there/u);
+			match(stranded.stdout, /server\.json starts it from there/u);
+			match(stranded.stdout, /clio-coder gui background install --handover/u);
+			ok(existsSync(current));
+			rmSync(unit);
+			rmSync(background, { recursive: true });
+
 			const preview = await runInHome(temp, () => runUninstallCommand(["--inactive", "--dry-run"]));
 			strictEqual(preview.code, 0);
 			match(preview.stdout, /Inactive install: /u);

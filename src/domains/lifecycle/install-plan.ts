@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { resolveClioDirs } from "../../core/xdg.js";
 import {
@@ -125,14 +125,60 @@ export function installRootHolders(root: string, state = resolveClioDirs().state
 				if (statSync(`/proc/${name}`).uid !== process.getuid?.()) continue;
 				const command = readFileSync(`/proc/${name}/cmdline`, "utf8");
 				const cwd = readlinkSync(`/proc/${name}/cwd`);
-				if (insideAny(command) || atOrUnder(cwd))
-					holders.push(`pid ${pid} (${command.split("\0")[0]})`);
+				if (insideAny(command) || atOrUnder(cwd)) holders.push(`pid ${pid} (${command.split("\0")[0]})`);
 			} catch {
 				/* The process exited or is not inspectable. */
 			}
 		}
 	}
 	return holders;
+}
+
+/**
+ * Graphical-app files that start a server from inside `root`: the background
+ * service config, its systemd unit and the desktop entry. A stopped service still
+ * names its Node and package, so removing the root would strand it.
+ */
+export function installRootServiceFiles(
+	root: string,
+	state = resolveClioDirs().state,
+	env: NodeJS.ProcessEnv = process.env,
+): string[] {
+	const spellings = [...new Set([root, realPathOf(root)])];
+	const home = homedir();
+	const sources: Array<[string, (name: string) => boolean]> = [
+		[join(state, "gui", "background"), (name) => name.endsWith(".json") || name.endsWith(".service")],
+		[
+			join(env.XDG_CONFIG_HOME || join(home, ".config"), "systemd", "user"),
+			(name) => /^clio-coder-gui-.*\.service$/.test(name),
+		],
+		[
+			join(env.XDG_DATA_HOME || join(home, ".local", "share"), "applications"),
+			(name) => /^io\.iowarp\..*\.desktop$/.test(name),
+		],
+	];
+	const found: string[] = [];
+	for (const [dir, wanted] of sources) {
+		let names: string[] = [];
+		try {
+			names = readdirSync(dir).filter(wanted);
+		} catch {
+			continue;
+		}
+		for (const name of names) {
+			const file = join(dir, name);
+			try {
+				const text = readFileSync(file, "utf8");
+				// JSON escapes Windows separators, so its text is compared decoded too.
+				const decoded = text.replaceAll("\\\\", "\\");
+				if (spellings.some((spelling) => text.includes(`${spelling}${sep}`) || decoded.includes(`${spelling}${sep}`)))
+					found.push(file);
+			} catch {
+				/* Unreadable files are not ours to judge. */
+			}
+		}
+	}
+	return found;
 }
 
 const NATIVE_PACKAGE = join("lib", "node_modules", "@iowarp", "clio-coder");

@@ -30,6 +30,7 @@ import {
 	inactiveInstallerLauncher,
 	inactiveInstallerRoots,
 	installRootHolders,
+	installRootServiceFiles,
 } from "../domains/lifecycle/install-plan.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
@@ -523,6 +524,17 @@ async function uninstallInactive(
 		presenter.finish();
 		return 1;
 	}
+	const services = roots.flatMap((record) => installRootServiceFiles(record.root));
+	if (services.length > 0) {
+		presenter.fail("The graphical app is still installed from an inactive install");
+		for (const file of services) presenter.note(`${shortenPath(file)} starts it from there`);
+		presenter.commandAdvice(
+			"Move it to this installation once its work is finished, then retry:",
+			"clio-coder gui background install --handover",
+		);
+		presenter.finish();
+		return 1;
+	}
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");
 		presenter.done("Done");
@@ -550,7 +562,7 @@ async function uninstallInactive(
 		}
 		try {
 			// A launch that raced the check above is caught by its receipt.
-			const late = installRootHolders(record.root);
+			const late = [...installRootHolders(record.root), ...installRootServiceFiles(record.root)];
 			if (late.length > 0) {
 				presenter.fail(`Processes started from ${shortenPath(record.root)}`);
 				for (const holder of late) presenter.note(holder);
