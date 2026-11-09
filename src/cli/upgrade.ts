@@ -18,7 +18,14 @@ import {
 	npmUpgradeInvocation,
 	readInstallerRecord,
 } from "../domains/lifecycle/install-method.js";
-import { describeTracking } from "../domains/lifecycle/install-plan.js";
+import {
+	backgroundPackageRoot,
+	describeTracking,
+	inactiveInstallerLauncher,
+	inactiveInstallerRoots,
+	installIdentity,
+	launcherWinsOnPath,
+} from "../domains/lifecycle/install-plan.js";
 import { listMigrations, readMigrationManifestResult, runPending } from "../domains/lifecycle/migrations/index.js";
 import {
 	compareReleaseVersions,
@@ -29,7 +36,7 @@ import { readStateInfo } from "../domains/lifecycle/state.js";
 import { updateFingerprint } from "../domains/lifecycle/update-check.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
-import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
+import { createLifecyclePresenter, formatBytes, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { printError } from "./shared.js";
 
 const CHANNELS = ["latest", "beta", "dev"] as const;
@@ -382,6 +389,16 @@ async function runBackgroundRestart(installation: Installation): Promise<string>
 	return lines[0] ?? "";
 }
 
+/** Move the background app to this installation; the GUI refuses while it has active work. */
+async function runBackgroundHandover(installation: Installation): Promise<string> {
+	const output = await runChild(
+		nodeFor(installation),
+		[installation.entry, "gui", "background", "install", "--handover"],
+		"clio-coder gui background install --handover",
+	);
+	return output.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "The background app now runs from this installation.";
+}
+
 async function runRestart(installation: Installation): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(nodeFor(installation), [installation.entry], { stdio: "inherit" });
@@ -415,6 +432,7 @@ export interface UpgradeDependencies {
 	runDoctorFixAfterInstall: typeof runDoctorFixAfterInstall;
 	runPostInstallUpgrade: typeof runPostInstallUpgrade;
 	runBackgroundRestart: typeof runBackgroundRestart;
+	runBackgroundHandover: typeof runBackgroundHandover;
 	runPending: typeof runPending;
 	runRestart: typeof runRestart;
 	isInteractive: () => boolean;
@@ -428,6 +446,7 @@ const DEFAULT_DEPENDENCIES: UpgradeDependencies = {
 	runDoctorFixAfterInstall,
 	runPostInstallUpgrade,
 	runBackgroundRestart,
+	runBackgroundHandover,
 	runPending,
 	runRestart,
 	isInteractive: () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
@@ -565,8 +584,35 @@ export async function runUpgradeCommand(
 	const sourceAdvice = () => presenter.commandAdvice(SOURCE_UPGRADE_LEAD, updateCommand);
 	const backgroundOwner = join(stateDir, "gui/background/owner.json");
 	const finish = async (): Promise<number> => {
+		if (!opts.dryRun && opts.postInstall) {
+			// The installer root a move to a checkout or a package manager left behind.
+			for (const record of inactiveInstallerRoots(activeInstallation)) {
+				const size = measurePath(record.root);
+				presenter.warn(
+					`The installer root at ${shortenPath(record.root)} (${formatBytes(size.bytes ?? 0)}) is no longer used by this installation`,
+				);
+				const launcher = inactiveInstallerLauncher(record);
+				if (launcher !== null && launcherWinsOnPath(launcher))
+					presenter.warn(`${shortenPath(launcher)} comes first on PATH and still starts the old installation, not this one`);
+				presenter.commandAdvice("To remove only it, run:", "clio-coder uninstall --inactive");
+			}
+		}
 		if (!opts.dryRun && existsSync(backgroundOwner)) {
-			if (opts.postInstall) {
+			const owner = opts.postInstall ? backgroundPackageRoot(stateDir) : null;
+			if (owner !== null && installIdentity(owner) !== installIdentity(activeInstallation.root)) {
+				// The service still runs another installation's Node and server; it follows the active one.
+				try {
+					presenter.note(await deps.runBackgroundHandover(activeInstallation));
+				} catch (error) {
+					presenter.warn(
+						`The background app still runs from ${shortenPath(owner)}: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					presenter.commandAdvice(
+						"Move it to this installation once its work is finished:",
+						"clio-coder gui background install --handover",
+					);
+				}
+			} else if (opts.postInstall) {
 				presenter.commandAdvice(
 					"The background app is installed. Restart it when its open conversations can move to this version:",
 					"clio-coder gui background restart",

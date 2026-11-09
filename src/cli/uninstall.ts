@@ -17,7 +17,7 @@ import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
-import type { Installation, InstallerRecord } from "../domains/lifecycle/install-method.js";
+import type { Installation } from "../domains/lifecycle/install-method.js";
 import {
 	INSTALLER_LAUNCHER_MARK,
 	INSTALLER_OWNED_ENTRIES,
@@ -26,7 +26,11 @@ import {
 	installationCommand,
 	launcherPathFor,
 } from "../domains/lifecycle/install-method.js";
-import { inactiveInstallerRoots, installRootHolders } from "../domains/lifecycle/install-plan.js";
+import {
+	inactiveInstallerLauncher,
+	inactiveInstallerRoots,
+	installRootHolders,
+} from "../domains/lifecycle/install-plan.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import type { LifecycleItem, LifecyclePresenter } from "./lifecycle-presenter.js";
@@ -471,19 +475,6 @@ function binaryRemovalAdvice(installation: Installation, linkPath: string): { le
 }
 
 /** The launcher an inactive root wrote, when it still runs that root and nothing else replaced it. */
-function inactiveLauncher(record: InstallerRecord): string | null {
-	try {
-		if (lstatSync(record.launcher).isSymbolicLink()) return null;
-		const text = readFileSync(record.launcher, "utf8");
-		const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
-		return text.includes(INSTALLER_LAUNCHER_MARK) && fold(text).includes(fold(`${record.root}${sep}`))
-			? record.launcher
-			: null;
-	} catch {
-		return null;
-	}
-}
-
 /**
  * `uninstall --inactive`: only installer roots left behind by a move to another
  * install method. Homes, the running installation and the desktop app stay.
@@ -511,7 +502,7 @@ async function uninstallInactive(
 			status: "remove",
 			detail: "installer root this binary does not run from",
 		});
-		const launcher = inactiveLauncher(record);
+		const launcher = inactiveInstallerLauncher(record);
 		if (launcher) {
 			launchers.set(record.root, launcher);
 			items.push({ label: "Its launcher", path: launcher, status: "remove", detail: "install.sh launcher for it" });

@@ -1,8 +1,13 @@
-import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { hostname } from "node:os";
-import { join, sep } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { resolveClioDirs } from "../../core/xdg.js";
-import { type Installation, type InstallerRecord, inactiveInstallerRecord } from "./install-method.js";
+import {
+	INSTALLER_LAUNCHER_MARK,
+	type Installation,
+	type InstallerRecord,
+	inactiveInstallerRecord,
+} from "./install-method.js";
 
 /** Why background updates are off for an installer install; see nativeAutoUpdatePolicy. */
 export type TrackingAutoUpdate = { enabled: boolean; blocker: string | null } | null;
@@ -123,4 +128,55 @@ export function installRootHolders(root: string, state = resolveClioDirs().state
 		}
 	}
 	return holders;
+}
+
+const NATIVE_PACKAGE = join("lib", "node_modules", "@iowarp", "clio-coder");
+
+/**
+ * What one installation is, for comparing two package roots: the install root of
+ * a native install (every upgrade lands in a new versions/<version> prefix), and
+ * the package root itself for every other method.
+ */
+export function installIdentity(packageRoot: string): string {
+	const root = resolve(packageRoot);
+	if (!root.endsWith(`${sep}${NATIVE_PACKAGE}`)) return root;
+	const versions = dirname(root.slice(0, -(NATIVE_PACKAGE.length + 1)));
+	return basename(versions) === "versions" ? dirname(versions) : root;
+}
+
+/** The package root the background app was installed from, or null when there is none or it is unreadable. */
+export function backgroundPackageRoot(stateDir: string): string | null {
+	try {
+		const config = JSON.parse(readFileSync(join(stateDir, "gui", "background", "server.json"), "utf8")) as {
+			packageRoot?: unknown;
+		};
+		return typeof config.packageRoot === "string" && config.packageRoot !== "" ? config.packageRoot : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The launcher an inactive installer root still owns: a regular file with the installer mark naming that root. */
+export function inactiveInstallerLauncher(record: InstallerRecord): string | null {
+	try {
+		if (lstatSync(record.launcher).isSymbolicLink()) return null;
+		const text = readFileSync(record.launcher, "utf8");
+		const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
+		return text.includes(INSTALLER_LAUNCHER_MARK) && fold(text).includes(fold(`${record.root}${sep}`))
+			? record.launcher
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/** True when `launcher` is the first `clio-coder` a shell finds on PATH (POSIX names only). */
+export function launcherWinsOnPath(launcher: string, path = process.env.PATH ?? ""): boolean {
+	for (const dir of path.split(delimiter)) {
+		if (!dir) continue;
+		const candidate = join(dir, basename(launcher));
+		if (!existsSync(candidate)) continue;
+		return resolve(candidate) === resolve(launcher);
+	}
+	return false;
 }

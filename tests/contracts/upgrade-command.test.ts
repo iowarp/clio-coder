@@ -171,6 +171,58 @@ test("a successful upgrade asks the installed CLI to restart an idle background 
 	assert.match(manual.stdout, /clio-coder gui background restart/);
 });
 
+test("post-install moves a background app another installation owns and names the installer root it left", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	const background = join(f.home.dir, "state/gui/background");
+	mkdirSync(background, { recursive: true });
+	writeFileSync(join(background, "owner.json"), "{}\n");
+	const handover = `runBackgroundHandover: async (installation) => {
+			const { appendFileSync } = await import("node:fs");
+			appendFileSync(process.env.CALL_LOG, JSON.stringify({ handoverEntry: installation.entry }) + "\\n");
+			return "Background app now runs from this installation.";
+		},`;
+	const installRoot = join(f.home.dir, "old-install");
+	const oldPrefix = join(installRoot, "versions", "0.6.2");
+	const oldPackage = join(oldPrefix, "lib/node_modules/@iowarp/clio-coder");
+	const shadowDir = join(f.home.dir, "shadow-bin");
+	mkdirSync(join(oldPackage, "dist"), { recursive: true });
+	mkdirSync(shadowDir);
+	const launcher = join(shadowDir, "clio-coder");
+	writeFileSync(
+		join(installRoot, "install.json"),
+		JSON.stringify({
+			schema: 2,
+			kind: "clio-coder-installer",
+			current: oldPrefix,
+			node: join(installRoot, "runtime", "node-v24", "bin", "node"),
+			launcher,
+		}),
+	);
+	writeFileSync(launcher, `#!/bin/sh\n# clio-coder-installer launcher\nexec "${oldPrefix}/bin/x"\n`, { mode: 0o755 });
+	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: oldPackage }));
+	const env = { CLIO_CODER_INSTALL_DIR: installRoot, PATH: `${shadowDir}:${process.env.PATH}` };
+	const moved = f.run(["--post-install", "--skip-migrations"], handover, env);
+	assert.equal(moved.status, 0, moved.stderr + moved.stdout);
+	assert.deepEqual(f.calls().at(-1), { handoverEntry: f.entry });
+	assert.match(moved.stdout, /now runs from this installation/);
+	const said = (moved.stdout + moved.stderr).replace(/\s+/g, " ");
+	assert.match(said, /old-install \(\d+ B\) is no longer used by this installation/);
+	assert.match(said, /shadow-bin\/clio-coder comes first on PATH and still starts the old installation/);
+	assert.match(moved.stdout, /clio-coder uninstall --inactive/);
+
+	// A newer version of the same installation keeps the restart advice and never hands over.
+	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: f.root }));
+	const same = f.run(
+		["--post-install", "--skip-migrations"],
+		`runBackgroundHandover: async () => { throw new Error("must not hand over"); },`,
+		env,
+	);
+	assert.equal(same.status, 0, same.stderr + same.stdout);
+	assert.doesNotMatch(same.stdout + same.stderr, /must not hand over/);
+	assert.match(same.stdout, /clio-coder gui background restart/);
+});
+
 test("restart follows successful checks, relaunches with argv the real parser accepts, and propagates the new CLI's exit status", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
