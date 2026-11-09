@@ -1,5 +1,16 @@
-import { match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -340,6 +351,35 @@ describe("contracts/uninstall-lifecycle", () => {
 				if (server.listening) await new Promise<void>((done) => server.close(() => done()));
 				temp.cleanup();
 			}
+		}
+	});
+
+	it("edits a symlinked startup file at its target and keeps every other byte and its mode", {
+		skip: process.platform === "win32" && "install.sh PATH blocks are POSIX",
+	}, async () => {
+		const temp = home();
+		try {
+			const target = join(temp.root, "dotfiles", "bashrc");
+			mkdirSync(join(temp.root, "dotfiles"));
+			const before = Buffer.concat([
+				Buffer.from("# caf"),
+				Buffer.from([0xe9, 0xff, 0x0d]),
+				Buffer.from(`\n\n# added by clio-coder install.sh\nexport PATH="${temp.binDir}:$PATH"\n`),
+			]);
+			writeFileSync(target, before, { mode: 0o640 });
+			chmodSync(target, 0o640);
+			const rc = join(temp.root, ".bashrc");
+			symlinkSync(target, rc);
+
+			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			strictEqual(real.code, 0, real.stdout);
+			match(real.stdout, /Removed the PATH block from ~\/\.bashrc/u);
+			ok(lstatSync(rc).isSymbolicLink(), "the link stays a link");
+			deepStrictEqual(readFileSync(target), Buffer.concat([Buffer.from("# caf"), Buffer.from([0xe9, 0xff, 0x0d, 0x0a])]));
+			strictEqual(statSync(target).mode & 0o777, 0o640);
+			deepStrictEqual(readdirSync(join(temp.root, "dotfiles")), ["bashrc"], "no temporary file is left");
+		} finally {
+			temp.cleanup();
 		}
 	});
 

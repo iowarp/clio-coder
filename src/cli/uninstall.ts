@@ -1,18 +1,25 @@
 import { spawn } from "node:child_process";
 import {
+	closeSync,
 	existsSync,
+	fchmodSync,
+	fchownSync,
+	fsyncSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	renameSync,
 	rmdirSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
@@ -386,14 +393,38 @@ function markedPathBlock(text: ReadonlyArray<string>, binDir: string): number | 
 	return index < 0 ? null : index;
 }
 
-/** Remove the marked block and the blank line install.sh put before it. True when the file changed. */
+/**
+ * Remove the marked block and the blank line install.sh put before it. True when the file changed.
+ * The edit is byte-exact (latin1 maps each byte to one code unit, so bytes outside the block,
+ * valid UTF-8 or not, are written back unchanged), and lands by renaming a synced copy over
+ * the resolved file: a full disk or a kill leaves the original as it was.
+ */
 function removePathBlock(file: string, binDir: string): boolean {
-	const text = readFileSync(file, "utf8").split("\n");
-	const index = markedPathBlock(text, binDir);
+	const real = realpathSync(file);
+	const original = readFileSync(real);
+	const text = original.toString("latin1").split("\n");
+	const index = markedPathBlock(text, Buffer.from(binDir, "utf8").toString("latin1"));
 	if (index === null) return false;
 	const start = index > 0 && text[index - 1] === "" ? index - 1 : index;
 	text.splice(start, index + 2 - start);
-	writeFileSync(file, text.join("\n"));
+	const stat = statSync(real);
+	const temp = join(dirname(real), `.${basename(real)}.clio-coder-${process.pid}.tmp`);
+	let fd: number | null = null;
+	try {
+		fd = openSync(temp, "wx", stat.mode & 0o7777);
+		writeFileSync(fd, Buffer.from(text.join("\n"), "latin1"));
+		fchmodSync(fd, stat.mode & 0o7777);
+		if (process.platform !== "win32" && (stat.uid !== process.getuid?.() || stat.gid !== process.getgid?.()))
+			fchownSync(fd, stat.uid, stat.gid);
+		fsyncSync(fd);
+		closeSync(fd);
+		fd = null;
+		renameSync(temp, real);
+	} catch (error) {
+		if (fd !== null) closeSync(fd);
+		rmSync(temp, { force: true });
+		throw error;
+	}
 	return true;
 }
 
