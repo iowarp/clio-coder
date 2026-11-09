@@ -31,6 +31,7 @@ import { PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catal
 import { resolveVerifyCall } from "../../tools/verify/resolve.js";
 import { withContainedYoloPin } from "../safety/autonomy.js";
 import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
+import { type ArenaEnvPolicy, arenaContenderEnv } from "./contender-env.js";
 import { contenderWrites, readArenaStream, readNumstat } from "./facts.js";
 import { arenaRoot, contenderDiffPath, contenderStreamPath, matchDir, newArenaMatchId, writeMatch } from "./store.js";
 import {
@@ -63,11 +64,13 @@ export interface ArenaRunInput {
 	/** How to start this same Clio Coder: the executable and the arguments before the subcommand. */
 	clio: { file: string; args: ReadonlyArray<string> };
 	/**
-	 * The environment each contender inherits. A contender is the operator's own
-	 * `clio-coder run`, so it needs the same CLIO_CODER_* homes and provider
-	 * credentials the parent holds; the safe-exec allowlist alone would strip them.
+	 * The parent's environment. A contender is the operator's own `clio-coder run`, so it needs the CLIO_CODER_* homes
+	 * and its target's credentials, which the safe-exec allowlist alone would strip; `envPolicy` decides which of these
+	 * variables each contender is given (contender-env.ts).
 	 */
 	env: Record<string, string>;
+	/** The targets and the operator's pass list that scope `env` per contender; absent passes no target's credentials. */
+	envPolicy?: ArenaEnvPolicy;
 	signal?: AbortSignal;
 	onStarted?: (match: ArenaMatch) => void;
 	onProgress?: (line: string) => void;
@@ -77,6 +80,7 @@ export interface ArenaRunInput {
 const TIMEOUT_GRACE_SECONDS = 30;
 const CHECK_TIMEOUT_MS = 10 * 60_000;
 const CHECK_TAIL_BYTES = 2000;
+const NO_ENV_POLICY: ArenaEnvPolicy = { targets: [], passEnv: [] };
 
 function git(cwd: string, args: string[]): string {
 	return execFileSync("git", internalGitArgv(["-C", cwd, ...args]), {
@@ -197,7 +201,7 @@ async function runCheck(input: ArenaRunInput, cwd: string, id: string): Promise<
 	const result = await runCommandVector(input.clio.file, [...input.clio.args, "verifiers", "dry-run", id], {
 		cwd,
 		workspaceRoot: cwd,
-		env: input.env,
+		env: arenaContenderEnv(input.env, input.envPolicy ?? NO_ENV_POLICY, null),
 		timeoutMs: CHECK_TIMEOUT_MS,
 		...(input.signal ? { signal: input.signal } : {}),
 	});
@@ -238,6 +242,7 @@ async function runContender(
 	const streamPath = contenderStreamPath(dir, contender.index);
 	contender.status = "running";
 	save();
+	const env = arenaContenderEnv(input.env, input.envPolicy ?? NO_ENV_POLICY, contender.target);
 	const fd = openSync(streamPath, "w");
 	let result: SafeCommandResult | null = null;
 	let error: string | null = null;
@@ -248,7 +253,7 @@ async function runContender(
 			{
 				cwd: place.cwd,
 				workspaceRoot: place.workspaceRoot,
-				env: input.autonomy === "yolo" ? withContainedYoloPin(input.env) : input.env,
+				env: input.autonomy === "yolo" ? withContainedYoloPin(env) : env,
 				timeoutMs: (input.timeoutSeconds + TIMEOUT_GRACE_SECONDS) * 1000,
 				output: { onStdout: (chunk) => void writeSync(fd, chunk), retainTailBytes: 4096 },
 				...(input.signal ? { signal: input.signal } : {}),

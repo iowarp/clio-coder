@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
+import { readLayeredSettings } from "../core/settings-layers.js";
 import {
 	ARENA_MAX_CONTENDERS,
 	type ArenaContenderSpec,
+	type ArenaEnvPolicy,
 	type ArenaMatchView,
 	ArenaRevealRefused,
 	ArenaVoteError,
@@ -199,6 +201,12 @@ function parentEnv(): Record<string, string> {
 	return env;
 }
 
+/** The targets each contender's credentials are scoped by, as `run --cwd` resolves them, and the operator's pass list. */
+function arenaEnvPolicy(cwd: string): ArenaEnvPolicy {
+	const { settings } = readLayeredSettings(cwd);
+	return { targets: settings.targets, passEnv: settings.safety.sandboxPassEnv };
+}
+
 async function runCommand(args: string[]): Promise<number> {
 	const parsed = parse(
 		args,
@@ -250,6 +258,7 @@ async function runCommand(args: string[]): Promise<number> {
 		autonomy,
 		clio: { file: process.execPath, args: [...process.execArgv, entry] },
 		env: parentEnv(),
+		envPolicy: arenaEnvPolicy(workingDir(parsed)),
 		signal: controller.signal,
 		onStarted: (started) => process.stderr.write(`clio-coder arena: match ${started.id} started\n`),
 		onProgress: (line) => process.stderr.write(`clio-coder arena: ${line}\n`),

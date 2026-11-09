@@ -1,4 +1,5 @@
 export { blindOrder, isArenaChoice } from "./blind.js";
+export { type ArenaEnvPolicy, arenaContenderEnv } from "./contender-env.js";
 export { contenderWrites, readArenaStream } from "./facts.js";
 export { ArenaCheckError, type ArenaRunInput, runArenaMatch, validateArenaRunInput } from "./runner.js";
 export { type ArenaStanding, type ArenaStandings, computeStandings } from "./standings.js";

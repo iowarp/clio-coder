@@ -1,35 +1,12 @@
-import { readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { opencodeCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
+import {
+	opencodeCliMode,
+	referencedOpenCodeCredentials,
+} from "../../domains/providers/runtimes/external-cli-policy.js";
 import { assertToolProfileEnforceable } from "../../tools/profiles.js";
 import type { WorkerRunInput } from "../worker-runtime.js";
 import { cliEventRecord, emptyCliUsage, finiteUsage, type JsonlCliConnector } from "./jsonl-runner.js";
 
 export const OPENCODE_CLI_DEFAULT_MODEL = "opencode-cli-default";
-
-function referencedOpenCodeCredentials(sourceEnv: NodeJS.ProcessEnv): Record<string, string> {
-	const configRoot =
-		sourceEnv.OPENCODE_CONFIG_DIR ??
-		join(sourceEnv.XDG_CONFIG_HOME ?? join(sourceEnv.HOME ?? homedir(), ".config"), "opencode");
-	const paths = [sourceEnv.OPENCODE_CONFIG, join(configRoot, "opencode.json"), join(configRoot, "opencode.jsonc")];
-	const forwarded: Record<string, string> = {};
-	for (const path of paths) {
-		if (path === undefined) continue;
-		let content: string;
-		try {
-			if (statSync(path).size > 1024 * 1024) continue;
-			content = readFileSync(path, "utf8");
-		} catch {
-			continue;
-		}
-		for (const match of content.matchAll(/(?:["']apiKey["']|apiKey)\s*:\s*["']\{env:([A-Z_][A-Z0-9_]*)\}["']/gu)) {
-			const name = match[1];
-			if (name !== undefined && sourceEnv[name]) forwarded[name] = sourceEnv[name];
-		}
-	}
-	return forwarded;
-}
 
 export { opencodeCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 

@@ -1,5 +1,5 @@
 /** Claude's selected account/profile must survive the generic tool environment filter. */
-const CLAUDE_AUTH_ENV = [
+export const CLAUDE_AUTH_ENV = [
 	"CLAUDE_CONFIG_DIR",
 	"CLAUDE_CODE_OAUTH_TOKEN",
 	"CLAUDE_CODE_EXECUTABLE",

@@ -414,6 +414,7 @@ const cwd = args[args.indexOf("--cwd") + 1];
 const model = args[args.indexOf("--model") + 1];
 const end = args.indexOf("--");
 const prompt = end === -1 ? null : args.slice(end + 1).join(" ");
+if (process.env.ARENA_ENV_DIR) writeFileSync(join(process.env.ARENA_ENV_DIR, args[args.indexOf("--target") + 1] + ".json"), JSON.stringify(process.env));
 if (process.env.ARENA_PID_DIR) writeFileSync(join(process.env.ARENA_PID_DIR, model + ".pid"), String(process.pid));
 writeFileSync(join(cwd, "answer.txt"), model + "\\n");
 if (model === "settings") { require("node:fs").mkdirSync(join(cwd, ".clio-coder"), { recursive: true }); writeFileSync(join(cwd, ".clio-coder", "settings.json"), "{}\\n"); }
@@ -737,6 +738,7 @@ describe("arena runner", () => {
 			timeoutSeconds: 120,
 			clio: { file: process.execPath, args: [fake] },
 			env,
+			envPolicy: { targets: [], passEnv: ["ARENA_PID_DIR", "ARENA_BREAK"] },
 			// The breaker removes its own stream file, so reading it back throws while "slow" still runs.
 			onStarted: (begun) => {
 				env.ARENA_BREAK = join(arenaRoot(repo), begun.id, "contender-2.ndjson");
@@ -749,6 +751,56 @@ describe("arena runner", () => {
 		const slow = Number(readFileSync(join(pids, "slow.pid"), "utf8"));
 		assert.throws(() => process.kill(slow, 0), /ESRCH/);
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
+	it("gives each contender only the base variables and its own target's credentials", async () => {
+		const { base, repo, fake } = scratchRepo();
+		const dumps = join(base, "env");
+		mkdirSync(dumps);
+		const result = await runArenaMatch({
+			cwd: repo,
+			prompt: "go",
+			contenders: [
+				{ target: "claude", model: "m1" },
+				{ target: "lite", model: "m2" },
+			],
+			timeoutSeconds: 30,
+			readOnly: true,
+			clio: { file: process.execPath, args: [fake] },
+			env: {
+				ARENA_ENV_DIR: dumps,
+				CLIO_CODER_HOME: "/clio",
+				LC_TIME: "C",
+				OPERATOR_PASS: "kept",
+				MY_CLAUDE_KEY: "claude-key",
+				CLAUDE_CONFIG_DIR: "/claude",
+				LITE_KEY: "lite-key",
+				GITHUB_TOKEN: "gh",
+				SSH_AUTH_SOCK: "/agent.sock",
+				HERDR_PANE_ID: "w1:p1",
+			},
+			envPolicy: {
+				targets: [
+					{ id: "claude", runtime: "claude-code", auth: { apiKeyEnvVar: "MY_CLAUDE_KEY" } },
+					{ id: "lite", runtime: "litellm", auth: { apiKeyEnvVar: "LITE_KEY" } },
+				],
+				passEnv: ["ARENA_ENV_DIR", "OPERATOR_PASS"],
+			},
+		});
+		assert.equal(result.status, "complete", result.error ?? "");
+		const seen = (target: string) => JSON.parse(readFileSync(join(dumps, `${target}.json`), "utf8"));
+		const pick = (env: Record<string, string>, names: string[]) =>
+			Object.fromEntries(names.filter((name) => name in env).map((name) => [name, env[name]]));
+		const names = ["CLIO_CODER_HOME", "LC_TIME", "OPERATOR_PASS", "MY_CLAUDE_KEY", "CLAUDE_CONFIG_DIR", "LITE_KEY"];
+		const shared = { CLIO_CODER_HOME: "/clio", LC_TIME: "C", OPERATOR_PASS: "kept" };
+		assert.deepEqual(pick(seen("claude"), names), {
+			...shared,
+			MY_CLAUDE_KEY: "claude-key",
+			CLAUDE_CONFIG_DIR: "/claude",
+		});
+		assert.deepEqual(pick(seen("lite"), names), { ...shared, LITE_KEY: "lite-key" });
+		for (const target of ["claude", "lite"])
+			assert.deepEqual(pick(seen(target), ["GITHUB_TOKEN", "SSH_AUTH_SOCK", "HERDR_PANE_ID"]), {});
 	});
 
 	it("runs every contender at the match's autonomy and shows yolo audits as blind counts", async () => {

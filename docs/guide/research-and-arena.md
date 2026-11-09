@@ -220,7 +220,17 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
   parameter sweeps and parallel candidates are not in 0.7.0.
 - `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs. The pin also reaches every `clio-coder` such a run starts from bash, and setting it to another value does not widen it.
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
-- Arena contenders inherit the parent environment, the same as any `clio-coder run`.
+- Arena contenders do not inherit your whole environment. Each gets the safe command variables (`PATH`, `HOME`, `USER`,
+  `LANG`, `TMPDIR`, the XDG base dirs), Clio's own `CLIO_CODER_*`, `LC_*`, `TERM`, `SHELL`, `TZ`, `NODE_OPTIONS`, proxy
+  and CA variables, git author and committer names, and the names in `safety.sandboxPassEnv`. From the credentials it
+  gets only its own target's: the target's `auth.apiKeyEnvVar`, its runtime's default key variable, and that runtime's
+  own variables (`CLAUDE_CONFIG_DIR` and the Anthropic selectors for `claude-code`, also every `ANTHROPIC_*` and
+  `CLAUDE_CODE_*` for `claude-sdk`; `CODEX_HOME` for `codex-cli`; `OPENCODE_CONFIG*` and the keys its config names for
+  `opencode-cli`; `PI_CODING_AGENT_DIR` for `pi-cli`; `COPILOT_*`, `GH_HOST`, `GH_CONFIG_DIR` and the D-Bus address for
+  `copilot-sdk`; `AWS_*` for `bedrock`; the Google key, project and credentials file for `google`). A contender loses
+  everything else: other targets' keys, `GITHUB_TOKEN`/`GH_TOKEN`, `SSH_AUTH_SOCK`, cloud logins its runtime does not
+  read, `HERDR_*`, `DISPLAY`, `EDITOR`, and toolchain variables such as `VIRTUAL_ENV`. Add a name it needs to
+  `safety.sandboxPassEnv`.
 - A research measurement is only as good as its check. Run `research report` and look at the A/A line before you trust
   a gain.
 
@@ -230,7 +240,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 | --- | --- | --- | --- | --- |
 | `research start` | A budget cap ended the campaign | An error, a noisy A/A check, or unenforceable spend | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
 | `research report` | Every regrade agrees with the journal | A regrade disagrees, or the campaign is missing | Usage | |
-| `arena run` | Every contender finished | The match failed | Usage | 130 SIGINT, 143 SIGTERM |
+| `arena run` | Every contender finished | The match failed | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
 | `arena show`, `vote` | Done | Unknown match, reveal before a vote, or a second vote without `--replace` | Usage | |
 
 Implementation: [research](../../src/domains/research/index.ts), [arena](../../src/domains/arena/index.ts),
