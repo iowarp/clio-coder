@@ -794,6 +794,45 @@
 		}
 	}
 
+	.research-method {
+		display: grid;
+		grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 2fr);
+		column-gap: 3rem;
+		padding-block: 2.5rem;
+		border-block-start: 1px solid var(--line);
+	}
+	.research-method:last-child {
+		padding-block-end: 5rem;
+	}
+	.research-method > .eyebrow {
+		margin: 0;
+	}
+	.research-method > div > * {
+		max-inline-size: 65ch;
+	}
+	.research-method h2 {
+		font-size: 2rem;
+		margin-block-end: 1rem;
+	}
+	.research-method p:not(.eyebrow),
+	.research-method li {
+		color: var(--ink-soft);
+	}
+	.research-method ol {
+		margin-block: 1rem 0;
+		padding-inline-start: 1.25rem;
+		display: grid;
+		gap: 0.6rem;
+	}
+	@media (max-width: 600px) {
+		.research-method {
+			display: block;
+		}
+		.research-method > .eyebrow {
+			margin-block-end: 1rem;
+		}
+	}
+
 	.tutorial-article {
 		max-inline-size: 760px;
 		padding-block: 3rem 5rem;
