@@ -2,6 +2,8 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.7.0 - 2026-11-08
 
 Clio Coder 0.7.0 is the first stable release since 0.6.9 and includes everything published in 0.7.0-rc.1: the `data` tool for HDF5, NetCDF and Parquet, sealed `reproduce` checks judged against a tolerance, a per-project claims ledger (#406), cost per verified outcome, four science library packs, GitHub Copilot through the official Copilot SDK, cheaper in-prefix compaction and a pinned private pane host.
