@@ -169,6 +169,8 @@ export function api(path, method = "GET", body) {
 		run("gh", ["api", path, "--method", method, ...(body === undefined ? [] : ["--input", "-"])], {
 			encoding: "utf8",
 			stdio: "pipe",
+			// List endpoints grow with release history; the 1 MiB default killed the 0.7.0 release.
+			maxBuffer: 64 * 1024 * 1024,
 			...(body === undefined ? {} : { input: JSON.stringify(body) }),
 		}),
 	);
