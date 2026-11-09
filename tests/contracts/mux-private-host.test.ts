@@ -49,37 +49,43 @@ import { installPinnedTool, mirroredSources } from "../../src/domains/toolchain/
 import { findPinnedTool } from "../../src/domains/toolchain/registry.js";
 
 const SESSION = "clio-coder-0123456789ab";
+/** The hashed name the short fallbacks carry: the uid and Clio's state root. */
+const short = (uid: number, state = "") => createHash("sha256").update(`${uid}\0${state}`).digest("hex").slice(0, 8);
 const shell = { defaultShell: "/state/mux/0123456789ab/pane-shell", shellMode: "non_login" } as const;
 
 describe("private pane host layout (POSIX)", () => {
 	it("prefers the runtime dir and falls back to /tmp when the socket path would be too long", () => {
 		deepStrictEqual(posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: "/run/user/1000" }, SESSION, "linux", 1000), [
 			"/run/user/1000/clio-coder",
-			"/tmp/clio-coder-1000",
+			`/tmp/clio-1000-${short(1000)}`,
 		]);
 		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: "/var/folders/x/T/" }, SESSION, "darwin", 501), [
 			"/var/folders/x/T/clio-coder",
-			"/tmp/clio-coder-501",
+			`/var/folders/x/T/c-${short(501)}`,
+			`/tmp/clio-501-${short(501)}`,
 		]);
 		deepStrictEqual(posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: `/${"d".repeat(90)}` }, SESSION, "linux", 7), [
-			"/tmp/clio-coder-7",
+			"/run/user/7/clio-coder",
+			`/tmp/clio-7-${short(7)}`,
 		]);
 		deepStrictEqual(posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: "relative" }, SESSION, "linux", 7), [
-			"/tmp/clio-coder-7",
+			"/run/user/7/clio-coder",
+			`/tmp/clio-7-${short(7)}`,
 		]);
 	});
 
 	it("tries the operator's TMPDIR before the system temp root when XDG_RUNTIME_DIR is unusable", () => {
 		const systemRoot = posixRuntimeDirCandidates({}, SESSION, "linux", 7);
 		const longXdg = `/${"d".repeat(90)}`;
+		const tmpTail = ["/run/user/7/clio-coder", `/home/me/t/c-${short(7)}`, `/tmp/clio-7-${short(7)}`];
 		deepStrictEqual(posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: longXdg, TMPDIR: "/home/me/t" }, SESSION, "linux", 7), [
 			"/home/me/t/clio-coder-7",
-			...systemRoot,
+			...tmpTail,
 		]);
 		// A runtime dir that fits but cannot be made private falls through to TMPDIR, not straight to the system root.
 		deepStrictEqual(
 			posixRuntimeDirCandidates({ XDG_RUNTIME_DIR: "/run/user/7", TMPDIR: "/home/me/t" }, SESSION, "linux", 7),
-			["/run/user/7/clio-coder", "/home/me/t/clio-coder-7", ...systemRoot],
+			["/run/user/7/clio-coder", "/home/me/t/clio-coder-7", ...tmpTail.slice(1)],
 		);
 		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: `/${"t".repeat(60)}` }, SESSION, "linux", 7), systemRoot);
 		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: "relative" }, SESSION, "linux", 7), systemRoot);
@@ -91,7 +97,7 @@ describe("private pane host layout (POSIX)", () => {
 		const plan = posixRuntimeDirPlan({ XDG_RUNTIME_DIR: xdg, TMPDIR: tmp }, SESSION, "linux", 7, {
 			state: `/${"s".repeat(70)}`,
 		});
-		deepStrictEqual(plan.candidates, ["/tmp/clio-coder-7"]);
+		deepStrictEqual(plan.candidates, ["/run/user/7/clio-coder", `/tmp/clio-7-${short(7, `/${"s".repeat(70)}`)}`]);
 		const message = noRuntimeDirMessage(
 			["EROFS: read-only file system, mkdir '/tmp/clio-coder-7/x'"],
 			plan.tooLong,
@@ -111,9 +117,34 @@ describe("private pane host layout (POSIX)", () => {
 				"linux",
 				7,
 			),
-			[`/${"d".repeat(52)}/clio-coder`, `/${"t".repeat(50)}/clio-coder-7`, "/tmp/clio-coder-7"],
+			[
+				`/${"d".repeat(52)}/clio-coder`,
+				`/${"t".repeat(50)}/clio-coder-7`,
+				"/run/user/7/clio-coder",
+				`/${"t".repeat(50)}/c-${short(7)}`,
+				`/tmp/clio-7-${short(7)}`,
+			],
 		);
 		equal(noRuntimeDirMessage(["EACCES"], [], "linux"), "no usable runtime directory for the pane host (EACCES)");
+	});
+
+	it("falls back to short hashed dirs before failing when every preferred dir is too long", () => {
+		// 52 bytes: too long for `clio-coder-1000` beside the client socket, short enough for `c-<hash>`.
+		const tmp = `/${"t".repeat(51)}`;
+		const state = `/${"s".repeat(70)}`;
+		const plan = posixRuntimeDirPlan({ XDG_RUNTIME_DIR: `/${"d".repeat(60)}`, TMPDIR: tmp }, SESSION, "linux", 1000, {
+			state,
+		});
+		deepStrictEqual(plan.candidates, [
+			"/run/user/1000/clio-coder",
+			`${tmp}/c-${short(1000, state)}`,
+			`/tmp/clio-1000-${short(1000, state)}`,
+		]);
+		equal(Buffer.byteLength(`${tmp}/c-${short(1000, state)}/${SESSION}-client.sock`), 99);
+		equal(plan.tooLong.length, 3);
+		// Each Clio home gets its own /tmp directory, and so does each user.
+		notEqual(short(1000, state), short(1000, "/other"));
+		notEqual(short(1000, state), short(1001, state));
 	});
 
 	it("lays the socket out in TMPDIR when the runtime dir is too long for one", (t) => {
@@ -156,7 +187,8 @@ describe("private pane host layout (POSIX)", () => {
 		const stateRun = join(state, "mux", "run");
 		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", uid, { state, cache: join(scratch, "c") }), [
 			...[stateRun, join(scratch, "c", "run")].filter(fits),
-			`/tmp/clio-coder-${uid}`,
+			`/run/user/${uid}/clio-coder`,
+			`/tmp/clio-${uid}-${short(uid, state)}`,
 		]);
 		if (!fits(stateRun)) {
 			t.skip("tmp root too long for a socket under the state root");
@@ -178,11 +210,13 @@ describe("private pane host layout (POSIX)", () => {
 		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", 7, { state: fitting, cache: "/c" }), [
 			join(fitting, "mux", "run"),
 			"/c/run",
-			"/tmp/clio-coder-7",
+			"/run/user/7/clio-coder",
+			`/tmp/clio-7-${short(7, fitting)}`,
 		]);
 		deepStrictEqual(posixRuntimeDirCandidates({}, session, "linux", 7, { state: tooLong, cache: "/c" }), [
 			"/c/run",
-			"/tmp/clio-coder-7",
+			"/run/user/7/clio-coder",
+			`/tmp/clio-7-${short(7, tooLong)}`,
 		]);
 	});
 

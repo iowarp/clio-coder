@@ -20,6 +20,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
@@ -65,7 +66,8 @@ export interface TooLongRuntimeDir {
  * the session's `XDG_RUNTIME_DIR`, then a uid-named directory in the operator's
  * `TMPDIR`; macOS uses its per-user `TMPDIR`. Both then try `<state>/mux/run`
  * and `<cache>/run`, which a launcher's write fence leaves writable when it
- * makes `/run/user/<uid>` read-only, and end at a uid-named directory in /tmp.
+ * makes `/run/user/<uid>` read-only, and end at the short directories of
+ * {@link shortRuntimeDirs}.
  */
 export function posixRuntimeDirCandidates(
 	env: NodeJS.ProcessEnv,
@@ -115,8 +117,37 @@ export function posixRuntimeDirPlan(
 			});
 		}
 	}
-	const fallback = `/tmp/clio-coder-${uid}`;
-	return { candidates: [...new Set([...fitting, fallback])], tooLong };
+	return {
+		candidates: [...new Set([...fitting, ...shortRuntimeDirs(env, session, platform, uid, clioRoots)])],
+		tooLong,
+	};
+}
+
+/**
+ * Short directories tried after the preferred ones, for a launch whose own
+ * roots are too long or fenced: the login session's `/run/user/<uid>` when it
+ * exists (Linux; it is never created), then a short hashed directory in
+ * `TMPDIR`, then one in /tmp. The hash is of the uid and Clio's state root, so
+ * every Clio home gets its own directory and a shared `TMPDIR` keeps users apart.
+ */
+function shortRuntimeDirs(
+	env: NodeJS.ProcessEnv,
+	session: string,
+	platform: NodeJS.Platform,
+	uid: number,
+	clioRoots: { state?: string },
+): string[] {
+	const hash = createHash("sha256")
+		.update(`${uid}\0${clioRoots.state ?? ""}`)
+		.digest("hex")
+		.slice(0, 8);
+	const dirs: string[] = [];
+	if (platform !== "darwin") dirs.push(`/run/user/${uid}/clio-coder`);
+	const tmp = env.TMPDIR?.replace(/\/+$/u, "");
+	// Named as short as it can be: in a long TMPDIR every byte of the name counts.
+	if (tmp?.startsWith("/")) dirs.push(join(tmp, `c-${hash}`));
+	dirs.push(`/tmp/clio-${uid}-${hash}`);
+	return dirs.filter((dir) => Buffer.byteLength(join(dir, `${session}-client.sock`)) <= SOCKET_PATH_BUDGET);
 }
 
 /**
