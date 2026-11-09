@@ -146,6 +146,7 @@ import {
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 	withStrayWrites,
 } from "../../tools/task-worktree.js";
+import { extractTaskGates } from "../../tools/verify/task-gates.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
 import {
 	DEFAULT_ESCALATION_FALLBACK,
@@ -8927,6 +8928,8 @@ export function createDispatchBundle(
 					executedCommands: observedRunEffects.verificationCommands,
 					executedCheckingCalls: countCheckingCalls(toolStats),
 					readOnly: lifecycle.readOnly,
+					// The worker derived the same gates from the same task text.
+					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
 				const sealedResultContractFact: RunResultContractFact | null =
 					resultContract === null

@@ -72,6 +72,27 @@ export interface ValidationGroundingInput {
 	executedCommands: ReadonlySet<string>;
 	/** Successful shell and typed-verification calls this run made, matched or not. */
 	executedCheckingCalls: number;
+	/** The gates a verifier's task declared; `verify <id>` ran the gate's command text. */
+	taskGates?: ReadonlyArray<{ id: string; text: string }>;
+}
+
+/**
+ * A typed check ran as `verify <id>`, and a report names it by that id or, for
+ * a task gate, by the command the task wrote. Both name the same execution.
+ */
+function withTypedCheckNames(
+	executed: ReadonlySet<string>,
+	gates: ReadonlyArray<{ id: string; text: string }>,
+): ReadonlySet<string> {
+	const names = new Set(executed);
+	for (const command of executed) {
+		const id = /^verify (\S+)$/u.exec(command)?.[1];
+		if (id === undefined || id === "frontend") continue;
+		names.add(id);
+		const gate = gates.find((candidate) => candidate.id === id);
+		if (gate !== undefined) names.add(gate.text);
+	}
+	return names;
 }
 
 function normalize(value: string): string {
@@ -160,8 +181,9 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
 	let grounded = 0;
+	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
 	for (const name of claims) {
-		if (isExecuted(name, input.executedCommands)) grounded += 1;
+		if (isExecuted(name, executed)) grounded += 1;
 		else if (!ungrounded.includes(name)) ungrounded.push(name);
 	}
 	return {

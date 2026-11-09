@@ -116,3 +116,20 @@ it("grounds a verify claim in its successful tool execution and preserves unmatc
 		"validated",
 	);
 });
+
+it("grounds verifier claims that name a typed check by its id or its task gate command", () => {
+	const ground = (claim: string, taskGates?: Array<{ id: string; text: string }>) =>
+		groundClaimedValidations({
+			contractKind: "verifier-report",
+			output: JSON.stringify({ checks: [{ name: claim, passed: true, evidence: "exit 0" }] }),
+			executedCommands: new Set(["verify gate-1", "tool:verify"]),
+			executedCheckingCalls: 1,
+			...(taskGates ? { taskGates } : {}),
+		})?.grounded;
+	const gates = [{ id: "gate-1", text: "python3 check.py" }];
+	strictEqual(ground("gate-1: python3 check.py"), 1);
+	strictEqual(ground("python3 check.py", gates), 1);
+	strictEqual(ground("python3 check.py"), 0);
+	strictEqual(ground("gate-2"), 0);
+	strictEqual(ground("python3 other.py", gates), 0);
+});
