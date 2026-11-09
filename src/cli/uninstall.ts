@@ -36,6 +36,7 @@ import {
 import {
 	inactiveInstallerLauncher,
 	inactiveInstallerRoots,
+	installerExeFiles,
 	installRootHolders,
 	installRootServiceFiles,
 } from "../domains/lifecycle/install-plan.js";
@@ -247,6 +248,7 @@ function ownedCliEntries(): string[] {
 function isInstallerLauncher(linkPath: string, installation: Installation): boolean {
 	const record = installation.installer;
 	if (record === undefined) return false;
+	if (installerExeFiles(linkPath, record.root)) return true;
 	try {
 		// The sh launcher carries the mark as a comment line, the Windows .cmd as a
 		// `rem` line; both name the install root they run from.
@@ -615,7 +617,7 @@ async function uninstallInactive(
 			}
 			const targets = INSTALLER_OWNED_ENTRIES.map((name) => join(record.root, name));
 			const launcher = launchers.get(record.root);
-			if (launcher) targets.push(launcher);
+			if (launcher) targets.push(launcher, ...(installerExeFiles(launcher, record.root) ?? []));
 			const failed = targets.flatMap((target) => removePath("inactive install", target, false) ?? []);
 			failures.push(...failed);
 			if (failed.length === 0) presenter.completedStep(`Removed ${shortenPath(record.root)}`);
@@ -689,6 +691,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const inactiveSize = inactiveInstall ? measurePath(inactiveInstall.root) : null;
 	const linkSize = measurePath(linkPath);
 	const launcher = classifyLauncher(linkPath, installation);
+	const launcherFiles =
+		launcher.kind === "remove" && installerRecord ? (installerExeFiles(linkPath, installerRecord.root) ?? []) : [];
 	const runtimeSize = installerRecord ? measurePath(installerRecord.root) : null;
 	const shellEdits = detectShellRcEdits(dirname(linkPath));
 	const paneHosts = process.platform === "win32" ? [] : privatePaneHosts(dirs.state);
@@ -746,6 +750,15 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			status: launcherItemStatus(launcher, !args.keepBinary),
 			detail: launcherItemDetail(launcher, !args.keepBinary),
 		},
+		...launcherFiles.map(
+			(file): LifecycleItem => ({
+				label: "Launcher file",
+				path: file,
+				bytes: measurePath(file).bytes,
+				status: args.keepBinary ? "keep" : "remove",
+				detail: args.keepBinary ? "kept by --keep-binary" : undefined,
+			}),
+		),
 	];
 	if (installerRecord && runtimeSize) {
 		items.push({
@@ -994,13 +1007,13 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		const deferToExit = process.platform === "win32" && installerRecord !== undefined && !args.keepBinary;
 		const deferred: string[] = [];
 		if (deferToExit && launcher.kind === "remove") {
-			deferred.push(linkPath);
+			deferred.push(linkPath, ...launcherFiles);
 			presenter.completedStep("Launcher will be removed when this command exits");
 			launcherRemoved = true;
 		} else if (!args.keepBinary && launcher.kind === "remove") {
-			const failure = removePath("launcher", linkPath, false);
-			if (failure) failures.push(failure);
-			else {
+			const failed = [linkPath, ...launcherFiles].flatMap((file) => removePath("launcher", file, false) ?? []);
+			failures.push(...failed);
+			if (failed.length === 0) {
 				presenter.completedStep("Removed launcher");
 				launcherRemoved = true;
 			}

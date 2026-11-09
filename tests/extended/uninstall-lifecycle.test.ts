@@ -302,6 +302,69 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
+	it("removes the native Windows launcher of an inactive root with its sidecar, retired .cmd and aside copies", async () => {
+		const temp = home();
+		try {
+			const root = join(temp.root, ".local", "share", "clio-coder-install");
+			const current = join(root, "versions", "0.7.1");
+			mkdirSync(current, { recursive: true });
+			const exe = join(temp.binDir, "clio-coder.exe");
+			writeFileSync(
+				join(root, "install.json"),
+				JSON.stringify({
+					schema: 2,
+					kind: "clio-coder-installer",
+					current,
+					node: join(root, "runtime", "node-v24", "bin", "node"),
+					launcher: exe,
+				}),
+				"utf8",
+			);
+			const owned = [
+				exe,
+				join(temp.binDir, "clio-coder.launch"),
+				join(temp.binDir, "clio-coder.cmd"),
+				join(temp.binDir, "clio-coder.exe.1234.old"),
+			];
+			writeFileSync(owned[0] as string, "MZ", "utf8");
+			writeFileSync(owned[1] as string, `node\n"${root}/launchers/a.cjs" launch "${root}"\nutf8-console\n`, "utf8");
+			writeFileSync(owned[2] as string, "@echo off\r\nrem # clio-coder-installer launcher\r\nexit /b 9009\r\n", "utf8");
+			writeFileSync(owned[3] as string, "MZ", "utf8");
+
+			const preview = await runInHome(temp, () => runUninstallCommand(["--inactive", "--dry-run"]));
+			strictEqual(preview.code, 0, preview.stdout);
+			match(preview.stdout, /Its launcher: .*clio-coder\.exe/u);
+
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			strictEqual(code, 0, stdout);
+			for (const file of owned) ok(!existsSync(file), file);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("keeps a .exe launcher whose sidecar names another install root", async () => {
+		const temp = home();
+		try {
+			const root = join(temp.root, ".local", "share", "clio-coder-install");
+			const current = join(root, "versions", "0.7.1");
+			mkdirSync(current, { recursive: true });
+			const exe = join(temp.binDir, "clio-coder.exe");
+			writeFileSync(
+				join(root, "install.json"),
+				JSON.stringify({ schema: 2, kind: "clio-coder-installer", current, node: "node", launcher: exe }),
+				"utf8",
+			);
+			writeFileSync(exe, "MZ", "utf8");
+			writeFileSync(join(temp.binDir, "clio-coder.launch"), `node\n"x.cjs" launch "${root}-other"\n`, "utf8");
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			strictEqual(code, 0, stdout);
+			ok(existsSync(exe), "a launcher for another root stays");
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("stops a private pane host, removes the marked PATH block, and closes with what was kept", {
 		skip: process.platform === "win32" && "private hosts and install.sh PATH blocks are POSIX",
 	}, async () => {

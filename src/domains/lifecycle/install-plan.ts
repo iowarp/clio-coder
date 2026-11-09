@@ -207,10 +207,41 @@ export function backgroundPackageRoot(stateDir: string): string | null {
 	}
 }
 
-/** The launcher an inactive installer root still owns: a regular file with the installer mark naming that root. */
+/**
+ * The other files of the native Windows launcher install.ps1 wrote for `root`, or null when
+ * `exe` is not one: an exe is the installer's when its `.launch` sidecar runs `launch "<root>"`.
+ * Its files are the sidecar, the retired MARK-carrying .cmd and copies renamed aside while running.
+ */
+export function installerExeFiles(exe: string, root: string): string[] | null {
+	if (!/\.exe$/iu.test(exe)) return null;
+	const stem = exe.slice(0, -".exe".length);
+	try {
+		if (!readFileSync(`${stem}.launch`, "utf8").toLowerCase().includes(`launch "${root}"`.toLowerCase())) return null;
+	} catch {
+		return null;
+	}
+	const files = [`${stem}.launch`];
+	try {
+		if (readFileSync(`${stem}.cmd`, "utf8").includes(INSTALLER_LAUNCHER_MARK)) files.push(`${stem}.cmd`);
+	} catch {
+		/* No retired .cmd beside it. */
+	}
+	const aside = `${basename(exe)}.`.toLowerCase();
+	try {
+		for (const name of readdirSync(dirname(exe)))
+			if (name.toLowerCase().startsWith(aside) && name.toLowerCase().endsWith(".old"))
+				files.push(join(dirname(exe), name));
+	} catch {
+		/* Nothing renamed aside. */
+	}
+	return files;
+}
+
+/** The launcher an inactive installer root still owns: a regular file with the installer mark naming that root, or the native exe whose sidecar runs it. */
 export function inactiveInstallerLauncher(record: InstallerRecord): string | null {
 	try {
 		if (lstatSync(record.launcher).isSymbolicLink()) return null;
+		if (installerExeFiles(record.launcher, record.root)) return record.launcher;
 		const text = readFileSync(record.launcher, "utf8");
 		const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
 		return text.includes(INSTALLER_LAUNCHER_MARK) && fold(text).includes(fold(`${record.root}${sep}`))
