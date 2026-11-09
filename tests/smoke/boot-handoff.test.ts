@@ -11,7 +11,7 @@ import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 import { findPinnedTool } from "../../src/domains/toolchain/index.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
-import { reapProcessesCarrying, type StrayProcess } from "../harness/stray-processes.js";
+import { type StrayProcess, stopProcessesCarrying } from "../harness/stray-processes.js";
 
 // The Stage 0 shell must answer the terminal while Stage 1 hydrates. Boot turns
 // the event loop between its phases, so keystrokes, submits, Ctrl+C, resize and
@@ -195,9 +195,10 @@ function launch(env: NodeJS.ProcessEnv, cwd: string, args: readonly string[] = [
 
 /**
  * End a test's CLI and remove its fixture. The CLI is killed outright, and
- * once it is gone every process still carrying its home is killed too, before
- * the home is deleted: a pane host it started is detached, survives the kill,
- * and would otherwise run on in a deleted home for as long as the machine does.
+ * once it is gone every process still carrying its home is stopped too, and
+ * waited for, before the home is deleted: a pane host it started is detached,
+ * survives the kill, and would otherwise run on in a deleted home for as long
+ * as the machine does. The host is asked to stop over its socket first.
  */
 async function release(terminal: Terminal, scratch: Fixture): Promise<void> {
 	terminal.kill();
@@ -205,8 +206,12 @@ async function release(terminal: Terminal, scratch: Fixture): Promise<void> {
 		await terminal.exited();
 	} finally {
 		const home = scratch.env.CLIO_CODER_HOME;
-		if (home) strayHosts.push(...reapProcessesCarrying("CLIO_CODER_HOME", home).filter((stray) => stray.herdrHost));
-		scratch.cleanup();
+		try {
+			if (home)
+				strayHosts.push(...(await stopProcessesCarrying("CLIO_CODER_HOME", home)).filter((stray) => stray.herdrHost));
+		} finally {
+			scratch.cleanup();
+		}
 	}
 }
 

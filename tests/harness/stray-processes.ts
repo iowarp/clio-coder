@@ -15,6 +15,7 @@
  */
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export interface StrayProcess {
 	readonly pid: number;
@@ -23,6 +24,8 @@ export interface StrayProcess {
 	readonly herdrHost: boolean;
 	/** The host socket the process was given, for a pane host or a pane in one. */
 	readonly socketPath: string | undefined;
+	/** Start time in clock ticks since boot (stat field 22): with the pid, the process's identity. */
+	readonly startTime: string;
 }
 
 /**
@@ -40,12 +43,15 @@ export function processesCarrying(name: string, value: string): StrayProcess[] {
 		let environ: string[];
 		let argv: string[];
 		let parent: number;
+		let startTime: string;
 		try {
 			environ = readFileSync(`/proc/${entry}/environ`, "utf8").split("\0");
 			argv = readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0").filter(Boolean);
 			// The command name in field 2 may hold spaces and parentheses; the parent pid follows the last ")".
 			const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
-			parent = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+			const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+			parent = Number(fields[1]);
+			startTime = fields[19] ?? "";
 		} catch {
 			// Another user's process, or one that exited during the scan.
 			continue;
@@ -57,6 +63,7 @@ export function processesCarrying(name: string, value: string): StrayProcess[] {
 			argv,
 			herdrHost: basename(argv[0] ?? "") === "herdr" && argv.includes("server"),
 			socketPath: socket?.slice("HERDR_SOCKET_PATH=".length),
+			startTime,
 		});
 	}
 	return found;
@@ -79,6 +86,104 @@ export function reapProcessesCarrying(name: string, value: string): StrayProcess
 	}
 	for (const stray of strays) if (stray.herdrHost && stray.socketPath) removeHostSocket(stray.socketPath);
 	return strays;
+}
+
+/** State and start time of `pid`, or null once it is gone. */
+function statOf(pid: number): { state: string; startTime: string } | null {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+		return { state: fields[0] ?? "", startTime: fields[19] ?? "" };
+	} catch {
+		return null;
+	}
+}
+
+/** Whether `pid` still runs. A zombie has exited; only its parent's wait is missing. */
+export function processAlive(pid: number): boolean {
+	const stat = statOf(pid);
+	return stat !== null && stat.state !== "Z";
+}
+
+/** Whether `stray` itself still runs, and its pid has not been handed to a newer process. */
+function stillRunning(stray: StrayProcess): boolean {
+	const stat = statOf(stray.pid);
+	return stat !== null && stat.state !== "Z" && stat.startTime === stray.startTime;
+}
+
+async function waitForExit(strays: readonly StrayProcess[], timeoutMs: number): Promise<StrayProcess[]> {
+	const deadline = Date.now() + timeoutMs;
+	let alive = strays.filter(stillRunning);
+	while (alive.length > 0 && Date.now() < deadline) {
+		await sleep(25);
+		alive = alive.filter(stillRunning);
+	}
+	return alive;
+}
+
+/**
+ * Stop every process whose environment holds `name=value` and wait until each
+ * has exited. A pane host is first asked to stop through its own socket, the
+ * way a launcher stops it, so it closes its panes and removes its socket;
+ * whatever is still running after `graceMs` is SIGKILLed and waited for.
+ * Throws when a process survives SIGKILL, so a test cannot delete a home that
+ * a host still runs in. Returns what it found.
+ */
+export async function stopProcessesCarrying(
+	name: string,
+	value: string,
+	options: { graceMs?: number } = {},
+): Promise<StrayProcess[]> {
+	const strays = processesCarrying(name, value);
+	if (strays.length === 0) return strays;
+	const hosts = strays.filter((stray) => stray.herdrHost && stray.socketPath);
+	if (hosts.length > 0) {
+		const { createMuxClient } = await import("../../src/domains/mux/index.js");
+		await Promise.all(
+			hosts.map(async (host) => {
+				const client = createMuxClient({
+					socketPath: host.socketPath as string,
+					requestTimeoutMs: 1_000,
+					connectTimeoutMs: 500,
+				});
+				try {
+					await client.serverStop();
+				} catch {
+					// A host that will not answer is killed below.
+				} finally {
+					await client.close().catch(() => undefined);
+				}
+			}),
+		);
+		await waitForExit(hosts, options.graceMs ?? 3_000);
+	}
+	// A host shutting down may still start a child (a pane shell, a fetch), so
+	// scan again after each round until a scan comes back empty.
+	const seen = new Map(strays.map((stray) => [stray.pid, stray]));
+	let round = strays;
+	for (let attempt = 0; round.length > 0; attempt++) {
+		for (const stray of round) {
+			seen.set(stray.pid, stray);
+			// Checked against the start time so a pid reused while this waited is never signalled.
+			if (!stillRunning(stray)) continue;
+			try {
+				process.kill(stray.pid, "SIGKILL");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+			}
+		}
+		const survivors = await waitForExit(round, 5_000);
+		if (survivors.length > 0)
+			throw new Error(
+				`processes carrying ${name}=${value} outlived SIGKILL: ${survivors.map((stray) => stray.pid).join(", ")}`,
+			);
+		round = processesCarrying(name, value).filter(stillRunning);
+		if (round.length > 0 && attempt === 4)
+			throw new Error(`processes carrying ${name}=${value} kept starting: ${round.map((stray) => stray.pid).join(", ")}`);
+	}
+	const found = [...seen.values()];
+	for (const stray of found) if (stray.herdrHost && stray.socketPath) removeHostSocket(stray.socketPath);
+	return found;
 }
 
 /** A Clio host's server and client sockets and its exit markers, named after the server socket. */
