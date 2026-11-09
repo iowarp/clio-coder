@@ -207,9 +207,9 @@ if (inherited !== null) {
 	process.env.TMPDIR = root;
 	// Same worker constraint as the git guard below; a worker never creates a root anyway.
 	const strays = isMainThread ? await import("./stray-processes.js") : null;
-	process.on("exit", () => {
-		// Every test child has exited by now, so anything still carrying this root
-		// was started by a test and abandoned: a pane host a killed test never got
+	const endRun = (): void => {
+		// At exit every test child has exited, and on a signal the run is ending,
+		// so anything still carrying this root was started by a test and abandoned: a pane host a killed test never got
 		// to stop, running on in a directory about to be deleted.
 		const left = strays?.reapProcessesCarrying(ROOT_ENV, root) ?? [];
 		if (left.length > 0) {
@@ -226,7 +226,23 @@ if (inherited !== null) {
 			// Best effort. A run that cannot remove its own scratch has already
 			// reported whatever failure caused that; it is not this module's to raise.
 		}
-	});
+	};
+	process.on("exit", endRun);
+	// A signal's default action ends the process without "exit" listeners, and
+	// a run stopped from its terminal or by a timeout wrapper used to leave every
+	// pane host its tests abandoned running. End the run here too, then let the
+	// signal take its course: re-raised when nothing else handles it, as the
+	// test runner may.
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+		const onSignal = (): void => {
+			endRun();
+			if (process.listenerCount(signal) === 1) {
+				process.removeListener(signal, onSignal);
+				process.kill(process.pid, signal);
+			}
+		};
+		process.on(signal, onSignal);
+	}
 }
 
 const clioRootEnvKeys = [
