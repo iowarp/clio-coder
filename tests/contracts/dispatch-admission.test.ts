@@ -349,6 +349,41 @@ describe("dispatch admission boundary", () => {
 		strictEqual(assess("verifier", "verification", "Write new retry tests")?.verdict, "refuse");
 	});
 
+	it("reads 'change nothing' and 'leave X unchanged' as prohibitions, not mutation requests", () => {
+		const specs = [agent("verifier", "verification"), agent("coder", "workspace-edit")];
+		const verdict = (task: string) =>
+			assessCapabilityMismatch({
+				agentId: "verifier",
+				capabilityClass: "verification",
+				task,
+				autoSelected: false,
+				resultContractKind: "verifier-report",
+				specs,
+			})?.verdict ?? null;
+		const table: ReadonlyArray<[string, "refuse" | "flag" | null]> = [
+			[
+				"Run `python3 bench/heat_check.py --plain` against ref/heat-reference.json and `python3 -m pytest -q tests`, and report each gate as pass or fail. Change nothing.",
+				null,
+			],
+			["Run bench/heat_check.py and pytest, and report each gate as pass or fail. Change nothing.", null],
+			["Run the test suite and report each gate as pass or fail. Edit nothing, modify no files.", null],
+			["Run the tests and report the result; write nothing to disk.", null],
+			["Run the tests and report failures. Leave the source tree unchanged.", null],
+			["Run the tests and report failures, then change nothing else.", null],
+			["Run the tests and report; do not change anything.", null],
+			["Run the tests. Change the retry limit to 5.", "refuse"],
+			["Run the tests. Change anything that fails.", "refuse"],
+			["Run the tests, fix the failures and change nothing else.", "refuse"],
+			["Leave the docs untouched. Run the tests and update the failing snapshot tests.", "refuse"],
+			["Run the tests. Change nothing, then write new retry tests.", "refuse"],
+			["Run the tests. Change nothing except the retry limit to 5.", "refuse"],
+			["Run the tests. Edit nothing else but the retry limit.", "refuse"],
+			["Run the tests. Change nothing in src/config.ts except the retry limit to 5.", "refuse"],
+			["Run the tests. Leave docs untouched but also update tests to keep rows intact.", "refuse"],
+		];
+		for (const [task, expected] of table) strictEqual(verdict(task), expected, task);
+	});
+
 	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
 		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
 		const task =

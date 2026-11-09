@@ -77,6 +77,19 @@ const IMPERATIVE_MUTATION =
 	/(?:^|[.;:!?,\n]\s*|\b(?:and|then|also|please|must|should|need to|needs to)\s+)(?:implement|add|create|build(?=\s+(?:a|an|the\s+(?:new|missing))\b)|develop|fix|edit|change|modify|refactor|update|write(?!\s+(?:up\s+)?(?:(?:a|an|the|your)\s+)?(?:\w+\s+)?(?:report|summary)\b(?!\s+(?:to|into|in|on)\b)))\b/i;
 
 /**
+ * A mutation verb whose object is nothing is a prohibition. "Change nothing."
+ * opens a clause with "change", so it is removed before the imperative check;
+ * "fix it and change nothing else" still mutates through "fix". A sentence that
+ * carries an exception ("change nothing in x.ts except the limit") is kept.
+ */
+const MUTATION_PROHIBITION =
+	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
+
+function asksForMutation(task: string): boolean {
+	return IMPERATIVE_MUTATION.test(task.replace(MUTATION_PROHIBITION, " "));
+}
+
+/**
  * Contracts whose postcondition is a report. A recipe that declares one has
  * said in its own frontmatter that its terminal result is an account of the
  * workspace rather than a change to it, which is the corroboration a refusal
@@ -157,7 +170,7 @@ export function assessCapabilityMismatch(input: CapabilityMismatchInput): Capabi
 	if (
 		input.capabilityClass === "verification" &&
 		VERIFICATION_REQUEST.test(input.task) &&
-		!IMPERATIVE_MUTATION.test(input.task)
+		!asksForMutation(input.task)
 	) {
 		return null;
 	}
