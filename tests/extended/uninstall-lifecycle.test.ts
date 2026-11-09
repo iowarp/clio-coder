@@ -542,9 +542,11 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(running.kind, "installer");
 			// Even a caller that missed the manifest never calls the root it runs from inactive.
 			temp.env.CLIO_CODER_INSTALL_DIR = root;
+			const { installer: _installer, ...withoutManifest } = running;
+			const missed = { ...withoutManifest, kind: "npm" as const };
 			const { code, stdout } = await runInHome(temp, async () => {
-				strictEqual(inactiveInstallerRecord({ ...running, kind: "npm", installer: undefined }), null);
-				strictEqual(installRootFinding({ ...running, kind: "npm", installer: undefined }), null);
+				strictEqual(inactiveInstallerRecord(missed), null);
+				strictEqual(installRootFinding(missed), null);
 				return 0;
 			});
 			strictEqual(code, 0, stdout);
