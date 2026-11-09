@@ -39,7 +39,6 @@
 	"/docs/architecture/middleware-and-components.html": "/docs/guide/harness-extensions.html",
 	"/docs/architecture/dispatch-typed-intent.html": "/docs/guide/fleet-dispatch.html",
 	"/docs/architecture/artifact-placement.html": "/docs/guide/environment-variables.html",
-	"/docs/guide/glossary.html": "/docs.html",
 	"/docs/guide/skills-marketplace.html": "/docs/guide/plugins.html",
 	"/docs/guide/authoring-plugins.html": "/docs/guide/plugins.html",
 	"/docs/guide/extensions-and-sharing.html": "/docs/guide/harness-extensions.html",
