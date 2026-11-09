@@ -372,8 +372,9 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	const markDirty = (topics: Iterable<TelemetryTopic>) => {
 		for (const topic of topics) if (listeners.get(topic)?.size) dirty.add(topic);
 		if (dirty.size === 0 || timer) return;
+		// Stays ref'd so a subscriber awaiting this update is not stranded when the loop drains
+		// (#434, cancelled on Node 22). It is one-shot, at most MIN_UPDATE_MS, and dispose clears it.
 		timer = setTimeout(emit, Math.max(0, lastEmit + MIN_UPDATE_MS - performance.now()));
-		timer.unref();
 	};
 
 	const unbind = () => {
