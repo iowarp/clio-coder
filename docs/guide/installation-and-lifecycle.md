@@ -1016,7 +1016,10 @@ checkout or a package manager, is listed as `Inactive install` and removed the s
 `--keep-binary` keeps it. `clio-coder uninstall --inactive` removes only such roots and the
 installer launcher that still names them, and keeps every home, the running installation and
 the desktop app. It refuses with exit 1 while a process runs from the root, naming each one
-(`pid N (launched from it)`, or `pid N@host` for another host), and cannot combine with a `--keep-*` flag. For an installer install, uninstall also removes the managed Node and
+(`pid N (launched from it)`, or `pid N@host` for another host). It also refuses while the
+graphical app's `server.json`, a `clio-coder-gui-*.service` unit or an `io.iowarp.*.desktop` entry
+still starts from the root, names that file, and advises
+`clio-coder gui background install --handover`. It cannot combine with a `--keep-*` flag. For an installer install, uninstall also removes the managed Node and
 every installed version: only what the installer created inside the install root
 (`runtime/`, `versions/`, `launchers/`, `.active/`, `install.json` and its ownership
 marker), then the root itself if nothing else is left in it. It takes the
@@ -1024,7 +1027,11 @@ installer's lock first and refuses while another session started from that
 install is still running (`Another native session (pid N) is still running; close it before uninstalling`).
 The `PATH` block `install.sh --modify-path` appended for this launcher's directory, the
 `# added by clio-coder install.sh` line and the exact `export PATH=...` or `fish_add_path` line
-after it, is removed with the launcher and kept with it under `--keep-binary`. Any other line
+after it, is removed with the launcher and kept with it under `--keep-binary`. It is also kept,
+under `Kept, and why`, while any other program shares that directory (pipx, uv and
+`pip --user` install into `~/.local/bin` too and rely on the line). The edit changes only those
+bytes, lands at the target of a symlinked startup file, and replaces the file through a synced
+rename that keeps its mode and owner, so a failure leaves the original as it was. Any other line
 in a shell startup file that mentions Clio Coder is reported as a `Shell config` row and never
 edited. The candidates are the files `install.sh --modify-path` writes: `~/.bashrc`, `~/.zshrc`,
 `$ZDOTDIR/.zshrc` when `ZDOTDIR` is absolute, `~/.profile`, and fish's `config.fish` under an
@@ -1155,7 +1162,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
 4.  **Installer Root** (installer installs only; `clio-coder uninstall` removes it):
     *   `~/.local/share/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `%LOCALAPPDATA%\clio-coder\install` on Windows, or the `--install-dir` you chose.
     *   An installer root no longer in use after a move to another method: `clio-coder uninstall --inactive` removes it.
-    *   Only lines you edited yourself in a shell startup file; uninstall removes the exact `PATH` block `--modify-path` added and reports any other line that mentions Clio Coder.
+    *   Only lines you edited yourself in a shell startup file; uninstall removes the exact `PATH` block `--modify-path` added, unless other programs share the launcher's directory, and reports any other line that mentions Clio Coder.
 5.  **Desktop App** (only if you installed it):
     *   Run `clio-coder gui background uninstall` and `clio-coder gui launcher uninstall`, which `uninstall` also does for an app whose ownership it can verify.
 6.  **Per-Repository State**:
