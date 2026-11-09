@@ -302,7 +302,8 @@ async function qualify(values) {
 		const ready = {};
 		const setup = (major) => {
 			ready[major] ??= (async () => {
-				const tree = join(state, `wt-${commit.slice(0, 12)}-node${major}`);
+				// Outside the git dir: tools such as biome skip nested configs under .git/ (0.7.1 rehearsal).
+				const tree = join(tmpdir(), `clio-qualify-${commit.slice(0, 12)}-node${major}`);
 				const log = join(directory, `qualify-node${major}.log`);
 				writeFileSync(log, "");
 				trees.push(tree);
