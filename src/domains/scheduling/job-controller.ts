@@ -185,6 +185,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		retries_exhausted: "provider retries ran out",
 		compaction: "context compaction failed",
 		job_exhausted: "it ran out of its starts before its condition matched",
+		job_deadline: "it reached its for_ms deadline before its condition matched",
 		polls_failing: "its polls keep failing",
 	};
 	function queueContinuation(
@@ -218,6 +219,15 @@ export function createJobController(options: JobControllerOptions): JobControlle
 	function terminal(id: string, reason: "canceled" | "deadline" | "stopped"): JobRecord {
 		const job = current(id);
 		if (jobHasUnresolvedCleanup(job)) return job;
+		// Like running out of starts, the turn that made this job ended waiting on its match (#450).
+		const wake =
+			reason === "deadline" &&
+			job.state === "active" &&
+			job.spec.runner.kind === "command" &&
+			job.spec.until !== null &&
+			job.spec.onMatch.kind === "main_turn" &&
+			job.delivery?.state !== "running" &&
+			options.continuation?.allowed(job) === true;
 		let result: JobRecord;
 		try {
 			result = commit(job, (draft) => {
@@ -229,11 +239,19 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				dropDelivery(draft, reason);
 				draft.cancelRequested = reason !== "stopped" && live.has(id);
 				if (reason !== "stopped") draft.generation += 1;
+				const last = draft.history.at(-1);
+				if (wake && last?.evidence) queueContinuation(draft, last.id, "job_deadline", last.evidence);
 			});
 		} finally {
 			// A failed cancel receipt must not leave effects running (#411).
 			if (reason !== "stopped") abortLive(id, reason, reason === "deadline" ? "timed_out" : "canceled");
 		}
+		if (result.delivery?.continuation === "job_deadline")
+			try {
+				options.continuation?.resumed(copy(result), jobExecutionTimeoutMs(result.spec, "delivery"), "job_deadline");
+			} catch (error) {
+				report(error);
+			}
 		return result;
 	}
 	function pauseForNavigation(id: string, reason: string): void {
@@ -309,7 +327,10 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			job.persistenceError === null &&
 			job.generation === execution.generation &&
 			options.ports.isCurrent(job.owner) &&
-			(job.spec.deadlineAt === null || now() < job.spec.deadlineAt) &&
+			// The deadline's own wake starts after it by definition (#450).
+			(job.spec.deadlineAt === null ||
+				now() < job.spec.deadlineAt ||
+				(execution.kind === "delivery" && job.delivery?.continuation === "job_deadline")) &&
 			(execution.kind === "delivery"
 				? job.state !== "paused" && job.delivery?.state === "pending"
 				: job.state === "active" && job.pending !== null)

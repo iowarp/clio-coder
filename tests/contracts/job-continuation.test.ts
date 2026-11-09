@@ -328,6 +328,19 @@ describe("job continuation at yolo (#445)", () => {
 		strictEqual(final?.delivery?.state, "delivered");
 	});
 
+	it("wakes the main turn once when a poll job reaches its deadline without a match (#450)", async () => {
+		const delivered: string[] = [];
+		const host = make(polls([{ state: "pending" }], delivered));
+		const { count: _count, ...unbounded } = pollJob;
+		const job = await host.create({ ...unbounded, deadlineAt: clock + 2500 }, owner);
+		for (let i = 0; i < 6; i++) await advance(host, 1000);
+		deepStrictEqual(resumed, [{ cause: "job_deadline", attempt: 0 }]);
+		deepStrictEqual(delivered, ["job_deadline"], "the wake runs once, after the deadline");
+		const final = host.get(job.id, owner);
+		strictEqual(final?.reason, "deadline");
+		strictEqual(final?.delivery?.state, "delivered");
+	});
+
 	it("wakes it too when every poll failed, which is when the turn most needs to know", async () => {
 		const delivered: string[] = [];
 		const host = make(polls([null], delivered));

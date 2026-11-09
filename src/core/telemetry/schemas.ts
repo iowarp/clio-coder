@@ -1545,6 +1545,7 @@ export const TurnContinuedSchema = Type.Object(
 			"retries_exhausted",
 			"compaction",
 			"job_exhausted",
+			"job_deadline",
 			"polls_failing",
 		]),
 		attempt: count,

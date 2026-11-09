@@ -49,6 +49,8 @@ function jobContinuationPreamble(job: JobRecord): string {
 	if (job.delivery?.continuation === undefined) return "";
 	if (job.delivery.continuation === "job_exhausted")
 		return `[Clio Coder] Job ${job.id} ran out of its ${job.spec.count} starts and its condition never matched. The follow-up below was written for a match and does not apply yet. The request that created this job still stands. Read the last poll in the observation. If the polls were failing, fix why first. If the last poll shows the wait is still in progress, create another job now. Stop only when the last poll shows the work cannot finish without the operator, and then say exactly what is needed from them.\n\n`;
+	if (job.delivery.continuation === "job_deadline")
+		return `[Clio Coder] Job ${job.id} reached its for_ms deadline and its condition never matched. The follow-up below was written for a match and does not apply yet. The request that created this job still stands. Read the last poll in the observation. If the polls were failing, fix why first. If the last poll shows the wait is still in progress and no limit the operator set has passed, create another job now. Otherwise stop and say which condition is still unmet and what is needed from the operator.\n\n`;
 	if (job.delivery.continuation === "polls_failing")
 		return `[Clio Coder] Job ${job.id} has failed ${job.failedPolls ?? 0} polls in a row and is still polling. The follow-up below was written for a match and does not apply yet. Read the last poll in the observation and fix why it fails, because the job's next polls pick up the fix. If this job cannot succeed, end it with action stop and create what replaces it. Do not use action cancel, because that also ends this turn. If nothing needs doing, say so and stop.\n\n`;
 	const count = jobContinuationCount(job);
@@ -183,7 +185,9 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 		const continuing = phase === "delivery" && context.job.delivery?.continuation !== undefined;
 		const continuationCount = jobContinuationCount(context.job);
 		const continuationAction =
-			context.job.delivery?.continuation === "job_exhausted" || context.job.delivery?.continuation === "polls_failing"
+			context.job.delivery?.continuation === "job_exhausted" ||
+			context.job.delivery?.continuation === "job_deadline" ||
+			context.job.delivery?.continuation === "polls_failing"
 				? "Waking the main turn"
 				: "Continuing that turn";
 		const chat = deps.chat();

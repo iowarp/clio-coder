@@ -55,6 +55,7 @@ export type TurnContinuationCause =
 	| "retries_exhausted"
 	| "compaction"
 	| "job_exhausted"
+	| "job_deadline"
 	| "polls_failing";
 /**
  * One job or one operator turn gets this many continuations after a failure stop; a turn that dies that often is not a
@@ -62,9 +63,9 @@ export type TurnContinuationCause =
  * hours. The cost ceiling and the loop guard bound it instead (#445).
  */
 export const TURN_CONTINUATION_CAP = 3;
-/** A job runs out of starts once and wakes on failing polls once, so those wakes have nothing to cap. */
+/** A job runs out of starts or time once and wakes on failing polls once, so those wakes have nothing to cap. */
 export const continuationCountsAgainstCap = (cause: TurnContinuationCause): boolean =>
-	cause !== "tool_budget" && cause !== "job_exhausted" && cause !== "polls_failing";
+	cause !== "tool_budget" && cause !== "job_exhausted" && cause !== "job_deadline" && cause !== "polls_failing";
 /** A command job that fails this many polls in a row wakes the turn waiting on it at yolo (#445). */
 export const JOB_FAILED_POLL_WAKE = 5;
 /** Wait before continuing a turn that failed, so a provider outage has time to clear (#445). */
