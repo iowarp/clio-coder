@@ -326,6 +326,12 @@ function assistantError(message: AgentMessage | undefined): string | null {
  */
 /** Share of the checked answer's lines a reply must repeat to count as restating it. */
 const RESTATED_LINE_SHARE = 0.6;
+/** Share of one line's words a reply must carry for that line to count as repeated. */
+const RESTATED_WORD_SHARE = 0.6;
+
+function words(text: string): string[] {
+	return text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+}
 
 /**
  * The answer to print after a citation check. A reply that restates the
@@ -339,7 +345,17 @@ function answerAfterCitationCheck(checked: string | null, reply: string): string
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line.length > 0);
-	const repeated = lines.filter((line) => reply.includes(line)).length;
+	// A rewrite that inserts citations into each line repeats no line verbatim, so a line also counts
+	// when the reply carries most of its words.
+	const replyWords = new Set(words(reply));
+	const repeated = lines.filter((line) => {
+		if (reply.includes(line)) return true;
+		const lineWords = new Set(words(line));
+		if (lineWords.size === 0) return false;
+		let carried = 0;
+		for (const word of lineWords) if (replyWords.has(word)) carried++;
+		return carried / lineWords.size >= RESTATED_WORD_SHARE;
+	}).length;
 	if (lines.length > 0 && repeated / lines.length >= RESTATED_LINE_SHARE) return reply;
 	return `${checked}\n\n${reply}`;
 }

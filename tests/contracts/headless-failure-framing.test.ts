@@ -98,6 +98,19 @@ test("a reply to a citation check that holds only corrections keeps the answer i
 	}
 });
 
+test("a reply to a citation check that rewrites each line with citations is printed alone", async () => {
+	const answer =
+		"At the default level, workspace edits run without asking.\nEdits ask only outside the workspace roots.\nSource: docs/architecture/safety-model.md, lines 11-21.";
+	const reply =
+		"At the `default` level, workspace edits run without asking (safety-model.md:15).\nEdits ask only outside the workspace and scratch roots (safety-model.md:15).\nSource: docs/architecture/safety-model.md, lines 11-20.";
+	const env = await isolateClioEnv("headless-citation-check-");
+	try {
+		strictEqual(await stdoutAfterCitationCheck(answer, reply, "text"), `${reply}\n`);
+	} finally {
+		env.restore();
+	}
+});
+
 test("a reply to a citation check that restates the answer is printed alone", async () => {
 	const answer = "The entry point is c_to_k in src/convert.py.\nRun the tests with python3 -m pytest -q (README.md:2).";
 	const reply = `Confirmed with line numbers; the citations stand.\n\n${answer}`;
