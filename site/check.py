@@ -193,6 +193,14 @@ for url in [*urls, origin + '/404.html']:
         digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
         if not policy or f"'sha256-{digest}'" not in policy.group(1) or 'unsafe-inline' in policy.group(1):
             errors.append(f'{path}: an inline script is not allowed by its exact hash in the page policy')
+    # Published assets are cached by URL, so each reference names the bytes it expects.
+    assets = re.findall(r'\s(?:href|src|poster|data-src|data-light-src)="(/(?:css|js|assets)/[^"]+)"', source)
+    assets += re.findall(r'(?:srcset="|, )(/assets/\S+) \d+w', source)
+    for ref in assets:
+        asset, _, version = ref.partition('?v=')
+        file = root / asset.lstrip('/')
+        if file.suffix in ('.css', '.js', '.woff2', '.png', '.webp', '.jpg', '.jpeg', '.svg', '.ico', '.mp4') and file.is_file() and version != hashlib.sha256(file.read_bytes()).hexdigest()[:10]:
+            errors.append(f'{path}: {ref} does not carry the hash of the published file')
     first_card = re.search(r'<a class="tutorial-card"[^>]*><img [^>]*>', source)
     if first_card and ('loading="lazy"' in first_card.group(0) or 'fetchpriority="high"' not in first_card.group(0)):
         errors.append(f'{path}: the first listing image is the likely LCP element and must load eagerly with high priority')

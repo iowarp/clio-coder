@@ -118,8 +118,9 @@
 			);
 		});
 	}
-	const captures = [...document.querySelectorAll('a[href^="/assets/"][href$=".png"]')].filter((link) =>
-		link.querySelector("img"),
+	// Asset links carry a ?v= cache key, so match the path rather than the raw attribute.
+	const captures = [...document.querySelectorAll('a[href^="/assets/"]')].filter(
+		(link) => new URL(link.href).pathname.endsWith(".png") && link.querySelector("img"),
 	);
 	if (captures.length && "HTMLDialogElement" in window && "showModal" in HTMLDialogElement.prototype) {
 		const viewer = document.createElement("dialog");
@@ -146,7 +147,7 @@
 			const link = captures[current];
 			const source = link.querySelector("img");
 			// Load the full WebP only when a reader opens the viewer; keep the original PNG available.
-			image.src = new URL(link.href).pathname.replace(/\.png$/, ".webp");
+			image.src = source.getAttribute("src");
 			image.alt = source.alt;
 			image.width = Number(source.getAttribute("width"));
 			image.height = Number(source.getAttribute("height"));

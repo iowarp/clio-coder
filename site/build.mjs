@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, posix, resolve } from "node:path";
+import { dirname, join, posix, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { checkPolicy } from "./policy.mjs";
@@ -1145,3 +1145,50 @@ await writeFile(
 		2,
 	)}\n`,
 );
+
+// Every built reference to a stylesheet, script, font, image, or video carries a
+// short hash of the file's bytes, so a deploy changes the URL of anything that
+// changed and no visitor pairs new pages with a stale cached asset.
+const outputFiles = (await readdir(out, { recursive: true })).map((file) => file.split(sep).join("/"));
+const assetHashes = new Map();
+async function hashAssets(pattern) {
+	for (const file of outputFiles.filter((name) => pattern.test(name)))
+		assetHashes.set(
+			`/${file}`,
+			createHash("sha256")
+				.update(await readFile(join(out, file)))
+				.digest("hex")
+				.slice(0, 10),
+		);
+}
+const versioned = (url, base = "/") => {
+	const hash = assetHashes.get(new URL(url, `${product.origin}${base}`).pathname);
+	return hash ? `${url}?v=${hash}` : url;
+};
+await hashAssets(/\.(?:woff2|png|webp|jpe?g|svg|ico|mp4)$/);
+for (const file of outputFiles.filter((name) => name.endsWith(".css")))
+	await writeFile(
+		join(out, file),
+		(await readFile(join(out, file), "utf8")).replace(
+			/url\((["']?)([^"')?#:]+)\1\)/g,
+			(_, quote, url) => `url(${quote}${versioned(url, `/${file}`)}${quote})`,
+		),
+	);
+await hashAssets(/\.(?:css|js)$/);
+for (const file of outputFiles.filter((name) => name.endsWith(".html")))
+	await writeFile(
+		join(out, file),
+		(await readFile(join(out, file), "utf8"))
+			.replace(
+				/(\s(?:href|src|poster|data-src|data-light-src)=")(\/[^"?#]*)"/g,
+				(_, attr, url) => `${attr}${versioned(url)}"`,
+			)
+			.replace(
+				/(\ssrcset=")([^"]+)"/g,
+				(_, attr, list) =>
+					`${attr}${list
+						.split(/,\s*/)
+						.map((candidate) => candidate.replace(/^\/\S+/, (url) => versioned(url)))
+						.join(", ")}"`,
+			),
+	);

@@ -173,7 +173,7 @@ try {
 	await page.waitForFunction(() => !document.querySelector(".nav-more").open);
 	assert.match(
 		(await page.locator('.media-dialog [data-media="original"]').getAttribute("href")) ?? "",
-		/\.png$/,
+		/\.png\?v=[0-9a-f]{10}$/,
 		"The screenshot viewer's original link has an href before it opens",
 	);
 	await page.locator(".capture-link").click();
