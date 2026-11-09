@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { mcpCommandOutput } from "../../src/cli/mcp.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContractMap, DomainName } from "../../src/core/domain-loader.js";
@@ -789,6 +790,44 @@ describe("native worker MCP capabilities", () => {
 		}
 		strictEqual(existsSync(outside), false);
 		if (started) ok(existsSync(join(tree, "inside-marker")));
+	});
+
+	it("lets a sandboxed MCP server handle SIGTERM on close", async () => {
+		const tree = join(env.dir, "tree");
+		mkdirSync(tree);
+		const server = join(tree, "server.mjs");
+		writeFileSync(
+			server,
+			[
+				'import { writeFileSync } from "node:fs";',
+				'process.on("SIGTERM", () => { writeFileSync("term-marker", "1"); process.exit(0); });',
+				'process.argv[2] = "ignore-sigterm";',
+				`await import(${JSON.stringify(pathToFileURL(FIXTURE).href)});`,
+			].join("\n"),
+		);
+		configureWorkerProcessSandbox({
+			version: WORKER_SANDBOX_SPEC_VERSION,
+			mode: "required",
+			writableRoots: [`${tree}/`],
+			readOnlyPaths: [],
+			gitWritablePaths: [],
+			readableRoots: [tree],
+			network: false,
+		});
+		const client = createMcpStdioClient(
+			{ id: "graceful", command: process.execPath, args: [server] },
+			{ workspaceRoot: tree, initializeTimeoutMs: 5_000, killGraceMs: 2_000 },
+		);
+		try {
+			await client.initialize();
+		} catch (error) {
+			match(error instanceof Error ? error.message : String(error), /sandbox/);
+			return;
+		} finally {
+			deepStrictEqual(await client.close(), { complete: true });
+			configureWorkerProcessSandbox(undefined);
+		}
+		ok(existsSync(join(tree, "term-marker")), "the sandboxed server never saw SIGTERM");
 	});
 
 	it("gives the native model loop an MCP result through the worker-local source", { timeout: 20_000 }, async () => {

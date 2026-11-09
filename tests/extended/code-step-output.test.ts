@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { mainSandboxPolicy } from "../../src/core/sandbox/main-session.js";
 import {
 	CODE_STEP_CAPTURE_MAX_BYTES,
 	CODE_STEP_EXCERPT_MAX_BYTES,
@@ -110,6 +112,32 @@ it("a successful leader cannot leave its background child running", {
 			} catch {}
 		}
 	}
+});
+
+it("a sandboxed command that times out gets SIGTERM before it is killed", {
+	skip: !sandboxAvailability().available,
+}, async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-code-step-sandbox-term-"));
+	roots.push(root);
+	const handler = `
+		process.on('SIGTERM', () => { require('node:fs').writeFileSync('term-marker', '1'); process.exit(0); });
+		setInterval(() => {}, 1000);
+	`;
+	const result = await runCodeStep({
+		stepId: "measurement",
+		command: {
+			id: "graceful",
+			argv: [process.execPath, "-e", handler],
+			cwd: "",
+			timeoutMs: 2_000,
+			env: [],
+			description: "Sandboxed SIGTERM fixture",
+		},
+		workspaceRoot: root,
+		shellSandbox: mainSandboxPolicy({ workspace: root, scratchRoots: [] }),
+	});
+	strictEqual(result.record.timedOut, true);
+	ok(existsSync(join(root, "term-marker")), "the sandboxed command never saw SIGTERM");
 });
 
 it("fails the check when a newly reported test fails outside the declared suite", async () => {

@@ -25,6 +25,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { readClioVersion } from "../../../core/package-root.js";
 import { buildSafeToolEnv, resolveSafeCwd } from "../../../core/safe-exec.js";
+import { signalSandboxPayload } from "../../../core/sandbox/signal.js";
 import { planSandboxedSpawn } from "../../../core/sandbox/worker-process.js";
 import { clampTimerDelayMs, sleep } from "../../../core/timers.js";
 import type { JsonRpcErrorObject, JsonRpcId, JsonRpcMessage } from "./protocol.js";
@@ -504,6 +505,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	let exited: Promise<void> | null = null;
 	let leaderExited = false;
 	let groupPhase: GroupPhase = "unspawned";
+	let sandboxedLauncher = false;
 	let groupCleanup: Promise<McpTeardownOutcome> | null = null;
 	let teardown: McpTeardownOutcome | null = null;
 	let closing = false;
@@ -550,6 +552,9 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 	const signalGroup = (signalName: NodeJS.Signals): void => {
 		const pid = child?.pid;
 		if (pid !== undefined && process.platform !== "win32" && groupOwned()) {
+			// A sandboxed server runs in its own session inside the sandbox, so TERM
+			// goes to it alone and the launcher exits after it; KILL reaches both.
+			if (sandboxedLauncher && signalSandboxPayload(pid, signalName) && signalName !== "SIGKILL") return;
 			try {
 				process.kill(-pid, signalName);
 				return;
@@ -779,6 +784,7 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 			fail(new McpError("spawn", `mcp server ${spec.id} failed to start: ${sandbox.message}`));
 			return false;
 		}
+		sandboxedLauncher = sandbox.kind === "sandboxed";
 		let proc: ChildProcess;
 		try {
 			const [file, args] =

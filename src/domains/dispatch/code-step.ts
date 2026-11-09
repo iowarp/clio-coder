@@ -35,6 +35,7 @@ import {
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { scrubSandboxEnv } from "../../core/sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "../../core/sandbox/main-session.js";
+import { signalSandboxPayload } from "../../core/sandbox/signal.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import {
@@ -546,6 +547,9 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 			signal: (signal) => {
 				if (child.pid === undefined) return false;
 				if (process.platform === "win32") return child.kill(signal);
+				// A sandboxed command runs in its own session inside the sandbox, so TERM
+				// goes to it alone and the launcher exits after it; KILL reaches both.
+				if (contained !== undefined && signalSandboxPayload(child.pid, signal) && signal !== "SIGKILL") return true;
 				try {
 					process.kill(-child.pid, signal);
 					return true;
