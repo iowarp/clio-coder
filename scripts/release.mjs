@@ -17,14 +17,19 @@ import {
 const repository = "iowarp/clio-coder";
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function recentRun(workflow, branch, commit, since = "") {
+function dispatchedRuns(workflow, branch, commit) {
 	return api(
 		`repos/${repository}/actions/workflows/${workflow}/runs?${branch ? `branch=${encodeURIComponent(branch)}&` : ""}event=workflow_dispatch&head_sha=${commit}&per_page=100`,
-	).workflow_runs.find((record) => record.head_sha === commit && record.created_at >= since);
+	).workflow_runs.filter((record) => record.head_sha === commit);
+}
+
+async function recentRun(workflow, branch, commit) {
+	return dispatchedRuns(workflow, branch, commit)[0];
 }
 
 async function dispatch(workflow, branch, commit, fields) {
-	const since = new Date(Date.now() - 1000).toISOString();
+	// Match the new run by ID, not by timestamp: GitHub's created_at can lag the local clock by seconds.
+	const known = new Set(dispatchedRuns(workflow, branch, commit).map((record) => record.id));
 	run("gh", [
 		"workflow",
 		"run",
@@ -36,7 +41,7 @@ async function dispatch(workflow, branch, commit, fields) {
 		...Object.entries(fields).flatMap(([name, value]) => ["--field", `${name}=${value}`]),
 	]);
 	for (let attempt = 0; attempt < 18; attempt++) {
-		const record = await recentRun(workflow, branch, commit, since);
+		const record = dispatchedRuns(workflow, branch, commit).find((candidate) => !known.has(candidate.id));
 		if (record) return record;
 		await delay(5000);
 	}
