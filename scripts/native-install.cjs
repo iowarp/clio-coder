@@ -404,6 +404,9 @@ function prune(root, options = {}) {
 		}
 	};
 	if (installed?.launcher) readText(installed.launcher, "launcher");
+	// The native Windows launcher names its bootstrap in the sidecar, not in its own bytes.
+	if (/\.exe$/iu.test(installed?.launcher ?? ""))
+		readText(`${installed.launcher.slice(0, -".exe".length)}.launch`, "launcher");
 	const state = clioRoot("state");
 	const home = os.homedir();
 	const listed = (dir, test) => {

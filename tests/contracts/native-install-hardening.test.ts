@@ -179,6 +179,31 @@ test("prune names a version it cannot read and leaves it whole, and finishes an 
 	assert.deepEqual(readdirSync(join(f.root, "versions")).sort(), ["0.5.9", "0.6.0", "0.6.1"]);
 });
 
+test("prune keeps the bootstrap a native Windows launcher names in its sidecar", (t) => {
+	const f = fixture(t);
+	mkdirSync(join(f.root, "launchers"));
+	const live = join(f.root, "launchers/aaa.cjs");
+	const stale = join(f.root, "launchers/bbb.cjs");
+	for (const file of [live, stale]) writeFileSync(file, "");
+	mkdirSync(join(f.root, "bin"));
+	const exe = join(f.root, "bin/clio-coder.exe");
+	writeFileSync(exe, "MZ");
+	writeFileSync(join(f.root, "bin/clio-coder.launch"), `node\n"${live}" launch "${f.root}"\nutf8-console\n`);
+	f.save({ ...f.record, launcher: exe });
+	for (const name of ["HOME", "CLIO_CODER_STATE_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] as const) {
+		const saved = process.env[name];
+		process.env[name] = join(f.root, "home", name);
+		t.after(() => {
+			if (saved === undefined) delete process.env[name];
+			else process.env[name] = saved;
+		});
+	}
+	const result = lifecycle.prune(f.root, { dryRun: true, inventory: () => ({ complete: true, texts: [] }) });
+	assert.equal(result.proof, true);
+	assert.equal(result.kept.find((entry) => entry.name === "aaa.cjs")?.why, "launcher");
+	assert.ok(result.removed.some((entry) => entry.name === "bbb.cjs"));
+});
+
 test("without a complete process inventory, prune keeps the last week and the newest three", (t) => {
 	const f = fixture(t);
 	const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
