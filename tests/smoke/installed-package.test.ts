@@ -281,6 +281,9 @@ interface WebServer {
 	close: () => Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 }
 
+/** The launch line arrives as soon as the server listens; the cap only bounds a hung start on a loaded host. */
+const WEB_READY_TIMEOUT_MS = 60_000;
+
 async function startInstalledWeb(
 	bin: string,
 	args: string[],
@@ -318,17 +321,36 @@ async function startInstalledWeb(
 		return exited;
 	};
 	try {
-		const deadline = Date.now() + 10_000;
-		let found: RegExpMatchArray | null = null;
-		while (Date.now() < deadline) {
-			found = stdout.match(readyPattern);
-			if (found) break;
-			if (spawnError) throw spawnError;
-			if (child.exitCode !== null || child.signalCode !== null)
-				throw new Error(`installed graphical server exited before it was ready:\n${stdout}\n${stderr}`);
-			await delay(50);
-		}
-		ok(found, `installed graphical server did not print its launch line within 10s:\n${stdout}\n${stderr}`);
+		const found = await new Promise<RegExpMatchArray>((resolve, reject) => {
+			const settle = (finish: () => void) => {
+				clearTimeout(timer);
+				child.stdout?.off("data", check);
+				finish();
+			};
+			const check = () => {
+				const match = stdout.match(readyPattern);
+				if (match) settle(() => resolve(match));
+			};
+			const timer = setTimeout(
+				() =>
+					settle(() =>
+						reject(
+							new Error(
+								`installed graphical server did not print its launch line within ${WEB_READY_TIMEOUT_MS / 1000}s:\n${stdout}\n${stderr}`,
+							),
+						),
+					),
+				WEB_READY_TIMEOUT_MS,
+			);
+			child.stdout?.on("data", check);
+			void exited.then(() => {
+				check();
+				settle(() =>
+					reject(spawnError ?? new Error(`installed graphical server exited before it was ready:\n${stdout}\n${stderr}`)),
+				);
+			});
+			check();
+		});
 		const url = found[0].match(/http:\/\/127\.0\.0\.1:\d+/u)?.[0];
 		ok(url, `ready line carries a loopback URL: ${found[0]}`);
 		return { origin: new URL(url).origin, child, stdout: () => stdout, stderr: () => stderr, close };
