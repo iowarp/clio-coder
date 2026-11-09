@@ -495,6 +495,8 @@ function mergeInto(
 	sources: Record<string, SettingsOrigin>,
 ): void {
 	for (const [key, value] of Object.entries(source)) {
+		// YAML keeps `__proto__` as an own key; merging it would write into Object.prototype.
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 		const segments = [...prefix, key];
 		const path = settingPath(segments);
 		if (isRecord(value)) {

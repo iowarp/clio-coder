@@ -146,3 +146,22 @@ test("a watcher that cannot start reports one line once per process, never a sta
 		home.restore();
 	}
 });
+
+test("a __proto__ key in a settings layer never reaches Object.prototype", async () => {
+	const home = await isolateClioEnv("clio-settings-proto-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(workspace);
+		mkdirSync(dirname(settingsPath()), { recursive: true });
+		writeFileSync(settingsPath(), "__proto__:\n  clioPolluted: true\n");
+		try {
+			readLayeredSettings(workspace);
+		} catch {
+			// Rejecting the layer is fine; only the prototype matters here.
+		}
+		strictEqual(({} as Record<string, unknown>).clioPolluted, undefined);
+	} finally {
+		delete (Object.prototype as Record<string, unknown>).clioPolluted;
+		home.restore();
+	}
+});
