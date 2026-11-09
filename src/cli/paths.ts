@@ -91,7 +91,7 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 		? "  (absent)"
 		: installActive
 			? "  (running from here)"
-			: "  (not running from here)";
+			: "  (not running from here; clio-coder uninstall --inactive removes it)";
 	const rows: ReadonlyArray<readonly [string, string]> = [
 		["config", `${dirs.config}${absent(dirs.config)}`],
 		["data", `${dirs.data}${absent(dirs.data)}`],

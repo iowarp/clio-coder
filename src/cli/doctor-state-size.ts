@@ -66,12 +66,12 @@ export function installRootFinding(installation = inspectInstallation()): Doctor
 	const measured = measureEntry(root);
 	if (measured.error !== null) return { ok: false, name: "install root", detail: measured.error };
 	const size = `${formatBytes(measured.bytes)} at ${root}`;
+	if (installation.installer) return { ok: true, name: "install root", detail: size };
 	return {
 		ok: true,
+		level: "warn",
 		name: "install root",
-		detail: installation.installer
-			? size
-			: `${size}; this binary does not run from it, and \`clio-coder uninstall\` removes it`,
+		detail: `${size}; this binary does not run from it, so nothing updates or prunes it. \`clio-coder uninstall --inactive\` removes only it`,
 	};
 }
 

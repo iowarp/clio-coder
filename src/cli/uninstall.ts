@@ -16,7 +16,7 @@ import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
-import type { Installation } from "../domains/lifecycle/install-method.js";
+import type { Installation, InstallerRecord } from "../domains/lifecycle/install-method.js";
 import {
 	INSTALLER_LAUNCHER_MARK,
 	INSTALLER_OWNED_ENTRIES,
@@ -25,15 +25,17 @@ import {
 	installationCommand,
 	launcherPathFor,
 } from "../domains/lifecycle/install-method.js";
+import { inactiveInstallerRoots, installRootHolders } from "../domains/lifecycle/install-plan.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
-import type { LifecycleItem } from "./lifecycle-presenter.js";
+import type { LifecycleItem, LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import type { RemovalFailure } from "./removal.js";
 import { refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder uninstall [--keep-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+clio-coder uninstall --inactive [--dry-run] [--force] [--json]
 
 Remove Clio Coder: the config, data, state, and cache roots, the launcher, and for
 an install.sh install its private Node and every installed version.
@@ -53,6 +55,9 @@ Flags:
                    installed versions. Without it the launcher goes only when it belongs
                    to this installation: a real file, or a link into a different clio-coder
                    installation, is kept and reported.
+  --inactive       remove only installer roots this binary does not run from, left behind
+                   after moving to a checkout or a package manager, and their own
+                   launcher. Your config, data, sessions and this installation stay.
   --dry-run        print what would be removed without changing anything
   --force, -f      skip confirmation prompt and proceed immediately
   --json           emit machine-readable JSON output
@@ -63,6 +68,7 @@ interface ParsedUninstallArgs {
 	keepBinary: boolean;
 	keepConfig: boolean;
 	keepData: boolean;
+	inactive: boolean;
 	force: boolean;
 	dryRun: boolean;
 	json: boolean;
@@ -74,6 +80,7 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 		keepBinary: false,
 		keepConfig: false,
 		keepData: false,
+		inactive: false,
 		force: false,
 		dryRun: false,
 		json: false,
@@ -89,6 +96,9 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 				break;
 			case "--keep-data":
 				parsed.keepData = true;
+				break;
+			case "--inactive":
+				parsed.inactive = true;
 				break;
 			case "--force":
 			case "-f":
@@ -108,6 +118,8 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 				throw new Error(`unknown flag: ${arg}`);
 		}
 	}
+	if (parsed.inactive && (parsed.keepBinary || parsed.keepConfig || parsed.keepData))
+		throw new Error("--inactive already keeps the binary, config and data; drop the --keep-* flags");
 	return parsed;
 }
 
@@ -379,6 +391,127 @@ function binaryRemovalAdvice(installation: Installation, linkPath: string): { le
 	};
 }
 
+/** The launcher an inactive root wrote, when it still runs that root and nothing else replaced it. */
+function inactiveLauncher(record: InstallerRecord): string | null {
+	try {
+		if (lstatSync(record.launcher).isSymbolicLink()) return null;
+		const text = readFileSync(record.launcher, "utf8");
+		const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
+		return text.includes(INSTALLER_LAUNCHER_MARK) && fold(text).includes(fold(`${record.root}${sep}`))
+			? record.launcher
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * `uninstall --inactive`: only installer roots left behind by a move to another
+ * install method. Homes, the running installation and the desktop app stay.
+ */
+async function uninstallInactive(
+	installation: Installation,
+	args: ParsedUninstallArgs,
+	presenter: LifecyclePresenter,
+): Promise<number> {
+	presenter.header("Remove inactive installs", "uninstall");
+	const roots = inactiveInstallerRoots(installation);
+	if (roots.length === 0) {
+		presenter.note("No installer root other than the one this binary runs from.");
+		presenter.done("Done");
+		return 0;
+	}
+	const items: LifecycleItem[] = [];
+	const launchers = new Map<string, string>();
+	for (const record of roots) {
+		const size = measurePath(record.root);
+		items.push({
+			label: "Inactive install",
+			path: record.root,
+			bytes: size.bytes,
+			status: "remove",
+			detail: "installer root this binary does not run from",
+		});
+		const launcher = inactiveLauncher(record);
+		if (launcher) {
+			launchers.set(record.root, launcher);
+			items.push({ label: "Its launcher", path: launcher, status: "remove", detail: "install.sh launcher for it" });
+		}
+	}
+	presenter.listItems("The following will be removed", items);
+	presenter.note("Config, data, sessions, this installation and the desktop app stay.");
+	const holders = roots.flatMap((record) =>
+		installRootHolders(record.root).map((holder) => `${holder} holds ${shortenPath(record.root)}`),
+	);
+	if (holders.length > 0) {
+		presenter.fail("Processes still run from an inactive install");
+		for (const holder of holders) presenter.note(holder);
+		presenter.commandAdvice(
+			"Close them (for a Clio session: clio-coder session list, then clio-coder session terminate <id>) and retry:",
+			"clio-coder uninstall --inactive",
+		);
+		presenter.finish();
+		return 1;
+	}
+	if (args.dryRun) {
+		presenter.warn("Dry run: no changes made");
+		presenter.done("Done");
+		return 0;
+	}
+	if (!args.force && !(await presenter.confirm("Remove these inactive installs?", false))) {
+		presenter.warn("Cancelled");
+		presenter.done("Cancelled");
+		return 0;
+	}
+	const failures: RemovalFailure[] = [];
+	for (const record of roots) {
+		const lock = join(record.root, ".install-lock");
+		try {
+			mkdirSync(lock);
+			safeResourceWrite(join(lock, "pid"), `${process.pid}\n`);
+			safeResourceWrite(join(lock, "uninstall"), "1\n");
+		} catch (error) {
+			presenter.fail(
+				`${shortenPath(record.root)} is locked by an installer; retry after it exits`,
+				error instanceof Error ? error.message : String(error),
+			);
+			presenter.finish();
+			return 1;
+		}
+		try {
+			// A launch that raced the check above is caught by its receipt.
+			const late = installRootHolders(record.root);
+			if (late.length > 0) {
+				presenter.fail(`Processes started from ${shortenPath(record.root)}`);
+				for (const holder of late) presenter.note(holder);
+				presenter.finish();
+				return 1;
+			}
+			const targets = INSTALLER_OWNED_ENTRIES.map((name) => join(record.root, name));
+			const launcher = launchers.get(record.root);
+			if (launcher) targets.push(launcher);
+			const failed = targets.flatMap((target) => removePath("inactive install", target, false) ?? []);
+			failures.push(...failed);
+			if (failed.length === 0) presenter.completedStep(`Removed ${shortenPath(record.root)}`);
+		} finally {
+			rmSync(lock, { recursive: true, force: true });
+			try {
+				rmdirSync(record.root);
+			} catch {
+				/* Other files in a shared install root are preserved. */
+			}
+		}
+	}
+	if (failures.length > 0) {
+		presenter.fail("uninstall --inactive did not remove everything");
+		reportRemovalFailures("clio-coder uninstall --inactive --force", failures);
+		presenter.finish();
+		return 1;
+	}
+	presenter.done("Done");
+	return 0;
+}
+
 export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<number> {
 	let args: ParsedUninstallArgs;
 	try {
@@ -413,6 +546,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const installation = inspectInstallation();
 	const method = installation.kind;
 	const presenter = createLifecyclePresenter({ json: args.json });
+	if (args.inactive) return uninstallInactive(installation, args, presenter);
 
 	presenter.header("Uninstall Clio Coder", "uninstall");
 	presenter.step(

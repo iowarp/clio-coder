@@ -1,5 +1,5 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runGuiCommand } from "../../src/cli/gui.js";
@@ -213,6 +213,60 @@ describe("contracts/uninstall-lifecycle", () => {
 			} finally {
 				temp.cleanup();
 			}
+		}
+	});
+
+	it("removes only inactive installer roots and their own launcher with --inactive", async () => {
+		const temp = home();
+		try {
+			const root = join(temp.root, ".local", "share", "clio-coder-install");
+			const current = join(root, "versions", "0.6.2");
+			mkdirSync(current, { recursive: true });
+			writeFileSync(
+				join(root, "install.json"),
+				JSON.stringify({
+					schema: 2,
+					kind: "clio-coder-installer",
+					current,
+					node: join(root, "runtime", "node-v24", "bin", "node"),
+					launcher: launcherPath(temp),
+				}),
+				"utf8",
+			);
+			writeFileSync(join(root, "operator-note.txt"), "not ours\n", "utf8");
+			writeFileSync(launcherPath(temp), `#!/bin/sh\n# clio-coder-installer launcher\nexec "${current}/bin/x"\n`, "utf8");
+			strictEqual(
+				(await runInHome(temp, () => runUninstallCommand(["--inactive", "--keep-data"]))).code,
+				2,
+				"--inactive already keeps the homes",
+			);
+
+			const holder = join(root, ".active");
+			mkdirSync(holder);
+			writeFileSync(join(holder, "1.json"), JSON.stringify({ pid: 1 }), "utf8");
+			const held = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			strictEqual(held.code, 1, held.stdout);
+			match(held.stdout, /pid 1 \(launched from it\) holds /u);
+			ok(existsSync(current));
+			rmSync(holder, { recursive: true });
+
+			const preview = await runInHome(temp, () => runUninstallCommand(["--inactive", "--dry-run"]));
+			strictEqual(preview.code, 0);
+			match(preview.stdout, /Inactive install: /u);
+			match(preview.stdout, /Its launcher: /u);
+			ok(existsSync(current));
+
+			const { code } = await runInHome(temp, () => runUninstallCommand(["--inactive", "--force"]));
+			strictEqual(code, 0);
+			ok(!existsSync(join(root, "versions")));
+			ok(!existsSync(join(root, "install.json")));
+			ok(!existsSync(launcherPath(temp)));
+			ok(existsSync(join(root, "operator-note.txt")), "only what the installer created goes");
+			ok(existsSync(join(temp.configDir, "settings.yaml")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
+			ok(existsSync(temp.dataDir));
+		} finally {
+			temp.cleanup();
 		}
 	});
 
