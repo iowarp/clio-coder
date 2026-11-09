@@ -90,6 +90,15 @@ describe("release decisions", () => {
 		strictEqual(failed.step, "stop");
 		const waiting = releaseRun("waiting", { status: "completed", conclusion: "success" }, { status: "waiting" });
 		strictEqual(nextStep(facts({ releaseRun: waiting }), {}).step, "publish-npm");
+		// Approved before the publish: the release job runs and waits for npm, so publish is still offered.
+		const approvedEarly = releaseRun(
+			"in_progress",
+			{ status: "completed", conclusion: "success" },
+			{ status: "in_progress" },
+		);
+		strictEqual(nextStep(facts({ releaseRun: approvedEarly }), {}).step, "publish-npm");
+		const preflightOnly = releaseRun("in_progress", { status: "completed", conclusion: "success" });
+		strictEqual(nextStep(facts({ releaseRun: preflightOnly }), {}).step, "watch-release");
 		// Once npm accepted the bytes the publish is never offered again, even while npm serves nothing.
 		strictEqual(nextStep(facts({ releaseRun: waiting }), { npm: { accepted: true } }).step, "approve-release");
 		const timedOut = releaseRun("failure", { status: "completed", conclusion: "success" }, { status: "completed" });

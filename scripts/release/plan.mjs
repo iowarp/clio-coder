@@ -201,7 +201,9 @@ export function nextStep(facts, receipt) {
 			return stop(
 				"the release preflight failed before npm publish; nothing irreversible happened, so fix it in a new candidate",
 			);
-		if (release?.status === "waiting") return { step: "publish-npm" };
+		// An owner may approve before publishing; the approved job then waits for npm, so the
+		// publish is still offered while the release job is anywhere short of completed.
+		if (["waiting", "queued", "pending", "in_progress"].includes(release?.status)) return { step: "publish-npm" };
 		if (["queued", "pending", "in_progress"].includes(run.state)) return { step: "watch-release" };
 		return { step: "rerun-release" };
 	}
