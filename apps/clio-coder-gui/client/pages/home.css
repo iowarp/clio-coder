@@ -341,10 +341,13 @@
 		font-size: clamp(40px, 4.4cqi, 56px);
 		line-height: 1.08;
 	}
-	.newtask__inner:has(> .onboard) > .onboard,
-	.newtask__inner:has(> .onboard) > .newtask__notice {
+	.newtask__inner:has(> .onboard) > .onboard {
 		grid-column: 2;
 		grid-row: 1 / span 3;
+	}
+	/* A notice follows the steps in their column; sharing their rows drew it over step 1. */
+	.newtask__inner:has(> .onboard) > .newtask__notice {
+		grid-column: 2;
 	}
 }
 
