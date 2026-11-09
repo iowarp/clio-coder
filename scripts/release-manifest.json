@@ -6,6 +6,8 @@
 		"scripts/install.ps1",
 		"scripts/install.cmd",
 		"scripts/native-install.cjs",
+		"assets/git-shim/win32-x64/git.exe",
+		"assets/git-shim/win32-arm64/git.exe",
 		"dist/build.json",
 		"dist/cli/index.js",
 		"dist/gui/server.js",

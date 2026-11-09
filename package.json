@@ -86,6 +86,8 @@
 		"!docs/wiki/**",
 		"docs/corpus.json",
 		"assets/clio-mark-gui.webp",
+		"assets/git-shim/win32-x64/git.exe",
+		"assets/git-shim/win32-arm64/git.exe",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",

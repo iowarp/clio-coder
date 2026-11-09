@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,8 @@ import {
 	setGitCommitAuthorSetting,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../src/core/git-commit-attribution.js";
+import { installGitShimLauncher } from "../../src/core/git-shim-launcher.js";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
 import { commitWorktreePath } from "../../src/tools/task-worktree.js";
@@ -409,22 +411,85 @@ describe("autonomous commit authorship", () => {
 				"C:\\Tools\\git.cmd",
 				"C:\\Program Files\\Git\\cmd\\git.com",
 				"C:\\Program Files\\Git\\cmd\\git.exe",
+				"C:\\Links\\git.exe",
 			]);
 			const windowsHost = (path: string, pathext?: string) => ({
 				platform: "win32",
 				env: { Path: path, ...(pathext === undefined ? {} : { PATHEXT: pathext }) },
-				shimFile: "C:\\Users\\op\\state\\git-hooks\\v8-shim\\git-shim.cjs",
+				shimFile: "C:\\Users\\op\\state\\git-hooks\\v9-shim\\git-shim.cjs",
 				isExecutableFile: (candidate: string) => exists.has(candidate),
-				sameFile: () => false,
+				// C:\Links\git.exe is a link to the shim's own launcher.
+				sameFile: (candidate: string, own: string) =>
+					candidate === "C:\\Links\\git.exe" && own === "C:\\Users\\op\\state\\git-hooks\\v9-shim\\git.exe",
 			});
 			const path =
 				'C:\\Users\\op\\state\\git-hooks\\V8-SHIM;C:\\Users\\op\\state\\git-hooks\\v7-shim;C:\\Tools;"C:\\Program Files\\Git\\cmd"';
 			strictEqual(shim.findRealGit(windowsHost(path)), "C:\\Program Files\\Git\\cmd\\git.com");
 			strictEqual(shim.findRealGit(windowsHost(path, ".EXE;.CMD")), "C:\\Program Files\\Git\\cmd\\git.exe");
 			strictEqual(shim.findRealGit(windowsHost("C:\\Tools")), null);
+			strictEqual(
+				shim.findRealGit(windowsHost('C:\\Links;"C:\\Program Files\\Git\\cmd"', ".EXE")),
+				"C:\\Program Files\\Git\\cmd\\git.exe",
+			);
 		} finally {
 			isolated.restore();
 		}
+	});
+
+	it("installs the native Windows git launcher only from bytes that match its pin", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-git-launcher-"));
+		try {
+			const shimDirectory = join(root, "shim");
+			mkdirSync(shimDirectory);
+			const node = "C:\\Program Files\\nodejs\\node.exe";
+			const launcher = join(shimDirectory, "git.exe");
+			const shipped = readFileSync(join(resolvePackageRoot(), "assets", "git-shim", "win32-x64", "git.exe"));
+			strictEqual(installGitShimLauncher(shimDirectory, node, { arch: "x64" }), null);
+			ok(readFileSync(launcher).equals(shipped));
+			strictEqual(readFileSync(join(shimDirectory, "git-shim.node"), "utf8"), `${node}\n`);
+
+			// An altered package launcher is never installed, and a stale one is removed so git.cmd takes over.
+			const altered = join(root, "package", "assets", "git-shim", "win32-x64");
+			mkdirSync(altered, { recursive: true });
+			writeFileSync(join(altered, "git.exe"), Buffer.concat([shipped, Buffer.from([0])]));
+			writeFileSync(launcher, "stale");
+			const issue = installGitShimLauncher(shimDirectory, node, { arch: "x64", packageRoot: join(root, "package") });
+			match(issue ?? "", /does not match its pinned SHA-256/);
+			strictEqual(existsSync(launcher), false);
+			match(installGitShimLauncher(shimDirectory, node, { arch: "ia32" }) ?? "", /no git launcher is built for ia32/);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("passes %NAME% in git arguments through the native launcher literally on Windows", {
+		skip: process.platform !== "win32" && "needs native Windows",
+	}, async () => {
+		await withRepo((repo, git) => {
+			const env = autonomousSeam(repo);
+			const shimDirectory = (env[Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "Path"] ?? "").split(
+				";",
+			)[0];
+			ok(existsSync(join(shimDirectory ?? "", "git.exe")));
+			writeFileSync(join(repo, "file%USERNAME%.txt"), "x\n");
+			// PowerShell runs git.exe directly; it would run git.cmd through cmd.exe, which expands %NAME%.
+			execFileSync(
+				"powershell.exe",
+				[
+					"-NoProfile",
+					"-NonInteractive",
+					"-Command",
+					"git add 'file%USERNAME%.txt'; git commit -q -m 'feat: %PATH% %USERNAME%'; exit $LASTEXITCODE",
+				],
+				{ cwd: repo, env: { ...env, USERNAME: "operator" }, encoding: "utf8" },
+			);
+			strictEqual(git(["log", "-1", "--format=%s"]).trim(), "feat: %PATH% %USERNAME%");
+			strictEqual(git(["ls-files"]).trim(), "file%USERNAME%.txt");
+			deepStrictEqual(
+				[git(["log", "-1", "--format=%an <%ae>|%cn <%ce>"]).trim(), git(["log", "-1", "--format=%(trailers:only)"]).trim()],
+				[`${CLIO}|${HUMAN}`, `Co-authored-by: ${HUMAN}`],
+			);
+		});
 	});
 
 	it("credits the human on a revert finished after a conflict", async () => {

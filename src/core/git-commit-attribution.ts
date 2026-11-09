@@ -23,6 +23,7 @@ import {
 } from "./commit-attribution.js";
 import type { GitCommitAuthorSetting } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
+import { installGitShimLauncher } from "./git-shim-launcher.js";
 import { internalGitArgv } from "./internal-git.js";
 import { clioStateDir } from "./xdg.js";
 
@@ -39,7 +40,7 @@ const AUTHOR_MANAGED_ENV = "CLIO_CODER_GIT_AUTHOR_MANAGED";
 /** Present iff this environment carries Clio's command-scope core.hooksPath pair; holds the count below it. */
 const CONFIG_BASE_COUNT_ENV = "CLIO_CODER_GIT_CONFIG_BASE_COUNT";
 const DEFAULT_HOOKS_EQUIVALENT_ENV = "CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT";
-const MANAGED_HOOK_VERSION = 8;
+const MANAGED_HOOK_VERSION = 9;
 const DIAGNOSTIC_MAX_CHARS = 300;
 const COUNT = /^(?:0|[1-9][0-9]*)$/u;
 const reportedDiagnostics = new Set<string>();
@@ -612,17 +613,19 @@ exec "$real_git" "$@"
 const MANAGED_GIT_SHIM_NODE_NAME = "git-shim.cjs";
 
 /**
- * The shim's decision and git lookup in JavaScript, for `git.cmd`. cmd.exe,
- * PowerShell and any `shell: true` spawn resolve `git` through PATHEXT and so
- * find `git.cmd` in the shim directory before the real `git.exe`; Git Bash
- * runs the POSIX `git` beside it. A batch file cannot parse arguments, so
- * `git.cmd` forwards `%*` to Node, which splits the command line with the
- * same MSVCRT rules `git.exe` uses and re-quotes it for `git.exe` the same
- * way. The argument rules mirror {@link MANAGED_GIT_SHIM_SCRIPT} exactly.
+ * The shim's decision and git lookup in JavaScript, for Windows. cmd.exe,
+ * PowerShell, any `shell: true` spawn and a plain CreateProcess of `git` find
+ * the native launcher `git.exe` in the shim directory before the real git
+ * (`src/core/git-shim-launcher.ts`); Git Bash runs the POSIX `git` beside it.
+ * The launcher passes the caller's command line unchanged to Node, which
+ * splits it with the same MSVCRT rules `git.exe` uses and re-quotes it for
+ * `git.exe` the same way. Where the launcher is missing, `git.cmd` forwards
+ * `%*` instead, which cmd.exe has already expanded `%NAME%` in. The argument
+ * rules mirror {@link MANAGED_GIT_SHIM_SCRIPT} exactly.
  * Loaded with `require`, it exports its pure parts for tests.
  */
 const MANAGED_GIT_SHIM_NODE_SCRIPT = String.raw`"use strict";
-// Clio Coder managed git shim v${MANAGED_HOOK_VERSION} (Node half of git.cmd). On PATH only
+// Clio Coder managed git shim v${MANAGED_HOOK_VERSION} (Node half of git.exe and git.cmd). On PATH only
 // in Clio child-process environments where Clio is the commit author.
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
@@ -707,7 +710,8 @@ function pathKey(env, platform) {
 
 /**
  * The git this shim stands in front of: the first one on the search path
- * outside every managed shim directory and other than this file. On Windows
+ * outside every managed shim directory and other than this file or the
+ * launcher beside it (a link to either elsewhere on PATH). On Windows
  * only an executable counts, in PATHEXT order; a batch git could not receive
  * the forwarded arguments intact, so it is passed over.
  */
@@ -716,6 +720,7 @@ function findRealGit(host) {
   const paths = windows ? nodePath.win32 : nodePath.posix;
   const fold = (value) => (windows ? paths.resolve(value).toLowerCase() : paths.resolve(value));
   const ownDirectory = fold(paths.dirname(host.shimFile));
+  const launcher = paths.join(paths.dirname(host.shimFile), "git.exe");
   const names = windows
     ? (host.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
         .split(";")
@@ -728,7 +733,9 @@ function findRealGit(host) {
     if (directory === "" || SHIM_DIRECTORY.test(directory) || fold(directory) === ownDirectory) continue;
     for (const name of names) {
       const candidate = paths.join(directory, name);
-      if (host.isExecutableFile(candidate) && !host.sameFile(candidate, host.shimFile)) return candidate;
+      if (host.isExecutableFile(candidate) && !host.sameFile(candidate, host.shimFile) && !host.sameFile(candidate, launcher)) {
+        return candidate;
+      }
     }
   }
   return null;
@@ -788,10 +795,11 @@ else module.exports = { keepsClioAuthor, findRealGit, pathKey };
 `;
 
 /**
- * `git.cmd`: the entry PATHEXT lookup finds. Node and the shim are named by
- * absolute path, so neither `%~dp0` nor a second PATH search is involved;
- * `%` is doubled because cmd.exe expands it even inside quotes. `%*` is the
- * caller's command line as given, which Node splits as `git.exe` would.
+ * `git.cmd`: the Windows entry when the native launcher is missing. Node and
+ * the shim are named by absolute path, so neither `%~dp0` nor a second PATH
+ * search is involved; `%` is doubled because cmd.exe expands it even inside
+ * quotes. `%*` is the caller's command line after cmd.exe expanded any set
+ * `%NAME%` in it, which Node splits as `git.exe` would.
  */
 function managedGitCmdScript(nodeExecutable: string, shimScript: string): string {
 	const quoted = (value: string) => `"${value.replace(/%/gu, "%%")}"`;
@@ -858,9 +866,11 @@ const MANAGED_SHIM_DIRECTORY_PATTERN = /[\\/]git-hooks[\\/]v\d+-shim[\\/]?$/iu;
 /**
  * The installed git shim's directory, installed or repaired on use. Every
  * platform gets the same three files: `git` for POSIX shells and Git Bash,
- * and `git.cmd` with its Node half for Windows PATHEXT lookup.
+ * and `git.cmd` with its Node half for Windows PATHEXT lookup. Windows also
+ * gets the native `git.exe` launcher in front of `git.cmd`; `launcherIssue`
+ * says why it is missing, and the shim still works through `git.cmd`.
  */
-function managedGitShimDirectory(): string {
+function managedGitShimDirectory(): { directory: string; launcherIssue: string | null } {
 	const directory = join(clioStateDir(), "git-hooks", `v${MANAGED_HOOK_VERSION}-shim`);
 	const nodeShim = join(directory, MANAGED_GIT_SHIM_NODE_NAME);
 	const files: Array<[string, string]> = [
@@ -868,16 +878,20 @@ function managedGitShimDirectory(): string {
 		[nodeShim, MANAGED_GIT_SHIM_NODE_SCRIPT],
 		[join(directory, "git.cmd"), managedGitCmdScript(process.execPath, nodeShim)],
 	];
+	const withLauncher = () => ({
+		directory,
+		launcherIssue: process.platform === "win32" ? installGitShimLauncher(directory, process.execPath) : null,
+	});
 	try {
 		for (const [path, script] of files) if (readFileSync(path, "utf8") !== script) throw new Error("stale");
 		accessSync(join(directory, "git"), fsConstants.X_OK);
-		return directory;
+		return withLauncher();
 	} catch {
 		// Missing or damaged: installed below.
 	}
 	mkdirSync(directory, { recursive: true, mode: 0o700 });
 	for (const [path, script] of files) installManagedScript(path, script);
-	return directory;
+	return withLauncher();
 }
 
 /**
@@ -1055,19 +1069,28 @@ export function withManagedGitCommitAttributionEnvironment(
 	// Clio authors through the environment only with the managed git shim in
 	// front of PATH, which drops that author from every command the hook cannot
 	// credit the human on. A git reached without the shim (an absolute path,
-	// git.exe spawned without PATHEXT, a git library) still sees Clio as
-	// author; the hook's commit-msg pass credits the human on every commit it
-	// runs for, and only hookless plumbing keeps Clio with no trailer.
+	// git.exe spawned without PATHEXT where the native launcher is missing, a
+	// git library) still sees Clio as author; the hook's commit-msg pass
+	// credits the human on every commit it runs for, and only hookless
+	// plumbing keeps Clio with no trailer.
 	if (options.authorship === undefined && (options.author ?? autonomousCommitAuthor(source)) === "clio") {
 		const authorship = resolveClioCommitAuthorship(cwd, env);
 		if (authorship !== null) {
 			try {
-				const shimDirectory = managedGitShimDirectory();
+				const { directory: shimDirectory, launcherIssue } = managedGitShimDirectory();
 				applyClioAuthor(env, authorship);
 				const pathKey = pathEnvKey(env);
 				const pathValue = env[pathKey];
 				env[pathKey] =
 					pathValue === undefined || pathValue.length === 0 ? shimDirectory : `${shimDirectory}${delimiter}${pathValue}`;
+				if (launcherIssue !== null) {
+					return {
+						env,
+						diagnostic: boundedDiagnostic(
+							`native git launcher unavailable; git.cmd expands %NAME% in git arguments (${launcherIssue})`,
+						),
+					};
+				}
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
 				return {
