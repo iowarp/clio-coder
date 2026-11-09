@@ -230,16 +230,17 @@ if (inherited !== null) {
 	process.on("exit", endRun);
 	// A signal's default action ends the process without "exit" listeners, and
 	// a run stopped from its terminal or by a timeout wrapper used to leave every
-	// pane host its tests abandoned running. End the run here too, then let the
-	// signal take its course: re-raised when nothing else handles it, as the
-	// test runner may.
+	// pane host its tests abandoned running. End the run here too, then re-raise
+	// the signal. Only when this is the sole listener: otherwise something else
+	// handles the signal and the process lives on, as when a test emits SIGTERM
+	// to exercise its own stop handler (research-campaign), and ending the run
+	// would delete the root under the tests still using it.
 	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
 		const onSignal = (): void => {
+			if (process.listenerCount(signal) !== 1) return;
 			endRun();
-			if (process.listenerCount(signal) === 1) {
-				process.removeListener(signal, onSignal);
-				process.kill(process.pid, signal);
-			}
+			process.removeListener(signal, onSignal);
+			process.kill(process.pid, signal);
 		};
 		process.on(signal, onSignal);
 	}
