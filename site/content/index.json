@@ -105,7 +105,10 @@
     "headings": [
       "What memory does",
       "See and approve lessons",
-      "Turn it off or route it elsewhere"
+      "Turn it off or route it elsewhere",
+      "Settings",
+      "Choose a cheap or local background model",
+      "Cost and budget"
     ]
   },
   {
@@ -236,6 +239,8 @@
     "headings": [
       "Start with the standard check",
       "Read the findings",
+      "Common rows and their fix",
+      "HPC toolchain rows",
       "Repair or investigate further"
     ]
   },
@@ -278,6 +283,8 @@
     "summary": "research-and-arena.md",
     "headings": [
       "Improve a number, and keep only real gains",
+      "Budgets and stopping",
+      "Where results go",
       "Compare models blind"
     ]
   },
