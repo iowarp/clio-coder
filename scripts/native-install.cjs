@@ -528,9 +528,12 @@ function packageName(prefix) {
 }
 
 // Activation and rollback prune inside the installer's lock. Errors never block activation.
-function pruneQuietly(root, keep) {
+// Activation prunes again once the manifest moves; that pass alone names what it could not remove.
+function pruneQuietly(root, keep, options = {}) {
 	try {
-		for (const line of describePrune(prune(root, { keep }))) process.stdout.write(`${line}\n`);
+		const result = prune(root, { keep });
+		if (options.final === false) result.skipped = [];
+		for (const line of describePrune(result)) process.stdout.write(`${line}\n`);
 	} catch (error) {
 		process.stderr.write(`[install] retained older versions: ${error.message}\n`);
 	}
@@ -713,7 +716,7 @@ async function main() {
 	if (process.platform === "win32" && /[%\r\n"]/u.test([node, old?.launcherNode, old?.node, root, launcher].join("")))
 		throw new Error("Windows installer paths cannot contain percent, newline or quote characters");
 	// The candidate is in versions/ but not yet in the manifest.
-	pruneQuietly(root, [current, node]);
+	pruneQuietly(root, [current, node], { final: false });
 	const fromVersion = old ? packageVersion(old.current) : "";
 	const toVersion = packageVersion(current);
 	if (channel === "latest" && /^\d+\.\d+\.\d+-/.test(fromVersion) && /^\d+\.\d+\.\d+$/.test(toVersion)) {
