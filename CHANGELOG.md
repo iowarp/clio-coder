@@ -113,6 +113,11 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 - `clio-coder doctor` describes yolo's confinement the way a yolo run resolves it, so contained yolo is no longer reported as unsandboxed.
 - Under `clio-coder acp --read-only`, a refused write says the operator started the server read-only and must restart it without the flag, instead of pointing at a client ceiling.
 - The agent sends file, search, git and test work to the typed tools (`read`, `grep`, `git`, `verify`) instead of `bash`.
+- The desktop app no longer polls quota in a tight loop for a provider without a credential: a failed reading is cached (until a credential appears, or 60 s for other failures) and journaled once.
+- A message you send while a Copilot turn is running reaches the model as your own message before its next request, instead of being appended to a tool result.
+- A verifier task that says "change nothing" or "leave X unchanged" is no longer refused as a request to edit files.
+- Workspace snapshots work when a worktree's shared `.git` is read-only, as inside a clio-agent fence: Clio keeps them in a private object store under its state directory.
+- Clio Coder answers first, pushes back plainly and states the better option instead of offering it.
 
 ### Internal
 
@@ -122,6 +127,8 @@ Since 0.7.0-rc.1, yolo runs contained by default and every autonomous stretch le
 
 ### Known limits
 
+- The `verifier` recipe has no shell, so it reports a declared gate command such as a test run as unverified instead of running it.
+- The private snapshot store used under a read-only `.git` is not pruned yet.
 - A research campaign cannot be resumed, each iteration tries one candidate, and there are no parameter sweeps.
 - `arena run` has no SIGHUP handler, and arena contenders inherit the parent environment. Only `.clio-coder/verifiers.yaml` is copied into a contender's worktree, so untracked files a check reads must be committed.
 - On Windows, cmd.exe expands `%NAME%` in the arguments of the `git.cmd` wrapper when `NAME` is set, even inside quotes, so `git add 'file%USERNAME%.txt'` from PowerShell or a commit message containing `%PATH%` reaches git with the value substituted. Git Bash is not affected; call `git.exe` by name or use `-F <file>` to pass such text literally.
