@@ -383,6 +383,28 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
+	it("keeps the PATH block while other programs share the launcher's directory", {
+		skip: process.platform === "win32" && "install.sh PATH blocks are POSIX",
+	}, async () => {
+		const temp = home();
+		try {
+			mkdirSync(temp.binDir, { recursive: true });
+			writeFileSync(join(temp.binDir, "pipx-tool"), "#!/bin/sh\n");
+			const rc = join(temp.root, ".bashrc");
+			const own = `\n# added by clio-coder install.sh\nexport PATH="${temp.binDir}:$PATH"\n`;
+			writeFileSync(rc, own);
+
+			const preview = await runInHome(temp, () => runUninstallCommand(["--dry-run"]));
+			match(preview.stdout, /PATH block: ~\/\.bashrc \(other programs in .* rely on it\)/u);
+			const real = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			strictEqual(real.code, 0, real.stdout);
+			strictEqual(readFileSync(rc, "utf8"), own);
+			match(real.stdout, /Kept, and why:\n(?:.*\n)*?.*PATH block: ~\/\.bashrc \(other programs in .* rely on it\)/u);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("keeps a launcher that is a real file rather than a symlink", async () => {
 		const temp = home();
 		try {

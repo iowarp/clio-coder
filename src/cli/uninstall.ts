@@ -428,6 +428,19 @@ function removePathBlock(file: string, binDir: string): boolean {
 	return true;
 }
 
+/** What else lives in the launcher's directory, the launcher itself aside. */
+function otherBinEntries(binDir: string, launcher: string): string[] {
+	try {
+		return readdirSync(binDir).filter((name) => name !== basename(launcher));
+	} catch {
+		return [];
+	}
+}
+
+function sharedBinReason(launcher: string): string {
+	return `other programs in ${shortenPath(dirname(launcher))} rely on it`;
+}
+
 function detectShellRcEdits(binDir: string): Array<{ file: string; lines: number[]; block: boolean }> {
 	const home = homedir();
 	const zdotdir = process.env.ZDOTDIR?.trim();
@@ -781,14 +794,19 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		});
 	// Only the exact block install.sh wrote is removed, and only with the launcher it
 	// points at; any other mention is reported and never edited.
-	const removePathBlocks = !args.keepBinary && launcher.kind !== "keep";
+	// The block put a shared directory on PATH, and other tools (pipx, uv, pip --user)
+	// rely on it once they install there, so it goes only when the launcher was alone.
+	const binShared = otherBinEntries(dirname(linkPath), linkPath).length > 0;
+	const removePathBlocks = !args.keepBinary && launcher.kind !== "keep" && !binShared;
+	const pathBlockKept =
+		args.keepBinary || launcher.kind === "keep" ? "kept with the launcher" : sharedBinReason(linkPath);
 	for (const { file, lines, block } of shellEdits) {
 		if (block)
 			items.push({
 				label: "PATH block",
 				path: file,
 				status: removePathBlocks ? "remove" : "skip",
-				detail: removePathBlocks ? `the two lines marked "${PATH_BLOCK_MARK}"` : "kept with the launcher",
+				detail: removePathBlocks ? `the two lines marked "${PATH_BLOCK_MARK}"` : pathBlockKept,
 			});
 		if (lines.length)
 			items.push({
@@ -988,7 +1006,14 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			}
 		}
 
-		if (removePathBlocks)
+		const sharedNow = removePathBlocks && otherBinEntries(dirname(linkPath), linkPath).length > 0;
+		if (sharedNow)
+			for (const { file, block } of shellEdits) {
+				if (!block) continue;
+				stayed.add(`PATH block|${file}`);
+				kept.push(`PATH block: ${shortenPath(file)} (${sharedBinReason(linkPath)})`);
+			}
+		else if (removePathBlocks)
 			for (const { file, block } of shellEdits) {
 				if (!block) continue;
 				try {
