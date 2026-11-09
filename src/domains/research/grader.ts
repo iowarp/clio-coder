@@ -148,5 +148,7 @@ export function aaIsNoisy(aa: ResearchGrade): boolean {
  */
 export function aaLabel(aa: ResearchGrade): string {
 	if (aaIsNoisy(aa)) return "noisy";
-	return aa.classification === "unchanged" ? "quiet" : "inconclusive (too few trials to judge the noise; raise --trials)";
+	return aa.classification === "unchanged"
+		? "quiet"
+		: "inconclusive (too few trials to judge the noise; raise --trials)";
 }
