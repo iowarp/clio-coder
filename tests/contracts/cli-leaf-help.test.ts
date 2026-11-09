@@ -50,7 +50,7 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	{ args: ["interop", "inspect", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["interop", "adopt", "claude-code", "--yes", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["verifiers", "inspect", "--help"], usage: /clio-coder verifiers inspect --json/ },
-	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs\]/ },
+	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs \| --build\]/ },
 	...["run", "show", "vote", "list", "standings"].map((leaf) => ({
 		args: ["arena", leaf, "--help"],
 		usage: /clio-coder arena run --contender /,
