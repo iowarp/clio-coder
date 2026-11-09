@@ -142,7 +142,8 @@ function declarationTarget(packageName: string, pkg: PackageJson, entryPoint: st
 		if (!entryPoint.startsWith(prefix) || !entryPoint.endsWith(suffix)) continue;
 		const replacement = entryPoint.slice(prefix.length, entryPoint.length - suffix.length);
 		const target = typesTarget(value);
-		if (target !== null) return target.replace("*", replacement);
+		// Node substitutes every `*` in a subpath pattern target.
+		if (target !== null) return target.replaceAll("*", replacement);
 	}
 	throw new Error(`${packageName} does not expose a declaration entry point for ${entryPoint}`);
 }
