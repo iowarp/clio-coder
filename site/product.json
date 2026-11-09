@@ -1,8 +1,8 @@
 {
 	"name": "Clio Coder",
 	"description": "Clio Coder is an open-source coding agent for scientific computing and HPC. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.",
-	"version": "0.7.0",
+	"version": "0.7.1",
 	"origin": "https://coder.iowarp.ai",
 	"repository": "https://github.com/iowarp/clio-coder",
-	"publishedVersion": "0.7.0"
+	"publishedVersion": "0.7.1"
 }
