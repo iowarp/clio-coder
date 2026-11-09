@@ -95,8 +95,9 @@ environments, checks, and a documented cost basis. Do not caricature other tools
 
 The desired outcome is a useful installed workflow. Search ranking and adoption
 are hypotheses until measured. Aggregate npm downloads are a noisy proxy, not
-unique installations. This site has no public telemetry; this content batch adds
-no tracker or unsupported adoption claim.
+unique installations. The published site loads Cloudflare Web Analytics' beacon,
+which counts page views without cookies, and no other tracker. Do not add a
+tracker or an unsupported adoption claim.
 
 ## Guide composition
 

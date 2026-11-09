@@ -44,7 +44,7 @@ Guide CSS uses only the semantic colors, the space scale, the radius, and the mo
 
 Use semantic HTML, a single main heading, a visible keyboard focus, a skip link, labeled controls, accurate alt text, and readable line lengths. Body and muted text and text links must meet WCAG AA contrast. Interactive boundaries meet 3:1. Layout must work at 320px and 200% zoom. Menus close with Escape and return focus. Motion respects `prefers-reduced-motion`. Core content and navigation work without JavaScript.
 
-The site is static HTML and CSS with small progressive enhancements. Use CSS layers, fluid type, grid, logical properties, and semantic themes. JavaScript adds theme choice, copying, article search, and local live reload. No public telemetry, remote font requests, autoplay, or dependency-heavy client framework is required. Build and browser checks are part of delivery. Keep verification artifacts in ignored local scratch, never in the published output.
+The site is static HTML and CSS with small progressive enhancements. Use CSS layers, fluid type, grid, logical properties, and semantic themes. JavaScript adds theme choice, copying, article search, and local live reload. The published site loads Cloudflare Web Analytics' beacon and no other tracker; its Content-Security-Policy allows that beacon's script and reporting origins and nothing else remote except the YouTube embed. No remote font requests, autoplay, or dependency-heavy client framework is required. Build and browser checks are part of delivery. Keep verification artifacts in ignored local scratch, never in the published output.
 
 ## Interaction and motion
 

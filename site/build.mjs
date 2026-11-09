@@ -246,7 +246,7 @@ function responsiveImages(html, path) {
 // GitHub Pages sends no custom headers, so the policy nginx used to send rides
 // in a meta tag. frame-ancestors is not honored there and cannot be restored.
 const contentSecurityPolicy =
-	"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
+	"default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'";
 const titleSuffix = / — Clio Coder(?: docs)?$/;
 const organization = {
 	"@type": "Organization",
