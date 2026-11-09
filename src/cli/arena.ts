@@ -19,6 +19,7 @@ import {
 } from "../domains/arena/index.js";
 import { formatColumns, printError } from "./argv.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
+import { installStopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
   clio-coder arena run --contender <target>/<model> --contender <target>/<model> [...] [options] <prompt>
@@ -235,13 +236,7 @@ async function runCommand(args: string[]): Promise<number> {
 	if (entry === undefined) throw new Error("cannot locate the clio-coder entry point to start contenders");
 	// Each contender leads its own process group, so a signal to this one reaches them only through the abort.
 	const controller = new AbortController();
-	let stoppedBy: NodeJS.Signals | null = null;
-	const onSignal = (signal: NodeJS.Signals): void => {
-		stoppedBy ??= signal;
-		controller.abort();
-	};
-	process.on("SIGINT", onSignal);
-	process.on("SIGTERM", onSignal);
+	const stops = installStopSignals(controller);
 	const match = await runArenaMatch({
 		cwd: workingDir(parsed),
 		prompt,
@@ -258,14 +253,11 @@ async function runCommand(args: string[]): Promise<number> {
 		signal: controller.signal,
 		onStarted: (started) => process.stderr.write(`clio-coder arena: match ${started.id} started\n`),
 		onProgress: (line) => process.stderr.write(`clio-coder arena: ${line}\n`),
-	}).finally(() => {
-		process.off("SIGINT", onSignal);
-		process.off("SIGTERM", onSignal);
-	});
+	}).finally(() => stops.dispose());
 	const root = arenaRoot(match.root);
 	const view = arenaMatchView(root, match, null);
 	process.stdout.write(json ? `${JSON.stringify(view)}\n` : renderView(view));
-	if (stoppedBy !== null) return stoppedBy === "SIGINT" ? 130 : 143;
+	if (stops.received() !== null) return stops.exitCode();
 	return match.status === "complete" ? 0 : 1;
 }
 

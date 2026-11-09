@@ -18,6 +18,7 @@ import {
 } from "../domains/research/index.js";
 import { printError } from "./argv.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
+import { installStopSignals, type StopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
   clio-coder research start --check <id> --metric <key> --direction min|max --max-iterations <N> [options]
@@ -206,37 +207,13 @@ function viewJson(view: ResearchCampaignView): Record<string, unknown> {
 	};
 }
 
-const STOP_SIGNALS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
-type StopSignal = keyof typeof STOP_SIGNALS;
-
 /**
  * Stop the campaign on SIGINT, SIGTERM or SIGHUP the same way: abort the controller so the loop stops the agent
  * child, waits for it, journals `stopped` and removes the worktrees. Returns the exit code the first signal implies
  * (130, 143 or 129) and a dispose that takes the listeners off again.
  */
-export function installResearchStopSignals(
-	controller: AbortController,
-	log: (line: string) => void,
-): { received: () => StopSignal | null; exitCode: () => number; dispose: () => void } {
-	let received: StopSignal | null = null;
-	const handlers = (Object.keys(STOP_SIGNALS) as StopSignal[]).map((name) => {
-		const handler = (): void => {
-			if (received === null) {
-				received = name;
-				log(`${name} received; stopping after the current step`);
-			}
-			controller.abort();
-		};
-		process.on(name, handler);
-		return [name, handler] as const;
-	});
-	return {
-		received: () => received,
-		exitCode: () => STOP_SIGNALS[received ?? "SIGINT"],
-		dispose: () => {
-			for (const [name, handler] of handlers) process.off(name, handler);
-		},
-	};
+export function installResearchStopSignals(controller: AbortController, log: (line: string) => void): StopSignals {
+	return installStopSignals(controller, (name) => log(`${name} received; stopping after the current step`));
 }
 
 function exitFor(outcome: ResearchRunOutcome, stopCode: number): number {

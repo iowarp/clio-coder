@@ -475,6 +475,40 @@ describe("arena runner", () => {
 		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 	});
 
+	it("arena run stops on SIGHUP like Ctrl-C, exits 129 and removes the worktrees", async (t) => {
+		const { repo, fake, gitIn } = scratchRepo();
+		// Contenders start as `<execPath> <execArgv> <argv[1]>`; the runner's relative --import would not resolve in a worktree.
+		const entry = process.argv[1];
+		const execArgv = process.execArgv;
+		process.argv[1] = fake;
+		process.execArgv = [];
+		t.after(() => {
+			process.argv[1] = entry as string;
+			process.execArgv = execArgv;
+		});
+		const hangups = process.listenerCount("SIGHUP");
+		// The contenders start once the match is open; the hangup then reaches them only through the abort.
+		const timer = setTimeout(() => process.emit("SIGHUP", "SIGHUP"), 1500);
+		t.after(() => clearTimeout(timer));
+		const code = await runArenaCommand([
+			"run",
+			"--contender",
+			"t/slow",
+			"--contender",
+			"t/slow",
+			"--cwd",
+			repo,
+			"--timeout",
+			"120",
+			"--",
+			"hang",
+			"--json",
+		]);
+		assert.equal(code, 129);
+		assert.equal(process.listenerCount("SIGHUP"), hangups);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
+	});
+
 	it("runs contenders in separate worktrees, keeps their diffs, and cleans up", async () => {
 		const { repo, fake, gitIn } = scratchRepo();
 		// The catalog is never committed, so the worktrees cut from HEAD lack it unless the arena brings it.
