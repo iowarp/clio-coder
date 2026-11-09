@@ -113,6 +113,10 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 					timeoutMs: tool.timeoutMs ?? 120000,
 					maxOutputBytes: tool.maxOutputBytes ?? 600000,
 					...(options?.signal ? { signal: options.signal } : {}),
+					// Admission credits the bash projection with the main-session sandbox at
+					// default (and under yolo with `safety.sandbox: required`), so the vector
+					// must run inside it; otherwise an admitted call escapes containment.
+					...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 				});
 				const details = {
 					extension: extension.provenance,

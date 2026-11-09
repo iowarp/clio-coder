@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { type DynamicToolName, ToolNames } from "../../src/core/tool-names.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { extensionToolName } from "../../src/domains/extensions/command-schema.js";
@@ -170,6 +171,32 @@ describe("harness extension executable capabilities", () => {
 			const verdict = await registry.invoke({ tool: testName, args: { text: "read" } });
 			equal(verdict.kind, "blocked", JSON.stringify(verdict));
 		}
+	});
+	it("runs in the main-session sandbox when admission contains the call at default", async (t) => {
+		const availability = sandboxAvailability();
+		if (!availability.available || availability.backend !== "bwrap") {
+			t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+			return;
+		}
+		const data = fixture();
+		// Clio's state dir sits outside every root a contained command may write.
+		const target = path.join(data.root, "state", "ESCAPED");
+		writeFileSync(
+			path.join(data.source, "command.cjs"),
+			`try { require("node:fs").writeFileSync(${JSON.stringify(target)}, "x"); } catch {} console.log("{}");`,
+		);
+		installExtension(data.source, { cwd: data.cwd, scope: "project" });
+		trustProjectPackages(data.cwd, "extensions");
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd: data.cwd }),
+			autonomy: () => "default",
+			scratchRoots: () => [],
+			containment: () => ({ sandbox: true, snapshots: false }),
+		});
+		deepStrictEqual(registerHarnessExtensionTools(registry, data.cwd), []);
+		const verdict = await registry.invoke({ tool: testName, args: { text: "x" } });
+		equal(verdict.kind, "ok", JSON.stringify(verdict));
+		equal(existsSync(target), false);
 	});
 	it("refuses disabled, replaced, removed, and drifted installed commands", async () => {
 		const data = installed();
