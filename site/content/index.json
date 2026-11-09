@@ -161,7 +161,9 @@
     "summary": "library.md",
     "headings": [
       "Find a useful skill",
+      "Command reference",
       "Review before installing",
+      "Trust project packages",
       "Refresh a running session"
     ]
   },
@@ -188,6 +190,7 @@
     "headings": [
       "Plugin or extension",
       "Manage extensions",
+      "Where packages live",
       "What an extension can add",
       "Write one"
     ]
@@ -215,8 +218,11 @@
     "summary": "slurm.md",
     "headings": [
       "Work with a scheduler",
+      "Set up the server",
+      "Check with doctor",
       "Use a job workflow",
-      "Choose approvals deliberately"
+      "Choose approvals deliberately",
+      "Run a parameter sweep"
     ]
   },
   {
@@ -298,7 +304,9 @@
     "headings": [
       "Use settings for ordinary preferences",
       "Locate or separate installation state",
-      "Credentials and terminal behavior"
+      "How each directory is resolved",
+      "Credentials and terminal behavior",
+      "Collect a trace"
     ]
   },
   {

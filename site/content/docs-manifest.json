@@ -72,7 +72,7 @@
     {
       "path": "guide/resource-library.md",
       "source": "docs/guide/resource-library.md",
-      "sha256": "2c8e220dd804cc0b0156a8dc14272edfa345baa887e5066d5735848ea085b6b6",
+      "sha256": "0a36b3157e1c51c4e5996b452f75eebf512900031b406ce46497e35e0652edd1",
       "sourceSha256": "94f173e41fad1a65d3ee2e551249abba60156afa80fcb5465e4d8253857af4f4"
     },
     {
@@ -84,7 +84,7 @@
     {
       "path": "guide/harness-extensions.md",
       "source": "docs/guide/harness-extensions.md",
-      "sha256": "e543be30280678e41d51ebe9e6571f71cd19fe690fcedb52c6da47e3cf8ccc14",
+      "sha256": "61ce4dd8e1f288f96c04714b9db27a9c4c071a3b35bce6bb90a69749aa3a90cf",
       "sourceSha256": "d50d9fed346e381083ac2d11fef3cb23a64aabec466812881859420842ec18fd"
     },
     {
@@ -96,7 +96,7 @@
     {
       "path": "guide/slurm.md",
       "source": "docs/guide/slurm.md",
-      "sha256": "5e4db37aac257e0c79692d7270f52760684f08583d09612a086de6b2788e1171",
+      "sha256": "f212ca35764fda8b09c677cdd22442ff515121119ab9ced130e8fdfe23c8c2df",
       "sourceSha256": "c47a7427758899bf80ea7556d44b26f7abe740fbf47f107024d7fd1a77073076"
     },
     {
@@ -132,7 +132,7 @@
     {
       "path": "guide/environment-variables.md",
       "source": "docs/guide/environment-variables.md",
-      "sha256": "9494ebeb0c909297dca69c99749eaf6c911985fe688ed9746d763c93b9e0e2b5",
+      "sha256": "c76ca4bb44cabf5115b5f00b73aec7611817e42b9bf7fb958e72797185a6cb08",
       "sourceSha256": "c0018e4d66058aef53e3c880f296b464d4fa501506873cbd666f5143b600be8d"
     },
     {
