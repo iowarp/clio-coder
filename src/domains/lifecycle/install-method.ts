@@ -57,7 +57,7 @@ export interface InstallerRecord {
 	channel: string;
 	versionPin?: string;
 	/** How the pin was set: an exact --version, a --package file, or a rollback. */
-	pinSource?: "version-flag" | "package-file" | "rollback";
+	pinSource?: "version-flag" | "package-file" | "rollback" | undefined;
 	/** ISO time the pin was set; older manifests fall back to installedAt. */
 	pinnedAt?: string;
 	installedAt?: string;
