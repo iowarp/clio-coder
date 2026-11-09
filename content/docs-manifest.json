@@ -4,8 +4,8 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.7.0",
-    "ref": "ca01ae1bc56b591ec8e484d57495e9149e693955",
-    "commit": "ca01ae1bc56b591ec8e484d57495e9149e693955",
+    "ref": "2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7",
+    "commit": "2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "c46ea51a79c0474bf6cb7c412ec77b9c96b5fc101bc239d768332ef2491b8ccb",
-      "sourceSha256": "249ff877bd43ed76852125927cd4d92bcbf731c73902c1afbb7a88b676755e1d"
+      "sourceSha256": "370cd3250c42204eab35deec86d42cf3b1793daaac00a894dd6289a928407940"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -25,13 +25,13 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "1193355ade892006e090aeb0c98771d04fbc5e32c2e9bbeea6d88da39828fb7e",
-      "sourceSha256": "ce4c71ed1bd88acb6781225ba597fde22c9bc5132c61c87f3cc996d2142997ca"
+      "sourceSha256": "c23cc774114424857daf3d79dba84bfda4d828ce9283a683239fded366a088a9"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "061eec3a7cc09c06cb5159e7b80df832650b72e2937fd430898f614177cf5466",
-      "sourceSha256": "407b510386b55a4b519f79272e98c9b631b5f83f32364065a23ee96665a4e96a"
+      "sourceSha256": "d6457f623ce2edad599191d7088b3257e693561d2622249239b26c5ebfe84dde"
     },
     {
       "path": "guide/tool-usage.md",
@@ -103,7 +103,7 @@
       "path": "guide/doctor.md",
       "source": "docs/guide/doctor.md",
       "sha256": "fd79a870bb4e2d887832ae299c7a5f252f1182b884246b839d8d3b724916aa32",
-      "sourceSha256": "19cbf1cde605add868b9163f744319e88b059d44ecc4a5d5584cf3bbfc5641c0"
+      "sourceSha256": "4a73625491bab5f3e82bd8e497eeb5705285f295058ad37eaa3413e8bfe3eec4"
     },
     {
       "path": "guide/troubleshooting.md",
@@ -121,7 +121,7 @@
       "path": "guide/research-and-arena.md",
       "source": "docs/guide/research-and-arena.md",
       "sha256": "4c02b9a27124044d4cddcd63c5646d78997969f063369f859fa53b10bfc27aaa",
-      "sourceSha256": "b65745b7e19999d30ad03eef7a3ac20bc1f5394a941d9f4b55584a584ab44226"
+      "sourceSha256": "595fe72065cb5be42e786e887697a0462d92c243d9634c2b38356ab4fb55f99f"
     },
     {
       "path": "guide/configuration-reference.md",
@@ -157,7 +157,7 @@
       "path": "guide/built-in-agents.md",
       "source": "docs/guide/built-in-agents.md",
       "sha256": "1387d7c168d6614878902cc7cc3498c8054057cddf22718414e3583a0ed7ba69",
-      "sourceSha256": "51102b2e63d1a27588074a3c739b09d32cda63cf72b24c964feca7b241896911"
+      "sourceSha256": "f686063a20d623d84aa0222f2e097144542f7798ab02128f57372cd142b4f783"
     }
   ]
 }

@@ -2816,7 +2816,7 @@ Native workers check each model request. Coding agents that make their own model
 **Next steps**
 
 - [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html)
-- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/ca01ae1bc56b591ec8e484d57495e9149e693955/docs/guide/information-flow.md)
+- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7/docs/guide/information-flow.md)
 - [Choose a model for your project](https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html)
 
 ---
