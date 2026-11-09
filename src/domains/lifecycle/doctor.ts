@@ -1301,6 +1301,21 @@ export async function runDoctorModelChecks(
 					...cache,
 				];
 			}
+			// The Copilot runtime serves models its listing omits (gemini-3.8-flash), so an unlisted id is sent
+			// as typed and the provider answers for it; proposing a repair would rewrite a working route.
+			if (runtime.servesUnlistedModels) {
+				const listed = roles.filter((entry) => advertised.includes(entry.model));
+				return [
+					connection,
+					{
+						ok: true,
+						level: "info",
+						name: `model ${target.id}`,
+						detail: `${listed.length > 0 ? `${listed.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} found in ${source}; ` : ""}${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not listed in ${source}; ${runtime.displayName} serves models it does not list, so Clio sends ${missing.length === 1 ? "it" : "them"} as typed and the provider answers for ${missing.length === 1 ? "it" : "them"}. No repair proposed.`,
+					},
+					...cache,
+				];
+			}
 			const resident = live
 				? observation.resident.length > 0
 					? observation.resident.join(", ")

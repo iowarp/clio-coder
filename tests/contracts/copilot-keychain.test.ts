@@ -135,3 +135,24 @@ test("a keychain-only login turns the chat target's Copilot connection row into 
 	const signIn = copilotSignInFinding({ kind: "keychain-only", login: "octo" });
 	ok(row?.detail.includes(signIn.detail), "the connection row says what the copilot sign-in row says");
 });
+
+// Runs after the signed-out SDK above is installed, so the passive check reaches no real runtime.
+test("doctor reports a model the Copilot runtime serves unlisted as info and proposes no repair", async () => {
+	writeFileSync(
+		join(env.dir, "config", "settings.yaml"),
+		"version: 2\ntargets:\n  - { id: copilot, runtime: copilot-sdk, wireModels: [claude-sonnet-5.5] }\nchat:\n  target: copilot\n  model: gemini-3.8-flash\n",
+	);
+	let asked = 0;
+	const rows = await runDoctorModelChecks({
+		fix: true,
+		confirm: async () => {
+			asked++;
+			return true;
+		},
+	});
+	const row = rows.find((entry) => entry.name === "model copilot");
+	strictEqual(row?.ok, true);
+	strictEqual(row?.level, "info");
+	match(row?.detail ?? "", /chat\.model 'gemini-3\.8-flash' not listed.*sends it as typed.*No repair proposed/u);
+	strictEqual(asked, 0);
+});
