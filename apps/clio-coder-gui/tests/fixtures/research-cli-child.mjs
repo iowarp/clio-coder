@@ -30,15 +30,16 @@ else if (action === "status") {
 } else if (action === "start") {
 	const campaign = list.campaigns.at(-1);
 	const goal = argv[argv.indexOf("--goal") + 1];
-	process.stderr.write(`research ${campaign.id}: opened at 405d368742a5 on clio/research/${campaign.id}\n`);
-	process.stderr.write(`research ${campaign.id}: A/A unchanged\n`);
-	if (goal === "wait for a stop") {
+	// The test stops this child once it reads "opened at", so the handler must exist before that line is written.
+	if (goal === "wait for a stop")
 		process.on("SIGTERM", () => {
 			record({ kind: "SIGTERM", pid: process.pid });
 			process.stderr.write(`research ${campaign.id}: SIGTERM: stopping after the current step\n`);
 			process.stdout.write(JSON.stringify(campaign));
 			process.exit(143);
 		});
-		setInterval(() => {}, 1000);
-	} else process.stdout.write(JSON.stringify(list.campaigns[0]));
+	process.stderr.write(`research ${campaign.id}: opened at 405d368742a5 on clio/research/${campaign.id}\n`);
+	process.stderr.write(`research ${campaign.id}: A/A unchanged\n`);
+	if (goal === "wait for a stop") setInterval(() => {}, 1000);
+	else process.stdout.write(JSON.stringify(list.campaigns[0]));
 }
