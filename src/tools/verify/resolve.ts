@@ -5,7 +5,13 @@ import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../..
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
 import { type DeclaredCheckDiscoveryResult, discoverDeclaredChecksAtRoot } from "./discovery.js";
 import { prepareVerifyArguments } from "./surface.js";
-import { findTaskGate, taskGateCheck, taskGateFallbackHint, taskGatesConfined } from "./task-gates.js";
+import {
+	findTaskGate,
+	taskGateCheck,
+	taskGateFallbackHint,
+	taskGatesConfined,
+	taskGatesContainable,
+} from "./task-gates.js";
 import { resolveCleanRunArgv } from "./toolchain.js";
 import {
 	discoverToolchainChecks,
@@ -28,7 +34,7 @@ export type VerifyResolution =
 	| { kind: "package"; check: DeclaredCheck; packageRoot: string }
 	| { kind: "toolchain"; check: ToolchainCheck; argv: string[] }
 	/** A gate the dispatched verifier task names; `confined` is the worker's OS sandbox, read by the safety scan. */
-	| { kind: "task"; check: DeclaredCheck; confined: boolean }
+	| { kind: "task"; check: DeclaredCheck; confined: boolean; containable: boolean }
 	| { kind: "unavailable"; check: ToolchainCheck }
 	| { kind: "unresolved"; message: string };
 
@@ -98,7 +104,12 @@ function resolveTaskGate(rawArgs: Record<string, unknown>): VerifyResolution | n
 			message: `task gate '${gate.id}' runs exactly as the task wrote it (${gate.text}); call it with no args.`,
 		};
 	}
-	return { kind: "task", check: taskGateCheck(gate), confined: taskGatesConfined() };
+	return {
+		kind: "task",
+		check: taskGateCheck(gate),
+		confined: taskGatesConfined(),
+		containable: taskGatesContainable(),
+	};
 }
 
 /**

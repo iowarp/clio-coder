@@ -132,4 +132,7 @@ it("grounds verifier claims that name a typed check by its id or its task gate c
 	strictEqual(ground("python3 check.py"), 0);
 	strictEqual(ground("gate-2"), 0);
 	strictEqual(ground("python3 other.py", gates), 0);
+	const pytest = [{ id: "gate-1", text: "python3 -m pytest -q tests" }];
+	strictEqual(ground("gate-1 (python3 -m pytest -q tests)", pytest), 1);
+	strictEqual(ground("python3 -m pytest -q tests"), 0);
 });

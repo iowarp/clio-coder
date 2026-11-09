@@ -1757,12 +1757,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		return { ...decision, shellSandbox };
 	};
 
-	const taskGateUnderJudgment = (call: ClassifierCall): { command: string; confined: boolean } | null => {
+	const taskGateUnderJudgment = (call: ClassifierCall): TaskGateUnderJudgment | null => {
 		const args = prepareVerifyArguments(call.args ?? {});
 		const resolution = resolveVerifyCall(cwd, args);
 		if (resolution.kind !== "task") return null;
 		const argv = verifyResolutionArgv(resolution, args, cwd);
-		return argv === null ? null : { command: argv.join(" "), confined: resolution.confined };
+		return argv === null
+			? null
+			: { command: argv.join(" "), confined: resolution.confined, containable: resolution.containable };
 	};
 
 	/**
@@ -1772,14 +1774,32 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	 */
 	const evaluateTaskGate = (
 		rawCall: ClassifierCall,
-		gate: { command: string; confined: boolean },
+		gate: TaskGateUnderJudgment,
 		posture: string | undefined,
 		scope: OperatorScope | undefined,
 	): SafetyPolicyDecision => {
 		const callCwd = typeof rawCall.args?.cwd === "string" ? { cwd: rawCall.args.cwd } : {};
-		const bash = evaluateScoped({ tool: ToolNames.Bash, args: { command: gate.command, ...callCwd } }, posture, scope);
+		const bashCall: ClassifierCall = { tool: ToolNames.Bash, args: { command: gate.command, ...callCwd } };
+		const bash = evaluateScoped(bashCall, posture, scope);
 		const named = { ...bash, tool: ToolNames.Verify, command: gate.command };
-		if (bash.kind === "allow") return taskGatePolicy(named, gate.confined);
+		if (bash.kind === "allow") {
+			if (gate.confined) return taskGatePolicy(named, true);
+			// Main bash at default runs an unrecognized command unasked when the
+			// main-session sandbox contains it; the gate gets that verdict and,
+			// through the decision's shellSandbox, runs in that same sandbox.
+			if (bash.execRecognition === "unrecognized" && gate.containable && posture === undefined && scope === undefined) {
+				const contained = evaluateOperatorDefault(bashCall, posture, {
+					level: "default",
+					scratchRoots: [],
+					sandbox: true,
+					snapshots: false,
+				});
+				if (contained.kind === "allow" && contained.shellSandbox !== undefined) {
+					return { ...contained, tool: ToolNames.Verify, command: gate.command };
+				}
+			}
+			return named;
+		}
 		if (bash.kind === "block") return named;
 		const { rejection: _rejection, ...rest } = named;
 		return blockDecision(rest, {
@@ -2311,6 +2331,14 @@ function evaluateBashPolicy(
 		policySource: "builtin-command-allowlist",
 		execRecognition: "unrecognized",
 	};
+}
+
+interface TaskGateUnderJudgment {
+	command: string;
+	/** The worker's OS sandbox writes nothing. */
+	confined: boolean;
+	/** The worker could run the gate in the main-session sandbox. */
+	containable: boolean;
 }
 
 /** Rule id of a verifier's task gate the scan passed, run in a sandbox that writes nothing. */

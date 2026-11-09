@@ -35,6 +35,8 @@ interface TaskGateState {
 	rejected: RejectedTaskGate[];
 	/** True when every command this worker spawns runs under bubblewrap with no writable roots. */
 	confined: boolean;
+	/** True when this worker could run a gate in the main-session sandbox, as main bash at default would. */
+	containable: boolean;
 }
 
 export const TASK_GATE_LIMIT = 8;
@@ -87,7 +89,7 @@ const REFUSED_PROGRAMS = new Set([
 	"powershell",
 ]);
 
-let state: TaskGateState = { active: false, gates: [], rejected: [], confined: false };
+let state: TaskGateState = { active: false, gates: [], rejected: [], confined: false, containable: false };
 
 function collapse(text: string): string {
 	return text.trim().replace(/\s+/gu, " ");
@@ -153,13 +155,18 @@ export function extractTaskGates(task: string): { gates: TaskGate[]; rejected: R
 }
 
 /** Set once at a verifier worker's start from its dispatched task. */
-export function configureTaskGates(task: string, options: { confined: boolean }): void {
-	state = { active: true, ...extractTaskGates(task), confined: options.confined };
+export function configureTaskGates(task: string, options: { confined: boolean; containable?: boolean }): void {
+	state = {
+		active: true,
+		...extractTaskGates(task),
+		confined: options.confined,
+		containable: options.containable === true,
+	};
 }
 
 /** Back to no gates: a process that is not a verifier worker. */
 export function clearTaskGates(): void {
-	state = { active: false, gates: [], rejected: [], confined: false };
+	state = { active: false, gates: [], rejected: [], confined: false, containable: false };
 }
 
 /**
@@ -181,6 +188,10 @@ export function taskGates(): { gates: ReadonlyArray<TaskGate>; rejected: Readonl
 
 export function taskGatesConfined(): boolean {
 	return state.confined;
+}
+
+export function taskGatesContainable(): boolean {
+	return state.containable;
 }
 
 /** A gate named by its id or by its exact command text, backticks tolerated. */

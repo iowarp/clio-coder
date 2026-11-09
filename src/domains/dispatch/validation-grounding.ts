@@ -90,7 +90,10 @@ function withTypedCheckNames(
 		if (id === undefined || id === "frontend") continue;
 		names.add(id);
 		const gate = gates.find((candidate) => candidate.id === id);
-		if (gate !== undefined) names.add(gate.text);
+		if (gate === undefined) continue;
+		names.add(gate.text);
+		// A claim naming the gate's command is read as its canonical spelling.
+		names.add(claimIdentity(gate.text));
 	}
 	return names;
 }

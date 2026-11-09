@@ -52,6 +52,8 @@ import {
 	responseSchemaDialectFor,
 	runtimeSpeaksResponseSchemaDialect,
 } from "../core/response-schema.js";
+import { sandboxAvailability } from "../core/sandbox/availability.js";
+import { mainShellContained } from "../core/sandbox/main-session.js";
 import {
 	workerSandboxConfinesWrites,
 	workerSandboxReadableRoots,
@@ -822,7 +824,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// A verifier has no shell; the gate commands its task names are what it may
 	// run through verify (task-gates.ts). Every other role sees none.
 	if (input.resultContract?.kind === "verifier-report") {
-		configureTaskGates(input.task, { confined: workerSandboxWritesNothing() });
+		configureTaskGates(input.task, {
+			confined: workerSandboxWritesNothing(),
+			// The main-session sandbox main bash would run an unrecognized gate in.
+			containable: workerSandboxConfinesWrites() && mainShellContained("auto", sandboxAvailability()),
+		});
 	} else {
 		clearTaskGates();
 	}

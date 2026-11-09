@@ -1,9 +1,11 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioStatePath } from "../../src/core/xdg.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -134,8 +136,8 @@ describe("verifier task gates", () => {
 			"pip install --user requests",
 			`touch ${home}/.config/autostart/x`,
 		]) {
-			for (const confined of [false, true]) {
-				configureTaskGates(`Run \`${command}\`.`, { confined });
+			for (const sandbox of [{ confined: false }, { confined: false, containable: true }, { confined: true }]) {
+				configureTaskGates(`Run \`${command}\`.`, sandbox);
 				const engine = createSafetyPolicyEngine({ cwd: root });
 				for (const [posture, scope] of [
 					[undefined, undefined],
@@ -155,6 +157,36 @@ describe("verifier task gates", () => {
 				notStrictEqual(admitted.kind, "allow", `${command}: worker admission allowed`);
 			}
 		}
+	});
+
+	it("runs an unrecognized gate that main bash would contain, inside that sandbox", async (t) => {
+		const availability = sandboxAvailability();
+		if (!availability.available || availability.backend !== "bwrap") {
+			t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+			return;
+		}
+		const root = enter({ "w.py": "import sys\nopen(sys.argv[1], 'w').write('x')\n" });
+		// Clio's state dir sits outside every root a contained command may write.
+		mkdirSync(clioStatePath(), { recursive: true });
+		const escaped = join(clioStatePath(), "ESCAPED");
+		configureTaskGates(`Run \`python3 w.py inside.txt\` and \`python3 w.py ${escaped}\`.`, {
+			confined: false,
+			containable: true,
+		});
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), principal: "worker" });
+		registry.register(verifyTool);
+		const inside = await registry.invoke({ tool: ToolNames.Verify, args: { check: "gate-1" } });
+		const ran = (verdict: typeof inside) => (verdict.kind === "ok" ? verdict.result.kind : verdict.kind);
+		strictEqual(ran(inside), "ok", JSON.stringify(inside));
+		ok(existsSync(join(root, "inside.txt")));
+		const outside = await registry.invoke({ tool: ToolNames.Verify, args: { check: "gate-2" } });
+		strictEqual(ran(outside), "error", JSON.stringify(outside));
+		if (outside.kind === "ok") match(JSON.stringify(outside.result), /Read-only file system/u);
+		strictEqual(existsSync(escaped), false);
+
+		configureTaskGates("Run `python3 w.py inside.txt`.", { confined: false, containable: false });
+		const unsandboxed = await registry.invoke({ tool: ToolNames.Verify, args: { check: "gate-1" } });
+		strictEqual(unsandboxed.kind, "blocked", JSON.stringify(unsandboxed));
 	});
 
 	it("a read-only worker runs a gate only inside a sandbox that writes nothing, else says unverified", async () => {

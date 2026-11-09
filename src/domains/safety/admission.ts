@@ -591,6 +591,15 @@ function admit(input: AdmissionInput): AdmissionDisposition {
 			const actionClass = effectDecision.classification.actionClass;
 			if (effectDecision.policy?.shellSandbox !== undefined && CONTAINED_CLASSES.has(actionClass)) continue;
 		}
+		// A verifier's task gate the net judged as main bash at default would,
+		// contained: it runs in that same main-session sandbox.
+		if (
+			effectDecision.policy?.shellSandbox !== undefined &&
+			effectDecision.classification.actionClass === "execute" &&
+			isTaskGateCall(call.tool, call.args)
+		) {
+			continue;
+		}
 		// A worker's typed write to a git hook, config or git dir pointer plants
 		// code that runs outside its sandbox on the operator's or the main
 		// session's next git command, so at default it asks the main agent; a
