@@ -274,9 +274,9 @@ function unwrapStep(input: ShellCommandStep): ShellCommandStep | null {
 /** Standing for `.` once it is known to be the directory the command started in. */
 const CURRENT_DIRECTORY = "\u0001cwd";
 
-/** `.`, `./`, `././`: the directory itself, not `..`. */
+/** `.`, `./`, `././`: the directory itself, not `..`. Each repeat ends in `.`, so a run of `/` backtracks linearly. */
 function isCurrentDir(word: string): boolean {
-	return /^\.(?:\/+\.?)*\/*$/u.test(word);
+	return /^\.(?:\/+\.)*\/*$/u.test(word);
 }
 
 /** Executables whose words are only paths, so a path set at run time is still a path. */

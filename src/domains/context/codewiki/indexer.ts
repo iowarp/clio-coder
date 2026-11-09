@@ -585,8 +585,10 @@ const cFamilyExtractor: LanguageExtractor = {
 				kind: "type",
 			},
 			{
+				// One run for the return type and qualifiers: a repeated group of the same characters backtracked
+				// exponentially on long whitespace-separated lines.
 				regex:
-					/^\s*(?!(?:typedef|using)\b)(?:template\s*<[^>]+>\s*)?(?:[A-Za-z_][\w:<>,*&\s]+\s+)+(?:(?:[A-Za-z_]\w*)::)*([~A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:;|\{)?$/,
+					/^\s*(?!(?:typedef|using)\b)(?:template\s*<[^>]+>\s*)?[A-Za-z_][\w:<>,*&\s]+\s(?:(?:[A-Za-z_]\w*)::)*([~A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:;|\{)?$/,
 				kind: "func",
 			},
 			{ regex: /^(?:const\s+)?[A-Za-z_][\w:<>,*&\s]+\s+([A-Z][A-Z0-9_]*)\s*=/, kind: "const" },

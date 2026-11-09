@@ -71,6 +71,8 @@ describe("bash approval card consequence lines", () => {
 			`rm -rf /home/me/projects/myapp/build/output/artifacts/${"../".repeat(7)}`,
 			["Deletes a path using .. (too long to show) recursively"],
 		],
+		// A long run of `/` after `.` is checked in linear time, not exponential backtracking.
+		[`rm -rf .${"/".repeat(40)}x`, [`Deletes .${"/".repeat(40)}x recursively`]],
 		// Where `.` and the default scope are.
 		["git -C /other checkout -- .", ["Discards uncommitted changes in /other"]],
 		["git -C /other restore .", ["Discards uncommitted changes in /other"]],
