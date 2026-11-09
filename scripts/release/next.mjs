@@ -9,7 +9,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -27,7 +27,16 @@ import {
 } from "../release-candidate.mjs";
 import { api, forwardedTags, registryTags, registryVersion, requireIntegrity } from "../release-publish.mjs";
 import { releaseVersionErrors } from "../release-version-policy.mjs";
-import { alreadyPublished, latestJob, nextStep, rerunStarted, runState, tmpdirProblem } from "./plan.mjs";
+import {
+	alreadyPublished,
+	ciCandidateDirectory,
+	latestJob,
+	nextStep,
+	publishArgs,
+	rerunStarted,
+	runState,
+	tmpdirProblem,
+} from "./plan.mjs";
 import { acquireLock, LockHeld, loadReceipt, newReceipt, recordEvent, saveReceipt } from "./receipt.mjs";
 
 const repository = "iowarp/clio-coder";
@@ -157,6 +166,35 @@ function remoteHead(branch) {
 	return git("ls-remote", "--heads", "origin", `refs/heads/${branch}`).split(/\s/u)[0] || null;
 }
 
+/**
+ * The ci.yml run's candidate artifact, downloaded once and verified on every use. The local
+ * candidate only gates the push; every published, drafted or compared byte comes from here.
+ */
+function ciCandidate(receipt, context) {
+	const directory = ciCandidateDirectory(context.state, receipt.ciRun);
+	if (!existsSync(join(directory, "candidate.json"))) {
+		const partial = `${directory}.partial`;
+		rmSync(partial, { recursive: true, force: true });
+		rmSync(directory, { recursive: true, force: true });
+		run("gh", [
+			"run",
+			"download",
+			String(receipt.ciRun.id),
+			"--repo",
+			repository,
+			"--name",
+			`candidate-${receipt.commit}`,
+			"--dir",
+			partial,
+		]);
+		renameSync(partial, directory);
+	}
+	const candidate = verifyCandidate(directory, receipt.commit);
+	if (String(candidate.run) !== String(receipt.ciRun.id))
+		throw new Error(`The artifact in ${directory} belongs to run ${candidate.run}, not ${receipt.ciRun.id}.`);
+	return { ...candidate, directory };
+}
+
 // ---------- Facts ----------
 
 function readTree(commit) {
@@ -223,13 +261,16 @@ async function readFacts(mode, receipt, context) {
 
 	const published = await registryVersion(context.name, receipt.version);
 	let integrityMatches = null;
-	if (published && candidateReady)
+	// npm is compared with the CI artifact that release.yml verifies, never with a local pack.
+	if (published && ci?.state === "success" && ci.artifacts) {
+		const candidate = ciCandidate(receipt, context);
 		try {
-			requireIntegrity(published, verifyCandidate(context.candidate, commit));
+			requireIntegrity(published, candidate);
 			integrityMatches = true;
 		} catch {
 			integrityMatches = false;
 		}
+	}
 	const npm = { served: Boolean(published), integrityMatches };
 
 	let isPublished = false;
@@ -395,8 +436,8 @@ async function perform(step, facts, receipt, context) {
 		}
 		case "draft-rehearsal": {
 			const tag = `rehearse-${receipt.nonce}`;
-			const candidate = verifyCandidate(context.candidate, commit);
-			const assets = [candidate.tarball, ...installers.map((name) => join(context.candidate, name))];
+			const candidate = ciCandidate(receipt, context);
+			const assets = [candidate.tarball, ...installers.map((name) => join(candidate.directory, name))];
 			run("gh", [
 				"release",
 				"create",
@@ -431,8 +472,7 @@ async function perform(step, facts, receipt, context) {
 			return recordEvent(receipt, "draft-rehearsal", "done", { id: draft.id, tag });
 		}
 		case "publish-stub": {
-			const candidate = verifyCandidate(context.candidate, commit);
-			const args = ["publish", candidate.tarball, "--access", "public", "--tag", context.channel];
+			const args = publishArgs(ciCandidate(receipt, context), { ...context, ciRun: receipt.ciRun });
 			const output = run("npm", [...args, "--dry-run"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 			console.log(`  the release runs: npm ${args.join(" ")}`);
 			receipt.rehearsal.stubbed = { argv: args, dryRun: output.trim().split("\n").at(-1) ?? "" };
@@ -457,8 +497,7 @@ async function perform(step, facts, receipt, context) {
 			return recordEvent(receipt, "dispatch-release", "done", { id });
 		}
 		case "publish-npm": {
-			const candidate = verifyCandidate(context.candidate, commit);
-			const args = ["publish", candidate.tarball, "--access", "public", "--tag", context.channel];
+			const args = publishArgs(ciCandidate(receipt, context), { ...context, ciRun: receipt.ciRun });
 			await confirm(
 				`The finishing path passed its check. Publish the qualified tarball to npm as the owner (irreversible):\n  npm ${args.join(" ")}`,
 				`publish ${version}`,

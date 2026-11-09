@@ -3,7 +3,7 @@
  * GitHub and returns a decision, so the order of irreversible steps is testable without
  * touching any service.
  */
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /** The 107-character socket limit leaves room for at most this much TMPDIR. */
 export const MAX_TMPDIR_LENGTH = 40;
@@ -70,6 +70,22 @@ export function draftAction({ release, tagCommit }, commit) {
 	if (!release) return { action: "create" };
 	if (release.target_commitish !== commit) return { action: "retarget" };
 	return { action: "publish" };
+}
+
+/** Where release:next keeps the ci.yml run's `candidate-<sha>` artifact. */
+export const ciCandidateDirectory = (state, ciRun) => join(state, `ci-${ciRun.id}`);
+
+/**
+ * The npm publish argv, only for the CI run's own artifact. release.yml verifies npm against that
+ * artifact, and every build has a fresh buildId, so publishing a local pack would burn the version.
+ */
+export function publishArgs(candidate, { state, ciRun, channel }) {
+	const directory = ciCandidateDirectory(state, ciRun);
+	if (String(candidate.run) !== String(ciRun.id))
+		throw new Error(`The candidate was not produced by ci.yml run ${ciRun.id}; publish only its artifact.`);
+	if (resolve(dirname(candidate.tarball)) !== resolve(directory))
+		throw new Error(`Publish only the CI artifact in ${directory}, not ${candidate.tarball}.`);
+	return ["publish", candidate.tarball, "--access", "public", "--tag", channel];
 }
 
 /** npm refuses a second publish of an existing version with this message; same bytes mean accepted. */

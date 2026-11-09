@@ -96,6 +96,26 @@ describe("release decisions", () => {
 		strictEqual(nextStep(facts({ releaseRun: timedOut }), { npm: { accepted: true } }).step, "wait-npm");
 	});
 
+	it("publishes only the ci.yml run's artifact, never the local candidate", async () => {
+		const { ciCandidateDirectory, publishArgs } = await import(planModule);
+		const ciRun = { id: 42 };
+		const state = "/state";
+		const options = { state, ciRun, channel: "latest" };
+		const tarball = join(ciCandidateDirectory(state, ciRun), "iowarp-clio-coder-0.7.1.tgz");
+		deepStrictEqual(publishArgs({ run: "42", tarball }, options), [
+			"publish",
+			tarball,
+			"--access",
+			"public",
+			"--tag",
+			"latest",
+		]);
+		const local = join(state, "c-aaaaaaaaaaaa", "iowarp-clio-coder-0.7.1.tgz");
+		throws(() => publishArgs({ run: null, tarball: local }, options), /ci\.yml run 42/u);
+		throws(() => publishArgs({ run: "42", tarball: local }, options), /only the CI artifact/u);
+		throws(() => publishArgs({ run: "41", tarball }, options), /ci\.yml run 42/u);
+	});
+
 	it("stops on different published bytes and forwards tags after verification", async () => {
 		const { nextStep } = await import(planModule);
 		strictEqual(nextStep(facts({ npm: { served: true, integrityMatches: false } }), {}).step, "stop");
