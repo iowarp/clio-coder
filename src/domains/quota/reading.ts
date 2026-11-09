@@ -116,10 +116,14 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 	return reading && reading.windows.length > 0 && utc.test(reading.observedAt) ? reading : null;
 }
 
-/** Window observations deduplicate drift; each fresh poll also establishes the account reading's freshness (#434). */
+/**
+ * Window observations deduplicate drift; each fresh successful poll also establishes the account reading's freshness
+ * (#434). A failed poll that repeats the last one (no credential, the same error) says nothing new, so it is journaled
+ * once rather than on every read.
+ */
 export function quotaReadingFingerprint(reading: QuotaReading): string {
 	return JSON.stringify([
-		...(reading.source === "poll" ? [reading.observedAt] : []),
+		...(reading.source === "poll" && reading.status === "ok" ? [reading.observedAt] : []),
 		reading.limitReached ?? null,
 		reading.status,
 		reading.plan,

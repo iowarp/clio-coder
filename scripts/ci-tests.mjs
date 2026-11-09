@@ -89,6 +89,7 @@ export const coreTests = [
 	"approval-card-arguments",
 	"footer-snapshot",
 	"quota-tui",
+	"quota-poll-loop",
 	"tui-presentation-modes",
 	"copilot-sdk-route",
 	"copilot-keychain",

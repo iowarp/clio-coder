@@ -13,6 +13,12 @@ import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export const DEFAULT_QUOTA_CACHE_TTL_MS = 5 * 60_000;
 
+/**
+ * How long a failed read (error, expired) is served before the provider is asked again. Shorter than the TTL so an
+ * outage clears quickly, but long enough that a surface re-reading on every update never turns into a poll loop.
+ */
+export const QUOTA_FAILURE_BACKOFF_MS = 60_000;
+
 export interface QuotaCacheOptions {
 	ttlMs?: number;
 	/** Clock source in milliseconds, injected so tests can advance time. */
@@ -31,7 +37,9 @@ export interface QuotaCache {
 	/**
 	 * Serve a fresh snapshot, reading from the provider only when the cached
 	 * value has expired. A failed read falls back to the last good snapshot
-	 * marked stale, so a transient outage does not erase known usage.
+	 * marked stale, so a transient outage does not erase known usage, and is
+	 * itself held: a missing credential until one is detected (or the TTL),
+	 * any other failure for QUOTA_FAILURE_BACKOFF_MS.
 	 */
 	resolve(provider: QuotaProvider): Promise<UsageSnapshot>;
 }
@@ -41,10 +49,21 @@ interface CacheEntry {
 	storedAtMs: number;
 }
 
+/** A read that did not return usage: what resolve answered, and how long to keep answering it. */
+interface MissEntry {
+	answer: UsageSnapshot;
+	status: UsageSnapshot["status"];
+	storedAtMs: number;
+	holdMs: number;
+}
+
 export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 	const ttlMs = options.ttlMs ?? DEFAULT_QUOTA_CACHE_TTL_MS;
 	const now = options.now ?? Date.now;
 	const entries = new Map<string, CacheEntry>();
+	// Failed reads are held too. Without this, every read of a provider without credentials fetched and journaled
+	// again, and a surface that re-reads on each journal update polled in a closed loop.
+	const misses = new Map<string, MissEntry>();
 
 	const fresh = (entry: CacheEntry | undefined): boolean => entry !== undefined && now() - entry.storedAtMs < ttlMs;
 
@@ -66,13 +85,26 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 		},
 
 		clear(providerId) {
-			if (providerId === undefined) entries.clear();
-			else entries.delete(providerId);
+			if (providerId === undefined) {
+				entries.clear();
+				misses.clear();
+			} else {
+				entries.delete(providerId);
+				misses.delete(providerId);
+			}
 		},
 
 		async resolve(provider) {
 			const cached = entries.get(provider.id);
 			if (fresh(cached) && cached !== undefined) return cached.snapshot;
+			const miss = misses.get(provider.id);
+			if (miss !== undefined && now() - miss.storedAtMs < miss.holdMs) {
+				// A missing credential holds until one appears; detect() is a local credential read, so a login (in
+				// this process or another) is picked up on the next read without spending a usage request.
+				if (miss.status !== "no_credentials") return miss.answer;
+				const detected = await provider.detect().catch(() => false);
+				if (!detected) return miss.answer;
+			}
 
 			const snapshot = await provider.fetch();
 			noteQuotaRead(snapshot, ttlMs, now());
@@ -90,15 +122,21 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 				now(),
 			);
 			if (snapshot.status === "ok") {
+				misses.delete(provider.id);
 				entries.set(provider.id, { snapshot, storedAtMs: now() });
 				return snapshot;
 			}
-			if (cached === undefined) return snapshot;
-			return {
-				...cached.snapshot,
-				stale: true,
-				message: snapshot.message ?? cached.snapshot.message ?? null,
-			};
+			const answer =
+				cached === undefined
+					? snapshot
+					: { ...cached.snapshot, stale: true, message: snapshot.message ?? cached.snapshot.message ?? null };
+			misses.set(provider.id, {
+				answer,
+				status: snapshot.status,
+				storedAtMs: now(),
+				holdMs: snapshot.status === "no_credentials" ? ttlMs : Math.min(ttlMs, QUOTA_FAILURE_BACKOFF_MS),
+			});
+			return answer;
 		},
 	};
 }

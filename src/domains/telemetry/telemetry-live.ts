@@ -13,7 +13,7 @@ import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
 import { observedQuotaReadings, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
-import { quotaReadingFromSnapshot } from "../quota/reading.js";
+import { quotaReadingFingerprint, quotaReadingFromSnapshot } from "../quota/reading.js";
 import type { CallJournalRead, PersistedTelemetry } from "./call-journal.js";
 import {
 	appendPersistedTelemetry,
@@ -38,6 +38,7 @@ import {
 	prepareSource,
 	processQuantity,
 	quantityOf,
+	quotaAccount,
 	quotaAccountDetails,
 	reconcileQuotaAccounts,
 	runEnqueued,
@@ -307,6 +308,23 @@ const localCount = (value: number) => {
 	const fact: Fact<number> = { kind: "measured", value, source: "local-count" };
 	return { fact, display: renderFact(fact) };
 };
+
+type QuotaReadRecord = Extract<TelemetryRecord, { k: "quota.read" }>;
+
+/** True when a failed reading says exactly what its account's newest held reading said (#434). */
+function repeatsNewestReading(held: Iterable<TelemetryRecord>, record: QuotaReadRecord): boolean {
+	if (record.data.status === "ok") return false;
+	const account = quotaAccount(record.data);
+	let newest: QuotaReadRecord | undefined;
+	for (const candidate of held)
+		if (
+			candidate.k === "quota.read" &&
+			quotaAccount(candidate.data) === account &&
+			(newest === undefined || candidate.data.observedAt >= newest.data.observedAt)
+		)
+			newest = candidate;
+	return newest !== undefined && quotaReadingFingerprint(newest.data) === quotaReadingFingerprint(record.data);
+}
 
 export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTelemetryModel {
 	const importLoader = options.loader ?? (() => import("../session/telemetry-source.js"));
@@ -640,6 +658,9 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			appendPersistedTelemetry(read, event);
 			for (const { record } of read.records) {
 				if (record.k === "quota.read") {
+					// A failed poll that repeats its account's newest reading changes no view; admitting it marked the
+					// session dirty, and a surface that re-reads quota on that update polled in a closed loop.
+					if (repeatsNewestReading(follow.quota.values(), record)) continue;
 					follow.quota.set(record.id, record);
 					if (current) mergeAccountQuota(current);
 					markDirty(["quota"]);
