@@ -737,6 +737,7 @@
 }
 .wb-bar__end {
 	display: flex;
+	flex: none;
 	align-items: center;
 	gap: 2px;
 }
@@ -886,17 +887,55 @@ button.wb-chip:hover:not(:disabled) {
 	border-radius: var(--radius-sm);
 	background: var(--action-tint);
 }
-/* What a tight bar gives up, in order: the title down to its minimum, then the token count (the
-   Session column has it), and only then the project's name. Status and the meters never clip. */
+/* What a tight bar gives up, in order: the end controls' words, the title down to its minimum, the project's name
+   down to its own, and only then a whole reading. Status, the readings and the end controls never clip. */
 .wb-bar {
 	container: bar / inline-size;
 }
+/* The title and the project's name shrink, eight to one, so far ahead of the readings (shrink 1) that a reading loses
+   no fraction of a pixel until both are at their minimums. A factor under 1 on the readings would instead stop them
+   shrinking once they are the last flexible item, so the weight sits here. */
+.wb-bar .wb-bar__title {
+	flex-shrink: 8000000;
+}
 .wb-bar .wb-chip--place {
-	flex: 0 1 auto;
+	flex: 0 1000000 auto;
 	min-width: min(12ch, 30%);
 }
 .wb-bar :is(.wb-chip--status, .wb-chip--meter, .wb-chip--figure) {
 	flex: none;
+}
+/* A figure is the server's display, read whole (#434), never cut to the chip cap. */
+.wb-bar :is(.wb-chip--meter, .wb-chip--figure) {
+	max-width: none;
+}
+/* The live readings take the room the title leaves, right-aligned, and shrink only once the title and the project's
+   name are at their minimums. A reading that still does not fit wraps onto a second line the bar hides, so it shows
+   whole or not at all, and the controls after it never leave the bar. */
+.wb-bar__readings {
+	display: flex;
+	flex: 1 1 auto;
+	flex-wrap: wrap;
+	align-content: flex-start;
+	align-items: center;
+	justify-content: flex-end;
+	column-gap: var(--space-2);
+	min-width: 0;
+	height: 30px;
+	overflow: hidden;
+}
+/* So the readings' clip never cuts an explanation, it is fixed where `placePanel` anchors it. */
+.wb-bar .explain__panel {
+	position: fixed;
+	top: calc(var(--explain-top, 0px) + var(--space-2));
+	left: calc(var(--explain-left, 0px) + var(--explain-shift, 0px));
+}
+/* Before the bar runs out of room, the end controls drop their words; each keeps its accessible name. */
+@container bar (max-width: 1120px) {
+	.wb-bar__end .wb-icon--text > span:not(.diffstat, .pane-attention),
+	.wb-bar__end .conversation__find > span {
+		display: none;
+	}
 }
 @container bar (max-width: 760px) {
 	.wb-bar .wb-chip__tokens {

@@ -473,14 +473,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									{snapshot.recoveredOrphan ? <span>· recovered after a server interruption</span> : null}
 								</span>
 							) : null}
-							<span className="wb-bar__spacer" />
-							<TelemetryChips
-								client={client}
-								sessionId={snapshot.id}
-								state={snapshot.state}
-								turns={snapshot.turns}
-								onOpen={pane.show}
-							/>
+							<div className="wb-bar__readings">
+								<TelemetryChips
+									client={client}
+									sessionId={snapshot.id}
+									state={snapshot.state}
+									turns={snapshot.turns}
+									onOpen={pane.show}
+								/>
+							</div>
 							<div className="wb-bar__end">
 								<OutputDetailPicker value={outputDetail} onChange={setOutputDetail} />
 								<button
@@ -490,7 +491,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									title="Find a request or response in this conversation"
 									onClick={() => setOutline(true)}
 								>
-									<Icon name="search" /> Find
+									<Icon name="search" /> <span>Find</span>
 								</button>
 								<PaneToggles
 									client={client}

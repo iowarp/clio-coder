@@ -10,6 +10,10 @@ import "./explain.css";
 function placePanel(details: HTMLDetailsElement): void {
 	const panel = details.querySelector<HTMLElement>(".explain__panel");
 	if (!panel) return;
+	// Where a panel is fixed to the viewport (the top bar's readings), it hangs from these.
+	const anchor = details.getBoundingClientRect();
+	panel.style.setProperty("--explain-top", `${Math.round(anchor.bottom)}px`);
+	panel.style.setProperty("--explain-left", `${Math.round(anchor.left)}px`);
 	panel.style.removeProperty("--explain-shift");
 	const box = panel.getBoundingClientRect();
 	const shift = Math.max(8 - box.left, Math.min(0, document.documentElement.clientWidth - 8 - box.right));

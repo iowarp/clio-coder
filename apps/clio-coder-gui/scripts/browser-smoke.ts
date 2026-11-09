@@ -1105,6 +1105,75 @@ try {
 			composerVisible: true,
 		});
 		await page.screenshot({ path: join(output, `conversation-${width}.png`), fullPage: true });
+		// At 1400px a partial token sum with its gap clause, beside a status, pushed Review and Details out of the
+		// bar. A throwaway page sets that case up, so the text it writes never reaches the page that goes on.
+		if (width === 1600) {
+			const probe = await context.newPage();
+			try {
+				await probe.setViewportSize({ width: 1400, height: 900 });
+				await probe.goto(`${page.url()}#token=test-token`);
+				const bar = probe.locator(".conversation .wb-bar");
+				const tokens = bar.locator(".wb-chip--figure summary").first();
+				await tokens.waitFor();
+				// A reading shows whole or wraps out of the bar whole; it is never cut.
+				const measure = (status: boolean) =>
+					bar.evaluate((element, withStatus) => {
+						const summary = element.querySelector(".wb-chip--figure summary");
+						if (summary) summary.textContent = "Tokens: ≥415,998 (1 call unknown)";
+						if (withStatus) {
+							const chip = document.createElement("span");
+							chip.className = "wb-chip wb-chip--status";
+							chip.innerHTML = "<span>Memory reviewing</span>";
+							element.querySelector(".wb-bar__readings")?.before(chip);
+						}
+						const edge = element.getBoundingClientRect();
+						const [review, details] = ['[title="Review changes"]', '[title^="Task details"]'].map((selector) => {
+							const box = element.querySelector(selector)?.getBoundingClientRect();
+							return !!box && box.left >= edge.left && box.right <= edge.right + 0.5;
+						});
+						const chip = element.querySelector(".wb-chip--figure") as HTMLElement;
+						const figure = chip.getBoundingClientRect();
+						const region = element.querySelector(".wb-bar__readings")?.getBoundingClientRect() ?? edge;
+						const shown = figure.top < region.bottom && figure.bottom > region.top;
+						const whole =
+							figure.left >= region.left - 0.5 &&
+							figure.right <= region.right + 0.5 &&
+							figure.bottom <= region.bottom + 0.5 &&
+							chip.scrollWidth <= chip.clientWidth + 1;
+						return {
+							barOverflows: element.scrollWidth > element.clientWidth + 1,
+							reviewInside: review,
+							detailsInside: details,
+							figure: shown ? (whole ? "whole" : "cut") : "wrapped out",
+						};
+					}, status);
+				const roomy = await measure(false);
+				await probe.screenshot({ path: join(output, "conversation-header-1400.png") });
+				assert.deepEqual(
+					roomy,
+					{ barOverflows: false, reviewInside: true, detailsInside: true, figure: "whole" },
+					"At 1400px the header must show the whole token figure beside Review and Details",
+				);
+				await tokens.click();
+				const panel = probe.locator(".wb-chip--figure .explain__panel").first();
+				await panel.waitFor();
+				const panelShown = await panel.evaluate((node) => {
+					const box = node.getBoundingClientRect();
+					const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+					return box.height > 0 && !!hit && node.contains(hit);
+				});
+				assert.ok(panelShown, "The token figure's explanation opened clipped by the bar");
+				await probe.keyboard.press("Escape");
+				const tight = await measure(true);
+				await probe.screenshot({ path: join(output, "conversation-header-1400-status.png") });
+				assert.ok(
+					!tight.barOverflows && tight.reviewInside && tight.detailsInside && tight.figure !== "cut",
+					`At 1400px with a status the header cut a reading or lost Review or Details: ${JSON.stringify(tight)}`,
+				);
+			} finally {
+				await probe.close();
+			}
+		}
 		await dark(true);
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
