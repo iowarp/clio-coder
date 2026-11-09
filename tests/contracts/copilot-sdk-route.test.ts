@@ -96,6 +96,9 @@ class FakeSession {
 	async send(options) {
 		if (this.markedDisconnected) throw new Error("Session disconnected");
 		state.order.push("send " + this.sessionId);
+		(state.sends ??= []).push({ sessionId: this.sessionId, prompt: options.prompt, mode: options.mode });
+		// Immediate mode joins the run in flight before its next model request; it starts no run of its own.
+		if (options.mode === "immediate") { (this.injected ??= []).push(options.prompt); return "m"; }
 		this.prompts.push(options.prompt);
 		setTimeout(() => void this.run(options.prompt), 0);
 		return "m";
@@ -177,7 +180,8 @@ class FakeSession {
 		if (prompt.includes("use tool")) {
 			const result = await this.callTool("call_1");
 			if (!result) return;
-			state.toolResults.push(result);
+			state.toolResults.push({ ...result, injectedBefore: [...(this.injected ?? [])] });
+			this.injected = [];
 			this.usage({ model: "fake-model", apiCallId: "call-b", inputTokens: 130, outputTokens: 5, cacheReadTokens: 100, cacheWriteTokens: 0, initiator: "agent", cost: 1 });
 			this.emit("assistant.message_delta", { messageId: "a2", deltaContent: "tool said " + result.textResultForLlm });
 			this.emit("assistant.message", { messageId: "a2", content: "tool said " + result.textResultForLlm });
@@ -271,7 +275,8 @@ interface FakeState {
 	sessions: FakeSession[];
 	deleted: string[];
 	disconnected: string[];
-	toolResults: Array<{ textResultForLlm: string; resultType: string }>;
+	toolResults: Array<{ textResultForLlm: string; resultType: string; injectedBefore: string[] }>;
+	sends?: Array<{ sessionId: string; prompt: string; mode?: string }>;
 	rejected: string[];
 	auth: { isAuthenticated: boolean; login?: string; host?: string };
 	instances: unknown[];
@@ -560,10 +565,19 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 	strictEqual(second.stopReason, "stop");
 	match((second.content[0] as { text: string }).text, /tool said file body/);
 	strictEqual(fake().sessions.length, before + 1, "the tool round trip reuses one Copilot session");
-	// The registry's framed note reaches Copilot exactly as Clio wrote it; later user text keeps a frame of its own.
+	// The tool's output and the registry's note reach Copilot exactly as Clio wrote them, the host reminder rides
+	// with them in its own frame, and the operator's steer is never part of the tool result.
 	strictEqual(
 		fake().toolResults.at(-1)?.textResultForLlm,
-		`file body${HOST_NOTE}\n\n<system-reminder>host note</system-reminder>\n\n<user-message>\noperator steer\n</user-message>`,
+		`file body${HOST_NOTE}\n\n<system-reminder>host note</system-reminder>`,
+	);
+	// The steer is a real user message in immediate mode, in the run before its next model request.
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, ["operator steer"]);
+	deepStrictEqual(
+		fake()
+			.sends?.filter((entry) => entry.mode === "immediate")
+			.map((entry) => entry.prompt),
+		["operator steer"],
 	);
 	const firstSettled = callSettlementFromMessage(first, "none");
 	// Usage reported after the tool started still settles on the call that requested the tool.
@@ -584,6 +598,82 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 		source: "provider",
 	});
 	strictEqual(firstSettled.pricing.usd.kind, "unknown", "a seat call never renders a dollar price");
+});
+
+test("a reminder-only follow-up rides on the tool result; a steer is sent once and never replayed", async () => {
+	disposeCopilotConversations("steer-session");
+	const sendsBefore = fake().sends?.length ?? 0;
+	const context: Context = { systemPrompt: "You are Clio.", tools: [readTool], messages: [user("please use tool")] };
+	const first = await step(context, "steer-session");
+	strictEqual(first.stopReason, "toolUse");
+	const withResult = [...context.messages, first, toolResult("call_1", "file body")];
+	const second = await step(
+		{ ...context, messages: [...withResult, user("<system-reminder>only a reminder</system-reminder>")] },
+		"steer-session",
+	);
+	strictEqual(second.stopReason, "stop");
+	strictEqual(
+		fake().toolResults.at(-1)?.textResultForLlm,
+		"file body\n\n<system-reminder>only a reminder</system-reminder>",
+	);
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, []);
+	strictEqual(
+		fake()
+			.sends?.slice(sendsBefore)
+			.some((entry) => entry.mode === "immediate"),
+		false,
+		"a reminder alone is no operator message",
+	);
+	// A steer, then the next turn: the steer is in Clio's transcript, so Copilot already has it and gets only what is new.
+	const third = await step(
+		{ ...context, messages: [...withResult, second, user("please use tool again")] },
+		"steer-session",
+	);
+	strictEqual(third.stopReason, "toolUse");
+	const fourth = await step(
+		{
+			...context,
+			messages: [
+				...withResult,
+				second,
+				user("please use tool again"),
+				third,
+				toolResult("call_1", "second body"),
+				user("<system-reminder>r</system-reminder>\nWhile you are at it, also list the dir"),
+			],
+		},
+		"steer-session",
+	);
+	strictEqual(fourth.stopReason, "stop");
+	strictEqual(fake().toolResults.at(-1)?.textResultForLlm, "second body\n\n<system-reminder>r</system-reminder>");
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, ["While you are at it, also list the dir"]);
+	await step(
+		{
+			...context,
+			messages: [
+				...withResult,
+				second,
+				user("please use tool again"),
+				third,
+				toolResult("call_1", "second body"),
+				user("<system-reminder>r</system-reminder>\nWhile you are at it, also list the dir"),
+				fourth,
+				user("thanks"),
+			],
+		},
+		"steer-session",
+	);
+	const later = fake().sends?.slice(sendsBefore) ?? [];
+	deepStrictEqual(
+		later.map((entry) => [entry.mode ?? "enqueue", entry.prompt]),
+		[
+			["enqueue", "please use tool"],
+			["enqueue", "please use tool again"],
+			["immediate", "While you are at it, also list the dir"],
+			["enqueue", "thanks"],
+		],
+	);
+	disposeCopilotConversations("steer-session");
 });
 
 test("usage facts keep per-field presence and billing coverage", async () => {

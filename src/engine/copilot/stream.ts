@@ -401,10 +401,18 @@ function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | un
 	}
 }
 
-function framedUserText(text: string): string {
-	const trimmed = text.trim();
-	if (trimmed.length === 0 || trimmed.startsWith("<system-reminder>")) return trimmed;
-	return `<user-message>\n${trimmed}\n</user-message>`;
+/** A user message's host reminders, each in its own `<system-reminder>` frame, in order. */
+function remindersOf(text: string): string[] {
+	return text.match(REMINDER_BLOCK) ?? [];
+}
+
+/** A user message's own text: what the person wrote, without the host's reminders. */
+function operatorTextOf(text: string): string {
+	return text.replace(REMINDER_BLOCK, "").trim();
+}
+
+function blobAttachments(images: ReadonlyArray<ImageContent>) {
+	return images.map((image) => ({ type: "blob" as const, data: image.data, mimeType: image.mimeType }));
 }
 
 function toolResultObject(message: Extract<CoreMessage, { role: "toolResult" }>, extraText = ""): ToolResultObject {
@@ -1102,14 +1110,26 @@ async function runStep(
 				(message): message is Extract<CoreMessage, { role: "toolResult" }> => message.role === "toolResult",
 			);
 			const after = fresh.filter((message) => message.role === "user");
-			// Copilot takes no user message while its run waits on tools, so text that followed the results rides on
-			// the last one. The tool's own output and the registry's `[middleware:*]` notes stay byte-for-byte what
-			// Clio produced, as on the Pi route; a reminder keeps its `<system-reminder>` frame, and a person's
-			// message gets one, so none of it reads as tool output.
-			const extra = after
-				.map((message) => framedUserText(textOf(message.content)))
+			// The tool's own output and the registry's `[middleware:*]` notes stay byte-for-byte what Clio produced,
+			// as on the Pi route. Host reminders keep riding on the last result in their `<system-reminder>` frame.
+			// A person's text that followed the results (a mid-turn steer) is a real user message: it goes in
+			// Copilot's immediate mode, which places it before the run's next model request, so the model reads it
+			// as the operator's turn and never as tool output. It is sent before the results are delivered, while
+			// the run is still waiting on them, so it lands at the very next request.
+			const extra = after.flatMap((message) => remindersOf(textOf(message.content))).join("\n\n");
+			const steer = after
+				.map((message) => operatorTextOf(textOf(message.content)))
 				.filter((text) => text.length > 0)
 				.join("\n\n");
+			const steerImages = after.flatMap((message) => imagesOf(message.content));
+			if (steer.length > 0 || steerImages.length > 0) {
+				await active.session.send({
+					prompt: steer,
+					mode: "immediate",
+					...(steerImages.length > 0 ? { attachments: blobAttachments(steerImages) } : {}),
+				});
+				if (step.isFinished) return;
+			}
 			const answered = new Set(results.map((message) => message.toolCallId));
 			for (const [index, message] of results.entries()) {
 				active.deliver(message.toolCallId, toolResultObject(message, index === results.length - 1 ? extra : ""));
@@ -1141,15 +1161,7 @@ async function runStep(
 					})();
 			await active.session.send({
 				prompt: seed.prompt,
-				...(seed.images.length > 0
-					? {
-							attachments: seed.images.map((image) => ({
-								type: "blob" as const,
-								data: image.data,
-								mimeType: image.mimeType,
-							})),
-						}
-					: {}),
+				...(seed.images.length > 0 ? { attachments: blobAttachments(seed.images) } : {}),
 			});
 		}
 	} catch (error) {
