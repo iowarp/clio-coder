@@ -46,6 +46,14 @@ const articles = collections.flatMap((collection) =>
 		folder: item.draft ? "content/drafts" : `content/${collection.id}`,
 	})),
 );
+// Each article names the guides it puts into practice; every guide page lists
+// those articles at its end, so a guide links back to its worked examples.
+const related = new Map();
+for (const item of articles)
+	for (const path of item.guides ?? []) {
+		if (!index.some((doc) => doc.path === path)) throw new Error(`Article ${item.slug} names an unknown guide: ${path}`);
+		related.set(path, [...(related.get(path) ?? []), item]);
+	}
 for (const [id, item] of Object.entries(captures)) {
 	for (const key of ["image", "original", "alt", "caption", "label", "interface", "version", "capturedAt", "source"])
 		if (!item[key]) throw new Error(`Capture ${id} is missing ${key}.`);
@@ -668,7 +676,12 @@ for (const item of index) {
 	const markdown = await read(`content/docs/${item.path}`);
 	if (createHash("sha256").update(markdown).digest("hex") !== entry?.sha256)
 		throw new Error(`Documentation hash mismatch: ${item.path}`);
-	const rendered = renderMarkdown(markdown, item.source, true);
+	const examples = (related.get(item.path) ?? []).filter((article) => !article.draft);
+	const kinds = [...new Set(examples.map((article) => article.collection.label.toLowerCase()))].join(" and ");
+	const relatedBlock = examples.length
+		? `\n\n## Related ${kinds}\n\n::: next Related ${kinds}\n${examples.map((article) => `- [${article.title}](${article.url})`).join("\n")}\n:::\n`
+		: "";
+	const rendered = renderMarkdown(markdown + relatedBlock, item.source, true);
 	const headings = [...rendered.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)];
 	const toc = headings.map(([, id, text]) => `<a href="#${id}">${text.replace(/<[^>]+>/g, "")}</a>`).join("\n");
 	const nav = groups

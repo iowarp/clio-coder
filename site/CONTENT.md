@@ -104,6 +104,12 @@ when the workflow ran as described; otherwise "Documented workflow". The cover
 is a capture id from `content/captures.json`, chosen for the task, never a
 generic screen reused across guides.
 
+Each tutorial and research entry lists `guides`: the one to three
+`public-docs.json` paths it puts into practice. Every docs page ends with a
+Related list built from these entries, so a guide links to its worked
+examples. Name a guide only when the article uses that feature; the build fails
+on a path that is not published.
+
 Markdown stays the source. A line `::: name arguments` opens a guide block and
 `:::` closes it; the body is Markdown.
 
