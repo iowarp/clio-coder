@@ -220,10 +220,12 @@ function responsiveImages(html, path) {
 		const parent = source === "assets/brand/iowarp-mark.webp";
 		const guide = articles.some((item) => item.url === path);
 		const article = guide || path.startsWith("/docs");
+		// Brand marks render at .brand img sizes; listing cards subtract the 1rem
+		// padding and 1px border around each card image from the column width.
 		const sizes = clio
 			? tag.includes('class="scene-mark"')
 				? "160px"
-				: "36px"
+				: "(max-width: 600px) 27px, 32px"
 			: parent
 				? "(max-width: 600px) 130px, 220px"
 				: guide
@@ -232,11 +234,11 @@ function responsiveImages(html, path) {
 						? "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc(100vw - 64px), 760px"
 						: path === "/"
 							? "(max-width: 600px) calc(100vw - 64px), (max-width: 824px) calc(100vw - 88px), (max-width: 1000px) 736px, (max-height: 650px) 736px, (max-width: 1100px) calc((94vw - 64px) * 0.623 - 24px), (max-width: 1344px) calc((94vw - 96px) * 0.623 - 24px), 700px"
-							: "(max-width: 600px) calc(100vw - 40px), (max-width: 850px) calc((100vw - 96px) / 2), (max-width: 1344px) calc((100vw - 128px) / 2), 600px";
+							: "(max-width: 600px) calc(100vw - 74px), (max-width: 1100px) calc(50vw - 90px), (max-width: 1344px) calc(50vw - 106px), 566px";
 		const srcset = [...item.variants, { path: source, width: item.width }]
 			.map((v) => `/${v.path} ${v.width}w`)
 			.join(", ");
-		if (clio) tag = tag.replace(`src="/${source}"`, `src="/${item.variants[1].path}"`);
+		if (clio) tag = tag.replace(`src="/${source}"`, `src="/${item.variants.find((v) => v.width === 64).path}"`);
 		if (!/\bwidth=/.test(tag)) tag = tag.replace("<img", `<img width="${item.width}" height="${item.height}"`);
 		return tag
 			.replace(/\s*\/?>(?=$)/, ` srcset="${srcset}" sizes="${sizes}" decoding="async">`)

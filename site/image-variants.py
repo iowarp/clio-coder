@@ -42,7 +42,7 @@ INPUTS = {
     "assets/guides/gui-home.webp": [640, 1024, 1600],
     "assets/guides/gui-approval.webp": [640, 1024, 1600],
     "assets/guides/gui-setup.webp": [640, 1024, 1600],
-    "assets/brand/clio-mark.webp": [32, 64, 128],
+    "assets/brand/clio-mark.webp": [32, 48, 64, 128],
     "assets/brand/iowarp-mark.webp": [128, 256],
 }
 

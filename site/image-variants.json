@@ -711,6 +711,12 @@
         "sha256": "d5000fe84d97e19fdcca0657daf16de78f11aa6f3f537b6389cce5746f17b0c0"
       },
       {
+        "path": "assets/responsive/clio-mark-48.webp",
+        "width": 48,
+        "height": 53,
+        "sha256": "3b500dd7c47a5ecaad3d003697248ee3143d30b29aa5b5f381dfd0a9c415925c"
+      },
+      {
         "path": "assets/responsive/clio-mark-64.webp",
         "width": 64,
         "height": 70,
