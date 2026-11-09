@@ -14,8 +14,8 @@ import {
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { runGuiCommand } from "../../src/cli/gui.js";
 import { installRootFinding } from "../../src/cli/doctor-state-size.js";
+import { runGuiCommand } from "../../src/cli/gui.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { inactiveInstallerRecord, inspectInstallation } from "../../src/domains/lifecycle/install-method.js";
