@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -170,6 +171,22 @@ describe("release decisions", () => {
 			["issues: gh: rate limited"],
 		);
 		deepStrictEqual(postFailures(undefined), []);
+	});
+
+	it("scans issues from the previous release, not from the new tag", async () => {
+		const { previousTag } = await import(planModule);
+		const repo = mkdtempSync(join(tmpdir(), "clio-release-tags-"));
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" }).trim();
+		try {
+			git("init", "-q");
+			for (const message of ["0.7.0", "fix", "0.7.1"]) git("commit", "-q", "--allow-empty", "-m", message);
+			git("tag", "v0.7.0", "HEAD~2");
+			git("tag", "v0.7.1", "HEAD");
+			strictEqual(previousTag(git, "v0.7.1", git("rev-parse", "HEAD")), "v0.7.0");
+		} finally {
+			rmSync(repo, { recursive: true, force: true });
+		}
 	});
 
 	it("rehearses without public writes and always tears down", async () => {

@@ -33,6 +33,7 @@ import {
 	latestJob,
 	nextStep,
 	postFailures,
+	previousTag,
 	publicProven,
 	publishArgs,
 	rerunStarted,
@@ -640,7 +641,7 @@ export async function main(argv = process.argv.slice(2)) {
 			channel,
 			name: pkg.name,
 			tag: `v${pkg.version}`,
-			previousTag: git("describe", "--tags", "--abbrev=0", "--match", "v*", "origin/main"),
+			previousTag: previousTag(git, `v${pkg.version}`, receipt.commit),
 			post: existsSync(postModule) ? await import(postModule) : null,
 			ask: makeAsk(),
 		};

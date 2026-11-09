@@ -124,6 +124,13 @@ export const postFailures = (results) =>
 		.filter(([, result]) => result?.status === "failed")
 		.map(([id, result]) => `${id}: ${result.note}`);
 
+/**
+ * The release before this one, for the post-release issue scan. Described from the candidate's
+ * parent with the new tag excluded: after a fetch, origin/main already carries the new tag.
+ */
+export const previousTag = (git, tag, commit) =>
+	git("describe", "--tags", "--abbrev=0", "--match", "v*", "--exclude", tag, `${commit}^`);
+
 /** npm refuses a second publish of an existing version with this message; same bytes mean accepted. */
 export const alreadyPublished = (stderr) =>
 	/cannot publish over the previously published versions/u.test(String(stderr));
