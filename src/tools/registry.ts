@@ -1839,12 +1839,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// the reason code names which one the operator set.
 			const hostSource = deps.readOnly === true ? null : HOST_READ_ONLY_SOURCES[deps.hostReadOnlySource ?? "run"];
 			const reasonCode = hostSource !== null ? "task:read_only" : "dispatch:read_only";
-			const verdict = readOnlyDeniedVerdict(decision, call.tool, hostSource, reasonCode);
+			// A read-only worker runs a check only inside an OS sandbox that keeps
+			// every write out of the workspace; without one the gate is unverified,
+			// and the model must say so rather than read it as a policy refusal.
+			const noSandbox =
+				call.tool === ToolNames.Verify && deps.principal === "worker" && deps.readOnlyShellConfined?.() !== true;
+			const verdict = readOnlyDeniedVerdict(decision, call.tool, hostSource, reasonCode, noSandbox);
 			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode });
 			return withDenial(
 				verdict,
 				"clio_policy",
-				hostSource?.remedy ?? "the dispatching agent must dispatch this work without read-only.",
+				noSandbox
+					? "run the check on a Linux host with bubblewrap, or dispatch it without read-only."
+					: (hostSource?.remedy ?? "the dispatching agent must dispatch this work without read-only."),
 				reasonCode,
 			);
 		}
@@ -3266,9 +3273,19 @@ function readOnlyDeniedVerdict(
 	tool: string,
 	hostSource: { detail: string } | null,
 	reasonCode: string,
+	noSandbox = false,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const rejection =
-		hostSource !== null
+	const rejection = noSandbox
+		? {
+				short: `${tool} unverified: no OS sandbox for checks in this read-only run`,
+				detail:
+					"This read-only run has no bubblewrap sandbox to keep a check's writes out of the workspace, so no check can run here and none was run.",
+				hints: [
+					"Report each requested gate as unverified, naming this reason; do not report it passed or failed.",
+					"Inspection tools remain available for paths inside the workspace.",
+				],
+			}
+		: hostSource !== null
 			? {
 					short: `${tool} denied: this task is read-only`,
 					detail: `${hostSource.detail}, so this call cannot execute and no approval clears it.`,

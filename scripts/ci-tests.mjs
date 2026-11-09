@@ -112,6 +112,7 @@ export const coreTests = [
 	"verify-numeric-boundaries",
 	"verify-reproduce",
 	"verify-toolchain-checks",
+	"verify-task-gates",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

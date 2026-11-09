@@ -66,8 +66,11 @@ export interface DeclaredPerfBudget {
 	tolerance?: { relative?: number };
 }
 
-/** `toolchain` checks are derived from build and CI files at call time and never written to a catalog. */
-export type DeclaredCheckSourceKind = "package.json" | "project-catalog" | "toolchain";
+/**
+ * `toolchain` checks are derived from build and CI files at call time and never written to a catalog;
+ * `task` checks are the gate commands a verifier's dispatched task names (task-gates.ts).
+ */
+export type DeclaredCheckSourceKind = "package.json" | "project-catalog" | "toolchain" | "task";
 
 export interface DeclaredCheckSourceRef {
 	kind: DeclaredCheckSourceKind;

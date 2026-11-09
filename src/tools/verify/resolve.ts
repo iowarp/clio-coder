@@ -5,6 +5,7 @@ import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../..
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
 import { type DeclaredCheckDiscoveryResult, discoverDeclaredChecksAtRoot } from "./discovery.js";
 import { prepareVerifyArguments } from "./surface.js";
+import { findTaskGate, taskGateCheck, taskGateFallbackHint, taskGatesConfined } from "./task-gates.js";
 import { resolveCleanRunArgv } from "./toolchain.js";
 import {
 	discoverToolchainChecks,
@@ -26,6 +27,8 @@ export type VerifyResolution =
 	| { kind: "catalog"; check: DeclaredCheck; run?: string }
 	| { kind: "package"; check: DeclaredCheck; packageRoot: string }
 	| { kind: "toolchain"; check: ToolchainCheck; argv: string[] }
+	/** A gate the dispatched verifier task names; `confined` is the worker's OS sandbox, read by the safety scan. */
+	| { kind: "task"; check: DeclaredCheck; confined: boolean }
 	| { kind: "unavailable"; check: ToolchainCheck }
 	| { kind: "unresolved"; message: string };
 
@@ -47,10 +50,9 @@ export function availableToolchainChecks(
 
 function nothingDeclared(root: string, diagnostics: ReadonlyArray<string>): string {
 	const skipped = diagnostics.length > 0 ? ` Skipped during discovery: ${diagnostics.join(" ")}` : "";
-	return (
-		`no declared or derivable verification checks in ${root}. Looked for ${TOOLCHAIN_DISCOVERY_SOURCES}. ` +
-		`Run the repository's documented test or gate command through bash instead.${skipped}`
-	);
+	const fallback =
+		taskGateFallbackHint() || " Run the repository's documented test or gate command through bash instead.";
+	return `no declared or derivable verification checks in ${root}. Looked for ${TOOLCHAIN_DISCOVERY_SOURCES}.${fallback}${skipped}`;
 }
 
 interface VerifyDiscoveryCache {
@@ -70,7 +72,33 @@ export function createRootVerifyResolver(workspaceRoot: string): (check: string)
 }
 
 export function resolveVerifyCall(workspaceRoot: string, args: Record<string, unknown>): VerifyResolution {
-	return resolveWithDiscovery(workspaceRoot, args);
+	return resolveTaskGate(args) ?? resolveWithDiscovery(workspaceRoot, args);
+}
+
+/**
+ * A verify call naming a gate of the dispatched task. Only verify calls see
+ * gates; the quality policy's root resolver does not, so a task cannot satisfy
+ * a repository's own quality rule. A gate runs exactly as the task wrote it.
+ */
+function resolveTaskGate(rawArgs: Record<string, unknown>): VerifyResolution | null {
+	const args = prepareVerifyArguments(rawArgs);
+	const check = typeof args.check === "string" ? args.check.trim() : "";
+	if (check.length === 0) return null;
+	const gate = findTaskGate(check);
+	if (gate === null) return null;
+	if (!("id" in gate)) {
+		return {
+			kind: "unresolved",
+			message: `the task names \`${gate.text}\`, but it cannot run as a gate: ${gate.reason}. Report it unverified with that reason.`,
+		};
+	}
+	if (extraArgs(args).length > 0) {
+		return {
+			kind: "unresolved",
+			message: `task gate '${gate.id}' runs exactly as the task wrote it (${gate.text}); call it with no args.`,
+		};
+	}
+	return { kind: "task", check: taskGateCheck(gate), confined: taskGatesConfined() };
 }
 
 /**
@@ -93,6 +121,8 @@ export function verifyResolutionArgv(
 		}
 		case "toolchain":
 			return resolution.argv;
+		case "task":
+			return resolution.check.command;
 		case "package": {
 			const extra = extraArgs(args);
 			return ["npm", "run", resolution.check.id, ...(extra.length > 0 ? ["--", ...extra] : [])];
@@ -207,6 +237,6 @@ function resolveWithDiscovery(
 		: ` Check ids are ${VERIFICATION_SCRIPT_FAMILY_HINT} package scripts, ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} ids, or the derived ids listed.`;
 	return {
 		kind: "unresolved",
-		message: `'${check}' is not a declared check. Declared checks: ${ids.join(", ")}.${hint} For any other command, use bash.`,
+		message: `'${check}' is not a declared check. Declared checks: ${ids.join(", ")}.${hint}${taskGateFallbackHint() || " For any other command, use bash."}`,
 	};
 }

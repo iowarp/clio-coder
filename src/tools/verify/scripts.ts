@@ -38,6 +38,7 @@ import {
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
 import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
+import { taskGateBounds, taskGateFallbackHint, taskGates } from "./task-gates.js";
 import {
 	type DeclaredProjectEntry,
 	discoverDeclaredProjectEntriesAtRoot,
@@ -120,12 +121,21 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 	const declared = discovery.sources.flatMap((source) => source.checks);
 	const diagnostics = [...(discovery.diagnostics ?? [])];
 	const derived = availableToolchainChecks(process.cwd(), declared, diagnostics);
+	const gates = taskGates();
 	const lines: string[] = [];
+	if (gates.gates.length > 0 || gates.rejected.length > 0) {
+		lines.push("Gates the dispatched task declares (each runs exactly as written, from the workspace root, no args):");
+		for (const gate of gates.gates) lines.push(`- ${gate.id}: ${gate.command.join(" ")}`);
+		for (const entry of gates.rejected)
+			lines.push(`- not runnable: ${entry.text} (${entry.reason}); report it unverified`);
+		lines.push("");
+	}
 	if (declared.length === 0 && derived.length === 0) {
 		lines.push(
 			`No declared verification checks found (no package.json verification scripts or ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} entries).`,
 			`Nothing derivable either: looked for ${TOOLCHAIN_DISCOVERY_SOURCES}.`,
-			"Run the repository's documented test command through bash, or run `clio-coder verifiers author` to create the catalog after confirmation.",
+			taskGateFallbackHint().trim() ||
+				"Run the repository's documented test command through bash, or run `clio-coder verifiers author` to create the catalog after confirmation.",
 		);
 	} else {
 		if (declared.length > 0) lines.push("Declared verification checks:");
@@ -166,6 +176,14 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 		details: {
 			...(diagnostics.length > 0 ? { diagnostics } : {}),
 			sources: clonedSources(discovery.sources),
+			...(gates.gates.length > 0 || gates.rejected.length > 0
+				? {
+						taskGates: {
+							gates: gates.gates.map((gate) => ({ id: gate.id, text: gate.text, command: [...gate.command] })),
+							rejected: gates.rejected.map((entry) => ({ ...entry })),
+						},
+					}
+				: {}),
 			derived: derived.map((check) => ({
 				id: check.id,
 				command: [...check.command],
@@ -218,6 +236,23 @@ export async function runToolchainCheck(
 		options,
 	);
 	return withDeclaredEvidence(result, { ...check, command: [...argv] });
+}
+
+/**
+ * Run a gate the dispatched task declares. The argv is the one the safety
+ * scan judged; it runs from the workspace root under the task-gate bounds,
+ * whatever cwd the model sent.
+ */
+export async function runTaskGateCheck(
+	check: DeclaredCheck,
+	args: Record<string, unknown>,
+	options?: VerifyRunOptions,
+): Promise<ToolResult> {
+	const [file, ...vector] = check.command;
+	if (file === undefined) return { kind: "error", message: `verify: task gate '${check.id}' has empty argv` };
+	const bounds = taskGateBounds(args);
+	const result = await runVectorTool("verify", file, vector, { cwd: process.cwd(), ...bounds }, options);
+	return withDeclaredEvidence(result, { ...check, timeoutMs: bounds.timeout_ms });
 }
 
 /**

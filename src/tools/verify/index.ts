@@ -6,6 +6,7 @@ import {
 	listChecks,
 	runProjectCheck,
 	runScriptCheck,
+	runTaskGateCheck,
 	runToolchainCheck,
 	unavailableCheck,
 	type VerifyRunOptions,
@@ -117,6 +118,10 @@ async function runResolvedVerify(args: Record<string, unknown>, options: VerifyR
 		}
 		case "toolchain": {
 			const result = await runToolchainCheck(resolution.check, resolution.argv, args, options);
+			return { ...result, details: { ...result.details, checkKind: "command" } };
+		}
+		case "task": {
+			const result = await runTaskGateCheck(resolution.check, args, options);
 			return { ...result, details: { ...result.details, checkKind: "command" } };
 		}
 		case "unavailable":

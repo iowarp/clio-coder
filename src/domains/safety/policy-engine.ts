@@ -1233,7 +1233,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const verifyArgs = call.tool === ToolNames.Verify ? prepareVerifyArguments(call.args ?? {}) : null;
 		const verifyResolution = verifyArgs === null ? null : resolveVerifyCall(cwd, verifyArgs);
 		const resolvedCheckCwd =
-			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
+			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain" || verifyResolution?.kind === "task"
 				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
 				: null;
 		const callCwd = typeof resolvedCheckCwd === "string" ? resolvedCheckCwd : cwdArg(call.args, cwd);
@@ -1610,7 +1610,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Unrecognized checks are left to the autonomy mapping: default asks,
 			// while yolo admits them headlessly.
 			if (bash.kind === "block") return blockDecision(base, bash);
-			const scanned = call.projection === "mcp-server" ? mcpExecutePolicy(bash) : bash;
+			const scanned =
+				call.projection === "mcp-server"
+					? mcpExecutePolicy(bash)
+					: verifyResolution?.kind === "task"
+						? taskGatePolicy(bash, verifyResolution.confined)
+						: bash;
 			if (scanned.kind === "ask") return settle(askDecision(base, scanned));
 			return settle(allowDecision(base, scanned));
 		}
@@ -1657,7 +1662,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				? null
 				: (verifyResolutionArgv(verifyResolution, verifyArgs, cwd)?.join(" ") ?? null);
 		const checkCwd =
-			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain"
+			verifyResolution?.kind === "catalog" || verifyResolution?.kind === "toolchain" || verifyResolution?.kind === "task"
 				? resolveProjectVerifierExecutionCwd(verifyResolution.check.cwd, cwd)
 				: null;
 		return {
@@ -2272,6 +2277,33 @@ function evaluateBashPolicy(
 		],
 		policySource: "builtin-command-allowlist",
 		execRecognition: "unrecognized",
+	};
+}
+
+/** Rule id of a verifier's task gate the scan passed, run in a sandbox that writes nothing. */
+export const TASK_GATE_RULE_ID = "verify-task-gate";
+
+/**
+ * A gate the verifier's dispatched task names. The scan's rails still block or
+ * ask; what it passed as unrecognized becomes recognized only when the worker
+ * runs it under bubblewrap with no writable roots, so the gate can change
+ * nothing. Anywhere else a gate gets exactly the admission bash would give the
+ * same argv, so task text cannot carry an unrecognized command past an ask.
+ */
+function taskGatePolicy<T extends Pick<SafetyPolicyDecision, "kind" | "execRecognition" | "reasons">>(
+	bash: T,
+	confined: boolean,
+): T {
+	if (bash.kind !== "allow" || bash.execRecognition !== "unrecognized" || !confined) return bash;
+	return {
+		...bash,
+		ruleId: TASK_GATE_RULE_ID,
+		reasonCode: TASK_GATE_RULE_ID,
+		reasons: [
+			"a gate the dispatched verifier task names, run as plain argv inside the worker's OS sandbox",
+			...bash.reasons,
+		],
+		execRecognition: "recognized",
 	};
 }
 
