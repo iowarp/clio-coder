@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runTests } from "./ci-tests.mjs";
+import { tmpdirProblem } from "./release/plan.mjs";
+import { acquireLock } from "./release/receipt.mjs";
 import { releaseVersionErrors } from "./release-version-policy.mjs";
 
 export const root = fileURLToPath(new URL("..", import.meta.url));
@@ -162,7 +173,7 @@ export async function prepare(directory) {
 	return receipt;
 }
 
-export async function testCandidate(directory, commit) {
+export async function testCandidate(directory, commit, results = "test-results.json") {
 	const receipt = verifyCandidate(directory, commit);
 	rmSync(join(root, "dist"), { recursive: true, force: true });
 	run("tar", ["-xzf", receipt.tarball, "--strip-components=1", "-C", root, "package/dist"]);
@@ -177,7 +188,7 @@ export async function testCandidate(directory, commit) {
 	verifyCandidate(directory, commit);
 	if (source() !== commit) throw new Error("Source changed while testing the candidate.");
 	writeFileSync(
-		join(directory, "test-results.json"),
+		join(directory, results),
 		`${JSON.stringify({ commit, sha256: receipt.files[basename(receipt.tarball)], counts, total }, null, 2)}\n`,
 	);
 	console.log(`Qualification tests: ${total} (${JSON.stringify(counts)})`);
@@ -218,39 +229,168 @@ export function smokeCandidate(directory, commit) {
 	}
 }
 
+/** Release ownership and candidates live beside the clone's refs, shared by all its worktrees. */
+export function releaseState() {
+	return join(git("rev-parse", "--path-format=absolute", "--git-common-dir"), "clio-release");
+}
+
+export const QUALIFIED_MAJORS = ["24", "22"];
+
+/** The Node binary for one major: an explicit path, this process, or the newest nvm install. */
+export function nodeBinary(major, explicit) {
+	const binary = explicit ?? (process.versions.node.split(".")[0] === major ? process.execPath : nvmNode(major));
+	if (!binary) throw new Error(`Qualification needs Node ${major}; pass --node${major} <path to node>.`);
+	const version = run(binary, ["--version"], { encoding: "utf8", stdio: "pipe" }).trim();
+	if (!version.startsWith(`v${major}.`)) throw new Error(`${binary} is ${version}, not Node ${major}.`);
+	return binary;
+}
+
+function nvmNode(major) {
+	const base = join(homedir(), ".nvm", "versions", "node");
+	if (!existsSync(base)) return undefined;
+	const numeric = (name) => name.slice(1).split(".").map(Number);
+	const newest = readdirSync(base)
+		.filter((name) => name.startsWith(`v${major}.`))
+		.sort((a, b) => {
+			const [x, y] = [numeric(a), numeric(b)];
+			return y[1] - x[1] || y[2] - x[2];
+		})[0];
+	return newest === undefined ? undefined : join(base, newest, "bin", "node");
+}
+
+/** True when this candidate passed tests and the install boot on one Node major. */
+export function qualifiedOn(directory, commit, major) {
+	const path = join(directory, `qualified-node${major}.json`);
+	if (!existsSync(path) || !existsSync(join(directory, "candidate.json"))) return false;
+	const marker = json(path);
+	const receipt = verifyCandidate(directory, commit);
+	return marker.commit === commit && marker.sha256 === receipt.files[basename(receipt.tarball)];
+}
+
+/** Runs one command to completion with its output in a log file, so concurrent legs stay readable. */
+function runLogged(command, args, { cwd, env, log }) {
+	return new Promise((resolvePromise, reject) => {
+		const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+		for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => appendFileSync(log, chunk));
+		child.on("error", reject);
+		child.on("close", (code) =>
+			code === 0
+				? resolvePromise()
+				: reject(new Error(`${basename(command)} ${args.join(" ")} exited ${code}; see ${log}`)),
+		);
+	});
+}
+
+/**
+ * Local qualification of the exact clean commit on both supported Node majors (item 1 of the
+ * 0.7.0 release). Each major gets its own detached worktree, because testing replaces the tree's
+ * dist/ and native addons bind to one Node ABI; no operator's checkout is touched (item 7). The
+ * archive is packed once and both majors test and boot it concurrently. A passed major is reused.
+ */
+async function qualify(values) {
+	const problem = tmpdirProblem(tmpdir());
+	if (problem) throw new Error(problem);
+	const commit = source();
+	const state = resolve(values.state ?? releaseState());
+	const directory = resolve(values.directory ?? join(state, `c-${commit.slice(0, 12)}`));
+	const nodes = Object.fromEntries(QUALIFIED_MAJORS.map((major) => [major, nodeBinary(major, values[`node${major}`])]));
+	const lock = acquireLock(state, `qualify ${commit}`, { inherit: true });
+	const trees = [];
+	const started = Date.now();
+	try {
+		mkdirSync(directory, { recursive: true });
+		const ready = {};
+		const setup = (major) => {
+			ready[major] ??= (async () => {
+				const tree = join(state, `wt-${commit.slice(0, 12)}-node${major}`);
+				const log = join(directory, `qualify-node${major}.log`);
+				writeFileSync(log, "");
+				trees.push(tree);
+				if (existsSync(tree)) run("git", ["worktree", "remove", "--force", tree]);
+				run("git", ["worktree", "add", "--quiet", "--detach", tree, commit]);
+				const env = { ...process.env, PATH: `${dirname(nodes[major])}:${process.env.PATH}` };
+				await runLogged("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: tree, env, log });
+				return { tree, env, log };
+			})();
+			return ready[major];
+		};
+		const leg = async (major, steps) => {
+			const { tree, env, log } = await setup(major);
+			for (const args of steps)
+				await runLogged(
+					nodes[major],
+					[join(tree, "scripts", "release-candidate.mjs"), ...args, "--directory", directory, "--sha", commit],
+					{ cwd: tree, env, log },
+				);
+		};
+		if (!existsSync(join(directory, "candidate.json"))) {
+			console.log(`Packing ${commit.slice(0, 12)} on Node 24...`);
+			// Installing the Node 22 tree overlaps the pack; a failure there surfaces in its leg.
+			setup("22").catch(() => {});
+			await leg("24", [["prepare"]]);
+		}
+		const receipt = verifyCandidate(directory, commit);
+		const sha = receipt.files[basename(receipt.tarball)];
+		const pending = QUALIFIED_MAJORS.filter((major) => !qualifiedOn(directory, commit, major));
+		for (const major of QUALIFIED_MAJORS)
+			if (!pending.includes(major)) console.log(`Node ${major}: reusing qualification of ${commit.slice(0, 12)}`);
+		const outcomes = await Promise.allSettled(
+			pending.map(async (major) => {
+				const legStarted = Date.now();
+				const results = `test-results-${major}.json`;
+				await leg(major, [["test", "--results", results], ["smoke"]]);
+				const version = run(nodes[major], ["--version"], { encoding: "utf8", stdio: "pipe" }).trim();
+				const { total, counts } = json(join(directory, results));
+				const platform = `${process.platform}-${process.arch}`;
+				writeFileSync(
+					join(directory, `qualified-node${major}.json`),
+					`${JSON.stringify({ commit, sha256: sha, node: version, platform, total, counts }, null, 2)}\n`,
+				);
+				console.log(
+					`Node ${major}: ${total} tests and install boot passed (${Math.round((Date.now() - legStarted) / 60_000)} min)`,
+				);
+			}),
+		);
+		const failed = outcomes.filter((outcome) => outcome.status === "rejected");
+		if (failed.length) throw new Error(failed.map((outcome) => outcome.reason.message).join("\n"));
+		console.log(
+			`QUALIFIED ${commit} on Node ${QUALIFIED_MAJORS.join(" and ")} (${process.platform}-${process.arch}) in ${Math.round((Date.now() - started) / 60_000)} min: ${directory}`,
+		);
+	} finally {
+		for (const tree of trees) if (existsSync(tree)) run("git", ["worktree", "remove", "--force", tree]);
+		run("git", ["worktree", "prune"]);
+		lock.release();
+	}
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	try {
 		const { values, positionals } = parseArgs({
-			options: { directory: { type: "string" }, sha: { type: "string" } },
+			options: {
+				directory: { type: "string" },
+				sha: { type: "string" },
+				results: { type: "string" },
+				node22: { type: "string" },
+				node24: { type: "string" },
+				state: { type: "string" },
+			},
 			allowPositionals: true,
 		});
 		const commit = values.sha ?? git("rev-parse", "HEAD");
-		const directory = resolve(values.directory ?? join(tmpdir(), `clio-coder-candidate-${commit}`));
+		const directory = resolve(values.directory ?? join(releaseState(), `c-${commit.slice(0, 12)}`));
 		const mode = positionals[0];
 		if (mode === "prepare") await prepare(directory);
-		else if (mode === "test") await testCandidate(directory, commit);
-		else if (mode === "smoke") smokeCandidate(directory, commit);
+		else if (mode === "test") {
+			if (values.results !== undefined && !/^test-results(?:-\d+)?\.json$/u.test(values.results))
+				throw new Error("--results names test-results.json or test-results-<node major>.json.");
+			await testCandidate(directory, commit, values.results);
+		} else if (mode === "smoke") smokeCandidate(directory, commit);
 		else if (mode === "verify" || mode === "preflight")
 			console.log(JSON.stringify(verifyCandidate(directory, commit), null, 2));
-		else if (mode === "qualify") {
-			if (existsSync(join(directory, "test-results.json"))) {
-				const receipt = verifyCandidate(directory, commit);
-				const results = json(join(directory, "test-results.json"));
-				if (results.commit !== commit || results.sha256 !== receipt.files[basename(receipt.tarball)])
-					throw new Error("Existing qualification differs from the candidate.");
-				console.log(`Reusing tested ${commit} from ${directory}`);
-			} else {
-				await prepare(directory);
-				await testCandidate(directory, commit);
-			}
-			const marker = `${commit}:${sha256(readFileSync(verifyCandidate(directory, commit).tarball))}:${process.platform}:${process.version}`;
-			if (!existsSync(join(directory, "boot-passed")) || readFileSync(join(directory, "boot-passed"), "utf8") !== marker) {
-				smokeCandidate(directory, commit);
-				writeFileSync(join(directory, "boot-passed"), marker);
-			}
-		} else
+		else if (mode === "qualify") await qualify(values);
+		else
 			throw new Error(
-				"Usage: release-candidate.mjs prepare|test|smoke|verify|qualify --directory <path> [--sha <commit>]",
+				"Usage: release-candidate.mjs prepare|test|smoke|verify|qualify [--directory <path>] [--sha <commit>] [--results <file>] [--state <dir>] [--node22 <node>] [--node24 <node>]",
 			);
 	} catch (error) {
 		console.error(`release-candidate: ${error.message}`);
