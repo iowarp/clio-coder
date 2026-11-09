@@ -252,3 +252,47 @@ it("keeps a large paste literal when deleting preceding typed text exposes its b
 	assert.equal(f.editor.getExpandedText(), pasted);
 	assert.equal(parseEditorBashCommand(f.editor.getTextForSubmit()), null);
 });
+
+it("Enter on a slash row that leaves the typed line unchanged submits it", async () => {
+	const previous = getKeybindings();
+	createKeybindingManager(DEFAULT_SETTINGS, {});
+	cleanups.push(() => setKeybindings(previous));
+	// Submitting schedules a render, so every terminal method the render touches is a no-op.
+	const terminal = new Proxy({ columns: 80, rows: 24 }, { get: (target, key) => Reflect.get(target, key) ?? noop });
+	const tui = new TuiMainScreen(terminal as unknown as Terminal);
+	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });
+	const submitted: string[] = [];
+	editor.onSubmit = (text) => submitted.push(text);
+	const rows = ["claude-sonnet-5.5", "claude-sonnet-5.5-fast"].map((model) => ({
+		value: model,
+		label: model,
+		path: `model › ${model}`,
+	}));
+	editor.setAutocompleteProvider({
+		getSuggestions: async (lines: string[], _line: number, col: number) => {
+			const prefix = (lines[0] ?? "").slice("/model ".length, col);
+			return { prefix, items: rows.filter((row) => row.value.startsWith(prefix)) };
+		},
+		applyCompletion: (lines: string[], _line: number, _col: number, item: { value: string }, prefix: string) => {
+			const text = `${(lines[0] ?? "").slice(0, (lines[0] ?? "").length - prefix.length)}${item.value}`;
+			return { lines: [text], cursorLine: 0, cursorCol: text.length };
+		},
+	} as unknown as Parameters<ClioEditor["setAutocompleteProvider"]>[0]);
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+	const open = async (text: string) => {
+		editor.setText(text);
+		editor.handleInput("\t");
+		await settle();
+		assert.equal(editor.isShowingAutocomplete(), true);
+	};
+
+	await open("/model claude-sonnet-5.5");
+	editor.handleInput("\r");
+	assert.deepEqual(submitted, ["/model claude-sonnet-5.5"]);
+
+	// A row that changes the line still only completes it, so the operator confirms before it runs.
+	await open("/model claude-son");
+	editor.handleInput("\r");
+	assert.equal(editor.getText(), "/model claude-sonnet-5.5");
+	assert.deepEqual(submitted, ["/model claude-sonnet-5.5"]);
+});

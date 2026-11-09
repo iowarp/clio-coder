@@ -1233,8 +1233,13 @@ export class ClioEditor extends Editor {
 			this.getText().trimStart().startsWith("/") &&
 			this.selectedSuggestion() !== null;
 		super.handleInput(completesSlashRow ? "\t" : data);
+		// A row that left the line as typed (`/model claude-sonnet-5.5` typed in full) has nothing for
+		// the operator to confirm, so the same Enter submits instead of being swallowed by the list.
+		const submitsUnchanged =
+			completesSlashRow && this.getText() === textBeforeCompletion && !this.isShowingAutocomplete();
+		if (submitsUnchanged) super.handleInput(data);
 		if (killsText) this.followSuggestionsAfterKill(textBeforeInput);
-		if (completingDirectory && this.getText() !== textBeforeCompletion) {
+		if (completingDirectory && !submitsUnchanged && this.getText() !== textBeforeCompletion) {
 			if (cursorEndsDirectoryPath(this)) {
 				// Directory rows are submenus on the same provider. Re-open immediately
 				// after acceptance so ↑/↓ continues in the child tree without requiring
