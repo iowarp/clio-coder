@@ -157,6 +157,11 @@ describe("release decisions", () => {
 		strictEqual(nextStep(facts({ mode: "rehearse" }), { rehearsal: stubbed }).step, "teardown");
 		const finished = facts({ mode: "rehearse", pushed: false, ci: null });
 		strictEqual(nextStep(finished, { rehearsal: { ...stubbed, tornDown: true } }).step, "done");
+		// A failed or interrupted rehearsal was torn down too; it resumes on a new branch, never reports done.
+		const failed = { checked: { run: 7 }, tornDown: true, branch: null };
+		strictEqual(nextStep(finished, { rehearsal: failed }).step, "push");
+		strictEqual(nextStep(facts({ mode: "rehearse" }), { rehearsal: failed }).step, "draft-rehearsal");
+		strictEqual(nextStep(finished, { rehearsal: { tornDown: true } }).step, "push");
 	});
 
 	it("reports an environment approval as waiting", async () => {

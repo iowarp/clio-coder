@@ -77,7 +77,16 @@ function proven(mode, facts, receipt) {
 	const ready = facts.pushed || (tree.clean && tree.versionsAgree && tree.mainAncestor && !tree.readiness.length);
 	const local = facts.local.node22 && facts.local.node24;
 	if (mode === "rehearse")
-		return [ready, local, facts.pushed || ci, ci, r.checked, r.drafted, r.stubbed, r.tornDown].map(Boolean);
+		return [
+			ready,
+			local,
+			facts.pushed || ci,
+			ci,
+			r.checked,
+			r.drafted,
+			r.stubbed,
+			r.tornDown && r.checked && r.drafted && r.stubbed,
+		].map(Boolean);
 	const preflight = facts.releaseRun && latestJob(facts.releaseRun.jobs, "preflight")?.conclusion === "success";
 	const accepted = facts.npm.served || receipt.npm?.accepted === true;
 	return [
@@ -375,7 +384,10 @@ function teardown(receipt) {
 			console.log(`  run ${record.id} could not be cancelled; it ends at its timeout`);
 		}
 	if (remoteHead(branch)) run("git", ["push", "--quiet", "origin", `:refs/heads/${branch}`]);
-	receipt.rehearsal.tornDown = true;
+	// Passed steps stay recorded; the next run pushes a new scratch branch for the rest. A CI run that
+	// did not pass cannot be rerun on a deleted branch, so it is dispatched again.
+	if (receipt.ciRun && getRun(receipt.ciRun.id).state !== "success") receipt.ciRun = null;
+	receipt.rehearsal = { ...receipt.rehearsal, branch: null, tornDown: true };
 	recordEvent(receipt, "teardown", "done", { branch, cancelled: open.map((record) => record.id) });
 }
 

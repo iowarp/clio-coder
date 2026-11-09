@@ -130,8 +130,11 @@ export const alreadyPublished = (stderr) =>
  */
 export function nextStep(facts, receipt) {
 	const stop = (reason) => ({ step: "stop", reason });
-	// A rehearsal ends with its branch deleted, so a finished one is read from the receipt alone.
-	if (facts.mode === "rehearse" && receipt.rehearsal?.tornDown) return { step: "done" };
+	// A rehearsal ends with its branch deleted, so a finished one is read from the receipt alone. A
+	// failed or interrupted one was torn down too, but resumes on a new scratch branch.
+	const rehearsal = receipt.rehearsal;
+	if (facts.mode === "rehearse" && rehearsal?.checked && rehearsal.drafted && rehearsal.stubbed && rehearsal.tornDown)
+		return { step: "done" };
 	if (facts.foreignRuns.length)
 		return stop(
 			`run ${facts.foreignRuns.join(", ")} on this commit belongs to another operator; let it finish or cancel it there`,
