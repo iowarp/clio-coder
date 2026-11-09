@@ -138,9 +138,9 @@ it("retains model fallback quotas without inventing a five-hour window", async (
 
 it("moves to the next endpoint when the first one fails", async () => {
 	const { fetch, urls } = stubFetch((url) => {
-		if (url.startsWith(PRIMARY)) return jsonResponse({ error: "nope" }, 500);
-		if (url.startsWith(SANDBOX) && url.endsWith("loadCodeAssist")) return jsonResponse(LOAD_OK);
-		if (url.startsWith(SANDBOX)) return jsonResponse(summaryBody([GEMINI_GROUP]));
+		if (url.startsWith(`${PRIMARY}/`)) return jsonResponse({ error: "nope" }, 500);
+		if (url.startsWith(`${SANDBOX}/`) && url.endsWith("loadCodeAssist")) return jsonResponse(LOAD_OK);
+		if (url.startsWith(`${SANDBOX}/`)) return jsonResponse(summaryBody([GEMINI_GROUP]));
 		return jsonResponse({});
 	});
 
@@ -148,8 +148,8 @@ it("moves to the next endpoint when the first one fails", async () => {
 
 	assert.equal(snapshot.status, "ok");
 	assert.equal(snapshot.windows.length, 2);
-	assert.ok(urls[0]?.startsWith(PRIMARY));
-	assert.ok(urls[1]?.startsWith(SANDBOX));
+	assert.ok(urls[0]?.startsWith(`${PRIMARY}/`));
+	assert.ok(urls[1]?.startsWith(`${SANDBOX}/`));
 });
 
 it("maps an auth failure on every endpoint to expired", async () => {
