@@ -183,7 +183,7 @@ describe("harness extension executable capabilities", () => {
 		const target = path.join(data.root, "state", "ESCAPED");
 		writeFileSync(
 			path.join(data.source, "command.cjs"),
-			`try { require("node:fs").writeFileSync(${JSON.stringify(target)}, "x"); } catch {} console.log("{}");`,
+			`require("node:fs").writeFileSync(${JSON.stringify(target)}, "x"); console.log("{}");`,
 		);
 		installExtension(data.source, { cwd: data.cwd, scope: "project" });
 		trustProjectPackages(data.cwd, "extensions");
@@ -194,8 +194,21 @@ describe("harness extension executable capabilities", () => {
 			containment: () => ({ sandbox: true, snapshots: false }),
 		});
 		deepStrictEqual(registerHarnessExtensionTools(registry, data.cwd), []);
+		const asked: Array<string | undefined> = [];
+		registry.onPermissionRequired((_call, decision) => {
+			asked.push(decision.policy?.ruleId);
+			registry.cancelParkedCalls("denied by the test");
+		});
 		const verdict = await registry.invoke({ tool: testName, args: { text: "x" } });
 		equal(verdict.kind, "ok", JSON.stringify(verdict));
+		if (verdict.kind !== "ok") return;
+		equal(verdict.result.kind, "error");
+		// Bash parity: the refused write names the roots and the reviewed escape.
+		if (verdict.result.kind === "error") ok(verdict.result.message.includes("unsandboxed: true"), verdict.result.message);
+		equal(existsSync(target), false);
+		deepStrictEqual(asked, []);
+		await registry.invoke({ tool: testName, args: { text: "x", unsandboxed: true } });
+		deepStrictEqual(asked, ["sandbox-escape"]);
 		equal(existsSync(target), false);
 	});
 	it("refuses disabled, replaced, removed, and drifted installed commands", async () => {

@@ -3,6 +3,7 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { parse as parseYaml } from "yaml";
 import { runCommandVector } from "../core/safe-exec.js";
+import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import type { DynamicToolName } from "../core/tool-names.js";
 import { extensionToolName, resolveExtensionEntrypoint } from "../domains/extensions/command-schema.js";
 import { parseExtensionManifest } from "../domains/extensions/discovery.js";
@@ -27,6 +28,44 @@ function jsonInput(args: Record<string, unknown>): string {
 	const input = JSON.stringify(args);
 	if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error(`command tool input exceeds ${MAX_INPUT_BYTES} bytes`);
 	return input;
+}
+
+const UNSANDBOXED = "unsandboxed";
+
+/**
+ * Bash parity for a contained command: the call may ask to leave the main-session
+ * sandbox with `unsandboxed: true`, projected onto the bash call so it asks like
+ * bash does. A tool that declares its own `unsandboxed` input keeps it as input.
+ */
+function escapable(tool: ExtensionCommandTool): boolean {
+	const properties = (tool.inputSchema as { properties?: Record<string, unknown> }).properties;
+	return properties !== undefined && !Object.hasOwn(properties, UNSANDBOXED);
+}
+
+function parametersOf(tool: ExtensionCommandTool): TSchema {
+	if (!escapable(tool)) return tool.inputSchema as TSchema;
+	const schema = tool.inputSchema as { properties: Record<string, unknown> };
+	return {
+		...schema,
+		properties: {
+			...schema.properties,
+			[UNSANDBOXED]: {
+				type: "boolean",
+				description:
+					"Leave the sandbox, only after the command failed because of it (a path outside the writable roots); the call is reviewed. Not passed to the command.",
+			},
+		},
+	} as TSchema;
+}
+
+/** The command's own input and whether the call asks to leave the sandbox. */
+function splitArgs(
+	tool: ExtensionCommandTool,
+	args: Record<string, unknown>,
+): { input: Record<string, unknown>; unsandboxed: boolean } {
+	if (!escapable(tool) || !Object.hasOwn(args, UNSANDBOXED)) return { input: args, unsandboxed: false };
+	const { [UNSANDBOXED]: flag, ...input } = args;
+	return { input, unsandboxed: flag === true };
 }
 
 function commandVector(extension: LoadableExtension, tool: ExtensionCommandTool): { file: string; args: string[] } {
@@ -61,7 +100,7 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 	return {
 		name,
 		description: `${tool.description}\nExtension ${extension.id}@${extension.version}; runs an installed command with JSON input and output.`,
-		parameters: tool.inputSchema as TSchema,
+		parameters: parametersOf(tool),
 		baseActionClass: "execute",
 		executionMode: "sequential",
 		// Reached through gateway find/describe/call; the spec, its execute
@@ -77,18 +116,21 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 		},
 		safetyCall(args) {
 			// The vector stays execution-class even for inputs such as {op:"read"}.
+			const split = splitArgs(tool, args);
 			let input = "[invalid JSON input]";
 			try {
-				input = jsonInput(args);
+				input = jsonInput(split.input);
 			} catch {
 				/* The body reports bounded input validation. */
 			}
-			return { tool: "bash", args: { command: [vector.file, ...vector.args, input].map(quoted).join(" "), cwd } };
+			const command = [vector.file, ...vector.args, input].map(quoted).join(" ");
+			return { tool: "bash", args: { command, cwd, ...(split.unsandboxed ? { unsandboxed: true } : {}) } };
 		},
 		async run(args, options) {
 			try {
-				const input = jsonInput(args);
-				if (!Value.Check(tool.inputSchema as TSchema, args))
+				const split = splitArgs(tool, args);
+				const input = jsonInput(split.input);
+				if (!Value.Check(tool.inputSchema as TSchema, split.input))
 					return { kind: "error", message: `${name}: input does not match its declared JSON schema` };
 				if (options?.signal?.aborted) return { kind: "error", message: `${name}: aborted before execution` };
 				const current = listInstalledExtensions(cwd).find(
@@ -137,7 +179,15 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 							: result.outputCapped
 								? "output limit exceeded"
 								: `exited with code ${result.exitCode}`;
-					return { kind: "error", message: `${name}: ${reason}`, details };
+					const sandboxHint =
+						options?.shellSandbox === undefined || result.exitCode === 0
+							? null
+							: mainSandboxWriteHint(`${result.stdout}\n${result.stderr}`, options.shellSandbox);
+					return {
+						kind: "error",
+						message: `${name}: ${reason}${sandboxHint === null ? "" : `\n${sandboxHint}`}`,
+						details,
+					};
 				}
 				try {
 					return { kind: "ok", output: JSON.stringify(JSON.parse(result.stdout)), details };
