@@ -125,6 +125,31 @@ describe("release decisions", () => {
 		});
 	});
 
+	it("treats an un-drafted release with unfinished closeout as a failed run to rerun", async () => {
+		const { nextStep, publicProven } = await import(planModule);
+		const fix = "b".repeat(40);
+		const done = {
+			runSucceeded: false,
+			release: { draft: false },
+			tagCommit: commit,
+			commit,
+			latest: true,
+			mainHead: fix,
+			finishingHeads: [commit, fix],
+			branchHead: null,
+		};
+		ok(publicProven(done));
+		ok(publicProven({ ...done, release: { draft: true }, runSucceeded: true }));
+		ok(!publicProven({ ...done, mainHead: "c".repeat(40) }), "main not promoted");
+		ok(!publicProven({ ...done, branchHead: commit }), "version branch not deleted");
+		ok(!publicProven({ ...done, release: { draft: true } }));
+		ok(!publicProven({ ...done, tagCommit: fix }));
+		ok(publicProven({ ...done, latest: false, mainHead: "c".repeat(40), branchHead: commit }), "prerelease");
+		const failed = releaseRun("failure", { status: "completed", conclusion: "success" }, { status: "completed" });
+		const served = { served: true, integrityMatches: true };
+		strictEqual(nextStep(facts({ npm: served, releaseRun: failed, published: false }), {}).step, "rerun-release");
+	});
+
 	it("rehearses without public writes and always tears down", async () => {
 		const { nextStep } = await import(planModule);
 		strictEqual(nextStep(facts({ mode: "rehearse" }), {}).step, "check-release");

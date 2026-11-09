@@ -88,6 +88,27 @@ export function publishArgs(candidate, { state, ciRun, channel }) {
 	return ["publish", candidate.tarball, "--access", "public", "--tag", channel];
 }
 
+/**
+ * The release counts as published only when its run succeeded or real state shows every finishing
+ * step. publish() un-drafts before main, website and branch cleanup, so a public release alone is
+ * not enough: a later failure must still offer the rerun.
+ */
+export function publicProven({
+	runSucceeded,
+	release,
+	tagCommit,
+	commit,
+	latest,
+	mainHead,
+	finishingHeads,
+	branchHead,
+}) {
+	if (runSucceeded) return true;
+	if (!release || release.draft || tagCommit !== commit) return false;
+	if (!latest) return true;
+	return finishingHeads.includes(mainHead) && branchHead === null;
+}
+
 /** npm refuses a second publish of an existing version with this message; same bytes mean accepted. */
 export const alreadyPublished = (stderr) =>
 	/cannot publish over the previously published versions/u.test(String(stderr));

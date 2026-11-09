@@ -32,6 +32,7 @@ import {
 	ciCandidateDirectory,
 	latestJob,
 	nextStep,
+	publicProven,
 	publishArgs,
 	rerunStarted,
 	runState,
@@ -195,6 +196,15 @@ function ciCandidate(receipt, context) {
 	return { ...candidate, directory };
 }
 
+/** The commit a remote tag points to, peeling an annotated tag. */
+function remoteTagCommit(tag) {
+	const lines = git("ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`)
+		.split("\n")
+		.filter(Boolean);
+	const peeled = lines.find((line) => line.endsWith("^{}")) ?? lines[0];
+	return peeled ? peeled.split(/\s/u)[0] : null;
+}
+
 // ---------- Facts ----------
 
 function readTree(commit) {
@@ -256,6 +266,7 @@ async function readFacts(mode, receipt, context) {
 		ci = { ...found, artifacts: found.state === "success" && artifactsPresent(receipt.ciRun.id, commit) };
 	}
 	let releaseRun = mode === "release" && receipt.releaseRun ? getRun(receipt.releaseRun.id) : null;
+	const releaseHead = releaseRun?.record.head_sha ?? null;
 	// A failed run on an older head is replaced, not rerun, once a tooling fix moved the branch (design 5b).
 	if (releaseRun?.state === "failure" && releaseRun.record.head_sha !== remoteHead(receipt.branch)) releaseRun = null;
 
@@ -278,7 +289,16 @@ async function readFacts(mode, receipt, context) {
 	let postPending = [];
 	if (mode === "release" && npm.served) {
 		const release = publishedRelease(context.tag);
-		isPublished = releaseRun?.state === "success" || (release !== null && !release.draft);
+		isPublished = publicProven({
+			runSucceeded: releaseRun?.state === "success",
+			release,
+			tagCommit: release ? remoteTagCommit(context.tag) : null,
+			commit,
+			latest: context.channel === "latest",
+			mainHead: remoteHead("main"),
+			finishingHeads: [commit, releaseHead].filter(Boolean),
+			branchHead: remoteHead(receipt.branch),
+		});
 		if (isPublished) {
 			tagsBehind = forwardedTags(await registryTags(context.name), receipt.version, context.channel);
 			postPending = context.post ? context.post.postPending(postContext(receipt, context)) : [];
