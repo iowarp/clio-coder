@@ -105,27 +105,31 @@ nonempty release notes, and matching committed website metadata. Full
 investigation also limits concurrent test files to two so subprocess fixtures
 do not compete with hundreds of cold boots. One manual `ci.yml` run
 checks source, builds and packs once, tests selected root/GUI behavior and the
-installed package, and boots that same archive on Node 24. Its immutable
+installed package on Node 22, runs the same tests and boot on Node 24, and
+publishes no result unless both pass. Its immutable
 `candidate-<sha>` artifact includes the versioned npm tarball, SHA-256 receipt,
 four installers extracted from that archive, release notes, and a prepared
-website. `results-<sha>` records actual test counts. The development defaults select 20 root and six GUI files; package and runtime
+website. `results-<sha>` and `results24-<sha>` record the actual test counts. The development defaults select 20 root and six GUI files; package and runtime
 checks remain part of explicit qualification. `pnpm run test:list` lists every selected
 file and every contract/GUI file reserved for full investigation. Redundant
 prose and appearance-specific tests are retired with maintainer approval. `test:full`, `test:gui:full`, and maintenance checks stay manual.
 
-Run the interactive command in a visible terminal:
+Release with one resumable command in a visible terminal:
 
 ```bash
-pnpm run release:rehearse
-pnpm run release
+pnpm run release:next status      # read-only: where the release stands
+pnpm run release:next --rehearse  # full non-public rehearsal, about 20 minutes
+pnpm run release:next             # the release, about 30 minutes from a qualified candidate
 ```
 
-Both commands explain their next action and ask before proceeding. Rehearsal
-uses a temporary `ci-scratch-*` branch, calls the actual publisher's validation
-path, and removes the branch afterward. It makes no npm, tag, release, main,
-or website changes. Add `-- --platforms` to request Windows and macOS boots;
-their queues do not block the two required check results. Prove Windows changes
-on a native Windows clone with `core.autocrlf=false` before pushing them.
+Each run reads git, GitHub and npm, prints every position with what proves it
+and its expected wall time, and performs the next step until it needs the
+owner, finishes or fails. Interrupting is safe; the next run resumes from the
+real state. One release command runs per clone at a time: a lock and a receipt
+live in `$(git rev-parse --git-common-dir)/clio-release/`, and every remote
+write asks for a typed phrase such as `push v071` or `publish 0.7.1`.
+Qualification and packing refuse `/tmp` and long `TMPDIR` paths; export a short
+private one such as `TMPDIR=$HOME/.cache/cr`.
 
 To cut a release:
 
@@ -134,43 +138,54 @@ To cut a release:
    in `site/product.json`. Add dated release
    notes in `CHANGELOG.md` and update version references such as the README
    source-install command. Commit the candidate on the version branch. The
-   script refuses a dirty tree or inconsistent versions; it does not invent
+   command refuses a dirty tree or inconsistent versions; it does not invent
    release notes or silently bump versions.
-2. Run `pnpm run release`. Before a new push it runs local qualification once.
-   It synchronizes the branch and dispatches one hosted qualification. A
-   successful manual qualification on the exact commit with unexpired artifacts
-   is reused instead of rerunning its checks. Artifacts are retained for 30 days.
-3. Review the candidate receipt, qualification link, package digest, and test
-   count. If npm lacks the version, the script shows the exact `npm publish`
-   command for the qualified tarball and, after the owner confirms, runs it in
-   the visible terminal so npm's two-factor prompt works. It waits until npm
-   serves the version with the candidate's integrity. Matching bytes already on
-   npm are reused. The script then requests publication through `release.yml`
-   and prints the run URL. **The owner approves the protected `release`
-   environment in GitHub.** Agents must leave the npm publish and this approval
-   to the owner. After the job succeeds, the script offers to forward the
-   `beta` and `dev` dist-tags that the job cannot write.
-4. After approval, the publisher downloads the existing artifact, verifies its
-   checksums, exact successful source run, version, branch head, and main
-   ancestry. It does not install project dependencies, build, pack, test, or
-   publish to npm. It stops before any GitHub write unless npm already serves
-   the exact qualified bytes. GitHub then creates the tag/release with the
-   versioned tarball and four installers. Stable releases become Latest.
-5. The publisher fast-forwards `main`, commits the prepared site output to
-   `gh-pages`, and lets GitHub's existing branch-based Pages deployment run.
-   It verifies npm integrity and dist-tag, the GitHub tag/assets/Latest, main,
-   and the public website before deleting the remote version branch. The
-   website is prepared from the exact commit snapshot before approval; its
-   `docsCommit` and `revision` identify that immutable source commit.
-6. The interactive command offers to fast-forward clean local `main`, detach
-   the completed version worktree, and delete the finished local branch.
+2. The command qualifies the exact commit locally on Node 22 and 24 at once,
+   each in its own detached worktree, so no checkout's `dist/` is replaced.
+   A passed Node major is reused. Qualification uses `nvm`'s newest install of
+   each major unless `release-candidate.mjs qualify` gets `--node22`/`--node24`.
+3. Rehearse. `--rehearse` pushes a temporary `rehearse/*` branch and dispatches
+   one `ci.yml` run with the publisher's rehearsal and the macOS and Windows
+   boots. It then runs `release.yml` in `check` mode (the real preflight and
+   finish check, never the release job). It creates, verifies and deletes a
+   never-published draft release `rehearse-<nonce>`, prints the exact
+   `npm publish` with a dry run, cancels its runs and deletes the branch. It
+   changes nothing public. The release reuses this `ci.yml` run, so a
+   candidate is qualified in CI once.
+4. Release. The command pushes the version branch and dispatches `release.yml`.
+   Its preflight verifies the qualification and runs every finishing step in
+   read form: the release-notes length, the draft decision, the main
+   fast-forward and the website diff. Only when that is green and the release
+   job awaits approval does the command offer the owner's `npm publish` of the
+   qualified tarball, in the terminal so npm's two-factor prompt works. Its
+   acceptance is recorded, so the publish is never offered twice while npm
+   propagates. **The owner approves the protected `release` environment in
+   GitHub.** Agents leave the npm publish and this approval to the owner. The
+   release job waits up to 40 minutes for npm to serve the exact bytes.
+5. The release job creates or repairs the draft, pins it to the candidate,
+   uploads the versioned tarball and four installers, and publishes the
+   tag/release. Stable releases become Latest. It fast-forwards `main`, commits
+   the prepared site to `gh-pages`, verifies npm, GitHub, main and the website,
+   and deletes the remote version branch.
+6. The command then offers to forward the `beta` and `dev` dist-tags, and runs
+   the post-release checklist: local `main` and branches, the next version
+   branch, the ACP registry, the local install and fixed issues.
 
-For retries, rerun the failed publication jobs or run `pnpm run release` again
-with the same qualification. Matching bytes already on npm are reused; draft
-GitHub assets can be repaired; main/site closeout can resume. A different npm
-integrity or tag commit stops the operation. If an artifact expires, recover the exact archived bytes or prepare a new
-candidate commit; do not silently rebuild a previously qualified commit. Prereleases use npm `beta` and a GitHub
-prerelease, and keep the development branch, stable `main`, and stable site.
+For retries, run the command again. Matching bytes already on npm are reused;
+a failed release job is rerun; draft GitHub assets are repaired. If a
+release-tooling bug appears after npm accepted the version, commit the fix to
+the version branch: once npm serves the candidate, `release.yml` may finish
+from a head that adds only release-tooling files (`scripts/release*.mjs`,
+`scripts/release/`, `release.yml`, `tests/contracts/release-*.test.ts`). The
+tag, tarball and website still come from the candidate. A different npm
+integrity or tag commit stops the operation. If an artifact expires, prepare a
+new candidate commit; do not rebuild a previously qualified commit.
+Prereleases use npm `beta` and a GitHub prerelease, and keep the development
+branch, stable `main`, and stable site.
+
+`pnpm run release` and `pnpm run release:rehearse` remain as the previous
+interactive flow and use the same hardened publisher. Prove Windows changes on
+a native Windows clone with `core.autocrlf=false` before pushing them.
 
 ### Owner configuration
 
@@ -178,7 +193,7 @@ On npm, a GitHub Actions trusted publisher is configured for
 `iowarp/clio-coder`, workflow filename `release.yml`, environment `release`.
 Its OIDC exchange currently returns 404, so CI neither publishes nor writes
 dist-tags. The owner publishes with npm two-factor authentication inside
-`pnpm run release`, and those versions carry no provenance. Dev snapshots are
+`pnpm run release:next`, and those versions carry no provenance. Dev snapshots are
 refused until trusted publishing works, because their bytes exist only inside
 CI. A rehearsal cannot prove npm's authorization without publishing a new
 version. Do not claim it is verified by `npm publish --dry-run`.
@@ -208,7 +223,7 @@ split it so the App bypasses creation restrictions only. Likewise isolate a
 main pull-request requirement from structural protections before granting the
 App a release-promotion bypass. Preserve `ci (22)` and `ci (24)` as required
 checks. The release promotion does not satisfy them on main: the owner publishes
-the qualified tarball to npm inside `pnpm run release`, `release.yml` verifies
+the qualified tarball to npm inside `pnpm run release:next`, `release.yml` verifies
 that npm serves those exact bytes and that the manual qualification run passed
 `ci (22)` and `ci (24)` on the commit, and the App then fast-forwards main
 through its ruleset bypass.
