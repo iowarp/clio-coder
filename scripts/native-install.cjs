@@ -155,73 +155,333 @@ function check(node, prefix, postInstall, echo = true) {
 	}
 }
 
-// Collection requires a complete local process inventory. Unknown platforms, permissions or
-// receipts retain everything. Keep current and rollback unconditionally, and ordinary versions
-// for at least seven days. Refused candidates can be reclaimed sooner, but may run doctor.
-function pruneVersions(root) {
-	if (process.platform !== "linux") return;
-	// A local process inventory cannot prove inactivity on another host sharing this filesystem.
-	const localFilesystems = new Set([0xef53, 0x9123683e, 0x58465342, 0x01021994, 0x794c7630, 0x2fc12fc1, 0xf2f52010]);
-	try {
-		if (!localFilesystems.has(fs.statfsSync(root).type)) return;
-	} catch {
-		return;
+const DAY = 24 * 60 * 60 * 1000;
+const FALLBACK_AGE = 7 * DAY;
+const FALLBACK_NEWEST = 3;
+
+// Command lines of this user's processes, plus the working directory of node and Clio processes
+// on Linux. `complete` is false whenever any part could not be read: an unseen process could
+// still be loading files from an old prefix, so removal then falls back to age and count.
+function processInventory(root) {
+	if (process.platform === "linux") {
+		// A local process table cannot see processes on another host sharing this filesystem.
+		const local = new Set([0xef53, 0x9123683e, 0x58465342, 0x01021994, 0x794c7630, 0x2fc12fc1, 0xf2f52010]);
+		try {
+			if (!local.has(fs.statfsSync(root).type))
+				return { complete: false, reason: `${root} is not on a local filesystem`, texts: [] };
+		} catch (error) {
+			return { complete: false, reason: `cannot identify the filesystem of ${root}: ${error.message}`, texts: [] };
+		}
+		const texts = [];
+		try {
+			for (const pid of fs.readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+				try {
+					if (fs.statSync(`/proc/${pid}`).uid !== process.getuid()) continue;
+					const command = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+					texts.push(command);
+					if (/(?:^|\/)node(?:\0|$)|clio-coder/.test(command.split("\0")[0]))
+						texts.push(fs.readlinkSync(`/proc/${pid}/cwd`));
+				} catch (error) {
+					if (error.code !== "ENOENT" && error.code !== "ESRCH")
+						return { complete: false, reason: `cannot inspect process ${pid}: ${error.code}`, texts };
+				}
+			}
+		} catch (error) {
+			return { complete: false, reason: `cannot list processes: ${error.message}`, texts };
+		}
+		return { complete: true, texts };
 	}
+	const command =
+		process.platform === "darwin"
+			? ["ps", ["-axww", "-o", "uid=,command="]]
+			: process.platform === "win32"
+				? [
+						"powershell.exe",
+						[
+							"-NoProfile",
+							"-NonInteractive",
+							"-Command",
+							"Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }",
+						],
+					]
+				: null;
+	if (!command) return { complete: false, reason: `no process inventory on ${process.platform}`, texts: [] };
+	const result = spawnSync(command[0], command[1], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		maxBuffer: 64 * 1024 * 1024,
+		windowsHide: true,
+	});
+	if (result.error || result.status !== 0)
+		return {
+			complete: false,
+			reason: `${command[0]} failed: ${result.error?.message ?? (result.stderr || `exit ${result.status}`).trim()}`,
+			texts: [],
+		};
+	return { complete: true, texts: parseProcessList(process.platform, result.stdout, process.getuid?.()) };
+}
+
+// macOS `ps -axww -o uid=,command=` lists every user; keep this user's lines. Windows CIM command
+// lines carry no owner cheaply, so every process counts, which can only keep more.
+function parseProcessList(platform, text, uid) {
+	const lines = text.split(/\r?\n/u).filter((line) => line.trim());
+	if (platform !== "darwin") return lines.map((line) => line.trim());
+	const texts = [];
+	for (const line of lines) {
+		const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
+		if (match && (uid === undefined || Number(match[1]) === uid)) texts.push(match[2]);
+	}
+	return texts;
+}
+
+function treeBytes(file) {
+	let total = 0;
+	const stack = [file];
+	while (stack.length) {
+		const next = stack.pop();
+		let info;
+		try {
+			info = fs.lstatSync(next);
+		} catch {
+			continue;
+		}
+		total += info.size;
+		if (info.isDirectory()) {
+			try {
+				for (const name of fs.readdirSync(next)) stack.push(path.join(next, name));
+			} catch {
+				/* An unreadable directory is counted by its own entry only. */
+			}
+		}
+	}
+	return total;
+}
+
+function formatBytes(bytes) {
+	if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+	if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+	return `${Math.round(bytes / 1e3)} kB`;
+}
+
+// One retention rule for versions/, runtime/ and launchers/ on every platform. The keep set is
+// the manifest, the launcher, the GUI service files, running-build and launch receipts, and the
+// process inventory. With a complete inventory everything else goes at once; without one, keep
+// anything younger than seven days and the newest three. Dead local launch receipts are removed.
+function prune(root, options = {}) {
+	const now = options.now ?? Date.now();
+	const windows = (options.platform ?? process.platform) === "win32";
+	const norm = (text) => (windows ? text.toLowerCase().replaceAll("/", "\\") : text);
 	const installed = record(root);
-	const versions = path.join(root, "versions");
-	const keep = new Set([installed?.current, installed?.previous, installed?.desktopManager]);
-	const protect = (text) => {
-		for (const candidate of fs.readdirSync(versions)) {
-			const prefix = path.join(versions, candidate);
-			if (text.includes(prefix + path.sep) || text === prefix) keep.add(prefix);
+	const entries = [];
+	for (const kind of ["versions", "runtime", "launchers"]) {
+		const dir = path.join(root, kind);
+		for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+			if (name.startsWith(".")) continue;
+			const file = path.join(dir, name);
+			const info = fs.lstatSync(file);
+			if (kind === "launchers" ? !info.isFile() || !name.endsWith(".cjs") : !info.isDirectory()) continue;
+			if (kind === "runtime" && !name.startsWith("node-v")) continue;
+			if (kind === "versions" && packageName(file) !== "@iowarp/clio-coder") continue;
+			entries.push({
+				kind,
+				name,
+				path: file,
+				mtimeMs: info.mtimeMs,
+				needle: norm(kind === "launchers" ? file : file + path.sep),
+			});
+		}
+	}
+	const kept = new Map();
+	let proof = true;
+	let reason = "";
+	const unproven = (why) => {
+		if (proof) reason = why;
+		proof = false;
+	};
+	const protect = (text, why) => {
+		if (typeof text !== "string" || !text) return;
+		const haystack = norm(text);
+		for (const entry of entries)
+			if (!kept.has(entry.path) && (haystack.includes(entry.needle) || haystack === norm(entry.path)))
+				kept.set(entry.path, why);
+	};
+	for (const extra of options.keep ?? []) protect(extra, "being activated");
+	protect(installed?.current, "current");
+	protect(installed?.node, "current");
+	protect(installed?.previous, "previous");
+	protect(installed?.previousNode, "previous");
+	protect(installed?.desktopManager, "desktop manager");
+	protect(installed?.launcherNode, "launcher");
+	const readText = (file, why) => {
+		try {
+			protect(fs.readFileSync(file, "utf8"), why);
+		} catch (error) {
+			if (error.code !== "ENOENT") unproven(`cannot read ${file}: ${error.code}`);
 		}
 	};
-	try {
-		const home = os.homedir();
-		const background = path.join(clioRoot("state"), "gui/background/server.json");
-		if (fs.existsSync(background)) protect(fs.readFileSync(background, "utf8"));
-		const units = path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "systemd/user");
-		for (const unit of fs.existsSync(units) ? fs.readdirSync(units) : []) {
-			if (/^clio-coder-gui-.*\.service$/.test(unit)) protect(fs.readFileSync(path.join(units, unit), "utf8"));
+	if (installed?.launcher) readText(installed.launcher, "launcher");
+	const state = clioRoot("state");
+	const home = os.homedir();
+	const listed = (dir, test) => {
+		try {
+			return fs
+				.readdirSync(dir)
+				.filter(test)
+				.map((name) => path.join(dir, name));
+		} catch (error) {
+			if (error.code !== "ENOENT") unproven(`cannot list ${dir}: ${error.code}`);
+			return [];
 		}
-		const receipts = path.join(root, ".active");
-		for (const file of fs.existsSync(receipts) ? fs.readdirSync(receipts) : []) {
-			const receipt = JSON.parse(fs.readFileSync(path.join(receipts, file), "utf8"));
-			if (!Number.isInteger(receipt.pid) || receipt.pid <= 0 || typeof receipt.current !== "string") return;
-			if (receipt.host !== os.hostname()) {
-				protect(receipt.current);
+	};
+	for (const file of listed(path.join(state, "gui/background"), (name) => name.endsWith(".json")))
+		readText(file, "GUI service");
+	for (const file of listed(
+		path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "systemd/user"),
+		(name) => /^clio-coder-gui-.*\.service$/.test(name),
+	))
+		readText(file, "GUI service");
+	for (const file of listed(
+		path.join(process.env.XDG_DATA_HOME || path.join(home, ".local/share"), "applications"),
+		(name) => /^io\.iowarp\..*\.desktop$/.test(name),
+	))
+		readText(file, "GUI service");
+	const alive = (pid) => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch (error) {
+			return error.code !== "ESRCH";
+		}
+	};
+	for (const file of listed(path.join(state, "running-builds"), (name) => /^\d+\.json$/.test(name))) {
+		try {
+			const build = JSON.parse(fs.readFileSync(file, "utf8"));
+			if (build.host === os.hostname() && Number.isInteger(build.pid) && !alive(build.pid)) continue;
+			protect(build.root, "running session");
+		} catch (error) {
+			if (error.code !== "ENOENT") unproven(`unreadable session record ${file}`);
+		}
+	}
+	const deadReceipts = [];
+	for (const file of listed(path.join(root, ".active"), (name) => name.endsWith(".json"))) {
+		let receipt;
+		try {
+			receipt = JSON.parse(fs.readFileSync(file, "utf8"));
+		} catch (error) {
+			if (error.code !== "ENOENT") unproven(`unreadable launch receipt ${file}`);
+			continue;
+		}
+		if (!receipt || !Number.isInteger(receipt.pid) || receipt.pid <= 0 || typeof receipt.current !== "string") {
+			unproven(`unreadable launch receipt ${file}`);
+			continue;
+		}
+		if (receipt.host !== os.hostname()) {
+			// Another host's session cannot be checked from here; honor it for a week.
+			let fresh = true;
+			try {
+				fresh = now - fs.statSync(file).mtimeMs < FALLBACK_AGE;
+			} catch {
+				/* Treated as fresh. */
+			}
+			if (!fresh) continue;
+		} else if (!alive(receipt.pid)) {
+			deadReceipts.push(file);
+			continue;
+		}
+		for (const held of [receipt.current, receipt.node, receipt.launcherNode]) protect(held, "running session");
+	}
+	const inventory = (options.inventory ?? processInventory)(root);
+	if (!inventory.complete) unproven(inventory.reason);
+	for (const text of inventory.texts) protect(text, "running process");
+	if (proof === false) {
+		for (const kind of ["versions", "runtime", "launchers"]) {
+			const own = entries.filter((entry) => entry.kind === kind).sort((a, b) => b.mtimeMs - a.mtimeMs);
+			own.forEach((entry, index) => {
+				if (kept.has(entry.path)) return;
+				const refused = kind === "versions" && fs.existsSync(path.join(entry.path, ".clio-coder-refused-candidate"));
+				if (!refused && (index < FALLBACK_NEWEST || now - entry.mtimeMs < FALLBACK_AGE)) kept.set(entry.path, "recent");
+			});
+		}
+	}
+	const removed = [];
+	const skipped = [];
+	for (const entry of entries) {
+		if (kept.has(entry.path)) continue;
+		const bytes = treeBytes(entry.path);
+		if (!options.dryRun) {
+			try {
+				fs.rmSync(entry.path, { recursive: true });
+			} catch (error) {
+				// A Windows file in use cannot be removed; the next activation retries.
+				skipped.push({ kind: entry.kind, name: entry.name, path: entry.path, error: error.code || error.message });
 				continue;
 			}
+		}
+		removed.push({ kind: entry.kind, name: entry.name, path: entry.path, bytes });
+	}
+	if (!options.dryRun)
+		for (const file of deadReceipts) {
 			try {
-				process.kill(receipt.pid, 0);
-				protect(receipt.current);
-			} catch (error) {
-				if (error.code !== "ESRCH") return;
+				fs.rmSync(file, { force: true });
+			} catch {
+				/* The next prune retries. */
 			}
 		}
-		for (const pid of fs.readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
-			try {
-				if (fs.statSync(`/proc/${pid}`).uid !== process.getuid()) continue;
-				const command = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-				protect(command);
-				if (/(?:^|\/)node(?:\0|$)|clio-coder/.test(command.split("\0")[0])) protect(fs.readlinkSync(`/proc/${pid}/cwd`));
-			} catch (error) {
-				if (error.code !== "ENOENT" && error.code !== "ESRCH") return;
-			}
-		}
-		for (const name of fs.readdirSync(versions)) {
-			const prefix = path.join(versions, name);
-			const info = fs.lstatSync(prefix);
-			if (name.startsWith(".") || !info.isDirectory() || keep.has(prefix)) continue;
-			const refused = fs.existsSync(path.join(prefix, ".clio-coder-refused-candidate"));
-			if (!refused && Date.now() - info.mtimeMs < 7 * 24 * 60 * 60 * 1000) continue;
-			const pkg = JSON.parse(
-				fs.readFileSync(path.join(prefix, "lib/node_modules/@iowarp/clio-coder/package.json"), "utf8"),
-			);
-			if (pkg.name !== "@iowarp/clio-coder") continue;
-			fs.rmSync(prefix, { recursive: true });
-			process.stdout.write(`[install] removed unused version ${name}\n`);
-		}
+	return {
+		proof,
+		reason,
+		dryRun: Boolean(options.dryRun),
+		removed,
+		skipped,
+		kept: entries
+			.filter((entry) => kept.has(entry.path))
+			.map((entry) => ({ kind: entry.kind, name: entry.name, path: entry.path, why: kept.get(entry.path) })),
+		deadReceipts: deadReceipts.length,
+	};
+}
+
+function describePrune(result) {
+	const count = (kind, one, many) => {
+		const n = result.removed.filter((entry) => entry.kind === kind).length;
+		return n ? `${n} ${n === 1 ? one : many}` : "";
+	};
+	const parts = [
+		count("versions", "unused version", "unused versions"),
+		count("runtime", "runtime", "runtimes"),
+		count("launchers", "launcher helper", "launcher helpers"),
+	].filter(Boolean);
+	const lines = [];
+	const verb = result.dryRun ? "would remove" : "removed";
+	const versions = result.kept
+		.filter((entry) => entry.kind === "versions")
+		.map((entry) => `${entry.name} (${entry.why})`)
+		.join(", ");
+	if (parts.length)
+		lines.push(
+			`[install] ${verb} ${parts.join(", ")} (${formatBytes(result.removed.reduce((sum, entry) => sum + entry.bytes, 0))}); kept ${versions || "no versions"}`,
+		);
+	if (!result.proof && result.kept.some((entry) => entry.why === "recent"))
+		lines.push(
+			`[install] kept versions from the last 7 days and the newest ${FALLBACK_NEWEST}, because running processes cannot be ruled out: ${result.reason}`,
+		);
+	for (const entry of result.skipped)
+		lines.push(`[install] could not remove ${entry.path} (${entry.error}); the next update retries`);
+	return lines;
+}
+
+function packageName(prefix) {
+	try {
+		const file = path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "package.json");
+		return String(JSON.parse(fs.readFileSync(file, "utf8")).name || "");
+	} catch {
+		return "";
+	}
+}
+
+// Activation and rollback prune inside the installer's lock. Errors never block activation.
+function pruneQuietly(root, keep) {
+	try {
+		for (const line of describePrune(prune(root, { keep }))) process.stdout.write(`${line}\n`);
 	} catch (error) {
 		process.stderr.write(`[install] retained older versions: ${error.message}\n`);
 	}
@@ -251,7 +511,13 @@ async function main() {
 		for (;;) {
 			atomic(
 				receipt,
-				JSON.stringify({ pid: process.pid, host: os.hostname(), current: current.current, node: current.node }),
+				JSON.stringify({
+					pid: process.pid,
+					host: os.hostname(),
+					current: current.current,
+					node: current.node,
+					launcherNode: process.execPath,
+				}),
 			);
 			const latest = record(root);
 			if (latest.current === current.current && latest.node === current.node) break;
@@ -299,7 +565,35 @@ async function main() {
 		return;
 	}
 	if (action === "prune") {
-		pruneVersions(root);
+		if (!record(root)) throw new Error(`No installer manifest in ${root}`);
+		const dryRun = args.includes("--dry-run");
+		const lock = path.join(root, ".install-lock");
+		if (!dryRun) {
+			try {
+				fs.mkdirSync(lock);
+			} catch (error) {
+				if (error.code !== "EEXIST") throw error;
+				process.stderr.write(
+					`[install] installation locked at ${lock}; another install, upgrade or uninstall is running\n`,
+				);
+				process.exitCode = 75;
+				return;
+			}
+		}
+		try {
+			if (!dryRun) {
+				fs.writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+				fs.writeFileSync(path.join(lock, "hostname"), `${os.hostname()}\n`);
+			}
+			const result = prune(root, { dryRun });
+			if (args.includes("--json")) process.stdout.write(`${JSON.stringify(result)}\n`);
+			else {
+				const lines = describePrune(result);
+				process.stdout.write(`${lines.length ? lines.join("\n") : "[install] nothing to remove"}\n`);
+			}
+		} finally {
+			if (!dryRun) fs.rmSync(lock, { recursive: true, force: true });
+		}
 		return;
 	}
 	const old = record(root);
@@ -345,6 +639,7 @@ async function main() {
 			`[install] rolled back to ${restored}; ${replaced} stays installed and another rollback returns to it\n` +
 				`[install] background updates disabled until explicitly enabled${pin ? `; pinned ${pin}` : ""}\n`,
 		);
+		pruneQuietly(root, []);
 		return;
 	}
 	if (action !== "activate") throw new Error(`Unknown installer action ${action}`);
@@ -367,7 +662,8 @@ async function main() {
 		throw new Error("Candidate is outside owned install directories");
 	if (process.platform === "win32" && /[%\r\n"]/u.test([node, old?.launcherNode, old?.node, root, launcher].join("")))
 		throw new Error("Windows installer paths cannot contain percent, newline or quote characters");
-	pruneVersions(root);
+	// The candidate is in versions/ but not yet in the manifest.
+	pruneQuietly(root, [current, node]);
 	const fromVersion = old ? packageVersion(old.current) : "";
 	const toVersion = packageVersion(current);
 	if (channel === "latest" && /^\d+\.\d+\.\d+-/.test(fromVersion) && /^\d+\.\d+\.\d+$/.test(toVersion)) {
@@ -437,13 +733,16 @@ async function main() {
 			2,
 		)}\n`,
 	);
-	pruneVersions(root);
+	pruneQuietly(root, []);
 	process.stdout.write(
 		`[install] background updates ${autoUpdate === "1" && (!pin || pin === "-") ? "enabled" : "disabled"}${pin && pin !== "-" ? `; pinned ${pin}` : ""}${old ? "; previous version retained for rollback and running sessions" : ""}\n`,
 	);
 }
 
-main().catch((error) => {
-	process.stderr.write(`[install] ${error.message}\n`);
-	process.exitCode = 1;
-});
+if (require.main === module)
+	main().catch((error) => {
+		process.stderr.write(`[install] ${error.message}\n`);
+		process.exitCode = 1;
+	});
+
+module.exports = { prune, parseProcessList, describePrune };

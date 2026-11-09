@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -10,13 +10,21 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { activatedPackageRoot, pendingInstalledVersion } from "../../src/core/running-build.js";
 
 const helper = fileURLToPath(new URL("../../scripts/native-install.cjs", import.meta.url));
+const lifecycle = createRequire(import.meta.url)(helper) as {
+	prune(
+		root: string,
+		options?: { dryRun?: boolean; inventory?: () => { complete: boolean; reason?: string; texts: string[] } },
+	): { proof: boolean; removed: { name: string }[]; kept: { name: string; why: string }[] };
+	parseProcessList(platform: string, text: string, uid?: number): string[];
+};
 const suffix = "lib/node_modules/@iowarp/clio-coder";
 function fixture(t: { after(fn: () => void): void }) {
 	const root = mkdtempSync(join(tmpdir(), "clio-install-hardening-"));
@@ -49,6 +57,7 @@ function fixture(t: { after(fn: () => void): void }) {
 				CLIO_CODER_HOME: join(root, "home"),
 				CLIO_CODER_STATE_DIR: join(root, "home/state"),
 				XDG_CONFIG_HOME: join(root, "home/config"),
+				XDG_DATA_HOME: join(root, "home/data"),
 			},
 		});
 	return { root, prefix, record, save, run };
@@ -92,13 +101,107 @@ test("retention preserves current, rollback and live receipts while collecting o
 	assert.equal(existsSync(refused), false);
 });
 
-test("malformed liveness receipts prevent collection", { skip: process.platform !== "linux" }, (t) => {
+test("a proven keep set removes every unused version, runtime and helper at once, whatever its age", {
+	skip: process.platform !== "linux",
+}, async (t) => {
+	const f = fixture(t);
+	const fresh = (dir: string) => {
+		utimesSync(dir, new Date(), new Date());
+		return dir;
+	};
+	const duplicate = fresh(f.prefix("0.6.1-20261009000000-42"));
+	const unused = fresh(f.prefix("0.5.9"));
+	const held = fresh(f.prefix("0.5.8"));
+	const runtime = (name: string) => {
+		mkdirSync(join(f.root, "runtime", name, "bin"), { recursive: true });
+		return join(f.root, "runtime", name);
+	};
+	const currentNode = runtime("node-v24.2.0-linux-x64");
+	const launcherNode = runtime("node-v24.0.0-linux-x64");
+	const oldNode = runtime("node-v24.1.0-linux-x64");
+	mkdirSync(join(f.root, "launchers"));
+	const named = join(f.root, "launchers/aaa.cjs");
+	const stale = join(f.root, "launchers/bbb.cjs");
+	for (const file of [named, stale]) writeFileSync(file, "");
+	mkdirSync(join(f.root, "bin"));
+	writeFileSync(f.record.launcher, `#!/bin/sh\nexec '${launcherNode}/bin/node' '${named}' launch '${f.root}' "$@"\n`);
+	f.save({ ...f.record, node: join(currentNode, "bin/node") });
+	mkdirSync(join(f.root, ".active"));
+	writeFileSync(join(f.root, ".active/dead.json"), JSON.stringify({ pid: 99999999, host: hostname(), current: unused }));
+	const holder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", join(held, suffix)], { stdio: "ignore" });
+	t.after(() => holder.kill());
+	await new Promise((resolve) => setTimeout(resolve, 200));
+
+	const preview = f.run("prune", "--dry-run", "--json");
+	assert.equal(preview.status, 0, preview.stderr);
+	const plan = JSON.parse(preview.stdout);
+	assert.equal(plan.proof, true, plan.reason);
+	assert.deepEqual(plan.removed.map((entry: { name: string }) => entry.name).sort(), [
+		"0.5.9",
+		"0.6.1-20261009000000-42",
+		"bbb.cjs",
+		"node-v24.1.0-linux-x64",
+	]);
+	assert.equal(existsSync(unused), true, "a dry run removes nothing");
+
+	const result = f.run("prune");
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(
+		result.stdout,
+		/removed 2 unused versions, 1 runtime, 1 launcher helper \(.+\); kept .*0\.6\.1 \(current\)/,
+	);
+	for (const gone of [duplicate, unused, oldNode, stale, join(f.root, ".active/dead.json")])
+		assert.equal(existsSync(gone), false, gone);
+	for (const kept of [f.record.current, f.record.previous, held, currentNode, launcherNode, named])
+		assert.equal(existsSync(kept), true, kept);
+	assert.equal(existsSync(join(f.root, ".install-lock")), false);
+});
+
+test("without a complete process inventory, prune keeps the last week and the newest three", (t) => {
+	const f = fixture(t);
+	const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+	const aged = (version: string, age: number) => {
+		const dir = f.prefix(version);
+		utimesSync(dir, days(age), days(age));
+		return dir;
+	};
+	const recent = aged("0.6.3", 2);
+	const newest = [aged("0.5.3", 10), aged("0.5.2", 11)];
+	const old = [aged("0.5.1", 20), aged("0.5.0", 30)];
+	for (const name of ["HOME", "CLIO_CODER_STATE_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] as const) {
+		const saved = process.env[name];
+		process.env[name] = join(f.root, "home", name);
+		t.after(() => {
+			if (saved === undefined) delete process.env[name];
+			else process.env[name] = saved;
+		});
+	}
+	const result = lifecycle.prune(f.root, { inventory: () => ({ complete: false, reason: "no /proc", texts: [] }) });
+	assert.equal(result.proof, false);
+	for (const dir of [recent, ...newest, f.record.current, f.record.previous]) assert.equal(existsSync(dir), true, dir);
+	for (const dir of old) assert.equal(existsSync(dir), false, dir);
+	assert.equal(result.kept.find((entry) => entry.name === "0.6.3")?.why, "recent");
+});
+
+test("malformed liveness receipts withdraw the proof", { skip: process.platform !== "linux" }, (t) => {
 	const f = fixture(t),
 		unused = f.prefix("0.5.9");
 	mkdirSync(join(f.root, ".active"));
 	writeFileSync(join(f.root, ".active/broken.json"), "{");
-	assert.equal(f.run("prune").status, 0);
+	const result = f.run("prune", "--json");
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(JSON.parse(result.stdout).reason, /unreadable launch receipt/);
 	assert.equal(existsSync(unused), true);
+});
+
+test("macOS and Windows process listings feed the same keep set", () => {
+	assert.deepEqual(
+		lifecycle.parseProcessList("darwin", "  501 /opt/node /Users/a/clio/versions/0.6.1/x.js\n    0 /sbin/launchd\n", 501),
+		["/opt/node /Users/a/clio/versions/0.6.1/x.js"],
+	);
+	assert.deepEqual(lifecycle.parseProcessList("win32", "\r\n C:\\clio\\node.exe C:\\clio\\versions\\0.6.1\\x.js\r\n"), [
+		"C:\\clio\\node.exe C:\\clio\\versions\\0.6.1\\x.js",
+	]);
 });
 
 test("running package notices activation and rollback even when its old files are intact", (t) => {
