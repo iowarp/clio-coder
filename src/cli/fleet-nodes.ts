@@ -171,6 +171,7 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 				throw new Error("setup requires one node id, or --all without node flags");
 			const known = new Set(readSettings().fleet.nodes.map((node) => node.id));
 			const ids = all ? [...known] : [parsed.positional[0] as string];
+			let added = false;
 			if (!all) {
 				const id = ids[0] as string;
 				const host = parsed.values.get("--host");
@@ -178,6 +179,7 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 					if (!host) throw new Error(`unknown fleet node '${id}'; give --host <SSH alias or address> to add it`);
 					addFleetNode(nodeFromFlags(id, host, parsed.values));
 					process.stdout.write(`Added ${id} (${host}).\n`);
+					added = true;
 				} else if (parsed.values.size > 0) {
 					throw new Error(`node '${id}' already exists; change its connection with remove and add`);
 				}
@@ -191,6 +193,7 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 			for (const id of ids) {
 				const result = await setupFleetNode(id, {
 					yes: parsed.flags.has("--yes"),
+					added,
 					write: (line) => process.stdout.write(`${line}\n`),
 				});
 				if (result.recorded) writeRecord(result.record, true);

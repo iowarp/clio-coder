@@ -167,11 +167,16 @@ function sameMachineDetail(id: string, twin: string): string {
 	return `node '${id}' is the same machine as node '${twin}', and two entries for one machine double its worker capacity; remove one of them`;
 }
 
+/** The other registered node with a passing record that already holds this machine, or null. */
+export function sameMachineHolder(id: string, machine: string | null | undefined): string | null {
+	if (!machine) return null;
+	return machineHolders(new Set([id])).find((record) => record.machine === machine)?.nodeId ?? null;
+}
+
 /** Why another registered node with a passing record already holds this machine, or null. */
 export function sameMachineConflict(id: string, machine: string | null | undefined): string | null {
-	if (!machine) return null;
-	const twin = machineHolders(new Set([id])).find((record) => record.machine === machine);
-	return twin === undefined ? null : sameMachineDetail(id, twin.nodeId);
+	const twin = sameMachineHolder(id, machine);
+	return twin === null ? null : sameMachineDetail(id, twin);
 }
 
 /**

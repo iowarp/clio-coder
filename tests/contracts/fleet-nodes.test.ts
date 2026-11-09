@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { shellQuote } from "../../src/core/shell-quote.js";
+import { setupFleetNode } from "../../src/domains/dispatch/fleet-node-setup.js";
 import {
 	addFleetNode,
 	inspectFleetNodes,
@@ -149,6 +150,32 @@ describe("fleet node management", () => {
 		strictEqual(twin.ok, false);
 		match(twin.detail ?? "", /same machine as node 'builder'/);
 		strictEqual((await testFleetNode("builder", process.cwd(), { ...options, record: true })).ok, true);
+	});
+
+	it("setup refusing a twin machine does not keep the entry it just added", async () => {
+		addFleetNode({ id: "builder", host: "builder.invalid", maxWorkers: 1 });
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
+		);
+		chmodSync(ssh, 0o755);
+		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
+		addFleetNode({ id: "builder-lan", host: "192.0.2.10", maxWorkers: 1 });
+		const lines: string[] = [];
+		const result = await setupFleetNode("builder-lan", {
+			yes: false,
+			added: true,
+			sshBinary: ssh,
+			write: (line) => lines.push(line),
+		});
+		strictEqual(result.outcome, "needs-attention");
+		strictEqual(result.recorded, false);
+		strictEqual(
+			readSettings().fleet.nodes.some((node) => node.id === "builder-lan"),
+			false,
+		);
+		match(lines.join("\n"), /Use node 'builder' for this machine/);
 	});
 
 	it("tells builds of one -dev version apart by clean commit or build id", () => {

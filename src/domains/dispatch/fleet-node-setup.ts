@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { FleetNodeSettings } from "../../core/defaults.js";
 import { describeFleetNodeInstall, executeFleetNodeInstall, prepareFleetNodeInstall } from "./fleet-node-install.js";
-import { fleetNode, sameMachineConflict, testFleetNode } from "./fleet-nodes.js";
+import { fleetNode, removeFleetNode, sameMachineConflict, sameMachineHolder, testFleetNode } from "./fleet-nodes.js";
 import type { FleetPreflightRecord } from "./fleet-preflight.js";
 
 export type FleetNodeSetupOutcome = "ready" | "install-previewed" | "needs-attention" | "unreachable";
@@ -10,6 +10,10 @@ export interface FleetNodeSetupOptions {
 	projectRoot?: string;
 	/** Execute an install the probe calls for; without it setup previews the install and stops. */
 	yes: boolean;
+	/** This setup run registered the node, so a refusal that the entry itself causes removes it again. */
+	added?: boolean;
+	/** Test seam for the SSH client binary. */
+	sshBinary?: string;
 	write: (line: string) => void;
 }
 
@@ -44,7 +48,8 @@ export async function setupFleetNode(id: string, options: FleetNodeSetupOptions)
 	const node = fleetNode(id);
 	const write = options.write;
 	write(`${id}: checking ${destination(node)} over SSH`);
-	const probe = await testFleetNode(id, projectRoot, { record: false, verifyProject: false });
+	const ssh = options.sshBinary !== undefined ? { sshBinary: options.sshBinary } : {};
+	const probe = await testFleetNode(id, projectRoot, { record: false, verifyProject: false, ...ssh });
 	if (!probe.checks.reachable) {
 		write(`  ${probe.detail ?? "unreachable"}`);
 		write(
@@ -53,11 +58,22 @@ export async function setupFleetNode(id: string, options: FleetNodeSetupOptions)
 		return { outcome: "unreachable", record: probe, recorded: false };
 	}
 	// Installing on a machine another node holds would only end in a failed check.
-	const twin = sameMachineConflict(id, probe.machine);
+	const twin = sameMachineHolder(id, probe.machine);
 	if (twin !== null) {
 		probe.ok = false;
-		probe.detail = twin;
-		write(`  ${twin}`);
+		probe.detail = sameMachineConflict(id, probe.machine);
+		if (options.added === true) {
+			removeFleetNode(id);
+			write(`  node '${id}' is the same machine as node '${twin}', so setup did not keep the '${id}' entry it added.`);
+			write(
+				`  Use node '${twin}' for this machine. To reach it under this name or address instead, run 'clio-coder fleet nodes remove ${twin}', then rerun this setup.`,
+			);
+		} else {
+			write(`  ${probe.detail}`);
+			write(
+				`  Remove one entry with 'clio-coder fleet nodes remove ${id}' or 'clio-coder fleet nodes remove ${twin}', then rerun setup for the one you keep.`,
+			);
+		}
 		return { outcome: "needs-attention", record: probe, recorded: false };
 	}
 	if (!probe.checks.clioPresent || !probe.checks.versionMatch) {
@@ -87,6 +103,6 @@ export async function setupFleetNode(id: string, options: FleetNodeSetupOptions)
 			plan.cleanup();
 		}
 	}
-	const record = await testFleetNode(id, projectRoot, { record: true });
+	const record = await testFleetNode(id, projectRoot, { record: true, ...ssh });
 	return { outcome: record.ok ? "ready" : "needs-attention", record, recorded: true };
 }
