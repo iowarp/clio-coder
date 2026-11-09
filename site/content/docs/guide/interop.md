@@ -29,8 +29,26 @@ Open `/library`, then use its local-agent discovery action. Inspect the proposed
 
 ## Connect an ACP frontend
 
+To use Clio Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor's ACP agent entry at `clio-coder acp`. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, modes, and model options.
+
 ```sh
 clio-coder acp --cwd /path/to/project
 ```
 
-This serves Clio Coder over stdio for an ACP frontend, with session listing, resume, modes, and model options. Consult the full guide for peer-specific setup, permission limits, and installing Clio Coder's portable library in other agents.
+`clio-coder --acp` is an exact alias. These launch options are the operator's limits; a client can narrow them but never widen them:
+
+| Option | Effect |
+| --- | --- |
+| `--cwd PATH` | Pins the workspace. Without it, the editor's first session request selects it. |
+| `--permission-timeout MS` | Longest wait, in milliseconds, for one permission answer from the editor; 120000 by default. |
+| `--allow-tools NAMES` | Limits the session's tools to these comma-separated names, as `clio-coder run` does; `none` disables all. |
+| `--delegate-tools NAMES` | Limits the tools the session's dispatched workers may hold. |
+| `--read-only` | Holds every session at the read-only ceiling. No file outside Clio Coder's own home changes. |
+
+`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](../architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing Clio Coder's portable library in other agents.
+
+## Built on the Pi SDK
+
+Clio Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.7.0 pins the Pi 1.5.0 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. Clio Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
+
+Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](../architecture/pi-boundary.md).

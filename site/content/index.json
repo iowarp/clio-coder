@@ -45,7 +45,8 @@
     "headings": [
       "Connect the way you already work",
       "Settings Center",
-      "Check the connection"
+      "Check the connection",
+      "Servers without a built-in runtime"
     ]
   },
   {
@@ -71,7 +72,8 @@
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
-      "Verify using your project's checks"
+      "Verify using your project's checks",
+      "How tools reach the model"
     ]
   },
   {
@@ -140,7 +142,8 @@
       "Follow the work",
       "Permissions, sandbox, and merges",
       "Run a playbook when you need one",
-      "Give workers MCP tools"
+      "Give workers MCP tools",
+      "When a worker stops or fails"
     ]
   },
   {
@@ -193,7 +196,8 @@
     "headings": [
       "Bring an installed coding agent",
       "Review resources from another agent",
-      "Connect an ACP frontend"
+      "Connect an ACP frontend",
+      "Built on the Pi SDK"
     ]
   },
   {
@@ -233,7 +237,8 @@
       "A connection is unavailable",
       "Settings fail to load",
       "A terminal shortcut does not arrive",
-      "Work stopped or a check failed"
+      "Work stopped or a check failed",
+      "Exit codes"
     ]
   },
   {

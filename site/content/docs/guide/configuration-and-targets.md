@@ -42,3 +42,18 @@ clio-coder targets --probe
 ```
 
 If setup fails, check credentials, the endpoint address, and whether the local model is loaded. See [troubleshooting](/docs/guide/troubleshooting.html) for the next step.
+
+## Servers without a built-in runtime
+
+Every connection names a runtime, which fixes how Clio Coder talks to the server. `clio-coder configure --list` prints the runtime ids you can choose.
+
+| Kind of server | Runtimes |
+| --- | --- |
+| Local model servers | `lmstudio`, `ollama`, `llamacpp`, `vllm`, `sglang`, `lemonade` |
+| Cloud providers | `openai`, `anthropic`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, `bedrock`, and others |
+| Any compatible endpoint | `openai-compat`, `anthropic-compat`, `litellm` |
+| Another agent's login | `claude-code`, `codex-cli`, `opencode-cli`, `pi-cli`, and others; workers only |
+
+A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.
+
+When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of Clio Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.

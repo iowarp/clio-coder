@@ -49,3 +49,16 @@ Remote native workers use SSH and need the same Clio Coder version and the proje
 A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
 
 Start locally with one worker. Use the full guide for remote-node configuration, capacity, recipes, and failure recovery.
+
+## When a worker stops or fails
+
+A worker has no operator watching it, so `fleet.permissions.mode` decides what happens when it needs an approval. The default, `judge`, sends a local worker's ordinary request to the main session's safety judge while that session runs at `default`; elsewhere it denies. A refused shell command goes back to the worker as a tool result, and the third refusal ends the run with exit 3 and outcome `permission_required`. The reason names every refused command. Under `fail`, the first refusal ends the run.
+
+Some failures retry automatically and some never do:
+
+- A provider 429 retries on another target after at least one second; a 401 or 403 also moves to another target, and a 408 retries.
+- Other provider 4xx errors, cancellation, policy and permission refusals, and deterministic outcomes such as `worker_no_work` never retry.
+- No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.
+- Backoff starts at 500 ms, doubles, and stops at 60 seconds.
+
+A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](../architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
