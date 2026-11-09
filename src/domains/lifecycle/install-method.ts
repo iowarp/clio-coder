@@ -99,7 +99,7 @@ function strictlyInside(parent: string, child: string): boolean {
 }
 
 /** True when `child` is `parent` or inside it, comparing resolved paths so a symlinked home matches. */
-export function pathWithin(parent: string, child: string): boolean {
+function pathWithin(parent: string, child: string): boolean {
 	const real = realPathOf(parent);
 	const target = realPathOf(child);
 	const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
