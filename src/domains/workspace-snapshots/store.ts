@@ -1,8 +1,11 @@
+import { randomBytes } from "node:crypto";
 import {
+	closeSync,
 	copyFileSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	rmdirSync,
@@ -13,7 +16,7 @@ import {
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { GITLINK_MODE, parseRawDiff, runGit, SnapshotUnavailableError, splitNul } from "./git.js";
+import { GITLINK_MODE, type GitCall, parseRawDiff, runGit, SnapshotUnavailableError, splitNul } from "./git.js";
 import {
 	pinIdentity,
 	pinnedBranchNames,
@@ -36,7 +39,11 @@ import {
  * `refs/clio-coder/snapshots/<session>/<n>`, which Git keeps in the common
  * directory of a linked worktree, and each snapshot's ref pins (HEAD, the
  * stash, branches about to be deleted; see `pins.ts`) under
- * `refs/clio-coder/snapshots/<session>/pins/<n>/`. Only a Git work tree can be
+ * `refs/clio-coder/snapshots/<session>/pins/<n>/`. When the repository's
+ * objects or refs cannot be written (a linked worktree whose common directory
+ * an outer sandbox mounts read-only), snapshot objects go to a private object
+ * directory under the session's state instead, borrowing the repository's
+ * objects as an alternate, and those snapshots take no refs or pins. Only a Git work tree can be
  * snapshotted; everything else reports the snapshot unavailable and the
  * caller proceeds.
  */
@@ -72,7 +79,8 @@ export interface WorkspaceSnapshotRecord {
 	turnId?: string;
 	tree: string;
 	commit: string;
-	ref: string;
+	/** Absent when the snapshot lives in the session's private object directory, which no repository ref can name. */
+	ref?: string;
 	skipped: SnapshotSkip[];
 	/** Refs this snapshot keeps reachable; absent on records written before ref pinning. */
 	pins?: SnapshotPin[];
@@ -343,6 +351,26 @@ function insideRoot(root: string, rel: string): string {
 	return abs;
 }
 
+/**
+ * Whether a file can be created in `dir`. Asked of the filesystem by trying,
+ * since a read-only bind mount and Landlock both refuse the write itself
+ * while `access(2)` may still answer yes.
+ */
+function canCreateIn(dir: string): boolean {
+	const probe = path.join(dir, `.clio-coder-probe-${process.pid}-${randomBytes(6).toString("hex")}`);
+	try {
+		closeSync(openSync(probe, "wx"));
+	} catch {
+		return false;
+	}
+	try {
+		unlinkSync(probe);
+	} catch {
+		// Left behind only if the directory changed under us; Git ignores it.
+	}
+	return true;
+}
+
 async function deleteRefs(cwd: string, refs: ReadonlyArray<string>, deadline: number, gitDir?: string): Promise<void> {
 	if (refs.length === 0) return;
 	await runGit([...(gitDir !== undefined ? [`--git-dir=${gitDir}`] : []), "update-ref", "--stdin"], {
@@ -373,6 +401,24 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 	const idProblem = sessionIdProblem(sessionId);
 	const dir = path.join(snapshotsRoot(stateDir), idProblem === null ? sessionId : "invalid");
 	const indexFile = path.join(dir, "index");
+	const privateObjects = path.join(dir, "objects");
+
+	/**
+	 * A call that reads or writes snapshot objects. Once this session holds a
+	 * private object directory every such call uses it, with the repository's
+	 * objects as an alternate, so earlier snapshots in the repository stay readable.
+	 */
+	const objects = (repo: Repository, call: GitCall): GitCall =>
+		existsSync(privateObjects)
+			? {
+					...call,
+					env: {
+						...call.env,
+						GIT_OBJECT_DIRECTORY: privateObjects,
+						GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(repo.commonDir, "objects"),
+					},
+				}
+			: call;
 
 	/** Copy the operator's index so the first snapshot inherits its stat cache instead of rehashing every file. */
 	const seedIndex = async (repo: Repository, deadline: number): Promise<"copy" | "head" | "empty"> => {
@@ -394,7 +440,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		});
 		const tree = head.stdout.trim();
 		if (head.exitCode !== 0 || tree.length === 0) return "empty";
-		await runGit(["read-tree", tree], { cwd: repo.root, deadline, indexFile });
+		await runGit(["read-tree", tree], objects(repo, { cwd: repo.root, deadline, indexFile }));
 		return "head";
 	};
 
@@ -434,13 +480,16 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		}
 		const addSpecs = [".", ...skipped.map((skip) => `:(exclude,literal)${skip.path}`)].join("\0");
 		const add = () =>
-			runGit(["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], {
-				cwd: repo.root,
-				deadline,
-				indexFile,
-				config,
-				input: `${addSpecs}\0`,
-			});
+			runGit(
+				["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+				objects(repo, {
+					cwd: repo.root,
+					deadline,
+					indexFile,
+					config,
+					input: `${addSpecs}\0`,
+				}),
+			);
 		try {
 			await add();
 		} catch (error) {
@@ -451,15 +500,18 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			await add();
 		}
 		if (skipped.length > 0) {
-			await runGit(["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--pathspec-from-file=-", "--pathspec-file-nul"], {
-				cwd: repo.root,
-				deadline,
-				indexFile,
-				config,
-				input: `${skipped.map((skip) => `:(literal)${skip.path}`).join("\0")}\0`,
-			});
+			await runGit(
+				["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--pathspec-from-file=-", "--pathspec-file-nul"],
+				objects(repo, {
+					cwd: repo.root,
+					deadline,
+					indexFile,
+					config,
+					input: `${skipped.map((skip) => `:(literal)${skip.path}`).join("\0")}\0`,
+				}),
+			);
 		}
-		const tree = (await runGit(["write-tree"], { cwd: repo.root, deadline, indexFile })).stdout.trim();
+		const tree = (await runGit(["write-tree"], objects(repo, { cwd: repo.root, deadline, indexFile }))).stdout.trim();
 		if (!/^[0-9a-f]{40,64}$/u.test(tree)) throw new SnapshotUnavailableError("git write-tree returned no tree");
 		return { tree, skipped };
 	};
@@ -472,6 +524,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		const log = readLog(dir);
 		if (log !== null && log.workspace !== repo.root)
 			throw new SnapshotUnavailableError(`this session's snapshots belong to ${log.workspace}`);
+		mkdirSync(dir, { recursive: true });
+		if (
+			!existsSync(privateObjects) &&
+			!(canCreateIn(path.join(repo.commonDir, "objects")) && canCreateIn(path.join(repo.commonDir, "refs")))
+		)
+			mkdirSync(privateObjects, { recursive: true });
+		const isPrivate = existsSync(privateObjects);
 		// Refs are read beside staging: neither touches the other's state, and a
 		// failed read costs only the pins, never the snapshot or the call.
 		const [staged, refs] = await Promise.all([
@@ -486,7 +545,12 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			),
 		]);
 		const pinsAt = (n: number): SnapshotPin[] =>
-			refs.state === null ? [] : snapshotPins(SNAPSHOT_REF_PREFIX, sessionId, n, refs.state);
+			refs.state === null || isPrivate ? [] : snapshotPins(SNAPSHOT_REF_PREFIX, sessionId, n, refs.state);
+		// A private snapshot pins nothing, so every ref the call puts at risk is reported unheld.
+		const heldState = isPrivate ? null : refs.state;
+		const privateNote = isPrivate
+			? "refs not pinned: the repository cannot be written here, so the snapshot is kept in Clio Coder's state"
+			: null;
 		const last = log?.snapshots.at(-1);
 		// The same tree is reused only while it already pins every ref as it
 		// stands; a moved HEAD, a new stash entry or a branch about to be deleted
@@ -497,8 +561,8 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				return {
 					record: last,
 					reused: true,
-					pinNote: refs.note,
-					unpinned: unpinnedRefs(request.refs, refs.state, pinsAt(last.n), last.pins ?? []),
+					pinNote: privateNote ?? refs.note,
+					unpinned: unpinnedRefs(request.refs, heldState, pinsAt(last.n), last.pins ?? []),
 				};
 		}
 		// A lost log must not reuse a number whose snapshot ref or pins still exist.
@@ -517,19 +581,23 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			"",
 		].join("\n");
 		const commit = (
-			await runGit(["commit-tree", "--no-gpg-sign", staged.tree], {
-				cwd: repo.root,
-				deadline,
-				input: message,
-				env: SNAPSHOT_IDENTITY,
-			})
+			await runGit(
+				["commit-tree", "--no-gpg-sign", staged.tree],
+				objects(repo, {
+					cwd: repo.root,
+					deadline,
+					input: message,
+					env: SNAPSHOT_IDENTITY,
+				}),
+			)
 		).stdout.trim();
-		const ref = `${SNAPSHOT_REF_PREFIX}/${sessionId}/${n}`;
-		await runGit(["update-ref", ref, commit], { cwd: repo.root, deadline });
+		// A private snapshot needs no ref to survive: no repository gc reaches Clio Coder's state.
+		const ref = isPrivate ? undefined : `${SNAPSHOT_REF_PREFIX}/${sessionId}/${n}`;
+		if (ref !== undefined) await runGit(["update-ref", ref, commit], { cwd: repo.root, deadline });
 		// One transaction, apart from the snapshot ref: the pins land together or
 		// not at all, and a failure leaves the files snapshot standing with a note.
 		let pins = pinsAt(n);
-		let pinNote = refs.note;
+		let pinNote = privateNote ?? refs.note;
 		if (pins.length > 0) {
 			try {
 				await runGit(["update-ref", "--stdin"], {
@@ -551,7 +619,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 			...(request.turnId !== undefined ? { turnId: request.turnId } : {}),
 			tree: staged.tree,
 			commit,
-			ref,
+			...(ref !== undefined ? { ref } : {}),
 			skipped: staged.skipped,
 			pins,
 		};
@@ -569,13 +637,13 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		try {
 			await deleteRefs(
 				repo.root,
-				dropped.flatMap((old) => [old.ref, ...(old.pins ?? []).map((pin) => pin.ref)]),
+				dropped.flatMap((old) => [...(old.ref !== undefined ? [old.ref] : []), ...(old.pins ?? []).map((pin) => pin.ref)]),
 				deadline,
 			);
 		} catch {
 			// Retention is best effort; the age prune removes what is left.
 		}
-		return { record, reused: false, pinNote, unpinned: unpinnedRefs(request.refs, refs.state, pinsAt(n), pins) };
+		return { record, reused: false, pinNote, unpinned: unpinnedRefs(request.refs, heldState, pinsAt(n), pins) };
 	};
 
 	/**
@@ -591,7 +659,12 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		deadline: number,
 	): Promise<Omit<RewindPlan, "refs">> => {
 		const diff = parseRawDiff(
-			(await runGit(["diff-tree", "-r", "-z", "--no-renames", target.tree, current], { cwd: repo.root, deadline })).stdout,
+			(
+				await runGit(
+					["diff-tree", "-r", "-z", "--no-renames", target.tree, current],
+					objects(repo, { cwd: repo.root, deadline }),
+				)
+			).stdout,
 		);
 		let restore: string[] = [];
 		let remove: string[] = [];
@@ -783,14 +856,20 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				rmSync(`${scratchIndex}.lock`, { force: true });
 				try {
 					const config = await plumbingConfig(repo, deadline);
-					await runGit(["read-tree", target.tree], { cwd: repo.root, deadline, indexFile: scratchIndex, config });
-					await runGit(["checkout-index", "-f", "-z", "--stdin"], {
-						cwd: repo.root,
-						deadline,
-						indexFile: scratchIndex,
-						config,
-						input: `${writable.join("\0")}\0`,
-					});
+					await runGit(
+						["read-tree", target.tree],
+						objects(repo, { cwd: repo.root, deadline, indexFile: scratchIndex, config }),
+					);
+					await runGit(
+						["checkout-index", "-f", "-z", "--stdin"],
+						objects(repo, {
+							cwd: repo.root,
+							deadline,
+							indexFile: scratchIndex,
+							config,
+							input: `${writable.join("\0")}\0`,
+						}),
+					);
 				} finally {
 					rmSync(scratchIndex, { force: true });
 				}
@@ -839,11 +918,14 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 					const deadline = performance.now() + timeoutMs;
 					const repo = await resolveRepository(cwd, deadline);
 					const current = (await stageWorkspace(repo, deadline)).tree;
-					const out = await runGit(["diff-tree", "--stdin", "-r", "-z", "--no-renames"], {
-						cwd: repo.root,
-						deadline,
-						input: records.map((record) => `${record.tree} ${current}\n`).join(""),
-					});
+					const out = await runGit(
+						["diff-tree", "--stdin", "-r", "-z", "--no-renames"],
+						objects(repo, {
+							cwd: repo.root,
+							deadline,
+							input: records.map((record) => `${record.tree} ${current}\n`).join(""),
+						}),
+					);
 					const counts = new Map<number, number>(records.map((record) => [record.n, 0]));
 					for (const entry of parseRawDiff(out.stdout)) {
 						const record = records[entry.pair];

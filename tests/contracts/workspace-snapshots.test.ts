@@ -105,6 +105,47 @@ describe("workspace snapshots", () => {
 		strictEqual(existsSync(path.join(repo, "u.txt")), false);
 	});
 
+	it("keeps snapshots in Clio's state when a linked worktree's common objects and refs are read-only", async () => {
+		const linked = path.join(env.dir, "linked");
+		git(repo, "worktree", "add", "-q", linked, "-b", "run");
+		writeFileSync(path.join(linked, "old_notes.txt"), "notes\n");
+		const common = path.join(repo, ".git");
+		const snapshots = createWorkspaceSnapshots({ stateDir, sessionId: "s-ro", cwd: linked });
+		const before = await snapshots.snapshot({ reason: "turn-start" });
+		ok(before.kind === "taken" && before.record.ref !== undefined, JSON.stringify(before));
+		writeFileSync(path.join(linked, "later.txt"), "later\n");
+		const readOnly = (on: boolean) =>
+			execFileSync("chmod", ["-R", on ? "a-w" : "u+w", path.join(common, "objects"), path.join(common, "refs")]);
+		const listing = () =>
+			execFileSync("find", [path.join(common, "objects"), path.join(common, "refs")], { encoding: "utf8" });
+		readOnly(true);
+		try {
+			const untouched = listing();
+			const taken = await snapshots.snapshot({
+				reason: "pre-delete",
+				tool: ToolNames.Bash,
+				refs: { head: false, stash: false, branches: ["run"] },
+			});
+			ok(taken.kind === "taken" && !taken.reused, JSON.stringify(taken));
+			strictEqual(taken.record.ref, undefined);
+			deepStrictEqual(taken.record.pins, []);
+			deepStrictEqual(taken.unpinned, ["branch run"]);
+			ok(taken.pinNote?.includes("cannot be written"), taken.pinNote);
+			rmSync(path.join(linked, "old_notes.txt"));
+			rmSync(path.join(linked, "later.txt"));
+			const restored = await snapshots.restore(taken.record.n);
+			ok(restored.kind === "restored", JSON.stringify(restored));
+			strictEqual(readFileSync(path.join(linked, "later.txt"), "utf8"), "later\n");
+			// The snapshot taken while the repository was writable still restores through the alternate.
+			ok((await snapshots.restore(before.record.n)).kind === "restored");
+			strictEqual(existsSync(path.join(linked, "later.txt")), false);
+			strictEqual(readFileSync(path.join(linked, "old_notes.txt"), "utf8"), "notes\n");
+			strictEqual(listing(), untouched);
+		} finally {
+			readOnly(false);
+		}
+	});
+
 	const PINS = "refs/clio-coder/snapshots/s-1/pins";
 	const refsUnder = (prefix: string) => git(repo, "for-each-ref", "--format=%(refname)", prefix);
 
