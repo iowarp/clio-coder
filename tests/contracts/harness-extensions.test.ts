@@ -302,6 +302,14 @@ describe("harness extension executable capabilities", () => {
 			{ kind: entry?.kind, actionClass: entry?.actionClass },
 			{ kind: "extension", actionClass: "execute" },
 		);
+		const described = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "describe", capability: testName },
+		});
+		if (described.kind !== "ok" || described.result.kind !== "ok") throw new Error(JSON.stringify(described));
+		const authority = (JSON.parse(described.result.output) as { authority: string[] }).authority.join("\n");
+		ok(authority.includes("runs inside the session's OS sandbox"), authority);
+		ok(!authority.includes("does not sandbox"), authority);
 		// read-only denies the command through the gateway exactly as it denies
 		// the command by name: the gateway call itself settles as that block.
 		const readOnly = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "default", readOnly: true });

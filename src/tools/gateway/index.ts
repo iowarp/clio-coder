@@ -750,8 +750,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			authority.push("Terminal: writing the artifact completes the turn, so close the task board before calling it.");
 		}
 		if (kind === "extension") {
+			const digest = spec.sourceInfo?.extension ? ` ${spec.sourceInfo.extension.contentDigest.slice(0, 12)}` : "";
 			authority.push(
-				`Extension${spec.sourceInfo?.extension ? ` ${spec.sourceInfo.extension.contentDigest.slice(0, 12)}` : ""}: an installed command run with JSON input on the workspace; its argv is classified like a bash command, and running it does not sandbox it.`,
+				spec.safetyCall
+					? `Extension${digest}: an installed command run with JSON input on the workspace; its argv is classified like a bash command, and a call admission contains runs inside the session's OS sandbox.`
+					: `Extension${digest}: served by the extension runtime under the permissions approved at install.`,
 			);
 		}
 		const mcpNote = kind === "mcp" ? deps.mcp?.authorityNote(spec.name, spec.baseActionClass) : null;
