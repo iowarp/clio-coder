@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Editors and other agents — Clio Coder docs</title><meta name="description" content="Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://coder.iowarp.ai/docs/guide/interop.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/interop.html"><meta property="og:title" content="Editors and other agents — Clio Coder docs"><meta property="og:description" content="Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:modified_time" content="2026-11-04T09:50:06-06:00">
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/interop.html"><meta property="og:title" content="Editors and other agents — Clio Coder docs"><meta property="og:description" content="Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:published_time" content="2026-09-26T01:31:06-05:00"><meta property="article:modified_time" content="2026-11-09T09:51:34-06:00">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Editors and other agents — Clio Coder docs"><meta name="twitter:description" content="Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Work in the terminal or on the desktop (alpha) with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/interop.html#page","name":"Editors and other agents — Clio Coder docs","description":"Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane.","url":"https://coder.iowarp.ai/docs/guide/interop.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"dateModified":"2026-11-04T09:50:06-06:00","headline":"Editors and other agents","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/interop.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Editors and other agents","item":"https://coder.iowarp.ai/docs/guide/interop.html"}]}]}</script></head><body>
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/interop.html#page","name":"Editors and other agents — Clio Coder docs","description":"Use supported agent connections and editor integrations. Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane.","url":"https://coder.iowarp.ai/docs/guide/interop.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-09-26T01:31:06-05:00","dateModified":"2026-11-09T09:51:34-06:00","headline":"Editors and other agents","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/interop.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/interop.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Editors and other agents","item":"https://coder.iowarp.ai/docs/guide/interop.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
@@ -28,22 +28,24 @@
 <a href="/docs/guide/quality-policy.html">Require project checks</a>
 <a href="/docs/guide/research-and-arena.html">Climb a metric, compare models</a>
 <a href="/docs/guide/semantic-context.html">Semantic context</a>
-<a href="/docs/guide/built-in-agents.html">Agents</a></details>
+<a href="/docs/guide/built-in-agents.html">Built-in and custom agents</a></details>
 <details class="doc-nav-group" open><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
-<a href="/docs/guide/harness-extensions.html">Extensions</a>
+<a href="/docs/guide/harness-extensions.html">Write and install extensions</a>
 <a href="/docs/guide/interop.html" aria-current="page">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a>
-<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Editors and other agents</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7/docs/guide/interop.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/interop.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#bring-an-installed-coding-agent">Bring an installed coding agent</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Editors and other agents</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/guide/interop.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/interop.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#bring-an-installed-coding-agent">Bring an installed coding agent</a>
 <a href="#review-resources-from-another-agent">Review resources from another agent</a>
-<a href="#connect-an-acp-frontend">Connect an ACP frontend</a></details><h1 id="editors-and-other-agents">Editors and other agents</h1>
+<a href="#connect-an-acp-frontend">Connect an ACP frontend</a>
+<a href="#built-on-the-pi-sdk">Built on the Pi SDK</a>
+<a href="#related-tutorials">Related tutorials</a></details><h1 id="editors-and-other-agents">Editors and other agents</h1>
 <p>Use supported agent connections and editor integrations.</p>
 <h2 id="bring-an-installed-coding-agent">Bring an installed coding agent</h2>
 <p>Clio Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer&#39;s own CLI first, then inspect what Clio can use:</p>
@@ -61,12 +63,51 @@ clio-coder configure --interop</code></pre></div>
 <p>The Library can discover supported foreign resources and review their origin, scope, trust, and actual availability before adoption. It identifies unsupported components rather than treating an entire foreign package as compatible.</p>
 <p>Open <code>/library</code>, then use its local-agent discovery action. Inspect the proposed resources and approve the ones you want in your user or project library.</p>
 <h2 id="connect-an-acp-frontend">Connect an ACP frontend</h2>
+<p>To use Clio Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor&#39;s ACP agent entry at <code>clio-coder acp</code>. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, modes, and model options.</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder acp --cwd /path/to/project</code></pre></div>
-<p>This serves Clio Coder over stdio for an ACP frontend, with session listing, resume, modes, and model options. Consult the full guide for peer-specific setup, permission limits, and installing Clio Coder&#39;s portable library in other agents.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-version="0.7.0" data-source-ref="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-commit="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+<p><code>clio-coder --acp</code> is an exact alias. These launch options are the operator&#39;s limits; a client can narrow them but never widen them:</p>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--cwd PATH</code></td>
+<td>Pins the workspace. Without it, the editor&#39;s first session request selects it.</td>
+</tr>
+<tr>
+<td><code>--permission-timeout MS</code></td>
+<td>Longest wait, in milliseconds, for one permission answer from the editor; 120000 by default.</td>
+</tr>
+<tr>
+<td><code>--allow-tools NAMES</code></td>
+<td>Limits the session&#39;s tools to these comma-separated names, as <code>clio-coder run</code> does; <code>none</code> disables all.</td>
+</tr>
+<tr>
+<td><code>--delegate-tools NAMES</code></td>
+<td>Limits the tools the session&#39;s dispatched workers may hold.</td>
+</tr>
+<tr>
+<td><code>--read-only</code></td>
+<td>Holds every session at the read-only ceiling. No file outside Clio Coder&#39;s own home changes.</td>
+</tr>
+</tbody></table></div>
+<p><code>clio-coder acp auth login</code> opens the interactive Quick Connect setup, so an editor&#39;s terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The <a href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/architecture/acp.md">ACP protocol reference</a> covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing Clio Coder&#39;s portable library in other agents.</p>
+<h2 id="built-on-the-pi-sdk">Built on the Pi SDK</h2>
+<p>Clio Coder&#39;s model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.7.0 pins the Pi 1.5.0 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. Clio Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.</p>
+<p>Pi&#39;s coding agent is also a delegation peer. With the <code>pi</code> command installed and signed in, a target on the <code>pi-cli</code> runtime runs headless worker tasks under Pi&#39;s own login. Like other peers that run their own tool loop, it needs <code>trustedUnmediated: true</code> on the target before it may take write-capable work. Developers upgrading the SDK can read the <a href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/architecture/pi-boundary.md">Pi SDK boundary</a>.</p>
+<h2 id="related-tutorials">Related tutorials</h2>
+<nav class="guide-next" aria-label="Related tutorials"><ul>
+<li><a href="/tutorials/coordinate-your-coding-agents.html">Coordinate the coding agents you already use <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-09T09:51:34-06:00">November 9, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-version="0.7.0" data-source-ref="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-commit="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#bring-an-installed-coding-agent">Bring an installed coding agent</a>
 <a href="#review-resources-from-another-agent">Review resources from another agent</a>
-<a href="#connect-an-acp-frontend">Connect an ACP frontend</a></aside>
+<a href="#connect-an-acp-frontend">Connect an ACP frontend</a>
+<a href="#built-on-the-pi-sdk">Built on the Pi SDK</a>
+<a href="#related-tutorials">Related tutorials</a></aside>
 </main><footer class="colophon page">
   <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>

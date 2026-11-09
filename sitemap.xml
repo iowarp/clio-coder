@@ -3,29 +3,29 @@
   <url><loc>https://coder.iowarp.ai/</loc><lastmod>2026-11-08T07:38:56-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs.html</loc><lastmod>2026-11-04T14:45:54-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/hpc-clusters.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-and-targets.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-and-targets.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/commands-and-modes.html</loc><lastmod>2026-11-06T17:28:24-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/proactive-memory.html</loc><lastmod>2026-11-04T09:56:19-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/proactive-memory.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/gui.html</loc><lastmod>2026-11-08T07:38:56-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc><lastmod>2026-11-04T09:56:19-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/harness-extensions.html</loc><lastmod>2026-11-04T09:51:44-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc><lastmod>2026-11-04T09:50:06-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/troubleshooting.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/harness-extensions.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/troubleshooting.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/quality-policy.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/research-and-arena.html</loc><lastmod>2026-11-08T10:05:07-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/research-and-arena.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/configuration-reference.html</loc><lastmod>2026-11-04T09:56:19-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc><lastmod>2026-10-05T08:58:30-05:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/system-one.html</loc><lastmod>2026-11-04T13:43:53-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/information-flow.html</loc><lastmod>2026-11-04T13:43:53-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/semantic-context.html</loc><lastmod>2026-11-04T13:43:53-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/built-in-agents.html</loc><lastmod>2026-11-04T13:43:53-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/system-one.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/information-flow.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/semantic-context.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/built-in-agents.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/first-session.html</loc><lastmod>2026-11-07T21:50:25-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/desktop-and-terminal.html</loc><lastmod>2026-11-08T07:38:56-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html</loc><lastmod>2026-11-04T09:56:19-06:00</lastmod></url>
@@ -53,6 +53,6 @@
   <url><loc>https://coder.iowarp.ai/research/context-and-retrieval.html</loc><lastmod>2026-11-04T10:32:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/research/fleets-and-local-models.html</loc><lastmod>2026-11-04T10:34:19-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/research/scientific-and-hpc-workflows.html</loc><lastmod>2026-11-04T10:34:19-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/learn.html</loc><lastmod>2026-11-04T14:39:54-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/research.html</loc><lastmod>2026-11-04T14:45:54-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/learn.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/research.html</loc><lastmod>2026-11-09T09:51:34-06:00</lastmod></url>
 </urlset>

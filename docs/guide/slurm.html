@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Slurm workflows — Clio Coder docs</title><meta name="description" content="Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://coder.iowarp.ai/docs/guide/slurm.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/slurm.html"><meta property="og:title" content="Slurm workflows — Clio Coder docs"><meta property="og:description" content="Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:modified_time" content="2026-10-05T08:58:30-05:00">
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/slurm.html"><meta property="og:title" content="Slurm workflows — Clio Coder docs"><meta property="og:description" content="Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:published_time" content="2026-09-26T01:31:06-05:00"><meta property="article:modified_time" content="2026-11-09T09:51:34-06:00">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Slurm workflows — Clio Coder docs"><meta name="twitter:description" content="Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Work in the terminal or on the desktop (alpha) with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/slurm.html#page","name":"Slurm workflows — Clio Coder docs","description":"Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit.","url":"https://coder.iowarp.ai/docs/guide/slurm.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"dateModified":"2026-10-05T08:58:30-05:00","headline":"Slurm workflows","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/slurm.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/slurm.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/slurm.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Slurm workflows","item":"https://coder.iowarp.ai/docs/guide/slurm.html"}]}]}</script></head><body>
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/slurm.html#page","name":"Slurm workflows — Clio Coder docs","description":"Connect Clio Coder to supported Slurm tools for cluster work. Clio Coder connects to Slurm through the stdio MCP server shipped by clio-kit.","url":"https://coder.iowarp.ai/docs/guide/slurm.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-09-26T01:31:06-05:00","dateModified":"2026-11-09T09:51:34-06:00","headline":"Slurm workflows","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/slurm.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/slurm.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/slurm.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Slurm workflows","item":"https://coder.iowarp.ai/docs/guide/slurm.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
@@ -28,39 +28,111 @@
 <a href="/docs/guide/quality-policy.html">Require project checks</a>
 <a href="/docs/guide/research-and-arena.html">Climb a metric, compare models</a>
 <a href="/docs/guide/semantic-context.html">Semantic context</a>
-<a href="/docs/guide/built-in-agents.html">Agents</a></details>
+<a href="/docs/guide/built-in-agents.html">Built-in and custom agents</a></details>
 <details class="doc-nav-group" open><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
-<a href="/docs/guide/harness-extensions.html">Extensions</a>
+<a href="/docs/guide/harness-extensions.html">Write and install extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html" aria-current="page">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a>
-<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Slurm workflows</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7/docs/guide/slurm.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/slurm.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#work-with-a-scheduler">Work with a scheduler</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Slurm workflows</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/guide/slurm.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/slurm.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#work-with-a-scheduler">Work with a scheduler</a>
+<a href="#set-up-the-server">Set up the server</a>
+<a href="#check-with-doctor">Check with doctor</a>
 <a href="#use-a-job-workflow">Use a job workflow</a>
-<a href="#choose-approvals-deliberately">Choose approvals deliberately</a></details><h1 id="slurm-workflows">Slurm workflows</h1>
+<a href="#choose-approvals-deliberately">Choose approvals deliberately</a>
+<a href="#run-a-parameter-sweep">Run a parameter sweep</a>
+<a href="#related-tutorials-and-research">Related tutorials and research</a></details><h1 id="slurm-workflows">Slurm workflows</h1>
 <p>Connect Clio Coder to supported Slurm tools for cluster work.</p>
 <h2 id="work-with-a-scheduler">Work with a scheduler</h2>
 <p>Clio Coder connects to Slurm through the stdio MCP server shipped by <a href="https://github.com/iowarp/clio-kit">clio-kit</a>. The server provides job submission, listing, description, cancellation, and cluster information. A working scheduler connection is required; client binaries alone are not enough.</p>
-<p>Use the full guide&#39;s setup commands to declare the server, then run <code>clio-coder doctor</code> to check the Slurm clients and configuration.</p>
+<h2 id="set-up-the-server">Set up the server</h2>
+<p>Install clio-kit (for example <code>uv tool install clio-kit</code>) on a host where <code>sbatch</code>, <code>squeue</code>, <code>scontrol</code>, and <code>scancel</code> reach your cluster. Declare the server in <code>mcp.yaml</code> in your config directory, which <code>clio-coder paths</code> prints:</p>
+<div class="code-block"><p class="code-label eyebrow">YAML</p><pre tabindex="0" aria-label="Code example 1"><code class="language-yaml">version: 1
+servers:
+  - id: slurm
+    command: clio-kit
+    args: [mcp-server, slurm]
+    timeoutMs: 120000</code></pre></div>
+<p>Keep the id <code>slurm</code>; the skill and the approval rules below expect it. Run <code>clio-kit mcp-server slurm</code> once in a terminal and stop it with Ctrl-C, because a cold first launch can exceed the 15 second initialize bound. A project declaration in <code>.clio-coder/mcp.yaml</code> needs <code>clio-coder mcp trust slurm</code> first.</p>
+<h2 id="check-with-doctor">Check with doctor</h2>
+<p><code>clio-coder doctor --verbose</code> prints three Slurm rows, none of which fails doctor.</p>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Row</th>
+<th>What it reports</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>slurm clio-kit</code></td>
+<td><code>clio-kit</code> on <code>PATH</code> and whether it lists <code>slurm</code></td>
+</tr>
+<tr>
+<td><code>slurm mcp server</code></td>
+<td>Which <code>mcp.yaml</code> declares it, its scope, and its trust</td>
+</tr>
+<tr>
+<td><code>slurm scheduler</code></td>
+<td>Whether <code>sbatch</code> and <code>squeue</code> answer <code>--version</code></td>
+</tr>
+</tbody></table></div>
+<p>An OK scheduler row does not prove a working scheduler; it never contacts the controller.</p>
 <h2 id="use-a-job-workflow">Use a job workflow</h2>
 <p>Install the project-scoped Slurm skill:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder library install skill:slurm-jobs --project</code></pre></div>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder library install skill:slurm-jobs --project</code></pre></div>
 <p>Then ask it to run a specific script and report the evidence:</p>
-<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">/skill slurm-jobs Submit this script, wait for its terminal state, and report the job ID, exit code, stdout, and stderr paths.</code></pre></div>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">/skill slurm-jobs Submit this script, wait for its terminal state, and report the job ID, exit code, stdout, and stderr paths.</code></pre></div>
 <p>The skill submits once, polls through the MCP server, and reports the outcome. It does not fall back to shell <code>sbatch</code> when the server is unavailable.</p>
 <h2 id="choose-approvals-deliberately">Choose approvals deliberately</h2>
-<p>With the server declared as <code>slurm</code>, Clio Coder classifies each tool. Listing, describing, and cluster reads run without asking. Submission and cancellation always ask for approval, in <code>yolo</code> too, and a headless run denies those asks.</p>
-<p>A <code>toolActionClasses</code> entry in <code>mcp.yaml</code> can reclassify one tool, but submission and cancellation keep their confirmation. Review the full guide before changing a classification or enabling unattended execution. For small local changes, begin with <a href="/docs/guide/tool-usage.html">ordinary project checks</a>.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-version="0.7.0" data-source-ref="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-commit="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+<p>With the server declared as <code>slurm</code>, Clio Coder classifies the <code>mcp_slurm__</code> tools by name:</p>
+<div class="doc-table" role="region" aria-label="Reference table 2" tabindex="0"><table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Class</th>
+<th>At <code>default</code></th>
+<th>At <code>yolo</code></th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>slurm_list</code>, <code>slurm_describe</code>, <code>slurm_cluster</code></td>
+<td><code>read</code></td>
+<td>Runs</td>
+<td>Runs</td>
+</tr>
+<tr>
+<td><code>slurm_submit</code>, <code>slurm_cancel</code></td>
+<td><code>execute</code></td>
+<td>Safety judge reviews; you decide when it has no verdict</td>
+<td>Runs</td>
+</tr>
+</tbody></table></div>
+<p>In a headless <code>clio-coder run</code> at <code>default</code>, a submission or cancellation runs only when the safety judge allows it.</p>
+<p>A <code>toolActionClasses</code> entry in <code>mcp.yaml</code> can reclassify one tool, but submission and cancellation keep their confirmation at <code>default</code>. Review the full guide before changing a classification or enabling unattended execution. For small local changes, begin with <a href="/docs/guide/tool-usage.html">ordinary project checks</a>.</p>
+<h2 id="run-a-parameter-sweep">Run a parameter sweep</h2>
+<p>The <code>hpc-sweep</code> skill in the <code>hpc</code> plugin runs a sweep as one job array:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder library install plugin:hpc --project</code></pre></div>
+<p>Run <code>/library reload</code>, then <code>/skill hpc-sweep dry run sweeps/decay.yaml</code>. The sweep file names <code>parameters</code>, a <code>mode</code> (<code>grid</code> or <code>sample</code>), a run <code>template</code>, <code>resources</code>, a <code>concurrency</code> cap, and a verify <code>check</code>. The skill submits only on your word, checks each run, and writes verdicts to <code>sweeps/&lt;name&gt;/results.md</code>.</p>
+<p>For 0.7.0 this path was checked against fake Slurm clients only, not a live controller.</p>
+<h2 id="related-tutorials-and-research">Related tutorials and research</h2>
+<nav class="guide-next" aria-label="Related tutorials and research"><ul>
+<li><a href="/tutorials/submit-a-slurm-job.html">Submit a Slurm job through Clio Coder <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/research/scientific-and-hpc-workflows.html">What would make a scientist trust an agent&#39;s change? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-09T09:51:34-06:00">November 9, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-version="0.7.0" data-source-ref="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-commit="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#work-with-a-scheduler">Work with a scheduler</a>
+<a href="#set-up-the-server">Set up the server</a>
+<a href="#check-with-doctor">Check with doctor</a>
 <a href="#use-a-job-workflow">Use a job workflow</a>
-<a href="#choose-approvals-deliberately">Choose approvals deliberately</a></aside>
+<a href="#choose-approvals-deliberately">Choose approvals deliberately</a>
+<a href="#run-a-parameter-sweep">Run a parameter sweep</a>
+<a href="#related-tutorials-and-research">Related tutorials and research</a></aside>
 </main><footer class="colophon page">
   <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>

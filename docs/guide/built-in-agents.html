@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Agents — Clio Coder docs</title><meta name="description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Built-in and custom agents — Clio Coder docs</title><meta name="description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://coder.iowarp.ai/docs/guide/built-in-agents.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/built-in-agents.html"><meta property="og:title" content="Agents — Clio Coder docs"><meta property="og:description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:modified_time" content="2026-11-04T13:43:53-06:00">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Agents — Clio Coder docs"><meta name="twitter:description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Work in the terminal or on the desktop (alpha) with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#page","name":"Agents — Clio Coder docs","description":"See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes.","url":"https://coder.iowarp.ai/docs/guide/built-in-agents.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"dateModified":"2026-11-04T13:43:53-06:00","headline":"Agents","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/built-in-agents.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Agents","item":"https://coder.iowarp.ai/docs/guide/built-in-agents.html"}]}]}</script></head><body>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/built-in-agents.html"><meta property="og:title" content="Built-in and custom agents — Clio Coder docs"><meta property="og:description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column."><meta property="article:published_time" content="2026-09-26T01:31:06-05:00"><meta property="article:modified_time" content="2026-11-09T09:51:34-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Built-in and custom agents — Clio Coder docs"><meta name="twitter:description" content="See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="Clio Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"Clio Coder","url":"https://coder.iowarp.ai/","description":"Clio Coder is an open-source coding agent for scientific computing and HPC. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#page","name":"Built-in and custom agents — Clio Coder docs","description":"See the agents you can dispatch and add your own. Clio Coder dispatches focused agents from Markdown recipes.","url":"https://coder.iowarp.ai/docs/guide/built-in-agents.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-09-26T01:31:06-05:00","dateModified":"2026-11-09T09:51:34-06:00","headline":"Built-in and custom agents","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/built-in-agents.html","author":{"@type":"Organization","name":"The Clio Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/built-in-agents.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"Clio Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Built-in and custom agents","item":"https://coder.iowarp.ai/docs/guide/built-in-agents.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="Clio Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a>
@@ -28,21 +28,24 @@
 <a href="/docs/guide/quality-policy.html">Require project checks</a>
 <a href="/docs/guide/research-and-arena.html">Climb a metric, compare models</a>
 <a href="/docs/guide/semantic-context.html">Semantic context</a>
-<a href="/docs/guide/built-in-agents.html" aria-current="page">Agents</a></details>
+<a href="/docs/guide/built-in-agents.html" aria-current="page">Built-in and custom agents</a></details>
 <details class="doc-nav-group"><summary>Extend Clio Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
 <a href="/docs/guide/resource-library.html">Skills and resources</a>
 <a href="/docs/guide/plugins.html">Install plugins</a>
-<a href="/docs/guide/harness-extensions.html">Extensions</a>
+<a href="/docs/guide/harness-extensions.html">Write and install extensions</a>
 <a href="/docs/guide/interop.html">Editors and other agents</a>
 <a href="/docs/guide/slurm.html">Slurm workflows</a></details>
 <details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
 <a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a>
-<a href="/docs/guide/system-one.html">System One</a>
+<a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Agents</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7/docs/guide/built-in-agents.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/built-in-agents.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#see-the-agents">See the agents</a>
-<a href="#add-your-own">Add your own</a></details><h1 id="agents">Agents</h1>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Built-in and custom agents</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/guide/built-in-agents.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/built-in-agents.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#see-the-agents">See the agents</a>
+<a href="#shipped-agents">Shipped agents</a>
+<a href="#add-your-own">Add your own</a>
+<a href="#what-validation-rejects">What validation rejects</a>
+<a href="#related-tutorials-and-research">Related tutorials and research</a></details><h1 id="built-in-and-custom-agents">Built-in and custom agents</h1>
 <p>See the agents you can dispatch and add your own.</p>
 <h2 id="see-the-agents">See the agents</h2>
 <p>Clio Coder dispatches focused agents from Markdown recipes. Each recipe declares the agent&#39;s tools, budget, and the result it must return.</p>
@@ -51,11 +54,97 @@ clio-coder agents validate
 clio-coder run --agent coder &quot;&lt;task&gt;&quot;</code></pre></div>
 <p><code>clio-coder agents</code> lists the agents you can run, including <code>architect</code>, <code>coder</code>, <code>debugger</code>, <code>documenter</code>, <code>git-master</code>, <code>tester</code>, and <code>verifier</code>. <code>/run</code> dispatches one from a session. Add <code>--read-only</code> to deny writes, commands, and delegation for one dispatch.</p>
 <p>Helper agents such as Scout are dispatched by the main agent, and <code>clio-coder agents --all</code> lists them. You cannot start them directly.</p>
+<h2 id="shipped-agents">Shipped agents</h2>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Use it to</th>
+<th>Edits files</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>architect</code></td>
+<td>Design a change or cut a plan into a sprint</td>
+<td>Plan file only</td>
+</tr>
+<tr>
+<td><code>coder</code></td>
+<td>Make a bounded change, repair, or refactor</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>debugger</code></td>
+<td>Diagnose failing code, tests, or runs</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>documenter</code></td>
+<td>Write docs and examples from source</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>git-master</code></td>
+<td>Commits, worktrees, merges, pull requests</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>tester</code></td>
+<td>Add deterministic regression tests</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>verifier</code></td>
+<td>Run test, lint, build, and review gates</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>wiki-writer</code></td>
+<td>Plan a wiki or write one page</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>wiki-repair</code></td>
+<td>Fix one wiki draft&#39;s diagnostics</td>
+<td>Yes</td>
+</tr>
+</tbody></table></div>
 <h2 id="add-your-own">Add your own</h2>
 <p>Put a recipe at <code>.clio-coder/agents/&lt;id&gt;.md</code> for one project, or in the <code>agents</code> folder of your Clio Coder config directory for yourself. The file name is the agent&#39;s id, and when a user recipe and a project recipe share an id, the project one wins. Run <code>clio-coder agents validate</code> after an edit.</p>
-</div><div class="doc-end"><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-version="0.7.0" data-source-ref="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7" data-source-commit="2c17ee86e5119ddba8aa0e5be109ec7c74b85ab7">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+<p>A recipe must declare every required key, and <code>audience</code> must be <code>custom</code>:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-md">---
+version: 1
+name: My Agent
+description: Focused local review helper.
+tools:
+  required: [read, artifact]
+  optional: [grep, find, ls, git]
+skills: []
+audience: custom
+category: quality
+capabilityClass: artifact-write
+latencyClass: balanced
+projectContextTier: bounded
+budget: {toolCalls: 20, readReserve: 4, synthesis: true}
+resultContract: {kind: artifact-report}
+tags: [review]
+---
+
+You are My Agent. Inspect only the requested area. Never edit files.</code></pre></div>
+<p>The body is the agent&#39;s instructions. Model and target are chosen at dispatch, not in the recipe. Start it with <code>clio-coder run --agent my-agent &quot;Review the parser change.&quot;</code>. A user recipe may replace a shipped agent such as <code>coder</code>; a project recipe cannot.</p>
+<h2 id="what-validation-rejects">What validation rejects</h2>
+<p><code>clio-coder agents validate</code> checks project and user recipes and skills, and the fleet bindings in <code>.clio-coder/settings.local.yaml</code>. It prints each problem as a <code>file: field: message</code> line and exits 1 when there is any. It rejects an unknown or missing key, an audience other than <code>custom</code>, a <code>budget</code> whose <code>readReserve</code> is not below <code>toolCalls</code>, a skill that does not resolve, and tools that break the <code>capabilityClass</code>, such as a <code>verification</code> agent that uses <code>bash</code>. A rejected recipe is not loaded.</p>
+<h2 id="related-tutorials-and-research">Related tutorials and research</h2>
+<nav class="guide-next" aria-label="Related tutorials and research"><ul>
+<li><a href="/tutorials/run-a-playbook-and-land-it.html">Run a playbook and land the result <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/research/sealed-run-records.html">Can an agent run be a scientific record? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-09T09:51:34-06:00">November 9, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-version="0.7.0" data-source-ref="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-commit="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#see-the-agents">See the agents</a>
-<a href="#add-your-own">Add your own</a></aside>
+<a href="#shipped-agents">Shipped agents</a>
+<a href="#add-your-own">Add your own</a>
+<a href="#what-validation-rejects">What validation rejects</a>
+<a href="#related-tutorials-and-research">Related tutorials and research</a></aside>
 </main><footer class="colophon page">
   <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">Clio <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>

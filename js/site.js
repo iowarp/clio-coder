@@ -127,6 +127,8 @@
 		viewer.setAttribute("aria-labelledby", "media-title");
 		viewer.setAttribute("aria-describedby", "media-caption");
 		viewer.innerHTML = `<div class="media-header"><h2 id="media-title">Clio Coder</h2><button class="media-close" type="button" aria-label="Close screenshot">Close <span aria-hidden="true">×</span></button></div><div class="image-view"><img alt="" decoding="async"></div><div class="media-footer"><p class="caption" id="media-caption"></p><div class="media-controls"><button type="button" data-media="previous" aria-label="Previous screenshot">←</button><button type="button" data-media="next" aria-label="Next screenshot">→</button><button type="button" data-media="zoom" aria-pressed="false">Actual size</button><a class="text-link" data-media="original" target="_blank" rel="noopener">Open original <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>`;
+		// Crawlers that render the page see this link before any capture opens.
+		viewer.querySelector('[data-media="original"]').href = captures[0].href;
 		document.body.append(viewer);
 		const image = viewer.querySelector("img");
 		const viewport = viewer.querySelector(".image-view");
