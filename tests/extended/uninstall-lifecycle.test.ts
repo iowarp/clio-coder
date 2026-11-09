@@ -1,5 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runGuiCommand } from "../../src/cli/gui.js";
@@ -267,6 +268,58 @@ describe("contracts/uninstall-lifecycle", () => {
 			ok(existsSync(temp.dataDir));
 		} finally {
 			temp.cleanup();
+		}
+	});
+
+	it("stops a private pane host, removes the marked PATH block, and closes with what was kept", {
+		skip: process.platform === "win32" && "private hosts and install.sh PATH blocks are POSIX",
+	}, async () => {
+		for (const keepBinary of [false, true]) {
+			const temp = home();
+			const methods: string[] = [];
+			const socketPath = join(temp.root, "h.sock");
+			const server = createServer((socket) => {
+				let pending = "";
+				socket.on("data", (chunk) => {
+					pending += chunk.toString();
+					if (!pending.includes("\n")) return;
+					const request = JSON.parse(pending.trim());
+					methods.push(request.method);
+					const result = request.method === "ping" ? { version: "fixture", protocol: 21 } : {};
+					socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+					if (request.method === "server.stop") server.close();
+				});
+			});
+			try {
+				await new Promise<void>((done) => server.listen(socketPath, done));
+				mkdirSync(join(temp.stateDir, "mux", "abc"), { recursive: true });
+				writeFileSync(join(temp.stateDir, "mux", "abc", "socket-path"), `${socketPath}\n`);
+				const rc = join(temp.root, ".bashrc");
+				const own = `alias c=clio-coder\n\n# added by clio-coder install.sh\nexport PATH="${temp.binDir}:$PATH"\n`;
+				writeFileSync(rc, own);
+
+				// The test reporter flushes asynchronously; capture would swallow its pending lines.
+				await new Promise((done) => setTimeout(done, 50));
+				const preview = await runInHome(temp, () => runUninstallCommand(["--dry-run"]));
+				match(preview.stdout, /Pane host: .*h\.sock/u);
+				match(preview.stdout, keepBinary ? /PATH block: / : /✓ PATH block: ~\/\.bashrc/u);
+				match(preview.stdout, /Shell config: ~\/\.bashrc .*lines 1;/u, "the operator's own line is only reported");
+				strictEqual(readFileSync(rc, "utf8"), own);
+
+				const real = await runInHome(temp, () =>
+					runUninstallCommand(keepBinary ? ["--force", "--keep-binary"] : ["--force"]),
+				);
+				strictEqual(real.code, 0, real.stdout);
+				ok(methods.includes("server.stop"), "the host is asked to stop before its binary goes");
+				match(real.stdout, /Stopped the pane host at /u);
+				strictEqual(readFileSync(rc, "utf8"), keepBinary ? own : "alias c=clio-coder\n");
+				match(real.stdout, /Removed:\n(?:.*\n)*?.*Pane host: /u);
+				match(real.stdout, /Kept, and why:\n(?:.*\n)*?.*Shell config: ~\/\.bashrc/u);
+				if (keepBinary) match(real.stdout, /PATH block: ~\/\.bashrc \(kept with the launcher\)/u);
+			} finally {
+				if (server.listening) await new Promise<void>((done) => server.close(() => done()));
+				temp.cleanup();
+			}
 		}
 	});
 

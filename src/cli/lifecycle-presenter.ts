@@ -40,6 +40,8 @@ export interface LifecycleReport {
 	errors: string[];
 	advice: Array<{ lead: string; command: string }>;
 	summary?: string;
+	removed?: string[];
+	kept?: string[];
 }
 
 /**
@@ -398,6 +400,26 @@ export class LifecyclePresenter {
 		} finally {
 			rl.close();
 		}
+	}
+
+	/** The closing account of a removal: what went, and what stayed with the reason. */
+	outcome(removed: ReadonlyArray<string>, kept: ReadonlyArray<string>): void {
+		this.report.removed = [...removed];
+		this.report.kept = [...kept];
+		if (this.json) return;
+		this.open("note");
+		this.prose("Removed:");
+		this.open("list");
+		for (const line of removed.length ? removed : ["nothing"]) this.substepQuiet(line, "✓");
+		this.open("note");
+		this.prose("Kept, and why:");
+		this.open("list");
+		for (const line of kept.length ? kept : ["nothing"]) this.substepQuiet(line, "–");
+	}
+
+	private substepQuiet(text: string, glyph: string): void {
+		if (this.plain) this.out.write(`    ${glyph} ${text}\n`);
+		else this.out.write(`${chalk.blue("●")}    ${glyph === "✓" ? chalk.green(glyph) : chalk.dim(glyph)} ${text}\n`);
 	}
 
 	/**

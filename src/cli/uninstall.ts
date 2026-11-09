@@ -9,6 +9,7 @@ import {
 	realpathSync,
 	rmdirSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -34,7 +35,7 @@ import type { RemovalFailure } from "./removal.js";
 import { refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder uninstall [--keep-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+const HELP = `clio-coder uninstall [--keep-binary] [--keep-package] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 clio-coder uninstall --inactive [--dry-run] [--force] [--json]
 
 Remove Clio Coder: the config, data, state, and cache roots, the launcher, and for
@@ -43,8 +44,10 @@ an install.sh install its private Node and every installed version.
 Per-project \`.clio-coder/\` directories sit outside those roots and are never
 removed here. Every project Clio has run in is recorded in the session metadata,
 so the real run and --dry-run both list them and name the command that clears one.
-Shell startup files are reported, never edited. Uninstall stops while a session
-is still open.
+The PATH block install.sh --modify-path appended goes with the launcher when its
+two marked lines are unchanged; any other mention in a shell startup file is
+reported, never edited. Clio's private pane host is stopped before its binary is
+removed. Uninstall stops while a session is still open.
 Owned graphical background services are stopped and disabled before their state is
 removed; their desktop launchers are removed using the app's ownership manifests.
 
@@ -55,6 +58,8 @@ Flags:
                    installed versions. Without it the launcher goes only when it belongs
                    to this installation: a real file, or a link into a different clio-coder
                    installation, is kept and reported.
+  --keep-package   for an npm global install, leave the package itself; uninstall
+                   otherwise runs npm uninstall -g --prefix <its prefix> last
   --inactive       remove only installer roots this binary does not run from, left behind
                    after moving to a checkout or a package manager, and their own
                    launcher. Your config, data, sessions and this installation stay.
@@ -69,6 +74,7 @@ interface ParsedUninstallArgs {
 	keepConfig: boolean;
 	keepData: boolean;
 	inactive: boolean;
+	keepPackage: boolean;
 	force: boolean;
 	dryRun: boolean;
 	json: boolean;
@@ -81,6 +87,7 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 		keepConfig: false,
 		keepData: false,
 		inactive: false,
+		keepPackage: false,
 		force: false,
 		dryRun: false,
 		json: false,
@@ -96,6 +103,9 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 				break;
 			case "--keep-data":
 				parsed.keepData = true;
+				break;
+			case "--keep-package":
+				parsed.keepPackage = true;
 				break;
 			case "--inactive":
 				parsed.inactive = true;
@@ -118,7 +128,7 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 				throw new Error(`unknown flag: ${arg}`);
 		}
 	}
-	if (parsed.inactive && (parsed.keepBinary || parsed.keepConfig || parsed.keepData))
+	if (parsed.inactive && (parsed.keepBinary || parsed.keepPackage || parsed.keepConfig || parsed.keepData))
 		throw new Error("--inactive already keeps the binary, config and data; drop the --keep-* flags");
 	return parsed;
 }
@@ -315,7 +325,74 @@ function otherClioOnPath(pathClio: string | null, localLink: string): string | n
  * shell. Naming the file and leaving the edit to the operator is the honest
  * trade, so these rows are listed as kept rather than as removals.
  */
-function detectShellRcEdits(): Array<{ file: string; lines: number[] }> {
+/** Sockets of Clio's private herdr hosts that still exist, from `<state>/mux/<hash>/socket-path`. */
+function privatePaneHosts(stateDir: string): string[] {
+	const mux = join(stateDir, "mux");
+	let roots: string[];
+	try {
+		roots = readdirSync(mux);
+	} catch {
+		return [];
+	}
+	return roots.flatMap((name) => {
+		try {
+			const socket = readFileSync(join(mux, name, "socket-path"), "utf8").trim();
+			return isAbsolute(socket) && lstatSync(socket).isSocket() ? [socket] : [];
+		} catch {
+			return [];
+		}
+	});
+}
+
+/** Ask a private host to stop and wait for its socket to go quiet. True when it is gone. */
+async function stopPaneHost(socketPath: string): Promise<boolean> {
+	const { createMuxClient } = await import("../domains/mux/index.js");
+	const answers = async (): Promise<boolean> => {
+		const client = createMuxClient({ socketPath, connectTimeoutMs: 500, requestTimeoutMs: 500 });
+		try {
+			await client.ping({ timeoutMs: 500 });
+			return true;
+		} catch {
+			return false;
+		} finally {
+			await client.close();
+		}
+	};
+	if (!(await answers())) return true;
+	const client = createMuxClient({ socketPath, connectTimeoutMs: 500, requestTimeoutMs: 2_000 });
+	await client.serverStop().catch(() => undefined);
+	await client.close();
+	for (let attempt = 0; attempt < 30; attempt++) {
+		if (!(await answers())) return true;
+		await new Promise((done) => setTimeout(done, 100));
+	}
+	return false;
+}
+
+const PATH_BLOCK_MARK = "# added by clio-coder install.sh";
+
+/**
+ * The 0-based index of the mark line of the block `install.sh --modify-path`
+ * appended for `binDir`, when both of its lines are still exactly as written.
+ */
+function markedPathBlock(text: ReadonlyArray<string>, binDir: string): number | null {
+	const written = [`export PATH="${binDir}:$PATH"`, `fish_add_path "${binDir}"`];
+	const index = text.findIndex((line, at) => line === PATH_BLOCK_MARK && written.includes(text[at + 1] ?? ""));
+	return index < 0 ? null : index;
+}
+
+/** Remove the marked block and the blank line install.sh put before it. True when the file changed. */
+function removePathBlock(file: string, binDir: string): boolean {
+	const text = readFileSync(file, "utf8").split("\n");
+	const index = markedPathBlock(text, binDir);
+	if (index === null) return false;
+	const start = index > 0 && text[index - 1] === "" ? index - 1 : index;
+	text.splice(start, index + 2 - start);
+	writeFileSync(file, text.join("\n"));
+	return true;
+}
+
+function detectShellRcEdits(binDir: string): Array<{ file: string; lines: number[]; block: boolean }> {
 	const home = homedir();
 	const zdotdir = process.env.ZDOTDIR?.trim();
 	const xdgConfig = process.env.XDG_CONFIG_HOME?.trim();
@@ -327,12 +404,14 @@ function detectShellRcEdits(): Array<{ file: string; lines: number[] }> {
 		join(home, ".profile"),
 		join(xdgConfig && isAbsolute(xdgConfig) ? xdgConfig : join(home, ".config"), "fish", "config.fish"),
 	];
-	const results: Array<{ file: string; lines: number[] }> = [];
+	const results: Array<{ file: string; lines: number[]; block: boolean }> = [];
 	for (const file of new Set(candidates)) {
 		try {
 			const content = readFileSync(file, "utf8");
 			const text = content.split("\n");
+			const block = markedPathBlock(text, binDir);
 			const lines = text.flatMap((line, index) => {
+				if (index === block || index === (block ?? -2) + 1) return [];
 				if (
 					line.includes("clio-coder") ||
 					line.includes("CLIO_CODER") ||
@@ -341,7 +420,7 @@ function detectShellRcEdits(): Array<{ file: string; lines: number[] }> {
 					return [index + 1];
 				return [];
 			});
-			if (lines.length) results.push({ file, lines });
+			if (lines.length || block !== null) results.push({ file, lines, block: block !== null });
 		} catch {
 			// Absent or unreadable says nothing to report.
 		}
@@ -564,7 +643,10 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const linkSize = measurePath(linkPath);
 	const launcher = classifyLauncher(linkPath, installation);
 	const runtimeSize = installerRecord ? measurePath(installerRecord.root) : null;
-	const shellEdits = detectShellRcEdits();
+	const shellEdits = detectShellRcEdits(dirname(linkPath));
+	const paneHosts = process.platform === "win32" ? [] : privatePaneHosts(dirs.state);
+	const npmPrefix = method === "npm" && process.platform !== "win32" ? installation.prefix : null;
+	const removePackage = npmPrefix !== null && !args.keepBinary && !args.keepPackage;
 	let web: Awaited<ReturnType<typeof prepareGuiUninstall>>;
 	try {
 		const desktopPrefix =
@@ -647,14 +729,40 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		if (state) state.detail = "sessions, telemetry; gui is kept";
 	}
 
-	// A login file is reported, never edited; see detectShellRcEdits.
-	for (const { file, lines } of shellEdits) {
+	for (const socket of paneHosts)
 		items.push({
-			label: "Shell config",
-			path: file,
-			status: "skip",
-			detail: `mentions clio-coder on lines ${lines.join(", ")}; edit it by hand`,
+			label: "Pane host",
+			path: socket,
+			status: "remove",
+			detail: "Clio's private herdr host; stopped first",
 		});
+	if (npmPrefix !== null)
+		items.push({
+			label: "npm package",
+			path: installation.root,
+			status: removePackage ? "remove" : "skip",
+			detail: removePackage
+				? `npm uninstall -g --prefix ${shortenPath(npmPrefix)}, run last`
+				: `kept by ${args.keepPackage ? "--keep-package" : "--keep-binary"}`,
+		});
+	// Only the exact block install.sh wrote is removed, and only with the launcher it
+	// points at; any other mention is reported and never edited.
+	const removePathBlocks = !args.keepBinary && launcher.kind !== "keep";
+	for (const { file, lines, block } of shellEdits) {
+		if (block)
+			items.push({
+				label: "PATH block",
+				path: file,
+				status: removePathBlocks ? "remove" : "skip",
+				detail: removePathBlocks ? `the two lines marked "${PATH_BLOCK_MARK}"` : "kept with the launcher",
+			});
+		if (lines.length)
+			items.push({
+				label: "Shell config",
+				path: file,
+				status: "skip",
+				detail: `mentions clio-coder on lines ${lines.join(", ")}; edit it by hand`,
+			});
 	}
 
 	presenter.listItems("The following will be removed", items);
@@ -749,8 +857,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		if (
 			process.platform === "win32" &&
 			!args.keepBinary &&
-			installerRecord?.manager === "winget" &&
-			installerRecord.pathAdded &&
+			installerRecord?.pathAdded &&
 			installerRecord.pathEntry === dirname(installerRecord.launcher)
 		) {
 			const entry = `'${installerRecord.pathEntry.replaceAll("'", "''")}'`;
@@ -768,13 +875,23 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 				{ timeoutMs: 30_000 },
 			);
 			if (result.exitCode !== 0) {
-				presenter.fail("Could not remove the manager-owned PATH addition", result.stderr);
+				presenter.fail("Could not remove the PATH entry the installer added", result.stderr);
 				presenter.finish();
 				return 1;
 			}
-			presenter.completedStep("Removed only the manager-owned PATH addition");
+			presenter.completedStep("Removed only the PATH entry the installer added");
 		}
 		const failures: RemovalFailure[] = [];
+		const kept: string[] = [];
+		const stayed = new Set<string>();
+		// The pinned herdr binary lives in the data root; its server goes first.
+		for (const socket of paneHosts) {
+			if (await stopPaneHost(socket)) presenter.completedStep(`Stopped the pane host at ${shortenPath(socket)}`);
+			else {
+				stayed.add(`Pane host|${socket}`);
+				kept.push(`Pane host: ${shortenPath(socket)} (it did not stop; it exits with its terminal)`);
+			}
+		}
 		try {
 			await stopLegacyDocsBeforeRemoval();
 			await web.remove();
@@ -837,6 +954,22 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			}
 		}
 
+		if (removePathBlocks)
+			for (const { file, block } of shellEdits) {
+				if (!block) continue;
+				try {
+					if (removePathBlock(file, dirname(linkPath)))
+						presenter.completedStep(`Removed the PATH block from ${shortenPath(file)}`);
+					else {
+						stayed.add(`PATH block|${file}`);
+						kept.push(`PATH block: ${shortenPath(file)} (it changed since the listing, so it was left alone)`);
+					}
+				} catch (error) {
+					stayed.add(`PATH block|${file}`);
+					kept.push(`PATH block: ${shortenPath(file)} (${error instanceof Error ? error.message : String(error)})`);
+				}
+			}
+
 		// The running Node and package live under this root. Unlinking them is safe
 		// on Linux and macOS: the open files stay readable until this process exits.
 		let runtimeRemoved = false;
@@ -876,6 +1009,24 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 		resetXdgCache();
 
+		// Last: npm deletes the package this process runs from, which POSIX allows.
+		let packageRemoved = false;
+		if (removePackage && npmPrefix !== null && failures.length === 0) {
+			const besideNode = join(dirname(process.execPath), "npm");
+			const result = await runCommandVector(
+				existsSync(besideNode) ? besideNode : "npm",
+				["uninstall", "-g", "--prefix", npmPrefix, "@iowarp/clio-coder"],
+				{ timeoutMs: 120_000 },
+			);
+			if (result.exitCode === 0) {
+				presenter.completedStep(`Removed the npm package from ${shortenPath(npmPrefix)}`);
+				packageRemoved = true;
+			} else {
+				stayed.add(`npm package|${installation.root}`);
+				kept.push(`npm package: npm uninstall exited ${result.exitCode ?? "on a signal"}`);
+			}
+		}
+
 		if (failures.length > 0) {
 			presenter.fail("uninstall did not remove everything");
 			reportRemovalFailures(
@@ -887,8 +1038,19 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		}
 
 		const installerGone = method === "installer" && runtimeRemoved && launcher.kind !== "keep";
-		if (!installerGone && (method !== "source" || (launcher.kind !== "absent" && !launcherRemoved)))
+		if (!installerGone && !packageRemoved && (method !== "source" || (launcher.kind !== "absent" && !launcherRemoved)))
 			presenter.commandAdvice(advice.lead, advice.command);
+		presenter.outcome(
+			items
+				.filter((item) => item.status === "remove" && !stayed.has(`${item.label}|${item.path}`))
+				.map((item) => `${item.label}: ${shortenPath(item.path)}`),
+			[
+				...items
+					.filter((item) => item.status === "keep" || item.status === "skip")
+					.map((item) => `${item.label}: ${shortenPath(item.path)}${item.detail ? ` (${item.detail})` : ""}`),
+				...kept,
+			],
+		);
 		if (survivor !== null)
 			presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
 
