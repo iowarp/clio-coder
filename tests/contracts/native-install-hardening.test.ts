@@ -7,6 +7,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
@@ -181,6 +182,40 @@ test("without a complete process inventory, prune keeps the last week and the ne
 	for (const dir of [recent, ...newest, f.record.current, f.record.previous]) assert.equal(existsSync(dir), true, dir);
 	for (const dir of old) assert.equal(existsSync(dir), false, dir);
 	assert.equal(result.kept.find((entry) => entry.name === "0.6.3")?.why, "recent");
+});
+
+test("activation moves a POSIX launcher to the new Node and collects the old runtime", {
+	skip: process.platform === "win32",
+}, (t) => {
+	const f = fixture(t);
+	const runtime = (name: string) => {
+		mkdirSync(join(f.root, "runtime", name, "bin"), { recursive: true });
+		symlinkSync(process.execPath, join(f.root, "runtime", name, "bin/node"));
+		return join(f.root, "runtime", name, "bin/node");
+	};
+	const candidate = (version: string) => {
+		const dir = f.prefix(version);
+		mkdirSync(join(dir, suffix, "dist/cli"), { recursive: true });
+		writeFileSync(join(dir, suffix, "dist/cli/index.js"), `console.log(${JSON.stringify(version)});`);
+		return dir;
+	};
+	rmSync(join(f.root, "install.json"));
+	const activate = (node: string, prefix: string) =>
+		f.run("activate", node, "24", "linux-x64", prefix, f.record.launcher, "latest", "-", "0", "0");
+	const first = runtime("node-v24.0.0-linux-x64");
+	const a = activate(first, candidate("0.6.2"));
+	assert.equal(a.status, 0, a.stderr);
+	const second = runtime("node-v24.1.0-linux-x64");
+	const b = activate(second, candidate("0.6.3"));
+	assert.equal(b.status, 0, b.stderr);
+	const manifest = JSON.parse(readFileSync(join(f.root, "install.json"), "utf8"));
+	assert.equal(manifest.launcherNode, second);
+	assert.match(readFileSync(f.record.launcher, "utf8"), new RegExp(`exec '${second}'`));
+	// The first runtime is still the previous version's Node, kept for rollback.
+	assert.equal(manifest.previousNode, first);
+	const c = activate(second, candidate("0.6.4"));
+	assert.equal(c.status, 0, c.stderr);
+	assert.equal(existsSync(join(f.root, "runtime/node-v24.0.0-linux-x64")), process.platform !== "linux");
 });
 
 test("malformed liveness receipts withdraw the proof", { skip: process.platform !== "linux" }, (t) => {

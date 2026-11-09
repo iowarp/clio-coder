@@ -694,7 +694,10 @@ async function main() {
 	fs.mkdirSync(helpers, { recursive: true });
 	const bootstrap = path.join(helpers, `${crypto.createHash("sha256").update(helper).digest("hex")}.cjs`);
 	if (!fs.existsSync(bootstrap)) atomic(bootstrap, helper);
-	const launcherNode = old?.launcherNode || old?.node || node;
+	// A POSIX launcher execs its Node, so replacing the file never disturbs a running shell and
+	// the launcher can follow the new runtime, letting prune collect the old one. cmd.exe rereads
+	// a running .cmd by byte offset, so a Windows launcher keeps its first Node.
+	const launcherNode = process.platform === "win32" ? old?.launcherNode || old?.node || node : node;
 	const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 	const body =
 		process.platform === "win32"
