@@ -31,7 +31,11 @@ function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
  * first `bash.exe` on PATH, then the standard Git for Windows locations. The
  * `bash.exe` under the system directory or WindowsApps is the WSL launcher,
  * which runs the command inside a Linux distribution where the workspace's
- * Windows paths do not resolve, so it is skipped.
+ * Windows paths do not resolve, so it is skipped. Git for Windows'
+ * `<git>\bin\bash.exe` is a wrapper that puts its own git ahead of everything
+ * on PATH, including Clio's managed git shim, so its sibling
+ * `<git>\usr\bin\bash.exe` runs instead; {@link bashShellEnvironment} gives it
+ * the tool directories the wrapper would have added.
  */
 export function resolveBashShell(host: BashShellHost = LIVE_HOST): string | null {
 	if (host.platform !== "win32") return POSIX_BASH;
@@ -53,7 +57,47 @@ export function resolveBashShell(host: BashShellHost = LIVE_HOST): string | null
 	const localAppData = envValue(host.env, "LOCALAPPDATA");
 	if (localAppData !== undefined) candidates.push(win.join(localAppData, "Programs", "Git", "bin", "bash.exe"));
 	candidates.push("C:\\Program Files\\Git\\bin\\bash.exe");
-	return candidates.find((file) => !isWslLauncher(file) && host.isFile(file)) ?? null;
+	const found = candidates.find((file) => !isWslLauncher(file) && host.isFile(file));
+	if (found === undefined) return null;
+	const dir = win.dirname(found);
+	if (win.basename(dir).toLowerCase() !== "bin" || win.basename(win.dirname(dir)).toLowerCase() === "usr") return found;
+	const unwrapped = win.join(win.dirname(dir), "usr", "bin", "bash.exe");
+	return host.isFile(unwrapped) ? unwrapped : found;
+}
+
+/** The MSYS2 environments Git for Windows ships its own git and tools under, in the order its wrapper prefers. */
+const GIT_FOR_WINDOWS_MSYSTEMS = ["ucrt64", "mingw64", "clangarm64", "mingw32"] as const;
+
+/**
+ * The environment a bash from {@link resolveBashShell} runs with. A Windows
+ * `<root>\usr\bin\bash.exe` started directly has no `/usr/bin` on PATH, so
+ * sed, grep and ls are missing and `find` is the Windows one. This prepends what
+ * Git for Windows' `bin\bash.exe` wrapper does, `<root>\<msystem>\bin` and
+ * `<root>\usr\bin`, and sets MSYSTEM to match. Callers that put a directory
+ * ahead of these, such as the managed git shim, add it after this runs.
+ */
+export function bashShellEnvironment(
+	shell: string,
+	env: NodeJS.ProcessEnv,
+	host: BashShellHost = LIVE_HOST,
+): NodeJS.ProcessEnv {
+	if (host.platform !== "win32") return env;
+	const win = path.win32;
+	const usrBin = win.dirname(shell);
+	if (win.basename(usrBin).toLowerCase() !== "bin" || win.basename(win.dirname(usrBin)).toLowerCase() !== "usr")
+		return env;
+	const root = win.dirname(win.dirname(usrBin));
+	const msystem = GIT_FOR_WINDOWS_MSYSTEMS.find((name) => host.isFile(win.join(root, name, "bin", "git.exe")));
+	const prefix = [...(msystem === undefined ? [] : [win.join(root, msystem, "bin")]), usrBin];
+	const next = { ...env };
+	const pathKey = Object.keys(next).find((key) => key.toUpperCase() === "PATH") ?? "Path";
+	const current = next[pathKey];
+	next[pathKey] = current === undefined || current.length === 0 ? prefix.join(";") : `${prefix.join(";")};${current}`;
+	if (msystem !== undefined) {
+		for (const key of Object.keys(next)) if (key.toUpperCase() === "MSYSTEM") Reflect.deleteProperty(next, key);
+		next.MSYSTEM = msystem.toUpperCase();
+	}
+	return next;
 }
 
 let resolved: string | null | undefined;

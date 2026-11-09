@@ -3,7 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { YOLO_CONFINEMENT_PIN_ENV, yoloConfinementPinned } from "../domains/safety/autonomy.js";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
-import { bashShellPath } from "./bash-shell.js";
+import { bashShellEnvironment, bashShellPath } from "./bash-shell.js";
 import {
 	gitCommitAttributionEnabled,
 	reportCommitAttributionDiagnostic,
@@ -428,7 +428,10 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 	// A sandboxed command reaches the network without a judgment, so its
 	// environment loses every credential variable before the sandbox starts;
 	// the scrub covers the names the plain filter drops and more.
-	const toolEnv = sandbox.kind === "sandboxed" ? scrubSandboxEnv(plan.source, sandbox.env, plan.source).env : plan.env;
+	const toolEnv = bashShellEnvironment(
+		shell,
+		sandbox.kind === "sandboxed" ? scrubSandboxEnv(plan.source, sandbox.env, plan.source).env : plan.env,
+	);
 	const attribution = withManagedGitCommitAttributionEnvironment(toolEnv, {
 		cwd: options.cwd ?? process.cwd(),
 		enabled: gitCommitAttributionEnabled(process.env),

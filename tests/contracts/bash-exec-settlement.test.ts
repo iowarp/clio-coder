@@ -10,7 +10,7 @@ import {
 	createBashOutputProgressController,
 	runBashCommand,
 } from "../../src/core/bash-exec.js";
-import { POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
+import { bashShellEnvironment, POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
 import { bashTool } from "../../src/tools/bash.js";
 
 class DeterministicScheduler implements BashProgressScheduler {
@@ -204,6 +204,21 @@ describe("bash shell resolution", () => {
 			windows(env, [...launchers, "C:\\tools\\git\\usr\\bin\\bash.exe", gitBash]),
 			"C:\\tools\\git\\usr\\bin\\bash.exe",
 		);
+	});
+
+	it("runs Git for Windows' usr\\bin bash with the wrapper's tool directories so the git shim stays first", () => {
+		const usrBash = "C:\\Program Files\\Git\\usr\\bin\\bash.exe";
+		const ucrtGit = "C:\\Program Files\\Git\\ucrt64\\bin\\git.exe";
+		const env = { Path: "C:\\Program Files\\Git\\bin;C:\\Windows", ProgramFiles: "C:\\Program Files", msystem: "MSYS" };
+		const files = [gitBash, usrBash, ucrtGit];
+		strictEqual(windows(env, files), usrBash);
+		const host = { platform: "win32" as const, env, isFile: (file: string) => files.includes(file) };
+		deepStrictEqual(bashShellEnvironment(usrBash, env, host), {
+			Path: "C:\\Program Files\\Git\\ucrt64\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\bin;C:\\Windows",
+			ProgramFiles: "C:\\Program Files",
+			MSYSTEM: "UCRT64",
+		});
+		strictEqual(bashShellEnvironment(gitBash, env, host), env);
 	});
 
 	it("reports none when only the WSL launcher exists", () => {
