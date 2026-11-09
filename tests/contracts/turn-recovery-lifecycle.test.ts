@@ -17,6 +17,7 @@ import {
 	recoveryRetryDelayMs,
 } from "../../src/domains/session/retry.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
+import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { TurnRecoveryDeps } from "../../src/session-control/turn-recovery.js";
@@ -187,6 +188,31 @@ test("recovery matrix preserves route, output, cancellation and loading policy",
 				recovery.cancelRetryCountdown();
 			}
 		});
+});
+
+test("the overflow notice says Clio refused when its own guard stopped the request before sending", async () => {
+	const notices: string[] = [];
+	const runtime = {
+		runtimeId: "litellm",
+		runtimeResolution: { contextWindowDetails: { effectiveContextWindow: 28000 } },
+		agent: { state: { messages: [] }, async continue() {}, async prompt() {} },
+	} as unknown as AgentRuntime;
+	const recovery = createTurnRecovery({
+		state: createTurnState(),
+		persistence: { appendRetryStatus() {}, wasPersisted: () => true } as unknown as TurnRecoveryDeps["persistence"],
+		context: { runAutoCompact: async () => true } as unknown as TurnRecoveryDeps["context"],
+		retrySettings: () => DEFAULT_RETRY_SETTINGS,
+		markPersistedUserEcho: async (_text, prompt) => prompt(),
+		emitRetryStatus() {},
+		emitFailureMessage() {},
+		emitNotice: (text) => notices.push(text),
+	});
+	const local = `${LOCAL_CONTEXT_OVERFLOW_PREFIX}: the request would leave 1 output tokens of a 28000-token window (estimated input 27999), below the usable minimum of 3500.`;
+	await recovery.runCompactAndRetry(runtime, "request", new ContextOverflowError(local, new Error(local)));
+	await recovery.runCompactAndRetry(runtime, "request", new ContextOverflowError("maximum context length exceeded"));
+	ok(notices[0]?.startsWith("[Clio Coder] Clio refused this request before sending it"), notices[0]);
+	ok(!notices[0]?.includes("Server rejected"), notices[0]);
+	ok(notices[1]?.startsWith("[Clio Coder] Server rejected this request"), notices[1]);
 });
 
 test("an OAuth rejection refreshes the sent token once, then retries or ends with the login remedy (#427)", async (t) => {

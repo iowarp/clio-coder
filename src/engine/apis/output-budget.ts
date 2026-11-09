@@ -204,6 +204,9 @@ function requestedOutputCeiling(
 	return Math.min(requested, modelLimit);
 }
 
+/** Opens the overflow error Clio raises itself, before any provider call, so recovery can say who refused. */
+export const LOCAL_CONTEXT_OVERFLOW_PREFIX = "Context window exceeded before the provider call";
+
 /**
  * Why a request must not go out: the output budget it would actually carry
  * falls below the usable floor preflight admission reserves. `sentMaxTokens`
@@ -227,7 +230,7 @@ export function outputBudgetShortfall(
 	const sent = clampMaxTokensToContext(model as Model<Api>, normalizeContext(context), clio);
 	const floor = usableOutputFloor(ceiling, contextWindow);
 	if (sent >= floor) return null;
-	return `Context window exceeded before the provider call: the request would leave ${sent} output tokens of a ${contextWindow}-token window (estimated input ${estimateInputTokensFromContext(context)}), below the usable minimum of ${floor}.`;
+	return `${LOCAL_CONTEXT_OVERFLOW_PREFIX}: the request would leave ${sent} output tokens of a ${contextWindow}-token window (estimated input ${estimateInputTokensFromContext(context)}), below the usable minimum of ${floor}.`;
 }
 
 /** Reasoning tokens inferred from visible thinking text, for servers that report none. */

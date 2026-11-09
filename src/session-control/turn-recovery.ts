@@ -22,6 +22,7 @@ import {
 	retryWaitCause,
 	statedRetryWaitMs,
 } from "../domains/session/retry.js";
+import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../engine/apis/output-budget.js";
 import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
 import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import {
@@ -389,10 +390,13 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		try {
 			if (cancelled()) return;
 			const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
+			const refusedLocally = overflow.message.startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX);
 			deps.emitNotice(
-				windowUnknown
-					? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
-					: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
+				refusedLocally
+					? "[Clio Coder] Clio refused this request before sending it: it would leave too little of the context window for a reply; compacting and retrying once."
+					: windowUnknown
+						? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
+						: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
 			);
 			let compacted = false;
 			try {
