@@ -99,3 +99,23 @@ test("CLI entry static closure loads no Effect", () => {
 	ok(entry);
 	assertNoEffect(metadata, entry[0], "CLI entry");
 });
+
+test("run --help answers from a module that does not load the run command", () => {
+	const metadata = readMetafile();
+	const owners = Object.entries(metadata.outputs).filter(([, output]) => "src/cli/run-help.ts" in output.inputs);
+	strictEqual(owners.length, 1, "build with pnpm build before checking the run help artifact");
+	const owner = owners[0];
+	ok(owner);
+	const seen = new Set<string>();
+	const visit = (name: string): void => {
+		if (seen.has(name)) return;
+		const output = metadata.outputs[name];
+		ok(output, `missing static output: ${name}`);
+		seen.add(name);
+		for (const source of Object.keys(output.inputs))
+			ok(!/^src\/(?:cli\/run\.ts|domains\/(?:dispatch|providers|session)\/)/u.test(source), `run help loads ${source}`);
+		for (const dependency of output.imports)
+			if (dependency.kind !== "dynamic-import" && !dependency.external) visit(dependency.path);
+	};
+	visit(owner[0]);
+});

@@ -391,6 +391,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"run",
 		async (subArgs, bootOptions) => {
+			const help = (await import("./run-help.js")).answerRunHelp(subArgs);
+			if (help !== null) return help;
 			await enableBootCompileCache(subArgs);
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		},
