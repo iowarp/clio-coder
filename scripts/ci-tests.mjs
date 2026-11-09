@@ -140,6 +140,7 @@ export const guiTests = [
 	"arena-model",
 	"research-model",
 	"research-http",
+	"pages",
 	"machine-proxy",
 	"client-auth",
 	"session-control",
