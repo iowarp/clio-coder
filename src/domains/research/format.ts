@@ -1,4 +1,5 @@
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
+import { aaLabel } from "./grader.js";
 import type { ResearchCampaignView } from "./report.js";
 import type { ResearchAgentAutonomy, ResearchCost, ResearchDirection } from "./types.js";
 
@@ -76,7 +77,7 @@ export function campaignStatusLines(view: ResearchCampaignView): string[] {
 	];
 	if (view.aa !== null)
 		lines.push(
-			`A/A: ${view.aa.noisy ? "noisy" : "quiet"}${view.aa.noisy && view.aa.allowed ? " (allowed)" : ""}; ${describeGrade(view.aa.grade, objective)}`,
+			`A/A: ${view.aa.noisy ? "noisy" : aaLabel(view.aa.grade)}${view.aa.noisy && view.aa.allowed ? " (allowed)" : ""}; ${describeGrade(view.aa.grade, objective)}`,
 		);
 	for (const iteration of view.iterations) {
 		const graded = iteration.grade !== null ? `; ${describeGrade(iteration.grade, objective)}` : "";

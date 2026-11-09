@@ -141,3 +141,12 @@ export function grade(input: GradeInput): ResearchGrade {
 export function aaIsNoisy(aa: ResearchGrade): boolean {
 	return aa.classification !== "unchanged" && intervalExcludesZero(aa.ci);
 }
+
+/**
+ * How the A/A check reads. Quiet only when the medians stay inside `minImprovement`; a delta past it whose interval
+ * still spans zero means too few trials to tell noise from a change, so it is inconclusive rather than quiet.
+ */
+export function aaLabel(aa: ResearchGrade): string {
+	if (aaIsNoisy(aa)) return "noisy";
+	return aa.classification === "unchanged" ? "quiet" : "inconclusive (too few trials to judge the noise; raise --trials)";
+}

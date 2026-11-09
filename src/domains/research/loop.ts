@@ -40,7 +40,7 @@ import {
 	untrackedEntries,
 	withinEntries,
 } from "./git.js";
-import { aaIsNoisy, grade } from "./grader.js";
+import { aaIsNoisy, aaLabel, grade } from "./grader.js";
 import {
 	changeReachesProtected,
 	filesNamedByCheck,
@@ -319,7 +319,7 @@ export async function runResearchCampaign(
 		});
 		const noisy = aaIsNoisy(aaGrade);
 		journal({ type: "aa", at: at(), samples: aaSamples, grade: aaGrade, noisy, allowed: !noisy || campaign.allowNoisy });
-		log(`A/A: ${noisy ? "noisy" : "quiet"} (${describeGrade(aaGrade, campaign.objective)})`);
+		log(`A/A: ${aaLabel(aaGrade)} (${describeGrade(aaGrade, campaign.objective)})`);
 		if (noisy && !campaign.allowNoisy)
 			return finish(
 				"noisy",

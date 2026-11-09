@@ -29,6 +29,7 @@ import {
 	type AgentRunner,
 	type AgentRunResult,
 	aaIsNoisy,
+	aaLabel,
 	agentRunArgv,
 	budgetStop,
 	campaignStatusLines,
@@ -123,6 +124,17 @@ describe("research grading", () => {
 	it("does not call a delta past the threshold improved when the interval straddles zero", () => {
 		const verdict = grade({ ...base, base: [100, 100, 100, 100], candidate: [10, 200, 10, 200] }).verdict;
 		ok(verdict === "inconclusive" || verdict === "regressed", verdict);
+	});
+
+	it("reads an A/A check whose delta passes the threshold with an interval spanning zero as inconclusive, not quiet", () => {
+		const underpowered = grade({ ...base, base: [100, 90, 110, 95, 105], candidate: [100, 250, 90, 160, 141] });
+		strictEqual(underpowered.verdict, "inconclusive");
+		ok(underpowered.ci !== null && underpowered.ci.low < 0 && underpowered.ci.high > 0);
+		strictEqual(aaIsNoisy(underpowered), false);
+		ok(aaLabel(underpowered).startsWith("inconclusive (too few trials"), aaLabel(underpowered));
+		const before = [100, 101, 99, 100, 102];
+		strictEqual(aaLabel(grade({ ...base, base: before, candidate: before })), "quiet");
+		strictEqual(aaLabel(grade({ ...base, base: before, candidate: [50, 51, 49, 50, 52] })), "noisy");
 	});
 
 	it("labels a sure move inside the threshold below threshold or a small regression, and still unchanged", () => {
