@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,6 +9,8 @@ import { parse } from "yaml";
 
 const planModule = "../../scripts/release/plan.mjs";
 const receiptModule = "../../scripts/release/receipt.mjs";
+const nextModule = "../../scripts/release/next.mjs";
+const candidateModule = "../../scripts/release-candidate.mjs";
 const commit = "a".repeat(40);
 
 type Facts = Record<string, unknown>;
@@ -296,5 +299,185 @@ describe("release workflows", () => {
 		ok(workflow.jobs.release["timeout-minutes"] >= 40);
 		strictEqual(workflow.jobs.release.if, `\${{ inputs.mode != 'check' }}`);
 		ok(workflow.on.workflow_dispatch.inputs.mode.options.includes("check"));
+	});
+});
+
+describe("release walk over recorded reads", () => {
+	const repo = "repos/iowarp/clio-coder";
+	const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	const name = "@iowarp/clio-coder";
+	const version = "0.7.1";
+
+	/** A CI candidate artifact of run 77 that verifyCandidate accepts. */
+	async function ciArtifact(scratch: string) {
+		const { installers, sha256 } = await import(candidateModule);
+		const directory = join(scratch, `artifacts/77-candidate-${head}`);
+		mkdirSync(join(directory, "package"), { recursive: true });
+		mkdirSync(join(directory, "site"));
+		writeFileSync(join(directory, "package/package.json"), JSON.stringify({ name, version }));
+		const tarball = `iowarp-clio-coder-${version}.tgz`;
+		execFileSync("tar", ["-czf", join(directory, tarball), "-C", directory, "package"]);
+		writeFileSync(
+			join(directory, "site/version.json"),
+			JSON.stringify({ publishedVersion: version, docsCommit: head, revision: head }),
+		);
+		execFileSync("tar", ["-czf", join(directory, "website.tgz"), "-C", join(directory, "site"), "."]);
+		rmSync(join(directory, "package"), { recursive: true });
+		rmSync(join(directory, "site"), { recursive: true });
+		const others = [...installers, "release-notes.md", "metafile-esm.json"];
+		for (const file of others) writeFileSync(join(directory, file), file);
+		const files = Object.fromEntries(
+			[tarball, "website.tgz", ...others].map((file) => [file, sha256(readFileSync(join(directory, file)))]),
+		);
+		writeFileSync(
+			join(directory, "candidate.json"),
+			JSON.stringify({ schema: 2, name, version, commit: head, run: 77, files }),
+		);
+		return `sha512-${createHash("sha512")
+			.update(readFileSync(join(directory, tarball)))
+			.digest("base64")}`;
+	}
+
+	type Run = { id: number; status: string; conclusion?: string | null; jobs: Facts[] };
+	const job = (jobName: string, status: string, conclusion: string | null = null) => ({
+		id: jobName.length,
+		name: jobName,
+		status,
+		conclusion,
+	});
+	const passed = (...names: string[]) => names.map((jobName) => job(jobName, "completed", "success"));
+
+	/** The reads one readFacts pass makes, keyed the way useRecording stores them. */
+	function book(world: {
+		heads: Record<string, string>;
+		ci?: Run[];
+		release?: Run[];
+		npm?: Facts | null;
+		published?: boolean;
+		distTags?: Facts;
+	}) {
+		const reads: Facts = { post: [] };
+		const runs = (workflow: string, list: Run[] = []) => {
+			reads[`api ${repo}/actions/workflows/${workflow}/runs?event=workflow_dispatch&head_sha=${head}&per_page=20`] = {
+				workflow_runs: list.map(({ jobs: _jobs, ...record }) => ({ ...record, head_sha: head, run_attempt: 1 })),
+			};
+			for (const { jobs, ...record } of list) {
+				reads[`api ${repo}/actions/runs/${record.id}`] = { ...record, head_sha: head, run_attempt: 1 };
+				reads[`api ${repo}/actions/runs/${record.id}/jobs?filter=latest&per_page=100`] = { jobs };
+				reads[`api ${repo}/actions/runs/${record.id}/artifacts?per_page=100`] = {
+					artifacts: ["candidate", "results", "results24"].map((prefix) => ({
+						name: `${prefix}-${head}`,
+						expired: false,
+					})),
+				};
+			}
+		};
+		runs("ci.yml", world.ci);
+		runs("release.yml", world.release);
+		for (const branch of ["v071", "main", "rehearse/0.7.1-ab-cd"])
+			reads[`ls-remote refs/heads/${branch}`] = world.heads[branch]
+				? `${world.heads[branch]}\trefs/heads/${branch}\n`
+				: "";
+		reads[`npm ${name}@${version}`] = world.npm ?? null;
+		reads[`api ${repo}/releases/tags/v${version}`] = world.published
+			? { draft: false, tag_name: `v${version}` }
+			: { $error: "HTTP 404" };
+		reads[`ls-remote refs/tags/v${version} refs/tags/v${version}^{}`] = world.published
+			? `${head}\trefs/tags/v${version}\n`
+			: "";
+		reads[`dist-tags ${name}`] = world.distTags ?? { latest: version };
+		return reads;
+	}
+
+	it("walks every rehearse and release position and reuses the rehearsal's one ci.yml run", async () => {
+		const next = await import(nextModule);
+		const { nextStep } = await import(planModule);
+		const scratch = mkdtempSync(join(tmpdir(), "clio-release-walk-"));
+		try {
+			const integrity = await ciArtifact(scratch);
+			const file = join(scratch, "reads.json");
+			const context = {
+				state: join(scratch, "state"),
+				candidate: join(scratch, "state/c-none"),
+				channel: "latest",
+				name,
+				tag: `v${version}`,
+				post: null,
+			};
+			const receipt: Facts = { version, commit: head, branch: "v071", nonce: "ab", events: [], ciRun: null };
+			const at = async (mode: string, world: Parameters<typeof book>[0]) => {
+				writeFileSync(file, JSON.stringify(book(world)));
+				next.useRecording(file);
+				return nextStep(await next.readFacts(mode, receipt, context), receipt).step;
+			};
+			const scratchBranch = { "rehearse/0.7.1-ab-cd": head };
+			const ci = (status: string, jobs: Facts[], conclusion: string | null = null): Run => ({
+				id: 77,
+				status,
+				conclusion,
+				jobs,
+			});
+			const green = ci("completed", passed("prepare", "ci (22)", "ci (24)", "boot (macos-latest)"), "success");
+
+			receipt.rehearsal = { branch: "rehearse/0.7.1-ab-cd", tornDown: false, runs: [] };
+			strictEqual(await at("rehearse", { heads: scratchBranch }), "dispatch-ci");
+			receipt.ciRun = { id: 77, attempt: 1 };
+			(receipt.rehearsal as Facts).runs = [77];
+			strictEqual(
+				await at("rehearse", { heads: scratchBranch, ci: [ci("queued", [job("prepare", "queued")])] }),
+				"watch-ci",
+			);
+			const foreign = ci("in_progress", [job("prepare", "in_progress")]);
+			strictEqual(await at("rehearse", { heads: scratchBranch, ci: [{ ...foreign, id: 99 }, ci("queued", [])] }), "stop");
+			strictEqual(await at("rehearse", { heads: scratchBranch, ci: [green] }), "check-release");
+			Object.assign(receipt.rehearsal as Facts, { checked: { run: 78 } });
+			strictEqual(await at("rehearse", { heads: scratchBranch, ci: [green] }), "draft-rehearsal");
+			Object.assign(receipt.rehearsal as Facts, { drafted: true });
+			strictEqual(await at("rehearse", { heads: scratchBranch, ci: [green] }), "publish-stub");
+			Object.assign(receipt.rehearsal as Facts, { stubbed: true });
+			strictEqual(await at("rehearse", { heads: scratchBranch, ci: [green] }), "teardown");
+			Object.assign(receipt.rehearsal as Facts, { branch: null, tornDown: true });
+			strictEqual(await at("rehearse", { heads: {}, ci: [green] }), "done");
+
+			// The release pushes the version branch and reuses run 77; it never dispatches ci.yml again.
+			const pushed = { v071: head };
+			strictEqual(await at("release", { heads: pushed, ci: [green] }), "dispatch-release");
+			receipt.ciRun = null;
+			strictEqual(await at("release", { heads: pushed, ci: [green] }), "dispatch-release");
+			deepStrictEqual(receipt.ciRun, { id: 77, attempt: 1 });
+
+			receipt.releaseRun = { id: 88, attempt: 1 };
+			const release = (status: string, jobs: Facts[], conclusion: string | null = null) => [
+				{ id: 88, status, conclusion, jobs },
+			];
+			const awaiting = release("waiting", [...passed("preflight"), job("release", "waiting")]);
+			strictEqual(
+				await at("release", {
+					heads: pushed,
+					ci: [green],
+					release: release("in_progress", [job("preflight", "in_progress")]),
+				}),
+				"watch-release",
+			);
+			strictEqual(await at("release", { heads: pushed, ci: [green], release: awaiting }), "publish-npm");
+			receipt.npm = { accepted: true };
+			strictEqual(await at("release", { heads: pushed, ci: [green], release: awaiting }), "approve-release");
+			const npm = { name, version, dist: { integrity } };
+			strictEqual(
+				await at("release", {
+					heads: pushed,
+					ci: [green],
+					release: awaiting,
+					npm: { ...npm, dist: { integrity: "sha512-x" } },
+				}),
+				"stop",
+			);
+			const finished = release("completed", passed("preflight", "release"), "success");
+			const out = { heads: { main: head }, ci: [green], release: finished, npm, published: true };
+			strictEqual(await at("release", { ...out, distTags: { latest: version, beta: "0.7.1-beta.2" } }), "forward-tags");
+			strictEqual(await at("release", out), "done");
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 });

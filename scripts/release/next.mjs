@@ -9,9 +9,9 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -118,18 +118,79 @@ function statusScreen(mode, facts, receipt, step) {
 	return lines.join("\n");
 }
 
+// ---------- Remote reads ----------
+
+/** Every read of GitHub and npm passes through here, so `--record` saves them and `--replay` serves them. */
+const liveReads = {
+	api: (path) => api(path),
+	lsRemote: (...refs) => git("ls-remote", "origin", ...refs),
+	registryVersion,
+	registryTags,
+	download: (id, name, directory) =>
+		run("gh", ["run", "download", String(id), "--repo", repository, "--name", name, "--dir", directory]),
+	postPending: (post, context) => (post ? post.postPending(context) : []),
+};
+let reads = liveReads;
+
+/** Directs the reads at a recording: `{ record: true }` saves live answers to it, otherwise it replays them. */
+export function useRecording(file, { record = false } = {}) {
+	const book = existsSync(file) ? json(file) : {};
+	const save = () => {
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, `${JSON.stringify(book, null, "\t")}\n`);
+	};
+	const replay = (key) => {
+		if (!(key in book)) throw new Error(`No recorded read for ${key} in ${file}.`);
+		const value = book[key];
+		if (value?.$error) throw Object.assign(new Error(value.$error), { stderr: value.$error });
+		return value;
+	};
+	const answer = (key, live) => {
+		if (!record) return replay(key);
+		try {
+			const value = live();
+			if (value instanceof Promise) return value.then((resolved) => keep(key, resolved));
+			return keep(key, value);
+		} catch (error) {
+			if (String(error.stderr).includes("404")) keep(key, { $error: "HTTP 404" });
+			throw error;
+		}
+	};
+	const keep = (key, value) => {
+		book[key] = value ?? null;
+		save();
+		return value;
+	};
+	reads = {
+		api: (path) => answer(`api ${path}`, () => liveReads.api(path)),
+		lsRemote: (...refs) => answer(`ls-remote ${refs.join(" ")}`, () => liveReads.lsRemote(...refs)),
+		registryVersion: async (name, version) =>
+			answer(`npm ${name}@${version}`, () => liveReads.registryVersion(name, version)),
+		registryTags: async (name) => answer(`dist-tags ${name}`, () => liveReads.registryTags(name)),
+		download: (id, name, directory) => {
+			const saved = join(dirname(file), "artifacts", `${id}-${name}`);
+			if (record) {
+				liveReads.download(id, name, directory);
+				cpSync(directory, saved, { recursive: true });
+			} else if (existsSync(saved)) cpSync(saved, directory, { recursive: true });
+			else throw new Error(`No recorded artifact ${name} of run ${id} in ${saved}.`);
+		},
+		postPending: (post, context) => answer("post", () => liveReads.postPending(post, context)),
+	};
+}
+
 // ---------- GitHub ----------
 
 function getRun(id) {
-	const record = api(`repos/${repository}/actions/runs/${id}`);
-	const jobs = api(`repos/${repository}/actions/runs/${id}/jobs?filter=latest&per_page=100`).jobs;
+	const record = reads.api(`repos/${repository}/actions/runs/${id}`);
+	const jobs = reads.api(`repos/${repository}/actions/runs/${id}/jobs?filter=latest&per_page=100`).jobs;
 	return { record, jobs, state: runState(record, jobs) };
 }
 
 function runsOn(workflow, commit) {
-	return api(
-		`repos/${repository}/actions/workflows/${workflow}/runs?event=workflow_dispatch&head_sha=${commit}&per_page=20`,
-	).workflow_runs.filter((record) => record.head_sha === commit);
+	return reads
+		.api(`repos/${repository}/actions/workflows/${workflow}/runs?event=workflow_dispatch&head_sha=${commit}&per_page=20`)
+		.workflow_runs.filter((record) => record.head_sha === commit);
 }
 
 /** Dispatches and returns the created run's ID; GitHub returns it with return_run_details. */
@@ -160,7 +221,7 @@ async function dispatch(workflow, ref, inputs, title) {
 }
 
 function artifactsPresent(id, commit) {
-	const artifacts = api(`repos/${repository}/actions/runs/${id}/artifacts?per_page=100`).artifacts;
+	const artifacts = reads.api(`repos/${repository}/actions/runs/${id}/artifacts?per_page=100`).artifacts;
 	return [`candidate-${commit}`, `results-${commit}`, `results24-${commit}`].every((name) =>
 		artifacts.some((artifact) => artifact.name === name && !artifact.expired),
 	);
@@ -168,7 +229,7 @@ function artifactsPresent(id, commit) {
 
 function publishedRelease(tag) {
 	try {
-		return api(`repos/${repository}/releases/tags/${encodeURIComponent(tag)}`);
+		return reads.api(`repos/${repository}/releases/tags/${encodeURIComponent(tag)}`);
 	} catch (error) {
 		if (String(error.stderr).includes("404")) return null;
 		throw error;
@@ -176,7 +237,7 @@ function publishedRelease(tag) {
 }
 
 function remoteHead(branch) {
-	return git("ls-remote", "--heads", "origin", `refs/heads/${branch}`).split(/\s/u)[0] || null;
+	return reads.lsRemote(`refs/heads/${branch}`).split(/\s/u)[0] || null;
 }
 
 /**
@@ -189,17 +250,7 @@ function ciCandidate(receipt, context) {
 		const partial = `${directory}.partial`;
 		rmSync(partial, { recursive: true, force: true });
 		rmSync(directory, { recursive: true, force: true });
-		run("gh", [
-			"run",
-			"download",
-			String(receipt.ciRun.id),
-			"--repo",
-			repository,
-			"--name",
-			`candidate-${receipt.commit}`,
-			"--dir",
-			partial,
-		]);
+		reads.download(receipt.ciRun.id, `candidate-${receipt.commit}`, partial);
 		renameSync(partial, directory);
 	}
 	const candidate = verifyCandidate(directory, receipt.commit);
@@ -210,9 +261,7 @@ function ciCandidate(receipt, context) {
 
 /** The commit a remote tag points to, peeling an annotated tag. */
 function remoteTagCommit(tag) {
-	const lines = git("ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`)
-		.split("\n")
-		.filter(Boolean);
+	const lines = reads.lsRemote(`refs/tags/${tag}`, `refs/tags/${tag}^{}`).split("\n").filter(Boolean);
 	const peeled = lines.find((line) => line.endsWith("^{}")) ?? lines[0];
 	return peeled ? peeled.split(/\s/u)[0] : null;
 }
@@ -247,7 +296,7 @@ function readTree(commit) {
 	};
 }
 
-async function readFacts(mode, receipt, context) {
+export async function readFacts(mode, receipt, context) {
 	const { commit } = receipt;
 	const candidateReady = existsSync(join(context.candidate, "candidate.json"));
 	const local = Object.fromEntries(
@@ -282,7 +331,7 @@ async function readFacts(mode, receipt, context) {
 	// A failed run on an older head is replaced, not rerun, once a tooling fix moved the branch (design 5b).
 	if (releaseRun?.state === "failure" && releaseRun.record.head_sha !== remoteHead(receipt.branch)) releaseRun = null;
 
-	const published = await registryVersion(context.name, receipt.version);
+	const published = await reads.registryVersion(context.name, receipt.version);
 	let integrityMatches = null;
 	// npm is compared with the CI artifact that release.yml verifies, never with a local pack.
 	if (published && ci?.state === "success" && ci.artifacts) {
@@ -312,8 +361,8 @@ async function readFacts(mode, receipt, context) {
 			branchHead: remoteHead(receipt.branch),
 		});
 		if (isPublished) {
-			tagsBehind = forwardedTags(await registryTags(context.name), receipt.version, context.channel);
-			postPending = context.post ? context.post.postPending(postContext(receipt, context)) : [];
+			tagsBehind = forwardedTags(await reads.registryTags(context.name), receipt.version, context.channel);
+			postPending = reads.postPending(context.post, postContext(receipt, context));
 		}
 	}
 	return {
@@ -603,13 +652,15 @@ export async function main(argv = process.argv.slice(2)) {
 			rehearse: { type: "boolean" },
 			windows: { type: "boolean" },
 			state: { type: "string" },
+			record: { type: "string" },
+			replay: { type: "string" },
 			help: { type: "boolean" },
 		},
 		allowPositionals: true,
 	});
 	if (values.help) {
 		console.log(
-			"pnpm run release:next            release the version branch's head, resuming where it stands\npnpm run release:next --rehearse  full non-public rehearsal on a temporary rehearse/* branch\npnpm run release:next status      print the positions and exit (read-only)",
+			"pnpm run release:next            release the version branch's head, resuming where it stands\npnpm run release:next --rehearse  full non-public rehearsal on a temporary rehearse/* branch\npnpm run release:next status      print the positions and exit (read-only)\n  --record <file>                  save every GitHub and npm read to <file>\n  --replay <file>                  read GitHub and npm from <file> offline; prints the next step, writes nothing",
 		);
 		return;
 	}
@@ -617,10 +668,12 @@ export async function main(argv = process.argv.slice(2)) {
 	if (problem) throw new Error(problem);
 	const mode = values.rehearse ? "rehearse" : "release";
 	const state = resolve(values.state ?? releaseState());
-	const statusOnly = positionals[0] === "status";
+	if (values.record && values.replay) throw new Error("--record and --replay exclude each other.");
+	if (values.record || values.replay) useRecording(resolve(values.record ?? values.replay), { record: !values.replay });
+	const statusOnly = positionals[0] === "status" || Boolean(values.replay);
 	const lock = statusOnly ? null : takeLock(state, mode);
 	try {
-		run("git", ["fetch", "--quiet", "origin", "main"]);
+		if (!values.replay) run("git", ["fetch", "--quiet", "origin", "main"]);
 		const pkg = json(join(root, "package.json"));
 		const head = git("rev-parse", "HEAD");
 		let receipt = loadReceipt(state, pkg.version);
