@@ -22,6 +22,7 @@ import { describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { panesFindings, panesModeFinding } from "../../src/cli/doctor-panes.js";
 import { workspaceEligibility } from "../../src/cli/workspace-launch.js";
+import { processBirthToken } from "../../src/core/process-identity.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import {
 	renderWorkspaceConfig,
@@ -429,6 +430,64 @@ describe("private host startup cleanup", () => {
 		equal(alive, false, "the failed server must be reaped before fallback");
 		equal(existsSync(layoutRoot), false);
 		equal(existsSync(socketPath), false);
+	});
+});
+
+describe("private host second terminal", () => {
+	it("never joins a Clio another live terminal still shows (#420)", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "host-second-"));
+		const socketPath = join(tmpdir(), `${SESSION}.sock`);
+		const methods: string[] = [];
+		const holder = `${process.ppid}:${processBirthToken(process.ppid) ?? ""}`;
+		const server = createServer((socket) => {
+			socket.once("data", (chunk) => {
+				const request = JSON.parse(chunk.toString().trim());
+				methods.push(request.method);
+				let result: unknown = {};
+				if (request.method === "ping") result = { version: "fixture", protocol: 21 };
+				if (request.method === "workspace.list") result = { workspaces: [{ workspace_id: "w1" }] };
+				if (request.method === "pane.list") {
+					const tokens = { clio_coder_workspace: "00000000-0000-0000-0000-000000000000", clio_coder_launcher: holder };
+					result = { panes: [{ pane_id: "w1:p1", tab_id: "t1", workspace_id: "w1", cwd: scratch, tokens }] };
+				}
+				socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+			});
+		});
+		t.after(async () => {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			rmSync(socketPath, { force: true });
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+		const result = await launchWorkspace({
+			herdrPath: join(scratch, "never-run"),
+			herdrVersion: "fixture",
+			nested: false,
+			outputStyle: "standard",
+			cwd: scratch,
+			clioArgv: ["unused"],
+			platform: {
+				hostLayout: () => ({
+					socketPath,
+					herdrArgs: [],
+					hostEnv: { HERDR_SOCKET_PATH: socketPath },
+					configPath: join(scratch, "config.toml"),
+					shell: { defaultShell: null, shellMode: "non_login" },
+					sessionFile: join(scratch, "session.json"),
+					disposableDirs: [],
+					cleanupArgs: null,
+				}),
+				paneLaunch: () => ({ env: {}, line: "" }),
+				detach: () => undefined,
+				afterClientExit: () => undefined,
+			},
+		});
+		equal(result.status, "fallback");
+		if (result.status === "fallback") match(result.reason, new RegExp(`another terminal, pid ${process.ppid}`));
+		for (const joins of ["pane.report_metadata", "workspace.focus", "workspace.create"])
+			ok(!methods.includes(joins), joins);
 	});
 });
 

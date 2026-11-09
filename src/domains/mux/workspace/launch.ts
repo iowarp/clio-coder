@@ -17,10 +17,11 @@
  * server and deletes what the platform marked disposable rather than leaving a
  * daemon nobody asked for.
  *
- * Two launchers using the same Clio state root share a session when
- * `clio-coder` is run twice in one project, and that is intended:
- * the second reattaches to the first's
- * workspace. So everything that changes the session's shape, which is
+ * Two launchers using the same Clio state root share one host per project.
+ * A launch reattaches only to a Clio whose own launcher is gone, which is a
+ * workspace the operator detached from. While another terminal still holds
+ * that Clio, a second launch never joins it: it falls back to the plain
+ * terminal, where Clio starts its own session (#420). Everything that changes the session's shape, which is
  * starting the server, creating a workspace, closing one and stopping the
  * server, happens under one cross-process lock keyed by the session. A launcher that finds the session empty and stops it
  * cannot do so between another launcher's server check and its workspace.
@@ -44,10 +45,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { OutputStyle } from "../../../core/defaults.js";
+import { processBirthToken, processIdentityAlive } from "../../../core/process-identity.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import { MUX_MIN_PROTOCOL } from "../protocol.js";
@@ -73,6 +76,8 @@ const SERVER_POLL_MS = 100;
 /** The agent name Clio reports for its own pane (src/domains/mux/contract.ts). */
 const CLIO_AGENT = "clio-coder";
 const WORKSPACE_TOKEN = "clio_coder_workspace";
+/** `<pid>:<birth token>` of the launcher whose terminal shows this Clio. */
+const LAUNCHER_TOKEN = "clio_coder_launcher";
 const WORKSPACE_METADATA_SOURCE = "clio-coder:workspace";
 const WORKSPACE_NONCE = /^[0-9a-f-]{36}$/u;
 const EXIT_POLL_MS = 200;
@@ -324,10 +329,9 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 }
 
 /**
- * A live Clio already running in this project's session, so a second launch
- * reattaches instead of doubling up. A pane whose exit marker exists is a Clio
- * that has quit and whose agent record the host has not cleared yet, not a
- * running one.
+ * A live Clio already running in this project's session. A pane whose exit
+ * marker exists is a Clio that has quit and whose agent record the host has
+ * not cleared yet, not a running one.
  */
 async function findRunningClio(host: Host, client: MuxClient): Promise<MuxPane | null> {
 	for (const workspace of await client.workspaceList()) {
@@ -426,14 +430,26 @@ async function stillOwnsWorkspace(client: MuxClient, opened: Exclude<Opened, { r
 	);
 }
 
+/**
+ * The pid of another live launcher whose terminal shows this pane, or null
+ * when nobody holds it (the operator detached) or the pane never recorded one.
+ */
+function heldByLauncher(pane: MuxPane): number | null {
+	const match = /^(\d+):(.*)$/u.exec(pane.tokens[LAUNCHER_TOKEN] ?? "");
+	if (match === null) return null;
+	const pid = Number(match[1]);
+	const alive = processIdentityAlive({ host: hostname(), pid, birthToken: match[2] || null });
+	return alive === true ? pid : null;
+}
+
+/** Tag the workspace once and record this launcher as the terminal that shows it. */
 async function tagWorkspace(client: MuxClient, pane: MuxPane): Promise<string> {
 	const existing = pane.tokens[WORKSPACE_TOKEN];
-	if (existing !== undefined && WORKSPACE_NONCE.test(existing)) return existing;
-	const nonce = randomUUID();
+	const nonce = existing !== undefined && WORKSPACE_NONCE.test(existing) ? existing : randomUUID();
 	await client.paneReportMetadata({
 		paneId: pane.paneId,
 		source: WORKSPACE_METADATA_SOURCE,
-		tokens: { [WORKSPACE_TOKEN]: nonce },
+		tokens: { [WORKSPACE_TOKEN]: nonce, [LAUNCHER_TOKEN]: `${process.pid}:${processBirthToken() ?? ""}` },
 	});
 	return nonce;
 }
@@ -458,6 +474,15 @@ async function openWorkspace(host: Host): Promise<Opened> {
 	try {
 		const running = await findRunningClio(host, client);
 		if (running) {
+			// Another terminal still shows that Clio. Joining it would share one
+			// conversation and steering queue between two terminals (#420).
+			const holder = heldByLauncher(running);
+			if (holder !== null) {
+				await client.close();
+				return {
+					refused: `this folder's pane host is in use by another terminal, pid ${holder}, so this terminal starts its own session`,
+				};
+			}
 			const workspaceNonce = await tagWorkspace(client, running);
 			await client.workspaceFocus(running.workspaceId);
 			return {
