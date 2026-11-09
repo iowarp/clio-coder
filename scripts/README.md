@@ -16,6 +16,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm library:pin` / `pnpm skills:pin` | Refresh generated catalogs. Library pinning also fetches blessed remote packages. |
 | `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
 | `pnpm herdr:pin` | Fetch and verify the selected Herdr release and its schema. |
+| `node scripts/build-git-shim.mjs --verify-pins` / `--check` / `--write` | Check the committed Windows `git.exe` launchers against their pinned SHA-256; rebuild them from `assets/git-shim/launcher.c` with the pinned zig and compare byte for byte; or rebuild and write them. `--check` and `--write` download zig into `TMPDIR` unless `--zig <path>` names one. |
 | `pnpm hooks:install` | Install guards against committing ignored files. |
 | `node scripts/export-github-wiki.mjs --from <wiki> --to <checkout>` | Render a complete generated wiki into a GitHub wiki checkout, replacing its pages. It refuses partial generations, broken links and private material, and never commits or pushes. |
 | `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
