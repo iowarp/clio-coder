@@ -10,7 +10,11 @@
 #   <InstallDir>\runtime\node-v<ver>-win-<arch>\node.exe
 #   <InstallDir>\versions\<version>\lib\node_modules\@iowarp\clio-coder
 #   <InstallDir>\install.json
-#   <BinDir>\clio-coder.cmd
+#   <BinDir>\clio-coder.exe and clio-coder.launch
+# The launcher is a small native exe (assets\windows-launcher) that starts the
+# managed Node with your arguments unchanged; a .cmd would pass them through
+# cmd.exe, which expands %NAME% in them. An earlier clio-coder.cmd is replaced
+# by a stub that points at the exe.
 # It downloads the official win-x64 or win-arm64 zip, verifies it against
 # SHASUMS256.txt (and that file's OpenPGP signature when gpg is on PATH), and
 # adds the launcher to the user PATH and the current PowerShell session by
@@ -96,17 +100,26 @@ function Install-ClioCoder {
 	$installRoot = Get-AbsolutePath $installRoot
 	$binDir = Get-AbsolutePath $binDir
 	if (($installRoot + $binDir) -match '[%\r\n"]') { Fail "Windows installer paths cannot contain percent, newline or quote characters" }
+	# The helper is given the .cmd path that installers before the native launcher used, and installs clio-coder.exe beside it.
 	$launcher = Join-Path $binDir "clio-coder.cmd"
+	$exeLauncher = Join-Path $binDir "clio-coder.exe"
+	$exeLaunchFile = Join-Path $binDir "clio-coder.launch"
 	$installSpec = if ($Options.Package) { Get-AbsolutePath $Options.Package } else { "$PackageName@$spec" }
 	if ($Options.Package -and -not (Test-Path -LiteralPath $installSpec)) { Fail "-Package $installSpec does not exist" }
 
 	Say "platform:     Windows $build (PowerShell $($PSVersionTable.PSVersion))"
 	Say "package:      $installSpec"
 	Say "install root: $installRoot"
-	Say "launcher:     $launcher"
+	Say "launcher:     $exeLauncher"
 
 	if ((Test-Path -LiteralPath $launcher) -and -not ((Get-Content -LiteralPath $launcher -Raw) -match [regex]::Escape($LauncherMark)) -and -not $Options.Force) {
 		Fail "refusing to overwrite $launcher, which this installer did not write; move it aside, choose another -BinDir, or pass -Force"
+	}
+	function Test-OwnedExeLauncher {
+		(Test-Path -LiteralPath $exeLaunchFile) -and ((Get-Content -LiteralPath $exeLaunchFile -Raw) -match [regex]::Escape("launch `"$installRoot`""))
+	}
+	if ((Test-Path -LiteralPath $exeLauncher) -and -not (Test-OwnedExeLauncher) -and -not $Options.Force) {
+		Fail "refusing to overwrite $exeLauncher, which this installer did not write for $installRoot; move it aside, choose another -BinDir, or pass -Force"
 	}
 	if ($Options.DryRun) {
 		if ($Options.Rollback) {
@@ -345,6 +358,15 @@ function Install-ClioCoder {
 			& $node $entry upgrade --post-install
 			if ($LASTEXITCODE -ne 0) { Fail "package installed, but local migrations/initialization need attention. Run clio-coder upgrade --post-install; the previous version remains available with: clio-coder upgrade --rollback" }
 		}
+		# A candidate whose helper predates the native launcher wrote clio-coder.cmd; an exe left beside it would run first.
+		$activeLauncher = ""
+		try { $activeLauncher = [string](Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json).launcher } catch { $activeLauncher = "" }
+		if ($activeLauncher -ne $exeLauncher -and (Test-Path -LiteralPath $exeLauncher) -and (Test-OwnedExeLauncher)) {
+			$aside = "$exeLauncher.$([guid]::NewGuid()).old"
+			Move-Item -LiteralPath $exeLauncher -Destination $aside
+			Remove-Item -LiteralPath $aside, $exeLaunchFile -Force -ErrorAction SilentlyContinue
+		}
+		if ($activeLauncher) { $launcher = $activeLauncher }
 		$reported = & $node $entry --version
 		if ($LASTEXITCODE -ne 0) { Fail "active CLI failed version check" }
 		Ok "$reported"

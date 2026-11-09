@@ -26,7 +26,14 @@ On native Windows, which is best effort, run
 `install.ps1` from that address, runs it with the arguments it was given, and
 returns its exit status. Both install the same layout under
 `%LOCALAPPDATA%\clio-coder\install` with the launcher
-`%USERPROFILE%\.local\bin\clio-coder.cmd`, and need no administrator rights.
+`%USERPROFILE%\.local\bin\clio-coder.exe`, and need no administrator rights.
+The launcher is a small native program that reads `clio-coder.launch` beside it
+and starts the managed Node with your arguments unchanged, so cmd.exe never
+expands `%NAME%` or splits on `&` in them. The installer copies it only when its
+bytes match the SHA-256 pinned in the package. Installing over a version that
+wrote `clio-coder.cmd` replaces that file with a stub that names the exe. An
+npm or pnpm global install still starts Clio through npm's own `clio-coder.cmd`,
+which cmd.exe expands as before.
 Both installers refuse a package older than 0.6.0 before they change the active
 installation (`install.sh` leaves it unchanged and exits with an error). `install.sh` run from an MSYS, MinGW or Cygwin shell stops and names the
 PowerShell command. A relative path given to `install.ps1` for the install
@@ -112,7 +119,7 @@ for them.
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session naming its version and Node, which pruning and `uninstall` check before they remove anything. Receipts whose local process is gone are removed. |
 | `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
-| `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. On Linux and macOS each activation points it at the current Node; on Windows it keeps the Node of the first install, because `cmd.exe` rereads a running `.cmd` file. |
+| `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.exe` and `clio-coder.launch` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. On Linux and macOS each activation points it at the current Node; on Windows it keeps the Node of the first install, because an install that started from an older `clio-coder.cmd` may still be running it and `cmd.exe` rereads a running `.cmd` file. |
 
 #### Pruning versions and runtimes
 
@@ -189,7 +196,7 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 | `-NodeVersion` | `CLIO_CODER_NODE_VERSION` | Node.js major (default `24`) or exact version. |
 | `-NodeZip` | `CLIO_CODER_NODE_TARBALL` | A local `node-v<ver>-win-<arch>.zip`, with `SHASUMS256.txt` beside it or named by `CLIO_CODER_NODE_SHASUMS`. |
 | `-InstallDir` | `CLIO_CODER_INSTALL_DIR` | The install root. Defaults: `$CLIO_CODER_HOME\install`, else `%LOCALAPPDATA%\clio-coder\install`. |
-| `-BinDir` | `CLIO_CODER_BIN_DIR` | Where `clio-coder.cmd` goes. Default `%USERPROFILE%\.local\bin`. |
+| `-BinDir` | `CLIO_CODER_BIN_DIR` | Where `clio-coder.exe` goes. Default `%USERPROFILE%\.local\bin`. |
 | `-IncludeClaudeSdk` | none | Provision the optional Claude Agent SDK component. |
 | `-OmitOptional` | none | Accepted and ignored. |
 | `-AddToPath` | none | Accepted and redundant, because the installer already appends the bin dir to the user `PATH` registry value and to the current session. |

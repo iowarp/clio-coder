@@ -27,6 +27,69 @@ function atomic(file, text, mode = 0o600) {
 
 // src/core/xdg.ts resolveClioDirs for the two roots this helper reads. It runs before any
 // package is importable, so the order is repeated here.
+// On Windows the launcher is assets/windows-launcher's native exe, which starts what
+// clio-coder.launch names with the caller's command line unchanged. A clio-coder.cmd
+// would pass it through cmd.exe, which expands %NAME% and splits on & after an odd quote.
+const RETIRED_CMD = `@echo off\r\nrem ${MARK}\r\n>&2 echo clio-coder.cmd is retired; run clio-coder.exe beside it.\r\nexit /b 9009\r\n`;
+
+function quoteWindows(value) {
+	return `"${value.replace(/(\\*)$/u, "$1$1")}"`;
+}
+
+// Returns the installed exe, or null where no launcher is built for this arch and the .cmd stays.
+function installWindowsLauncher(cmd, launchText) {
+	const assets = path.join(__dirname, "..", "assets", "windows-launcher");
+	let pins;
+	try {
+		pins = JSON.parse(fs.readFileSync(path.join(assets, "pins.json"), "utf8"));
+	} catch {
+		return null;
+	}
+	const pin = pins[process.arch];
+	if (typeof pin !== "string") return null;
+	const source = path.join(assets, `win32-${process.arch}`, "launcher.exe");
+	const bytes = fs.readFileSync(source);
+	if (crypto.createHash("sha256").update(bytes).digest("hex") !== pin)
+		throw new Error(`${source} does not match its pinned SHA-256; previous launcher remains active`);
+	const bin = path.dirname(cmd);
+	const exe = path.join(bin, "clio-coder.exe");
+	atomic(path.join(bin, "clio-coder.launch"), launchText, 0o644);
+	let installed = null;
+	try {
+		installed = fs.readFileSync(exe);
+	} catch {
+		/* No launcher yet. */
+	}
+	if (!installed?.equals(bytes)) {
+		// A running exe cannot be replaced or deleted, but it can be renamed.
+		const aside = `${exe}.${crypto.randomUUID()}.old`;
+		if (installed) fs.renameSync(exe, aside);
+		try {
+			atomic(exe, bytes, 0o755);
+		} catch (error) {
+			if (installed) fs.renameSync(aside, exe);
+			throw error;
+		}
+	}
+	for (const name of fs.readdirSync(bin)) {
+		if (!/^clio-coder\.exe\..+\.old$/u.test(name)) continue;
+		try {
+			fs.rmSync(path.join(bin, name));
+		} catch {
+			/* Still running; the next activation removes it. */
+		}
+	}
+	// A .cmd paused in cmd.exe resumes at its old byte offset; a stub shorter than that offset ends it cleanly.
+	let previous = null;
+	try {
+		previous = fs.readFileSync(cmd, "utf8");
+	} catch {
+		/* Never installed as a .cmd. */
+	}
+	if (previous?.includes(MARK) && previous !== RETIRED_CMD) atomic(cmd, RETIRED_CMD, 0o755);
+	return exe;
+}
+
 function clioRoot(role) {
 	const specific = process.env[`CLIO_CODER_${role.toUpperCase()}_DIR`]?.trim();
 	if (specific) return specific;
@@ -759,7 +822,15 @@ async function main() {
 	if (process.platform === "win32" && /[%\r\n"]/u.test(launcherNode + bootstrap + root + launcher))
 		throw new Error("Windows installer paths cannot contain percent, newline or quote characters");
 	fs.mkdirSync(path.dirname(launcher), { recursive: true });
-	atomic(launcher, body, 0o755);
+	const exe =
+		process.platform === "win32"
+			? installWindowsLauncher(
+					path.join(path.dirname(launcher), "clio-coder.cmd"),
+					`${launcherNode}\n${quoteWindows(bootstrap)} launch ${quoteWindows(root)}\nutf8-console\n`,
+				)
+			: null;
+	if (exe) launcher = exe;
+	else atomic(launcher, body, 0o755);
 	atomic(
 		path.join(root, "install.json"),
 		`${JSON.stringify(

@@ -142,7 +142,7 @@ mirrors, and air-gapped sites.
 
 On native Windows, run `irm https://coder.iowarp.ai/install.ps1 | iex` in
 PowerShell. It needs no administrator rights and writes the launcher to
-`%USERPROFILE%\.local\bin\clio-coder.cmd`. Release checks only boot the
+`%USERPROFILE%\.local\bin\clio-coder.exe`. Release checks only boot the
 package on Windows, so interactive use there is best effort.
 
 Release candidates ship on the `beta` channel:
