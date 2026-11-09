@@ -43,6 +43,7 @@ export const coreTests = [
 	"bootstrap-schema-retry-identity",
 	"installed-package-ci",
 	"release-boundary",
+	"release-plan",
 	"dispatch-session-ownership",
 	"monitor-steer-tools",
 	"gateway-authority",
