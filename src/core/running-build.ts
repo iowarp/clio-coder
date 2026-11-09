@@ -24,6 +24,17 @@ function diskBuild(root: string): { id: string; files: string[] } | null {
 	}
 }
 
+/**
+ * The id of the completed build on disk, which is what a newly spawned worker
+ * or a node install from this package runs; null for a source run or an
+ * interrupted build. Fleet preflight compares it across machines because two
+ * builds of one `-dev` version share a version string.
+ */
+export function installedBuildId(root = resolvePackageRoot()): string | null {
+	const id = diskBuild(root)?.id;
+	return id !== undefined && /^[0-9a-f-]{36}$/u.test(id) ? id : null;
+}
+
 /** The currently activated package for a managed version, or the same checkout/package. */
 export function activatedPackageRoot(root: string): string {
 	const suffix = join("lib", "node_modules", "@iowarp", "clio-coder");

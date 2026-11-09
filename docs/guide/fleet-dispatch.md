@@ -233,7 +233,23 @@ A fleet node is a machine where a worker process runs. It is separate from an
 inference target: a local worker using a remote model still records `node: local`.
 The implicit `local` node always exists and is never declared in `fleet.nodes`.
 
-Start from the project root with noninteractive SSH access and one worker slot:
+Start from the project root with noninteractive SSH access. One command adds
+the node, installs this exact client build when the node lacks it, and records
+the preflight that admits it:
+
+```sh
+clio-coder fleet nodes setup node-a --host node-a      # add, probe, preview any install
+clio-coder fleet nodes setup node-a --yes              # install if needed, then record
+clio-coder fleet nodes setup --all --yes               # every registered node, after a rebuild
+```
+
+Setup accepts the `add` flags below when it adds a node. Without `--yes` it
+stops at the installation preview, so it writes nothing on the node. A node
+that already runs this build is only probed and re-recorded. An unreachable node
+gets guidance: setup needs key-based SSH and a host key already in
+`known_hosts`. Setup installs only when the worker entry is the default
+`clio-coder worker` or an install setup made; a custom entry is reported and
+left alone. To register a node without probing it:
 
 ```sh
 clio-coder fleet nodes add node-a --host node-a --max-workers 1
@@ -307,7 +323,10 @@ client package, transfers it over SSH, checks the digest, installs npm
 dependencies without optional SDKs, verifies the Clio Coder version, then saves the
 worker entry. It uses no sudo, system packages, service changes or shell profile
 edits. Build a source checkout before packing it. Installation changes the
-connection identity, so record preflight again afterwards.
+connection identity, so record preflight again afterwards; `fleet nodes setup`
+does both. After saving the new entry, installation removes earlier install
+directories that are a week old and not among the newest three, because every
+rebuild of a `-dev` client installs a new one.
 
 For an independently managed install, the default invocation is
 `clio-coder worker`. A custom `clioCoderEntry` that ends in ` worker` is version
@@ -320,7 +339,11 @@ clio-coder fleet nodes add custom --host custom-host \
   --version-command '/home/me/.local/bin/clio-coder --version'
 ```
 
-The probe must report exactly the client's Clio Coder version. Project compilers,
+The probe must report exactly the client's Clio Coder version. A `-dev` version
+names a moving tree, so the node must also run the same build: the same clean
+commit, or the same `dist/build.json` id for a build from a dirty tree. The
+node reports its id through `clio-coder version --build`. A node too old to
+report one is compared by the commit in its version label. Project compilers,
 dependencies and datasets remain the operator's responsibility.
 
 ### LAN endpoints and optional Tailscale discovery
@@ -334,14 +357,15 @@ configuration and record its preflight before relying on it.
 
 ```sh
 clio-coder fleet nodes discover [--json]
-clio-coder fleet nodes add node-b --host node-b.example-tailnet.ts.net
+clio-coder fleet nodes setup node-b --host node-b.example-tailnet.ts.net
 ```
 
 Discovery explicitly reads `tailscale status --json`; Tailscale is optional.
 It requires the daemon to report `Running`, and it shows MagicDNS names, IP
 addresses and reported peer state for at most 128 peers with four addresses each. The CLI lists
-candidates for you to select with `nodes add`; the TUI provides an endpoint
-picker. Discovery grants no SSH access, runtime compatibility or eligibility.
+candidates for you to select with `nodes setup` and marks a peer whose name,
+MagicDNS name or address is already a node's host as registered; the TUI
+provides an endpoint picker. Discovery grants no SSH access, runtime compatibility or eligibility.
 An unavailable CLI or daemon produces guidance to sign in or add a host directly.
 
 ### Project arrangement
@@ -395,8 +419,15 @@ A failed recorded test revokes prior eligibility.
 `FLEET_PREFLIGHT_MAX_AGE_MS` is one day: connection and resource observations
 need periodic rechecking. Records bind the complete connection configuration
 (host, user, port, identity file, worker entry and version probe), the project
-root and client version. Any connection change, different project, upgrade or
-expired record requires a new passing recorded check. Dispatch additionally
+root and client version, and for a `-dev` client the client build. Any
+connection change, different project, upgrade, rebuild or expired record
+requires a new passing recorded check.
+
+The probe also reads the node's machine id (`/etc/machine-id`, the dbus copy,
+or the macOS platform UUID) and stores only a salted hash. A recorded check
+fails for a node whose machine another registered node already holds with a
+passing record, because two entries for one machine double its worker capacity.
+A node that is the client's own machine passes with a note. Dispatch additionally
 rechecks project authority at launch. Failed nodes can remain doctor warnings
 while local work stays usable.
 

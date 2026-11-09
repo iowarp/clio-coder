@@ -76,6 +76,7 @@ export function describeFleetNodeInstall(plan: FleetNodeInstallPlan): string {
 		`Create ~/${plan.remotePrefix} with the package, npm dependencies, private cache and temporary files.`,
 		"Use the node's existing Node >=22.19 and npm. Optional SDK dependencies are omitted.",
 		"Update this client's node worker entry after verifying the installed version.",
+		"Remove earlier installs under ~/.local/share/clio-coder/workers that are a week old and not among the newest three.",
 		"No sudo, system packages, services, shell profile edits or existing launcher replacement.",
 	].join("\n");
 }
@@ -133,4 +134,25 @@ export async function executeFleetNodeInstall(plan: FleetNodeInstallPlan): Promi
 		node.clioCoderEntry = plan.workerEntry;
 		node.clioCoderVersionCommand = plan.versionCommand;
 	});
+	await pruneFleetNodeInstalls(plan);
+}
+
+/**
+ * Each rebuild of a `-dev` client installs a new directory, so setup after
+ * every rebuild would grow the node's disk without bound. Another client or a
+ * still-running worker may use a recent install, so the newest three and
+ * anything changed within a week stay.
+ */
+const PRUNE_SCRIPT = `cd "$HOME/.local/share/clio-coder/workers" 2>/dev/null || exit 0; ls -1t | grep -E '^[0-9a-f]{64}$' | tail -n +4 | while read -r d; do [ "$d" = "$1" ] && continue; [ -n "$(find "$d" -maxdepth 0 -mtime +7)" ] && rm -rf -- "$d" && echo "pruned=$d"; done; exit 0`;
+
+async function pruneFleetNodeInstalls(plan: FleetNodeInstallPlan): Promise<void> {
+	try {
+		await runCommandVector(
+			"ssh",
+			buildSshArgs(plan.node, `sh -c ${shellQuote(PRUNE_SCRIPT)} sh ${shellQuote(plan.sha256)}`),
+			{ timeoutMs: 60_000, maxOutputBytes: 64_000 },
+		);
+	} catch {
+		// Pruning only reclaims disk; the verified install and its entry already stand.
+	}
 }

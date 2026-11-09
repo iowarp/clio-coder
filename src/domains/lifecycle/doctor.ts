@@ -803,10 +803,12 @@ export async function runDoctorFleetChecks(
 	const nodes = settings.fleet?.nodes ?? [];
 	if (nodes.length === 0) return [];
 	const { recordFleetPreflight, fleetPreflightVerdict } = await import("../dispatch/fleet-preflight.js");
-	const { testFleetNode } = await import("../dispatch/fleet-nodes.js");
+	const { rejectSameMachineNodes, testFleetNode } = await import("../dispatch/fleet-nodes.js");
 	const records = await Promise.all(
 		nodes.map((node) => testFleetNode(node.id, projectRoot, { sharedProbe: options.fix === true })),
 	);
+	// Each probe saw only earlier records, so two entries for one machine checked together both passed.
+	rejectSameMachineNodes(records);
 	// Placement admits a node only from a stored record. Plain doctor observes;
 	// --fix is the run that may write state, so it is the one that records.
 	let recorded = options.fix === true;

@@ -28,7 +28,7 @@ export function isDevVersion(version: string): boolean {
 }
 
 /** The recorded commit of this bundle, or null when it was not built from a checkout. */
-function readBuildProvenance(): BuildProvenance | null {
+export function readBuildProvenance(): BuildProvenance | null {
 	if (typeof __CLIO_BUILD_COMMIT__ !== "string" || __CLIO_BUILD_COMMIT__.length === 0) return null;
 	return { commit: __CLIO_BUILD_COMMIT__, dirty: typeof __CLIO_BUILD_DIRTY__ === "boolean" && __CLIO_BUILD_DIRTY__ };
 }

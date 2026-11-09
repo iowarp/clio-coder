@@ -1,4 +1,4 @@
-import { match, strictEqual, throws } from "node:assert/strict";
+import { match, ok, strictEqual, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,9 +9,11 @@ import { shellQuote } from "../../src/core/shell-quote.js";
 import {
 	addFleetNode,
 	inspectFleetNodes,
+	rejectSameMachineNodes,
 	removeFleetNode,
 	testFleetNode,
 } from "../../src/domains/dispatch/fleet-nodes.js";
+import { sameFleetBuild } from "../../src/domains/dispatch/fleet-preflight.js";
 import { verifyFleetProject } from "../../src/domains/dispatch/fleet-project-verification.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -122,6 +124,40 @@ describe("fleet node management", () => {
 		writeFileSync(ssh, "#!/bin/sh\nexit 255\n");
 		await testFleetNode("builder", process.cwd(), { sshBinary: ssh, targets: [], verifyProject: false, record: true });
 		strictEqual(inspectFleetNodes()[0]?.readiness, "needs attention");
+	});
+
+	it("refuses a second node entry for a machine another node already holds", async () => {
+		addFleetNode({ id: "builder", host: "builder.invalid", maxWorkers: 1 });
+		addFleetNode({ id: "builder-lan", host: "192.0.2.10", maxWorkers: 1 });
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok' 'machine=0123456789abcdef0123456789abcdef'\n`,
+		);
+		chmodSync(ssh, 0o755);
+		const options = { sshBinary: ssh, targets: [], verifyProject: false } as const;
+		// Checked together, as a doctor sweep does, before either holds a record: the first listed keeps the machine.
+		const batch = [
+			await testFleetNode("builder", process.cwd(), options),
+			await testFleetNode("builder-lan", process.cwd(), options),
+		];
+		rejectSameMachineNodes(batch);
+		strictEqual(batch[0]?.ok, true);
+		strictEqual(batch[1]?.ok, false);
+		strictEqual((await testFleetNode("builder", process.cwd(), { ...options, record: true })).ok, true);
+		const twin = await testFleetNode("builder-lan", process.cwd(), { ...options, record: true });
+		strictEqual(twin.ok, false);
+		match(twin.detail ?? "", /same machine as node 'builder'/);
+		strictEqual((await testFleetNode("builder", process.cwd(), { ...options, record: true })).ok, true);
+	});
+
+	it("tells builds of one -dev version apart by clean commit or build id", () => {
+		const build = (id: string | null, commit: string | null, dirty = false) => ({ id, commit, dirty });
+		strictEqual(sameFleetBuild(build("a", "abc1234", true), build("a", "abc1234", true)), true);
+		strictEqual(sameFleetBuild(build("a", "abc1234"), build("b", "abc1234")), true);
+		strictEqual(sameFleetBuild(build("a", "abc1234", true), build("b", "abc1234", true)), false);
+		strictEqual(sameFleetBuild(build(null, "abc1234"), build(null, "def5678")), false);
+		ok(sameFleetBuild(build(null, "abc1234", true), build(null, "abc1234", true)) === null);
 	});
 
 	it("passes a node too old to report its worker spec versions as hook-free only", async () => {

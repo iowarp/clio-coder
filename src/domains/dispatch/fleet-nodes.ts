@@ -151,6 +151,44 @@ export async function testFleetNode(
 			result.detail = result.project.reason;
 		}
 	}
+	rejectSameMachineNodes([result]);
 	if (options.record) recordFleetPreflight([result]);
 	return result;
+}
+
+function machineHolders(excluded: ReadonlySet<string>): FleetPreflightRecord[] {
+	const registered = new Set(readSettings().fleet.nodes.map((node) => node.id));
+	return readFleetPreflightRecords().filter(
+		(record) => record.ok && record.machine && registered.has(record.nodeId) && !excluded.has(record.nodeId),
+	);
+}
+
+function sameMachineDetail(id: string, twin: string): string {
+	return `node '${id}' is the same machine as node '${twin}', and two entries for one machine double its worker capacity; remove one of them`;
+}
+
+/** Why another registered node with a passing record already holds this machine, or null. */
+export function sameMachineConflict(id: string, machine: string | null | undefined): string | null {
+	if (!machine) return null;
+	const twin = machineHolders(new Set([id])).find((record) => record.machine === machine);
+	return twin === undefined ? null : sameMachineDetail(id, twin.nodeId);
+}
+
+/**
+ * Fails a passing check for a node whose machine another registered node already holds, because
+ * two entries for one machine double its worker capacity. A node recorded earlier keeps the
+ * machine; within one batch, such as a doctor sweep, the first node listed keeps it.
+ */
+export function rejectSameMachineNodes(records: FleetPreflightRecord[]): void {
+	const holders = machineHolders(new Set(records.map((record) => record.nodeId)));
+	for (const result of records) {
+		if (!result.ok || !result.machine) continue;
+		const twin = holders.find((record) => record.nodeId !== result.nodeId && record.machine === result.machine);
+		if (twin === undefined) {
+			holders.push(result);
+			continue;
+		}
+		result.ok = false;
+		result.detail = sameMachineDetail(result.nodeId, twin.nodeId);
+	}
 }

@@ -14,7 +14,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDevVersion, readBuildProvenance } from "../../core/build-info.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { installedBuildId } from "../../core/running-build.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { shellQuote } from "../../core/shell-quote.js";
@@ -53,6 +55,19 @@ export interface FleetPreflightTarget {
 	headers?: Record<string, string>;
 }
 
+/**
+ * Which build of Clio a machine runs. Two builds of one `-dev` version share a
+ * version string, so the package version alone cannot prove a node runs the
+ * code this client would send it.
+ */
+export interface FleetBuildIdentity {
+	/** `dist/build.json` id; null for a source run or a build older than `version --build`. */
+	id: string | null;
+	/** Short commit from the version label; null when the build was not made from a checkout. */
+	commit: string | null;
+	dirty: boolean;
+}
+
 export interface FleetPreflightRecord {
 	nodeId: string;
 	connectionHash?: string;
@@ -64,6 +79,14 @@ export interface FleetPreflightRecord {
 	/** Local clio-coder version at check time; a different local version invalidates the record. */
 	localVersion: string;
 	remoteVersion: string | null;
+	/** Local build at check time; a rebuild of a `-dev` version invalidates the record. */
+	localBuild?: FleetBuildIdentity;
+	remoteBuild?: FleetBuildIdentity | null;
+	/**
+	 * Salted hash of the node's machine id; null when the node did not report one.
+	 * Two node entries for one machine would double its worker capacity.
+	 */
+	machine?: string | null;
 	/** Worker spec versions this install wrote at check time; a different set invalidates the record. */
 	localWorkerSpecs?: number[];
 	/**
@@ -181,7 +204,17 @@ export function fleetPreflightVerdict(
 	if (record.localVersion !== readClioVersion()) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' preflight predates a local clio-coder upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio-coder doctor --fix'`,
+			reason: `node '${node.id}' preflight predates a local clio-coder upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio-coder fleet nodes setup ${node.id} --yes'`,
+		};
+	}
+	if (
+		isDevVersion(record.localVersion) &&
+		record.localBuild !== undefined &&
+		sameFleetBuild(record.localBuild, localFleetBuild()) === false
+	) {
+		return {
+			ok: false,
+			reason: `node '${node.id}' preflight predates a local rebuild of ${record.localVersion}; run 'clio-coder fleet nodes setup ${node.id} --yes'`,
 		};
 	}
 	if (record.connectionHash !== fleetConnectionHash(node)) {
@@ -225,6 +258,57 @@ export function routeFactVerdict(
 	return evaluateRouteFacts(targets, resources, requirement, options);
 }
 
+/** The build this client would install on a node: the completed build on disk. */
+function localFleetBuild(): FleetBuildIdentity {
+	const provenance = readBuildProvenance();
+	return { id: installedBuildId(), commit: provenance?.commit ?? null, dirty: provenance?.dirty ?? false };
+}
+
+/**
+ * True when both sides provably run the same code, false when they provably
+ * do not, null when the evidence cannot decide. One clean commit is the same
+ * code however often it was rebuilt; a dirty tree is only identified by its id.
+ */
+export function sameFleetBuild(a: FleetBuildIdentity, b: FleetBuildIdentity): boolean | null {
+	if (a.id !== null && a.id === b.id) return true;
+	if (a.commit !== null && a.commit === b.commit && !a.dirty && !b.dirty) return true;
+	if (a.commit !== null && b.commit !== null && a.commit !== b.commit) return false;
+	if (a.id !== null && b.id !== null) return false;
+	return null;
+}
+
+/** Commit and dirty flag from a `0.6.6-dev (unreleased · abc1234-dirty)` version label. */
+function parseBuildLabel(label: string): { commit: string | null; dirty: boolean } {
+	const match = label.match(/unreleased · ([0-9a-f]{7,40})(-dirty)?\)/u);
+	return { commit: match?.[1] ?? null, dirty: match?.[2] !== undefined };
+}
+
+/**
+ * Reads the machine id without writing anything: systemd and dbus keep one on
+ * Linux, IOKit on macOS. The raw value never leaves this client's memory.
+ */
+const MACHINE_PROBE = `m=$( (cat /etc/machine-id || cat /var/lib/dbus/machine-id || ioreg -rd1 -c IOPlatformExpertDevice | awk -F'"' '/IOPlatformUUID/{print $4}') 2>/dev/null | head -n 1); echo "machine=$m"`;
+
+/** Salted so the stored value cannot be matched against other software's machine-id records. */
+function machineFingerprint(lines: ReadonlyArray<string>): string | null {
+	const raw =
+		lines
+			.find((line) => line.startsWith("machine="))
+			?.slice("machine=".length)
+			.trim() ?? "";
+	if (!/^[0-9A-Fa-f-]{16,64}$/u.test(raw)) return null;
+	return createHash("sha256").update(`clio-coder-machine\0${raw.toLowerCase()}`).digest("hex").slice(0, 16);
+}
+
+let localMachine: Promise<string | null> | undefined;
+/** This client's own fingerprint, so a node that is this machine is named as such. */
+function localMachineFingerprint(): Promise<string | null> {
+	localMachine ??= runCommandVector("sh", ["-c", MACHINE_PROBE], { timeoutMs: 5000 })
+		.then((result) => machineFingerprint(result.stdout.split("\n").map((line) => line.trim())))
+		.catch(() => null);
+	return localMachine;
+}
+
 const PREFLIGHT_MARKER = "clio-coder-preflight/1";
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 20_000;
 
@@ -249,6 +333,9 @@ function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): strin
 		cliBase !== null
 			? `w=$(${cliBase} version --worker-specs 2>/dev/null | head -n 1); echo "workerSpecs=$w"`
 			: "echo workerSpecs=unverified-entry";
+	// A build older than the report prints its version line, which is no build id.
+	const buildProbe =
+		cliBase !== null ? `b=$(${cliBase} version --build 2>/dev/null | head -n 1); echo "build=$b"` : null;
 	const versionProbe =
 		versionCommand !== null
 			? `v=$(${versionCommand} 2>/dev/null | head -n 1); if [ -n "$v" ]; then echo "clioCoder=$v"; else echo clioCoder=missing; fi`
@@ -258,6 +345,8 @@ function buildPreflightScript(node: SshNodeEndpoint, projectRoot: string): strin
 		`if cd ${shellQuote(projectRoot)} 2>/dev/null; then echo cwd=ok; else echo cwd=missing; fi`,
 		versionProbe,
 		specProbe,
+		...(buildProbe !== null ? [buildProbe] : []),
+		MACHINE_PROBE,
 		`d="\${XDG_STATE_HOME:-$HOME/.local/state}/clio-coder"; if [ -d "$d" ]; then if [ -w "$d" ]; then echo state=ok; else echo state=fail; fi; else p="$d"; while [ ! -e "$p" ] && [ "$p" != / ]; do p=$(dirname "$p"); done; if [ -d "$p" ] && [ -w "$p" ] && [ -x "$p" ]; then echo state=creatable; else echo state=fail; fi; fi`,
 		// Resource observation runs on the node. A node without nvidia-smi reports
 		// unknown; it never reports zero GPUs, which a fit requirement would read
@@ -419,6 +508,9 @@ export async function runFleetNodePreflight(
 		checkedAt,
 		localVersion,
 		remoteVersion: null,
+		localBuild: localFleetBuild(),
+		remoteBuild: null,
+		machine: null,
 		localWorkerSpecs: [...WORKER_SPEC_VERSIONS],
 		remoteWorkerSpecs: null,
 		detail: null,
@@ -445,6 +537,10 @@ export async function runFleetNodePreflight(
 		vramBytes: parseUnknownableNumber(lines, "vrammb=", 1024 * 1024),
 		observedAt: checkedAt,
 	};
+	record.machine = machineFingerprint(lines);
+	const notes: string[] = [];
+	if (record.machine !== null && record.machine === (await localMachineFingerprint()))
+		notes.push("this node is the machine running this client, so its workers share local CPU, memory and models");
 	checks.pathParity = lines.includes("cwd=ok");
 	checks.stateDirWritable = lines.includes("state=ok") || lines.includes("state=creatable");
 	// The probe script is generated locally and always echoes `clioCoder=`, so
@@ -454,6 +550,11 @@ export async function runFleetNodePreflight(
 		checks.clioPresent = true;
 		record.remoteVersion = parseSemver(clioValue);
 		checks.versionMatch = record.remoteVersion !== null && record.remoteVersion === parseSemver(localVersion);
+		const reportedId = lines.find((line) => line.startsWith("build="))?.slice("build=".length) ?? "";
+		record.remoteBuild = {
+			id: /^[0-9a-f-]{36}$/u.test(reportedId) ? reportedId : null,
+			...parseBuildLabel(clioValue),
+		};
 	}
 	// The package version alone misses two builds of one version that write
 	// different specs, so a node that reports its spec versions must read every
@@ -468,10 +569,28 @@ export async function runFleetNodePreflight(
 		record.remoteWorkerSpecs = parseWorkerSpecs(specValue);
 		if (record.remoteWorkerSpecs !== null) specMismatch = workerSpecMismatch(record.remoteWorkerSpecs);
 		else
-			record.note = `the node's worker does not report the spec versions it reads (a build older than this one), so it counts as reading version ${WORKER_SPEC_HOOKLESS_VERSION} only; dispatches carrying extension hooks (version ${WORKER_SPEC_VERSION}) will not run on this node and go to another node`;
+			notes.push(
+				`the node's worker does not report the spec versions it reads (a build older than this one), so it counts as reading version ${WORKER_SPEC_HOOKLESS_VERSION} only; dispatches carrying extension hooks (version ${WORKER_SPEC_VERSION}) will not run on this node and go to another node`,
+			);
 	}
+	if (notes.length > 0) record.note = notes.join("; ");
 	const packageMatch = checks.versionMatch;
 	if (specMismatch !== null) checks.versionMatch = false;
+	// A `-dev` version names a moving tree, so the node must run this exact build.
+	let buildMismatch: string | null = null;
+	if (packageMatch && isDevVersion(localVersion) && record.remoteBuild && record.localBuild) {
+		if (sameFleetBuild(record.localBuild, record.remoteBuild) === false) {
+			// One commit built twice from a dirty tree differs only by build id.
+			const sameCommit = record.localBuild.commit !== null && record.localBuild.commit === record.remoteBuild.commit;
+			const describe = (build: FleetBuildIdentity) =>
+				[
+					...(build.commit !== null ? [`${build.commit}${build.dirty ? "-dirty" : ""}`] : []),
+					...(build.commit === null || sameCommit ? [`build ${build.id?.slice(0, 8) ?? "unknown"}`] : []),
+				].join(" ");
+			buildMismatch = `the node runs another build of ${localVersion} (remote ${describe(record.remoteBuild)}, local ${describe(record.localBuild)})`;
+			checks.versionMatch = false;
+		}
+	}
 	const failures: string[] = [];
 	if (!checks.pathParity)
 		failures.push(
@@ -480,12 +599,15 @@ export async function runFleetNodePreflight(
 	if (clioValue === "unverified-entry")
 		failures.push("custom worker entry needs clioCoderVersionCommand printing its exact Clio version");
 	else if (!checks.clioPresent)
-		failures.push("clio-coder not found on remote PATH (set fleet.nodes[].clioCoderEntry or install clio-coder)");
+		failures.push(
+			`clio-coder not found on the node's SSH PATH (run 'clio-coder fleet nodes setup ${node.id} --yes', or set fleet.nodes[].clioCoderEntry)`,
+		);
 	else if (!packageMatch) {
 		failures.push(
 			`clio-coder version mismatch (local ${parseSemver(localVersion) ?? localVersion}, remote ${record.remoteVersion ?? "unknown"})`,
 		);
 	} else if (specMismatch !== null) failures.push(specMismatch);
+	else if (buildMismatch !== null) failures.push(buildMismatch);
 	if (!checks.stateDirWritable) failures.push("remote clio-coder state dir is not writable");
 	record.ok = failures.length === 0;
 	record.detail = failures.length > 0 ? failures.join("; ") : null;

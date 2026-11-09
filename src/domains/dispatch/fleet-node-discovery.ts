@@ -19,7 +19,7 @@ export async function discoverTailscaleNodes(): Promise<TailscaleNodeCandidate[]
 	if (result.exitCode !== 0) {
 		throw new Error(
 			result.exitCode === null || result.exitCode === 127
-				? "Tailscale CLI is unavailable. Install/sign in to Tailscale if you want discovery, or add an SSH node with 'fleet nodes add <id> --host <host>'."
+				? "Tailscale CLI is unavailable. Install/sign in to Tailscale if you want discovery, or set up an SSH node with 'fleet nodes setup <id> --host <host>'."
 				: "Tailscale status failed. Check that its daemon is running and signed in, or add an SSH host directly. Tailscale is optional.",
 		);
 	}
