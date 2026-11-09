@@ -116,8 +116,14 @@ export type {
 	FleetRunPreviewWave,
 } from "./fleet-run-preview.js";
 export { compileFleetRunPreview, fleetRouteResolver } from "./fleet-run-preview.js";
-export type { FleetToolInstallPlan } from "./fleet-tool-install.js";
-export { describeFleetToolInstall, executeFleetToolInstall, prepareFleetToolInstall } from "./fleet-tool-install.js";
+export type { FleetTool, FleetToolInstallPlan } from "./fleet-tool-install.js";
+export {
+	describeFleetToolInstall,
+	executeFleetToolInstall,
+	FLEET_TOOLS,
+	isFleetTool,
+	prepareFleetToolInstall,
+} from "./fleet-tool-install.js";
 export { FleetWorkspaceBusyError, FleetWorkspaceLockUnavailableError } from "./fleet-workspace-lock.js";
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {

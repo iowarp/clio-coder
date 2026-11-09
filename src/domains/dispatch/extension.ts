@@ -331,6 +331,7 @@ import {
 	honestWorkerSpecSkewText,
 	isContextOverflowFailure,
 	isInfrastructureFailure,
+	nodeComponentRemedy,
 	type RetryDecision,
 } from "./failure-classification.js";
 import {
@@ -9273,10 +9274,18 @@ export function createDispatchBundle(
 				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode, providerErrorMessage);
 				// A released node's skew refusal asks for a re-dispatch that earns the
 				// same refusal; the receipt reports the build skew instead.
-				const receiptResult =
+				let receiptResult =
 					failureClass === "node-version" && typeof result.stderrTail === "string"
 						? { ...result, stderrTail: honestWorkerSpecSkewText(result.stderrTail) }
 						: result;
+				// A node worker missing an SDK component names the install for its own
+				// machine; the operator runs the client command that installs it there.
+				if (failureClass === "deterministic-task" && placed.kind !== "local") {
+					if (failureMessage !== undefined) failureMessage = nodeComponentRemedy(failureMessage, placed.id);
+					if (finalDetail !== null) finalDetail = nodeComponentRemedy(finalDetail, placed.id);
+					if (typeof receiptResult.stderrTail === "string")
+						receiptResult = { ...receiptResult, stderrTail: nodeComponentRemedy(receiptResult.stderrTail, placed.id) };
+				}
 				const receiptDraft = buildReceiptDraft(
 					receiptResult,
 					endedAt,

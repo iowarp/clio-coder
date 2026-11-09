@@ -16,7 +16,8 @@ const HELP = `clio-coder fleet nodes <command>
                                         probes it after adding, --record also records the check
   discover [--json]                     list Tailscale peers and which ones are registered nodes
   install <id> [--yes]                  preview a user-level install of this exact client; --yes executes
-  tools install <id> asciinema [--yes]  preview a checksum-pinned user-level remote tool install; --yes executes
+  tools install <id> <tool> [--yes]     preview a user-level remote install of asciinema, copilot-sdk or
+                                        claude-sdk pinned by the node's Clio; --yes executes
   list [--json]                         show recorded readiness for this project and check age
   remove <id>                           remove a node without deleting remote files
   test <id> [--record] [--json]         probe without remote writes; --record updates local eligibility
@@ -247,17 +248,17 @@ export async function runFleetNodes(args: ReadonlyArray<string>): Promise<number
 			}
 		}
 		if (sub === "tools") {
-			if (args[1] !== "install") throw new Error("tools requires install <node-id> asciinema");
+			const { prepareFleetToolInstall, describeFleetToolInstall, executeFleetToolInstall, FLEET_TOOLS, isFleetTool } =
+				await import("../domains/dispatch/index.js");
+			const usage = `tools install requires <node-id> and one of ${FLEET_TOOLS.join(", ")}`;
+			if (args[1] !== "install") throw new Error(usage);
 			const parsed = parse(args.slice(2), ["--yes"], []);
-			if (parsed.positional.length !== 2 || parsed.positional[1] !== "asciinema")
-				throw new Error("tools install requires <node-id> asciinema");
-			const { prepareFleetToolInstall, describeFleetToolInstall, executeFleetToolInstall } = await import(
-				"../domains/dispatch/index.js"
-			);
-			const plan = prepareFleetToolInstall(parsed.positional[0] as string, "asciinema");
+			const tool = parsed.positional[1];
+			if (parsed.positional.length !== 2 || tool === undefined || !isFleetTool(tool)) throw new Error(usage);
+			const plan = prepareFleetToolInstall(parsed.positional[0] as string, tool);
 			process.stdout.write(`${describeFleetToolInstall(plan)}\n`);
 			if (!parsed.flags.has("--yes")) {
-				process.stdout.write(`Run 'clio-coder fleet nodes tools install ${plan.node.id} asciinema --yes' to execute.\n`);
+				process.stdout.write(`Run 'clio-coder fleet nodes tools install ${plan.node.id} ${tool} --yes' to execute.\n`);
 				return 0;
 			}
 			const output = await executeFleetToolInstall(plan);

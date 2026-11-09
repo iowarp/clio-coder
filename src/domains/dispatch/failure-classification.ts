@@ -73,6 +73,10 @@ const TRANSIENT_TARGET_TEXT =
 
 const WORKERSPEC_REJECTION = /\[worker\] fatal: workerspec/;
 
+/** CopilotSdkUnavailableError and ClaudeAgentSdkUnavailableError wording, lowercased. */
+const MISSING_RUNTIME_COMPONENT =
+	/the (?:copilot-sdk|claude sdk) runtime needs \S+\. run: clio-coder tools install (?:copilot-sdk|claude-sdk)\b|no @anthropic-ai\/claude-agent-sdk in prepared prefix\b/;
+
 /** HTTP status the worker reported for the provider answer that ended its run. */
 function workerProviderHttpStatus(result: SpawnedWorkerResult | null): number | null {
 	const tail = result?.stderrTail;
@@ -105,6 +109,19 @@ export function honestWorkerSpecSkewText(text: string): string {
 		RELEASED_SPEC_VERSION_REFUSAL,
 		(_match, sent: string, reads: string) =>
 			`WorkerSpec version ${sent} is not one this worker reads (it reads ${reads}). The dispatching session and this node run different Clio Coder builds; upgrade the older one, or dispatch to another node.`,
+	);
+}
+
+// The worker words this remedy for its own machine: the client command it names does not reach the node.
+const COMPONENT_REMEDY =
+	/Run: clio-coder tools install (copilot-sdk|claude-sdk)\. This installs a separate component at ([^;]+);/g;
+
+/** A remote worker's missing-component remedy, reworded to the client command that installs it on that node. */
+export function nodeComponentRemedy(text: string, nodeId: string): string {
+	return text.replace(
+		COMPONENT_REMEDY,
+		(_match, tool: string, path: string) =>
+			`Install it on node '${nodeId}' from this client: clio-coder fleet nodes tools install ${nodeId} ${tool} --yes. This installs a separate component at ${path} on that node;`,
 	);
 }
 
@@ -193,6 +210,11 @@ export function classifyFailure(
 	// error. Ending it here surfaces the contract message the operator has to act
 	// on instead of burying it under two more identical failures.
 	if (WORKERSPEC_REJECTION.test(diagnostic)) return "deterministic-task";
+	// The worker's machine lacks an optional runtime SDK component. Every attempt
+	// on that machine earns the same refusal until someone installs it, so a
+	// retry only repeats the error and charging the target breaker blames an
+	// endpoint Clio never reached.
+	if (MISSING_RUNTIME_COMPONENT.test(diagnostic)) return "deterministic-task";
 	// ACP model admission and 400/404 prompt verdicts reject the same request
 	// on every attempt. They do not indicate that the peer is unhealthy.
 	if (

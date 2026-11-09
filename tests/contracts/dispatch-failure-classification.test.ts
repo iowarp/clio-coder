@@ -5,6 +5,7 @@ import {
 	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
+	nodeComponentRemedy,
 } from "../../src/domains/dispatch/failure-classification.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
 import { blockedWriteAttempts, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
@@ -130,6 +131,19 @@ describe("dispatch failure classification", () => {
 			strictEqual(affectsTargetBreaker(failureClass), false, tail);
 			strictEqual(decideRetry(failureClass, 0, 2).retry, false, tail);
 		}
+	});
+
+	it("does not retry a missing runtime SDK component and names the node-side install", () => {
+		const message =
+			"The copilot-sdk runtime needs @github/copilot-sdk@1.0.26. Run: clio-coder tools install copilot-sdk. This installs a separate component at /home/u/.local/share/clio-coder/components/copilot-sdk/1.0.26; it does not change Clio's installation.";
+		const failureClass = classifyTail(`[worker] agent ended with stopReason=error: ${message}`);
+		strictEqual(failureClass, "deterministic-task");
+		strictEqual(decideRetry(failureClass, 0, 2).retry, false);
+		strictEqual(affectsTargetBreaker(failureClass), false);
+		match(
+			nodeComponentRemedy(message, "loop"),
+			/^The copilot-sdk runtime needs \S+\. Install it on node 'loop' from this client: clio-coder fleet nodes tools install loop copilot-sdk --yes\. This installs a separate component at \/home\/u\/\S+ on that node;/,
+		);
 	});
 
 	it("treats bare 500s and connection failures as target-transient", () => {
