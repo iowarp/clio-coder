@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
+	chmodSync,
 	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	symlinkSync,
@@ -157,6 +159,24 @@ test("a proven keep set removes every unused version, runtime and helper at once
 	for (const kept of [f.record.current, f.record.previous, held, currentNode, launcherNode, named])
 		assert.equal(existsSync(kept), true, kept);
 	assert.equal(existsSync(join(f.root, ".install-lock")), false);
+});
+
+test("prune names a version it cannot read and leaves it whole, and finishes an interrupted removal", {
+	skip: (process.platform !== "linux" || process.getuid?.() === 0) && "needs a non-root POSIX permission check",
+}, (t) => {
+	const f = fixture(t);
+	const locked = f.prefix("0.5.9");
+	const manifest = join(locked, suffix, "package.json");
+	chmodSync(manifest, 0);
+	const leftover = join(f.root, "versions/.clio-coder-pruning-0.5.7-123");
+	mkdirSync(join(leftover, suffix), { recursive: true });
+
+	const result = f.run("prune");
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /could not remove .*0\.5\.9 \(EACCES\); the next update retries/);
+	assert.equal(existsSync(manifest), true, "the unreadable version stays whole");
+	assert.equal(existsSync(leftover), false, "a renamed entry from an interrupted prune is swept");
+	assert.deepEqual(readdirSync(join(f.root, "versions")).sort(), ["0.5.9", "0.6.0", "0.6.1"]);
 });
 
 test("without a complete process inventory, prune keeps the last week and the newest three", (t) => {

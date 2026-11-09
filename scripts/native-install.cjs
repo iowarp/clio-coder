@@ -267,12 +267,18 @@ function formatBytes(bytes) {
 // the manifest, the launcher, the GUI service files, running-build and launch receipts, and the
 // process inventory. With a complete inventory everything else goes at once; without one, keep
 // anything younger than seven days and the newest three. Dead local launch receipts are removed.
+// Entries prune has renamed for removal; the leading dot keeps them out of every listing.
+const PRUNE_PREFIX = ".clio-coder-pruning-";
+
 function prune(root, options = {}) {
 	const now = options.now ?? Date.now();
 	const windows = (options.platform ?? process.platform) === "win32";
 	const norm = (text) => (windows ? text.toLowerCase().replaceAll("/", "\\") : text);
 	const installed = record(root);
 	const entries = [];
+	// A version whose package.json cannot be read for a reason other than its absence (a
+	// Windows file held open without sharing) is left alone, and said so, rather than skipped silently.
+	const unreadable = [];
 	for (const kind of ["versions", "runtime", "launchers"]) {
 		const dir = path.join(root, kind);
 		for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
@@ -281,7 +287,11 @@ function prune(root, options = {}) {
 			const info = fs.lstatSync(file);
 			if (kind === "launchers" ? !info.isFile() || !name.endsWith(".cjs") : !info.isDirectory()) continue;
 			if (kind === "runtime" && !name.startsWith("node-v")) continue;
-			if (kind === "versions" && packageName(file) !== "@iowarp/clio-coder") continue;
+			if (kind === "versions") {
+				const owner = packageName(file);
+				if (owner.error) unreadable.push({ kind, name, path: file, error: owner.error });
+				if (owner.name !== "@iowarp/clio-coder") continue;
+			}
 			// Service files, session records and /proc carry resolved paths, the manifest the
 			// logical ones; behind a symlinked home both spellings must protect the entry.
 			let real = file;
@@ -415,22 +425,41 @@ function prune(root, options = {}) {
 		}
 	}
 	const removed = [];
-	const skipped = [];
+	const skipped = [...unreadable];
 	for (const entry of entries) {
 		if (kept.has(entry.path)) continue;
 		const bytes = treeBytes(entry.path);
 		if (!options.dryRun) {
+			// Windows deletes around a file held open and leaves a half-removed version that
+			// no later prune recognizes. Renaming first fails while anything inside is open,
+			// so a held entry stays whole; a rename that lands is finished now or by the next sweep.
+			const doomed = path.join(path.dirname(entry.path), `${PRUNE_PREFIX}${entry.name}-${process.pid}`);
 			try {
-				fs.rmSync(entry.path, { recursive: true });
+				fs.renameSync(entry.path, doomed);
 			} catch (error) {
-				// A Windows file in use cannot be removed; the next activation retries.
 				skipped.push({ kind: entry.kind, name: entry.name, path: entry.path, error: error.code || error.message });
 				continue;
+			}
+			try {
+				fs.rmSync(doomed, { recursive: true });
+			} catch {
+				/* The next prune sweeps it. */
 			}
 		}
 		removed.push({ kind: entry.kind, name: entry.name, path: entry.path, bytes });
 	}
-	if (!options.dryRun)
+	if (!options.dryRun) {
+		for (const kind of ["versions", "runtime", "launchers"]) {
+			const dir = path.join(root, kind);
+			for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : [])
+				if (name.startsWith(PRUNE_PREFIX)) {
+					try {
+						fs.rmSync(path.join(dir, name), { recursive: true });
+					} catch {
+						/* Still held; the next prune retries. */
+					}
+				}
+		}
 		for (const file of deadReceipts) {
 			try {
 				fs.rmSync(file, { force: true });
@@ -438,6 +467,7 @@ function prune(root, options = {}) {
 				/* The next prune retries. */
 			}
 		}
+	}
 	return {
 		proof,
 		reason,
@@ -490,9 +520,10 @@ function pinRecord(old, pin, source) {
 function packageName(prefix) {
 	try {
 		const file = path.join(prefix, "lib", "node_modules", "@iowarp", "clio-coder", "package.json");
-		return String(JSON.parse(fs.readFileSync(file, "utf8")).name || "");
-	} catch {
-		return "";
+		return { name: String(JSON.parse(fs.readFileSync(file, "utf8")).name || "") };
+	} catch (error) {
+		const missing = error.code === "ENOENT" || error.code === "ENOTDIR" || error instanceof SyntaxError;
+		return { name: "", error: missing ? undefined : error.code || error.message };
 	}
 }
 
