@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { hostname } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { endAbandonedSession, listSessionWorkspaces } from "../../../../../src/domains/session/history.js";
@@ -35,7 +36,10 @@ export function preflightLedger() {
 export function sessionWorkspaces() {
 	return preflightLedger() ? listSessionWorkspaces() : [];
 }
-/** Ends a session ledger record the caller has proven abandoned; the ops worker is its only caller. */
-export function recoverSession(cwd: string, sessionId: string) {
-	return preflightLedger() ? endAbandonedSession(cwd, sessionId) : false;
+/**
+ * Ends a session ledger record the caller has proven abandoned, only while the dead child `pid` is still its
+ * recorded owner; the ops worker is its only caller.
+ */
+export function recoverSession(cwd: string, sessionId: string, pid: number, birth: string | null) {
+	return preflightLedger() ? endAbandonedSession(cwd, sessionId, { host: hostname(), pid, birth }) : false;
 }

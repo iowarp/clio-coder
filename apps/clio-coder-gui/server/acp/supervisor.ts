@@ -263,7 +263,11 @@ export class Supervisor {
 		/** Turns that may run at once across every session. Open sessions are not limited. */
 		turnCapacity = DEFAULT_TURN_CAPACITY,
 		private readonly permissionTimers?: PermissionTimers,
-		private readonly recover?: (cwd: string, sessionId: string) => Promise<unknown>,
+		private readonly recover?: (
+			cwd: string,
+			sessionId: string,
+			owner: { pid: number; birth: string | null },
+		) => Promise<unknown>,
 		private readonly parkAfterMs = PARK_AFTER_MS,
 	) {
 		this.capacity = boundedTurnCapacity(turnCapacity);
@@ -405,7 +409,7 @@ export class Supervisor {
 					// A mismatch against a real birth token means the child is gone; without one it proves nothing.
 					const dead =
 						result === "closed" || (result === "identity-mismatch" && !!row.birthToken && !row.birthToken.startsWith("pid-"));
-					if (dead) await this.recoverLedger(row.workspaceId, row.sessionId);
+					if (dead) await this.recoverLedger(row);
 					this.state(row.sessionId, "closed", true);
 				})
 				.catch(() => {
@@ -418,12 +422,17 @@ export class Supervisor {
 	/**
 	 * A child confirmed dead cannot close its own record, and ACP refuses an unended record as possibly open, so the
 	 * session would be stuck for every interface except a terminal resume. Only this supervisor's own dead children
-	 * reach here, which is the proof ACP lacks. Best effort: when it fails the record stays as it was.
+	 * reach here, which is the proof ACP lacks. That proof covers only a ledger the dead child itself held: a load
+	 * the ledger's live owner refused leaves that owner's record alone (#420). Best effort: when it fails the record
+	 * stays as it was.
 	 */
-	private async recoverLedger(workspaceId: string, sessionId: string) {
+	private async recoverLedger(row: ChildRow) {
 		if (!this.recover) return;
 		try {
-			await this.recover((await this.workspaces.get(workspaceId)).path, sessionId);
+			await this.recover((await this.workspaces.get(row.workspaceId)).path, row.sessionId, {
+				pid: row.pid,
+				birth: row.birthToken,
+			});
 		} catch {
 			// The workspace may have vanished or the ledger be unreadable; the record then keeps its terminal-resume path.
 		}
@@ -1941,7 +1950,7 @@ export class Supervisor {
 		}
 		this.failTurn(entry, new AppProblem("upstream_acp", "ACP session closed during its turn."));
 		if (!(await childRunning(entry.row.pid))) {
-			await this.recoverLedger(entry.row.workspaceId, entry.id);
+			await this.recoverLedger({ ...entry.row, sessionId: entry.id });
 			await this.children.remove(entry.row);
 			const snapshot = this.snapshots.get(entry.id);
 			// A task nobody typed into has nothing to come back to, so it closes like any other.

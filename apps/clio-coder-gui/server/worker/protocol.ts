@@ -50,7 +50,10 @@ export interface Methods {
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"sessions.workspaces": { params: Record<string, never>; result: unknown };
 	"workspace.files": { params: { cwd: string; input: string }; result: unknown };
-	"sessions.recover": { params: { cwd: string; sessionId: string }; result: boolean };
+	"sessions.recover": {
+		params: { cwd: string; sessionId: string; pid: number; birth: string | null };
+		result: boolean;
+	};
 	"traces.read": { params: TraceRequest; result: unknown };
 	"telemetry.read": { params: TelemetryRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
