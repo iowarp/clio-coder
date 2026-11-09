@@ -48,6 +48,16 @@ export interface PosixHostOptions {
 	cacheDir?: () => string;
 }
 
+/** A preferred runtime directory left out because herdr's client socket in it would not fit a Unix socket path. */
+export interface TooLongRuntimeDir {
+	dir: string;
+	/** The longest socket herdr would create there. */
+	socketPath: string;
+	bytes: number;
+	/** The variable the directory came from, and the longest value of it that would fit; absent for Clio's own roots. */
+	variable?: { name: "XDG_RUNTIME_DIR" | "TMPDIR"; maxBytes: number };
+}
+
 /**
  * Runtime directories to try, most preferred first; a candidate that would
  * make the socket path too long is skipped, and one that cannot be made
@@ -64,19 +74,76 @@ export function posixRuntimeDirCandidates(
 	uid: number,
 	clioRoots: { state?: string; cache?: string } = {},
 ): string[] {
-	const fits = (dir: string): boolean => Buffer.byteLength(join(dir, `${session}-client.sock`)) <= SOCKET_PATH_BUDGET;
-	const preferred: string[] = [];
-	if (platform === "darwin") {
-		if (env.TMPDIR?.startsWith("/")) preferred.push(join(env.TMPDIR, "clio-coder"));
-	} else {
-		if (env.XDG_RUNTIME_DIR?.startsWith("/")) preferred.push(join(env.XDG_RUNTIME_DIR, "clio-coder"));
+	return posixRuntimeDirPlan(env, session, platform, uid, clioRoots).candidates;
+}
+
+/** The candidates, and the preferred directories skipped because the socket path would be too long. */
+export function posixRuntimeDirPlan(
+	env: NodeJS.ProcessEnv,
+	session: string,
+	platform: NodeJS.Platform,
+	uid: number,
+	clioRoots: { state?: string; cache?: string } = {},
+): { candidates: string[]; tooLong: TooLongRuntimeDir[] } {
+	const preferred: Array<{ dir: string; from?: { name: "XDG_RUNTIME_DIR" | "TMPDIR"; value: string } }> = [];
+	const fromEnv = (name: "XDG_RUNTIME_DIR" | "TMPDIR", leaf: string): void => {
+		const value = env[name];
+		if (value?.startsWith("/")) preferred.push({ dir: join(value, leaf), from: { name, value } });
+	};
+	if (platform === "darwin") fromEnv("TMPDIR", "clio-coder");
+	else {
+		fromEnv("XDG_RUNTIME_DIR", "clio-coder");
 		// TMPDIR may be shared between users, so the directory carries the uid.
-		if (env.TMPDIR?.startsWith("/")) preferred.push(join(env.TMPDIR, `clio-coder-${uid}`));
+		fromEnv("TMPDIR", `clio-coder-${uid}`);
 	}
-	if (clioRoots.state !== undefined) preferred.push(join(clioRoots.state, "mux", "run"));
-	if (clioRoots.cache !== undefined) preferred.push(join(clioRoots.cache, "run"));
+	if (clioRoots.state !== undefined) preferred.push({ dir: join(clioRoots.state, "mux", "run") });
+	if (clioRoots.cache !== undefined) preferred.push({ dir: join(clioRoots.cache, "run") });
+	const fitting: string[] = [];
+	const tooLong: TooLongRuntimeDir[] = [];
+	for (const { dir, from } of preferred) {
+		const socketPath = join(dir, `${session}-client.sock`);
+		const bytes = Buffer.byteLength(socketPath);
+		if (bytes <= SOCKET_PATH_BUDGET) fitting.push(dir);
+		else if (!tooLong.some((entry) => entry.dir === dir)) {
+			// The value's own trailing slash is not part of the joined path.
+			const overhead = bytes - Buffer.byteLength(from?.value.replace(/\/+$/u, "") ?? "");
+			tooLong.push({
+				dir,
+				socketPath,
+				bytes,
+				...(from !== undefined ? { variable: { name: from.name, maxBytes: SOCKET_PATH_BUDGET - overhead } } : {}),
+			});
+		}
+	}
 	const fallback = `/tmp/clio-coder-${uid}`;
-	return [...new Set([...preferred.filter(fits), fallback])];
+	return { candidates: [...new Set([...fitting, fallback])], tooLong };
+}
+
+/**
+ * Why no runtime directory worked, naming every directory skipped for length
+ * and the fix: an integrator that roots each instance in a long path (a
+ * desktop app's per-terminal home) leaves only /tmp, which its fence may deny.
+ */
+export function noRuntimeDirMessage(
+	failures: ReadonlyArray<string>,
+	tooLong: ReadonlyArray<TooLongRuntimeDir>,
+	platform: NodeJS.Platform,
+): string {
+	const tried = failures.length > 0 ? ` (${failures.join("; ")})` : "";
+	if (tooLong.length === 0) return `no usable runtime directory for the pane host${tried}`;
+	const skipped = tooLong.map((entry) => `${entry.socketPath} is ${entry.bytes} bytes`).join("; ");
+	const fixes = tooLong.flatMap((entry) =>
+		entry.variable !== undefined ? [`${entry.variable.name} of at most ${entry.variable.maxBytes} bytes`] : [],
+	);
+	const fix =
+		fixes.length > 0
+			? `set a shorter ${fixes.join(" or ")}`
+			: `set a short ${platform === "darwin" ? "TMPDIR" : "XDG_RUNTIME_DIR or TMPDIR"}`;
+	return (
+		`no usable runtime directory for the pane host${tried}; ` +
+		`skipped as too long for a Unix socket path (limit ${SOCKET_PATH_BUDGET} bytes): ${skipped}; ` +
+		`to fix, ${fix}`
+	);
 }
 
 /**
@@ -119,7 +186,8 @@ function runtimeDir(
 	clioRoots: { state?: string; cache?: string },
 ): string {
 	const failures: string[] = [];
-	for (const candidate of posixRuntimeDirCandidates(env, session, platform, uid, clioRoots)) {
+	const plan = posixRuntimeDirPlan(env, session, platform, uid, clioRoots);
+	for (const candidate of plan.candidates) {
 		try {
 			// Clio's own roots may not have the parent yet; system roots are never created.
 			const underClio = [clioRoots.state, clioRoots.cache].some((r) => r !== undefined && candidate.startsWith(`${r}/`));
@@ -130,7 +198,7 @@ function runtimeDir(
 			failures.push(error instanceof Error ? error.message : String(error));
 		}
 	}
-	throw new Error(`no usable runtime directory for the pane host (${failures.join("; ")})`);
+	throw new Error(noRuntimeDirMessage(failures, plan.tooLong, platform));
 }
 
 /** The pane shell shim, as text. */

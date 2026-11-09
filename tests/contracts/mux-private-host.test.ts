@@ -40,7 +40,9 @@ import { holdExitSummaryForLauncher } from "../../src/domains/mux/workspace/exit
 import { launchWorkspace } from "../../src/domains/mux/workspace/launch.js";
 import {
 	createPosixHostPlatform,
+	noRuntimeDirMessage,
 	posixRuntimeDirCandidates,
+	posixRuntimeDirPlan,
 	renderPosixShellShim,
 } from "../../src/domains/mux/workspace/platform-posix.js";
 import { installPinnedTool, mirroredSources } from "../../src/domains/toolchain/install.js";
@@ -81,6 +83,37 @@ describe("private pane host layout (POSIX)", () => {
 		);
 		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: `/${"t".repeat(60)}` }, SESSION, "linux", 7), systemRoot);
 		deepStrictEqual(posixRuntimeDirCandidates({ TMPDIR: "relative" }, SESSION, "linux", 7), systemRoot);
+	});
+
+	it("names each runtime dir skipped as too long, its length, the limit and the variable to shorten", () => {
+		const xdg = `/${"d".repeat(60)}`;
+		const tmp = `/${"t".repeat(60)}/`;
+		const plan = posixRuntimeDirPlan({ XDG_RUNTIME_DIR: xdg, TMPDIR: tmp }, SESSION, "linux", 7, {
+			state: `/${"s".repeat(70)}`,
+		});
+		deepStrictEqual(plan.candidates, ["/tmp/clio-coder-7"]);
+		const message = noRuntimeDirMessage(
+			["EROFS: read-only file system, mkdir '/tmp/clio-coder-7/x'"],
+			plan.tooLong,
+			"linux",
+		);
+		ok(message.includes("(EROFS: read-only file system"), message);
+		ok(message.includes(`${xdg}/clio-coder/${SESSION}-client.sock is 108 bytes`), message);
+		ok(message.includes(`/${"t".repeat(60)}/clio-coder-7/${SESSION}-client.sock is 110 bytes`), message);
+		ok(message.includes(`/mux/run/${SESSION}-client.sock is 115 bytes`), message);
+		ok(message.includes("limit 100 bytes"), message);
+		ok(message.endsWith("set a shorter XDG_RUNTIME_DIR of at most 53 bytes or TMPDIR of at most 51 bytes"), message);
+		// The advised lengths are exactly the ones that fit.
+		deepStrictEqual(
+			posixRuntimeDirCandidates(
+				{ XDG_RUNTIME_DIR: `/${"d".repeat(52)}`, TMPDIR: `/${"t".repeat(50)}` },
+				SESSION,
+				"linux",
+				7,
+			),
+			[`/${"d".repeat(52)}/clio-coder`, `/${"t".repeat(50)}/clio-coder-7`, "/tmp/clio-coder-7"],
+		);
+		equal(noRuntimeDirMessage(["EACCES"], [], "linux"), "no usable runtime directory for the pane host (EACCES)");
 	});
 
 	it("lays the socket out in TMPDIR when the runtime dir is too long for one", (t) => {
