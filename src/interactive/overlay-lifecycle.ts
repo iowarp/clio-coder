@@ -666,13 +666,16 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				session: () => {
 					const meta = deps.app.session?.current();
 					if (!meta) return null;
-					const autonomy = deps.app.getSettings?.().safety.autonomy;
+					const settings = deps.app.getSettings?.();
+					const autonomy = settings?.safety.autonomy;
+					// Session meta names the target; the report's Runtime line wants that target's runtime.
+					const runtime = settings?.targets.find((target) => target.id === meta.target)?.runtime;
 					return {
 						id: meta.id,
 						cwd: meta.cwd,
 						facts: {
 							...(meta.model ? { model: meta.model } : {}),
-							...(meta.target ? { runtime: meta.target } : {}),
+							...(runtime ? { runtime } : {}),
 							...(autonomy ? { autonomy } : {}),
 						},
 					};
