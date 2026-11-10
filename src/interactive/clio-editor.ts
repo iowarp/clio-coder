@@ -1308,7 +1308,9 @@ export class ClioEditor extends Editor {
 				: null;
 		const completesSlashRow = slashRow !== null;
 		// A command row that runs bare is the one row Enter runs: `/con` Enter opens the context view.
-		const runsCommandRow = slashRow?.kind === "command" && slashRow.runsBare === true;
+		// A bare `/` typed no command, so its first row is not a choice: Enter only completes it.
+		const typedCommand = /^\/(\S*)/u.exec(textBeforeCompletion.trimStart())?.[1] ?? "";
+		const runsCommandRow = slashRow?.kind === "command" && slashRow.runsBare === true && typedCommand.length > 0;
 		super.handleInput(completesSlashRow ? "\t" : data);
 		// A row that left the line as typed (`/model claude-sonnet-5.5` typed in full) has nothing for
 		// the operator to confirm, so the same Enter submits instead of being swallowed by the list.
