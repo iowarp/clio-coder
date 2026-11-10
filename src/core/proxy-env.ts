@@ -54,7 +54,9 @@ export async function installProxyFromEnv(env: ProxyEnv = process.env): Promise<
 	if (userNoProxy.includes("*")) return;
 	const http = httpRaw === null ? null : withScheme(httpRaw);
 	const https = httpsRaw === null ? http : withScheme(httpsRaw);
-	const noProxy = [...new Set([...userNoProxy, ...LOOPBACK_HOSTS])];
+	// undici and proxyForUrl match host names and suffixes only, so a CIDR range never bypasses the proxy.
+	const cidr = userNoProxy.filter((entry) => entry.includes("/"));
+	const noProxy = [...new Set([...userNoProxy.filter((entry) => !entry.includes("/")), ...LOOPBACK_HOSTS])];
 	try {
 		const { EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
 		setGlobalDispatcher(
@@ -70,6 +72,10 @@ export async function installProxyFromEnv(env: ProxyEnv = process.env): Promise<
 		);
 		return;
 	}
+	if (cidr.length > 0)
+		process.stderr.write(
+			`clio-coder: NO_PROXY CIDR entries are not honoured (${cidr.join(",")}); name those hosts in NO_PROXY to reach them directly\n`,
+		);
 	active = {
 		http: http === null ? null : displayProxy(http),
 		https: https === null ? null : displayProxy(https),
