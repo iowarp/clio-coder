@@ -576,6 +576,8 @@ export const CostReportSchema = Type.Object(
 );
 export type CostReportV1 = Static<typeof CostReportSchema>;
 
+/** Cached share of a prompt in percent: cache read / (cache read + cache write + uncached input). */
+const CacheShareSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
 const cacheBreak = Type.Object(
 	{
 		callId: CallIdSchema,
@@ -587,6 +589,7 @@ const cacheBreak = Type.Object(
 		rePrefilled: QuantitySchema,
 		uncachedPrefill: QuantitySchema,
 		breakUsd: QuantitySchema,
+		share: Type.Optional(CacheShareSchema),
 	},
 	closed,
 );
@@ -608,6 +611,16 @@ export const CacheReportSchema = Type.Object(
 		breaks: Type.Array(cacheBreak),
 		byCause: Type.Array(
 			Type.Object({ cause: text, breaks: count, rePrefilled: QuantitySchema, breakUsd: QuantitySchema }, closed),
+		),
+		/** Cached share over the session's calls that reported their cache read, and over its last turn's. */
+		share: Type.Optional(CacheShareSchema),
+		lastTurnShare: Type.Optional(CacheShareSchema),
+		/**
+		 * Routes whose engine resumes a prefix only at fixed block boundaries, learned from the session's own cached
+		 * counts. Their calls that fell short by under two blocks count as `hot` (reason engine-floor), not breaks.
+		 */
+		engineFloor: Type.Optional(
+			Type.Array(Type.Object({ route: text, granularity: count, calls: count, rePrefilled: count }, closed)),
 		),
 	},
 	closed,

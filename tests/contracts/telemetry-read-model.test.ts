@@ -902,3 +902,36 @@ test("a cache break re-prefills past the shared band, or an unknown amount on a 
 		["partial", "partial", "cold"],
 	);
 });
+
+test("C-05: cached share skips an omitted read, and whole-block reads learn the engine floor", () => {
+	let second = 0;
+	const call = (cacheRead: number | null, input: number, verdict: CallSettled["cache"]["verdict"]) =>
+		telemetryCall("cache-floor", {
+			at: new Date(Date.UTC(2026, 10, 6, 12, 0, second++)).toISOString(),
+			usage: { cacheRead, input },
+			cache: { verdict, uncachedPrefillTokens: { kind: "unknown", reason: "not-observed" } },
+		});
+	const report = cacheReport(
+		{
+			...source,
+			sessionId: "cache-floor",
+			journal: {
+				...source.journal,
+				records: [
+					...call(null, 9_000, "unknown"),
+					...call(6_144, 2_600, "partial"),
+					...call(6_144, 2_700, "partial"),
+					...call(8_192, 2_100, "partial"),
+				],
+			},
+		},
+		now,
+	);
+	deepStrictEqual(
+		report.engineFloor?.map((row) => [row.granularity, row.calls]),
+		[[2_048, 3]],
+	);
+	deepStrictEqual([report.verdicts.hot, report.verdicts.partial, report.breaks.length], [3, 0, 0]);
+	const share = report.share?.fact;
+	ok(share?.kind === "measured" && Math.abs(share.value - (100 * 20_480) / (20_480 + 7_400)) < 1e-9);
+});

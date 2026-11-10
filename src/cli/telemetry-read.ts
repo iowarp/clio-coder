@@ -14,6 +14,7 @@ import type {
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
 import { AgentRole, Disposition } from "../core/telemetry/enums.js";
+import { renderCount } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	loadRunScopeFiles,
@@ -263,18 +264,26 @@ function printCost(dto: CostReportV1): string {
 function printCache(dto: CacheReportV1): string {
 	const v = dto.verdicts;
 	const lines = [
+		...(dto.share
+			? [`cached share ${dto.share.display} (session), last turn ${dto.lastTurnShare?.display ?? "unknown"}`]
+			: []),
 		`verdicts  hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
 		`tokens    cache read ${show(dto.cacheRead)} · cache write ${show(dto.cacheWrite)} · uncached prefill ${show(dto.uncachedPrefill)} · re-prefilled ${show(dto.rePrefilled)}`,
 		`bill      ${show(dto.breakUsd)}`,
+		...(dto.engineFloor ?? []).map(
+			(floor) =>
+				`engine floor  ${floor.route} resumes at ${renderCount(floor.granularity)}-token blocks: ${floor.calls} calls hot (engine-floor), engine floor re-prefill ${renderCount(floor.rePrefilled)}`,
+		),
 	];
 	if (dto.breaks.length > 0)
 		lines.push(
 			"",
 			formatColumns([
-				["at", "verdict", "causes", "first divergent section", "re-prefilled", "bill"],
+				["at", "verdict", "share", "causes", "first divergent section", "re-prefilled", "bill"],
 				...dto.breaks.map((row) => [
 					row.at,
 					row.verdict,
+					row.share?.display ?? "unknown",
 					row.expectedColdReasons.join(",") || "unattributed",
 					row.firstDivergentSection.display,
 					show(row.rePrefilled),

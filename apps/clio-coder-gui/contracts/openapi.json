@@ -22334,6 +22334,9 @@
 								},
 								"breakUsd": {
 									"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+								},
+								"share": {
+									"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
 								}
 							},
 							"additionalProperties": false
@@ -22358,6 +22361,38 @@
 								},
 								"breakUsd": {
 									"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"share": {
+						"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
+					},
+					"lastTurnShare": {
+						"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
+					},
+					"engineFloor": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"required": ["route", "granularity", "calls", "rePrefilled"],
+							"properties": {
+								"route": {
+									"type": "string",
+									"maxLength": 4096
+								},
+								"granularity": {
+									"type": "integer",
+									"minimum": 0
+								},
+								"calls": {
+									"type": "integer",
+									"minimum": 0
+								},
+								"rePrefilled": {
+									"type": "integer",
+									"minimum": 0
 								}
 							},
 							"additionalProperties": false

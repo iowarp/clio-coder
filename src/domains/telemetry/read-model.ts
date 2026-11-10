@@ -2248,11 +2248,30 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 	const view: View = { session: source };
 	const analysis = analyze(source);
 	const id = source.sessionId;
+	const floors = engineFloors(analysis.attempts);
+	const floorCalls = new Map<Attempt, number>();
+	for (const attempt of analysis.attempts) {
+		const granularity = floorGranularity(attempt, floors);
+		if (granularity !== null) floorCalls.set(attempt, granularity);
+	}
 	const verdicts = { hot: 0, partial: 0, cold: 0, small: 0, unknown: 0 };
 	for (const attempt of analysis.attempts)
-		if (invoked(attempt) && attempt.settled) verdicts[attempt.settled.cache.verdict] += 1;
-	const breaks = analysis.attempts.filter(isBreak);
+		if (invoked(attempt) && attempt.settled)
+			verdicts[floorCalls.has(attempt) ? "hot" : attempt.settled.cache.verdict] += 1;
+	const breaks = analysis.attempts.filter((attempt) => isBreak(attempt) && !floorCalls.has(attempt));
 	const causes = [...new Set(breaks.flatMap(coldKeys))].sort();
+	const lastTurn = [...analysis.attempts].reverse().find((attempt) => invoked(attempt) && attempt.ctx?.turnId)
+		?.ctx?.turnId;
+	const floorRows = [...floors].flatMap(([route, granularity]) => {
+		const calls = [...floorCalls.keys()].filter((attempt) => routeOf(attempt) === route);
+		if (calls.length === 0) return [];
+		const rePrefilled = calls.reduce((total, attempt) => {
+			const settled = attempt.settled;
+			const re = settled?.cache.rePrefilledTokens;
+			return total + (re?.kind === "measured" ? re.value : (promptParts(attempt)?.input ?? 0));
+		}, 0);
+		return [{ route, granularity, calls: calls.length, rePrefilled }];
+	});
 	return {
 		...header(options),
 		kind: "cache",
@@ -2275,6 +2294,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 				rePrefilled: q("rePrefilled"),
 				uncachedPrefill: q("uncachedPrefill"),
 				breakUsd: q("breakUsd"),
+				share: cacheShare([attempt]),
 			};
 		}),
 		byCause: causes.map((cause) => ({
@@ -2283,7 +2303,87 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			rePrefilled: quantity(view, own(id, "rePrefilled", { group: { by: "cold", key: cause } })),
 			breakUsd: quantity(view, own(id, "breakUsd", { group: { by: "cold", key: cause } })),
 		})),
+		share: cacheShare(analysis.attempts),
+		lastTurnShare: cacheShare(
+			lastTurn === undefined ? [] : analysis.attempts.filter((attempt) => attempt.ctx?.turnId === lastTurn),
+		),
+		engineFloor: floorRows,
 	};
+}
+
+const knownCount = (fact: Fact<number> | undefined): number | null =>
+	fact && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : null;
+
+/**
+ * One sent call's cache read, cache write and uncached input, or null when its read went unreported: an omitted read
+ * is never a zero read. A server that omits the read from usage but timed its uncached prefill read the rest (#434).
+ */
+function promptParts(attempt: Attempt): { read: number; write: number; input: number } | null {
+	const settled = attempt.settled;
+	if (!invoked(attempt) || !settled?.usage) return null;
+	const input = knownCount(settled.usage.input);
+	if (input === null) return null;
+	const write = knownCount(settled.usage.cacheWrite) ?? 0;
+	const read = knownCount(settled.usage.cacheRead);
+	if (read !== null) return { read, write, input };
+	const uncached = knownCount(settled.cache.uncachedPrefillTokens);
+	return uncached === null || uncached > input ? null : { read: input - uncached, write, input: uncached };
+}
+
+/** C-05: the cached share of the prompts these calls sent, over the calls that reported their read. */
+function cacheShare(attempts: readonly Attempt[]): { fact: Fact<number>; display: string } {
+	let read = 0;
+	let total = 0;
+	for (const attempt of attempts) {
+		const parts = promptParts(attempt);
+		if (!parts) continue;
+		read += parts.read;
+		total += parts.read + parts.write + parts.input;
+	}
+	const fact: Fact<number> =
+		total > 0 ? { kind: "measured", value: (100 * read) / total, source: "local-count" } : unobserved;
+	return { fact, display: renderFact(fact, "percent") };
+}
+
+const routeOf = (attempt: Attempt) => modelKey(attempt.settled?.target ?? attempt.started.target);
+
+/**
+ * C-05: per route, the block size its engine resumes a prefix at, learned from at least three cached counts that are
+ * all multiples of one power of two of 256 or more (Radiance resumes at 2,048-token blocks less one). The largest
+ * common power of two, not the gcd: repeated equal counts would otherwise learn the count itself.
+ */
+const ENGINE_FLOOR_MIN_CALLS = 3;
+const ENGINE_FLOOR_MIN_TOKENS = 256;
+function engineFloors(attempts: readonly Attempt[]): Map<string, number> {
+	const reads = new Map<string, number[]>();
+	for (const attempt of attempts) {
+		const read = promptParts(attempt)?.read ?? 0;
+		if (read <= 0 || !Number.isSafeInteger(read)) continue;
+		const route = routeOf(attempt);
+		reads.set(route, [...(reads.get(route) ?? []), read]);
+	}
+	const floors = new Map<string, number>();
+	for (const [route, values] of reads) {
+		if (values.length < ENGINE_FLOOR_MIN_CALLS) continue;
+		const granularity = Math.min(...values.map(lowestBit));
+		if (granularity >= ENGINE_FLOOR_MIN_TOKENS) floors.set(route, granularity);
+	}
+	return floors;
+}
+/** The largest power of two dividing a positive integer. */
+const lowestBit = (value: number): number => {
+	let bit = 1;
+	while (value % (bit * 2) === 0) bit *= 2;
+	return bit;
+};
+
+/** A partial call that read whole blocks and fell short by under two of them hit the engine's floor, not a break. */
+function floorGranularity(attempt: Attempt, floors: ReadonlyMap<string, number>): number | null {
+	if (attempt.settled?.cache.verdict !== "partial") return null;
+	const granularity = floors.get(routeOf(attempt));
+	const parts = promptParts(attempt);
+	if (granularity === undefined || !parts || parts.read <= 0 || parts.read % granularity !== 0) return null;
+	return parts.input + parts.write < 2 * granularity ? granularity : null;
 }
 
 type BudgetEntry = Extract<TimelineEntry, { kind: "budget" }>;

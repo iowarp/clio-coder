@@ -330,10 +330,14 @@ function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
 		};
 	}
 	const top = [...report.byCause].sort((a, b) => b.breaks - a.breaks || a.cause.localeCompare(b.cause))[0];
+	const calls = counts.hot + counts.partial + counts.cold + counts.small + counts.unknown;
+	const share = report.share?.fact;
+	// C-05: a session that read under half its prompts from cache names what cost it the rest.
+	const low = share?.kind === "measured" && share.value < 50 && calls >= 5;
 	return {
 		ok: true,
 		name: "cache telemetry",
-		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; cache read ${report.cacheRead.display} · re-prefilled ${report.rePrefilled.display} in ${report.breaks.length} breaks (${report.breakUsd.display}); top cause ${top ? `${top.cause} (${top.breaks})` : "none"}`,
+		detail: `last session ${latest.sessionId}: cached share ${report.share?.display ?? "unknown"}; hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; cache read ${report.cacheRead.display} · re-prefilled ${report.rePrefilled.display} in ${report.breaks.length} breaks (${report.breakUsd.display}); top cause ${top ? `${top.cause} (${top.breaks}${low ? `, ${top.rePrefilled.display} re-prefilled` : ""})` : "none"}`,
 	};
 }
 
