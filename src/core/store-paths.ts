@@ -153,7 +153,14 @@ export function storeWriteTarget(cwd: string, args: Record<string, unknown> | un
 		case "remove":
 			return blobTarget(args.blob);
 		case "put":
-			return blobTarget(args.blob ?? (typeof args.path === "string" ? basename(args.path) : undefined));
+			// The tool treats an empty blob as absent and stores under the source's basename, so the target does too.
+			return blobTarget(
+				typeof args.blob === "string" && args.blob.length > 0
+					? args.blob
+					: typeof args.path === "string"
+						? basename(args.path)
+						: undefined,
+			);
 		default:
 			return null;
 	}
