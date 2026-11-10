@@ -45,6 +45,6 @@ clio-coder acp --cwd /path/to/project
 
 ## Built on the Pi SDK
 
-Clio Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.7.0 pins the Pi 1.5.0 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. Clio Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
+Clio Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.7.1 pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. Clio Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
 
 Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](../architecture/pi-boundary.md).

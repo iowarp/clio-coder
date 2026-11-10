@@ -183,8 +183,9 @@ reapply a patch; the pinned dependency also supplies native helper assets.
 `NOTICE` and `dist/assets/tui-notices/` preserve the relevant licenses.
 
 On each Pi upgrade, check stock APIs and dry-run the patch against the published
-package, then regenerate `docs/pi-surface.json`. `pnpm lint` checks the consumed
-API snapshot even when the dependency version has not changed. Run
+package, then regenerate `docs/pi-surface.json`. Routine `pnpm lint` does not
+compare the installed declarations with that snapshot; `pnpm run pi:surface-diff`
+does. Run
 `pnpm test:maintenance` (keyboard routing and drafts: deletion under submit
 overrides, search ownership and navigation, editor undo, and policy-first
 ordering through the gate), `tests/contracts/tui-view-ergonomics.test.ts`
