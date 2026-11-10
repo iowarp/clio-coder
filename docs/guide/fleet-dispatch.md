@@ -708,7 +708,11 @@ or a file a shell command generated, stays out, and the dispatch result reports 
 `left_uncommitted` with a count and the first paths. When the host holds no complete
 write record for a run, the commit takes every new file. The dispatch result also states
 where the work landed: the merge, or the branch and worktree that hold it. A merged run's
-worktree is removed along with its left-out files. A file that arrives or changes after
+worktree is removed along with its left-out files. A new file the worker authored that
+`.gitignore` matches, such as a local config file, is never committed or merged and is not
+deleted: the result lists it in `left_uncommitted`, the detail says
+`N authored files are ignored by .gitignore and stay in the worktree`, and the worktree is
+kept, also when `clio-coder fleet land` applies the branch later. A file that arrives or changes after
 the commit keeps the worktree and its branch, and the result names it as
 `changed_after_commit`.
 
@@ -2084,7 +2088,7 @@ For an independent helper task, use `detach:true` and continue useful work; coll
 
 The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. Grounding counts the spans a read returned and the lines a grep result showed, whether the call was direct or a settled step of a gateway chain; a pending, failed or refused step grounds nothing, and a chain step cut to its share of the aggregate grounds only the lines that survived the cut. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
 
-Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and, for native and Claude SDK workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, the session cost ceiling `safety.limits.sessionCostUsd` (default $5, `0` turns it off), which stops every running worker in every mode once settled and in-flight session spend reaches it, so spend passes it only by calls already in flight, and, for native and Claude SDK workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own run record and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 

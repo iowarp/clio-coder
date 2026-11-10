@@ -395,7 +395,9 @@ You can redirect Clio Coder's folders using environment variables:
 On Linux an empty or relative `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` or `XDG_CACHE_HOME` reads as unset, as the XDG Base Directory specification requires.
 
 The four resolved roots are ownership boundaries. They must be absolute,
-distinct, and non-nesting. Clio resolves existing symlinked parents while
+distinct, non-nesting, and below the home directory. `CLIO_CODER_HOME` set to the
+home directory or above it is refused as well, because it would put the four roots
+straight into the home. Clio resolves existing symlinked parents while
 checking this rule, so two spellings of the same directory are not treated as
 separate roots. Bootstrap and upgrade refuse an unsafe layout before writing;
 reset and uninstall refuse it before previewing or deleting. `clio-coder doctor`
@@ -1086,7 +1088,17 @@ CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 
 #### What uninstall will and will not remove
 
-Ownership is identity, not shape. The launcher is removed only when it resolves
+Ownership is identity, not shape. `uninstall` and `reset` delete a root only when they can
+prove it is Clio Coder's own: it is the platform default for its role, its directory is named
+`clio-coder`, or it holds its role's file (`settings.yaml` for config, `home.json` for state,
+and the `.clio-coder-root` marker Clio Coder writes when it creates a data or cache root).
+The home directory, anything above it, `~/.local` and the shared XDG base directories
+(`~/.config`, `~/.local/share`, `~/.local/state`, `~/.cache` or their `XDG_*` values) never
+qualify. A root that fails the rule, for example `CLIO_CODER_CONFIG_DIR=~/.config`, is not
+touched: `uninstall` lists it under `Kept, and why` and `reset` reports it as a failure, and
+both exit 1. `uninstall --dry-run` shows the same kept rows.
+
+The launcher is removed only when it resolves
 to *this* installation's own entry, `dist/cli/index.js` or the `bin/clio-coder.cjs`
 guard that package managers link. The spelling of the target never qualifies it, so a
 symlink into a different Clio Coder checkout, or a target that is not a file, is kept
