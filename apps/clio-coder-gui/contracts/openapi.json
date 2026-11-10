@@ -16173,6 +16173,28 @@
 												"maxLength": 1024
 											},
 											"maxItems": 201
+										},
+										"_meta": {
+											"type": "object",
+											"required": ["clio-coder/report"],
+											"properties": {
+												"clio-coder/report": {
+													"type": "object",
+													"required": ["draftId", "state"],
+													"properties": {
+														"draftId": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"state": {
+															"type": "string",
+															"maxLength": 256
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
