@@ -178,7 +178,7 @@ export function mainApprovalRequestView(
 		(axisFromDecision.kind === "net"
 			? { kind: "net" as const, ruleId: axisFromDecision.ruleId }
 			: { kind: "autonomy" as const, level: autonomy });
-	const target = describeCallTarget(call.tool, call.args, resolvedVerifyCommand(call));
+	const target = describeCallTarget(call.tool, call.args, resolvedVerifyCommand(call), undefined, "Alt+V shows all");
 	const netReason = axis.kind === "net" ? netReasonOf(decision) : undefined;
 	// Facts only. The mutation text stays in the inspector the overlay opener
 	// gets; this object reaches the transcript row and the approval-state event.

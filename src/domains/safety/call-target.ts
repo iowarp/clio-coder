@@ -48,15 +48,22 @@ function bidiEscape(code: number): string {
 	return `\\u{${code.toString(16)}}`;
 }
 
-function sanitizeForDisplay(value: string, preserveLines = false): string {
-	const stripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
+/**
+ * `verbatim` keeps every character and shows each control byte as `\u{1b}`
+ * text instead of stripping escape sequences. Anything the operator approves
+ * renders this way: stripping an unterminated or crafted sequence can swallow
+ * text the shell still runs.
+ */
+function sanitizeForDisplay(value: string, preserveLines = false, verbatim = false): string {
+	const stripped = verbatim ? value : value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
 	const display = preserveLines ? stripped.replace(/\r\n|\n/g, " ⏎ ") : stripped;
 	let out = "";
 	const chars = Array.from(display);
 	for (const [index, ch] of chars.entries()) {
 		const code = ch.codePointAt(0) ?? 0;
 		if (isBidiControl(code) && !isEmojiJoiner(chars, index)) out += bidiEscape(code);
-		else out += code < 0x20 || code === 0x7f ? " " : ch;
+		else if (code < 0x20 || code === 0x7f) out += verbatim && ch !== "\n" && ch !== "\t" ? bidiEscape(code) : " ";
+		else out += ch;
 	}
 	return out;
 }
@@ -88,8 +95,12 @@ export interface SanitizedDisplayText {
  * Every other C0 byte and DEL becomes a visible placeholder, so a payload
  * cannot style, reposition, or spoof the surface that is approving it.
  */
-export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayText {
-	const escapesStripped = value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
+export function sanitizeMultilineDisplayText(
+	value: string,
+	/** Keep every character; control bytes show as `\u{1b}` text. For text the operator approves. */
+	verbatim = false,
+): SanitizedDisplayText {
+	const escapesStripped = verbatim ? value : value.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "");
 	let neutralized = escapesStripped.length !== value.length;
 	// CRLF is line structure, not an injection, so it normalizes rather than
 	// showing a placeholder at the end of every line of a Windows-authored file.
@@ -109,7 +120,7 @@ export function sanitizeMultilineDisplayText(value: string): SanitizedDisplayTex
 		}
 		const code = ch.codePointAt(0) ?? 0;
 		if (code < 0x20 || code === 0x7f) {
-			out += CONTROL_BYTE_PLACEHOLDER;
+			out += verbatim ? bidiEscape(code) : CONTROL_BYTE_PLACEHOLDER;
 			neutralized = true;
 			continue;
 		}
@@ -364,7 +375,7 @@ const TARGET_LIST_ITEMS_SHOWN = 4;
 
 function renderAllowedTargetValue(value: unknown): string | null {
 	if (typeof value === "string") {
-		const rendered = oneLine(sanitizeForDisplay(redactSecretString(value), true));
+		const rendered = oneLine(sanitizeForDisplay(redactSecretString(value), true, true));
 		return rendered.length > 0 ? rendered : null;
 	}
 	// A list of strings in an allowlisted field (`git add` paths) decides the
@@ -538,6 +549,8 @@ export function describeCallTarget(
 	/** The command a verify check resolved to; the card names it beside the check id. */
 	resolved?: { command: string },
 	maxChars: number = CALL_TARGET_MAX_CHARS,
+	/** Said after the clipped count, e.g. where the full text can be read. */
+	moreHint?: string,
 ): string {
 	if (!args) return "";
 	const allowedFields = CALL_TARGET_FIELDS[tool] ?? [];
@@ -572,5 +585,10 @@ export function describeCallTarget(
 		parts.push(`${targetFieldName(field)}=${summarizeUnlistedField(tool, field, value)}`);
 	}
 	const target = sanitizeCallTargetText(parts.join(" · "));
-	return target.length <= maxChars ? target : `${target.slice(0, maxChars - 1)}…`;
+	if (target.length <= maxChars) return target;
+	// The hint fits inside the cap, which bounds what crosses the worker seam.
+	const hint = (kept: number) =>
+		`… +${target.length - kept} more characters${moreHint === undefined ? "" : `, ${moreHint}`}`;
+	const kept = Math.max(0, maxChars - hint(0).length - 1);
+	return `${target.slice(0, kept)} ${hint(kept)}`;
 }

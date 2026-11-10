@@ -40,7 +40,7 @@ test("a worker bash target keeps command boundaries without terminal controls", 
 	const hostile = describeCallTarget("bash", {
 		command: `rm -rf scratch-a\u001b]0;hidden\ntext\u0007\nrm -rf scratch-b`,
 	});
-	strictEqual(hostile, "rm -rf scratch-a ⏎ rm -rf scratch-b");
+	strictEqual(hostile, "rm -rf scratch-a\\u{1b}]0;hidden ⏎ text\\u{7} ⏎ rm -rf scratch-b");
 	const body = createPermissionOverlayBody({
 		...WRITE_VIEW,
 		tool: "bash",
@@ -50,8 +50,8 @@ test("a worker bash target keeps command boundaries without terminal controls", 
 	});
 	match(plain(body.render(76)).join(" "), /scratch-a ⏎ rm -rf scratch-b/u);
 	const bounded = describeCallTarget("bash", { command: `${command}\n`.repeat(30) });
-	strictEqual(bounded.length, CALL_TARGET_MAX_CHARS);
-	ok(bounded.endsWith("…"));
+	ok(bounded.length <= CALL_TARGET_MAX_CHARS);
+	ok(/ … \+\d+ more characters$/u.test(bounded));
 });
 
 const WRITE_VIEW: ApprovalRequestView = {
@@ -244,12 +244,12 @@ test("local invocation inspection scrolls complete redacted arguments without ad
 test("a target the safety layer cut at its cap ends in an ellipsis on the card and the transcript row", () => {
 	const command = `cd /tmp/work/demo-repo && npm test -- ${"--reporter spec ".repeat(12)}`;
 	const cut = describeCallTarget("bash", { command });
-	strictEqual(cut.length, CALL_TARGET_MAX_CHARS, "the safety layer cuts at its cap");
-	ok(cut.endsWith("…"), "the source marks a cut for every consumer");
+	ok(cut.length <= CALL_TARGET_MAX_CHARS, "the safety layer cuts at its cap");
+	ok(/ … \+\d+ more characters$/u.test(cut), "the source marks a cut for every consumer");
 	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "execute", target: cut };
 	delete view.mutation;
 	const card = plain(createPermissionOverlayBody(view).render(76)).join(" ").replace(/\s+/g, " ");
-	match(card, /▌ cd \/tmp\/work\/demo-repo && npm test -- .*… \[Enter\]/u, card);
+	match(card, /▌ cd \/tmp\/work\/demo-repo && npm test -- .*… \+\d+ more characters/u, card);
 	const row = plain(
 		renderToolAwaitingApproval({ toolCallId: "b", toolName: "bash", args: { command } }, 100, view),
 	).join(" ");

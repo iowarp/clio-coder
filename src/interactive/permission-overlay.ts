@@ -628,9 +628,10 @@ interface PermissionFactRows {
 
 /**
  * The facts that identify the call, in reading order: the identity row, the
- * exact target in a gutter, then the labelled table. The target is the one
- * thing never clipped, because a deep path's file name is what says what the
- * write touches.
+ * exact target in a gutter, then the labelled table. The target wraps rather
+ * than clipping at the card's width, because a deep path's file name is what
+ * says what the write touches; past its length cap it names how much more the
+ * inspect key shows.
  */
 function permissionFacts(
 	theme: ClioTheme,
@@ -674,7 +675,7 @@ function permissionFacts(
 		facts.push({ label: "asked by", value: `worker ${view.origin.agentId} (run ${view.origin.runId})`, tone: "muted" });
 		// A worker card has no inspect key: its arguments stay in the worker, so a
 		// cut command is one the operator cannot finish reading anywhere.
-		if (view.tool === "bash" && view.target?.endsWith("…") === true) {
+		if (view.tool === "bash" && / … \+\d+ more characters$/u.test(view.target ?? "")) {
 			facts.push({
 				label: "cut",
 				value: "this card shows the start of the call; the rest stays inside the worker and cannot be read here.",

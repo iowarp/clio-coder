@@ -653,7 +653,8 @@ describe("safety gate boundary", () => {
 			}
 			if (command.length > 20_000) {
 				strictEqual(redactSecretString(command), command);
-				strictEqual(describeCallTarget(ToolNames.Bash, { command }), `${command.slice(0, 119)}…`);
+				const cut = describeCallTarget(ToolNames.Bash, { command });
+				strictEqual(cut.length <= 120 && cut.endsWith(` more characters`), true);
 			}
 		}
 	});

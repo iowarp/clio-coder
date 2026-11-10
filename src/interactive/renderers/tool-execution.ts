@@ -1412,7 +1412,8 @@ export function renderToolArguments(
 					: JSON.stringify(value, null, 2);
 		const full = String(text ?? value);
 		const chars = Number.isFinite(maxRows) ? Math.max(1, maxRows * Math.max(1, width) * 4) : full.length;
-		const source = sanitizeMultilineDisplayText(full.slice(0, chars)).text;
+		// Verbatim: an argument is what runs, so no byte of it may vanish from view.
+		const source = sanitizeMultilineDisplayText(full.slice(0, chars), true).text;
 		const lines =
 			typeof value === "string" && key === "command" && syntax === "shell" ? shellCommandInk(source) : source.split("\n");
 		const argumentLine = (line: string): string => {
