@@ -7,6 +7,7 @@ import {
 	REPORT_DETAILS_SUMMARY,
 	REPORT_EMPTY_SECTION,
 	REPORT_FOOTER,
+	REPORT_FOOTER_UNREVIEWED,
 	REPORT_HEADINGS,
 	REPORT_NOTHING_OBSERVED,
 	REPORT_NOTHING_UNKNOWN,
@@ -104,7 +105,7 @@ export function rememberIdentity(draft: ReportDraft, current: LocalIdentity): Re
  * what is not known, the environment, the report block and the footer. Every free-text field is scrubbed; the
  * scaffold and the block hold only fixed words and vocabulary values, which the scrubber never replaces.
  */
-export function renderReport(draft: ReportDraft, current: LocalIdentity): RenderedReport {
+export function renderReport(draft: ReportDraft, current: LocalIdentity, reviewed = true): RenderedReport {
 	const identity = draftIdentity(draft, current);
 	const lists: ReportMask[][] = [];
 	const scrub = (text: string) => {
@@ -151,7 +152,7 @@ export function renderReport(draft: ReportDraft, current: LocalIdentity): Render
 			...(draft.includeModel && env.model !== null ? [`- Model: ${env.model}`] : []),
 		].join("\n"),
 	);
-	const details = `${renderReportBlock(draft)}\n\n${REPORT_FOOTER}`;
+	const details = `${renderReportBlock(draft)}\n\n${reviewed ? REPORT_FOOTER : REPORT_FOOTER_UNREVIEWED}`;
 
 	const observedSection = section(REPORT_HEADINGS.observed, observed);
 	const notKnownSection = section(REPORT_HEADINGS.notKnown, notKnown);

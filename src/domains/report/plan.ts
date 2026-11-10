@@ -60,6 +60,8 @@ export interface PlanOptions {
 	transport: ReportPlanTransport;
 	/** Reads the outbox for the soft rate warning when given. */
 	stateDir?: string;
+	/** False when the send skips the review screen, so the footer does not say the reporter reviewed it. */
+	reviewed?: boolean;
 }
 
 const DESTINATION = `github.com/${REPORT_REPOSITORY}`;
@@ -128,7 +130,7 @@ export function maskSummary(masks: ReadonlyArray<ReportMask>): string {
 
 export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan {
 	const identity = draftIdentity(draft, options.identity);
-	const rendered = renderReport(draft, identity);
+	const rendered = renderReport(draft, identity, options.reviewed ?? true);
 	const gates = validateDraft(draft, rendered);
 	if (!isFixedPoint(rendered, identity, draft.unmasked))
 		gates.push("Scrubbing the report again would change it; edit the text so every masked value is gone.");
@@ -322,6 +324,8 @@ export interface ReportFlowDeps extends SendDeps {
 	related?: RelatedDeps;
 	/** The reporter ticked the daily reply check for this report (R-14); off unless asked. */
 	replyCheck?: boolean;
+	/** As in `PlanOptions`: false when the send skipped the review screen. */
+	reviewed?: boolean;
 	/** Asked only when the search found an open match, a fixed closed match or a fix in a newer version. */
 	chooseDuplicate: (
 		verdict: RelatedVerdict,
@@ -388,7 +392,7 @@ export async function runReportSend(
 	let final = applyVerdict(draft, verdict);
 	if (choice === "new" && "issue" in verdict && !final.links.includes(verdict.issue.number))
 		final = { ...final, links: [...final.links, verdict.issue.number] };
-	const finalRendered = final === draft ? rendered : renderReport(final, deps.identity);
+	const finalRendered = final === draft ? rendered : renderReport(final, deps.identity, deps.reviewed ?? true);
 	saveReportDraft(deps.stateDir, final);
 	const route = routeFor(final.kind);
 	const action =

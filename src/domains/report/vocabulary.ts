@@ -79,6 +79,9 @@ export const REPORT_BLOCK_TAG = "clio-coder-report";
 export const REPORT_DETAILS_SUMMARY = "Report details";
 export const REPORT_FOOTER =
 	"Filed with `/report` from Clio Coder. The reporter reviewed this text before it was sent.";
+/** A send that skipped the review screen (`--yes`) makes no claim that anyone reviewed the text. */
+export const REPORT_FOOTER_UNREVIEWED =
+	"Filed with `clio-coder report --yes` from Clio Coder, without the review screen.";
 export const REPORT_EMPTY_SECTION = "_No response_";
 export const REPORT_NOTHING_OBSERVED = "Nothing recorded.";
 export const REPORT_NOTHING_UNKNOWN = "nothing listed";

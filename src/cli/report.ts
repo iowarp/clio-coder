@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { startedUnderClioAgent } from "../core/agent-environment.js";
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -412,7 +413,16 @@ async function confirmAndSend(
 ): Promise<number> {
 	// R-12 promises the agent drafts but never sends: a bash call has no terminal, and --yes skips the review the
 	// footer claims, so an agent's draft goes only through the interactive review. Refused before gh is asked anything.
-	if (!options.dryRun && initial.origin === "agent" && (options.yes || !io.interactive || options.json)) {
+	// A command a Clio session's bash ran is the agent's at yolo too, where no autonomy ceiling marks it.
+	const fromSession = startedUnderClioAgent(io.env);
+	if (
+		!options.dryRun &&
+		(initial.origin === "agent" || fromSession) &&
+		(options.yes || !io.interactive || options.json)
+	) {
+		// Kept as the agent's, so the operator's own send of it opens the review.
+		if (fromSession && readReportDraft(io.stateDir, initial.id) === null)
+			saveDraft(io, { ...initial, origin: "agent" }, initial.title);
 		io.err(
 			`nothing sent: an agent's draft is reviewed in a terminal: run \`clio-coder report send ${initial.id}\` yourself\n`,
 		);
@@ -464,7 +474,9 @@ async function confirmAndSend(
 	}
 	const interactive = io.interactive && !options.json;
 	let draft = rememberIdentity(initial, identity);
-	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir });
+	// Only the prompt below is a review; --yes sends what the preview printed without one.
+	const reviewed = !options.yes;
+	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed });
 	const emit = (result?: unknown) =>
 		io.out(
 			`${JSON.stringify(
@@ -520,7 +532,7 @@ async function confirmAndSend(
 				else {
 					const before = plan.masks.reduce((sum, mask) => sum + mask.count, 0);
 					draft = edited;
-					plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir });
+					plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed });
 					io.out(formatReportPreview(plan, bundled));
 					const added = plan.masks.reduce((sum, mask) => sum + mask.count, 0) - before;
 					if (added > 0) io.out(`Clio masked ${added} more value${added === 1 ? "" : "s"} in your edit.\n`);
@@ -545,6 +557,7 @@ async function confirmAndSend(
 		...(io.deps.open !== undefined ? { open: io.deps.open } : {}),
 		...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
 		replyCheck: options.replyCheck,
+		reviewed,
 		related: {
 			...(io.deps.changelog !== undefined ? { changelog: io.deps.changelog } : {}),
 			...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
