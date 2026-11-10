@@ -1,12 +1,13 @@
 import { execFile, spawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, readFileSync, statSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { storeRoot } from "../../core/store-paths.js";
+import { clioDataDir } from "../../core/xdg.js";
 import type { StoreBackend } from "./backend.js";
 import { CLIO_CORE_CHAIN_TOP_POOL, createClioCoreStoreBackend } from "./backends/clio-core.js";
 import { type CoreHost, startCoreHost } from "./core-host/supervisor.js";
@@ -100,7 +101,10 @@ export function readStoreBackendSelection(): StoreBackendSelection {
 }
 
 export async function writeStoreBackendRecord(record: StoreBackendRecord): Promise<void> {
-	await safeResourceWriteAsync(storeBackendRecordPath(), `${JSON.stringify(record, null, 2)}\n`);
+	// Owner-only like the rest of the store; clioDataDir gives a missing data root its 0700 mode and marker first.
+	clioDataDir();
+	await mkdir(storeRoot(), { recursive: true, mode: 0o700 });
+	await safeResourceWriteAsync(storeBackendRecordPath(), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
 }
 
 export async function removeStoreBackendRecord(): Promise<void> {
