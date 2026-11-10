@@ -628,6 +628,28 @@ export function readReportBundle(stateDir: string, id: string): Buffer | null {
 	return bytes;
 }
 
+/** A kept bundle with what its envelope records: what `report send <id> --share` uploads. */
+export interface SavedBundle {
+	bytes: Buffer;
+	sha256: string;
+	clioCoder: string;
+	consent: ReportBundleEnvelope["consent"];
+}
+
+/** The kept bundle of a report, checked against the outbox hash and its envelope schema; null when there is none. */
+export function readSavedBundle(stateDir: string, id: string): SavedBundle | null {
+	const bytes = readReportBundle(stateDir, id);
+	if (bytes === null) return null;
+	const member = unpackTelemetryArchive(bytes).find((entry) => entry.path === MEMBER_ENVELOPE);
+	if (member === undefined) throw new Error(`the bundle for ${id} has no ${MEMBER_ENVELOPE}`);
+	const envelope: unknown = JSON.parse(member.bytes.toString("utf8"));
+	const problem = envelopeProblem(envelope);
+	if (problem !== null) throw new Error(`the bundle for ${id} is refused: ${problem}`);
+	const valid = envelope as ReportBundleEnvelope;
+	if (valid.reportId !== id) throw new Error(`the bundle is for ${valid.reportId}, not ${id}`);
+	return { bytes, sha256: sha256(bytes), clioCoder: valid.environment.clioCoder, consent: valid.consent };
+}
+
 /** Remove a report's bundle file and its outbox record. True when a file was removed. */
 export function deleteReportBundle(stateDir: string, id: string): boolean {
 	const path = reportBundlePath(stateDir, id);

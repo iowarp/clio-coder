@@ -879,6 +879,54 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(gists.length, before);
 		ok(out.includes("The bundle was not shared: a comment on an existing issue cannot carry it"), out);
 		ok(!out.includes("Shared the bundle encrypted"), out);
+
+		// A saved report's bundle is shared later by report send <id> --share, under the same rules.
+		const saveDraft = async (...flags: string[]) => {
+			out = "";
+			strictEqual(await runReport([...flicker, "--yes", ...flags], deps), 3);
+			return /saved as draft (rpt_[0-9A-Z]{26})/u.exec(out)?.[1] ?? "";
+		};
+		const bundleFlags = ["--session", "ses_share", "--bundle", "mechanics", "--consent", "debug"];
+		const bare = await saveDraft();
+		err = "";
+		strictEqual(await runReport(["send", bare, "--share", "--yes"], deps), 2);
+		ok(err.includes(`${bare} has no saved bundle to share`), err);
+		const later = await saveDraft(...bundleFlags);
+		ok(existsSync(reportBundlePath(stateDir, later)));
+		out = "";
+		err = "";
+		strictEqual(await runReport(["send", later, "--share"], deps), 2);
+		ok(out.includes("Sending also uploads the saved diagnostic bundle") && out.includes("you agree to:"), out);
+		ok(err.includes("add --yes"), err);
+		const session = { ...deps, interactive: true, env: { AI_AGENT: "clio-coder" } };
+		strictEqual(await runReport(["send", later, "--share"], session), 2);
+		ok(err.includes("an agent never shares a bundle"), err);
+		strictEqual(gists.length, before);
+		out = "";
+		strictEqual(await runReport(["send", later, "--share", "--yes", "--on-duplicate", "comment"], deps), 0);
+		strictEqual(gists.length, before);
+		ok(out.includes("The bundle was not shared: a comment on an existing issue cannot carry it"), out);
+
+		const filed = await saveDraft(...bundleFlags);
+		posted = "";
+		out = "";
+		strictEqual(await runReport(["send", filed, "--share", "--yes", "--on-duplicate", "new"], deps), 0);
+		strictEqual(gists.length, before + 1);
+		const laterShare = /#(shr_[0-9a-f]{16})/u.exec(posted)?.[1] ?? "";
+		ok(posted.includes(`bundle: gist:${gistId}#${laterShare}\nconsent: debug\n`), posted);
+		deepStrictEqual(outboxEntry(stateDir, filed)?.share, { shareId: laterShare, gistId });
+		strictEqual(readShareReceipts(stateDir)[laterShare]?.reportId, filed);
+		ok(out.includes(`Shared the bundle encrypted as secret gist ${gistId} (${laterShare})`), out);
+
+		// The receipt is written before the post here too.
+		const dies = await saveDraft(...bundleFlags);
+		postThrows = true;
+		await runReport(["send", dies, "--share", "--yes", "--on-duplicate", "new"], deps).catch(() => 1);
+		ok(
+			Object.values(readShareReceipts(stateDir)).some(
+				(receipt) => receipt.reportId === dies && receipt.deletedAt === null,
+			),
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

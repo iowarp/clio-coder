@@ -6,8 +6,10 @@ import { clioStateDir } from "../core/xdg.js";
 import {
 	applyReportEdit,
 	type BuiltBundle,
+	type ConsentScope,
 	checkLastAttempt,
 	composeReportDraft,
+	consentText,
 	type DuplicateChoice,
 	deleteShareGist,
 	detectTransport,
@@ -32,6 +34,7 @@ import {
 	type ReportSharePointer,
 	type ReportTransport,
 	readReportDraft,
+	readSavedBundle,
 	refreshReportStatus,
 	relatedLine,
 	rememberIdentity,
@@ -71,7 +74,7 @@ export const REPORT_HELP = `clio-coder report [bug|feature|question] [--title <t
                   [--on-duplicate comment|new|stop]
                   [--reply-check]
 clio-coder report status [--json]          clio-coder report show <id> [--bundle]
-clio-coder report send <id> [--yes] [--reply-check]
+clio-coder report send <id> [--share] [--yes] [--reply-check]
 clio-coder report forget <id>
 clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
@@ -101,8 +104,9 @@ also after the report was sent.
 --share uploads the bundle too, encrypted so only the maintainers can open it, as a
 secret gist in your own GitHub account through gh; the report names that gist.
 forget or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, the next
-report or telemetry share run deletes it. Only a report
-composed and sent with --share shares; report send <id> never does.
+report or telemetry share run deletes it. A report shares only when it is
+sent with --share: composed with it, or saved and then sent with
+report send <id> --share, which shares the bundle saved with it.
 selftest builds that bundle for the newest session here, writes nothing, and
 says whether any of this machine's identifiers survived into it.
 Exit codes: 0 sent, opened, written or previewed; 1 on a send failure or a refused
@@ -152,6 +156,7 @@ type ReportArgs =
 	| {
 			verb: "send";
 			id: string;
+			share: boolean;
 			yes: boolean;
 			dryRun: boolean;
 			json: boolean;
@@ -251,9 +256,10 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 			const id = idOf("send");
 			if (typeof id !== "string") return id.error;
 			return (
-				allow("send", ["--yes", "--dry-run", "--json", "--on-duplicate", "--reply-check"]) ?? {
+				allow("send", ["--share", "--yes", "--dry-run", "--json", "--on-duplicate", "--reply-check"]) ?? {
 					verb: "send",
 					id,
+					share: flags.has("--share"),
 					yes: flags.has("--yes"),
 					dryRun: flags.has("--dry-run"),
 					json: flags.has("--json"),
@@ -433,6 +439,8 @@ async function confirmAndSend(
 		replyCheck: boolean;
 		/** A bundle built for this report and not yet kept. */
 		bundle?: BuiltBundle | null;
+		/** The bundle kept with a saved report, for `report send <id> --share`. */
+		saved?: ShareSource | null;
 		/** Share that bundle encrypted to the maintainers when the report goes out through gh. */
 		share?: boolean;
 	},
@@ -460,7 +468,15 @@ async function confirmAndSend(
 		io.err("nothing sent: --yes is refused in a command a Clio session started; send it from your own terminal\n");
 		return 2;
 	}
+	if (!options.dryRun && options.share === true && fromSession) {
+		io.err("nothing sent: an agent never shares a bundle; run the command with --share yourself in your own terminal\n");
+		return 2;
+	}
 	const pending = options.bundle ?? null;
+	const source: ShareSource | null =
+		pending !== null
+			? { bytes: pending.bytes, clio: pending.envelope.environment.clioCoder, scopes: pending.summary.scopesGranted }
+			: (options.saved ?? null);
 	const keepBundle = () => {
 		if (pending !== null) saveBuiltBundle(io.stateDir, draft, pending, io.deps.now?.() ?? new Date());
 	};
@@ -503,12 +519,11 @@ async function confirmAndSend(
 	// Only the prompt below is a review; --yes sends what the preview printed without one.
 	const reviewed = !options.yes;
 	// The share id is fixed now so the preview names it; the gist id exists only once sending uploads it.
-	const shareId = options.share === true && pending !== null ? newShareId() : null;
+	const shareId = options.share === true && source !== null ? newShareId() : null;
 	const sharing = shareId !== null && planTransport.kind === "gh";
 	if (shareId !== null && !sharing && !options.json)
 		io.err("not shared: --share needs an authenticated gh; the bundle stays on this machine.\n");
-	const consent: ReportSharePointer["consent"] =
-		pending?.summary.scopesGranted.includes("dataset") === true ? "debug,dataset" : "debug";
+	const consent: ReportSharePointer["consent"] = source?.scopes.includes("dataset") === true ? "debug,dataset" : "debug";
 	const preview = sharing ? { share: { bundle: `gist:<created on send>#${shareId}`, consent } } : {};
 	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed, ...preview });
 	const emit = (result?: unknown) =>
@@ -582,7 +597,8 @@ async function confirmAndSend(
 			keepBundle();
 			saveDraft(io, draft, plan.rendered.title);
 			io.out(`nothing sent; saved as draft ${draft.id}. clio-coder report send ${draft.id} sends it later.\n`);
-			if (sharing) io.out("The bundle was not shared; report send <id> sends the report without sharing it.\n");
+			if (sharing)
+				io.out(`The bundle was not shared; clio-coder report send ${draft.id} --share shares it when you send it.\n`);
 			return 0;
 		}
 	}
@@ -590,8 +606,8 @@ async function confirmAndSend(
 	keepBundle();
 	if (plan.rateWarning !== null && !options.json) io.err(`${plan.rateWarning}\n`);
 	const share =
-		sharing && transport.kind === "gh" && pending !== null
-			? shareHook(io, transport.path, shareId, consent, pending)
+		sharing && transport.kind === "gh" && source !== null
+			? shareHook(io, transport.path, shareId, consent, source)
 			: null;
 	const outcome = await runReportSend(draft, plan.rendered, {
 		...(share !== null ? { share } : {}),
@@ -712,13 +728,20 @@ async function compose(args: ComposeArgs, io: Io): Promise<number> {
 	return confirmAndSend(draft, io, { ...args, bundle });
 }
 
-/** Uploads the built bundle sealed to the maintainers through the reporter's own gh, and deletes it again if asked. */
+/** The bytes a share uploads, with the Clio version and consent scopes its bundle's envelope records. */
+interface ShareSource {
+	bytes: Buffer;
+	clio: string;
+	scopes: ConsentScope[];
+}
+
+/** Uploads the bundle sealed to the maintainers through the reporter's own gh, and deletes it again if asked. */
 function shareHook(
 	io: Io,
 	gh: string,
 	shareId: string,
 	consent: ReportSharePointer["consent"],
-	built: BuiltBundle,
+	source: ShareSource,
 ): ReportShareHook {
 	const deps = { gh, env: io.env, ...(io.deps.run !== undefined ? { run: io.deps.run } : {}) };
 	return {
@@ -730,11 +753,11 @@ function shareHook(
 				{
 					kind: "report-bundle",
 					shareId,
-					clio: built.envelope.environment.clioCoder,
-					consent: built.summary.scopesGranted,
-					digest: reportBundleDigest(built.bytes),
+					clio: source.clio,
+					consent: source.scopes,
+					digest: reportBundleDigest(source.bytes),
 					archiveFormat: REPORT_BUNDLE_FORMAT,
-					archive: built.bytes,
+					archive: source.bytes,
 					...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
 				},
 				deps,
@@ -836,6 +859,7 @@ async function sendSaved(
 	io: Io,
 	args: {
 		id: string;
+		share: boolean;
 		yes: boolean;
 		dryRun: boolean;
 		json: boolean;
@@ -853,7 +877,42 @@ async function sendSaved(
 		fail(io, `no saved draft ${args.id}; clio-coder report status lists them`);
 		return 1;
 	}
-	return confirmAndSend(draft, io, args);
+	let saved: ShareSource | null = null;
+	if (args.share) {
+		if (entry?.share !== undefined) {
+			fail(io, `${args.id}'s bundle is already shared as gist ${entry.share.gistId}; send it without --share`);
+			return 2;
+		}
+		let kept: ReturnType<typeof readSavedBundle>;
+		try {
+			kept = readSavedBundle(io.stateDir, args.id);
+		} catch (error) {
+			fail(io, `nothing sent: ${error instanceof Error ? error.message : String(error)}`);
+			return 1;
+		}
+		if (kept === null) {
+			fail(
+				io,
+				`${args.id} has no saved bundle to share; compose a report with --bundle mechanics --consent debug|dataset --share instead`,
+			);
+			return 2;
+		}
+		saved = { bytes: kept.bytes, clio: kept.clioCoder, scopes: kept.consent.scopes };
+		const text = consentText();
+		const sentences = [
+			...kept.consent.scopes.map((scope) => text[scope]),
+			...(kept.consent.content === "transcript" ? [text.transcript] : []),
+			text.share,
+		];
+		(args.json ? io.err : io.out)(
+			`${[
+				`Sending also uploads the saved diagnostic bundle (${kept.bytes.length} bytes, sha256 ${kept.sha256}) encrypted to the maintainers (--share); clio-coder report show ${args.id} --bundle prints every byte of it.`,
+				`Consent: ${kept.consent.scopes.join(" and ")}. By sending the bundle you agree to:`,
+				...sentences.map((sentence) => `  ${sentence}`),
+			].join("\n")}\n`,
+		);
+	}
+	return confirmAndSend(draft, io, { ...args, saved });
 }
 
 async function forget(io: Io, id: string): Promise<number> {
