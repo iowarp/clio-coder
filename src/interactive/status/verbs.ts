@@ -147,6 +147,9 @@ function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["to
 }
 
 export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols: number): VerbRender | null {
+	// A quiet tool is still that tool running, timed from its own start; the model is not the one with no output.
+	if (status.phase === "stuck" && status.resumePhase === "tool_running" && status.tool)
+		return resolveFooterVerb({ ...status, phase: "tool_running" }, now, terminalCols);
 	const core = coreVerb(status);
 	if (!core) return null;
 	if (status.phase === "ended") return core;

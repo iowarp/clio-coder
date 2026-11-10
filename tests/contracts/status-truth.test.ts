@@ -49,6 +49,7 @@ import {
 } from "../../src/interactive/footer/notifications.js";
 import { silenceNoteForms } from "../../src/interactive/footer/silence-note.js";
 import {
+	buildHarnessStatePill,
 	composerPhasePresentation,
 	idleReadinessPresentation,
 	shellSettledPresentation,
@@ -72,7 +73,13 @@ import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
 import { createSilenceTranscriptRow } from "../../src/interactive/silence-row.js";
-import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
+import {
+	buildSummary,
+	reduceStatus,
+	resolveFooterVerb,
+	type StatusInputEvent,
+} from "../../src/interactive/status/index.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 import {
 	approvalWaitWords,
 	bindWorkerResponseLimit,
@@ -1769,6 +1776,21 @@ test("a tool's run is not model silence: the next call's wait never counts from 
 	const quiet = { ...status, lastMeaningfulAt: t0 + 303_000 };
 	const note = silenceNoteForms(quiet, t0 + 398_000, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "";
 	match(note, /^No output for 1m35s/u);
+});
+
+test("a quiet tool past the stuck threshold reads as that tool running, never as no output", () => {
+	const machine = reducer();
+	waitingOnModel(machine);
+	machine.apply({ type: "tool_execution_start", toolCallId: "b1", toolName: "bash", args: { command: "sleep 300" } });
+	const quiet = machine.advance(STUCK_AFTER_MS + 1_000);
+	strictEqual(quiet.phase, "stuck");
+	strictEqual(quiet.resumePhase, "tool_running");
+	strictEqual(resolveFooterVerb(quiet, machine.now(), 120)?.text, "Running bash · 3m1s");
+	const pill = stripTerminalSequences(
+		buildHarnessStatePill(clioTheme(), quiet, { active: 1 } as never, 0, machine.now(), 120),
+	);
+	match(pill, /Running bash/u);
+	doesNotMatch(pill, /No output/u);
 });
 
 test("a write refused beside a lint that changed nothing is a blocked change, and any changed path keeps the old reading", () => {

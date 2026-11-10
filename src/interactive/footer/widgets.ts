@@ -480,6 +480,9 @@ function footerPhasePresentation(status: AgentStatus, width: number, now: number
 		case "dispatching":
 			return { glyph: GLYPH.phaseDispatch, label: "Waiting for worker", token: "harnessAction", live: true };
 		case "stuck": {
+			// A quiet tool is still that tool running, as the rail reads it; the model is not the one with no output.
+			if (status.resumePhase === "tool_running" && status.tool)
+				return footerPhasePresentation({ ...status, phase: "tool_running" }, width, now);
 			const seconds = Math.max(0, Math.floor((now - status.lastMeaningfulAt) / 1000));
 			return {
 				glyph: GLYPH.warn,
