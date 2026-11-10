@@ -93,7 +93,12 @@ async function executeInWorker(
 	// source bootstrap can install its absolute loader.
 	signal?.throwIfAborted();
 	const workerData: CodewikiBuildWorkerData = { request };
-	const worker = new Worker(buildWorkerUrl(), { workerData, execArgv: [] });
+	// A runaway read or parse fails the worker, not the host process.
+	const worker = new Worker(buildWorkerUrl(), {
+		workerData,
+		execArgv: [],
+		resourceLimits: { maxOldGenerationSizeMb: 1024 },
+	});
 	let exited = false;
 	const exit = new Promise<void>((resolve) => {
 		worker.once("exit", () => {
@@ -120,11 +125,12 @@ async function executeInWorker(
 				onAbort();
 				return;
 			}
-			timer = setTimeout(() => {
-				const detail = lastProgress
+			const detail = (): string =>
+				lastProgress
 					? ` during ${lastProgress.stage}${lastProgress.path ? `; last reported file: ${lastProgress.path}` : ""}`
 					: " before reporting progress";
-				finish(() => reject(new Error(`codewiki build worker exceeded ${BUILD_TIMEOUT_MS} ms${detail}`)));
+			timer = setTimeout(() => {
+				finish(() => reject(new Error(`codewiki build worker exceeded ${BUILD_TIMEOUT_MS} ms${detail()}`)));
 			}, BUILD_TIMEOUT_MS);
 			timer.unref();
 			worker.on("message", (message: CodewikiBuildWorkerMessage) => {
@@ -145,11 +151,13 @@ async function executeInWorker(
 			});
 			worker.once("error", (error) =>
 				finish(() => {
-					reject(error);
+					reject(new Error(`codewiki build worker failed${detail()}: ${error.message}`, { cause: error }));
 				}),
 			);
 			worker.once("exit", (code) => {
-				finish(() => reject(new Error(`codewiki build worker exited with code ${code} before returning a result`)));
+				finish(() =>
+					reject(new Error(`codewiki build worker exited with code ${code}${detail()} before returning a result`)),
+				);
 			});
 		});
 	} finally {

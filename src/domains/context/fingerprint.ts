@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { readCodewiki } from "./codewiki/artifact.js";
-import { isIndexablePath } from "./codewiki/paths.js";
+import { isIndexablePath, oversizeFileBytes, streamFile } from "./codewiki/paths.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import { EXCLUDED_DIRS } from "./excluded-dirs.js";
 
@@ -86,7 +86,13 @@ function accumulateFile(
 	artifactLoc: number | null,
 ): number {
 	// Read failures must invalidate the operation, never certify a partial tree.
-	const contents = readFileSync(join(cwd, relPath));
+	const path = join(cwd, relPath);
+	if (oversizeFileBytes(path) !== null) {
+		const streamed = streamFile(path);
+		hash.update(`${JSON.stringify(relPath)}:${streamed.digest}\n`);
+		return artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath)) ? streamed.newlines + 1 : 0;
+	}
+	const contents = readFileSync(path);
 	const digest = createHash("sha256").update(contents).digest("hex");
 	hash.update(`${JSON.stringify(relPath)}:${digest}\n`);
 	if (artifactLoc === null && LOC_EXTENSIONS.has(extensionOf(relPath))) return countLines(contents.toString("utf8"));

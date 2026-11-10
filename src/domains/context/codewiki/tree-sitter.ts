@@ -768,6 +768,14 @@ export interface TreeSitterExtractor extends LanguageExtractor {
 	ensureGrammarsForPaths(paths: ReadonlyArray<string>): Promise<void>;
 }
 
+/**
+ * Per-file parse budget. Pathological input (an unterminated doc comment
+ * repeated thousands of times) makes the grammar's error recovery quadratic;
+ * past the budget the file falls back to the regex extractor instead of
+ * stalling the whole build.
+ */
+const TREE_SITTER_PARSE_BUDGET_MS = 1_000;
+
 export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> {
 	await ensureParserInit();
 	const parsers = new Map<GrammarName, ParserInstance>();
@@ -810,8 +818,13 @@ export async function createTreeSitterExtractor(): Promise<TreeSitterExtractor> 
 			if (!parser) throw new GrammarUnavailableError(`tree-sitter grammar not loaded for ${path}`);
 			let tree: Tree | null = null;
 			try {
-				const parsed = parser.parse(text);
-				if (!parsed) throw new Error(`tree-sitter returned no tree for ${path}`);
+				const deadline = performance.now() + TREE_SITTER_PARSE_BUDGET_MS;
+				const parsed = parser.parse(text, null, { progressCallback: () => performance.now() > deadline });
+				if (!parsed) {
+					// A cancelled parse resumes on the next call unless reset.
+					parser.reset();
+					throw new Error(`tree-sitter returned no tree for ${path}`);
+				}
 				tree = parsed;
 				const symbols = sortSymbols(extractSymbolsByGrammar(grammar, parsed.rootNode));
 				return {

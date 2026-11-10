@@ -9,7 +9,7 @@ import { extractCMake, isCMakePath } from "./cmake.js";
 import { type CooperativeSlicer, createSlicer } from "./cooperative.js";
 import { grammarNowCached } from "./fetched-grammars.js";
 import { FETCHED_GRAMMARS } from "./grammar-assets.js";
-import { isIndexablePath, languageForPath } from "./paths.js";
+import { isIndexablePath, languageForPath, oversizeFileBytes, streamFile } from "./paths.js";
 import {
 	type BuildCodewikiInput,
 	CODEWIKI_VERSION,
@@ -110,6 +110,16 @@ function contentHash(text: string): string {
 	return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
+/** Content hash of a file over the size gate, streamed; null when the file is indexable whole. */
+function oversizeHash(path: string): string | null {
+	if (oversizeFileBytes(path) === null) return null;
+	try {
+		return streamFile(path).digest.slice(0, 16);
+	} catch {
+		return null;
+	}
+}
+
 function defaultReadFile(path: string): string | null {
 	try {
 		return readFileSync(path, "utf8");
@@ -152,7 +162,10 @@ function roleFor(relPath: string, language: CodewikiLanguage): CodewikiFileRole 
 }
 
 function firstDocSummary(text: string): string | null {
-	const jsDoc = /\/\*\*([\s\S]*?)\*\//.exec(text)?.[1];
+	// Single pass: a lazy regex rescans to the end for every unclosed `/**`.
+	const open = text.indexOf("/**");
+	const close = open < 0 ? -1 : text.indexOf("*/", open + 3);
+	const jsDoc = close < 0 ? undefined : text.slice(open + 3, close);
 	const pythonDoc = /^\s*(?:"""([\s\S]*?)"""|'''([\s\S]*?)''')/.exec(text);
 	const raw = jsDoc ?? pythonDoc?.[1] ?? pythonDoc?.[2];
 	if (!raw) return null;
@@ -789,6 +802,28 @@ function extractSourceFile(
 	}
 }
 
+/** Index record for a file over the size gate: present, hashed by streaming, no symbols. */
+function oversizeFile(cwd: string, relPath: string, language: CodewikiLanguage): CodewikiFile | null {
+	let streamed: ReturnType<typeof streamFile>;
+	try {
+		streamed = streamFile(join(cwd, relPath));
+	} catch {
+		return null;
+	}
+	const loc = streamed.bytes === 0 ? 0 : streamed.endsWithNewline ? streamed.newlines : streamed.newlines + 1;
+	return {
+		id: stableFileId(relPath),
+		path: relPath,
+		lang: language,
+		loc,
+		bytes: streamed.bytes,
+		role: roleFor(relPath, language),
+		hash: streamed.digest.slice(0, 16),
+		imports: [],
+		...(FETCHED_GRAMMARS.some((grammar) => grammar.lang === language) ? { grammarMissing: false } : {}),
+	};
+}
+
 function buildFile(
 	cwd: string,
 	relPath: string,
@@ -797,6 +832,10 @@ function buildFile(
 ): BuiltFile | null {
 	const pathLanguage = languageForPath(relPath);
 	if (!pathLanguage) return null;
+	if (oversizeFileBytes(join(cwd, relPath)) !== null) {
+		const oversize = oversizeFile(cwd, relPath, pathLanguage);
+		return oversize ? { file: oversize, symbols: [] } : null;
+	}
 	let text: string | null;
 	try {
 		text = readFile(join(cwd, relPath));
@@ -1034,6 +1073,8 @@ async function buildFromPaths(
 		// One read plus one tree-sitter parse per file; a full build of a large
 		// repo is thousands of them and must not land as a single turn.
 		await slicer.tick();
+		// Name the file before parsing it so a stalled or dying worker reports it.
+		options.onProgress?.({ stage: "parse", current: index, total: sortedPaths.length, path: relPath });
 		const built = buildFile(cwd, relPath, treeSitterExtractor, readFile);
 		if (built) builtFiles.push(built);
 		options.onProgress?.({ stage: "parse", current: index + 1, total: sortedPaths.length, path: relPath });
@@ -1099,6 +1140,13 @@ function inspectCodewikiPaths(
 		const isCurrentIndexableFile = isIndexablePath(relPath) && visiblePaths.has(relPath);
 		if (!existing && !isCurrentIndexableFile) continue;
 		if (isCurrentIndexableFile) {
+			const hash = oversizeHash(join(cwd, relPath));
+			if (hash !== null) {
+				if (existing?.hash === hash && !reparse(existing)) continue;
+				rebuildPaths.push(relPath);
+				changedPathSet.add(relPath);
+				continue;
+			}
 			const text = readFile(join(cwd, relPath));
 			if (text !== null) {
 				if (existing?.hash === contentHash(text) && !reparse(existing)) continue;
@@ -1145,6 +1193,7 @@ export async function updateCodewikiPaths(
 		await treeSitterExtractor.ensureGrammarsForPaths(rebuildPaths);
 		for (const [index, relPath] of rebuildPaths.entries()) {
 			await slicer.tick();
+			options.onProgress?.({ stage: "parse", current: index, total: rebuildPaths.length, path: relPath });
 			const built = buildFile(
 				cwd,
 				relPath,
@@ -1200,8 +1249,10 @@ export async function syncCodewiki(
 		// Reads and hashes every visible file in the workspace. Cheap per file,
 		// seconds in aggregate on a large repo.
 		await slicer.tick();
-		const text = readFile(join(cwd, relPath));
-		if (text !== null) {
+		const oversize = oversizeHash(join(cwd, relPath));
+		const text = oversize === null ? readFile(join(cwd, relPath)) : null;
+		if (oversize !== null) currentFiles.set(relPath, oversize);
+		else if (text !== null) {
 			const hash = contentHash(text);
 			currentFiles.set(relPath, hash);
 			// Unchanged text is never parsed; retaining it duplicated the entire
