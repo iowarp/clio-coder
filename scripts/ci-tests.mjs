@@ -56,6 +56,7 @@ export const coreTests = [
 	"gateway-authority",
 	"mutation-atomicity",
 	"physical-dotdot",
+	"proxy-env-bypass",
 	"read-scope",
 	"session-durability",
 	"project-settings-save",
