@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { rememberMessageCalls } from "../../src/core/message-accounting.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { ContextLedger } from "../../src/domains/session/context-ledger.js";
+import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
 import { projectContextLedger } from "../../src/engine/acp/context-ledger.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -260,10 +261,22 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	const updates: Array<Record<string, unknown>> = [];
 	let close: () => void = () => {};
 	let onEvent: (event: unknown) => void = () => {};
-	let folded: () => void = () => {};
 	const records: TelemetryRecord[] = [];
 	let bound: string | null = null;
 	let probes = 0;
+	// The server subscribes more than once; a fold the turn's waiter never hears ends only at its 2 s bound.
+	const listeners = new Set<Parameters<TelemetryReadModel["subscribe"]>[1]>();
+	const folded = () => {
+		for (const listener of listeners)
+			listener({
+				v: 1,
+				kind: "telemetry_update",
+				sessionId: bound,
+				seq: 1,
+				generatedAt: new Date().toISOString(),
+				topics: ["session"],
+			});
+	};
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
 		request: async () => ({}) as never,
@@ -292,16 +305,10 @@ test("the prompt response waits for the read model to fold the turn's last call,
 				() => records,
 			),
 			subscribe: (_topic, listener) => {
-				folded = () =>
-					listener({
-						v: 1,
-						kind: "telemetry_update",
-						sessionId: bound,
-						seq: 1,
-						generatedAt: new Date().toISOString(),
-						topics: ["session"],
-					});
-				return () => {};
+				listeners.add(listener);
+				return () => {
+					listeners.delete(listener);
+				};
 			},
 		},
 		// The probe a write starts is still in flight when the turn settles; a batch folds while the response waits on it.
@@ -377,7 +384,7 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	// The turn's last frame, session block included, is what the response repeats.
 	assert.deepEqual(frames.filter((frame) => frame.turn !== null).at(-1)?.turn, reply.quantities);
 	// The batch that folded during the workspace wait reached a later session frame, not the response.
-	assert.equal(reply.session?.quantities.calls.display, "2");
+	assert.equal(reply.session?.quantities.calls.display, "1");
 	assert.equal(
 		(frames.at(-1)?.session as { own: { counts: { calls: { display: string } } } } | undefined)?.own.counts.calls.display,
 		"2",
