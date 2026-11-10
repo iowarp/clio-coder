@@ -63,7 +63,7 @@ export function formatReportPlanText(plan: ReportPlan, draftId: string): string 
 		`${plan.postedAs === "writes a file" ? "Writes a file for" : "Goes to"} ${plan.destination} (${plan.postedAs}); nothing sent yet`,
 		`Draft: ${draftId}`,
 		`Title: ${plan.rendered.title}`,
-		`Body, exactly as it will be sent (${Buffer.byteLength(plan.rendered.body, "utf8")} bytes):`,
+		`Body, exactly as it will be sent (${Buffer.byteLength(plan.rendered.body, "utf8")} bytes; this view leaves out blank lines):`,
 		`${fence}markdown`,
 		body,
 		fence,
