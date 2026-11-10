@@ -3,6 +3,7 @@
  * preview is one command's text and sending is a second, deliberate command. Nothing here sends during a preview.
  */
 
+import { rememberIdentity } from "./body.js";
 import type { ReportCommandRunner } from "./command.js";
 import type { ReportSessionFacts } from "./environment.js";
 import { observeSession } from "./observe.js";
@@ -110,7 +111,8 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 				};
 			}
 			const current = deps.session?.() ?? null;
-			const draft = composeReportDraft({
+			const who = await identity();
+			const composed = composeReportDraft({
 				kind: input.kind,
 				surface: "acp",
 				// ACP has no editor, so the summary is also the "What happened" text.
@@ -125,7 +127,9 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 							},
 				...(deps.now ? { now: deps.now() } : {}),
 			});
-			const plan = planReport(draft, { identity: await identity(), transport: await offline(), stateDir: deps.stateDir });
+			// Shown with this directory's identity, so a later resume elsewhere still masks what this preview masked.
+			const draft = rememberIdentity(composed, who);
+			const plan = planReport(draft, { identity: who, transport: await offline(), stateDir: deps.stateDir });
 			saveReportDraft(deps.stateDir, draft);
 			updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title: plan.rendered.title, state: "draft" });
 			shown.add(draft.id);

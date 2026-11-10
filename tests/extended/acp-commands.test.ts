@@ -430,6 +430,7 @@ test("/report previews as text with no transport call, and a read-only ceiling r
 
 	const draft = readReportDraft(stateDir, draftId);
 	assert.ok(draft);
+	assert.ok(draft.identity?.paths.includes(stateDir), "the draft records the identity its preview masked with");
 	saveReportDraft(stateDir, { ...draft, origin: "agent" });
 	const refused = await control.invoke({ command: "report", argv: ["send", draftId] });
 	assert.equal(refused.level, "warn");
