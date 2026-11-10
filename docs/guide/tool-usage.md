@@ -13,7 +13,7 @@ Operational reference for agents and operators. Sections summarize each tool's a
 | Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
-| Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder) |
+| Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder), [`report`](#report-draft-a-clio-coder-report-for-the-operator) |
 | Configure and manage the session | [`configure_clio`](#configureclio-propose-clio-settings-and-targets-with-an-approved-diff), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
@@ -73,7 +73,7 @@ Capabilities that the gateway directory implements itself, and the other gateway
 | `clio_library` | `query`, `kind`, `ref`, `limit`, `offset` | [clio_library](#cliolibrary-inspect-the-component-catalog-through-the-gateway) |
 | `data` | `op` is `inspect`, `select`, `validate` or `stats`, plus the format, window and hyperslab arguments | [data](#data-inspect-structured-files-through-the-gateway) |
 | `store` | `op` is `tags`, `create`, `list`, `stat`, `get`, `put`, `note` or `remove`, with `tag`, `blob` (or `ref: "<tag>:<blob>"`), `path`, `pattern`, `offset`, `limit`, `description`, `class`, `note` and `derived_from` | [store](#store-keep-results-and-datasets-outside-the-working-tree) |
-| `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio` | Each tool's own schema | The tool's own section |
+| `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `vision`, `configure_clio`, `report` | Each tool's own schema | The tool's own section |
 | `extension_<id>__<name>` | The tool's schema, from an extension command tool or an api 2 runtime tool | [Extensions](harness-extensions.md) |
 | `mcp_<id>__<tool>` | The MCP server tool's schema | The MCP paragraphs below |
 
@@ -1187,6 +1187,15 @@ Ask only when blocked on a decision the request does not answer. Never ask about
 ask_user(action="ask", questions=[{question: "Which database should we use?", options: [{label: "SQLite", description: "Local database"}, {label: "PostgreSQL"}]}])
 ask_user(action="complete", summary="Operator selected SQLite.", decisions=[{key: "db_choice", value: "SQLite"}])
 ```
+
+## report: draft a Clio Coder report for the operator
+
+Reached through the gateway in the main session only; workers never get it. Source: [report.ts](../../src/tools/report.ts). It is for problems with Clio Coder itself, not provider errors, rate limits, failing tests or the operator's project, and it never sends anything.
+
+- `action: "draft"` takes `kind` (`bug`, `feature` or `question`), `title`, `happened`, `not_known` (required, `[]` when everything was verified) and optional `operator_words`, `expected`, `reproduce` and `area`. Clio Coder adds versions and what it recorded, scrubs the text and saves the draft: one per session, three unsent per install. With the operator present the draft opens in the `/report` review; otherwise the result names `clio-coder report send <id>`.
+- `action: "offer"` asks the operator once through `ask_user` (Draft it, Not now, Don't ask again) under the same budget as Clio Coder's own suggestions. A no tells the agent not to raise it again, and "Don't ask again" sets `report.offers: off`.
+
+A `bash` command that files a `gh` issue against iowarp/clio-coder still runs, and its result gains a note naming `/report`. See [Report a problem to the maintainers](troubleshooting.md#report-a-problem-to-the-maintainers).
 
 ## artifact: plans, reviews, and reports
 
