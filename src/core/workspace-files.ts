@@ -192,15 +192,27 @@ function isRegularWorkspaceFile(cwd: string, relPath: string, requireCompleteSna
 }
 
 function gitVisibleFilesArgs(candidates?: ReadonlyArray<string>): string[] {
-	const args = ["--literal-pathspecs", "ls-files", "-z", "--stage", "--cached", "--others", "--exclude-standard"];
+	const args = [
+		"--literal-pathspecs",
+		"ls-files",
+		"-z",
+		"-t",
+		"--stage",
+		"--cached",
+		"--deleted",
+		"--others",
+		"--exclude-standard",
+	];
 	if (candidates) args.push("--", ...candidates);
 	return args;
 }
 
 /**
- * `git ls-files` output: every listed path, and the subset the index records
- * as regular files. Those need no per-path lstat (about 1.75 s on 200k files);
- * symlinks, gitlinks and untracked paths are still checked on disk.
+ * `git ls-files -t` output: every listed path, and the subset the index records
+ * as regular files present in the worktree. Those need no per-path lstat (about
+ * 1.75 s on 200k files); symlinks, gitlinks, untracked, skip-worktree and
+ * deleted paths are still checked on disk. Git reports a tracked file deleted
+ * from the worktree as `R` beside its `H` entry, so it is never trusted.
  */
 interface GitListing {
 	paths: string[];
@@ -212,17 +224,25 @@ const STAGED_ENTRY = /^(\d{6}) [0-9a-f]+ \d\t/;
 function splitGitPathOutput(output: string): GitListing {
 	const paths: string[] = [];
 	const indexedFiles = new Set<string>();
-	for (const record of output.split("\0")) {
-		if (record.length === 0) continue;
+	const deleted = new Set<string>();
+	for (const tagged of output.split("\0")) {
+		if (tagged.length < 3) continue;
+		const tag = tagged[0];
+		const record = tagged.slice(2);
 		const staged = STAGED_ENTRY.exec(record);
 		if (!staged) {
 			paths.push(record);
 			continue;
 		}
 		const path = record.slice(staged[0].length);
+		if (tag === "R") {
+			deleted.add(path);
+			continue;
+		}
 		paths.push(path);
-		if (staged[1] === "100644" || staged[1] === "100755") indexedFiles.add(path);
+		if (tag === "H" && (staged[1] === "100644" || staged[1] === "100755")) indexedFiles.add(path);
 	}
+	for (const path of deleted) indexedFiles.delete(path);
 	return { paths, indexedFiles };
 }
 
