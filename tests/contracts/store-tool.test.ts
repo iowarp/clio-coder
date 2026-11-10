@@ -122,4 +122,11 @@ describe("store tool", () => {
 			strictEqual(result.kind, "error");
 			match(String(result.message), /class must be one of/);
 		}));
+
+	it("keeps a comma inside a blob name in a derived_from string", () => {
+		deepStrictEqual(prepareStoreArguments({ op: "put", derived_from: "sim:a,b.csv, sim:c" }).derived_from, [
+			"sim:a,b.csv",
+			"sim:c",
+		]);
+	});
 });

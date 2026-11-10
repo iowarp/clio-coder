@@ -34,7 +34,9 @@ function numberArg(value: unknown): number | undefined {
 }
 
 function refListArg(value: unknown): string[] | undefined {
-	const items: unknown[] = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : [];
+	// A blob name may contain a comma, so a string splits only at a comma that starts the next `<tag>:`.
+	const items: unknown[] =
+		typeof value === "string" ? value.split(/,(?=\s*[A-Za-z0-9._/-]+:)/u) : Array.isArray(value) ? value : [];
 	const out = items
 		.filter((item): item is string => typeof item === "string")
 		.map((item) => item.trim())
