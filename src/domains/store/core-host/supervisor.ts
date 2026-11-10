@@ -14,6 +14,24 @@ import {
 
 export const CORE_HOST_STDERR_BYTES = 64 * 1024;
 const QUOTED_STDERR_BYTES = 4 * 1024;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matches terminal escape sequences
+const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+// clio-core's routine log lines (`<file>:<line> INFO <tid> <func> ...`) bury the warning, error, and host lines.
+const CORE_ROUTINE_LOG = /^\S+:\d+ (?:INFO|DEBUG) \d+ /;
+
+/** The end of a host's stderr as a refusal quotes it: no escape codes, no routine runtime logging, whole lines. */
+function quotableStderr(stderr: string): string {
+	const lines = stderr
+		.replace(ANSI_ESCAPE, "")
+		.split("\n")
+		.filter((line) => !CORE_ROUTINE_LOG.test(line.trim()));
+	let quoted = lines.join("\n").trim();
+	if (quoted.length > QUOTED_STDERR_BYTES) {
+		quoted = quoted.slice(-QUOTED_STDERR_BYTES);
+		quoted = quoted.slice(quoted.indexOf("\n") + 1);
+	}
+	return quoted;
+}
 
 export interface CoreHostTiming {
 	helloMs: number;
@@ -165,10 +183,7 @@ class HostProcess {
 	}
 
 	#refusal(why: string): StoreRefusal {
-		const tail = this.#stderr
-			.subarray(Math.max(0, this.#stderr.byteLength - QUOTED_STDERR_BYTES))
-			.toString("utf8")
-			.trim();
+		const tail = quotableStderr(this.#stderr.toString("utf8"));
 		const quoted = tail === "" ? " It wrote nothing to stderr." : ` Its stderr ended with:\n${tail}`;
 		return new StoreRefusal("unavailable", `The clio-core host ${why}.${quoted}`);
 	}
@@ -400,7 +415,7 @@ class CoreHostSupervisor implements CoreHost {
 			throw new StoreRefusal(
 				"unavailable",
 				`The clio-core host is quarantined and was already restarted; the next restart is allowed in ${wait} s. ` +
-					`Last stderr:\n${this.#proc.stderrTail().slice(-QUOTED_STDERR_BYTES).trim()}`,
+					`Last stderr:\n${quotableStderr(this.#proc.stderrTail())}`,
 			);
 		}
 		this.#lastRestartAt = now;

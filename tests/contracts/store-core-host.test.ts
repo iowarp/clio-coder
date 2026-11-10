@@ -16,6 +16,8 @@ const send = (value) => {
 	process.stdout.write(Buffer.concat([head, body]));
 };
 if (mode === "exit-at-start") {
+	process.stderr.write("\u001b[97m/src/ipc_manager.cc:380 INFO 7 ClientInit listener bound\u001b[0m\n");
+	process.stderr.write("\u001b[31m/src/ipc_manager.cc:1708 ERROR 7 WaitForLocalServer runtime is not running\u001b[0m\n");
 	process.stderr.write("libclio: cannot attach to runtime\n");
 	process.exit(3);
 }
@@ -111,8 +113,13 @@ test("a host that writes garbage is quarantined", async () => {
 	}
 });
 
-test("a host that exits at start reports its exit code and stderr", async () => {
-	await rejects(launch("exit-at-start"), unavailable(/exited with code 3[\s\S]*cannot attach to runtime/));
+test("a host that exits at start reports its exit code and stderr without routine runtime logging (M-40 F17)", async () => {
+	await rejects(launch("exit-at-start"), (error: unknown) => {
+		ok(unavailable(/exited with code 3[\s\S]*ERROR 7 WaitForLocalServer[\s\S]*cannot attach to runtime/)(error));
+		const message = (error as Error).message;
+		ok(!message.includes("\u001b") && !message.includes(" INFO "), message);
+		return true;
+	});
 });
 
 test("killing the host mid-call rejects with StoreRefusal and leaves the parent running", async () => {
