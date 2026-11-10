@@ -91,10 +91,17 @@ describe("compact coordinator dispatch contract", () => {
 			await tool.execute("batch", validated);
 			deepStrictEqual(received.at(-1), { agent: "coder", mode: "parallel", tasks });
 		}
+		const granted = { task: "put the summary", tags: ["results"], tasks: [{ task: "other", tags: ["inputs"] }] };
+		ok(!Object.hasOwn(coordinatorDispatchParameters().properties, "tags"), "store grants are not on the attached schema");
+		await tool.execute(
+			"granted",
+			validateEngineToolArguments(tool, { type: "toolCall", id: "granted", name: "dispatch", arguments: granted }),
+		);
+		deepStrictEqual(received.at(-1), granted, "a call carrying tags is still admitted");
 		const invalid = { task: "", tasks: ["valid"], candidates: "many" };
 		ok(Value.Check(tool.parameters, invalid), "hidden fields reach canonical validation");
 		await rejects(tool.execute("invalid", invalid), /candidates/u);
-		strictEqual(received.length, 3, "invalid canonical arguments never execute");
+		strictEqual(received.length, 4, "invalid canonical arguments never execute");
 	});
 
 	it("reads a one-item batch repeating the assignment as that run, and keeps a real conflict refusable", () => {

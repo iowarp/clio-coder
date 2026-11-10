@@ -92,7 +92,7 @@ export function coordinatorDispatchParameters() {
 				"One self-contained assignment with outcome and constraints, never the operator's words; empty only with list or tasks.",
 		}),
 		intent: Type.Optional(intent),
-		tags: Type.Optional(DispatchStoreTagsSchema),
+		// No `tags`: store grants are taught on demand (gateway describe dispatch); the canonical schema admits them.
 		briefing: Type.Optional(Type.String()),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
