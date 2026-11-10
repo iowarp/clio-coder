@@ -25,6 +25,15 @@ export interface InitReport {
 	cacheDir: string;
 	createdPaths: string[];
 	touchedSettings: boolean;
+	/** Set when a newer Clio last used this home; `home.json` was then left as it was. */
+	newerHome?: NewerHome;
+}
+
+/** A home last written by a newer Clio than the running one. */
+export interface NewerHome {
+	version: string;
+	/** Applied migration ids this build does not register. */
+	unknownMigrations: string[];
 }
 
 const CONFIG_SUBDIRS = ["agents"] as const;
@@ -53,6 +62,11 @@ interface InstallMetadata {
 	 * `doctor` can show it. Absent on a home that has never changed version.
 	 */
 	upgradedFrom?: string;
+	/**
+	 * The newer version this home was taken back from, after the operator
+	 * accepted running an older Clio on it. Cleared by the next upgrade.
+	 */
+	downgradedFrom?: string;
 	/**
 	 * The version whose upgrade notice the operator has already seen. Written
 	 * by the interactive boot, once per version, so the notice never repeats.
@@ -161,6 +175,7 @@ export function initializeClioHome(): InitReport {
 	// process's noticedVersion after an upgrade.
 	const installPath = join(stateDir, "home.json");
 	const runningVersion = readClioVersion();
+	let newerHome: NewerHome | undefined;
 	withStateFileLockSync(installPath, () => {
 		// Before 0.6.8 this record was install.json, one of three files with that name.
 		const legacyPath = join(stateDir, "install.json");
@@ -173,6 +188,12 @@ export function initializeClioHome(): InitReport {
 		// A home the dev build creates still records its own version.
 		const currentVersion =
 			installMetadata !== null && isDevVersion(runningVersion) ? installMetadata.version : runningVersion;
+		// An older binary must not restamp a newer home as its own version.
+		const newer = installMetadata ? newerHomeOf(installMetadata, runningVersion, stateDir) : null;
+		if (newer) {
+			newerHome = newer;
+			return;
+		}
 		if (!installMetadata) {
 			const payload: InstallMetadata = {
 				version: currentVersion,
@@ -198,6 +219,9 @@ export function initializeClioHome(): InitReport {
 				...(installMetadata.installedAt !== undefined ? { installedAt: installMetadata.installedAt } : {}),
 				...(installMetadata.repairedAt !== undefined ? { repairedAt: installMetadata.repairedAt } : {}),
 				...(upgradedFrom !== undefined ? { upgradedFrom } : {}),
+				...(installMetadata.version === currentVersion && installMetadata.downgradedFrom !== undefined
+					? { downgradedFrom: installMetadata.downgradedFrom }
+					: {}),
 				...(installMetadata.noticedVersion !== undefined ? { noticedVersion: installMetadata.noticedVersion } : {}),
 				upgradedAt: new Date().toISOString(),
 				platform: process.platform,
@@ -210,7 +234,84 @@ export function initializeClioHome(): InitReport {
 		chmodSync(installPath, 0o600);
 	});
 
-	return { configDir, dataDir, stateDir, cacheDir, createdPaths: created, touchedSettings: touched };
+	return {
+		configDir,
+		dataDir,
+		stateDir,
+		cacheDir,
+		createdPaths: created,
+		touchedSettings: touched,
+		...(newerHome ? { newerHome } : {}),
+	};
+}
+
+/** The release triple of a version; a `-dev` or `-rc` suffix is ignored. */
+function releaseTriple(version: string): [number, number, number] | null {
+	const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
+	return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function isNewerRelease(recorded: string, running: string): boolean {
+	const a = releaseTriple(recorded);
+	const b = releaseTriple(running);
+	if (!a || !b) return false;
+	for (let i = 0; i < 3; i++) {
+		if ((a[i] as number) !== (b[i] as number)) return (a[i] as number) > (b[i] as number);
+	}
+	return false;
+}
+
+function newerHomeOf(metadata: InstallMetadata, runningVersion: string, stateDir: string): NewerHome | null {
+	const newerVersion = isNewerRelease(metadata.version, runningVersion);
+	// Once the operator accepted this version on the home, its leftover newer ids no longer ask.
+	const unknownMigrations = metadata.downgradedFrom === undefined ? unknownAppliedMigrations(stateDir) : [];
+	if (!newerVersion && unknownMigrations.length === 0) return null;
+	return { version: metadata.version, unknownMigrations };
+}
+
+function unknownAppliedMigrations(stateDir: string): string[] {
+	const registered = new Set<string>(REGISTERED_MIGRATION_IDS);
+	for (const path of [migrationManifestPath(), legacyMigrationManifestPath(stateDir)]) {
+		if (!existsSync(path)) continue;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8")) as { applied?: unknown };
+			if (!Array.isArray(parsed.applied)) return [];
+			return parsed.applied.filter((id): id is string => typeof id === "string" && !registered.has(id));
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
+
+/** The newer Clio that last used this home, or null. Reads only; writes nothing. */
+export function detectNewerHome(): NewerHome | null {
+	const stateDir = resolveClioDirs().state;
+	const metadata = readInstallMetadata(join(stateDir, "home.json"));
+	return metadata ? newerHomeOf(metadata, readClioVersion(), stateDir) : null;
+}
+
+/**
+ * The operator accepted running this older Clio on a newer home: record the
+ * downgrade so later boots do not ask, and the home is this version's again.
+ */
+export function recordHomeDowngrade(): void {
+	const stateDir = clioStateDir();
+	const installPath = join(stateDir, "home.json");
+	withStateFileLockSync(installPath, () => {
+		const metadata = readInstallMetadata(installPath);
+		if (!metadata) return;
+		const payload: InstallMetadata = {
+			version: readClioVersion(),
+			...(metadata.installedAt !== undefined ? { installedAt: metadata.installedAt } : {}),
+			...(metadata.repairedAt !== undefined ? { repairedAt: metadata.repairedAt } : {}),
+			downgradedFrom: metadata.version,
+			...(metadata.noticedVersion !== undefined ? { noticedVersion: metadata.noticedVersion } : {}),
+			platform: process.platform,
+			nodeVersion: process.version,
+		};
+		safeResourceWrite(installPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	});
 }
 
 function readInstallMetadata(path: string): InstallMetadata | null {
@@ -232,6 +333,7 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 				...(typeof parsed.upgradedAt === "string" ? { upgradedAt: parsed.upgradedAt } : {}),
 				...(typeof parsed.repairedAt === "string" ? { repairedAt: parsed.repairedAt } : {}),
 				...(typeof parsed.upgradedFrom === "string" ? { upgradedFrom: parsed.upgradedFrom } : {}),
+				...(typeof parsed.downgradedFrom === "string" ? { downgradedFrom: parsed.downgradedFrom } : {}),
 				...(typeof parsed.noticedVersion === "string" ? { noticedVersion: parsed.noticedVersion } : {}),
 				platform: parsed.platform,
 				nodeVersion: parsed.nodeVersion,

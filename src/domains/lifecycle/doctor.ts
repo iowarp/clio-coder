@@ -4,7 +4,7 @@ import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
-import { initializeClioHome } from "../../core/init.js";
+import { detectNewerHome, initializeClioHome } from "../../core/init.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
@@ -640,7 +640,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	// A dev build never rewrites the recorded version (see initializeClioHome), so
 	// a record from the installed release is the expected state, not a stale one.
 	const devBuild = isDevVersion(version.clio);
-	const stateCurrent = Boolean(state && (state.version === version.clio || devBuild));
+	const newerHome = detectNewerHome();
+	const onPath = newerHome ? clioBinariesOnPath() : [];
+	const stateCurrent = Boolean(state && (state.version === version.clio || devBuild)) && newerHome === null;
 	// Each stamp names what actually happened. A record rebuilt by `--fix` over a
 	// state root whose install time was gone carries no installedAt, and the row
 	// used to print the repair minute as the day Clio was installed.
@@ -655,18 +657,20 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	findings.push({
 		ok: stateCurrent,
 		name: "state metadata",
-		detail: state
-			? stateCurrent
-				? `${state.version} (${stateStamp})${state.version === version.clio ? "" : "; this dev build leaves the recorded version alone"}`
-				: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio-coder doctor --fix\`)`
-			: stateRead.problem !== null
-				? // Present but unreadable. `--fix` cannot repair this one: it fails on
-					// the same permissions, so pointing there would send the user in a
-					// circle.
-					stateRead.problem
-				: // Every other failing row names the command that repairs it. This one
-					// said only "missing", and `clio-coder doctor --fix` does write it.
-					"missing (run `clio-coder doctor --fix`)",
+		detail: newerHome
+			? `last used by newer ${newerHome.version}${newerHome.unknownMigrations.length > 0 ? ` (unknown migrations: ${newerHome.unknownMigrations.join(", ")})` : ""}; this is ${version.clio} at ${process.argv[1] ?? process.execPath}${onPath.length > 0 ? `; on PATH: ${onPath.join(", ")}` : ""}. Run the newer \`clio-coder\``
+			: state
+				? stateCurrent
+					? `${state.version} (${stateStamp})${state.version === version.clio ? "" : "; this dev build leaves the recorded version alone"}`
+					: `stale ${state.version} (${stateStamp}); current ${version.clio} (run \`clio-coder doctor --fix\`)`
+				: stateRead.problem !== null
+					? // Present but unreadable. `--fix` cannot repair this one: it fails on
+						// the same permissions, so pointing there would send the user in a
+						// circle.
+						stateRead.problem
+					: // Every other failing row names the command that repairs it. This one
+						// said only "missing", and `clio-coder doctor --fix` does write it.
+						"missing (run `clio-coder doctor --fix`)",
 	});
 
 	const migrationRead = readMigrationManifestResult(dirs.state);
@@ -1556,4 +1560,23 @@ export function runDoctorHarnessChecks(workspaceRoot: string = process.cwd()): D
 		detail: `${issues.length} problem${issues.length === 1 ? "" : "s"} in ${byFile.size} file${byFile.size === 1 ? "" : "s"}; \`clio-coder agents validate\` prints each on its own line`,
 	});
 	return findings;
+}
+
+/** Every `clio-coder` on PATH, so a newer-home row can name the binaries in play. */
+function clioBinariesOnPath(): string[] {
+	const names = process.platform === "win32" ? ["clio-coder.cmd", "clio-coder.exe", "clio-coder"] : ["clio-coder"];
+	const found: string[] = [];
+	for (const dir of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+		if (!dir) continue;
+		for (const name of names) {
+			const candidate = join(dir, name);
+			try {
+				accessSync(candidate, constants.X_OK);
+				if (statSync(candidate).isFile() && !found.includes(candidate)) found.push(candidate);
+			} catch {
+				// Not here.
+			}
+		}
+	}
+	return found;
 }

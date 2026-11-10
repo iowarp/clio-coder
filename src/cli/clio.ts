@@ -1,7 +1,8 @@
 import { formatBootTrace } from "../core/boot-trace.js";
 import { allowCopilotKeychain } from "../core/copilot-keychain.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
-import { initializeClioHome } from "../core/init.js";
+import { detectNewerHome, initializeClioHome, type NewerHome, recordHomeDowngrade } from "../core/init.js";
+import { readClioVersion } from "../core/package-root.js";
 import { isRestartHandoff } from "../core/restart-status.js";
 import { formatSettingsLayerWarning } from "../core/settings-layer-diagnostics.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
@@ -21,6 +22,15 @@ function terminalLeaseEligible(
 	env: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
 	return !options.headless && !options.acp && env.CLIO_CODER_INTERACTIVE === "1";
+}
+
+/** What happened when an older Clio meets a home a newer one last used, and what to do. */
+function describeNewerHome(newer: NewerHome): string {
+	const unknown =
+		newer.unknownMigrations.length > 0
+			? ` with migrations this build does not know (${newer.unknownMigrations.join(", ")})`
+			: "";
+	return `This home was last used by Clio Coder ${newer.version}${unknown}; you are running ${readClioVersion()} (${process.argv[1] ?? process.execPath}). Run the newer one, or continue at your own risk.`;
 }
 
 export interface ClioCommandDependencies {
@@ -50,6 +60,26 @@ export async function runClioCommand(
 	// ACP (and the GUI's sessions over it) and the interactive TUI have an operator to answer a keychain
 	// prompt; headless runs and the non-interactive boot keep the Copilot runtime's keychain closed.
 	if (options.acp || terminalLeaseEligible(options)) allowCopilotKeychain();
+	const newerHome = process.env.CLIO_CODER_ALLOW_OLDER === "1" ? null : detectNewerHome();
+	if (newerHome) {
+		const sentence = describeNewerHome(newerHome);
+		if (!terminalLeaseEligible(options)) {
+			process.stderr.write(`${sentence} Set CLIO_CODER_ALLOW_OLDER=1 to continue anyway.\n`);
+			return 2;
+		}
+		const { createInterface } = await import("node:readline/promises");
+		const { askYesNo } = await import("./ask.js");
+		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		let accepted: boolean;
+		try {
+			process.stdout.write(wrapToTerminal(sentence));
+			accepted = await askYesNo(rl, "Continue with this version", false);
+		} finally {
+			rl.close();
+		}
+		if (!accepted) return 2;
+		recordHomeDowngrade();
+	}
 	if (!options.headless && !options.acp) {
 		const { confirmStartupWorkspace } = await import("./workspace-check.js");
 		if (!(await confirmStartupWorkspace())) return 1;
