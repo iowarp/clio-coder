@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { buildSafeToolEnv } from "../core/safe-exec.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -17,12 +16,14 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 export const SEARCH_SPAWN_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 3_000;
 export const SEARCH_STDERR_CAP_BYTES = 16 * 1024;
+/** Stdout lines longer than this are dropped unbuffered (e.g. rg --json over a minified bundle). */
+const SEARCH_STDOUT_LINE_CAP_BYTES = 1024 * 1024;
 const timeoutContext = new AsyncLocalStorage<number>();
 
 /** Leave an incomplete trailing code point undecoded, and bound replacement text for invalid input. */
-function decodeBoundedUtf8(buffer: Buffer): string {
+function decodeBoundedUtf8(buffer: Buffer, capBytes = SEARCH_STDERR_CAP_BYTES): string {
 	const decoded = new StringDecoder("utf8").write(buffer);
-	return truncateUtf8(decoded, SEARCH_STDERR_CAP_BYTES, "");
+	return truncateUtf8(decoded, capBytes, "");
 }
 
 /** Scope a shorter process deadline without changing tool arguments or concurrent calls. */
@@ -33,11 +34,16 @@ export function withSearchTimeout<T>(timeoutMs: number, run: () => T): T {
 
 /** Decode UTF-8 lines incrementally with one fixed-size byte buffer, including without newlines. */
 export class BoundedDiagnosticDecoder {
-	private readonly buffer = Buffer.alloc(SEARCH_STDERR_CAP_BYTES);
+	private readonly buffer: Buffer;
 	private used = 0;
 	private truncated = false;
 	oversizedLines = 0;
-	constructor(private readonly onLine: (line: string, truncated: boolean) => void) {}
+	constructor(
+		private readonly onLine: (line: string, truncated: boolean) => void,
+		capBytes = SEARCH_STDERR_CAP_BYTES,
+	) {
+		this.buffer = Buffer.alloc(capBytes);
+	}
 	get bufferedBytes(): number {
 		return this.used;
 	}
@@ -60,7 +66,10 @@ export class BoundedDiagnosticDecoder {
 	}
 	private flush(): void {
 		if (this.truncated) this.oversizedLines++;
-		this.onLine(decodeBoundedUtf8(this.buffer.subarray(0, this.used)).replace(/\r$/, ""), this.truncated);
+		this.onLine(
+			decodeBoundedUtf8(this.buffer.subarray(0, this.used), this.buffer.length).replace(/\r$/, ""),
+			this.truncated,
+		);
 		this.used = 0;
 		this.truncated = false;
 	}
@@ -196,6 +205,8 @@ export interface LineStreamResult {
 	exitCode: number | null;
 	stderr: string;
 	oversizedDiagnostics: number;
+	/** Stdout lines over SEARCH_STDOUT_LINE_CAP_BYTES, dropped without being passed to `onLine`. */
+	oversizedLines: number;
 	timedOut: boolean;
 	aborted: boolean;
 	/** True when the caller's `stop()` killed the child (not an error). */
@@ -246,6 +257,7 @@ export function spawnLineStream(
 				exitCode: null,
 				stderr: "",
 				oversizedDiagnostics: 0,
+				oversizedLines: 0,
 				timedOut: false,
 				aborted: false,
 				stoppedEarly: false,
@@ -254,7 +266,12 @@ export function spawnLineStream(
 			return;
 		}
 		const child = spawned.child;
-		const rl = createInterface({ input: child.stdout });
+		const stdoutLines = new BoundedDiagnosticDecoder((line, truncated) => {
+			// Lines buffered before an early stop still flush; they no longer
+			// count once the caller decided it has enough.
+			if (truncated || stoppedEarly || aborted || timedOut) return;
+			options.onLine(line, stop);
+		}, SEARCH_STDOUT_LINE_CAP_BYTES);
 		const stderrLines = new BoundedDiagnosticDecoder((line, truncated) => options.onStderrLine?.(line, truncated));
 
 		const sendSignal = (signalName: NodeJS.Signals): void => {
@@ -303,12 +320,19 @@ export function spawnLineStream(
 			clearTimeout(timeoutTimer);
 			if (killGraceTimer) clearTimeout(killGraceTimer);
 			options.signal?.removeEventListener("abort", onAbort);
-			rl.close();
+			if (spawnError === null) {
+				try {
+					stdoutLines.end();
+				} catch (error) {
+					spawnError = error instanceof Error ? error.message : String(error);
+				}
+			}
 			stderrLines.end();
 			resolve({
 				exitCode: child.exitCode,
 				stderr: decodeBoundedUtf8(retainedStderr.subarray(0, stderrBytes)),
 				oversizedDiagnostics: stderrLines.oversizedLines,
+				oversizedLines: stdoutLines.oversizedLines,
 				timedOut,
 				aborted,
 				stoppedEarly,
@@ -316,11 +340,18 @@ export function spawnLineStream(
 			});
 		};
 
-		rl.on("line", (line) => {
-			// Lines buffered before an early stop still flush through readline;
-			// they no longer count once the caller decided it has enough.
-			if (stoppedEarly || aborted || timedOut) return;
-			options.onLine(line, stop);
+		child.stdout.on("data", (chunk: Buffer) => {
+			if (settled) return;
+			try {
+				stdoutLines.write(chunk);
+			} catch (error) {
+				killChild();
+				finish(error instanceof Error ? error.message : String(error));
+			}
+		});
+		child.stdout.on("error", (error) => {
+			killChild();
+			finish(error.message);
 		});
 		child.stderr?.on("data", (chunk: Buffer) => {
 			const take = Math.min(chunk.length, retainedStderr.length - stderrBytes);

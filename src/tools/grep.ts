@@ -119,6 +119,8 @@ interface GrepRenderInput {
 	limitHit: boolean;
 	limit: number;
 	linesTruncated: boolean;
+	/** rg output lines over the stdout line cap, dropped unparsed. */
+	oversizedLines?: number;
 	reservation: ObservationReservation;
 	options: ToolInvokeOptions | undefined;
 }
@@ -147,6 +149,9 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 	const fallbackNotice = input.fallback
 		? "\n[Fallback search uses GENERATED_DIRS only; .gitignore is not applied.]"
 		: "";
+	const oversizedNotice = input.oversizedLines
+		? `\n[${input.oversizedLines} matches in lines longer than 1 MiB were omitted; narrow the pattern or exclude the file.]`
+		: "";
 	if (lines.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Grep,
@@ -156,6 +161,7 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 				(search.complete ? NO_MATCH_OUTPUT : "Search incomplete") +
 				searchNotice(search, 0, "matches") +
 				fallbackNotice +
+				oversizedNotice +
 				internalSearchExclusionNotice(input.searchPath),
 			details: { search },
 			shownCount: 0,
@@ -196,7 +202,7 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 		tool: ToolNames.Grep,
 		withheldPaths: input.withheldPaths,
 		unit: MODE_UNITS[mode],
-		output: output + searchNotice(search, shownCount, "matches") + fallbackNotice,
+		output: output + searchNotice(search, shownCount, "matches") + fallbackNotice + oversizedNotice,
 		details: observedLines === undefined ? { search } : { search, observedLines },
 		// Offload only when the byte cap cut collected content; a bare match
 		// limit continues via `next`, and the offload would duplicate the body.
@@ -354,6 +360,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		limitHit,
 		limit: input.limit,
 		linesTruncated,
+		oversizedLines: result.oversizedLines,
 		reservation: input.reservation,
 		options: input.options,
 	});
