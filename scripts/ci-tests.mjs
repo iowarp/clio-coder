@@ -116,6 +116,7 @@ export const coreTests = [
 	"handbook-discovery",
 	"report-share",
 	"typecheck-corpus",
+	"anthropic-thread-idle",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

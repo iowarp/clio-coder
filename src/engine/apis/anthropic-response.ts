@@ -1,10 +1,23 @@
 import { createHash } from "node:crypto";
 import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import {
+	appendAssistantMessageDiagnostic,
+	createAssistantMessageEventStream,
+	registerSessionResourceCleanup,
+} from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { AnthropicResponseObservation } from "../types.js";
 
 const RATE_LIMIT_PREFIX = "anthropic-ratelimit-unified-";
+// Max/Haiku measurements bracket expiry at 285-300 s. API-key calls use the same conservative margin.
+const THREAD_IDLE_LIMIT_MS = 270_000;
+const MAX_THREAD_REPLIES = 10_000;
+const threadReplies = new Map<string, { id: string; monotonicAt: number; wallAt: number }>();
+
+registerSessionResourceCleanup((sessionId) => {
+	if (sessionId) threadReplies.delete(sessionId);
+	else threadReplies.clear();
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,10 +59,71 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 	};
 	const fetchImpl = options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
 	const threadRequests: NonNullable<AnthropicResponseObservation["threadRequests"]> = [];
+	const sessionId = options?.sessionId;
+	const onPayload = options?.onPayload;
+	let fullPayload: unknown;
+	const restarts = new Map<string, boolean>();
+	let restarted = false;
+	let restartSkipped = false;
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
+		onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
+			const replacement = await onPayload?.(payload, payloadModel);
+			fullPayload = replacement === undefined ? payload : replacement;
+			return replacement;
+		},
 		fetch: async (url, init) => {
+			if (
+				sessionId &&
+				threadRequestOf(init?.body) === "continue" &&
+				/^https:\/\/api\.anthropic\.com(?:[/:]|$)/u.test(url instanceof Request ? url.url : String(url))
+			) {
+				const wire: unknown = JSON.parse(String(init?.body));
+				if (isRecord(wire) && isRecord(wire.thread) && typeof wire.thread.previous_message_id === "string") {
+					const previousId = wire.thread.previous_message_id;
+					const reply = threadReplies.get(sessionId);
+					// Keep the verdict across retries; wall time additionally catches hosts whose monotonic clock suspends.
+					const expired =
+						restarts.get(previousId) ??
+						(reply?.id !== previousId ||
+							performance.now() - reply.monotonicAt > THREAD_IDLE_LIMIT_MS ||
+							Date.now() - reply.wallAt > THREAD_IDLE_LIMIT_MS);
+					restarts.set(previousId, expired);
+					if (expired) {
+						const { thread: _thread, ...rest } = wire;
+						const rebuilt = isRecord(fullPayload)
+							? {
+									...rest,
+									messages: fullPayload.messages,
+									...(fullPayload.system === undefined ? {} : { system: fullPayload.system }),
+									...(fullPayload.tools === undefined ? {} : { tools: fullPayload.tools }),
+									thread: { type: "create" },
+								}
+							: undefined;
+						// Pi strips only these three fields; the SDK moves its routing fields into headers.
+						// A changed adapter must fall back through Pi, not send a partially reconstructed request.
+						if (
+							rebuilt &&
+							Array.isArray(rebuilt.messages) &&
+							isRecord(fullPayload) &&
+							Object.entries(fullPayload).every(
+								([key, value]) =>
+									value === undefined ||
+									["betas", "user_profile_id", "workspace_id"].includes(key) ||
+									Object.hasOwn(rebuilt, key),
+							)
+						) {
+							const headers = new Headers(init?.headers);
+							headers.delete("content-length");
+							init = { ...init, headers, body: JSON.stringify(rebuilt) };
+							restarted = true;
+						} else {
+							restartSkipped = true;
+						}
+					}
+				}
+			}
 			// Only the wire body says whether Pi continued a thread; the payload hook sees the request before that.
 			threadRequests.push(threadRequestOf(init?.body));
 			if (threadRequests.some((kind) => kind !== "none")) observation.threadRequests = threadRequests;
@@ -78,6 +152,18 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 		},
 	} as T);
 	const annotate = (terminal: AssistantMessage): void => {
+		if (restarted)
+			appendAssistantMessageDiagnostic(terminal, {
+				type: "anthropic_thread_restart",
+				timestamp: Date.now(),
+				details: { reason: "idle_or_unobserved_reply", idleLimitMs: THREAD_IDLE_LIMIT_MS },
+			});
+		if (restartSkipped)
+			appendAssistantMessageDiagnostic(terminal, {
+				type: "anthropic_thread_restart_skipped",
+				timestamp: Date.now(),
+				error: { message: "Anthropic request shape changed; leaving thread recovery to Pi." },
+			});
 		(terminal as AssistantMessage & { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse = observation;
 		if (observation.messageStart === null) return;
 		const reported = observation.messageStart.model;
@@ -94,6 +180,24 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 			for await (const event of source) {
 				if (event.type === "done" || event.type === "error") {
 					const terminal = event.type === "done" ? event.message : event.error;
+					if (
+						event.type === "done" &&
+						sessionId &&
+						terminal.responseId !== undefined &&
+						terminal.responseModel === undefined &&
+						(threadRequests.at(-1) === "create" || threadRequests.at(-1) === "continue")
+					) {
+						threadReplies.delete(sessionId);
+						threadReplies.set(sessionId, {
+							id: terminal.responseId,
+							monotonicAt: performance.now(),
+							wallAt: Date.now(),
+						});
+						if (threadReplies.size > MAX_THREAD_REPLIES) {
+							const oldest = threadReplies.keys().next().value;
+							if (oldest !== undefined) threadReplies.delete(oldest);
+						}
+					}
 					annotate(terminal);
 				}
 				output.push(event);
