@@ -197,16 +197,19 @@ function adoptionOf(entries: unknown, version: string): { share: number; window:
 	return null;
 }
 
-/** Sources the summary names as stale: `health` when it lists them, else every source whose last run failed. */
-function staleSources(summary: unknown, project: unknown): string[] {
-	for (const health of [at(project, "health"), at(summary, "health")]) {
-		for (const key of ["staleSources", "stale"]) {
-			const list = at(health, key);
-			if (Array.isArray(list))
-				return list
-					.map((item) => str(item) ?? str(at(item, "name")) ?? str(at(item, "source")))
-					.filter((name): name is string => name !== null);
-		}
+/** Sources `health` marks stale or gapped; without `health`, every source whose last run failed. */
+function staleSources(summary: unknown): string[] {
+	const health = at(summary, "health");
+	if (isRecord(health)) {
+		const entries = Object.entries(health).filter(([, source]) => isRecord(source));
+		const stale = entries
+			.filter(([, source]) => at(source, "stale") === true)
+			.map(([name, source]) => `${name} (newest ${str(at(source, "newestDate")) ?? "never"})`);
+		const gapped = entries.flatMap(([name, source]) => {
+			const gaps = num(at(source, "gaps")) ?? 0;
+			return gaps > 0 ? [`${name} (${gaps} gaps)`] : [];
+		});
+		return [...stale, ...gapped];
 	}
 	const sources = at(summary, "sources");
 	if (!isRecord(sources)) return [];
@@ -238,7 +241,7 @@ function usageFrom(summary: unknown): FlywheelUsage {
 						date: str(at(repo, "latestReleaseDate")),
 						adoption: adoptionOf(at(project, "releaseAdoption"), version) ?? adoptionOf(at(repo, "releaseAdoption"), version),
 					},
-		staleSources: staleSources(summary, project),
+		staleSources: staleSources(summary),
 		digest: null,
 	};
 }

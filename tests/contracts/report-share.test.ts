@@ -354,6 +354,18 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		);
 		ok(out.indexOf("release-health") < out.indexOf("To file"), out);
 		out = "";
+		Object.assign(summary, {
+			health: {
+				npm: { newestDate: "2026-11-09", expectedLagDays: 1, stale: false, gaps: 0 },
+				gsc: { newestDate: "2026-10-30", expectedLagDays: 3, stale: true, gaps: 0 },
+				telemetry: { newestDate: null, expectedLagDays: 1, stale: null, gaps: 0 },
+				github: { newestDate: "2026-11-09", expectedLagDays: 1, stale: false, gaps: 2 },
+			},
+		});
+		strictEqual(await flywheel(), 0);
+		match(out, /stale sources +gsc \(newest 2026-10-30\), github \(2 gaps\)\n/u);
+		Reflect.deleteProperty(summary, "health");
+		out = "";
 		strictEqual(await flywheel("--kind", "file-me,release-health", "--top", "1"), 0);
 		ok(out.includes("back off on rate limits") && !out.includes("adoption is slow") && !out.includes("split panes"), out);
 		ok(!out.includes("rank kind"), out);
