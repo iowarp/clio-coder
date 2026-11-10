@@ -541,7 +541,11 @@ async function executeLibraryCommand(
 				for (const entry of entries) {
 					const states =
 						entry.copies
-							.map((item) => `${item.scope}:${item.state}${item.update ? ` (${updateLabel(item.update)})` : ""}`)
+							.map((item) => {
+								// The version column is the catalog's, so name the installed one beside its update.
+								const installed = item.update && item.version ? `${item.version} installed, ` : "";
+								return `${item.scope}:${item.state}${item.update ? ` (${installed}${updateLabel(item.update)})` : ""}`;
+							})
 							.join(", ") || "available";
 					process.stdout.write(
 						`${libraryEntryRef(entry)}\t${entry.version ?? ""}\t${states}\t${originLabel(entry.provenance)}\t${entry.description}\n`,
