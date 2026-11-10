@@ -1,45 +1,71 @@
 name: Bug report
-description: Report reproducible Clio Coder behavior.
+description: Report something that went wrong in Clio Coder.
 title: "fix: "
 labels: ["bug"]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: What happened, and what did you expect?
+      label: What happened
+      description: Describe what went wrong. A few sentences are enough.
     validations:
       required: true
   - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What you expected to happen instead.
+    validations:
+      required: false
+  - type: textarea
     id: reproduce
     attributes:
-      label: Reproduce
-      description: Minimal commands, config shape, or session steps.
-      placeholder: |
-        clio-coder doctor
-        clio-coder targets
-        clio-coder run --agent scout "..."
+      label: Steps, if you have them
+      description: Commands, config shape, or session steps that bring it back.
     validations:
-      required: true
+      required: false
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Terminal
+        - Headless run
+        - Editor over ACP
+        - Desktop app
+        - Installer
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: false
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: Output of `clio-coder --version`, `node --version`, OS, shell, target id, runtime, and model.
+      description: "`clio-coder --version` and your target and model; `/report` fills this."
       render: text
     validations:
-      required: true
-  - type: textarea
-    id: doctor
-    attributes:
-      label: clio-coder doctor output
-      description: Paste the output of `clio-coder doctor` (without `--fix`). Redact any secrets.
-      render: text
-    validations:
-      required: true
+      required: false
   - type: textarea
     id: logs
     attributes:
-      label: Logs and receipt
-      description: Paste only the relevant log lines, plus the receipt id from `<dataDir>/receipts/<runId>.json` if a run was involved. Remove API keys and private source.
+      label: Logs
+      description: Only the relevant log lines. Remove API keys, host names and private source.
       render: text
+    validations:
+      required: false
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Filled by /report. Leave empty when writing by hand.
+    validations:
+      required: false
