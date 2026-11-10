@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { neutralizeFraming } from "../../core/reminder-framing.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -890,7 +891,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		spec: Omit<MemoryInterventionOffer, "id" | "workspaceRoot"> & { workspaceRoot?: string },
 		onSubmitted: (offer: MemoryInterventionOffer) => void,
 	): MemoryInterventionOffer | null {
-		const content = spec.content.trim();
+		// The registry holds the text as the host frame delivers it, so the submission receipt still finds it.
+		const content = neutralizeFraming(spec.content.trim());
 		if (content.length === 0 || submittedContents.has(content)) return null;
 		for (const pending of pendingOffers.values())
 			if (pending.offer.content === content && pending.generation === generation) return pending.offer;
@@ -925,7 +927,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function offerForContent(content: string): MemoryInterventionOffer | undefined {
-		const text = content.trim();
+		const text = neutralizeFraming(content.trim());
 		for (const pending of pendingOffers.values()) if (text.includes(pending.offer.content)) return pending.offer;
 		return undefined;
 	}

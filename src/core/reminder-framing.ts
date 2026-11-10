@@ -7,14 +7,27 @@
 
 const TOOL_RESULT_NOTE_PREFIX = /^\[middleware:[a-z-]+\] /u;
 
+/**
+ * Make text unable to open or close a host frame: a `<system-reminder>` or
+ * `</system-reminder>` tag (any case, whitespace after `<` or `</`) becomes
+ * `<\system-reminder` or `<\/system-reminder`, and a line opening with
+ * `[middleware:` becomes `[\middleware:`. Idempotent; text without those
+ * markers is returned unchanged.
+ */
+export function neutralizeFraming(text: string): string {
+	return text
+		.replace(/<\s*(\/?)\s*(system-reminder)/giu, (_, slash: string, tag: string) => `<\\${slash}${tag}`)
+		.replace(/^\[middleware:/gmu, "[\\middleware:");
+}
+
 /** One `<system-reminder>` block holding the given messages. */
 export function systemReminderBlock(messages: readonly string[]): string {
-	return `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>`;
+	return `<system-reminder>\n${messages.map(neutralizeFraming).join("\n\n")}\n</system-reminder>`;
 }
 
 /** One middleware note line; the notes of a result trail its output after a blank line. */
 export function toolResultNote(severity: string, message: string): string {
-	return `[middleware:${severity}] ${message}`;
+	return `[middleware:${severity}] ${neutralizeFraming(message)}`;
 }
 
 /** Separator between a tool result's own output and the notes appended to it. */

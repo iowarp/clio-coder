@@ -1,3 +1,4 @@
+import { neutralizeFraming } from "../core/reminder-framing.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -49,8 +50,9 @@ function truncate(text: string, maxBytes: number): string {
 }
 
 function capOutput(text: string, maxBytes: number): { output: string; truncated: boolean } {
-	const output = truncate(text, maxBytes);
-	return { output, truncated: output !== text };
+	const safe = neutralizeFraming(text);
+	const output = truncate(safe, maxBytes);
+	return { output, truncated: output !== safe };
 }
 
 async function readResponseText(response: Response, maxBytes: number): Promise<ReadResult> {
@@ -760,7 +762,7 @@ export const webFetchTool: ToolSpec = {
 				const preview = extractWebFetchContent(read.text, contentType, response.url || parsed.toString(), "auto").content;
 				return {
 					kind: "error",
-					message: `web_fetch: HTTP ${response.status}: ${response.statusText}${preview ? `\n${UNTRUSTED_CONTENT_BANNER}\nPreview:\n${truncate(preview, ERROR_PREVIEW_BYTES)}` : ""}`,
+					message: `web_fetch: HTTP ${response.status}: ${response.statusText}${preview ? `\n${UNTRUSTED_CONTENT_BANNER}\nPreview:\n${truncate(neutralizeFraming(preview), ERROR_PREVIEW_BYTES)}` : ""}`,
 				};
 			}
 			if (isProbablyBinary(contentType, read.text)) {

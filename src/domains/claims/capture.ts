@@ -119,6 +119,11 @@ function numericConditions(
 	};
 }
 
+/** A key or metric name from checked-program output, rendered in a narrow charset and clipped. */
+function outputToken(token: string): string {
+	return token.replace(/[^A-Za-z0-9_.\-/[\] ]/gu, "?").slice(0, 80);
+}
+
 function list(items: ReadonlyArray<string>, limit = 4): string {
 	const shown = items.slice(0, limit).join(", ");
 	return items.length > limit ? `${shown} and ${items.length - limit} more` : shown;
@@ -127,7 +132,7 @@ function list(items: ReadonlyArray<string>, limit = 4): string {
 /** The claim sentence. Every clause comes from the conditions, and an unrecorded condition is said to be unrecorded. */
 export function claimText(check: string, conditions: ClaimConditions, passed: boolean): string {
 	if (conditions.kind === "reproduce") {
-		const failed = conditions.metrics.filter((metric) => !metric.passed).map((metric) => metric.metric);
+		const failed = conditions.metrics.filter((metric) => !metric.passed).map((metric) => outputToken(metric.metric));
 		const against =
 			conditions.compare === "twice"
 				? "across two clean runs"
@@ -147,7 +152,7 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 				: `inputs ${list(conditions.inputs.map((input) => `${input.path}@${short(input.sha256)}`))}`;
 		return `${head}, ${commit} ${platform}, ${seed}, ${inputs}.`;
 	}
-	const failed = conditions.keys.filter((key) => !key.passed).map((key) => key.key);
+	const failed = conditions.keys.filter((key) => !key.passed).map((key) => outputToken(key.key));
 	const total = conditions.keys.length + conditions.keysOmitted;
 	const reference =
 		conditions.reference === undefined
