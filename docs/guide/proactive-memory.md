@@ -135,7 +135,10 @@ comments and multi-line scripts do not qualify because their exit status
 cannot prove which part ran, and a chain with another `cd` or a state-changing
 word such as `export`, `source`, `exec`, `builtin` or `command` is not split.
 A shell call given a `cwd` other than the workspace root counts for nothing.
-Source: `src/domains/memory/command-evidence.ts`.
+A command that cannot fail, such as `echo`, `printf`, `true`, `ls`, `cat`,
+`pwd`, `date`, `sleep`, a bare `env`, or a `test` without a file operator,
+proves nothing and is never evidence. Source:
+`src/domains/memory/command-evidence.ts`.
 
 Retention records its bounded progress under `<stateDir>/memory/retention/`.
 A process that finds an unsettled retention can recover the completed task from
@@ -148,8 +151,10 @@ Retention that extracted lessons but could bind none of them to a receipt or a
 quoted source settles as `abstained` with reason `missing-source-evidence`
 instead of trying again: the same ledger yields the same evidence, so a second
 extraction could only reword them. In the live session those lessons stay in
-the bank and are filed as unapproved proposals when its scope ends. Source:
-`src/domains/memory/completion-retention.ts`.
+the bank; when its scope ends, only the entries that carry a `command:` or
+`source:` evidence identity are filed as unapproved proposals. Source:
+`src/domains/memory/completion-retention.ts` and
+`src/domains/memory/lesson-feedback.ts`.
 
 Between turns the guardian also reviews earlier sessions of the same
 repository for lessons. An excerpt counts as reviewed only after what it
@@ -168,7 +173,10 @@ contradiction or recorded regression. It waits for the operator instead when
 another approved or operator-rejected repository lesson already carries one of
 its `command:` evidence refs: two wordings of one command stay separate claims,
 a rejection keeps its authority over rewordings, and which one stands is the
-operator's call. Procedural proposals still wait for an
+operator's call. A quote from a repository file is provenance only: the file
+can vouch for any sentence it contains, so a lesson backed by `source:` refs
+and no `command:` ref waits for the operator, and automatic approval needs a
+command that could have failed. Procedural proposals still wait for an
 operator. Global, runtime and agent scopes also require operator approval.
 The guardian never reverses an operator approval or rejection. A later
 contradiction demotes a guardian-approved lesson. The `held` observation is an
@@ -488,8 +496,9 @@ repeated sentence. A reminder with no closing tag was cut off and is rejected th
 same way. The phase-one bank writes of that step still apply.
 
 A stored operation is dropped, and counted as a dropped operation, when its
-content holds a chat-template control token, deliberation about the answer
-format, or a script foreign to the session. Stored content may quote JSON or the
+content holds a chat-template control token, a host framing tag
+(`<system-reminder>` or a line starting `[middleware:`), deliberation about the
+answer format, or a script foreign to the session. Stored content may quote JSON or the
 memory grammar, because a session working on the memory tier legitimately does.
 
 A well-formed reminder is still gated, and stays invisible, in these cases:
@@ -785,7 +794,13 @@ knowledge can also pass the guardian gate described above. A step with
 no session, or one running outside a canonical repository, proposes nothing:
 global scope broadens applicability to every future session and is not a claim a
 background step may make on the operator's behalf. An unapproved proposal that is
-never reviewed becomes eligible for `memory prune --stale` after 30 days.
+never reviewed becomes eligible for `memory prune --stale` after 30 days. When the
+store reaches its 500-record cap, undecided proposals make room, oldest first and
+those without evidence before evidence-backed ones; an invalid record is moved to
+`records.invalid.json` with one notice instead of disabling memory. The repository
+a lesson belongs to is the repository root plus its root commit, and a linked
+worktree shares it only when the main repository registers that worktree; see
+[Repository-scoped identity](../architecture/evidence-and-memory.md#repository-scoped-identity).
 
 Rules-tier reminders are not proposed. Their entries are this middleware's own
 one-line records of a repeated tool failure, and filing each one as a durable
