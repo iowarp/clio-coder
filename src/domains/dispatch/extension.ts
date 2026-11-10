@@ -640,6 +640,8 @@ interface ActiveRun {
 	heartbeatStatus: HeartbeatStatus;
 	/** Set while the finalizer waits on the operator's merge card; the worker is gone, the orchestrator is the live party. */
 	awaitingOperator?: boolean;
+	/** Budget admission exempted the route (unpriced or zero-rate), so the session cost-ceiling stop leaves it running. */
+	budgetExempt?: boolean;
 	meter: RunTokenMeter;
 	finalPromise: Promise<RunResult>;
 }
@@ -842,6 +844,11 @@ export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
  */
 function admissionMaxOutputTokens(settings: EffectiveSettings): number {
 	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
+}
+
+/** Unpriced and zero-rate routes pass the session cost ceiling at admission, and the ceiling stop spares them. */
+function budgetExemptRoute(pricing: EffectivePricing): boolean {
+	return pricing.rates === null || Object.values(pricing.rates).every((rate) => rate === 0);
 }
 
 function conservativeRouteAdmissionEstimateUsd(
@@ -4239,7 +4246,10 @@ export function createDispatchBundle(
 		const pricing = combineBudgetPricing(preflight.pricing, inFlightPricing());
 		const detail = new SessionCostCeilingError(currentUsd, ceilingUsd, cap, undefined, pricing).message;
 		for (const run of active.values()) {
-			if (!run.aborted) contract.abort(run.runId, { cause: "budget", detail });
+			// A run on its merge card or already sealing has no worker left to stop.
+			if (run.aborted || run.stallKilled || run.sealing === true || run.awaitingOperator === true) continue;
+			if (run.budgetExempt === true) continue;
+			contract.abort(run.runId, { cause: "budget", detail });
 		}
 	}
 
@@ -4258,7 +4268,7 @@ export function createDispatchBundle(
 				{ currentUsd: estimateUsd, ceilingUsd: intentCeiling, pricing: { estimated: true, unpriced: false } },
 				estimateUsd,
 			);
-		if (pricing.rates === null || Object.values(pricing.rates).every((rate) => rate === 0)) return;
+		if (budgetExemptRoute(pricing)) return;
 		try {
 			if (scheduling.admitPaidRequest) {
 				await scheduling.admitPaidRequest({
@@ -6567,6 +6577,8 @@ export function createDispatchBundle(
 			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: lifecycle.agentConfig.stallTimeoutMs ?? DEFAULT_ACP_STALL_TIMEOUT_MS,
+			// ACP delegation is admitted as unpriced.
+			budgetExempt: true,
 			lineage,
 			...(hostRun === undefined ? {} : { hostRun }),
 			heartbeatAt: acp.heartbeatAt,
@@ -8436,6 +8448,7 @@ export function createDispatchBundle(
 			abortCause: null,
 			stallKilled: false,
 			stallTimeoutMs: null,
+			budgetExempt: budgetExemptRoute(lifecycle.target.effectivePricing),
 			lineage,
 			...(hostRun === undefined ? {} : { hostRun }),
 			heartbeatAt,
