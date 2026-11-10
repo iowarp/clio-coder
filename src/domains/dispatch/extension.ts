@@ -5434,7 +5434,9 @@ export function createDispatchBundle(
 				windows.set(`${route.targetId}\0${route.modelId}`, contextWindow);
 				const tooSmall =
 					minContextWindow !== undefined && contextWindow <= minContextWindow
-						? `context window ${contextWindow} is not larger than ${minContextWindow}`
+						? contextWindow > 0
+							? `context window ${contextWindow} is not larger than ${minContextWindow}`
+							: `context window is unknown, so it is not shown to be larger than ${minContextWindow}`
 						: null;
 				return {
 					candidate,

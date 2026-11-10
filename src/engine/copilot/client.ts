@@ -295,8 +295,6 @@ export interface CopilotModelRow {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
-	/** Premium-request multiplier the runtime reports for the model. */
-	multiplier: number | undefined;
 }
 
 /**
@@ -321,7 +319,6 @@ async function listHeld(): Promise<CopilotModelRow[]> {
 				maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
 				vision: model.capabilities?.supports?.vision === true,
 				reasoning: model.capabilities?.supports?.reasoningEffort === true,
-				multiplier: model.billing?.multiplier,
 			}),
 		);
 	return rows;
