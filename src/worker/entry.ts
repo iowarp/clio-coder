@@ -25,6 +25,7 @@ import {
 	setAutonomousCommitProcess,
 	withManagedGitCommitAttributionEnvironment,
 } from "../core/git-commit-attribution.js";
+import { installProxyFromEnv } from "../core/proxy-env.js";
 import { configureWorkerProcessSandbox } from "../core/sandbox/worker-process.js";
 import { ToolNames } from "../core/tool-names.js";
 
@@ -132,6 +133,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 }
 
 async function main(): Promise<number> {
+	await installProxyFromEnv();
 	// A worker has no TUI, so residency notices go to stderr (the parent
 	// captures it for diagnostics) instead of the shared bus, keeping headless
 	// reconciliation parity with the interactive path.

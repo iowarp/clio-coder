@@ -82,9 +82,9 @@ export function headlessRouteFailureText(message: string): string | null {
 	);
 }
 
-/** OpenAI SDK transport failure, distinct from an HTTP gateway/backend error. */
+/** OpenAI SDK transport failure, distinct from an HTTP gateway/backend error, with the proxy note S-39 may add. */
 export function isLiteLLMConnectionFailure(message: string | null | undefined): boolean {
-	return message?.trim() === "Connection error.";
+	return /^Connection error\.(?: \(through proxy [^)\n]*\))?$/.test(message?.trim() ?? "");
 }
 
 interface HeaderReader {

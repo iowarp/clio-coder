@@ -24,6 +24,7 @@ import {
 	liteLLMGatewayRoutingFromHeaders,
 	liteLLMRouteFailureMessage,
 } from "../../core/gateway-routing.js";
+import { proxyForUrl } from "../../core/proxy-env.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { CacheReadField } from "../../core/token-split.js";
 import { stripDeadToolCallMarkup } from "../../core/tool-call-markup.js";
@@ -339,6 +340,9 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
 					}
+					// A proxy refusal and an unreachable provider read the same in the SDK's wording.
+					const proxy = event.error.errorMessage?.trim() === "Connection error." ? proxyForUrl(model.baseUrl) : null;
+					if (proxy !== null) event.error.errorMessage = `Connection error. (through proxy ${proxy})`;
 					if (capture.contentFilter && event.error.stopReason === "error") {
 						event.error.errorMessage = providerContentFilterMessage(event.error.errorMessage ?? "");
 					}

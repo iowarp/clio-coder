@@ -1,5 +1,6 @@
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
+import { proxyEnvSummary } from "../core/proxy-env.js";
 import { sandboxAvailability } from "../core/sandbox/availability.js";
 import {
 	mainSandboxLine,
@@ -428,6 +429,8 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		// The settings finding already reports an unreadable document. Optional
 		// integrations stay inactive rather than adding secondary warnings.
 	}
+	const proxy = proxyEnvSummary();
+	const proxyChecks: DoctorFinding[] = proxy === null ? [] : [{ ok: true, level: "info", name: "proxy", detail: proxy }];
 	const installRoot = installRootFinding();
 	const storageChecks = untouched
 		? []
@@ -489,6 +492,7 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		...findings,
 		...installChecks,
 		localCapacity,
+		...proxyChecks,
 		...storageChecks,
 		...runtimeChecks,
 		...modelChecks,

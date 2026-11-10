@@ -36,6 +36,7 @@ markClioAgentProcess();
 // its own chunk.
 import { traceBoot } from "../core/boot-trace.js";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
+import { installProxyFromEnv } from "../core/proxy-env.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
@@ -208,6 +209,7 @@ async function main(argv: string[]): Promise<number> {
 		printError(versionError.message, versionError.detail);
 		return 1;
 	}
+	await installProxyFromEnv();
 	const {
 		apiKey,
 		noContextFiles,
