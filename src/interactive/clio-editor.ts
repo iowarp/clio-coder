@@ -360,6 +360,16 @@ export class ClioEditor extends Editor {
 	private autocompleteSourceStart = 0;
 	/** The line a suggestion list was built for, stamped when the list first shows. */
 	private suggestionStamp: { list: unknown; text: string; line: number; col: number } | null = null;
+	/**
+	 * Whether the open list has a selected row. A list that opened by itself for
+	 * an argument nobody must give starts unarmed, so Enter cannot insert
+	 * `/context compact` or `/doctor deep` that the operator never chose (E-08).
+	 */
+	private suggestionArmed = true;
+	/** The next list to show was asked for by an auto-open site, not by a key the operator aimed at the list. */
+	private autoOpenPending = false;
+	/** The list `suggestionArmed` was decided for; a new list from a later key is armed. */
+	private armingList: unknown = null;
 	private pastedOperatorTokens = new Set<string>();
 	/**
 	 * The text is untouched since it came back from the queue. The next key is the
@@ -497,6 +507,7 @@ export class ClioEditor extends Editor {
 
 	/** The row the list has selected. The engine keeps its list private and the dock already reads its rendered rows. */
 	private selectedSuggestion(): SlashCompletionItem | null {
+		if (!this.syncSuggestionArming()) return null;
 		const list = (this as unknown as { autocompleteList?: { getSelectedItem(): unknown } }).autocompleteList;
 		const item = list?.getSelectedItem() as SlashCompletionItem | null | undefined;
 		return item?.path ? item : null;
@@ -542,8 +553,23 @@ export class ClioEditor extends Editor {
 		if (engine.autocompleteState !== null) engine.updateAutocomplete?.();
 	}
 
+	/** Decide arming once per list, and report whether the open list has a selected row. */
+	private syncSuggestionArming(): boolean {
+		const engine = this.suggestionEngine();
+		const list = engine.autocompleteList;
+		if (list === undefined || engine.autocompleteState === null) return true;
+		if (list !== this.armingList) {
+			this.armingList = list;
+			const items = (list as { items?: ReadonlyArray<SlashCompletionItem> }).items ?? [];
+			this.suggestionArmed = !(this.autoOpenPending && items.length > 0 && items.every((item) => item.required === false));
+			this.autoOpenPending = false;
+		}
+		return this.suggestionArmed;
+	}
+
 	/** Ask the provider for the next argument without the forced Tab path, which auto-applies a lone row. */
-	private reopenSuggestions(): void {
+	private reopenSuggestions(autoOpen = false): void {
+		this.autoOpenPending = autoOpen;
 		const request = (this as unknown as { tryTriggerAutocomplete?: () => void }).tryTriggerAutocomplete;
 		request?.call(this);
 	}
@@ -832,10 +858,22 @@ export class ClioEditor extends Editor {
 					: this.isShowingAutocomplete()
 						? // An open list owns Tab and Esc; a bare rail left the way out of it unnamed.
 							fitHintEntries(
-								[
-									{ key: "Tab", verb: "complete", critical: true },
-									{ key: "Esc", verb: "close list, keep text", short: "close list" },
-								],
+								!this.syncSuggestionArming()
+									? [
+											{ key: "Tab", verb: "complete", critical: true },
+											{ key: "Enter", verb: "run as typed", short: "run" },
+											{ key: "Esc", verb: "close list, keep text", short: "close list" },
+										]
+									: this.selectedSuggestion()?.kind === "command" && this.selectedSuggestion()?.runsBare === true
+										? [
+												{ key: "Enter", verb: "run", critical: true },
+												{ key: "Tab", verb: "complete" },
+												{ key: "Esc", verb: "close list" },
+											]
+										: [
+												{ key: "Tab", verb: "complete", critical: true },
+												{ key: "Esc", verb: "close list, keep text", short: "close list" },
+											],
 								Math.max(1, this.approvalLabelRoom(width) - (scroll ? visibleWidth(scroll) + 3 : 0)),
 							)
 						: "";
@@ -1110,7 +1148,18 @@ export class ClioEditor extends Editor {
 			this.autocompleteRowMap = lines.map(() => -1);
 			return this.paintComposerBody(lines, safeWidth, bodyEnd, "menuOption");
 		}
-		const lines = super.render(width);
+		const list = this.syncSuggestionArming()
+			? undefined
+			: (this.suggestionEngine().autocompleteList as { selectedIndex?: number } | undefined);
+		const keptIndex = list?.selectedIndex;
+		// An unarmed list draws no cursor mark; the engine marks the row at its selected index.
+		if (list !== undefined) list.selectedIndex = -1;
+		let lines: string[];
+		try {
+			lines = super.render(width);
+		} finally {
+			if (list !== undefined && keptIndex !== undefined) list.selectedIndex = keptIndex;
+		}
 		if (lines.length === 0) return lines;
 
 		if (text.length === 0 && lines[1]) {
@@ -1190,6 +1239,24 @@ export class ClioEditor extends Editor {
 		const pasteMutation = this.bracketedPasteActive || openedPaste;
 		const textBeforeInput = this.getText();
 		const keybindings = getKeybindings();
+		const armed = this.syncSuggestionArming();
+		this.autoOpenPending = false;
+		if (!armed && super.isShowingAutocomplete()) {
+			const moves = (["tui.select.up", "tui.select.down", "tui.select.pageUp", "tui.select.pageDown"] as const).some(
+				(action) => keybindings.matches(data, action),
+			);
+			// Down moves into the list: it selects the first row rather than skipping it.
+			if (moves) {
+				this.suggestionArmed = true;
+				return;
+			}
+			if (keybindings.matches(data, "tui.input.tab")) this.suggestionArmed = true;
+			else if (keybindings.matches(data, "tui.select.confirm")) {
+				// Nothing is selected, so Enter submits the line as typed.
+				this.suggestionEngine().cancelAutocomplete?.();
+				this.autocompleteDockOpen = false;
+			}
+		}
 		const acceptsSuggestion =
 			keybindings.matches(data, "tui.input.tab") || keybindings.matches(data, "tui.select.confirm");
 		if (acceptsSuggestion && this.suggestionsAreStale()) {
@@ -1229,16 +1296,18 @@ export class ClioEditor extends Editor {
 		// Enter on a slash suggestion only completes it. Pi's Enter also submits when the completed
 		// token begins with "/", which would run `/export /tmp/x` from a path row before the operator
 		// confirmed it, so the row is accepted through the Tab route and the line waits for Enter.
-		const completesSlashRow =
-			completingDirectory &&
-			keybindings.matches(data, "tui.select.confirm") &&
-			this.getText().trimStart().startsWith("/") &&
-			this.selectedSuggestion() !== null;
+		const slashRow =
+			completingDirectory && keybindings.matches(data, "tui.select.confirm") && this.getText().trimStart().startsWith("/")
+				? this.selectedSuggestion()
+				: null;
+		const completesSlashRow = slashRow !== null;
+		// A command row that runs bare is the one row Enter runs: `/con` Enter opens the context view.
+		const runsCommandRow = slashRow?.kind === "command" && slashRow.runsBare === true;
 		super.handleInput(completesSlashRow ? "\t" : data);
 		// A row that left the line as typed (`/model claude-sonnet-5.5` typed in full) has nothing for
 		// the operator to confirm, so the same Enter submits instead of being swallowed by the list.
 		const submitsUnchanged =
-			completesSlashRow && this.getText() === textBeforeCompletion && !this.isShowingAutocomplete();
+			completesSlashRow && (runsCommandRow || (this.getText() === textBeforeCompletion && !this.isShowingAutocomplete()));
 		if (submitsUnchanged) super.handleInput(data);
 		if (killsText) this.followSuggestionsAfterKill(textBeforeInput);
 		if (completingDirectory && !submitsUnchanged && this.getText() !== textBeforeCompletion) {
@@ -1248,11 +1317,11 @@ export class ClioEditor extends Editor {
 				// a second Tab. Pi's provider request remains the only completion path.
 				super.handleInput("\t");
 			} else if (cursorAwaitsSlashArgument(this)) {
-				this.reopenSuggestions();
+				this.reopenSuggestions(true);
 			}
 		} else if (data === " " && !pasteMutation && !super.isShowingAutocomplete() && cursorAwaitsSlashArgument(this)) {
 			// A space after a command or subcommand asks what comes next.
-			this.reopenSuggestions();
+			this.reopenSuggestions(true);
 		}
 		const textAfterInput = this.getText();
 		// A parked draft that came back during this key is still untouched.
@@ -1289,6 +1358,7 @@ export class ClioEditor extends Editor {
 
 	override setText(text: string): void {
 		this.revision += 1;
+		this.autoOpenPending = false;
 		this.autocompleteDockOpen = false;
 		this.pastedOperatorTokens.clear();
 		this.pastedBangOffsets.clear();

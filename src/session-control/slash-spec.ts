@@ -375,6 +375,12 @@ export interface ArgCompletion {
 	disabledReason?: string;
 	/** A completion with another grammatical slot receives a space on Tab. */
 	hasNextSlot: boolean;
+	/**
+	 * The parser demands this slot: a flag's awaited value or a required
+	 * positional. Flags are optional; verb rows are marked by the caller, which
+	 * knows whether the bare command runs.
+	 */
+	required: boolean;
 }
 
 export interface ArgCompletionResult {
@@ -497,6 +503,7 @@ function flagCompletions(spec: CommandArgsSpec, walk: CompletionWalk, current: s
 		token: name,
 		...(flag.takesValue ? { hint: `<${getFlagValuePlaceholder(flag)}>` } : {}),
 		hasNextSlot: flag.takesValue === true,
+		required: false,
 	}));
 }
 
@@ -537,6 +544,7 @@ export function completeArgs(
 					token: name,
 					...(hint.length > 0 ? { hint } : {}),
 					hasNextSlot: hint.length > 0,
+					required: false,
 				});
 			}
 			submenu = { parent: "", canGoBack: true };
@@ -554,19 +562,30 @@ export function completeArgs(
 
 	if (walk.awaitingValue) {
 		for (const value of walk.awaitingValue.values ?? []) {
-			if (value.toLowerCase().startsWith(current.toLowerCase())) completions.push({ token: value, hasNextSlot: true });
+			if (value.toLowerCase().startsWith(current.toLowerCase()))
+				completions.push({ token: value, hasNextSlot: true, required: true });
 		}
 		if (walk.awaitingValue.completionSlot) {
-			completions.push({ token: current, completionSlot: walk.awaitingValue.completionSlot, hasNextSlot: true });
+			completions.push({
+				token: current,
+				completionSlot: walk.awaitingValue.completionSlot,
+				hasNextSlot: true,
+				required: true,
+			});
 		}
 		return completions.length > 0 ? { completions, ...range, ...(submenu ? { submenu } : {}) } : null;
 	}
 
 	const atRest = (active.positionals ?? [])[walk.positionalIndex]?.rest === true;
 	const positional = (active.positionals ?? [])[walk.positionalIndex];
+	const positionalRequired = positional?.required === true;
 	for (const value of positional?.values ?? []) {
 		if (value.toLowerCase().startsWith(current.toLowerCase())) {
-			completions.push({ token: value, hasNextSlot: walk.positionalIndex + 1 < (active.positionals?.length ?? 0) });
+			completions.push({
+				token: value,
+				hasNextSlot: walk.positionalIndex + 1 < (active.positionals?.length ?? 0),
+				required: positionalRequired,
+			});
 		}
 	}
 	if (positional?.completionSlot && !current.startsWith("-")) {
@@ -574,6 +593,7 @@ export function completeArgs(
 			token: current,
 			completionSlot: positional.completionSlot,
 			hasNextSlot: walk.positionalIndex + 1 < (active.positionals?.length ?? 0),
+			required: positionalRequired,
 		});
 	}
 	const flagsParseable = !atRest || active.parseFlagsBeforeRest === true;
