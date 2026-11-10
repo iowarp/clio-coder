@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
-import { clioStateDir } from "../../core/xdg.js";
+import { clioStateDir, resolveClioDirs } from "../../core/xdg.js";
 import type { MigrationReport } from "./migrations/index.js";
 import { MIGRATION_NOTICES_FILE, readMigrationNotices } from "./migrations/notices.js";
 import {
@@ -66,7 +66,14 @@ export async function applyPendingMigrationsAtBoot(
 			// An unreadable manifest falls through to the runner, which refuses it by name.
 		}
 		// A manifest still in the state root also goes to the runner, even with nothing pending, to be moved.
-	} else if (!existsSync(legacyMigrationManifestPath(stateDir))) return;
+	} else if (
+		!existsSync(legacyMigrationManifestPath(stateDir)) &&
+		!existsSync(join(resolveClioDirs().config, "settings.yaml"))
+	)
+		return;
+	// `initializeClioHome()` runs first and writes the manifest together with any
+	// settings file it creates, so settings without a manifest anywhere can only
+	// be a home from before manifests (0.5.x); it goes to the runner like any other.
 	try {
 		const { runPending } = await import("./migrations/index.js");
 		const result = await runPending(stateDir);
