@@ -56,6 +56,21 @@ delete process.env.CLIO_CODER_THEME;
 for (const name of Object.keys(process.env)) {
 	if (/^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/.test(name)) delete process.env[name];
 }
+// A git-driven runner (git bisect run, a hook, rebase --exec) exports the
+// repository it runs in. A fixture's `git init` and `git config` would then
+// write that repository's config, which every worktree shares, instead of
+// its own (twice on 2026-11-10: core.bare=true and a fixture identity).
+for (const name of [
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_COMMON_DIR",
+	"GIT_PREFIX",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_NAMESPACE",
+]) {
+	delete process.env[name];
+}
 // A suite run from a pane inside the operator's own herdr inherits its pane
 // identity, and a spawned Clio would boot as a guest of that live server.
 // Pane fixtures set HERDR_* themselves.
