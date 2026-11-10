@@ -137,6 +137,7 @@ import {
 	markMemoryOffRecording,
 	memoryFlowSweepNotice,
 	memoryRecordStanding,
+	primeMemoryRepositoryFingerprint,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
 	seedTaskMemoryFromNewestHandoff,
@@ -1410,6 +1411,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		MEMORY_INTERVENTION_ACTIVITY_LIMIT,
 	);
 	const memoryWorkspaceRoot = (): string => session?.current()?.cwd || process.cwd();
+	primeMemoryRepositoryFingerprint(process.cwd());
 	// Bound late: the guardian needs the registration, and the registration
 	// reports turn boundaries and step activity to the guardian.
 	let memoryGuardian: MemoryGuardian | null = null;

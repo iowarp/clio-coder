@@ -237,7 +237,7 @@ function readOptionalMemoryRepositoryIdentity(
 		issues.push({ path, message: "expected object" });
 		return undefined;
 	}
-	rejectUnexpectedFields(value, path, ["kind", "key"], issues);
+	rejectUnexpectedFields(value, path, ["kind", "key", "fingerprint"], issues);
 	const kind = readString(value, `${path}.kind`, issues);
 	if (kind !== null && kind !== "canonical-path") {
 		issues.push({ path: `${path}.kind`, message: "expected canonical-path" });
@@ -246,8 +246,14 @@ function readOptionalMemoryRepositoryIdentity(
 	if (key !== null && !isNormalizedAbsoluteRepositoryPath(key)) {
 		issues.push({ path: `${path}.key`, message: "expected normalized absolute repository path" });
 	}
+	let fingerprint: string | undefined;
+	if (Object.hasOwn(value, "fingerprint")) {
+		const raw = value.fingerprint;
+		if (typeof raw === "string" && /^[0-9a-f]{40,64}$/u.test(raw)) fingerprint = raw;
+		else issues.push({ path: `${path}.fingerprint`, message: "expected commit id" });
+	}
 	if (kind !== "canonical-path" || key === null || !isNormalizedAbsoluteRepositoryPath(key)) return undefined;
-	return { kind, key };
+	return fingerprint === undefined ? { kind, key } : { kind, key, fingerprint };
 }
 
 function readOptionalNamedIdentity<T extends "runtime" | "agent">(
@@ -263,7 +269,7 @@ function readOptionalNamedIdentity<T extends "runtime" | "agent">(
 		issues.push({ path, message: "expected object" });
 		return undefined;
 	}
-	rejectUnexpectedFields(value, path, ["kind", "key"], issues);
+	rejectUnexpectedFields(value, path, ["kind", "key", "fingerprint"], issues);
 	const actualKind = readString(value, `${path}.kind`, issues);
 	if (actualKind !== null && actualKind !== kind) {
 		issues.push({ path: `${path}.kind`, message: `expected ${kind}` });

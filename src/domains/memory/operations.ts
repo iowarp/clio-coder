@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import {
 	type MemoryMutationOptions,
 	mutateMemoryRecords,
@@ -135,8 +137,40 @@ export function canonicalMemoryRepositoryIdentity(repositoryPath: string): Memor
 	if (!isUsableAbsoluteRepositoryPath(repositoryPath)) return null;
 	const canonical = canonicalizeExistingPath(repositoryPath);
 	if (!isUsableAbsoluteRepositoryPath(canonical)) return null;
-	const key = linkedWorktreeMainRoot(canonical) ?? canonical;
-	return { kind: "canonical-path", key };
+	const root = canonicalizeExistingPath(clioProjectRoot(canonical));
+	const toplevel = isUsableAbsoluteRepositoryPath(root) ? root : canonical;
+	const key = linkedWorktreeMainRoot(toplevel) ?? toplevel;
+	const fingerprint = repositoryFingerprints.get(key);
+	return fingerprint ? { kind: "canonical-path", key, fingerprint } : { kind: "canonical-path", key };
+}
+
+/** Root commits read once per session per repository key; `null` means none could be read. */
+const repositoryFingerprints = new Map<string, string | null>();
+
+/**
+ * Read the repository's root commit once, at session start and off the prompt-build path, so identities built
+ * afterwards carry it. A new repository at a reused path then has a different fingerprint than the old one's
+ * records. Shallow clones, empty repositories and non-repositories get none and keep path-only matching.
+ */
+export function primeMemoryRepositoryFingerprint(cwd: string): void {
+	const identity = canonicalMemoryRepositoryIdentity(cwd);
+	if (identity === null || repositoryFingerprints.has(identity.key)) return;
+	let fingerprint: string | null = null;
+	try {
+		if (existsSync(join(identity.key, ".git")) && !existsSync(join(identity.key, ".git", "shallow"))) {
+			const out = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], {
+				cwd: identity.key,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 5000,
+			});
+			const first = out.split("\n")[0]?.trim() ?? "";
+			if (/^[0-9a-f]{40,64}$/u.test(first)) fingerprint = first;
+		}
+	} catch {
+		// No git, no commits, or a broken repository: path-only matching.
+	}
+	repositoryFingerprints.set(identity.key, fingerprint);
 }
 
 /**
@@ -154,6 +188,12 @@ function linkedWorktreeMainRoot(root: string): string | null {
 		const absoluteGitDir = resolve(root, gitDir);
 		const commonDir = resolve(absoluteGitDir, readFileSync(join(absoluteGitDir, "commondir"), "utf8").trim());
 		if (basename(commonDir) !== ".git") return null;
+		// The main repository must vouch for this worktree: `git worktree add` writes
+		// `<commonDir>/worktrees/<name>/gitdir` naming the worktree's `.git` file. A
+		// directory that only forges its own pointer cannot write there.
+		const backLink = readFileSync(join(commonDir, "worktrees", basename(absoluteGitDir), "gitdir"), "utf8").trim();
+		const backRoot = canonicalizeExistingPath(dirname(resolve(commonDir, backLink.replaceAll("\\", "/"))));
+		if (basename(backLink) !== ".git" || backRoot !== root) return null;
 		const mainRoot = canonicalizeExistingPath(dirname(commonDir));
 		return isUsableAbsoluteRepositoryPath(mainRoot) && mainRoot !== root ? mainRoot : null;
 	} catch {
@@ -206,6 +246,8 @@ function canonicalActiveRepository(
 	if (identity === null || identity === undefined || identity.kind !== "canonical-path") return null;
 	const canonical = canonicalMemoryRepositoryIdentity(identity.key);
 	if (canonical === null || canonical.key !== identity.key) return null;
+	if (canonical.fingerprint === undefined && identity.fingerprint !== undefined)
+		canonical.fingerprint = identity.fingerprint;
 	return canonical;
 }
 
@@ -216,7 +258,19 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 	// The structured field is the only applicability mechanism: a repo-scoped
 	// record without it never enters any repository prompt.
 	if (record.repository === undefined) return false;
-	return record.repository.kind === activeRepository.kind && record.repository.key === activeRepository.key;
+	if (record.repository.kind !== activeRepository.kind) return false;
+	if (
+		record.repository.fingerprint !== undefined &&
+		activeRepository.fingerprint !== undefined &&
+		record.repository.fingerprint !== activeRepository.fingerprint
+	) {
+		return false;
+	}
+	if (record.repository.key === activeRepository.key) return true;
+	// Records learned in a subdirectory session before identities resolved to the
+	// repository root still apply, unless that subdirectory is a repository itself.
+	const key = record.repository.key;
+	return key.startsWith(`${activeRepository.key}${sep}`) && !existsSync(join(key, ".git"));
 }
 
 function runtimeApplies(record: MemoryRecord, activeRuntime: MemoryRuntimeIdentity | null): boolean {

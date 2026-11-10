@@ -71,6 +71,7 @@ export {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
 	eligibleMemoryRecords,
+	primeMemoryRepositoryFingerprint,
 	pruneStaleMemory,
 	rejectMemoryRecord,
 } from "./operations.js";

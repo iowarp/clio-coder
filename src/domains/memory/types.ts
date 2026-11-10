@@ -16,6 +16,8 @@ export type MemoryScope = (typeof MEMORY_SCOPES)[number];
 export interface MemoryRepositoryIdentity {
 	kind: "canonical-path";
 	key: string;
+	/** Root commit of the repository when known; records and the active repository must agree when both carry one. */
+	fingerprint?: string;
 }
 
 export interface MemoryRuntimeIdentity {
