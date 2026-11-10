@@ -108,10 +108,12 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
  * counts tool-use prompt tokens that Pi maps to no field; only a breakdown with no count at all, the legacy
  * total-only row, leaves its zeros unknown.
  */
-/** What an interrupted call that reported no usage cost, estimated from its prompt side and the text it streamed. */
+/** What a sent call that reported no usage cost, estimated from its prompt side and the text it streamed. */
 export interface InterruptedUsageEstimate {
 	input: number;
 	output: number;
+	/** The estimate priced at the route's declared or catalog rates, when it has any. */
+	usd?: number;
 }
 
 export function callSettlementFromMessage(
@@ -194,6 +196,12 @@ export function callSettlementFromMessage(
 		// billed with totalFromProvider, which OpenRouter reports for every call, on an unpriced target too.
 		if (external.cost === "provider-reported" || cost.totalFromProvider === true) pricing = pricedUsd("provider", usd);
 		else if (pricedBy !== "none") pricing = pricedUsd(pricedBy, usd);
+	} else if (!neverSent && !observed && !(reason === "error" && typeof failure.httpStatus === "number")) {
+		// A sent call whose provider reported no usage is charged its request-size estimate on a priced route, so a cost
+		// cap still trips; a provider that answered with an error status billed nothing.
+		const estimatedUsd = amount(interrupted?.usd);
+		if (estimatedUsd !== null && (pricedBy === "target-rates" || pricedBy === "catalog"))
+			pricing = { usd: { kind: "estimated", value: estimatedUsd, method: "prompt-side-only" }, pricedBy };
 	}
 	// The estimate an interrupted call gets when the provider reported nothing; the journal keeps it beside the
 	// measured usage, never inside it, so a resumed transcript reads as the live one did (#430, #434).

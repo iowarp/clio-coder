@@ -211,8 +211,11 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	 * and unpriced parts flagged. Read from persisted batches only; the gate itself reads {@link settledSessionSpend}.
 	 */
 	sessionSpend(): SessionSpend;
-	/** {@link sessionSpend} after every queued record is written and the live fold has seeded, so it never lags (#434). */
-	settledSessionSpend(): Promise<SessionSpend>;
+	/**
+	 * {@link sessionSpend} after every queued record is written and the live fold has seeded, so it never lags (#434).
+	 * `admitting` names the attempt admission holds: still unsettled, it is not counted as unpriced spend.
+	 */
+	settledSessionSpend(admitting?: string): Promise<SessionSpend>;
 	/** What the live read model already holds of a run's priced spend, so a meter's in-flight cost is not counted twice. */
 	journaledRunUsd(runId: string): number;
 	/** Bind the read model to the session now current, or to none. */

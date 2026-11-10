@@ -212,7 +212,11 @@ describe("contracts/metering integrity", () => {
 		ok(corrected);
 		strictEqual(corrected.input, 9_658);
 		ok(typeof corrected.output === "number" && corrected.output > 0);
-		strictEqual(estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658), null);
+		// A completed call that reported no usage gets the same estimate, so a priced route's cap can charge it.
+		strictEqual(
+			estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658)?.input,
+			9_658,
+		);
 	});
 
 	it("counts tool arguments with interleaved text and thinking, and repairs older estimates", () => {

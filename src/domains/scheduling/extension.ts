@@ -88,8 +88,8 @@ export function createSchedulingBundle(
 		return spendOf(telemetry?.sessionSpend() ?? NOTHING_SPENT);
 	}
 	/** Admission's read: every queued settlement written and the live fold seeded first, so the gate never lags. */
-	async function settledSpend(): Promise<Spend> {
-		return spendOf((await telemetry?.settledSessionSpend()) ?? NOTHING_SPENT);
+	async function settledSpend(admitting?: string): Promise<Spend> {
+		return spendOf((await telemetry?.settledSessionSpend(admitting)) ?? NOTHING_SPENT);
 	}
 
 	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; spend: Spend } {
@@ -182,7 +182,7 @@ export function createSchedulingBundle(
 				syncBudget();
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
 				// No ceiling compares nothing, so an uncapped session's calls pay for no flush and no seed.
-				const spent = ceilingUsd > 0 ? await settledSpend() : null;
+				const spent = ceilingUsd > 0 ? await settledSpend(telemetry?.attemptId) : null;
 				// Read after the settled spend and against the same fold, on every retry, so a call that settled while
 				// admission flushed is counted once: in the spend, not again in the projection (#434).
 				const additionalUsd = typeof additional === "function" ? additional() : additional;

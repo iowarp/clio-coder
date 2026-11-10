@@ -205,3 +205,10 @@ export function noCallRunUsageFacts(): RunUsageFacts {
 		pricing: { usd: notApplicable, pricedBy: "none" },
 	};
 }
+
+/** What a capped route's calls that report no usage are charged by: their request-size estimate at its rates. */
+const UNREPORTED_USAGE_SPEND = "reported no token usage; its spend is estimated from request size";
+
+export function unreportedUsageNotice(targetId: string): string {
+	return `${targetId} ${UNREPORTED_USAGE_SPEND}`;
+}

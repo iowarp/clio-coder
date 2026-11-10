@@ -453,11 +453,21 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 			pendingRecords.add(write);
 		},
 		sessionSpend: () => spendOf(telemetry.live()),
-		async settledSessionSpend() {
+		async settledSessionSpend(admitting) {
 			// Every queued settlement is written, and so published to the live model, before the fold is read (#434).
 			await journals.flush();
 			if (!sessionId) return refreshProcessSpend();
-			return spendOf(await telemetry.settled());
+			const view = await telemetry.settled();
+			const spend = spendOf(view);
+			if (!admitting || !spend.unpriced || !view || view.sessionId !== sessionId) return spend;
+			// The attempt being admitted is started but not sent; its open amount is not unpriced spend.
+			const held = factSumOf(
+				view.quantity(factRef({ scope: "own", owner: sessionId, attemptId: admitting, metric: "usd" }))?.fact,
+			);
+			if (!held || held.measured + held.estimated > 0 || held.coverage.measured + held.coverage.estimated > 0)
+				return spend;
+			const sum = factSumOf(view.quantity(factRef({ scope: "session", owner: sessionId, metric: "usd" }))?.fact);
+			return { ...spend, unpriced: (sum?.unknownCount ?? 0) > held.unknownCount };
 		},
 		journaledRunUsd(runId) {
 			// With no session, an owned run counts by the journal the last process refresh folded; any other run by none.

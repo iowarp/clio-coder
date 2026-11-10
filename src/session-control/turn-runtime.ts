@@ -4,7 +4,7 @@ import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-adm
 import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
-import { pricesCalls } from "../core/telemetry/pricing.js";
+import { pricesCalls, unreportedUsageNotice } from "../core/telemetry/pricing.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
@@ -12,7 +12,7 @@ import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { endpointCapacityHolders } from "../domains/dispatch/index.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
@@ -412,6 +412,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
 	// that closed the socket after its call, so the next call sends the recovery frame (#434).
 	let carriedColdReasons: ExpectedColdReason[] = [];
+	// Sessions already told that a capped route's spend is estimated because its calls report no usage.
+	const unreportedUsageSessions = new Set<string>();
 	const readTarget = (route?: { target: string; model: string }): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
 		const targetId = (route?.target ?? settings.chat.target)?.trim();
@@ -844,7 +846,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		};
 		const settleModelCall = async (
 			message: AgentMessage,
-			interrupted: InterruptedUsageEstimate | null = null,
+			unreported: InterruptedUsageEstimate | null = null,
 		): Promise<boolean> => {
 			const call = modelCall;
 			const lease = journalLease;
@@ -852,6 +854,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			journalLease = undefined;
 			if (call) {
 				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
+				// Under a cap, a call with no reported usage is priced from its request size at the route's rates, so the cap
+				// still trips; an uncapped session prices nothing extra.
+				const capped = deps.getSettings().safety.limits.sessionCostUsd > 0;
+				let interrupted = capped || (message as { stopReason?: unknown }).stopReason === "aborted" ? unreported : null;
+				if (unreported && capped) {
+					const resolution = localRuntime.runtimeResolution;
+					const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
+					if (rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
+				}
 				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
@@ -876,6 +887,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					reportedModelFromMessage(message),
 				);
 				carryRelabelledReasons(settlement, facts);
+				if (
+					settlement.pricing.usd.kind === "estimated" &&
+					settlement.pricing.usd.method === "prompt-side-only" &&
+					capped &&
+					!unreportedUsageSessions.has(deps.sessionOrigin?.()?.id ?? "")
+				) {
+					unreportedUsageSessions.add(deps.sessionOrigin?.()?.id ?? "");
+					deps.emitNotice(unreportedUsageNotice(localRuntime.targetId), "warning");
+				}
 				recordSettledCall(facts, lease?.context);
 				if (quota && facts) journalAccountQuota(quota);
 				rememberMessageCalls(message, settledAttempts);

@@ -799,6 +799,9 @@ export function assistantSessionPayload(
  * provider's usage and never inside it, and surfaces read it from the read
  * model as an estimate (#434). It never rides on the message.
  *
+ * A call that ended normally or failed without reporting usage gets the same
+ * estimate, so a priced route's cost cap can charge it.
+ *
  * Returns null when the provider did report usage (there is nothing to fill in)
  * or when neither prompt nor output tokens can be estimated. Never-sent
  * requests have no display estimate (#430).
@@ -807,7 +810,6 @@ export function estimatedUsageForInterruptedTurn(
 	message: AgentMessage,
 	promptSideTokens: number,
 ): InterruptedUsageEstimate | null {
-	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return null;
 	const reported = (message as { usage?: Record<string, unknown> }).usage;
 	// A request cancelled before invocation sent no prompt. Estimating one put
 	// the whole context on the meter for each budget-wait abort in #423.
