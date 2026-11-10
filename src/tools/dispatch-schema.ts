@@ -131,6 +131,7 @@ const CouncilMemberSchema = Type.Object(
 		target: Type.String(),
 		model: Type.Optional(Type.String()),
 		thinking: Type.Optional(StringEnum(THINKING_LEVELS)),
+		agent: Type.Optional(Type.String({ description: "Agent this member runs as; defaults to the call's agent." })),
 	},
 	{ additionalProperties: false },
 );

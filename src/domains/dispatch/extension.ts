@@ -2664,7 +2664,12 @@ function assertPostRuntimeToolCompatibility(
 	explicitReadOnly: boolean,
 	writeRoots: ReadonlyArray<string>,
 	mcp: WorkerMcpAttestation | undefined,
+	councilMember = false,
 ): void {
+	// A council member's profile is its ceiling by design: any recipe may sit
+	// on a council and argue, but none may act beyond the read-only council
+	// surface, so a required tool the profile removes is waived, not refused.
+	if (councilMember) return;
 	// The shipped coder may use a named subprocess peer. Its native Clio tool
 	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
 	// recipes on the normal compatibility gate, since their declared required
@@ -5785,6 +5790,7 @@ export function createDispatchBundle(
 			req.readOnly === true,
 			pathScope.writeBoundaries,
 			admission.mcp,
+			req.toolProfile === "council-read-only" && req.gate?.role === "member",
 		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		announceMcpSandboxNoNetwork(
@@ -10098,6 +10104,7 @@ export function createDispatchBundle(
 			req.readOnly === true,
 			pathScope.writeBoundaries,
 			admission.mcp,
+			req.toolProfile === "council-read-only" && req.gate?.role === "member",
 		);
 		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		// Preview refuses exactly what dispatch would: a widening narrowing, an

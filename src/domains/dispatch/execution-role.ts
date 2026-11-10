@@ -238,6 +238,11 @@ export function dispatchResultContract(
 	recipe: { resultContract: ResultContract } | null | undefined,
 ): ResultContract | undefined {
 	if (!appliesRecipeResultContract(req.gate?.role)) return undefined;
+	// A council member answers the council's question under a read-only
+	// profile, whatever recipe it is seated as, so a recipe contract that needs
+	// a write (an architect's plan file, a coder's mutation report) can never
+	// hold there. Only the topology's own override (the vote ballot) applies.
+	if (req.gate?.role === "member") return req.resultContractOverride;
 	const base = req.resultContractOverride ?? recipe?.resultContract;
 	const allowance = req.resultSummary;
 	if (allowance === undefined) return base;

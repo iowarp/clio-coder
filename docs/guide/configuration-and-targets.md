@@ -159,7 +159,7 @@ explains worker route selection.
 
 ### Fleet
 
-`fleet.rosters.<name>.members` contains two to five members. Each member has a unique `label`, a `target`, and optional `model`, `thinkingLevel`, and `color`. `fleet.agentProfiles` is the persisted agent-id-to-profile map.
+`fleet.rosters.<name>.members` contains two to five members. Each member has a unique `label`, a `target`, and optional `model`, `thinkingLevel`, `color`, and `agent` (the agent recipe the member runs as in a council; a council run refuses an id no installed agent has). `fleet.agentProfiles` is the persisted agent-id-to-profile map.
 
 | Key | Default | When it applies |
 | --- | --- | --- |

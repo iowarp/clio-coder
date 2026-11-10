@@ -106,7 +106,12 @@ function councilSettingsFromArgs(
 	if (rosterName !== undefined) {
 		const roster = deps.getWorkerRosters?.()[rosterName];
 		if (roster === undefined) return { ok: false, message: `council_roster_unknown: ${rosterName}` };
-		members = roster.members.map((member) => ({ ...member }));
+		// A roster member names its thinking level as `thinkingLevel`, the
+		// settings key; the council member carries it as `thinking`.
+		members = roster.members.map((member) => {
+			const { thinkingLevel, ...rest } = member as typeof member & { thinkingLevel?: string };
+			return { ...rest, ...(rest.thinking === undefined && thinkingLevel ? { thinking: thinkingLevel } : {}) };
+		});
 	} else {
 		if (!Array.isArray(args.members)) return { ok: false, message: "council_members_out_of_range" };
 		members = [];
@@ -119,16 +124,30 @@ function councilSettingsFromArgs(
 			}
 			const model = stringArg(raw, "model");
 			const thinking = stringArg(raw, "thinking");
-			members.push({ label, target, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) });
+			const agent = stringArg(raw, "agent");
+			members.push({
+				label,
+				target,
+				...(model ? { model } : {}),
+				...(thinking ? { thinking } : {}),
+				...(agent ? { agent } : {}),
+			});
 		}
 	}
 	if (members.length < COUNCIL_MIN_MEMBERS || members.length > COUNCIL_MAX_MEMBERS) {
 		return { ok: false, message: "council_members_out_of_range" };
 	}
 	const labels = new Set<string>();
+	const known = new Set(deps.getAgentSpecs().map((spec) => spec.id));
 	for (const member of members) {
 		if (labels.has(member.label)) return { ok: false, message: `council_member_label_duplicate: ${member.label}` };
 		labels.add(member.label);
+		if (member.agent !== undefined && (member.agent === "auto" || (known.size > 0 && !known.has(member.agent)))) {
+			return {
+				ok: false,
+				message: `council_member_agent_unknown: ${member.label}: '${member.agent}' (installed agents: ${[...known].sort().join(", ")})`,
+			};
+		}
 	}
 	const synthesis = args.synthesis === undefined ? "none" : args.synthesis;
 	if (synthesis !== "none" && synthesis !== "judge" && synthesis !== "vote") {
@@ -809,6 +828,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					for (const [index, member] of council.members.entries()) {
 						const memberRequest: DispatchRequest = {
 							...base,
+							...(member.agent !== undefined ? { agentId: member.agent } : {}),
 							executionRole: "researcher",
 							readOnly: true,
 							toolProfile: "council-read-only",

@@ -1847,7 +1847,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							issues.add(memberPath, `expected a map, got ${describe(rawMember)}`);
 							continue;
 						}
-						issues.unknownKeys(memberPath, rawMember, ["label", "target", "model", "thinkingLevel", "color"]);
+						issues.unknownKeys(memberPath, rawMember, ["label", "target", "model", "thinkingLevel", "color", "agent"]);
 						const label = expectString(issues, `${memberPath}.label`, rawMember.label);
 						const target = expectString(issues, `${memberPath}.target`, rawMember.target);
 						if (label !== undefined && !COUNCIL_MEMBER_LABEL_PATTERN.test(label))
@@ -1867,6 +1867,9 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (color !== undefined && !THEME_NAMED_COLORS.includes(color as never) && !/^#[0-9a-fA-F]{6}$/u.test(color)) {
 							issues.add(`${memberPath}.color`, "expected a theme named color or 6-digit hex color");
 						}
+						const agent =
+							rawMember.agent === undefined ? undefined : expectString(issues, `${memberPath}.agent`, rawMember.agent);
+						if (agent === "auto") issues.add(`${memberPath}.agent`, "'auto' is not a council member agent");
 						if (label === undefined || target === undefined) continue;
 						members.push({
 							label,
@@ -1874,6 +1877,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							...(model ? { model } : {}),
 							...(thinkingLevel ? { thinkingLevel } : {}),
 							...(color ? { color } : {}),
+							...(agent && agent !== "auto" ? { agent } : {}),
 						});
 					}
 					if (rawRoster.members.length >= 2 && rawRoster.members.length <= 5 && members.length === rawRoster.members.length)

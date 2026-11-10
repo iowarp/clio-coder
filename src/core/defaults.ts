@@ -61,6 +61,8 @@ export interface WorkerRosterMember {
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
 	color?: ThemeNamedColor | string;
+	/** Agent recipe id this member runs as; a council run checks it against the installed agents. */
+	agent?: string;
 }
 export type WorkerRosters = Record<string, { members: WorkerRosterMember[] }>;
 /** Map of native agent id -> fleet.profiles key. Empty means no agent is pinned to a profile. */

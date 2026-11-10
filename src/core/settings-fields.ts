@@ -7,6 +7,7 @@
  */
 export const SETTINGS_FIELD_NAMES = [
 	"adaptiveRouting",
+	"agent",
 	"agentControl",
 	"agentId",
 	"agentProfiles",

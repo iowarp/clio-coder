@@ -27,6 +27,8 @@ export interface DispatchCouncilMember {
 	model?: string;
 	thinking?: string;
 	color?: string;
+	/** Agent recipe id this member runs as; absent seats the council's agent. */
+	agent?: string;
 }
 
 export interface DispatchCouncilSettings {

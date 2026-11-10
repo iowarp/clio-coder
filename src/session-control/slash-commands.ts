@@ -2265,6 +2265,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "--roster", takesValue: true, valueName: "name" },
 				{ name: "--rounds", takesValue: true, valueName: "n" },
 				{ name: "--synthesis", takesValue: true, values: COUNCIL_SYNTHESIS_MODES },
+				{ name: "--agent", takesValue: true, valueName: "id" },
 			],
 			positionals: [{ name: "task", required: true, rest: true }],
 		},
@@ -2275,6 +2276,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const options: CouncilCommandOptions = {};
 			const roster = parsed.flags.get("--roster");
 			if (typeof roster === "string") options.roster = roster;
+			const agent = parsed.flags.get("--agent");
+			if (typeof agent === "string" && agent.trim().length > 0) options.agent = agent.trim();
 			const rounds = parsed.flags.get("--rounds");
 			if (typeof rounds === "string") {
 				const parsedRounds = Number(rounds);

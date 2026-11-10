@@ -1,5 +1,5 @@
 /**
- * `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] <task>`:
+ * `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] <task>`:
  * the roster an operator-typed council resolves to and the dispatch-tool
  * arguments it becomes.
  *
@@ -52,6 +52,8 @@ export interface CouncilCommandOptions {
 	roster?: string;
 	rounds?: number;
 	synthesis?: CouncilSynthesisMode;
+	/** Agent recipe the members without their own roster `agent` run as. */
+	agent?: string;
 }
 
 export type CouncilRosterResolution = { ok: true; roster: string } | { ok: false; reason: string };
@@ -106,5 +108,6 @@ export function buildCouncilDispatchArgs(
 		roster,
 		...(options.rounds !== undefined ? { rounds: options.rounds } : {}),
 		...(options.synthesis !== undefined ? { synthesis: options.synthesis } : {}),
+		...(options.agent !== undefined ? { agent: options.agent } : {}),
 	};
 }

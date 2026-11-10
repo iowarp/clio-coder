@@ -2203,6 +2203,7 @@ async function runCouncil(
 				}
 				const request: DispatchRequest = {
 					...base,
+					...(member.agent !== undefined ? { agentId: member.agent } : {}),
 					executionRole: "researcher",
 					readOnly: true,
 					toolProfile: "council-read-only",
