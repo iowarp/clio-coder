@@ -870,7 +870,10 @@ export class ClioEditor extends Editor {
 											{ key: "Enter", verb: "run as typed", short: "run" },
 											{ key: "Esc", verb: "close list, keep text", short: "close list" },
 										]
-									: this.selectedSuggestion()?.kind === "command" && this.selectedSuggestion()?.runsBare === true
+									: // After a bare `/` Enter only completes the first row, so the rail must not promise a run.
+										this.selectedSuggestion()?.kind === "command" &&
+											this.selectedSuggestion()?.runsBare === true &&
+											/^\/\S/u.test(this.getText().trimStart())
 										? [
 												{ key: "Enter", verb: "run", critical: true },
 												{ key: "Tab", verb: "complete" },
