@@ -1598,6 +1598,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"maxOutputTokens",
 				"prewarm",
 				"cacheKeepalive",
+				"loopsUntilStopped",
 				"retry",
 				"steering",
 			]);
@@ -1645,6 +1646,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("cacheKeepalive" in chat) {
 				const parsed = expectBoolean(issues, "chat.cacheKeepalive", chat.cacheKeepalive);
 				if (parsed !== undefined) settings.chat.cacheKeepalive = parsed;
+			}
+			if ("loopsUntilStopped" in chat) {
+				const parsed = expectBoolean(issues, "chat.loopsUntilStopped", chat.loopsUntilStopped);
+				if (parsed !== undefined) settings.chat.loopsUntilStopped = parsed;
 			}
 			if ("retry" in chat) {
 				if (!isPlainObject(chat.retry)) issues.add("chat.retry", `expected a map, got ${describe(chat.retry)}`);

@@ -594,6 +594,8 @@ export interface ChatSettings extends WorkerTarget {
 	 * expected to save more than it costs. Anthropic, OpenAI Responses and Codex routes, each refresh output-capped.
 	 */
 	cacheKeepalive: boolean;
+	/** Loops and jobs created without a count or duration run until the operator stops them (#450). */
+	loopsUntilStopped: boolean;
 	retry: RetrySettings;
 	steering: SteeringSettings;
 }
@@ -774,6 +776,7 @@ export const DEFAULT_SETTINGS = {
 		maxOutputTokens: 0,
 		prewarm: false,
 		cacheKeepalive: true,
+		loopsUntilStopped: false,
 		retry: {
 			enabled: true,
 			maxRetries: 3,
@@ -978,6 +981,8 @@ chat:
   maxOutputTokens: 0
   prewarm: false
   cacheKeepalive: true
+  # true: /loop and model-created jobs without --count or --for run until /loop stop or cancel.
+  loopsUntilStopped: false
   retry:
     enabled: true
     maxRetries: 3

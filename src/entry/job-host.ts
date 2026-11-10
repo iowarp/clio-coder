@@ -36,6 +36,8 @@ export interface JobHostDeps {
 	admissionAutonomy?(): AutonomyLevel;
 	/** The session's test-runner consent is owed; a job command is admitted as its direct call would be. */
 	sessionCodeConsentPending?(): boolean;
+	/** `chat.loopsUntilStopped`, read at each create (#450). */
+	untilStoppedDefault?(): boolean;
 	createSession(): void;
 	notice(text: string): void;
 	store?: JobStore;
@@ -169,6 +171,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 	});
 	const tool = createJobTool({
 		controller,
+		...(deps.untilStoppedDefault !== undefined ? { untilStoppedDefault: deps.untilStoppedDefault } : {}),
 		registry: deps.registry,
 		owner,
 		constraints: runtimeDeps.constraints,

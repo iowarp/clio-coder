@@ -134,6 +134,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.maxOutputTokens` | `0` | next turn |
 | `chat.prewarm` | `false` | next turn |
 | `chat.cacheKeepalive` | `true` | immediately; see [prompt cache retention and keepalive](../architecture/model-catalog.md#prompt-cache-retention-and-keepalive) |
+| `chat.loopsUntilStopped` | `false` | immediately; read when a loop or job is created |
 | `chat.retry.enabled` | `true` | next turn |
 | `chat.retry.maxRetries` | `3` | next turn |
 | `chat.retry.baseDelayMs` | `2000` | next turn |

@@ -32,6 +32,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"chat.modelPicker",
 	// The keepalive reads it before every refresh, so a change applies to the next one (#423).
 	"chat.cacheKeepalive",
+	// The job host reads it at each create.
+	"chat.loopsUntilStopped",
 	"interface.outputDetail",
 	"interface.demo",
 	"interface.smoothStreaming",

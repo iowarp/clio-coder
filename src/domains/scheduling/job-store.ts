@@ -80,6 +80,7 @@ function validateRecord(value: unknown, owner: JobOwner): asserts value is JobRe
 		...(spec.deadlineAt !== null ? { deadlineAt: spec.deadlineAt as number } : {}),
 		...(spec.until !== null ? { until: spec.until as NonNullable<JobCreateInput["until"]> } : {}),
 		onMatch: spec.onMatch as NonNullable<JobCreateInput["onMatch"]>,
+		...(spec.untilStopped === true ? { untilStopped: true as const } : {}),
 		...(spec.constraints !== null ? { constraints: spec.constraints as NonNullable<JobCreateInput["constraints"]> } : {}),
 		...(spec.originTurnId !== null ? { originTurnId: spec.originTurnId as string } : {}),
 	};

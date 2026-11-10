@@ -25,6 +25,8 @@ export interface JobCreateInput {
 	readonly timeoutDefaulted?: true;
 	readonly until?: JobPredicate;
 	readonly onMatch?: JobMatchAction;
+	/** Run until the operator stops it: no start count, no deadline (#450). */
+	readonly untilStopped?: true;
 	/** Host-supplied creating-turn scope, never authority supplied by model arguments. */
 	readonly constraints?: TurnConstraints;
 	readonly originTurnId?: string;
@@ -39,6 +41,8 @@ export interface JobSpec {
 	readonly timeoutDefaulted?: true;
 	readonly until: JobPredicate | null;
 	readonly onMatch: JobMatchAction;
+	/** Ends only on a matched until, stop or cancel; count and deadline are null. Absent on bounded and older records (#450). */
+	readonly untilStopped?: true;
 	readonly constraints: TurnConstraints | null;
 	readonly originTurnId: string | null;
 }

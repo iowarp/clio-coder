@@ -14,8 +14,8 @@ import type { NoticeLevel } from "./notice-source.js";
  * slash command, the ACP command and the model's `job` tool create jobs through
  * one admission path and none of them can mint a second execution authority.
  *
- *   /loop <every> [--count N] [--for DUR] [--timeout DUR] <task...>
- *   /loop <every> [--count N] [--for DUR] [--timeout DUR] [--until PRED]
+ *   /loop <every> [--count N | --for DUR | --until-stopped] [--timeout DUR] <task...>
+ *   /loop <every> [--count N | --for DUR | --until-stopped] [--timeout DUR] [--until PRED]
  *         [--on-match notice|main_turn] [--follow-up TEXT] --command <program> [args...]
  *   /loop list | status [id] | pause <id> | resume <id> | stop <id> | cancel <id>
  *
@@ -49,6 +49,7 @@ export type LoopCreateArgs = {
 	until?: LoopPredicate;
 	on_match?: "notice" | "main_turn";
 	follow_up?: string;
+	until_stopped?: boolean;
 };
 
 export const LOOP_CONTROL_ACTIONS = ["pause", "resume", "stop", "cancel"] as const;
@@ -206,6 +207,8 @@ const DURATION_FLAGS: ReadonlyArray<DurationFlag> = [
 
 /** The flags this grammar knows, for the "unknown option" refusal. */
 const VALUE_FLAGS = ["--count", "--for", "--timeout", "--until", "--on-match", "--follow-up"] as const;
+/** Takes no value: the loop runs until the operator stops it (#450). */
+const UNTIL_STOPPED_FLAG = "--until-stopped";
 
 /**
  * The words of a task as one prompt. A prompt-typed ACP line reaches here split on
@@ -263,10 +266,16 @@ function parseCreate(tokens: ReadonlyArray<string>): LoopParseResult {
 			index++;
 			continue;
 		}
-		if (!(VALUE_FLAGS as ReadonlyArray<string>).includes(token)) {
-			return fail(`Unknown option ${token}. Options are ${[...VALUE_FLAGS, "--command"].join(", ")}`);
-		}
 		if (seen.has(token)) return fail(`${token} was given twice`);
+		if (token === UNTIL_STOPPED_FLAG) {
+			seen.add(token);
+			args.until_stopped = true;
+			index++;
+			continue;
+		}
+		if (!(VALUE_FLAGS as ReadonlyArray<string>).includes(token)) {
+			return fail(`Unknown option ${token}. Options are ${[...VALUE_FLAGS, UNTIL_STOPPED_FLAG, "--command"].join(", ")}`);
+		}
 		seen.add(token);
 		const value = tokens[index + 1];
 		if (value === undefined) return fail(`${token} needs a value`);
@@ -293,6 +302,8 @@ function parseCreate(tokens: ReadonlyArray<string>): LoopParseResult {
 		}
 	}
 	if (every === null) return fail('Give the interval, for example /loop 5m "check the build"');
+	if (args.until_stopped === true && (args.count !== undefined || args.for_ms !== undefined))
+		return fail(`${UNTIL_STOPPED_FLAG} runs until /loop stop or cancel, so it takes no --count or --for`);
 	args.every_ms = every;
 	if (command !== undefined) {
 		if (task !== undefined) return fail("Give either a task or --command, not both");
@@ -445,6 +456,7 @@ function loopLabel(job: JobRecord): string {
 
 function runsText(job: JobRecord): string {
 	const limit = job.spec.count;
+	if (job.spec.untilStopped === true) return `${job.starts} run${job.starts === 1 ? "" : "s"} so far (until stopped)`;
 	if (limit === null) return `${job.starts} run${job.starts === 1 ? "" : "s"} so far (until deadline)`;
 	return `${job.starts}/${limit} runs`;
 }
@@ -537,11 +549,13 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 				? ` · follow-up timeout ${formatLoopDuration(jobExecutionTimeoutMs(job.spec, "delivery"))}`
 				: ""
 		} · ${
-			job.spec.deadlineAt === null
-				? "no deadline"
-				: job.spec.deadlineAt > now
-					? `deadline in ${formatLoopDuration(job.spec.deadlineAt - now)}`
-					: "deadline reached"
+			job.spec.untilStopped === true
+				? "runs until stopped"
+				: job.spec.deadlineAt === null
+					? "no deadline"
+					: job.spec.deadlineAt > now
+						? `deadline in ${formatLoopDuration(job.spec.deadlineAt - now)}`
+						: "deadline reached"
 		}`,
 	);
 	if (job.spec.until !== null) {
@@ -578,9 +592,11 @@ export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: numb
 			: job.nextDueAt <= now
 				? "first run due now"
 				: `first run in ${formatLoopDuration(job.nextDueAt - now)}`,
-		job.spec.count === null
-			? "runs until the deadline"
-			: `${job.spec.count} run${job.spec.count === 1 ? "" : "s"}${countDefault ? " (default)" : ""}`,
+		job.spec.untilStopped === true
+			? "runs until stopped"
+			: job.spec.count === null
+				? "runs until the deadline"
+				: `${job.spec.count} run${job.spec.count === 1 ? "" : "s"}${countDefault ? " (default)" : ""}`,
 		`timeout ${formatLoopDuration(job.spec.timeoutMs)}${args.timeout_ms === undefined ? " (default)" : ""}`,
 		job.spec.deadlineAt === null
 			? "no deadline"

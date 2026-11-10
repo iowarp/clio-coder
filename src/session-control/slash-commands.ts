@@ -2305,6 +2305,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			flags: [
 				{ name: "--count", takesValue: true, valueName: "runs" },
 				{ name: "--for", takesValue: true, valueName: "duration" },
+				{ name: "--until-stopped", takesValue: false },
 				{ name: "--timeout", takesValue: true, valueName: "duration" },
 				{ name: "--until", takesValue: true, valueName: "json.path == value" },
 				{ name: "--on-match", takesValue: true, values: ["notice", "main_turn"] },

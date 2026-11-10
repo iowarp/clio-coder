@@ -2507,6 +2507,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: resolveEffectiveAutonomy,
 		admissionAutonomy: resolveAdmissionAutonomy,
 		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
+		untilStoppedDefault: () => getCurrentSettings().chat.loopsUntilStopped,
 		createSession: () => {
 			const settings = getCurrentSettings();
 			session?.create({

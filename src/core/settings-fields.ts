@@ -126,6 +126,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"litellm",
 	"lmstudio",
 	"load",
+	"loopsUntilStopped",
 	"maxConcurrentRequests",
 	"maxDelayMs",
 	"maxDurationMs",

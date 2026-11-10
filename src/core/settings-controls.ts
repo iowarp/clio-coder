@@ -737,6 +737,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Keep prompt cache warm",
 		"While a turn waits on its own tools, such as an attached dispatch, refresh a hosted provider's prompt cache shortly before it expires when that is expected to save more than it costs. Applies to Anthropic, OpenAI and Codex routes.",
 	],
+	"chat.loopsUntilStopped": [
+		"Loops run until stopped",
+		"A /loop or job created without --count or --for keeps running until you run /loop stop or /loop cancel, or its --until condition matches. The cost ceiling and loop guard still apply.",
+	],
 	"systemOne.use": [
 		"Decision engine",
 		"Experimental opt-in. Off until chosen. Names what answers the consult tool, the judge screen and steering triage, one route or an ordered list: jev, memory, main, a declared engine or a target. Applies on the next start. A hosted route receives web and MCP result text at judge time.",

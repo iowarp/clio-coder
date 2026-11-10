@@ -165,6 +165,8 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "chat.retry.enabled":
 		case "chat.retry.maxRetries":
 			return place("chat", "Recovery");
+		case "chat.loopsUntilStopped":
+			return place("chat", "Loops");
 		case "interface.outputDetail":
 		case "interface.smoothStreaming":
 			return place("chat", "Replies");

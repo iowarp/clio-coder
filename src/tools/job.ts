@@ -25,6 +25,8 @@ export interface JobToolDeps {
 	/** Read at each occurrence; absent reads as below yolo (#445). */
 	autonomy?: () => AutonomyLevel;
 	controller: JobController;
+	/** `chat.loopsUntilStopped`: a job created without count, for_ms or until_stopped runs until stopped (#450). */
+	untilStoppedDefault?: () => boolean;
 	registry: Pick<ToolRegistry, "invoke">;
 	owner(createSession?: boolean): JobOwner | null;
 	constraints(): ToolInvokeOptions["turnConstraints"];
@@ -40,7 +42,7 @@ type PreparedJob =
 
 function jobToolResult(job: JobRecord): ToolResult {
 	const scope = `session ${job.owner.sessionId}; cwd=${job.owner.cwd}`;
-	const bounds = `${job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.timeoutDefaulted === true ? " (default)" : ""}${job.spec.onMatch.kind === "main_turn" ? `; follow-up timeout=${jobExecutionTimeoutMs(job.spec, "delivery")}ms` : ""}${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
+	const bounds = `${job.spec.untilStopped === true ? "runs until stopped" : job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.timeoutDefaulted === true ? " (default)" : ""}${job.spec.onMatch.kind === "main_turn" ? `; follow-up timeout=${jobExecutionTimeoutMs(job.spec, "delivery")}ms` : ""}${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
 	return {
 		kind: "ok",
 		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.spec.constraints?.allowedTools === undefined ? "" : `; allow=${JSON.stringify(job.spec.constraints.allowedTools)}`}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,
@@ -70,6 +72,7 @@ export function createJobTool(deps: JobToolDeps): {
 		"until",
 		"on_match",
 		"follow_up",
+		"until_stopped",
 	]);
 	const prepare = (raw: Record<string, unknown>): Record<string, unknown> => {
 		if (prepared.has(raw)) return raw;
@@ -150,6 +153,12 @@ export function createJobTool(deps: JobToolDeps): {
 					duration > 7 * 24 * 60 * 60 * 1000)
 			)
 				throw new Error("job: for_ms must be 1000 ms through seven days.");
+			if (args.until_stopped !== undefined && typeof args.until_stopped !== "boolean")
+				throw new Error("job: until_stopped must be true or false.");
+			if (args.until_stopped === true && (args.count !== undefined || duration !== undefined))
+				throw new Error("job: until_stopped runs until the operator stops it, so it takes no count or for_ms.");
+			const untilStopped =
+				args.until_stopped ?? (args.count === undefined && duration === undefined && deps.untilStoppedDefault?.() === true);
 			const inherited = snapshotTurnConstraints(deps.constraints());
 			if (args.allow !== undefined && runner.kind !== "main") throw new Error("job: allow applies only to runner=main.");
 			const requested =
@@ -182,6 +191,7 @@ export function createJobTool(deps: JobToolDeps): {
 				...(args.on_match === "main_turn"
 					? { onMatch: { kind: "main_turn" as const, prompt: args.follow_up as string } }
 					: {}),
+				...(untilStopped ? { untilStopped: true as const } : {}),
 				...(constraints === undefined ? {} : { constraints }),
 			};
 			normalizeJobSpec(input, Date.now());
@@ -195,7 +205,7 @@ export function createJobTool(deps: JobToolDeps): {
 		name: ToolNames.Job,
 		placement: "gateway",
 		description:
-			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. A job without count or for_ms defaults to five starts. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
+			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. A job without count or for_ms defaults to five starts. until_stopped=true runs it until the operator stops it (or until matches); use it when the operator says to keep going until they say so. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
 		parameters: Type.Object({
 			action: StringEnum(["create", "pause", "resume", "stop", "cancel"]),
 			job_id: Type.Optional(Type.String()),
@@ -228,6 +238,9 @@ export function createJobTool(deps: JobToolDeps): {
 				}),
 			),
 			follow_up: Type.Optional(Type.String({ description: "main_turn prompt, at most 8192 characters." })),
+			until_stopped: Type.Optional(
+				Type.Boolean({ description: "Run until the operator stops or cancels it; no count or for_ms." }),
+			),
 		}),
 		baseActionClass: "dispatch",
 		executionMode: "sequential",

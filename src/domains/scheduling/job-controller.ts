@@ -167,7 +167,13 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		else if (result.stoppedBy !== undefined) cause = result.stoppedBy;
 		else if (evidence.errorClass === "infrastructure") cause = "failure";
 		if (cause === null) return null;
-		if (continuationCountsAgainstCap(cause) && (job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP) return null;
+		// The operator asked this job to keep going until they stop it, so the continuation cap does not end it (#450).
+		if (
+			job.spec.untilStopped !== true &&
+			continuationCountsAgainstCap(cause) &&
+			(job.clockResumes ?? 0) >= TURN_CONTINUATION_CAP
+		)
+			return null;
 		const uncontinued =
 			execution.kind === "delivery"
 				? job.delivery?.kind === "main_turn"
@@ -500,7 +506,12 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				draft.consecutiveFailures += 1;
 				draft.pending = null;
 				// At yolo nobody is there to resume it, so it backs off until its count or deadline ends it (#445).
-				if (draft.consecutiveFailures >= 3 && options.continuation?.allowed(draft) !== true) {
+				// A job that runs until stopped backs off the same way instead of pausing, so an outage does not end hours of work (#450).
+				if (
+					draft.consecutiveFailures >= 3 &&
+					draft.spec.untilStopped !== true &&
+					options.continuation?.allowed(draft) !== true
+				) {
 					draft.state = "paused";
 					draft.nextDueAt = null;
 					// The operator reads this after the fact, so it carries the failure and not only the count (#445).

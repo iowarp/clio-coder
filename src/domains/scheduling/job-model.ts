@@ -91,6 +91,7 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 			"timeoutDefaulted",
 			"until",
 			"onMatch",
+			"untilStopped",
 			"constraints",
 			"originTurnId",
 		],
@@ -123,6 +124,9 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 		text(input.runner.prompt, 8192, "prompt");
 		runner = { kind: "main", prompt: input.runner.prompt };
 	} else throw new Error("job: Stage 1 supports command and main runners only");
+	if (input.untilStopped !== undefined && input.untilStopped !== true) throw new Error("job: invalid untilStopped");
+	if (input.untilStopped === true && (input.count !== undefined || input.deadlineAt !== undefined))
+		throw new Error("job: a job that runs until stopped takes no count or deadline");
 	if (input.count !== undefined) integer(input.count, 1, 100_000, "count");
 	if (input.deadlineAt !== undefined) integer(input.deadlineAt, now + 1, now + MAX_DURATION_MS, "deadlineAt");
 	const timeoutMs =
@@ -143,12 +147,13 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 	return {
 		intervalMs: input.intervalMs,
 		runner,
-		count: input.count ?? (input.deadlineAt === undefined ? 5 : null),
+		count: input.count ?? (input.deadlineAt === undefined && input.untilStopped !== true ? 5 : null),
 		deadlineAt: input.deadlineAt ?? null,
 		timeoutMs,
 		...(input.timeoutMs === undefined || input.timeoutDefaulted === true ? { timeoutDefaulted: true as const } : {}),
 		until,
 		onMatch: { ...onMatch },
+		...(input.untilStopped === true ? { untilStopped: true as const } : {}),
 		constraints: snapshotTurnConstraints(input.constraints) ?? null,
 		originTurnId: input.originTurnId ?? null,
 	};
