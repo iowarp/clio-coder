@@ -12,7 +12,7 @@ import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import type { TurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnRecovery, type RetryStatusPayload } from "../../src/session-control/turn-recovery.js";
-import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 
 const plain = (rows: string[]) => stripVTControlCharacters(rows.join("\n"));
 function failure(errorMessage: string): Extract<ChatLoopEvent, { type: "message_end" }> {
@@ -191,7 +191,7 @@ test("thrown exhausted provider retry emits one bounded outcome and persists its
 	const panel = createChatPanel();
 	let calls = 0;
 	const recovery = createTurnRecovery({
-		state: { activeInterruptReason: null } as ChatTurnState,
+		state: createTurnState(),
 		persistence: {
 			appendRetryStatus: (status: RetryStatusPayload) => statuses.push(status),
 			wasPersisted: () => false,
