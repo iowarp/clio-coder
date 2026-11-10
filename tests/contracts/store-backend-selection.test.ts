@@ -1,5 +1,5 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -81,6 +81,39 @@ describe("store backend selection", () => {
 			} finally {
 				process.env.PATH = savedPath;
 				daemon.close();
+			}
+		}));
+
+	it("clio_run ensure gets clio-core's environment contract, without Clio Coder's or credential variables (M-40 F20)", () =>
+		withHome(async (dir, root) => {
+			const passed = { CLIO_REPO_PATH: "/opt/ops", CLIO_STORAGE_ROOT: "/srv/tier", LD_LIBRARY_PATH: "/opt/clio/lib" };
+			const dropped = ["CLIO_CODER_PROBE", "CLIO_ACCESS_TOKEN", "OPENAI_API_KEY"];
+			const saved = Object.fromEntries([...Object.keys(passed), ...dropped].map((key) => [key, process.env[key]]));
+			Object.assign(process.env, passed, Object.fromEntries(dropped.map((key) => [key, "x"])));
+			try {
+				const config = join(dir, "clio.yaml");
+				const seen = join(dir, "ensure-env.json");
+				const clioRun = join(dir, "clio_run");
+				writeFileSync(
+					clioRun,
+					`#!${process.execPath}\n` +
+						`if (process.argv.includes("--help")) process.exit(0);\n` +
+						`process.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(seen)}, JSON.stringify(process.env));\n` +
+						"process.exit(1);\n",
+				);
+				chmodSync(clioRun, 0o755);
+				writeRecord(JSON.stringify({ v: 1, backend: "clio-core", python: join(dir, "python3"), config }));
+
+				await rejects(openStoreBackend(root), StoreRefusal);
+				const env = JSON.parse(readFileSync(seen, "utf8")) as Record<string, string>;
+				for (const [key, value] of Object.entries(passed)) strictEqual(env[key], value, key);
+				strictEqual(env.CLIO_SERVER_CONF, config);
+				for (const key of dropped) strictEqual(env[key], undefined, key);
+			} finally {
+				for (const [key, value] of Object.entries(saved)) {
+					if (value === undefined) delete process.env[key];
+					else process.env[key] = value;
+				}
 			}
 		}));
 });

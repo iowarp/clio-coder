@@ -6,6 +6,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import { scrubSandboxEnv } from "../../core/sandbox/env-scrub.js";
 import { storeRoot } from "../../core/store-paths.js";
 import { clioDataDir } from "../../core/xdg.js";
 import type { StoreBackend } from "./backend.js";
@@ -145,15 +146,30 @@ function resolveClioCoreTools(python: string | undefined): { python: string | nu
 /** clio-core's config variable. Clio Coder never reads it; it only hands the record's config to `clio_run`. */
 const CLIO_CORE_CONFIG_KEY = "CLIO_SERVER_CONF";
 
-/** PATH, HOME and USER, plus clio-core's config variable when the record names a config. Nothing else is inherited. */
-function toolEnv(config: string | undefined): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = {};
-	for (const key of ["PATH", "HOME", "USER"] as const) {
-		const value = process.env[key];
-		if (value !== undefined) env[key] = value;
+/** Plain names clio-core's tools and the daemon they start read from the operator's shell. */
+const CLIO_CORE_ENV_NAMES = ["PATH", "HOME", "USER", "TMPDIR", "LD_LIBRARY_PATH"] as const;
+
+/**
+ * clio-core's runtime environment contract, so a daemon Clio Coder starts is
+ * the daemon the operator's shell would start (M-40 F20). Passed through:
+ * - `PATH`, `HOME`, `USER`, `TMPDIR`;
+ * - `LD_LIBRARY_PATH`, which locates the core's native libraries and operators;
+ * - every `CLIO_*` variable except Clio Coder's own `CLIO_CODER_*`. Among them
+ *   `CLIO_REPO_PATH` finds out-of-tree ChiMods, `CLIO_STORAGE_ROOT` places the
+ *   tiers and the metadata log, `CLIO_SERVER_CONF` names the config and
+ *   `CLIO_IPC_MODE` picks the transport; the rest are the runtime's tuning knobs.
+ * A variable named like a credential is dropped even under these names. The
+ * record's config, when it names one, replaces an inherited `CLIO_SERVER_CONF`.
+ */
+function toolEnv(config: string | undefined): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (value === undefined) continue;
+		const named = (CLIO_CORE_ENV_NAMES as ReadonlyArray<string>).includes(key);
+		if (named || (key.startsWith("CLIO_") && !key.startsWith("CLIO_CODER_"))) env[key] = value;
 	}
 	if (config !== undefined) env[CLIO_CORE_CONFIG_KEY] = config;
-	return env;
+	return scrubSandboxEnv(env, { passEnv: [], secretNames: [] }).env as Record<string, string>;
 }
 
 interface ExecResult {
@@ -403,6 +419,7 @@ export async function attachClioCore(
 	try {
 		host = await startCoreHost({
 			command: tools.python,
+			env: toolEnv(selection.config),
 			args: [
 				path.join(resolvePackageRoot(), "assets", "core-host", "clio_core_host.py"),
 				"--pool",

@@ -44,7 +44,7 @@ export const CORE_HOST_DEFAULT_TIMING: CoreHostTiming = {
 export interface CoreHostLaunch {
 	command: string;
 	args?: ReadonlyArray<string>;
-	/** Laid over `PATH`, `HOME` and `USER`; the `CLIO_*` variables the backend record names. Nothing else is inherited. */
+	/** Laid over `PATH`, `HOME` and `USER`; the clio-core environment contract the store backend passes. Nothing else is inherited. */
 	env?: Record<string, string>;
 	cwd?: string;
 	timing?: Partial<CoreHostTiming>;
