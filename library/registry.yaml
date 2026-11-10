@@ -373,9 +373,9 @@ entries:
       - install a skill
       - add an agent skill
       - search the skills marketplace
-    version: 0.3.1
+    version: 0.3.2
     sourceUrl: skills/meta/find-skills
-    sha256: b06f8fb7d54dad645df09e489bcefc26044270faf131fea4be287c79c1a46d27
+    sha256: 319e26bf474e333603a9dc0b734f9181223747099537b199468eede7f4c5bd31
     provides:
       - kind: skill
         name: find-skills
@@ -674,9 +674,9 @@ entries:
     name: materio
     description: Materials research lab bench with local commands, usage and
       advisory guardrails.
-    version: 0.2.2
+    version: 0.2.3
     sourceUrl: extensions/materio
-    sha256: 8da9893c37029985a6ea6bc7b5b2ebedbbb88f61bf7068ec98872fb99b8fd844
+    sha256: 2c967fce05b48588cc6a9234261eaa27d848333b7e98076f0ecef840b1938ccf
     plugin: materio
     provides:
       - kind: extension

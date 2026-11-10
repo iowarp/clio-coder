@@ -263,7 +263,7 @@
 				"search the skills marketplace"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/find-skills",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "meta"
 		},

@@ -30,7 +30,8 @@ Flags:
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL frames, one JSON object per line; the first is a "session" header
-                            carrying schemaVersion, and with --agent the last is {"type":"result",...}
+                            carrying schemaVersion; the last is {"type":"run_end",...} with the run's exitCode
+                            and outcome, or with --agent {"type":"result",...}
   --json-events <mode>      full: progress and final answer in turn_end.message.content
                             terminal: accounting and final answer in turn_end.text
                             implies --json; refused with --agent

@@ -24,7 +24,7 @@ clio-coder library install extension:materio --user
 
 Use `/reload` in an existing session, then `/ext:materio:lab` or the host
 workspace menu to enter the lab. Leave with the host leader's `b` or
-`/workspace off`. With the lab active, Ctrl+G introduces its free leader keys:
+`/extensions leave`. With the lab active, Ctrl+G introduces its free leader keys:
 
 | Key | Action |
 | --- | --- |

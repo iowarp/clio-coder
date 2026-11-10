@@ -77,8 +77,8 @@ skills:
     sha256: 1ce85a55b0c609ecf195f81d6eda7de1a577a69bf71c42b54f208906e24079f2
   - name: find-skills
     path: meta/find-skills
-    version: 0.3.1
-    sha256: 6af8c791d0d14a2ccb791e80d63adcdcbbdeb3f68a3e0c3833b5017f49d42f3f
+    version: 0.3.2
+    sha256: d7bbccfbc8507fd255ebc04d59817be83711fbff4e790a1f0618ecc3f2a4a1c0
   - name: skill-authoring
     path: meta/skill-authoring
     version: 0.4.1

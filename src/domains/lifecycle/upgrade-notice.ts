@@ -21,6 +21,11 @@ const KEYBOARD_FACING_CHANGES: Readonly<Record<string, string>> = Object.freeze(
 	"0.6.5":
 		"In 0.6.4, fleet.permissions.mode moved from deny to judge; " +
 		"the safety judge answers ordinary worker asks at autonomy default; set it back to deny to refuse them.",
+	"0.7.1":
+		"/skills, /prompts, /agents and /interop moved under /library, /health and /systemone under /usage health, " +
+		"/branch is /fork, /peer is /panes peer, /share is /fleet share and /workspace off is /extensions leave; " +
+		"/interrupt, /editor, /background and /notifications became keys (Alt+S, Alt+G, Ctrl+G d, Ctrl+G x); " +
+		"the old names answer with a notice for this release only.",
 });
 
 /**

@@ -93,7 +93,7 @@ Usage:
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder claims [show <id>]   list the project's recorded reproduce and numeric-compare claims
   clio-coder arena run|show|vote|list|standings  run one prompt on 2 to 4 contenders, vote blind, read standings
-  clio-coder research start|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
+  clio-coder research start|resume|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder report [bug|feature|question]|status|show|send|forget|security  preview, then send a report to the maintainers

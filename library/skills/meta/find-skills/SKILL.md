@@ -7,7 +7,7 @@ triggers:
   - install a skill
   - add an agent skill
   - search the skills marketplace
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -74,7 +74,7 @@ and recommends without trying to write protected active roots.
    runtime name, whole-package owner, selected scope and component availability.
    Report disabled, foreign, shadowed or invalid states plainly; an installed
    directory alone is not success. Use `/skill <runtime-name>` for activation;
-   `/skills` opens the category browser. Do not invent an audit status. A copy
+   `/library skills` opens the category browser. Do not invent an audit status. A copy
    its catalog has moved past reads `update <version> available` in
    `library list`; `library update --all` brings those forward.
 
