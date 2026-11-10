@@ -35,6 +35,8 @@ export interface ProposeInjectedTaskMemoryInput {
 	writeOptions?: MemoryMutationOptions;
 	/** Only a caller that checked concrete source evidence may report a held lesson. */
 	observation?: "held";
+	/** Entry ids whose evidence command the caller saw succeed (`lessonEvidence` returned "command"). */
+	commandVerified?: ReadonlySet<string>;
 }
 
 export interface ProposeInjectedTaskMemoryResult {
@@ -61,7 +63,12 @@ export async function proposeInjectedTaskMemory(
 		if (entry.kind === "status") continue;
 		try {
 			const record = memoryRecordFromPromotion(
-				{ kind: "task-bank-entry", sessionId, evidenceRefs: [`session:${sessionId}`, ...evidenceIdentity(entry)], entry },
+				{
+					kind: "task-bank-entry",
+					sessionId,
+					evidenceRefs: [`session:${sessionId}`, ...evidenceIdentity(entry, input.commandVerified?.has(entry.id) === true)],
+					entry,
+				},
 				{ scope: "repo", repository },
 				input.now ?? new Date(),
 			);
@@ -146,12 +153,20 @@ function similarRepositoryLesson(
  * one simple invocation quoted whole in the lesson (a compound or commented
  * command proves nothing about the program it names), and its quoted source.
  * These name what the lesson recommends; they are not verdicts. Whether a
- * receipt satisfied them is decided by `lessonEvidence` and the gate.
+ * receipt satisfied them is decided by `lessonEvidence` and the gate. A lesson
+ * that also quotes a source carries its command only once the caller saw that
+ * command succeed: the gate approves without the operator only on a `command:`
+ * ref, and a lesson kept on its quote alone must not reach it by naming one.
  */
-export function evidenceIdentity(entry: TaskMemoryEntry): string[] {
+export function evidenceIdentity(entry: TaskMemoryEntry, commandVerified = false): string[] {
 	const refs: string[] = [];
 	const command = entry.evidenceCommand?.trim();
-	if (command && simpleInvocation(command) !== null && entry.content.includes(`\`${command}\``))
+	if (
+		command &&
+		(commandVerified || entry.evidenceSource === undefined) &&
+		simpleInvocation(command) !== null &&
+		entry.content.includes(`\`${command}\``)
+	)
 		refs.push(commandEvidenceRef(command));
 	if (entry.evidenceSource) refs.push(sourceEvidenceRef(entry.evidenceSource.path, entry.evidenceSource.quote));
 	return refs;

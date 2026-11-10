@@ -131,6 +131,7 @@ export interface MemoryGuardianDeps {
 		root: string;
 		grounded: ReadonlyArray<TaskMemoryEntry>;
 		ungrounded: ReadonlyArray<TaskMemoryEntry>;
+		commandVerified?: ReadonlyArray<string>;
 	}): Promise<HistoryFiling | undefined> | HistoryFiling | undefined;
 	telemetry?: TaskMemoryTelemetrySink;
 	onStateChange(state: MemoryGuardianState): void;
@@ -422,14 +423,16 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 				bank.saveKnowledge(recipe.content, { durable: true, evidenceCommand: recipe.command });
 		const lessons = bank.snapshot().knowledge.filter((entry) => entry.durable === true);
 		const root = deps.workspaceRoot();
-		const grounded = lessons.filter(
-			(entry) =>
-				lessonEvidence(entry, {
-					succeededCommands: slice.succeededCommands,
-					observedReads: slice.observedReads,
-					workspaceRoot: root,
-				}) !== null,
-		);
+		const commandVerified: string[] = [];
+		const grounded = lessons.filter((entry) => {
+			const kind = lessonEvidence(entry, {
+				succeededCommands: slice.succeededCommands,
+				observedReads: slice.observedReads,
+				workspaceRoot: root,
+			});
+			if (kind === "command") commandVerified.push(entry.id);
+			return kind !== null;
+		});
 		const ungrounded = lessons.filter((entry) => !grounded.includes(entry));
 		if (lessons.length > 0) {
 			// The excerpt counts as reviewed only once what it taught is durable:
@@ -438,7 +441,13 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 			let filing: HistoryFiling = "failed";
 			try {
 				filing =
-					(await deps.onHistoryLessons({ sessionId: slice.sessionId, root: slice.root, grounded, ungrounded })) ?? "filed";
+					(await deps.onHistoryLessons({
+						sessionId: slice.sessionId,
+						root: slice.root,
+						grounded,
+						ungrounded,
+						commandVerified,
+					})) ?? "filed";
 			} catch {
 				filing = "failed";
 			}

@@ -46,6 +46,8 @@ export interface HistoryLessons {
 	root: string;
 	grounded: ReadonlyArray<TaskMemoryEntry>;
 	ungrounded: ReadonlyArray<TaskMemoryEntry>;
+	/** Ids of grounded lessons whose own command the excerpt saw succeed. */
+	commandVerified?: ReadonlyArray<string>;
 }
 
 /** Filed in the store, or saved as pending candidates the next replay will file; false means neither. */
@@ -115,7 +117,7 @@ export class MemoryLessonFeedback {
 			filed.held = true;
 			return [filed.record];
 		});
-		if (fresh.length > 0) this.#propose(fresh, "held");
+		if (fresh.length > 0) this.#propose(fresh, "held", undefined, review.commandVerified);
 		if (nowHeld.length > 0) this.#observeResolved(nowHeld, "held", "held lessons not recorded");
 		const unfounded = review.ungrounded.filter((entry) => this.#proposed.get(entry.id)?.content !== entry.content);
 		if (unfounded.length > 0) this.#propose(unfounded, null);
@@ -305,6 +307,7 @@ export class MemoryLessonFeedback {
 			root: input.root,
 			grounded: input.grounded,
 			ungrounded: input.ungrounded,
+			...(input.commandVerified !== undefined ? { commandVerified: input.commandVerified } : {}),
 			at: new Date().toISOString(),
 		});
 		if (Buffer.byteLength(body) > HISTORY_CANDIDATE_MAX_BYTES) return null;
@@ -352,6 +355,7 @@ export class MemoryLessonFeedback {
 				sessionId: input.sessionId,
 				cwd: input.root,
 				entries,
+				...(input.commandVerified !== undefined ? { commandVerified: new Set(input.commandVerified) } : {}),
 			});
 			for (const error of result.errors) this.#ports.diagnostic(`proposed record not written for ${error}`);
 			const held = [
@@ -377,7 +381,12 @@ export class MemoryLessonFeedback {
 	}
 
 	/** Propose entries at repository scope and record what the session observed about each. */
-	#propose(entries: ReadonlyArray<TaskMemoryEntry>, kind: "delivered" | "held" | null, scopeSessionId?: string): void {
+	#propose(
+		entries: ReadonlyArray<TaskMemoryEntry>,
+		kind: "delivered" | "held" | null,
+		scopeSessionId?: string,
+		commandVerified?: ReadonlySet<string>,
+	): void {
 		const session = this.#ports.session();
 		const sessionId = scopeSessionId ?? session?.id ?? null;
 		if (sessionId !== null && this.#ports.sessionFlowRestricted?.(sessionId) === true) return;
@@ -388,6 +397,7 @@ export class MemoryLessonFeedback {
 					sessionId,
 					cwd: session?.cwd || process.cwd(),
 					entries,
+					...(commandVerified !== undefined ? { commandVerified } : {}),
 				}),
 			)
 			.then(async (result) => {
@@ -512,6 +522,9 @@ function readHistoryCandidates(path: string): HistoryLessons | "corrupt" | "unre
 			root: value.root,
 			grounded: value.grounded as TaskMemoryEntry[],
 			ungrounded: value.ungrounded as TaskMemoryEntry[],
+			...(Array.isArray(value.commandVerified)
+				? { commandVerified: value.commandVerified.filter((id): id is string => typeof id === "string") }
+				: {}),
 		};
 	} catch {
 		return "corrupt"; /* A pending file that does not parse carries nothing that can be filed. */

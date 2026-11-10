@@ -360,6 +360,18 @@ async function retainWithinDeadline(
 			cwd: input.cwd,
 			entries: lessons,
 			observation: "held",
+			commandVerified: new Set(
+				lessons
+					.filter(
+						(entry) =>
+							lessonEvidence(entry, {
+								succeededCommands: input.source.succeededCommands,
+								observedReads: input.source.observedReads,
+								workspaceRoot: input.cwd,
+							}) === "command",
+					)
+					.map((entry) => entry.id),
+			),
 			writeOptions: { signal: input.signal, timeoutMs: 100, isCurrent: input.isCurrent },
 		});
 		const retained = [

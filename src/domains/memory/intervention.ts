@@ -220,6 +220,8 @@ export interface MemoryKnowledgeReview {
 	withdrawn: ReadonlyArray<TaskMemoryEntry>;
 	/** Lessons kept on a later look with nothing observed to ground them; filed, never evidence. */
 	ungrounded: ReadonlyArray<TaskMemoryEntry>;
+	/** Ids of kept lessons grounded by their own command succeeding, not only by a quote. */
+	commandVerified?: ReadonlySet<string>;
 }
 
 const TURN_LOG_LIMIT = 40;
@@ -526,8 +528,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			return process.cwd();
 		}
 	};
-	const lessonIsGrounded = (entry: TaskMemoryEntry): boolean =>
-		lessonEvidence(entry, { succeededCommands, observedReads, workspaceRoot: workspaceRoot() }) !== null;
+	const groundingOf = (entry: TaskMemoryEntry) =>
+		lessonEvidence(entry, { succeededCommands, observedReads, workspaceRoot: workspaceRoot() });
 	let toolStep = 0;
 	let lastTurnEndStep = 0;
 	/**
@@ -1631,14 +1633,17 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const unchanged = lessons.filter((entry) => after.get(entry.id)?.content === entry.content);
 		// Grounding reads the live entry: the evidence command is part of what the
 		// model kept, and it has to equal a command the host ran.
+		const commandVerified = new Set<string>();
 		const kept = unchanged.filter((entry) => {
 			const live = after.get(entry.id);
-			return live !== undefined && lessonIsGrounded(live);
+			const kind = live === undefined ? null : groundingOf(live);
+			if (kind === "command") commandVerified.add(entry.id);
+			return kind !== null;
 		});
 		const ungrounded = unchanged.filter((entry) => !kept.includes(entry));
 		const withdrawn = lessons.filter((entry) => after.get(entry.id)?.content !== entry.content);
 		try {
-			deps.onKnowledgeReview({ kept, withdrawn, ungrounded });
+			deps.onKnowledgeReview({ kept, withdrawn, ungrounded, commandVerified });
 		} catch {
 			// Same contract as onInjectedEntries: the store's failure is not the session's.
 		}
