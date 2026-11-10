@@ -1,15 +1,36 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { startedUnderClioAgent } from "../core/agent-environment.js";
 import { resolvePackageRoot } from "../core/package-root.js";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
 import type { SegmentHeader } from "../core/telemetry/envelope.js";
 import { clioStateDir } from "../core/xdg.js";
+import {
+	consentText,
+	deleteShareGist,
+	detectTransport,
+	findDiscussionCategory,
+	newShareId,
+	postDiscussion,
+	type ReportCommandRunner,
+	readShareReceipts,
+	reportEnvironment,
+	reportsDirectory,
+	SHARE_ID,
+	SHARE_RETENTION_DAYS,
+	sweepShareGists,
+	telemetryShareDigest,
+	updateShareReceipt,
+	uploadShare,
+} from "../domains/report/index.js";
 import type { SharePlan, ShareProfile, ShareScopeKind, ShareSelection } from "../domains/telemetry/share.js";
 import {
 	freshShareSource,
 	importShareArchive,
 	isShareProfile,
 	listShareCandidates,
+	packShare,
 	planShare,
 	resolveShareScopes,
 	SHARE_PROFILE_NAMES,
@@ -24,10 +45,13 @@ import { printError } from "./shared.js";
 export const SHARE_HELP = `clio-coder telemetry share [--session <id>]... [--run <id>]... [--process <id>]... [--repo <path>]
                            [--since <iso>] [--until <iso>] [--live]
                            [--profile content-free|report|structural|research] [--out <file>] [--dry-run]
+                           [--send --consent debug|dataset [--yes]]
+clio-coder telemetry share list
+clio-coder telemetry share forget <shareId>
 clio-coder telemetry import <archive>
 
-share packs sealed telemetry scopes into one tar.gz for the maintainer; nothing is
-uploaded. Pick sessions, runs, a repository's sessions or a seal-time range; a
+share packs sealed telemetry scopes into one tar.gz for the maintainer; without
+--send nothing is uploaded. Pick sessions, runs, a repository's sessions or a seal-time range; a
 session brings the runs it references, and a scope that is live or fails
 verification is skipped and named. --live shares a named scope that is still
 live as a snapshot of what is on disk, without sealing or touching it; a
@@ -47,6 +71,17 @@ scope, record and object counts and what the profile drops before writing, and
 for report every name left readable; --dry-run stops there.
 --out defaults to a timestamped file in the current directory and is never
 overwritten.
+
+--send shares the archive instead of writing it, only when you run it: it seals the
+archive so that only the Clio Coder maintainers can open it, uploads it as a secret
+gist in your GitHub account through your own gh, and opens a public discussion in
+"Telemetry shares" on iowarp/clio-coder that names the gist and nothing else.
+--consent debug lets the maintainers read it to fix Clio; dataset also lets them
+publish an anonymized dataset from it. It takes the content-free, structural or
+research profile, asks before sending in a terminal and needs --yes outside one,
+and is refused in a command a Clio session started. list shows what this machine
+shared; forget <shareId> deletes the gist, and Clio deletes it ${SHARE_RETENTION_DAYS} days after
+sending.
 
 import verifies every bundle in an archive as telemetry verify does, then places
 the scopes under the state directory's telemetry/imported/<install-id>/,
@@ -135,9 +170,17 @@ interface ShareArgs {
 	profile: ShareProfile | null;
 	out: string | null;
 	dryRun: boolean;
+	send: { consent: ReadonlyArray<"debug" | "dataset">; yes: boolean } | null;
 }
 
-const SINGLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["--repo", "--since", "--until", "--profile", "--out"]);
+const SINGLE_VALUE_FLAGS: ReadonlySet<string> = new Set([
+	"--repo",
+	"--since",
+	"--until",
+	"--profile",
+	"--out",
+	"--consent",
+]);
 
 function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	const sessions: string[] = [];
@@ -146,10 +189,20 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	const single = new Map<string, string>();
 	let dryRun = false;
 	let live = false;
+	let send = false;
+	let yes = false;
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index] as string;
 		if (arg === "--dry-run") {
 			dryRun = true;
+			continue;
+		}
+		if (arg === "--send") {
+			send = true;
+			continue;
+		}
+		if (arg === "--yes") {
+			yes = true;
 			continue;
 		}
 		if (arg === "--live") {
@@ -182,6 +235,12 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	if (until instanceof Error) return until.message;
 	const repo = single.get("--repo");
 	const out = single.get("--out");
+	const consent = single.get("--consent");
+	if (!send && (consent !== undefined || yes)) return "--consent and --yes apply only with --send";
+	if (send && consent !== "debug" && consent !== "dataset") return "--send needs --consent debug or --consent dataset";
+	if (send && out !== undefined) return "--send uploads the archive instead of writing it: drop --out";
+	if (send && profile === "report")
+		return "--send takes the content-free, structural or research profile; a report profile archive goes with a report";
 	return {
 		selection: {
 			sessions,
@@ -195,6 +254,7 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 		profile,
 		out: out === undefined ? null : resolve(out),
 		dryRun,
+		send: send ? { consent: consent === "dataset" ? ["debug", "dataset"] : ["debug"], yes } : null,
 	};
 }
 
@@ -209,26 +269,239 @@ function selectsNothing(selection: ShareSelection): boolean {
 	);
 }
 
-/** `telemetry share`: exit 0 written or previewed, 1 nothing to share or a failure, 2 on usage errors (#434). */
-export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<number> {
-	const args = parseShare(argv);
-	if (typeof args === "string") {
-		printError(args);
-		process.stderr.write(SHARE_HELP);
+/** What `telemetry share` reaches outside itself; tests replace it. */
+export interface TelemetryShareDeps {
+	stateDir?: string;
+	env?: NodeJS.ProcessEnv;
+	interactive?: boolean;
+	findGh?: () => string | null;
+	run?: ReportCommandRunner;
+	stdout?: (text: string) => void;
+	stderr?: (text: string) => void;
+	now?: () => Date;
+}
+
+interface ShareIo {
+	stateDir: string;
+	env: NodeJS.ProcessEnv;
+	out: (text: string) => void;
+	fail: (message: string) => void;
+	deps: TelemetryShareDeps;
+}
+
+function shareIo(deps: TelemetryShareDeps): ShareIo {
+	const stderr = deps.stderr;
+	return {
+		stateDir: deps.stateDir ?? clioStateDir(),
+		env: deps.env ?? process.env,
+		out: deps.stdout ?? ((text) => process.stdout.write(text)),
+		fail: stderr === undefined ? (message) => printError(message) : (message) => stderr(`error: ${message}\n`),
+		deps,
+	};
+}
+
+async function findGhFor(deps: TelemetryShareDeps): Promise<() => string | null> {
+	if (deps.findGh !== undefined) return deps.findGh;
+	const { resolveToolBinary } = await import("../domains/toolchain/index.js");
+	return () => resolveToolBinary("gh").binaryPath;
+}
+
+function ghDeps(io: ShareIo, gh: string) {
+	return { gh, env: io.env, ...(io.deps.run !== undefined ? { run: io.deps.run } : {}) };
+}
+
+async function sweep(io: ShareIo): Promise<void> {
+	await sweepShareGists(io.stateDir, {
+		findGh: await findGhFor(io.deps),
+		env: io.env,
+		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+		...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+	});
+}
+
+const DISCUSSION_CATEGORY = "Telemetry shares";
+
+/** The public discussion a telemetry share leaves: a plain note and the pointer block the maintainers' intake reads. */
+function pointerBody(fields: {
+	gistId: string;
+	shareId: string;
+	version: string;
+	consent: string;
+	profile: string;
+}): string {
+	return [
+		"An encrypted telemetry share from Clio Coder. Only the Clio Coder maintainers can open it; counts derived from it, never its contents, help rank what to fix next.",
+		"",
+		`The sender can delete it at any time with \`clio-coder telemetry share forget ${fields.shareId}\`; Clio Coder deletes it ${SHARE_RETENTION_DAYS} days after sending.`,
+		"",
+		"```clio-coder-share",
+		"v: 1",
+		`share: gist:${fields.gistId}#${fields.shareId}`,
+		"kind: telemetry-share",
+		`version: ${fields.version}`,
+		`consent: ${fields.consent}`,
+		`profile: ${fields.profile}`,
+		"```",
+		"",
+	].join("\n");
+}
+
+/** `telemetry share list`: what this machine shared, live or deleted. */
+async function listShares(io: ShareIo): Promise<number> {
+	await sweep(io);
+	const shares = Object.entries(readShareReceipts(io.stateDir)).sort(([, a], [, b]) => a.sentAt.localeCompare(b.sentAt));
+	if (shares.length === 0) {
+		io.out("no shares sent from this machine\n");
+		return 0;
+	}
+	for (const [shareId, receipt] of shares) {
+		const state = receipt.deletedAt === null ? "live" : `deleted ${receipt.deletedAt.slice(0, 10)}`;
+		const where = receipt.url ?? (receipt.reportId !== undefined ? `report ${receipt.reportId}` : "");
+		io.out(
+			`${shareId}  ${receipt.kind}  ${receipt.sentAt.slice(0, 10)}  ${state}  consent ${receipt.consent}  ${receipt.profile}  gist ${receipt.gistId}  ${where}\n`,
+		);
+	}
+	return 0;
+}
+
+/** `telemetry share forget <shareId>`: delete the share's gist. The public pointer stays, naming a gist that is gone. */
+async function forgetShare(io: ShareIo, shareId: string | undefined): Promise<number> {
+	if (shareId === undefined || !SHARE_ID.test(shareId)) {
+		io.fail("usage: clio-coder telemetry share forget <shareId> (clio-coder telemetry share list names them)");
 		return 2;
 	}
-	const stateDir = clioStateDir();
-	const interactive = canSelect();
+	const receipt = readShareReceipts(io.stateDir)[shareId];
+	if (receipt === undefined) {
+		io.fail(`no share ${shareId} was sent from this machine; clio-coder telemetry share list names them`);
+		return 1;
+	}
+	if (receipt.deletedAt !== null) {
+		io.out(`${shareId} was already deleted on ${receipt.deletedAt}\n`);
+		return 0;
+	}
+	const gh = (await findGhFor(io.deps))();
+	if (gh === null) {
+		io.fail(
+			`deleting gist ${receipt.gistId} needs gh, which is not on PATH; or delete it at https://gist.github.com/${receipt.gistId}`,
+		);
+		return 1;
+	}
+	const deleted = await deleteShareGist(receipt.gistId, ghDeps(io, gh));
+	if ("failed" in deleted) {
+		io.fail(`nothing forgotten: ${deleted.failed}`);
+		return 1;
+	}
+	updateShareReceipt(io.stateDir, shareId, { deletedAt: (io.deps.now?.() ?? new Date()).toISOString() });
+	io.out(
+		`deleted the encrypted share ${shareId} (gist ${receipt.gistId}); the maintainers' counts drop it on their next daily run\n`,
+	);
+	return 0;
+}
+
+/** Seal, upload and point at the archive; any failure after the gist exists deletes it again. */
+async function sendShare(
+	io: ShareIo,
+	plan: SharePlan,
+	consent: ReadonlyArray<"debug" | "dataset">,
+	gh: string,
+	target: Parameters<typeof postDiscussion>[2],
+): Promise<number> {
+	const deps = ghDeps(io, gh);
+	const now = io.deps.now?.() ?? new Date();
+	const shareId = newShareId();
+	const archive = packShare(plan);
+	const digest = telemetryShareDigest(archive, {
+		platform: process.platform,
+		install: reportEnvironment("headless").install,
+		profile: plan.profile,
+	});
+	const uploaded = await uploadShare(
+		io.stateDir,
+		{
+			kind: "telemetry-share",
+			shareId,
+			clio: plan.clioCoderVersion,
+			consent,
+			digest,
+			archiveFormat: "clio-coder.telemetry.share",
+			archive,
+			now,
+		},
+		deps,
+	);
+	if ("failed" in uploaded) {
+		io.fail(`nothing shared: ${uploaded.failed}`);
+		return 1;
+	}
+	const { gistId } = uploaded;
+	const consentLine = consent.join(",");
+	// Recorded before posting, so a gist is never left without a receipt that can delete it.
+	updateShareReceipt(io.stateDir, shareId, {
+		kind: "telemetry-share",
+		gistId,
+		sentAt: now.toISOString(),
+		consent: consentLine,
+		profile: plan.profile,
+	});
+	const bodyPath = join(reportsDirectory(io.stateDir), `${shareId}.discussion.md`);
+	safeResourceWrite(
+		bodyPath,
+		pointerBody({ gistId, shareId, version: plan.clioCoderVersion, consent: consentLine, profile: plan.profile }),
+		{ mode: 0o600 },
+	);
+	let posted: Awaited<ReturnType<typeof postDiscussion>>;
+	try {
+		posted = await postDiscussion(`Telemetry share ${shareId}`, bodyPath, target, gh, deps);
+	} finally {
+		rmSync(bodyPath, { force: true });
+	}
+	if ("failed" in posted) {
+		const deleted = await deleteShareGist(gistId, deps);
+		if ("failed" in deleted) io.fail(`${deleted.failed}; delete it at https://gist.github.com/${gistId}`);
+		else updateShareReceipt(io.stateDir, shareId, { deletedAt: new Date().toISOString() });
+		io.fail(`nothing shared: ${posted.failed}`);
+		return 1;
+	}
+	updateShareReceipt(io.stateDir, shareId, { url: posted.url });
+	io.out(
+		`shared ${shareId}: encrypted in secret gist ${gistId}, announced at ${posted.url}\ndelete it with: clio-coder telemetry share forget ${shareId}\n`,
+	);
+	return 0;
+}
+
+/** `telemetry share`: exit 0 written, sent or previewed, 1 nothing to share or a failure, 2 on usage errors (#434). */
+export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: TelemetryShareDeps = {}): Promise<number> {
+	const io = shareIo(deps);
+	try {
+		if (argv[0] === "list" && argv.length === 1) return await listShares(io);
+		if (argv[0] === "forget" && argv.length <= 2) return await forgetShare(io, argv[1]);
+	} catch (error) {
+		io.fail(`cannot ${argv[0]} shares: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+	const args = parseShare(argv);
+	if (typeof args === "string") {
+		io.fail(args);
+		(deps.stderr ?? ((text) => process.stderr.write(text)))(SHARE_HELP);
+		return 2;
+	}
+	const send = args.send;
+	if (send !== null && !args.dryRun && startedUnderClioAgent(io.env)) {
+		io.fail("nothing sent: an agent never shares telemetry; run telemetry share --send yourself in your own terminal");
+		return 2;
+	}
+	const stateDir = io.stateDir;
+	const interactive = deps.interactive ?? canSelect();
 	let selection = args.selection;
 	if (selectsNothing(selection)) {
 		if (!interactive) {
-			printError("share needs --session, --run, --process, --repo, or --since/--until outside a terminal");
-			process.stderr.write(SHARE_HELP);
+			io.fail("share needs --session, --run, --process, --repo, or --since/--until outside a terminal");
+			(deps.stderr ?? ((text) => process.stderr.write(text)))(SHARE_HELP);
 			return 2;
 		}
 		const candidates = listShareCandidates(stateDir);
 		if (candidates.length === 0) {
-			printError("no sealed session or run scope to share");
+			io.fail("no sealed session or run scope to share");
 			return 1;
 		}
 		const picked = await promptMultiSelect<{ kind: ShareScopeKind; id: string }>({
@@ -244,7 +517,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 			clearOnExit: true,
 		});
 		if (picked.kind !== "selected" || picked.values.length === 0) {
-			process.stdout.write("nothing shared\n");
+			io.out("nothing shared\n");
 			return 1;
 		}
 		selection = {
@@ -257,21 +530,25 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 	if (args.profile === null && interactive) {
 		const chosen = await promptSelect<ShareProfile>({
 			heading: "Share profile",
-			choices: SHARE_PROFILE_NAMES.map((name) => ({ value: name, label: name, hint: SHARE_PROFILES[name].summary })),
+			choices: SHARE_PROFILE_NAMES.filter((name) => send === null || name !== "report").map((name) => ({
+				value: name,
+				label: name,
+				hint: SHARE_PROFILES[name].summary,
+			})),
 			backLabel: "cancel",
 			clearOnExit: true,
 		});
 		if (chosen.kind !== "selected") {
-			process.stdout.write("nothing shared\n");
+			io.out("nothing shared\n");
 			return 1;
 		}
 		profile = chosen.value;
 	}
 	try {
 		const { scopes, skipped } = resolveShareScopes(stateDir, selection);
-		for (const skip of skipped) process.stdout.write(`skipped ${skip.kind} ${skip.id}: ${skip.reason}\n`);
+		for (const skip of skipped) io.out(`skipped ${skip.kind} ${skip.id}: ${skip.reason}\n`);
 		if (scopes.length === 0) {
-			printError("nothing to share: no selected scope is sealed and verified");
+			io.fail("nothing to share: no selected scope is sealed and verified");
 			return 1;
 		}
 		const plan = planShare({
@@ -283,10 +560,55 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 			writer: packageWriter(),
 			...(profile === "report" ? { inventory: true as const } : {}),
 		});
-		process.stdout.write(preview(plan));
+		io.out(preview(plan));
+		if (send !== null) {
+			const text = consentText();
+			io.out(
+				`--send seals this archive so that only the Clio Coder maintainers can open it, uploads it as a secret gist in your GitHub account, and opens a public discussion in "${DISCUSSION_CATEGORY}" on iowarp/clio-coder that names the gist.\nBy sending it you agree to:\n  ${text.debug}\n${send.consent.includes("dataset") ? `  ${text.dataset}\n` : ""}  ${text.share}\n`,
+			);
+		}
 		if (args.dryRun) {
-			process.stdout.write("dry run: nothing written\n");
+			io.out(send === null ? "dry run: nothing written\n" : "dry run: nothing sent\n");
 			return 0;
+		}
+		if (send !== null) {
+			if (!interactive && !send.yes) {
+				io.fail("nothing sent: pass --yes to send outside a terminal");
+				return 2;
+			}
+			await sweep(io);
+			const findGh = await findGhFor(deps);
+			const transport = await detectTransport(io.env, {
+				findGh,
+				browserAvailable: () => false,
+				...(deps.run !== undefined ? { run: deps.run } : {}),
+			});
+			if (transport.kind !== "gh") {
+				io.fail("nothing sent: --send needs gh installed and signed in to github.com (gh auth login)");
+				return 1;
+			}
+			const target = await findDiscussionCategory(DISCUSSION_CATEGORY, transport.path, ghDeps(io, transport.path));
+			if (target === null) {
+				io.fail(
+					`nothing sent: the "${DISCUSSION_CATEGORY}" discussion category on iowarp/clio-coder could not be found; nothing was uploaded`,
+				);
+				return 1;
+			}
+			if (interactive) {
+				const confirm = await promptSelect<boolean>({
+					heading: "Send this encrypted share to the Clio Coder maintainers?",
+					choices: [
+						{ value: true, label: "send" },
+						{ value: false, label: "cancel" },
+					],
+					clearOnExit: true,
+				});
+				if (confirm.kind !== "selected" || !confirm.value) {
+					io.out("nothing sent\n");
+					return 1;
+				}
+			}
+			return await sendShare(io, plan, send.consent, transport.path, target);
 		}
 		const out =
 			args.out ?? resolve(`clio-coder-telemetry-${plan.createdAt.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}.tar.gz`);
@@ -300,15 +622,15 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 				clearOnExit: true,
 			});
 			if (confirm.kind !== "selected" || !confirm.value) {
-				process.stdout.write("nothing written\n");
+				io.out("nothing written\n");
 				return 1;
 			}
 		}
 		const bytes = await writeShare(plan, out);
-		process.stdout.write(`wrote ${out} (${formatBytes(bytes)})\n`);
+		io.out(`wrote ${out} (${formatBytes(bytes)})\n`);
 		return 0;
 	} catch (error) {
-		printError(`cannot share telemetry: ${error instanceof Error ? error.message : String(error)}`);
+		io.fail(`cannot share telemetry: ${error instanceof Error ? error.message : String(error)}`);
 		return 1;
 	}
 }

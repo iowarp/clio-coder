@@ -225,6 +225,7 @@ export {
 export {
 	checkLastAttempt,
 	detectTransport,
+	findDiscussionCategory,
 	ghEnvironment,
 	type LastAttempt,
 	newReportLink,

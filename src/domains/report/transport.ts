@@ -294,8 +294,9 @@ export async function sendReport(
 
 	record({ transport: "gh", state: "sending" });
 	if (route.name === "discussion") {
-		const filed = await createDiscussion(rendered.title, path, transport.path, run, options);
-		if (filed === null) return offline();
+		const target = await discussionCategory("Help", transport.path, run, options);
+		if (target === null) return offline();
+		const filed = await createDiscussion(rendered.title, path, target, transport.path, run, options);
 		if ("failed" in filed) return { status: "failed", reason: filed.failed, path };
 		record({ transport: "gh", state: "sent", url: filed.url, number: filed.number, sentAt: now().toISOString() });
 		return { status: "sent", ...filed, adopted: false };
@@ -416,14 +417,17 @@ async function findFiled(
 	return match === null ? null : { url: issueUrl(Number(match[1])), number: Number(match[1]) };
 }
 
-async function createDiscussion(
-	title: string,
-	bodyPath: string,
+export interface DiscussionCategory {
+	repositoryId: string;
+	categoryId: string;
+}
+
+async function discussionCategory(
+	category: string,
 	gh: string,
 	run: ReportCommandRunner,
 	options: GhOptions,
-	category = "Help",
-): Promise<{ url: string; number: number } | { failed: string } | null> {
+): Promise<DiscussionCategory | null> {
 	const ids = await run(
 		gh,
 		[
@@ -444,6 +448,17 @@ async function createDiscussion(
 	);
 	const [repositoryId, categoryId] = ids.stdout.trim().split("\t");
 	if (ids.exitCode !== 0 || !repositoryId || !categoryId) return null;
+	return { repositoryId, categoryId };
+}
+
+async function createDiscussion(
+	title: string,
+	bodyPath: string,
+	target: DiscussionCategory,
+	gh: string,
+	run: ReportCommandRunner,
+	options: GhOptions,
+): Promise<{ url: string; number: number } | { failed: string }> {
 	const created = await run(
 		gh,
 		[
@@ -452,9 +467,9 @@ async function createDiscussion(
 			"--hostname",
 			"github.com",
 			"-f",
-			`repositoryId=${repositoryId}`,
+			`repositoryId=${target.repositoryId}`,
 			"-f",
-			`categoryId=${categoryId}`,
+			`categoryId=${target.categoryId}`,
 			"-f",
 			`title=${title}`,
 			"-F",
@@ -473,19 +488,26 @@ async function createDiscussion(
 	return { url: match[0], number: Number(match[1]) };
 }
 
-/**
- * Post a public discussion in `category` on the report repository: the pointer a telemetry share leaves. Null when the
- * category could not be found, so nothing was posted.
- */
-export async function postDiscussion(
-	title: string,
-	bodyPath: string,
+/** The ids a discussion in `category` on the report repository is posted under; null when the category is not there. */
+export async function findDiscussionCategory(
 	category: string,
 	gh: string,
 	deps: { run?: ReportCommandRunner; env?: NodeJS.ProcessEnv },
-): Promise<{ url: string; number: number } | { failed: string } | null> {
+): Promise<DiscussionCategory | null> {
 	const options = { timeoutMs: REPORT_GH_TIMEOUT_MS, env: ghEnvironment(deps.env ?? process.env) };
-	return createDiscussion(title, bodyPath, gh, deps.run ?? runReportCommand, options, category);
+	return discussionCategory(category, gh, deps.run ?? runReportCommand, options);
+}
+
+/** Post a public discussion on the report repository under a category `findDiscussionCategory` found. */
+export async function postDiscussion(
+	title: string,
+	bodyPath: string,
+	target: DiscussionCategory,
+	gh: string,
+	deps: { run?: ReportCommandRunner; env?: NodeJS.ProcessEnv },
+): Promise<{ url: string; number: number } | { failed: string }> {
+	const options = { timeoutMs: REPORT_GH_TIMEOUT_MS, env: ghEnvironment(deps.env ?? process.env) };
+	return createDiscussion(title, bodyPath, target, gh, deps.run ?? runReportCommand, options);
 }
 
 async function addToIssue(
