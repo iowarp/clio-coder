@@ -12,6 +12,7 @@ import {
 	COMMANDS_REFUSED_DURING_TURN,
 	type CommandMatch,
 	commandReference,
+	isRetiredCommandName,
 	lettersInOrder,
 	matchCommandReference,
 	parseSlashCommand,
@@ -554,7 +555,9 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		if (cursorCol <= context.commandEnd) {
 			const prefix = context.line.slice(context.commandStart, cursorCol);
 			// A complete built-in name wins: Enter runs it instead of a longer sibling (`/skill`, not `/skills`).
-			if (refs.some((ref) => ref.name === prefix)) return null;
+			// A retired name typed in full does too, so Enter shows its notice and runs the successor
+			// instead of whichever row its description matched (`/workspace` would open Rewind).
+			if (refs.some((ref) => ref.name === prefix) || isRetiredCommandName(prefix)) return null;
 			let matches: ReadonlyArray<CommandMatch> = matchCommandReference(prefix, refs).filter(
 				(match) => !this.hidden(match.ref.name),
 			);

@@ -96,6 +96,14 @@ test("unprovided dynamic slots have no values", async () => {
 	deepStrictEqual(result, null);
 });
 
+test("a retired name typed in full offers no row, so Enter reaches its notice", async () => {
+	const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+	for (const line of ["/workspace", "/health"]) {
+		const result = await provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal });
+		deepStrictEqual(result, null, line);
+	}
+});
+
 // Stop presentation construction at its existing autocomplete factory seam;
 // the real presentation supplies the catalogs and the real provider consumes them.
 function presentationProvider(userTasks?: UserTasksStore) {

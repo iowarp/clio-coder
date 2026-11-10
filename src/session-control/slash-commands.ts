@@ -329,6 +329,11 @@ export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
 	{ name: "peer", since: "0.7.1", to: { command: "/panes peer" } },
 ];
 
+/** A one-word retired name, typed bare, must reach `dispatchRetiredCommand` rather than a palette row. */
+export function isRetiredCommandName(name: string): boolean {
+	return RETIRED_COMMANDS.some((entry) => entry.name === name);
+}
+
 /** A two-word name such as `library reload` retires a verb of a live command, so it is checked first. */
 function matchRetiredCommand(trimmed: string, twoWordOnly = false): SlashCommand | null {
 	if (!trimmed.startsWith("/")) return null;
