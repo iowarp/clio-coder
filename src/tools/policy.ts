@@ -1,6 +1,10 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import { type ActionClass, classify } from "../domains/safety/action-classifier.js";
-import { DATA_OBSERVATION_SELF_CAP_BYTES, GATEWAY_FIND_SELF_CAP_BYTES } from "./gateway/caps.js";
+import {
+	DATA_OBSERVATION_SELF_CAP_BYTES,
+	GATEWAY_FIND_SELF_CAP_BYTES,
+	STORE_OBSERVATION_SELF_CAP_BYTES,
+} from "./gateway/caps.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { readMaxBytes } from "./read.js";
 import type { ToolExecutionMode, ToolSpec } from "./registry.js";
@@ -45,6 +49,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.ClioLibrary]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	// data streams structured files and never writes; parallel like read.
 	[ToolNames.Data]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	// store's base class is read; the classifier judges its write ops by op, and
+	// sequential because those writes share one store.
+	[ToolNames.Store]: { plane: "observe", actionClass: "read", executionMode: "sequential" },
 	// memory_recall reads the session task bank and the durable store and never writes either.
 	[ToolNames.MemoryRecall]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Write]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
@@ -124,6 +131,7 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 	[ToolNames.ClioDocs, () => OBSERVE_SELF_CAPS.contextDocs],
 	[ToolNames.ClioLibrary, () => OBSERVE_SELF_CAPS.contextLibrary],
 	[ToolNames.Data, () => DATA_OBSERVATION_SELF_CAP_BYTES],
+	[ToolNames.Store, () => STORE_OBSERVATION_SELF_CAP_BYTES],
 	[ToolNames.Gateway, () => GATEWAY_FIND_SELF_CAP_BYTES],
 ];
 

@@ -2,7 +2,7 @@ import { BASH_HARD_CAP_BYTES } from "../core/bash-exec.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import { BASH_DEFAULT_RESULT_DISPOSITION } from "./bash.js";
-import { DATA_OBSERVATION_SELF_CAP_BYTES } from "./gateway/caps.js";
+import { DATA_OBSERVATION_SELF_CAP_BYTES, STORE_OBSERVATION_SELF_CAP_BYTES } from "./gateway/caps.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import { readMaxBytes } from "./read.js";
@@ -217,6 +217,27 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			},
 			{ goal: "Select one value from JSON by pointer", args: { op: "select", path: "config.json", pointer: "/version" } },
 			{ goal: "Summarize one NetCDF or HDF5 variable", args: { op: "stats", path: "climate.nc", variable: "tas" } },
+		],
+	},
+	[ToolNames.Store]: {
+		objective:
+			"Keep files in this project's store as blobs in named tags, outside the working tree and shared with every worker, with what Clio recorded about each (size, hash, producing script, inputs) and a readable path on request.",
+		uiLabel: "Store",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: observePolicy(
+			STORE_OBSERVATION_SELF_CAP_BYTES,
+			"Pass pattern, offset or limit to list fewer blobs, or stat one blob.",
+		),
+		costLatency: "local_fast",
+		examples: [
+			{
+				goal: "Store a result file with a note",
+				args: { op: "put", tag: "results", path: "out/summary.csv", note: "baseline run" },
+			},
+			{
+				goal: "Get a readable path for a blob, then pass it to data inspect",
+				args: { op: "get", tag: "results", blob: "summary.csv" },
+			},
 		],
 	},
 	[ToolNames.MemoryRecall]: {

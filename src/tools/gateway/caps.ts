@@ -9,3 +9,6 @@ export const DATA_OBSERVATION_SELF_CAP_BYTES = 32 * 1024;
 
 /** Bytes of one `gateway` find listing before the JSON stub rule offloads it. */
 export const GATEWAY_FIND_SELF_CAP_BYTES = 32 * 1024;
+
+/** Bytes of one `store` result body before the JSON stub rule offloads it. */
+export const STORE_OBSERVATION_SELF_CAP_BYTES = 32 * 1024;

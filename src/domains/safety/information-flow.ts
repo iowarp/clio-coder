@@ -46,7 +46,7 @@ export { isFlowRestrictionSet } from "../../core/flow-restrictions.js";
 import path from "node:path";
 import type { PathWalkMemo } from "../../core/path-canonical.js";
 import { canonicalizePath, canonicalizeRawPath, createPathWalkMemo } from "../../core/path-canonical.js";
-import { isMcpToolName, STORE_TOOL_NAME, ToolNames } from "../../core/tool-names.js";
+import { isMcpToolName, ToolNames } from "../../core/tool-names.js";
 import { expandPath } from "../../tools/path-utils.js";
 import type { CompiledPathPolicy } from "./path-policy.js";
 import { compilePathPolicy, evaluatePathPolicy, isSameOrDescendant } from "./path-policy.js";
@@ -464,7 +464,7 @@ const READ_PATH_TOOLS: ReadonlyMap<string, string> = new Map([
 	[ToolNames.Find, "path"],
 	[ToolNames.Data, "path"],
 	// The store's put copies its workspace source, the same read data makes.
-	[STORE_TOOL_NAME, "path"],
+	[ToolNames.Store, "path"],
 ]);
 
 /** Tools that walk a directory: a restricted entry below the walked path is read through them. */

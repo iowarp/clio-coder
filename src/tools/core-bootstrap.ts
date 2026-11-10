@@ -46,6 +46,7 @@ import { createReadTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
 import { runScriptToolSurface } from "./run-script.js";
 import { gitTool } from "./safe-exec.js";
+import { prepareStoreAdmissionArguments, storeToolSurface } from "./store/surface.js";
 import { createTasksTool } from "./tasks.js";
 import { verifyToolSurface } from "./verify/surface.js";
 import { createVisionTool } from "./vision.js";
@@ -118,6 +119,11 @@ export interface CoreToolBootstrapDeps {
 	consult?: ConsultDeps;
 	visionSidecar?: VisionSidecar;
 	getRecentVisionImages?: () => ReadonlyArray<ImageContent>;
+	/**
+	 * The main session writes the store; a worker registry leaves this unset,
+	 * so its `store` reads and refuses create, put, note and remove.
+	 */
+	storeWritable?: boolean;
 }
 
 export interface CoreToolRegistration {
@@ -206,6 +212,22 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 				async () => (await import("./gateway/data-tool.js")).createDataTool({ getCwd: getWorkspaceRoot }),
 			),
 			{ path: "src/tools/gateway/data-tool.ts", scope: "core" },
+		),
+	});
+	registry.register({
+		...builtin(
+			lazyTool(
+				{
+					...storeToolSurface,
+					prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args, getWorkspaceRoot()),
+				},
+				async () =>
+					(await import("./store/store-tool.js")).createStoreTool({
+						getCwd: getWorkspaceRoot,
+						writable: deps.storeWritable === true,
+					}),
+			),
+			{ path: "src/tools/store/store-tool.ts", scope: "core" },
 		),
 	});
 	registry.register({

@@ -63,6 +63,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.ClioDocs]: FOLDED,
 	[ToolNames.ClioLibrary]: FOLDED,
 	[ToolNames.Data]: FOLDED,
+	[ToolNames.Store]: FOLDED,
 	[ToolNames.MemoryRecall]: FOLDED,
 	[ToolNames.Write]: FOLDED_WITH_DIFF,
 	[ToolNames.Edit]: FOLDED_WITH_DIFF,
@@ -433,6 +434,17 @@ const DATA_VERBS: Readonly<Record<string, readonly [string, string]>> = {
 	stats: ["summarizing", "summarized"],
 };
 
+const STORE_VERBS: Readonly<Record<string, readonly [string, string]>> = {
+	tags: ["listing tags", "listed tags"],
+	create: ["creating", "created"],
+	list: ["listing", "listed"],
+	stat: ["checking", "checked"],
+	get: ["getting", "got"],
+	put: ["putting", "put"],
+	note: ["noting", "noted"],
+	remove: ["removing", "removed"],
+};
+
 const MONITOR_VERBS: Readonly<Record<string, readonly [string, string]>> = {
 	status: ["checking", "checked"],
 	peek: ["peeking at", "peeked at"],
@@ -473,6 +485,17 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbsFor: (args) => DATA_VERBS[text(args, "op") ?? ""] ?? null,
 		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["op", "path"],
+	},
+	[ToolNames.Store]: {
+		class: "observe",
+		verbs: ["using store", "used store"],
+		verbsFor: (args) => STORE_VERBS[text(args, "op") ?? ""] ?? null,
+		object: (args) => {
+			const tag = text(args, "tag");
+			const blob = text(args, "blob");
+			return code(tag === null ? text(args, "ref") : blob === null ? tag : `${tag}:${blob}`);
+		},
+		consumes: ["op", "tag", "blob", "ref"],
 	},
 	[ToolNames.MemoryRecall]: {
 		class: "search",

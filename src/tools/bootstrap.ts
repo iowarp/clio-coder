@@ -105,6 +105,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	const mcpCapabilities = requestedMcp === false ? null : (requestedMcp ?? createMcpCapabilitySource({ cwd, registry }));
 	const registration = registerCoreTools(registry, {
 		...coreDeps,
+		storeWritable: true,
 		...(askUser
 			? {
 					askUser: async (questions, options) => {

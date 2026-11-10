@@ -4,7 +4,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { storeReadRoots, storeWriteTarget } from "../../core/store-paths.js";
-import { isHarnessExtensionToolName, STORE_TOOL_NAME, ToolNames } from "../../core/tool-names.js";
+import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
@@ -757,7 +757,7 @@ function classifyStore(args: Record<string, unknown> | undefined): Classificatio
 
 export function classify(rawCall: ClassifierCall): Classification {
 	const call = normalizeCallPaths(rawCall);
-	if (call.tool === STORE_TOOL_NAME) return classifyStore(call.args);
+	if (call.tool === ToolNames.Store) return classifyStore(call.args);
 	if (call.tool === ToolNames.Panes && call.args?.action === "handoff") {
 		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-handoff"] };
 	}

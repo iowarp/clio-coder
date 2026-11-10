@@ -1,7 +1,7 @@
 import path from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { canonicalizePath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
-import { STORE_TOOL_NAME, ToolNames } from "../../core/tool-names.js";
+import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
 import { expandPath, readPathVariants } from "../../tools/path-utils.js";
 import { INTEROP_AGENT_KINDS, interopUserRoot } from "../interop/registry.js";
@@ -20,7 +20,7 @@ const READ_SCOPE_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Data,
-	STORE_TOOL_NAME,
+	ToolNames.Store,
 ]);
 
 export function isReadScopeTool(tool: string): boolean {

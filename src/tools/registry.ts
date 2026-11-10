@@ -2906,6 +2906,7 @@ const FLOW_SOURCE_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Data,
+	ToolNames.Store,
 ]);
 /** Result detail that carries a restricted read's label to the host; never model text. */
 export const FLOW_RESTRICTIONS_DETAIL = "clio_coder_flow_restrictions";
