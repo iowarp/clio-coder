@@ -55,12 +55,12 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 			io: { stdout() {}, stderr() {} },
 			chatPanel: { appendReplayBlock() {}, appendUser() {} },
 			requestRender() {},
-			reloadPlugins: () => {
+			reloadClasses: () => {
 				reloads++;
-				return reloadPluginResourcesAndNotify(cwd, (event) => bus.emit("plugin.reloaded", event));
+				reloadPluginResourcesAndNotify(cwd, (event) => bus.emit("plugin.reloaded", event));
 			},
 		} as unknown as InteractiveSlashRuntimeDeps);
-		strictEqual(runtime.dispatchCommand("/library reload"), "accepted");
+		strictEqual(runtime.dispatchCommand("/reload library"), "accepted");
 		strictEqual(reloads, 1);
 		const recipes = agents.contract.list().filter((x) => x.source === "plugin");
 		strictEqual(recipes.length, 6);
@@ -78,7 +78,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 		}
 		disablePlugin("materio", { cwd, scope: "project" });
 		trustProjectPackages(cwd, "plugins");
-		runtime.dispatchCommand("/library reload");
+		runtime.dispatchCommand("/reload library");
 		strictEqual(reloads, 2);
 		strictEqual(agents.contract.list().filter((x) => x.source === "plugin").length, 0);
 	} finally {

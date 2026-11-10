@@ -19,14 +19,17 @@ export function createInteractiveReload(
 	operator: OperatorExtensions | undefined,
 	notice: (level: "info" | "warn", text: string) => void,
 	print: (report: ReloadReport) => void,
+	openExtensions?: () => void,
 ): (target: ReloadTarget) => void {
 	return (target) => {
 		if (!controller) return notice("warn", "Reload is unavailable: reload coordinator is not loaded.");
+		let committed = false;
 		void controller
 			.run(target, async () => {
 				if (!operator)
 					return { status: "rejected", message: "extension host is not loaded", failures: [], nextSession: [] };
 				const result = await operator.reload();
+				committed = result.status === "committed";
 				const entries = operator.entries();
 				const failures = entries
 					.filter((entry) => entry.state === "failed")
@@ -39,7 +42,11 @@ export function createInteractiveReload(
 					nextSession: entries.flatMap((entry) => entry.newSessionReasons.map((reason) => `${entry.id}: ${reason}`)),
 				};
 			})
-			.then(print)
+			.then((report) => {
+				print(report);
+				// The retired `/extensions reload` opened the overlay after a commit; `/reload extensions` keeps that.
+				if (committed && target === "extensions") openExtensions?.();
+			})
 			.catch((error) => notice("warn", `Reload failed: ${error instanceof Error ? error.message : String(error)}`));
 	};
 }

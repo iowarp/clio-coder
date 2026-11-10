@@ -177,7 +177,7 @@ export function openHelpOverlay(
 				"**Ask Clio**: questions about Clio itself, such as how to switch models or what workers do, get answered from its own settings and docs.",
 				"**Demo guidance** (on by default) teaches as you work: the launchpad, one footer tip at a time, and after some turns a `[tip]` naming a feature that would have helped that turn. A newcomer gets two post-turn tips a session, later one.",
 				"**Tips retire**: a tip stops once you use its feature or key, or after a few showings. What you have learned is kept in `harness-profile.json` in Clio's state directory; delete it to start the lessons over.",
-				`**Worth knowing**: /model or ${manager.actionLabel("clio-coder.model.select")} picks a model; /run coder <task> hands work to a background worker, and /run coder --read-only <task> one that cannot change files; /skills and /library run and install skills; /usage shows quota and spend; /doctor checks the install; ${manager.actionLabel("clio-coder.leader")} y switches this session to YOLO.`,
+				`**Worth knowing**: /model or ${manager.actionLabel("clio-coder.model.select")} picks a model; /run coder <task> hands work to a background worker, and /run coder --read-only <task> one that cannot change files; /library skills browses skills, /skill <name> runs one, and /library installs more; /usage shows quota and spend; /doctor checks the install; ${manager.actionLabel("clio-coder.leader")} y switches this session to YOLO.`,
 				"**Turning it off**: Demo guidance in /settings (`interface.demo: false`) for good, or `--no-demo` for one session. The Minimal output style also stays quiet.",
 			],
 		},

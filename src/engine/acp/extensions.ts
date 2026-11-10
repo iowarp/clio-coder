@@ -12,7 +12,7 @@ export {
 /**
  * `_clio-coder/extensions/list`, `_clio-coder/extensions/reload` and
  * `_clio-coder/library/reload`: what the terminal's /extensions view shows,
- * and the two reloads /extensions reload and /library reload run.
+ * and the two reloads /reload extensions and /reload library run.
  *
  * The list is the running session's own view of its extensions: which are
  * eligible, disabled, invalid, incompatible or shadowed, and how many problems

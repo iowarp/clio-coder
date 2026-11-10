@@ -9,7 +9,7 @@ import {
 import type { Skill } from "./loader.js";
 
 export const PROJECT_SKILL_TRUST_REMEDY =
-	"The operator must review and approve project plugins with clio-coder config trust plugins, then run /library reload. Do not ask for another activation choice or retry loading before trust is approved.";
+	"The operator must review and approve project plugins with clio-coder config trust plugins, then run /reload library. Do not ask for another activation choice or retry loading before trust is approved.";
 
 const MEMBER_SCAN_DEPTH = 4;
 const MEMBER_HEADER_BYTES = 4096;
@@ -114,7 +114,7 @@ export function installedSkillPackages(skills: ReadonlyArray<Skill>, cwd: string
 											? "ready"
 											: admitted
 												? "no ready skills; inspect /library"
-												: "pending reload; run /library reload";
+												: "pending reload; run /reload library";
 			const record = readPluginInstallRecord(pkg.id, { cwd, scope: pkg.scope });
 			const origin = typeof record?.origin === "object" ? record.origin.kind : (record?.origin ?? "local");
 			return {

@@ -361,6 +361,17 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		layout: "split",
 		unit: "rows",
 		emptyMessage: EXTENSIONS_EMPTY,
+		status: () => {
+			const active = operator?.surface.activeWorkspace;
+			return active
+				? clioTheme().fg(
+						"annotation",
+						sanitizeCallTargetText(
+							`Workspace ${active.title} from ${active.extensionId} is active; /extensions leave leaves it`,
+						),
+					)
+				: undefined;
+		},
 		hints: (selected) => [
 			...(selected && runnable.has(selected.id) && ctx.setEditorText ? [{ key: "v", verb: "use command" }] : []),
 		],

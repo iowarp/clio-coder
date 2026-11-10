@@ -168,8 +168,8 @@ describe("interop discovery and adoption", () => {
 			ok(!files.includes("hooks: dangerous"));
 		}
 	});
-	it("registers /interop as the existing connection overlay route", () => {
-		deepStrictEqual(parseSlashCommand("/interop"), { kind: "agents", connect: true });
+	it("registers /library interop as the existing connection overlay route", () => {
+		deepStrictEqual(parseSlashCommand("/library interop"), { kind: "agents", connect: true });
 	});
 	it("keeps CLI dry-run and missing approval read-only, then installs with --yes", () => {
 		file(".claude/skills/example/SKILL.md", skill);

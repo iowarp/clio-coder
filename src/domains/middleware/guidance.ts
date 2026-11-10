@@ -266,10 +266,10 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 	},
 	{
 		id: "skills",
-		feature: "/skills",
+		feature: "/library skills",
 		score: (turn) =>
 			harnessQuestionTopics(turn.prompt).includes("skills") ? SPECIFIC_SCORE : used(turn, "skill") > 0 ? 1.5 : 0,
-		text: () => "/skills lists the skills ready here, and /skill <name> <task> runs one on purpose.",
+		text: () => "/library skills lists the skills ready here, and /skill <name> <task> runs one on purpose.",
 	},
 	{
 		id: "library",

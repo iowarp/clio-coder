@@ -404,7 +404,7 @@ const WELCOME_HINTS: ReadonlyArray<{
 	{
 		title: "Keep work moving",
 		commands: [
-			["/skills", "See available skills"],
+			["/library skills", "See available skills"],
 			["/model", "Switch the active model"],
 			["/help", "Look up a shortcut"],
 		],

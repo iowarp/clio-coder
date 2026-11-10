@@ -174,7 +174,7 @@ describe("demo guidance tips", () => {
 		for (const [prompt, pattern] of [
 			["how much have I spent today?", /^\[tip\] \/usage shows/],
 			["my clio login seems broken, how do I check it?", /\/doctor checks this install/],
-			["how can I use skills in clio?", /\/skills lists the skills/],
+			["how can I use skills in clio?", /\/library skills lists the skills/],
 			["can you install a skill for writing changelogs", /Alt\+L opens the Library/],
 		] as const) {
 			const { turn } = guidance({ keyFor: (id) => (id === "clio-coder.library.toggle" ? "Alt+L" : null) });

@@ -14,8 +14,8 @@ import { printError } from "./shared.js";
 const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings", "extensions", "plugins"];
 
 const PACKAGE_RELOAD: Partial<Record<ProjectTrustSurface, string>> = {
-	extensions: "Reload extensions (/extensions reload) to apply it.",
-	plugins: "Reload the library (/library reload) to apply it.",
+	extensions: "Reload extensions (/reload extensions) to apply it.",
+	plugins: "Reload the library (/reload library) to apply it.",
 };
 
 /** C1 controls, which JSON escaping leaves raw. */

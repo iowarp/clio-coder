@@ -170,9 +170,9 @@ type SlashCommandVariant =
 	| { kind: "context-recover"; handoffId: string; action: "reduce" | "deliver" }
 	| {
 			kind: "resources";
-			family?: "extensions" | "plugins";
+			family?: "extensions";
 			tab?: LibraryEntryKind;
-			action?: "reload" | "dev" | "mute" | "unmute";
+			action?: "dev" | "mute" | "unmute" | "leave";
 			/** The folder or extension id a dev, mute or unmute action names. */
 			target?: string;
 			/** A package ref or resource key the browser selects on open. */
@@ -214,7 +214,6 @@ type SlashCommandVariant =
 	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
 	| { kind: "usage"; tab?: UsageTab }
-	| { kind: "workspace"; action: "off" | "status" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
@@ -271,6 +270,18 @@ type SlashCommandVariant =
 export const USAGE_TAB_NAMES = ["activity", "accounts", "session", "models", "workers", "health"] as const;
 export type UsageTab = (typeof USAGE_TAB_NAMES)[number];
 
+/** `/library <kind>` completes the plurals and also accepts the singular tab ids. */
+const LIBRARY_KIND_PLURALS = ["skills", "agents", "prompts", "playbooks", "plugins", "extensions"] as const;
+const LIBRARY_KIND_WORDS = new Map<string, LibraryEntryKind>(
+	LIBRARY_KIND_PLURALS.flatMap((plural) => {
+		const kind = plural.slice(0, -1) as LibraryEntryKind;
+		return [
+			[plural, kind],
+			[kind, kind],
+		];
+	}),
+);
+
 export type SlashCommand =
 	| SlashCommandVariant
 	| { kind: "eggs"; action: "status" | "off"; id?: string }
@@ -304,12 +315,22 @@ export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
 	{ name: "notifications", since: "0.7.1", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
 	{ name: "health", since: "0.7.1", to: { command: "/usage health" } },
 	{ name: "systemone", since: "0.7.1", to: { command: "/usage health" } },
+	{ name: "skills", since: "0.7.1", to: { command: "/library skills" } },
+	{ name: "prompts", since: "0.7.1", to: { command: "/library prompts" } },
+	{ name: "agents", since: "0.7.1", to: { command: "/library agents" } },
+	{ name: "interop", since: "0.7.1", to: { command: "/library interop" } },
+	{ name: "workspace off", since: "0.7.1", to: { command: "/extensions leave" } },
+	{ name: "workspace", since: "0.7.1", to: { command: "/extensions" } },
+	{ name: "library reload", since: "0.7.1", to: { command: "/reload library" } },
+	{ name: "extensions reload", since: "0.7.1", to: { command: "/reload extensions" } },
 ];
 
-function matchRetiredCommand(trimmed: string): SlashCommand | null {
+/** A two-word name such as `library reload` retires a verb of a live command, so it is checked first. */
+function matchRetiredCommand(trimmed: string, twoWordOnly = false): SlashCommand | null {
 	if (!trimmed.startsWith("/")) return null;
 	const [first = "", second = ""] = trimmed.slice(1).split(/\s+/u);
 	const twoWord = second ? RETIRED_COMMANDS.find((entry) => entry.name === `${first} ${second}`) : undefined;
+	if (twoWordOnly && !twoWord) return null;
 	const entry = twoWord ?? RETIRED_COMMANDS.find((candidate) => candidate.name === first);
 	if (!entry) return null;
 	const rest = trimmed
@@ -1524,13 +1545,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		match(trimmed) {
-			if (trimmed === "/skill") {
-				return {
-					kind: "usage-error",
-					command: "skill",
-					reason: "Choose /skills to browse, /skill <name> to invoke, or /skill off to clear the active tool surface",
-				};
-			}
+			if (trimmed === "/skill") return { kind: "resources", tab: "skill" };
 			const command = parseSkillCommand(trimmed);
 			if (!command) return null;
 			// `off` is the one reserved name: an installed skill called `off`
@@ -1554,9 +1569,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "library",
 		acp: false,
-		description: "Browse and install plugins and extensions, or review an install, removal or reload",
+		description: "Browse skills, agents, prompts, playbooks, plugins and extensions, or review an install or removal",
 		group: "Inspect",
-		kinds: ["resources"],
+		kinds: ["resources", "agents"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
 		subcommandDescriptions: {
 			inspect: "Open the Library on one package or component",
@@ -1566,9 +1581,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			disable: "Review disabling one installed package, then apply it",
 			remove: "Review removing one package, then apply it",
 			import: "Review a plugin source from a path or URL",
-			reload: "Refresh installed components in this session",
+			interop: "Inspect local coding agents and adopt safe resources",
 		},
 		args: {
+			positionals: [{ name: "kind", required: false, values: [...LIBRARY_KIND_PLURALS] }],
 			subcommands: {
 				inspect: {
 					positionals: [{ name: "ref", required: true }],
@@ -1598,7 +1614,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					positionals: [{ name: "path-or-url", required: true }],
 					flags: [{ name: "--user" }, { name: "--project" }],
 				},
-				reload: {},
+				interop: {},
 			},
 		},
 		fromArgs(parsed) {
@@ -1611,7 +1627,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					? ("user" as const)
 					: undefined;
 			const subcommand = parsed.subcommand;
-			if (subcommand === "reload") return { kind: "resources", family: "plugins", action: "reload" };
+			if (subcommand === "interop") return { kind: "agents", connect: true };
 			if (subcommand === "import") {
 				const source = parsed.rest ?? parsed.positionals[0];
 				if (!source)
@@ -1646,36 +1662,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					...(scope ? { scope } : {}),
 				};
 			}
-			if (parsed.error || parsed.positionals.length > 0)
+			const [word, extra] = parsed.positionals;
+			const tab = word === undefined ? "plugin" : LIBRARY_KIND_WORDS.get(word);
+			if (!tab || extra !== undefined)
 				return {
 					kind: "usage-error",
 					command: "library",
 					reason:
-						"Use /library to browse, /library inspect|install|update|enable|disable|remove <ref>, /library import <path-or-url>, or /library reload; /skills, /agents and /prompts open the same browser on their category",
+						"Use /library [skills|agents|prompts|playbooks|plugins|extensions] to browse, /library inspect|install|update|enable|disable|remove <ref>, /library import <path-or-url>, or /library interop",
 				};
-			return { kind: "resources", tab: "plugin" };
+			return { kind: "resources", tab };
 		},
 		handle(command, ctx) {
-			if (command.kind !== "resources") return;
-			if (command.family === "plugins") {
-				if (!ctx.reloadPlugins)
-					ctx.notice("warn", "library: reload is unavailable in this session; restart to refresh resources");
-				else {
-					try {
-						const snapshot = ctx.reloadPlugins();
-						ctx.notice("success", `library: reloaded installed components (generation ${snapshot.generation})`);
-					} catch (error) {
-						ctx.notice("error", `library: reload failed: ${error instanceof Error ? error.message : String(error)}`);
-					}
-				}
+			if (command.kind === "agents") {
+				ctx.openInterop?.();
 				return;
 			}
+			if (command.kind !== "resources") return;
 			if (command.family === "extensions") {
-				if (command.action === "reload") reloadExtensionsCommand(ctx);
-				else if (command.action !== undefined) {
-					if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
-					else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
-				} else ctx.openExtensions?.();
+				extensionsCommand(command, ctx);
 				return;
 			}
 			ctx.openSkillsHub?.({
@@ -1685,30 +1690,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				...(command.importSource ? { importSource: command.importSource } : {}),
 				...(command.scope ? { scope: command.scope } : {}),
 			});
-		},
-	},
-	{
-		name: "skills",
-		acp: false,
-		description: "Open the Library on Skills",
-		group: "Inspect",
-		kinds: [],
-		args: {},
-		fromArgs: fromArgsOrUsage("skills", { kind: "resources", tab: "skill" }),
-		handle(_command, ctx) {
-			ctx.openSkillsHub?.({ tab: "skill" });
-		},
-	},
-	{
-		name: "prompts",
-		acp: false,
-		description: "Open the Library on Prompts",
-		group: "Inspect",
-		kinds: [],
-		args: {},
-		fromArgs: fromArgsOrUsage("prompts", { kind: "resources", tab: "prompt" }),
-		handle(_command, ctx) {
-			ctx.openSkillsHub?.({ tab: "prompt" });
 		},
 	},
 	{
@@ -1792,64 +1773,35 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "extensions",
 		acp: false,
-		description: "Inspect extensions, reload them, or manage dev and muted ones for this session",
+		description: "Inspect extensions, manage dev and muted ones for this session, or leave a workspace",
 		group: "Inspect",
 		// Harness navigation uses the shared overlay dispatcher, independently of component reload.
 		kinds: [],
 		args: {
-			positionals: [
-				{ name: "action", required: false, values: ["reload", "dev", "mute", "unmute"] },
-				{ name: "target", required: false, rest: true },
-			],
+			subcommands: {
+				dev: { positionals: [{ name: "target", required: false, rest: true }] },
+				mute: { positionals: [{ name: "target", required: false, rest: true }] },
+				unmute: { positionals: [{ name: "target", required: false, rest: true }] },
+				leave: {},
+			},
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "extensions", reason: parsed.error };
-			const action = parsed.positionals[0];
-			const target = (parsed.rest ?? parsed.positionals[1])?.trim();
-			if (action === undefined) return { kind: "resources", family: "extensions" };
-			if (action !== "reload" && action !== "dev" && action !== "mute" && action !== "unmute")
-				return { kind: "usage-error", command: "extensions", reason: "extensions accepts reload, dev, mute or unmute" };
-			if (action === "reload" && target)
-				return { kind: "usage-error", command: "extensions", reason: "extensions reload takes no argument" };
+			const action = parsed.subcommand;
+			const target = (parsed.rest ?? parsed.positionals[0])?.trim();
+			if (action === undefined) {
+				if (parsed.positionals.length > 0)
+					return { kind: "usage-error", command: "extensions", reason: "extensions accepts dev, mute, unmute or leave" };
+				return { kind: "resources", family: "extensions" };
+			}
+			if (action !== "dev" && action !== "mute" && action !== "unmute" && action !== "leave")
+				return { kind: "usage-error", command: "extensions", reason: "extensions accepts dev, mute, unmute or leave" };
+			if (action === "leave" && (target || parsed.positionals.length > 0))
+				return { kind: "usage-error", command: "extensions", reason: "extensions leave takes no argument" };
 			return { kind: "resources", family: "extensions", action, ...(target ? { target } : {}) };
 		},
 		handle(command, ctx) {
-			if (command.kind !== "resources" || command.family !== "extensions") return;
-			if (command.action === "reload") reloadExtensionsCommand(ctx);
-			else if (command.action !== undefined) {
-				if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
-				else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
-			} else ctx.openExtensions?.();
-		},
-	},
-	{
-		name: "workspace",
-		acp: false,
-		description: "Show or leave the active extension workspace",
-		group: "Inspect",
-		kinds: ["workspace"],
-		args: { positionals: [{ name: "action", required: false, values: ["off"] }] },
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "workspace", reason: parsed.error };
-			const action = parsed.positionals[0];
-			if (action !== undefined && action !== "off")
-				return { kind: "usage-error", command: "workspace", reason: "workspace accepts only off" };
-			return { kind: "workspace", action: action === "off" ? "off" : "status" };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "workspace") return;
-			const runtime = ctx.operatorExtensions;
-			const active = runtime?.surface.activeWorkspace ?? null;
-			if (command.action === "off") {
-				if (!runtime?.leaveWorkspace()) ctx.notice("info", "No extension workspace is active");
-			} else
-				ctx.notice(
-					"info",
-					active
-						? `Workspace ${active.title} from ${active.extensionId} is active; /workspace off leaves it`
-						: "No extension workspace is active",
-				);
-			ctx.render?.();
+			if (command.kind === "resources" && command.family === "extensions") extensionsCommand(command, ctx);
 		},
 	},
 	{
@@ -2315,41 +2267,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			(ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation()))(run);
-		},
-	},
-	{
-		name: "interop",
-		acp: false,
-		description: "Inspect coding agents and adopt safe resources",
-		group: "Inspect",
-		kinds: ["agents"],
-		args: {},
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "interop", reason: parsed.error };
-			return { kind: "agents", connect: true };
-		},
-		handle(_command, ctx) {
-			ctx.openInterop?.();
-		},
-	},
-	{
-		name: "agents",
-		acp: false,
-		description: "Open the Library on Agents",
-		group: "Inspect",
-		kinds: [],
-		args: {},
-		fromArgs(parsed) {
-			if (parsed.error)
-				return {
-					kind: "usage-error",
-					command: "agents",
-					reason: "Use /agents to browse agents, or /interop to inspect another local agent's resources",
-				};
-			return { kind: "resources", tab: "agent" };
-		},
-		handle(_command, ctx) {
-			ctx.openSkillsHub?.({ tab: "agent" });
 		},
 	},
 	{
@@ -3524,22 +3441,14 @@ export function formatExtensionReloadNotice(outcome: ExtensionReloadOutcome): [N
 	return [level, `extensions: generation ${outcome.generation} committed (${delta}); hooks: ${hookParts.join(", ")}`];
 }
 
-function reloadExtensionsCommand(ctx: SlashCommandContext): void {
-	if (ctx.operatorExtensions) {
-		void ctx.operatorExtensions.reload().then((result) => {
-			if (result.status === "deferred") ctx.notice("info", result.message);
-		});
-		return;
-	}
-	if (!ctx.reloadExtensions) {
-		ctx.notice("warn", "extensions: reload is unavailable in this session; restart to pick up installed changes");
-		return;
-	}
-	const outcome = ctx.reloadExtensions();
-	const [level, text] = formatExtensionReloadNotice(outcome);
-	ctx.notice(level, text);
-	for (const line of outcome.lines) ctx.notice("warn", line);
-	if (outcome.status === "committed") ctx.openExtensions?.();
+function extensionsCommand(command: Extract<SlashCommand, { kind: "resources" }>, ctx: SlashCommandContext): void {
+	if (command.action === "leave") {
+		if (!ctx.operatorExtensions?.leaveWorkspace()) ctx.notice("info", "No extension workspace is active");
+		ctx.render?.();
+	} else if (command.action !== undefined) {
+		if (ctx.extensionDev) ctx.extensionDev(command.action, command.target);
+		else ctx.notice("warn", "extensions: dev and mute are available in the terminal only");
+	} else ctx.openExtensions?.();
 }
 
 function sessionNameArgument(raw: string): string {
@@ -3556,6 +3465,8 @@ export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
+	const retiredVerb = matchRetiredCommand(trimmed, true);
+	if (retiredVerb) return retiredVerb;
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
@@ -3713,8 +3624,6 @@ const COMMAND_ORDER = [
 	"draft",
 	"share",
 	"skill",
-	"agents",
-	"interop",
 	"tasks",
 	"context",
 	"compact",
@@ -3727,10 +3636,7 @@ const COMMAND_ORDER = [
 	"decisions",
 	"research",
 	"library",
-	"skills",
-	"prompts",
 	"extensions",
-	"workspace",
 	"help",
 	"model",
 	"thinking",

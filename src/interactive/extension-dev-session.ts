@@ -130,7 +130,7 @@ export function createExtensionDevSession(deps: ExtensionDevSessionDeps): Extens
 				});
 				watchers.set(directory, watcher);
 			} catch {
-				// An unwatchable folder still reloads on /extensions dev and /extensions reload.
+				// An unwatchable folder still reloads on /extensions dev and /reload extensions.
 			}
 		}
 	};

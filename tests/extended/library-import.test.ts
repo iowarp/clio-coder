@@ -206,7 +206,10 @@ describe("library import of foreign plugin packages", () => {
 			const prompts = () => loadPromptTemplates({ cwd, home: env.dir });
 			const ctx = {
 				operatorExtensions: runtime,
-				reloadPlugins: () => reloadPluginResourcesAndNotify(cwd, (event) => resourceGenerations.push(event.generation)),
+				reloadClasses: (target: string) => {
+					if (target === "library")
+						reloadPluginResourcesAndNotify(cwd, (event) => resourceGenerations.push(event.generation));
+				},
 				listPrompts: prompts,
 				expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts()),
 				notice: (_level: string, text: string) => notices.push(text),
@@ -221,7 +224,7 @@ describe("library import of foreign plugin packages", () => {
 			} as unknown as SlashCommandContext;
 			const reloadRecipes = () => {
 				const before = resourceGenerations.length;
-				strictEqual(dispatchSlashCommand(parseSlashCommand("/library reload"), ctx), "accepted");
+				strictEqual(dispatchSlashCommand(parseSlashCommand("/reload library"), ctx), "accepted");
 				strictEqual(resourceGenerations.length, before + 1, notices.join("\n"));
 			};
 			const materioResources = () =>

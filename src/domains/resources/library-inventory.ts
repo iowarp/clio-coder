@@ -508,7 +508,7 @@ export function inactiveCopyRemedy(copy: Pick<LibraryCopy, "ref" | "scope" | "st
 		case "disabled":
 			return `enable with clio-coder library enable ${copy.ref} --${copy.scope}`;
 		case "untrusted":
-			return "approve with clio-coder config trust plugins, then /library reload";
+			return "approve with clio-coder config trust plugins, then /reload library";
 		default:
 			return `inspect with clio-coder library inspect ${copy.ref} --${copy.scope}`;
 	}

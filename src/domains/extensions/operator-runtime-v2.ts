@@ -970,7 +970,7 @@ export class OperatorExtensionRuntimeV2 {
 		}
 	}
 
-	/** The operator left the workspace (`/workspace off`, the leader key). */
+	/** The operator left the workspace (`/extensions leave`, the leader key). */
 	leaveWorkspace(): boolean {
 		const before = this.surface.activeWorkspace;
 		if (!before) return false;

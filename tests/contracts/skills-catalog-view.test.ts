@@ -117,7 +117,7 @@ function renderSkillsListBeforeChange(
 	);
 	if (marketplace.length > 0) {
 		lines.push(
-			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "Install for this project", "Install globally", "Not now", "Never offer this skill". The harness handles those exact offer options. An explicit operator request or approval also authorizes the documented library install CLI. After installation, refresh the inventory; distinguish installed from ready and report /library reload when required.`,
+			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "Install for this project", "Install globally", "Not now", "Never offer this skill". The harness handles those exact offer options. An explicit operator request or approval also authorizes the documented library install CLI. After installation, refresh the inventory; distinguish installed from ready and report /reload library when required.`,
 		);
 	}
 	return lines.join("\n");

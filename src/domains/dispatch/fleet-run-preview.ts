@@ -204,7 +204,9 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 			resolveAgent(context) {
 				const spec = input.getAgentSpec(context.agentId);
 				if (spec === null) {
-					throw new Error(`unknown agent '${context.agentId}' (step '${context.stepId}' must name a recipe from /agents)`);
+					throw new Error(
+						`unknown agent '${context.agentId}' (step '${context.stepId}' must name a recipe from /library agents)`,
+					);
 				}
 				if (spec.capabilityClass === "orchestration" || spec.capabilityClass === "internal") {
 					throw new Error(`fleet step '${context.stepId}' has no automatable agent authority`);

@@ -966,7 +966,7 @@ export function retryLibraryRefresh(
 			status: "not-applicable",
 			reason: touched.extensions
 				? "no active session in this process; run /reload in the running TUI to load the extension and its hooks"
-				: "no active session in this process; use /library reload in the running TUI",
+				: "no active session in this process; use /reload library in the running TUI",
 		};
 	try {
 		return refresh(cwd, touched);

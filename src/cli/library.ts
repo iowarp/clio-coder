@@ -339,7 +339,7 @@ function printRefreshNote(apply: LibraryApplyResult): void {
 		refresh.status === "not-applicable"
 			? apply.outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension")
 				? "A running session loads this extension and its hooks after /reload.\n"
-				: "A running session picks this up after /library reload.\n"
+				: "A running session picks this up after /reload library.\n"
 			: refresh.status === "failed"
 				? `session refresh failed: ${refresh.error}\n`
 				: `session resources refreshed (generation ${refresh.generation})\n`,
@@ -561,7 +561,7 @@ async function executeLibraryCommand(
 			if (parsed.positional.length) throw new Error("library reload takes no arguments");
 			const snapshot = reloadPluginResources(options.cwd);
 			if (parsed.json) emit(snapshot);
-			else printOk("library refreshed for this process; use /library reload in an active session");
+			else printOk("library refreshed for this process; use /reload library in an active session");
 			return 0;
 		}
 		if (parsed.command === "sync" || parsed.command === "push") {

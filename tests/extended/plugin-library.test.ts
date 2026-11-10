@@ -324,14 +324,9 @@ describe("plugin library lifecycle", () => {
 		equal(readFileSync(path.join(backup, "assets", "evidence.txt"), "utf8"), "preserve this edit");
 	});
 
-	it("routes the plugin tab and reload command through the library slash surface", () => {
+	it("routes the plugin tab through the library slash surface", () => {
 		deepStrictEqual(parseSlashCommand("/library"), { kind: "resources", tab: "plugin" });
-		equal(parseSlashCommand("/library plugin").kind, "usage-error");
-		deepStrictEqual(parseSlashCommand("/library reload"), {
-			kind: "resources",
-			family: "plugins",
-			action: "reload",
-		});
+		deepStrictEqual(parseSlashCommand("/library plugin"), { kind: "resources", tab: "plugin" });
 		equal(parseSlashCommand("/library plugin unsupported").kind, "usage-error");
 	});
 
@@ -339,8 +334,8 @@ describe("plugin library lifecycle", () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
 		for (const [line, expected] of [
 			["/lib", "library"],
-			["/library re", "reload"],
-			["/extensions re", "reload"],
+			["/library pl", "plugins"],
+			["/reload li", "library"],
 		]) {
 			ok(line);
 			ok(expected);

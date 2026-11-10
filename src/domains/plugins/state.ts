@@ -541,8 +541,8 @@ function blockUntrustedProjectPlugins(entries: ReadonlyArray<InstalledPlugin>, c
 				type: "warning",
 				message:
 					trust.verdict === "trusted"
-						? `project plugin ${entry.id} is not approved for this workspace, so it neither loads nor shadows a user copy; review with clio-coder config trust plugins, then run /library reload`
-						: "project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins, then run /library reload",
+						? `project plugin ${entry.id} is not approved for this workspace, so it neither loads nor shadows a user copy; review with clio-coder config trust plugins, then run /reload library`
+						: "project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins, then run /reload library",
 				path: pluginStatePath("project", cwd),
 			});
 		}

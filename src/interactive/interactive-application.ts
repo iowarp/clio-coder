@@ -181,7 +181,7 @@ export interface InteractiveDeps {
 	yoloHeldAtBoot?: boolean;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
-	/** `/extensions reload` seam; the composition root supplies the coordinator. */
+	/** `/reload extensions` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
 	/** Where api 2 hook registrations reach the runtimes this surface owns. */
 	runtimeHooks?: ExtensionRuntimeHookBridge;
@@ -777,7 +777,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				// Read at render time only while a workspace is active, after the presentation exists.
 				leaveHint: () => {
 					const leader = keybindings.getKeys("clio-coder.leader")[0];
-					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /workspace off` : "/workspace off";
+					return leader ? `${formatKeyLabel(leader, "")} ${WORKSPACE_LEAVE_KEY} or /extensions leave` : "/extensions leave";
 				},
 				terminalRows: () => terminal.rows,
 				press: (extensionId, action, source = "leader") => {
@@ -1349,6 +1349,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			operatorExtensions,
 			(level, text) => slashRuntime.notice(level, text),
 			(report) => appendReloadReport(report, busNoticeSink),
+			() => openExtensionsOverlayState(),
 		),
 		restart: createInteractiveRestart({
 			...(deps.session ? { session: deps.session } : {}),

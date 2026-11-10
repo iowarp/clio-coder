@@ -1,5 +1,5 @@
 /**
- * `/interop`: the other coding agents on this machine, and what Clio may do
+ * `/library interop`: the other coding agents on this machine, and what Clio may do
  * with each. The operator's two questions are "which of these are connected as
  * delegation peers?" and "what can I adopt from them?", so every row leads
  * with its answer as a status chip and the status row keeps the two facts the
@@ -48,7 +48,7 @@ import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListO
 
 /** @internal exported for contract tests */
 export const INTEROP_EMPTY =
-	"no other coding agents detected on this machine. install one, then `/interop` proposes it as a delegation peer.";
+	"no other coding agents detected on this machine. install one, then `/library interop` proposes it as a delegation peer.";
 
 const GROUP_PROPOSED = "Proposed";
 const GROUP_DETECTED = "Detected";

@@ -372,7 +372,7 @@ import {
 import type { BootInteractivity } from "../interactive/terminal-lease.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { subscribeLoopGuardStop } from "../session-control/loop-guard-interrupt.js";
-import { BUILTIN_SLASH_COMMANDS } from "../session-control/slash-commands.js";
+import { BUILTIN_SLASH_COMMANDS, formatExtensionReloadNotice } from "../session-control/slash-commands.js";
 import { runWatchdogReview } from "../session-control/watchdog-run.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
@@ -1704,7 +1704,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const cwd = process.cwd();
 		// Skill loading reads and hashes the filesystem. Reuse the count across
 		// warm/real requests and reminders until the same source epoch that
-		// invalidates prompt composition changes (/library reload, config, etc.).
+		// invalidates prompt composition changes (/reload library, config, etc.).
 		// Descriptions from here reach models through the [Skills] reminder and the
 		// relevance ranker, so this reads verified trees, never the display listing.
 		if (!prompts) {
@@ -4128,7 +4128,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					ask: (question, signal) => chat.askSideQuestion(question, { signal }),
 					draft: (request, count, signal) => chat.draftCandidates(request, count, { signal }),
 				},
-				// The same reload /library reload runs, with the generation change the
+				// The same reload /reload library runs, with the generation change the
 				// PluginsReloaded event reports. A throw is a failed reload.
 				libraryReload: () => {
 					let reloaded: PluginsReloadedPayload | null = null;
@@ -4509,6 +4509,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		reloadExtensions: () => {
 			const outcome = extensionReload.reload();
 			for (const issue of outcome.diagnostics.entries) reloadClasses.captureIssue(`${issue.type}: ${issue.message}`);
+			reloadClasses.captureExtensionCommit(formatExtensionReloadNotice(outcome)[1]);
 			return outcome;
 		},
 		reloadPlugins,

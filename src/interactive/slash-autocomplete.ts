@@ -263,7 +263,7 @@ function compactDescription(description: string | undefined): string | undefined
 	return `${truncateToWidth(description, COMPLETION_DESCRIPTION_BUDGET - 1, "", false).trimEnd()}…`;
 }
 
-const BARE_VALID_PARENTS = new Set(["agents", "context", "memory", "panes", "resources"]);
+const BARE_VALID_PARENTS = new Set(["context", "memory", "panes"]);
 
 interface SlashContext {
 	line: string;

@@ -532,7 +532,7 @@ export interface ClioAcpServerOptions {
 	/** Bind the domain projection and its live read model to the hosted session (#434). */
 	bindTelemetrySession?: (sessionId: string) => void;
 	/**
-	 * The plugin-resource reload /library reload runs, so a library change made
+	 * The plugin-resource reload /reload library runs, so a library change made
 	 * elsewhere reaches this open session. Absent means the method refuses.
 	 */
 	libraryReload?: AcpLibraryReload;
@@ -5861,7 +5861,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return projectExtensions(options.extensions.list());
 	});
 
-	// /extensions reload. Hooks and extension resources change together, so a
+	// /reload extensions. Hooks and extension resources change together, so a
 	// reload waits for a running turn rather than swapping them under it.
 	options.transport.onRequest(ACP_EXTENSIONS_RELOAD_METHOD, (params) => {
 		requireInitialized();
@@ -5874,7 +5874,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return projectExtensionReload(options.extensions.reload());
 	});
 
-	// /library reload, so a library change made outside this session reaches it.
+	// /reload library, so a library change made outside this session reaches it.
 	// A failed reload is reported as failed; the previous resources stay live.
 	options.transport.onRequest(ACP_LIBRARY_RELOAD_METHOD, (params) => {
 		requireInitialized();

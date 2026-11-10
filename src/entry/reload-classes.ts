@@ -71,6 +71,7 @@ export interface ReloadClassesDeps {
 export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesController {
 	let active = false;
 	let issues: string[] = [];
+	let extensionCommit: string | null = null;
 	let configFailure: string | null = null;
 	const bootSettings = deps.config ? structuredClone(deps.config.get()) : undefined;
 	let reportedSettings = bootSettings;
@@ -86,10 +87,16 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 			issues.push(message);
 			return true;
 		},
+		captureExtensionCommit(line) {
+			if (!active) return false;
+			extensionCommit = line;
+			return true;
+		},
 		async run(target, reloadOperators): Promise<ReloadReport> {
 			if (active) return { failed: true, text: "Reload refused: another reload report is in progress." };
 			active = true;
 			issues = [];
+			extensionCommit = null;
 			const lines = [`Reload report (${target})`];
 			let failed = false;
 			const failure = (label: string, error: unknown): void => {
@@ -147,6 +154,7 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 						const result = await reloadOperators();
 						lines.push(...summary("Extensions (operator runtimes and paired hooks)", before, packages(deps.extensions())));
 						lines.push(`  ${result.status}: ${result.message}`);
+						if (extensionCommit) lines.push(`  ${extensionCommit}`);
 						if (result.status === "rejected" || result.failures.length > 0) failed = true;
 						for (const issue of new Set([...issues, ...result.failures])) lines.push(`  issue: ${issue}`);
 						if (result.status !== "rejected" && result.failures.length === 0 && issues.length === 0)

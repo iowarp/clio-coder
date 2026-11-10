@@ -10,6 +10,8 @@ export interface ReloadReport {
 export interface ReloadClassesController {
 	readonly active: boolean;
 	captureIssue(message: string): boolean;
+	/** Records the hook generation line of the extension commit this report triggered. */
+	captureExtensionCommit(line: string): boolean;
 	run(
 		target: ReloadTarget,
 		reloadOperators: () => Promise<{
