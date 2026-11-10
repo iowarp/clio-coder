@@ -221,7 +221,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Store]: {
 		objective:
-			"Keep files in this project's store as blobs in named tags, outside the working tree and shared with every worker, with what Clio recorded about each (size, hash, producing script, inputs) and a readable path on request.",
+			"Keep files in this project's store as blobs in named tags, outside the working tree and shared with every worker; a `<tag>:<blob>` ref such as results:summary.parquet names one blob. Records what Clio observed about each (size, hash, producing script, inputs) and gives a readable path on request.",
 		uiLabel: "Store",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: observePolicy(
