@@ -58,6 +58,7 @@ import {
 	conformingAnonymous,
 	createProjectionTally,
 	projectionFor,
+	projectSharedContext,
 	projectSharedObject,
 	projectSharedPayload,
 } from "./share-projection.js";
@@ -439,10 +440,13 @@ export interface SharePlan {
 	inventory?: ShareInventory;
 }
 
-/** A header as a share carries it: the source host becomes the install id, and the rotation chain head is gone. */
+/**
+ * A header as a share carries it: the source host becomes the install id, the rotation chain head is gone, and the
+ * birth token, a local process identity that would link every share of one process, is cleared as on its records.
+ */
 function sharedHeader(header: SegmentHeader, installId: string): SegmentHeader {
 	const { chainHead: _chainHead, ...rest } = header;
-	return { ...rest, clockOrigin: { ...header.clockOrigin, host: installId } };
+	return { ...rest, clockOrigin: { ...header.clockOrigin, host: installId, birthToken: null } };
 }
 
 /** An identity or path as a share below research carries it: an id stable for this installation, not the value. */
@@ -464,7 +468,8 @@ function projectRecord(
 ): TelemetryRecord | null {
 	if (profile === "research") return record;
 	const data = projectSharedPayload(record.k, record.data, anonymize, projection, tally);
-	return data === null ? null : ({ ...record, data } as TelemetryRecord);
+	if (data === null) return null;
+	return { ...record, data, ctx: projectSharedContext(record.ctx, anonymize, projection, tally) } as TelemetryRecord;
 }
 
 /** How a plan projects beyond its profile, and what it collects while it does (R-16). */
@@ -674,7 +679,7 @@ function filterScope(
 		installId,
 		writer,
 		header: last,
-		ctx,
+		ctx: profile === "research" ? ctx : projectSharedContext(ctx, anonymize, projection),
 		now,
 	});
 	const check = verifyTelemetryScope({
@@ -885,6 +890,11 @@ function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, ins
 			}
 			const record = row.record;
 			if (record.origin !== undefined && record.origin.host !== installId) return `holds ${record.k} naming another host`;
+			if (
+				projected &&
+				canonicalJson(projectSharedContext(record.ctx, conformingAnonymous, projection)) !== canonicalJson(record.ctx)
+			)
+				return `holds ${record.k} with a context beyond the ${profile} projection`;
 			if (record.k === SHARE_SEAL_EVENT) continue;
 			if (admits(definition, record) !== null)
 				return `holds ${record.k} (${record.tier}, ${record.cc}) above the ${profile} profile`;

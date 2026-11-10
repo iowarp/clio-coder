@@ -66,9 +66,11 @@ Every profile redacts secrets again in every record and object it keeps. Each
 scope is resealed with share.sealed over exactly what the archive carries, and
 the archive's manifest names the profile, this installation's random install id
 and the Clio version, never a hostname or path; a report archive gets an install
-id and anonymization key of its own, so it links to no other share. It previews
-scope, record and object counts and what the profile drops before writing, and
-for report every name left readable; --dry-run stops there.
+id and anonymization key of its own, so no anonymous id links it to another
+share, though a settings fingerprint matches across shares of unchanged
+settings. It previews scope, record and object counts and what the profile
+drops before writing, and for report every name left readable; --dry-run stops
+there.
 --out defaults to a timestamped file in the current directory and is never
 overwritten.
 
@@ -561,7 +563,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: Telem
 			scopes,
 			skipped,
 			profile,
-			// A report archive links to no other share; every other profile names this installation (R-16).
+			// A report archive shares no anonymous id with another share; every other profile names this installation (R-16).
 			source: profile === "report" ? freshShareSource() : telemetryShareSource(stateDir),
 			writer: packageWriter(),
 			...(profile === "report" ? { inventory: true as const } : {}),

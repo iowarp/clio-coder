@@ -355,11 +355,11 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 async function liveJournal(
 	directory: string,
 	context: TelemetryContext,
-	records: ReadonlyArray<{ kind: string; data: unknown }>,
+	records: ReadonlyArray<{ kind: string; data: unknown; ctx?: TelemetryContext }>,
 ): Promise<string> {
 	const journal = await openCallJournal({ directory, context, writer });
-	for (const { kind, data } of records)
-		journal.enqueue({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() } as Parameters<
+	for (const { kind, data, ctx = context } of records)
+		journal.enqueue({ kind, data, ctx, wallMs: Date.now(), mono: performance.now() } as Parameters<
 			typeof journal.enqueue
 		>[0]);
 	await journal.flush();
@@ -565,6 +565,89 @@ test("a report plan's inventory lists the readable model ids and no target id (R
 		const archive = await readFile(out);
 		ok(!gunzipSync(archive).includes("qwen3.8-27b"));
 		strictEqual(verifyShareArchive(archive).failure, null);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a report share anonymizes engine, step and digest ids and the record context, and clears the birth token", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-report-ids-"));
+	try {
+		const stateDir = join(root, "operator");
+		const sessionId = "ses_report";
+		const main: TelemetryContext = { sessionId, agent: { role: "main", id: sessionId } };
+		const cwdHash = createHash("sha256").update("/home/opcanary/secret-proj").digest("hex").slice(0, 16);
+		const providerCall = ["toolu", "01CanaryProviderCall"].join("_");
+		await liveJournal(telemetrySessionDirectory(stateDir, sessionId), main, [
+			{
+				kind: "session.forked",
+				data: {
+					parentSessionId: "ses_parent",
+					parentCwdHash: cwdHash,
+					parentTurnId: "turn_1",
+					parentTurnAt: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				kind: "system_one.decided",
+				ctx: { sessionId, toolCallId: providerCall, agent: { role: "system-one", id: "canary-target" } },
+				data: {
+					point: "approval",
+					set: "v1",
+					askId: "ask_1",
+					outcome: "answered",
+					latencyMs: 1,
+					deadlineMs: 10,
+					asked: 1,
+					abstained: 0,
+					routes: [{ engine: "canary-target", kind: "chat", profile: "fast", outcome: "answered" }],
+					callIds: [],
+				},
+			},
+			{
+				kind: "code_step.settled",
+				data: {
+					runId: "run_1",
+					stepId: "deploy-nightingale",
+					commandId: "push-customer-ledger",
+					startedAt: "2026-01-01T00:00:00.000Z",
+					durationMs: 1,
+					timeoutMs: 10,
+					exitCode: 0,
+					signal: null,
+					timedOut: false,
+					commands: [],
+					outputBytes: 0,
+					outputTruncated: false,
+					outputDigest: "0".repeat(64),
+					reportDigest: "0".repeat(64),
+				},
+			},
+		]);
+		const selection = {
+			sessions: [sessionId],
+			runs: [],
+			repo: null,
+			since: null,
+			until: null,
+			live: "snapshot",
+		} as const;
+		const { scopes, skipped } = resolveShareScopes(stateDir, selection);
+		const plan = planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer });
+		const out = join(root, "report.tar.gz");
+		await writeShare(plan, out);
+		const archive = await readFile(out);
+		const text = gunzipSync(archive).toString("utf8");
+		for (const canary of ["canary-target", cwdHash, providerCall, "deploy-nightingale", "push-customer-ledger"])
+			ok(!text.includes(canary), canary);
+		strictEqual(verifyShareArchive(archive).failure, null);
+		const rows = scanTelemetrySegment(plan.scopes[0]?.journal ?? Buffer.alloc(0)).rows;
+		const decided = rows.find((row) => row.kind === "record" && row.record.k === "system_one.decided");
+		ok(decided?.kind === "record");
+		strictEqual(decided.record.ctx.agent.role, "system-one");
+		const engine = (decided.record.data as EventPayload<"system_one.decided">).routes[0]?.engine;
+		strictEqual(decided.record.ctx.agent.id, engine);
+		for (const row of rows) if (row.kind === "header") strictEqual(row.header.clockOrigin.birthToken, null);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

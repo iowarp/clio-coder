@@ -908,9 +908,42 @@ function projectField(
 export interface ShareProjection {
 	readonly events: Readonly<Record<string, FieldProjection>>;
 	readonly objects: Readonly<Record<string, FieldProjection>>;
+	/** How a record's envelope context is projected; absent, it is carried as it is. */
+	readonly context?: { readonly [field: string]: FieldProjection };
 }
 
 const BASE_PROJECTION: ShareProjection = { events: SHARE_EVENT_PROJECTIONS, objects: SHARE_OBJECT_PROJECTIONS };
+
+/**
+ * Fields `report` anonymizes whatever the shared tables say (R2-safety-secrets-12). An endpoint or directory digest is
+ * unsalted, so guessing reverses it; a System One engine is a target name; playbook step and command ids are names the
+ * operator chose.
+ */
+const REPORT_FIELDS: Readonly<Record<string, AnonKind>> = {
+	endpointIdentityHash: "endpoint",
+	parentCwdHash: "path",
+	engine: "name",
+	stepId: "name",
+	commandId: "name",
+};
+
+/**
+ * Under `report` a record's context keeps the scope ids, which the archive names its scopes by, and the agent, which
+ * is named by its scope; other ids go through `id`, so a provider's tool call id becomes anonymous. A System One agent
+ * is named by its engine, a target name, so {@link projectSharedContext} makes it a `name` id (R2-safety-secrets-12).
+ */
+const REPORT_CONTEXT = {
+	sessionId: "keep",
+	runId: "keep",
+	processId: "keep",
+	turnId: "id",
+	batchId: "id",
+	parentRunId: "id",
+	callId: "id",
+	attemptId: "id",
+	toolCallId: "id",
+	agent: "keep",
+} as const satisfies FieldProjection;
 
 /**
  * The `report` overrides (R-16). A target id is a name the operator typed into settings, often a machine's or a site's,
@@ -922,7 +955,8 @@ function reportOverride(projection: FieldProjection, anonymizeModels: boolean, f
 		if (field === "targetId" || field === "target") return "name";
 		return anonymizeModels ? "model" : projection;
 	}
-	if (typeof projection === "string") return projection;
+	if (typeof projection === "string")
+		return field !== undefined && Object.hasOwn(REPORT_FIELDS, field) ? (REPORT_FIELDS[field] as AnonKind) : projection;
 	return Object.fromEntries(
 		Object.entries(projection).map(([key, inner]) => [key, reportOverride(inner, anonymizeModels, key)]),
 	);
@@ -941,7 +975,11 @@ export function projectionFor(profile: string, models: "keep" | "anonymize" = "k
 	if (!projection) {
 		const table = (source: Readonly<Record<string, FieldProjection>>) =>
 			Object.fromEntries(Object.entries(source).map(([key, inner]) => [key, reportOverride(inner, anonymizeModels)]));
-		projection = { events: table(SHARE_EVENT_PROJECTIONS), objects: table(SHARE_OBJECT_PROJECTIONS) };
+		projection = {
+			events: table(SHARE_EVENT_PROJECTIONS),
+			objects: table(SHARE_OBJECT_PROJECTIONS),
+			context: REPORT_CONTEXT,
+		};
 		reportProjections.set(anonymizeModels, projection);
 	}
 	return projection;
@@ -969,4 +1007,18 @@ export function projectSharedObject(
 ): unknown | null {
 	if (!Object.hasOwn(projection.objects, subject)) return null;
 	return projectField(value, projection.objects[subject] as FieldProjection, anonymize, tally);
+}
+
+/** A record's envelope context as a profile carries it; as it is when the profile does not project contexts. */
+export function projectSharedContext<C>(
+	ctx: C,
+	anonymize: Anonymize,
+	projection: ShareProjection = BASE_PROJECTION,
+	tally?: ProjectionTally,
+): C {
+	if (projection.context === undefined) return ctx;
+	const role = (ctx as { agent?: { role?: unknown } } | null)?.agent?.role;
+	const table =
+		role === "system-one" ? { ...projection.context, agent: { role: "keep", id: "name" } as const } : projection.context;
+	return projectField(ctx, table, anonymize, tally) as C;
 }
