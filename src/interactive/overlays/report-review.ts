@@ -318,8 +318,11 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 	const render = (width: number, rows: number): string[] => {
 		const theme = clioTheme();
 		const w = Math.max(1, Math.floor(width));
+		// A written file or an opened browser form has not reached GitHub yet.
 		const sentAlready =
-			finished?.kind === "outcome" && finished.outcome.kind === "sent" && finished.outcome.result.status !== "failed";
+			finished?.kind === "outcome" &&
+			finished.outcome.kind === "sent" &&
+			["sent", "commented", "reacted"].includes(finished.outcome.result.status);
 		const head = wrapTextWithAnsi(
 			theme.fg(
 				"annotation",
@@ -434,7 +437,7 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 					...lines,
 					...plainRows(sentLine(outcome.result), w),
 					...wrapTextWithAnsi(REPORT_THANKS, w),
-					...note("/report status shows it and any reply."),
+					...note("/report status lists it."),
 				];
 			}
 		}
