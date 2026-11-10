@@ -14,7 +14,7 @@ import {
 import { importShareArchive } from "../domains/telemetry/share.js";
 import { printError } from "./shared.js";
 
-export const FLYWHEEL_HELP = `clio-coder dev flywheel [--json] [--limit N]
+export const FLYWHEEL_HELP = `clio-coder dev flywheel [--json] [--kind <kind>[,<kind>]] [--top N]
 clio-coder dev flywheel --pull <shareId|all> [--key <pem>] [--out <dir>]
 
 Prints a Usage block for Clio Coder from data/summary.json (npm downloads,
@@ -24,9 +24,13 @@ stale data sources, the latest weekly digest issue), then the maintainers'
 ranked backlog, data/flywheel/backlog.csv, both on the data branch of
 iowarp/clio-metrics and read through your gh: failure clusters, regressions,
 feature requests, latent demand and friction, each with the evidence that
-ranks it. --limit keeps the first N rows (default 20); --json prints
-{usage, backlog} for agents and scripts. The repository is private to the
-maintainers.
+ranks it. --kind keeps the rows of those kinds (failure, regression,
+friction, feature, demand, file-me and any kind clio-metrics adds); --top N
+(or --limit N) keeps the first N of them (default 20). A why column, when the
+backlog has one, prints under its row. file-me rows are issues clio-metrics
+suggests filing: they print last, each with its title ready to paste. --json
+prints {usage, backlog}, every column kept, for agents and scripts. The
+repository is private to the maintainers.
 
 --pull is for maintainers: it finds the share pointers in iowarp/clio-coder's
 has-bundle issues and recent discussions, fetches each named gist, opens it with
@@ -51,7 +55,8 @@ const BACKLOG_COLUMNS = [
 	"lastSeen",
 	"versions",
 ] as const;
-type BacklogRow = Record<(typeof BACKLOG_COLUMNS)[number], string>;
+/** The required columns, plus any column a newer clio-metrics adds (such as why), kept as text. */
+type BacklogRow = Record<(typeof BACKLOG_COLUMNS)[number], string> & Record<string, string>;
 const POINTER = /gist:([0-9a-f]{20,40})#(shr_[0-9a-f]{16})/gu;
 
 export interface FlywheelDeps {
@@ -99,10 +104,8 @@ function backlogRows(text: string): BacklogRow[] {
 	const index = BACKLOG_COLUMNS.map((column) => header?.indexOf(column) ?? -1);
 	const missing = BACKLOG_COLUMNS.filter((_, at) => index[at] === -1);
 	if (missing.length > 0) throw new Error(`the backlog has no ${missing.join(", ")} column`);
-	return rows.map(
-		(cells) =>
-			Object.fromEntries(BACKLOG_COLUMNS.map((column, at) => [column, cells[index[at] as number] ?? ""])) as BacklogRow,
-	);
+	const columns = header ?? [];
+	return rows.map((cells) => Object.fromEntries(columns.map((column, at) => [column, cells[at] ?? ""])) as BacklogRow);
 }
 
 function clip(text: string, width: number): string {
@@ -297,7 +300,39 @@ async function readUsage(gh: Gh): Promise<FlywheelUsage | null> {
 	return usage;
 }
 
-async function printBacklog(gh: Gh, json: boolean, limit: number, out: (text: string) => void): Promise<number> {
+interface BacklogView {
+	json: boolean;
+	limit: number;
+	kinds: ReadonlyArray<string> | null;
+}
+
+/** A `file-me` row is an issue clio-metrics suggests filing; its title is the one to paste. */
+const FILE_ME = "file-me";
+
+function formatBacklog(rows: ReadonlyArray<BacklogRow>): string {
+	const table = rows.filter((row) => row.kind !== FILE_ME);
+	const fileMe = rows.filter((row) => row.kind === FILE_ME);
+	const kindWidth = Math.max(10, ...table.map((row) => row.kind.length)) + 1;
+	let text = "";
+	if (table.length > 0) {
+		text += `${"rank".padEnd(5)}${"kind".padEnd(kindWidth)}${"score".padEnd(8)}${clip("title", 60)}  issue  evidence\n`;
+		for (const row of table) {
+			text += `${row.rank.padEnd(5)}${row.kind.padEnd(kindWidth)}${row.score.padEnd(8)}${clip(row.title, 60)}  ${(row.issue || "-").padEnd(5)}  ${row.evidence}\n`;
+			if (row.why) text += `${" ".repeat(5)}why: ${row.why}\n`;
+		}
+	}
+	if (fileMe.length > 0) {
+		text += `${table.length > 0 ? "\n" : ""}To file (ask before filing; each title is ready to paste):\n`;
+		for (const row of fileMe) {
+			text += `${row.rank.padEnd(5)}${row.title}\n`;
+			if (row.why) text += `${" ".repeat(5)}why: ${row.why}\n`;
+			text += `${" ".repeat(5)}evidence: ${row.evidence}${row.issue ? ` (${row.issue})` : ""}\n`;
+		}
+	}
+	return text;
+}
+
+async function printBacklog(gh: Gh, view: BacklogView, out: (text: string) => void): Promise<number> {
 	const result = await gh.run([
 		"-H",
 		"Accept: application/vnd.github.raw+json",
@@ -311,23 +346,22 @@ async function printBacklog(gh: Gh, json: boolean, limit: number, out: (text: st
 				: `cannot read the flywheel backlog: ${reason}`,
 		);
 	}
-	const rows = backlogRows(result.stdout).slice(0, limit);
+	const kinds = view.kinds;
+	const rows = backlogRows(result.stdout)
+		.filter((row) => kinds === null || kinds.includes(row.kind))
+		.slice(0, view.limit);
 	const usage = await readUsage(gh);
-	if (json) {
+	if (view.json) {
 		const backlog = rows.map((row) => ({ ...row, rank: Number(row.rank), score: Number(row.score) }));
 		out(`${JSON.stringify({ usage, backlog }, null, 2)}\n`);
 		return 0;
 	}
 	out(usage !== null ? `${formatUsage(usage)}\n` : `Usage: ${METRICS_REPOSITORY} has no readable summary.json\n\n`);
 	if (rows.length === 0) {
-		out("the flywheel backlog is empty\n");
+		out(kinds === null ? "the flywheel backlog is empty\n" : `the flywheel backlog has no ${kinds.join(" or ")} items\n`);
 		return 0;
 	}
-	out(`${"rank".padEnd(5)}${"kind".padEnd(11)}${"score".padEnd(8)}${clip("title", 60)}  issue  evidence\n`);
-	for (const row of rows)
-		out(
-			`${row.rank.padEnd(5)}${row.kind.padEnd(11)}${row.score.padEnd(8)}${clip(row.title, 60)}  ${(row.issue || "-").padEnd(5)}  ${row.evidence}\n`,
-		);
+	out(formatBacklog(rows));
 	return 0;
 }
 
@@ -437,7 +471,7 @@ export async function runFlywheelCommand(argv: ReadonlyArray<string>, deps: Flyw
 			continue;
 		}
 		const value = argv[index + 1];
-		if (!["--limit", "--pull", "--key", "--out"].includes(arg)) {
+		if (!["--limit", "--top", "--kind", "--pull", "--key", "--out"].includes(arg)) {
 			fail(`unknown argument: ${arg}`);
 			(stderr ?? ((text: string) => process.stderr.write(text)))(FLYWHEEL_HELP);
 			return 2;
@@ -454,17 +488,21 @@ export async function runFlywheelCommand(argv: ReadonlyArray<string>, deps: Flyw
 		fail("--key and --out apply only with --pull");
 		return 2;
 	}
-	if (which !== undefined && (json || values.has("--limit"))) {
-		fail("--json and --limit apply only to the backlog, not --pull");
+	if (which !== undefined && (json || values.has("--limit") || values.has("--top") || values.has("--kind"))) {
+		fail("--json, --kind, --top and --limit apply only to the backlog, not --pull");
+		return 2;
+	}
+	if (values.has("--limit") && values.has("--top")) {
+		fail("--top and --limit are the same; pass one");
 		return 2;
 	}
 	if (which !== undefined && which !== "all" && !SHARE_ID.test(which)) {
 		fail(`--pull takes a share id (shr_ and 16 hex digits) or all, not ${which}`);
 		return 2;
 	}
-	const limit = Number(values.get("--limit") ?? "20");
+	const limit = Number(values.get("--top") ?? values.get("--limit") ?? "20");
 	if (!Number.isInteger(limit) || limit < 1) {
-		fail("--limit takes a positive whole number");
+		fail(`${values.has("--top") ? "--top" : "--limit"} takes a positive whole number`);
 		return 2;
 	}
 	let gh: string | null;
@@ -478,7 +516,17 @@ export async function runFlywheelCommand(argv: ReadonlyArray<string>, deps: Flyw
 		return 1;
 	}
 	try {
-		if (which === undefined) return await printBacklog(ghFor(gh, deps), json, limit, out);
+		if (which === undefined) {
+			const kind = values.get("--kind");
+			const kinds =
+				kind === undefined
+					? null
+					: kind
+							.split(",")
+							.map((name) => name.trim())
+							.filter(Boolean);
+			return await printBacklog(ghFor(gh, deps), { json, limit, kinds }, out);
+		}
 		const env = deps.env ?? process.env;
 		const keyPath = resolve(
 			values.get("--key") ?? (env.CLIO_INTAKE_KEY_FILE || join(homedir(), ".config", "clio-intake", "intake-x25519.pem")),

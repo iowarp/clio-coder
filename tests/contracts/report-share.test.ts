@@ -230,9 +230,11 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 	const root = await mkdtemp(join(tmpdir(), "flywheel-"));
 	try {
 		const csv = [
-			"rank,kind,key,title,score,evidence,issue,firstSeen,lastSeen,versions",
-			'1,failure,tool.bash.timeout,"bash times out, then retries",42.5,"7 shares, 3 versions",#512,2026-01-02,2026-02-01,0.7.0;0.7.1',
-			"2,demand,feature.panes,split panes,9,4 requests,,2026-01-05,2026-01-30,0.7.1",
+			"rank,kind,key,title,score,evidence,issue,firstSeen,lastSeen,versions,why",
+			'1,failure,tool.bash.timeout,"bash times out, then retries",42.5,"7 shares, 3 versions",#512,2026-01-02,2026-02-01,0.7.0;0.7.1,three releases in a row',
+			"2,demand,feature.panes,split panes,9,4 requests,,2026-01-05,2026-01-30,0.7.1,",
+			"3,file-me,cause:rate_limited,fix(providers): back off on rate limits,6,3 shares,,2026-01-06,2026-01-31,0.7.1,no issue tracks it",
+			"4,release-health,v0.7.0,v0.7.0 adoption is slow,4,12% of downloads,,2026-01-07,2026-01-31,0.7.0,",
 		].join("\n");
 		const bundle = Buffer.from("not really a tar.gz, only bytes to carry");
 		const shareId = "shr_00112233445566ff";
@@ -324,6 +326,21 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		match(out, /open reports +2, shares on file 3/u);
 		match(out, /stale sources +gsc \(error\)/u);
 		ok(out.includes("#41 Weekly digest 2026-W45 https://github.com/iowarp/clio-metrics/issues/41"), out);
+		ok(out.includes("     why: three releases in a row\n"), out);
+		match(
+			out,
+			/To file \(ask before filing[^\n]*\n3 {4}fix\(providers\): back off on rate limits\n {5}why: no issue tracks it\n/u,
+		);
+		ok(out.indexOf("release-health") < out.indexOf("To file"), out);
+		out = "";
+		strictEqual(await flywheel("--kind", "file-me,release-health", "--top", "1"), 0);
+		ok(out.includes("back off on rate limits") && !out.includes("adoption is slow") && !out.includes("split panes"), out);
+		ok(!out.includes("rank kind"), out);
+		out = "";
+		strictEqual(await flywheel("--kind", "regression"), 0);
+		ok(out.includes("the flywheel backlog has no regression items"), out);
+		strictEqual(await flywheel("--top", "2", "--limit", "2"), 2);
+		strictEqual(await flywheel("--pull", "all", "--kind", "failure"), 2);
 		out = "";
 		strictEqual(await flywheel("--json", "--limit", "1"), 0);
 		const parsed = JSON.parse(out) as { usage: Record<string, unknown>; backlog: Array<Record<string, unknown>> };
@@ -341,6 +358,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			{ rank: rows[0]?.rank, score: rows[0]?.score, evidence: rows[0]?.evidence, versions: rows[0]?.versions },
 			{ rank: 1, score: 42.5, evidence: "7 shares, 3 versions", versions: "0.7.0;0.7.1" },
 		);
+		strictEqual(rows[0]?.why, "three releases in a row");
 		access = false;
 		strictEqual(await flywheel(), 1);
 		ok(err.includes("private to the Clio maintainers"), err);
