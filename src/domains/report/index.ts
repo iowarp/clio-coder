@@ -1,6 +1,18 @@
 export { isFixedPoint, parseReportBlock, type RenderedReport, renderReport, renderReportBlock } from "./body.js";
 export type { ReportCommandResult, ReportCommandRunner } from "./command.js";
 export {
+	applyVerdict,
+	changelogFixedIn,
+	findRelated,
+	type RelatedIssue,
+	type RelatedResult,
+	type RelatedVerdict,
+	relatedSearchUrl,
+	renderComment,
+	titleQuery,
+	titleTokens,
+} from "./dedup.js";
+export {
 	newReportId,
 	REPORT_BODY_MAX,
 	REPORT_ID,
