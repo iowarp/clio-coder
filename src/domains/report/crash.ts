@@ -82,9 +82,20 @@ function describeError(error: unknown): { name: string; message: string; stack: 
 }
 
 /**
+ * An operator's own settings mistake, which the CLI already answers with a fix: not a crash to offer a report for.
+ * Matched by name because this module may not import the config or domain loader.
+ */
+function operatorSettingsError(error: unknown): boolean {
+	const value = error as { name?: unknown; domain?: unknown; cause?: unknown } | null;
+	if (value?.name === "SettingsValidationError") return true;
+	if (value?.name !== "DomainLoadError") return false;
+	return value.domain === "config" || (value.cause as { name?: unknown } | null)?.name === "SettingsValidationError";
+}
+
+/**
  * Write `<stateDir>/reports/crashes/<ms>-<pid>.json` at 0600 and keep the newest {@link CRASH_RECORD_LIMIT}.
  * Synchronous, so a fault handler can call it before shutdown, and it never throws: a crash record that cannot be
- * written is not worth a second fault. Returns the file written, or null.
+ * written is not worth a second fault. Returns the file written, or null; an operator's settings error writes none.
  */
 export function writeCrashRecord(
 	error: unknown,
@@ -92,6 +103,7 @@ export function writeCrashRecord(
 	options: { stateDir?: string; packageRoot?: string; now?: Date } = {},
 ): string | null {
 	try {
+		if (operatorSettingsError(error)) return null;
 		const stateDir = options.stateDir ?? clioStateDir();
 		const now = options.now ?? new Date();
 		const described = describeError(error);
