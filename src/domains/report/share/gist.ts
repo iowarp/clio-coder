@@ -134,8 +134,8 @@ export async function uploadShare(
 }
 
 /**
- * Delete the gists of this machine's shares sent more than 180 days ago, as the consent text promises. Best effort and
- * quiet: it asks `gh` nothing when no share has expired, and a gist that cannot be deleted now is tried next time.
+ * Delete the gists of this machine's shares sent more than 180 days ago; every `report` and `telemetry share` run calls
+ * it, never startup, as the consent text says. Best effort and quiet: it asks `gh` nothing when no share has expired, and a gist that cannot be deleted now is tried next time.
  */
 export async function sweepShareGists(
 	stateDir: string,

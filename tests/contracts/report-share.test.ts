@@ -144,8 +144,10 @@ test("telemetry share --send seals to the maintainers, posts the pointer discuss
 		};
 		let out = "";
 		let err = "";
+		let clock: Date | null = null;
 		const share = (argv: string[], env: NodeJS.ProcessEnv = {}) =>
 			runTelemetryShare(argv, {
+				...(clock !== null ? { now: () => clock as Date } : {}),
 				stateDir,
 				env,
 				interactive: false,
@@ -210,6 +212,15 @@ test("telemetry share --send seals to the maintainers, posts the pointer discuss
 		ok(calls.slice(before).some((args) => args.includes("DELETE") && args.includes(`gists/${gistId}`)));
 		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
 		strictEqual(await share(["forget", "shr_0000000000000000"]), 1);
+
+		// No startup sweep: any later telemetry share run, even a local one, deletes a gist once it is 180 days old.
+		out = "";
+		strictEqual(await share([...send, "--yes"]), 0);
+		const aging = /shared (shr_[0-9a-f]{16})/u.exec(out)?.[1] ?? "";
+		ok(pointer.includes("once it is 180 days old, Clio Coder deletes it the next time the sender runs"), pointer);
+		clock = new Date(Date.now() + 181 * 86_400_000);
+		strictEqual(await share(["--session", "ses_send", "--out", join(root, "local.tar.gz")]), 0);
+		ok(readShareReceipts(stateDir)[aging]?.deletedAt !== null);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

@@ -80,8 +80,8 @@ gist in your GitHub account through your own gh, and opens a public discussion i
 publish an anonymized dataset from it. It takes the content-free, structural or
 research profile, asks before sending in a terminal and needs --yes outside one,
 and is refused in a command a Clio session started. list shows what this machine
-shared; forget <shareId> deletes the gist, and Clio deletes it ${SHARE_RETENTION_DAYS} days after
-sending.
+shared; forget <shareId> or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days
+old, the next report or telemetry share run deletes it.
 
 import verifies every bundle in an archive as telemetry verify does, then places
 the scopes under the state directory's telemetry/imported/<install-id>/,
@@ -332,7 +332,7 @@ function pointerBody(fields: {
 	return [
 		"An encrypted telemetry share from Clio Coder. Only the Clio Coder maintainers can open it; counts derived from it, never its contents, help rank what to fix next.",
 		"",
-		`The sender can delete it at any time with \`clio-coder telemetry share forget ${fields.shareId}\`; Clio Coder deletes it ${SHARE_RETENTION_DAYS} days after sending.`,
+		`The sender can delete it at any time with \`clio-coder telemetry share forget ${fields.shareId}\` or on github.com; once it is ${SHARE_RETENTION_DAYS} days old, Clio Coder deletes it the next time the sender runs \`clio-coder report\` or \`clio-coder telemetry share\`.`,
 		"",
 		"```clio-coder-share",
 		"v: 1",
@@ -348,7 +348,6 @@ function pointerBody(fields: {
 
 /** `telemetry share list`: what this machine shared, live or deleted. */
 async function listShares(io: ShareIo): Promise<number> {
-	await sweep(io);
 	const shares = Object.entries(readShareReceipts(io.stateDir)).sort(([, a], [, b]) => a.sentAt.localeCompare(b.sentAt));
 	if (shares.length === 0) {
 		io.out("no shares sent from this machine\n");
@@ -473,6 +472,13 @@ async function sendShare(
 export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: TelemetryShareDeps = {}): Promise<number> {
 	const io = shareIo(deps);
 	try {
+		// Every telemetry share run deletes this machine's expired share gists, as the consent text says.
+		await sweep(io);
+	} catch (error) {
+		io.fail(`cannot read the share receipts: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+	try {
 		if (argv[0] === "list" && argv.length === 1) return await listShares(io);
 		if (argv[0] === "forget" && argv.length <= 2) return await forgetShare(io, argv[1]);
 	} catch (error) {
@@ -576,7 +582,6 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: Telem
 				io.fail("nothing sent: pass --yes to send outside a terminal");
 				return 2;
 			}
-			await sweep(io);
 			const findGh = await findGhFor(deps);
 			const transport = await detectTransport(io.env, {
 				findGh,

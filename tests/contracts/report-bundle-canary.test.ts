@@ -819,7 +819,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(await report("--bundle", "mechanics", "--consent", "dataset", "--share", "--dry-run"), 0);
 		match(out, /bundle: gist:<created on send>#shr_[0-9a-f]{16}\nconsent: debug,dataset\n/u);
 		ok(out.includes("upload the bundle encrypted to the maintainers as a secret gist"), out);
-		ok(out.includes("Clio Coder deletes the gist 180 days after sending it"), out);
+		ok(out.includes("Once it is 180 days old, Clio Coder deletes it the next time you run"), out);
 		strictEqual(gists.length, 0);
 
 		gistFails = true;

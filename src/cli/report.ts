@@ -100,7 +100,8 @@ this machine: show <id> --bundle prints every byte of it and forget deletes it,
 also after the report was sent.
 --share uploads the bundle too, encrypted so only the maintainers can open it, as a
 secret gist in your own GitHub account through gh; the report names that gist.
-forget deletes the gist, and Clio deletes it ${SHARE_RETENTION_DAYS} days after sending. Only a report
+forget or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, the next
+report or telemetry share run deletes it. Only a report
 composed and sent with --share shares; report send <id> never does.
 selftest builds that bundle for the newest session here, writes nothing, and
 says whether any of this machine's identifiers survived into it.
@@ -345,7 +346,7 @@ function formatReportPreview(plan: ReportPlan, bundled: boolean, id: string): st
 		RULE("end of body"),
 		plan.maskSummary,
 		plan.bundle !== null
-			? `The diagnostic bundle is uploaded encrypted to the Clio Coder maintainers, as a secret gist in your GitHub account that the report names. Only the maintainers can open it. clio-coder report forget ${id} deletes the gist; Clio deletes it ${SHARE_RETENTION_DAYS} days after sending.`
+			? `The diagnostic bundle is uploaded encrypted to the Clio Coder maintainers, as a secret gist in your GitHub account that the report names. Only the maintainers can open it. clio-coder report forget ${id} or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, Clio deletes it the next time you run clio-coder report or clio-coder telemetry share.`
 			: bundled
 				? "The diagnostic bundle stays on this machine; sending does not upload it."
 				: "No diagnostic bundle is attached.",

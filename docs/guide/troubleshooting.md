@@ -430,8 +430,10 @@ clio-coder telemetry share forget <shareId>
   recalled once published.
 - **Deleting it.** `clio-coder report forget <id>` or `clio-coder telemetry
   share forget <shareId>` deletes the gist, and the derived counts go on the
-  maintainers' next daily run. Clio Coder deletes its share gists 180 days
-  after sending them. `telemetry share list` shows every share this machine
+  maintainers' next daily run. You can also delete the gist on github.com.
+  Once a share is 180 days old, Clio Coder deletes its gist the next time you
+  run `clio-coder report` or `clio-coder telemetry share`; nothing runs at
+  startup or in the background. `telemetry share list` shows every share this machine
   sent; the receipts live in the state directory's `reports/shares.json`.
 - **Never for the agent.** The agent never shares or passes `--share` or
   `--send`; both are refused in a command a Clio Coder session started, and

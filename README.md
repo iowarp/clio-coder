@@ -361,8 +361,9 @@ latent demand, you share one item at a time, by running the command yourself:
 `clio-coder report ... --bundle mechanics --consent debug --share` or
 `clio-coder telemetry share ... --send --consent debug`. Each share is
 previewed, encrypted so that only the maintainers can open it, uploaded as a
-secret gist in your own GitHub account, and deletable with `forget`; Clio
-deletes it after 180 days. Your agent never shares for you. See
+secret gist in your own GitHub account, and deletable with `forget` or on
+github.com; once it is 180 days old, your next `clio-coder report` or
+`clio-coder telemetry share` deletes it. Your agent never shares for you. See
 [Share with the maintainers](docs/guide/troubleshooting.md#share-with-the-maintainers).
 
 ## Safety and control
