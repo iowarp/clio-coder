@@ -212,11 +212,23 @@ export function canaryLocation(hit: CanaryHit): string {
 	return hit.path === null ? hit.member : `${hit.member}.${hit.path}`;
 }
 
-/** The refusal for the first hit: the kind and the location, never the value. */
-export function canaryRefusal(hits: ReadonlyArray<CanaryHit>, what = "the bundle was not built"): string {
+/** A field that names a model, which the `report` profile keeps readable unless models are anonymized. */
+const MODEL_FIELD = /(?:^|\.)(?:model|modelId|wireModelId|requestedModel|reportedModel|responseModelIds)(?:$|[.[])/u;
+
+/**
+ * The refusal for the first hit: the kind and the location, never the value. When every hit is in a model id kept
+ * readable, the model's name contains the machine's name, and building with models anonymized is the remedy.
+ */
+export function canaryRefusal(
+	hits: ReadonlyArray<CanaryHit>,
+	what = "the bundle was not built",
+	options: { modelsKept?: boolean } = {},
+): string {
 	const hit = hits[0];
 	if (hit === undefined) return "";
 	const more = hits.length > 1 ? ` (and ${hits.length - 1} more)` : "";
+	if (options.modelsKept === true && hits.every((each) => each.path !== null && MODEL_FIELD.test(each.path)))
+		return `${what}: a model id contains this machine's ${hit.kind} name, in ${canaryLocation(hit)}${more}; build it again with --anonymize-models.`;
 	return `${what}: a ${hit.kind} appears in ${canaryLocation(hit)}${more}. This is a Clio Coder bug; \`/report\` it without a bundle.`;
 }
 

@@ -502,7 +502,8 @@ export async function buildBundle(draft: ReportDraft, options: BundleOptions): P
 		options.identity,
 		{ stateDir: options.stateDir },
 	);
-	if (hits.length > 0) throw new Error(canaryRefusal(hits));
+	if (hits.length > 0)
+		throw new Error(canaryRefusal(hits, undefined, { modelsKept: (options.models ?? "keep") === "keep" }));
 
 	const bytes = packTelemetryArchive(members, Math.floor(now.getTime() / 1000));
 	const hash = sha256(bytes);

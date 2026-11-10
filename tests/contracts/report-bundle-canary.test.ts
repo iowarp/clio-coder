@@ -13,6 +13,7 @@ import { journalDefinition } from "../../src/core/telemetry/events.js";
 import {
 	buildBundle,
 	type CanaryHit,
+	canaryRefusal,
 	canaryScan,
 	composeReportDraft,
 	issueCanaryHits,
@@ -189,6 +190,31 @@ function eventLeaks(name: string, projection: ShareProjection): string[] {
 	}
 	return leaks;
 }
+
+test("a projected record still matches its event's schema under every report profile (R2b-report-03)", () => {
+	const broken: string[] = [];
+	for (const name of EVENT_NAMES) {
+		const schema = journalDefinition(name).schema;
+		for (const { label, projection } of PROJECTIONS.filter((entry) => entry.label.startsWith("report")))
+			for (let variant = 0; variant < VARIANTS; variant++) {
+				const payload = generate(asSchema(schema), variant);
+				if (!Value.Check(schema, payload)) continue;
+				const projected = projectSharedPayload(name, payload, anonymize, projection);
+				if (!Value.Check(schema, projected)) broken.push(`${label}: ${name} variant ${variant}`);
+			}
+	}
+	deepStrictEqual(broken, []);
+	const hit = (path: string): CanaryHit => ({ member: "report.json", kind: "target", event: null, path });
+	match(
+		canaryRefusal([hit("environment.model")], undefined, { modelsKept: true }),
+		/a model id contains this machine's target name, in report\.json\.environment\.model; build it again with --anonymize-models/u,
+	);
+	match(canaryRefusal([hit("environment.model")]), /This is a Clio Coder bug/u);
+	match(
+		canaryRefusal([hit("environment.model"), hit("environment.cwd")], undefined, { modelsKept: true }),
+		/Clio Coder bug/u,
+	);
+});
 
 test("no canary survives projection of any shareable event under any profile (R-19)", () => {
 	let covered = 0;

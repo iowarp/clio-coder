@@ -71,7 +71,7 @@ const TARGET = {
 	runtimeId: "runtime",
 	api: "token",
 	requestedModel: "model-id",
-	reportedModel: "model-id",
+	reportedModel: { ...keep("kind", "source", "method", "reason"), value: "model-id" },
 } as const satisfies FieldProjection;
 const ROUTE_TUPLE = {
 	executionRole: "keep",
