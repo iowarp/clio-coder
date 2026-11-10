@@ -28,6 +28,11 @@ PROGRESS_BYTES = 64 * 1024 * 1024
 PROGRESS_SECONDS = 2.0
 # Under the supervisor's 30 s call deadline, so a stalled runtime is answered, not timed out.
 CALL_SECONDS = 25.0
+# A call still waiting after STALL_SECONDS asks whether the runtime answers at all, so a stopped runtime is
+# refused in seconds rather than at CALL_SECONDS (M-40 F16).
+STALL_SECONDS = 1.0
+PROBE_SECONDS = 3.0
+LIVENESS_TAG = "^clio-core-host-liveness$"
 ATTACH_SECONDS = 10.0
 EXIT_ATTACH_FAILED = 3
 EXIT_PROTOCOL = 2
@@ -46,6 +51,8 @@ _frames_fd = os.dup(1)
 os.dup2(2, 1)
 sys.stdout = sys.stderr
 _send_lock = threading.Lock()
+# Set once attached: True when the runtime answers a query within PROBE_SECONDS.
+_runtime_answers = None
 
 
 def log(message):
@@ -109,16 +116,58 @@ def check_rc(code, what):
     raise Refusal("io", f"{what} failed with return code {code}.")
 
 
+def require_runtime(what):
+    if _runtime_answers is not None and not _runtime_answers():
+        raise Refusal(
+            "unavailable",
+            f"The clio-core runtime is not answering: {what} is still waiting and a liveness query got no reply"
+            f" within {PROBE_SECONDS:g} s. Start it (clio_run ensure) or check its log; the store reattaches"
+            " once it is back.",
+        )
+
+
 def finish(future, what):
     """Polls `done()` against a deadline; `wait` on a runtime that is gone never returns."""
-    deadline = time.monotonic() + CALL_SECONDS
+    start = time.monotonic()
+    deadline, stall_at = start + CALL_SECONDS, start + STALL_SECONDS
     delay = 0.0005
     while not future.done():
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise Refusal("unavailable", f"clio-core did not answer {what} within {CALL_SECONDS:g} s.")
+        if now >= stall_at:
+            stall_at = deadline
+            require_runtime(what)
         time.sleep(delay)
         delay = min(delay * 2, 0.02)
     return future
+
+
+def native(what, fn, *args):
+    """A blocking filesystem-client call with `finish`'s deadline; the binding has no timeout of its own.
+
+    A call the deadline gives up on keeps its thread until the runtime answers or the host exits; its
+    outcome is then unknown, as for an async call `finish` gave up on.
+    """
+    box = {}
+    done = threading.Event()
+
+    def body():
+        try:
+            box["value"] = fn(*args)
+        except BaseException as error:
+            box["error"] = error
+        finally:
+            done.set()
+
+    threading.Thread(target=body, name=f"native-{what}", daemon=True).start()
+    if not done.wait(STALL_SECONDS):
+        require_runtime(what)
+        if not done.wait(max(0.0, CALL_SECONDS - STALL_SECONDS)):
+            raise Refusal("unavailable", f"clio-core did not answer {what} within {CALL_SECONDS:g} s.")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 def result_of(future, what):
@@ -199,7 +248,7 @@ class Core:
             raise RuntimeError("initialize_cte returned False")
         major, minor = (int(part) for part in self.pool.split("."))
         self.client = cte.Client(cte.PoolId(major, minor))
-        probe = self.client.AsyncTagQuery("^clio-core-host-liveness$", 1, cte.PoolQuery.Broadcast())
+        probe = self.client.AsyncTagQuery(LIVENESS_TAG, 1, cte.PoolQuery.Broadcast())
         deadline = time.monotonic() + ATTACH_SECONDS
         while not probe.done():
             if time.monotonic() >= deadline:
@@ -223,6 +272,21 @@ class Core:
         self.devices, self.multi_node = read_config(self.config)
         self.tag_ids = {}
         self.tag_lock = threading.Lock()
+        global _runtime_answers
+        _runtime_answers = self.runtime_answers
+
+    def runtime_answers(self):
+        try:
+            probe = self.client.AsyncTagQuery(LIVENESS_TAG, 1, self.cte.PoolQuery.Broadcast())
+            deadline = time.monotonic() + PROBE_SECONDS
+            while not probe.done():
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.01)
+            return True
+        except Exception as error:
+            log(f"the liveness query failed: {error}")
+            return False
 
     # Tags
 
@@ -375,7 +439,7 @@ class Core:
 
     def blob_stat(self, fs, path):
         try:
-            info = fs.stat(path)
+            info = native("stat", fs.stat, path)
         except OSError as error:
             if error.errno in (errno.ENOENT, errno.ENOTDIR):
                 return None
@@ -442,7 +506,7 @@ class Core:
         fs = self.need_fs()
         path = self.path_of(args)
         try:
-            info = fs.stat(path)
+            info = native("stat", fs.stat, path)
         except OSError as error:
             if error.errno in (errno.ENOENT, errno.ENOTDIR):
                 raise Refusal("not-found", f"Tag {args['tag']} has no blob named {args['blob']}.") from None
@@ -476,9 +540,9 @@ class Core:
 
     def walk(self, fs, root, relative, names):
         directory = root + ("/" + relative if relative else "")
-        for entry in fs.readdir(directory):
+        for entry in native("readdir", fs.readdir, directory):
             name = f"{relative}/{entry}" if relative else entry
-            if stat_mode.S_ISDIR(fs.stat(f"{root}/{name}")["mode"]):
+            if stat_mode.S_ISDIR(native("stat", fs.stat, f"{root}/{name}")["mode"]):
                 self.walk(fs, root, name, names)
             else:
                 names.append(name)
@@ -517,7 +581,7 @@ class Core:
         if self.blob_stat(fs, path) is None:
             return {"deleted": False}
         try:
-            fs.remove(path)
+            native("remove", fs.remove, path)
         except OSError as error:
             if error.errno in (errno.ENOENT, errno.ENOTDIR, errno.EIO) and self.blob_stat(fs, path) is None:
                 return {"deleted": False}
