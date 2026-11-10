@@ -470,7 +470,12 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		callId: "id",
 		attemptId: "id",
 	},
-	"middleware.fired": { ...keep("hook", "phase", "effects", "severity", "evidence"), ruleId: "name", tool: "tool" },
+	"middleware.fired": {
+		...keep("hook", "phase", "effects", "severity"),
+		ruleId: "name",
+		evidence: "token",
+		tool: "tool",
+	},
 	"system_one.decided": {
 		...keep("outcome", "latencyMs", "deadlineMs", "asked", "abstained", "callIds"),
 		point: "token",
@@ -484,7 +489,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		tokens: keep("input", "output"),
 		routes: { ...keep("outcome", "roundTripMs", "breaker"), engine: "token", kind: "token", profile: "token" },
 	},
-	"worker.channel_failed": keep("lane", "frameType", "errno", "afterExit", "failure"),
+	"worker.channel_failed": { ...keep("lane", "errno", "afterExit", "failure"), frameType: "token" },
 	"hook.ran": {
 		...keep("origin", "sourceId", "hook", "kind", "outcome", "durationMs", "exitCode", "outputChars"),
 		hookId: "name",
