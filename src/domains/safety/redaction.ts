@@ -292,8 +292,10 @@ export function redactUrlCredentials(value: string): string {
 // cheap. A header keeps its scheme word. Names are whole words, as for URL parameters, so `author: "Jane Doe"` stays.
 const QUOTED_SECRET_CHARS = 1024;
 const QUOTED_HEADER_HEAD = String.raw`\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?`;
-// A lead never starts inside a run of name characters and names stay bounded, so a long dash or `a-` run scans linearly.
-const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])--?([A-Za-z0-9_-]{1,64})(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{1,64})\s*[=:]\s*`;
+// A lead starts only at the start of a run of name characters and is scanned once per run, so a long dash or `a-` run
+// scans linearly. A flag may follow a word inside a run that ends in whitespace, so a header name such as
+// `Proxy-Authorization "Basic a b"` still leads its value, while `api-key="a b"` stays a key; no name length is capped.
+const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_]+(?=-[A-Za-z0-9_-]*\s))?--?([A-Za-z0-9_-]+)(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)\s*[=:]\s*`;
 // The value never starts with whitespace, so a long space run after the colon is not rescanned once per space.
 const QUOTED_HEADER_RE = new RegExp(
 	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?!\s)(?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
