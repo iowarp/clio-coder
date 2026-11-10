@@ -4,7 +4,9 @@
  * Every run that settled under a route decision carries, on its run.settled, the executed route's whole identity,
  * its outcome, priced spend, cache reads, attempt and phase timing. Route policy and readiness read that history from
  * here; nothing else persists it. A run's entry is re-read whenever its bundle, journal segments or objects change
- * identity, so a dispatch stats each scope file and reads only changed runs. No index file exists.
+ * identity, so a dispatch reads only changed runs. A sealed run is immutable: once folded, its directory's own stat
+ * and its bundle's are its key. The fold covers the newest runs only, by directory time, as adaptive routing reads no
+ * older history. No index file exists.
  */
 
 import { lstatSync, readdirSync, type Stats } from "node:fs";
@@ -144,6 +146,9 @@ export interface RouteHistoryFold {
 	warm?(stopped: () => boolean): Promise<void>;
 }
 
+const HISTORY_MAX_RUNS = 2_000;
+const HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 function statOrNull(path: string): Stats | null {
 	try {
 		return lstatSync(path);
@@ -191,7 +196,18 @@ function sortEntries(left: RouteHistoryEntry, right: RouteHistoryEntry): number 
 
 /** The incremental fold; an unchanged run hands back the same entry object, so callers can memoize by identity. */
 export function createRouteHistoryFold(options: { stateDir: string }): RouteHistoryFold {
-	const cache = new Map<string, { identity: string; run: SettledRunFacts | null; entry: RouteHistoryEntry | null }>();
+	const cache = new Map<
+		string,
+		{ identity: string; sealedKey: string | null; run: SettledRunFacts | null; entry: RouteHistoryEntry | null }
+	>();
+	/** Sealed runs outside the bound; a sealed run only ages, so it is never stat'd again while it stays listed. */
+	const retired = new Set<string>();
+	const statKey = (stats: Stats): string => `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+	/** The directory's stat and its bundle's; null while the run is unsealed. A bundle rewritten in place moves it. */
+	const sealedKeyOf = (directory: string, dir: Stats): string | null => {
+		const bundle = statOrNull(telemetryBundlePath(directory));
+		return bundle?.isFile() === true ? `${statKey(dir)}|${statKey(bundle)}` : null;
+	};
 	let version = 0;
 	let last: RouteHistoryRead | null = null;
 	// A scope warmed since the last read is a cache hit there, but `last` does not hold it.
@@ -204,10 +220,11 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 			return [];
 		}
 	};
-	const foldRun = (
-		runId: string,
-		identity: string,
-	): { identity: string; run: SettledRunFacts | null; entry: RouteHistoryEntry | null } => {
+	const foldRun = (runId: string, identity: string) => {
+		const directory = telemetryRunDirectory(options.stateDir, runId);
+		// Taken before the read: any later change to the scope's entries moves the directory's own stat.
+		const dir = statOrNull(directory);
+		const sealedKey = dir === null ? null : sealedKeyOf(directory, dir);
 		let run: SettledRunFacts | null = null;
 		try {
 			const record = readRunRecord(options.stateDir, runId);
@@ -216,7 +233,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 			// An unreadable run scope contributes no history.
 			run = null;
 		}
-		const folded = { identity, run, entry: run === null ? null : routeEntryOf(run) };
+		const folded = { identity, sealedKey, run, entry: run === null ? null : routeEntryOf(run) };
 		cache.set(runId, folded);
 		return folded;
 	};
@@ -224,6 +241,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		async warm(stopped) {
 			for (const runId of listRuns()) {
 				if (stopped()) return;
+				if (retired.has(runId)) continue;
 				try {
 					const directory = telemetryRunDirectory(options.stateDir, runId);
 					const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
@@ -244,7 +262,12 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 			const seen = new Set<string>();
 			const entries: RouteHistoryEntry[] = [];
 			const runs: SettledRunFacts[] = [];
+			const listed = new Set(names);
+			for (const runId of retired) if (!listed.has(runId)) retired.delete(runId);
+			// One lstat per run not yet retired; a symlink is not a directory, so it never enters (#434).
+			const scopes: Array<{ runId: string; directory: string; stats: Stats }> = [];
 			for (const runId of names) {
+				if (retired.has(runId)) continue;
 				let directory: string;
 				try {
 					directory = telemetryRunDirectory(options.stateDir, runId);
@@ -252,11 +275,35 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 					// A name that is not a safe run id is not a run scope.
 					continue;
 				}
+				const stats = statOrNull(directory);
+				if (stats?.isDirectory()) scopes.push({ runId, directory, stats });
+			}
+			const oldest = Date.now() - HISTORY_MAX_AGE_MS;
+			const bounded = new Set(
+				scopes
+					.filter((scope) => scope.stats.mtimeMs >= oldest)
+					.sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs)
+					.slice(0, HISTORY_MAX_RUNS)
+					.map((scope) => scope.runId),
+			);
+			for (const { runId, directory, stats } of scopes) {
+				if (!bounded.has(runId)) {
+					if (sealedKeyOf(directory, stats) !== null) retired.add(runId);
+					continue;
+				}
+				const cached = cache.get(runId);
+				// A sealed run whose directory and bundle are unchanged is the run already folded; the runs directory was
+				// bounded above.
+				if (cached !== undefined && cached.sealedKey !== null && cached.sealedKey === sealedKeyOf(directory, stats)) {
+					seen.add(runId);
+					if (cached.run !== null) runs.push(cached.run);
+					if (cached.entry !== null) entries.push(cached.entry);
+					continue;
+				}
 				// A run scope that is symlinked or leaves the state root is not this host's route history (#434).
 				const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
 				if (identity === null) continue;
 				seen.add(runId);
-				const cached = cache.get(runId);
 				if (cached !== undefined && cached.identity === identity) {
 					if (cached.run !== null) runs.push(cached.run);
 					if (cached.entry !== null) entries.push(cached.entry);

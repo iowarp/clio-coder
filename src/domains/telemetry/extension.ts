@@ -41,6 +41,7 @@ import { TelemetryManifest } from "./manifest.js";
 import type { ProcessJournal } from "./process-journal.js";
 import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
+import { sweepTelemetryDaily } from "./retention.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
@@ -315,8 +316,17 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 	let exitStatus: number | undefined;
 	const processExitStatus = (): number => exitStatus ?? (typeof process.exitCode === "number" ? process.exitCode : 0);
 
+	/** Retention runs on its own once a day, after boot settles and off every input path (#434). */
+	let sweepTimer: NodeJS.Timeout | undefined;
+
 	const extension: DomainExtension = {
 		async start() {
+			sweepTimer = setTimeout(() => {
+				void sweepTelemetryDaily(clioStateDir(), { stopped: () => stopping }).catch(() => {
+					// A failed sweep removes nothing it could not prove safe; the next day tries again.
+				});
+			}, 5_000);
+			sweepTimer.unref();
 			try {
 				processJournal ??= createProcessJournal(
 					clioStateDir(),
@@ -382,6 +392,7 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 		},
 		async stop() {
 			stopping = true;
+			clearTimeout(sweepTimer);
 			healthWindows.stop();
 			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "shutdown" });
 			liveSession = null;

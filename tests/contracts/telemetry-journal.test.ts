@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
 	appendFile,
 	mkdir,
@@ -1015,7 +1016,7 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 			["current.jsonl", "meta.json"],
 			"the ledger is not telemetry",
 		);
-		deepStrictEqual(await readdir(expired), [], "the expired session keeps no telemetry");
+		strictEqual(existsSync(expired), false, "the expired session keeps no telemetry, not even its directory");
 		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
@@ -1099,8 +1100,7 @@ test("whole-session prune retires sealed bundles and bundle-only remnants", asyn
 		for (const id of ["sealed", "bundle-only"])
 			ok(plan.remove.some((action) => action.path === telemetryBundlePath(telemetrySessionDirectory(stateDir, id))));
 		deepStrictEqual((await applyTelemetryPrune(plan)).skipped, []);
-		for (const id of ["sealed", "bundle-only"])
-			deepStrictEqual(await readdir(telemetrySessionDirectory(stateDir, id)), []);
+		for (const id of ["sealed", "bundle-only"]) strictEqual(existsSync(telemetrySessionDirectory(stateDir, id)), false);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}

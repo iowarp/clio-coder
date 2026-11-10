@@ -1,7 +1,8 @@
-import { existsSync, lstatSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { lstat, readdir, readFile, rmdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
+import { clearAbandonedStateLock, stateLockIsAbandoned, tryWithStateFileLockSync } from "../../core/state-file-lock.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
@@ -12,6 +13,7 @@ import {
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
 	telemetryProcessesDirectory,
+	telemetryRoot,
 	telemetryRunsDirectory,
 	telemetrySessionsDirectory,
 } from "./paths.js";
@@ -154,9 +156,14 @@ async function realDirectory(path: string): Promise<boolean> {
 	}
 }
 
-/** A writer holds `<journal>.lock` for its whole life; a lock, live or stale, keeps every file of that journal. */
+function journalLock(directory: string): string {
+	return join(directory, `${TELEMETRY_JOURNAL_FILE}.lock`);
+}
+
+/** A writer holds `<journal>.lock` for its whole life; only a lock whose owner is provably gone keeps nothing. */
 function locked(directory: string): boolean {
-	return existsSync(join(directory, `${TELEMETRY_JOURNAL_FILE}.lock`));
+	const lock = journalLock(directory);
+	return existsSync(lock) && !stateLockIsAbandoned(lock);
 }
 
 /** Whether the session's owner may be alive; an unreadable or missing meta cannot rule it out. */
@@ -452,7 +459,10 @@ export interface PruneResult {
  * before every unlink, so a session that starts between the plan and its turn is skipped whole. Prune never takes
  * the journal lock itself: a writer that found it held would fail its open and lose the session's journal (#434).
  */
-export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult> {
+export async function applyTelemetryPrune(
+	plan: PrunePlan,
+	options: { stopped?: () => boolean } = {},
+): Promise<PruneResult> {
 	const result: PruneResult = { removed: [], skipped: [] };
 	const live = async (owner: PruneAction["owner"]): Promise<boolean> => {
 		if (locked(owner.directory)) return true;
@@ -465,6 +475,8 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 		batches.set(key, [...(batches.get(key) ?? []), action]);
 	}
 	for (const batch of batches.values()) {
+		// A budgeted sweep leaves the rest for its next run; nothing half of one owner is ever left behind by choice.
+		if (options.stopped?.()) break;
 		const owner = (batch[0] as PruneAction).owner;
 		const expectedJournal = owner.kind === "session" ? { ...owner.journalStamp } : null;
 		if (await live(owner)) {
@@ -503,9 +515,49 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			}
 		}
 	}
-	for (const directory of new Set(result.removed.map((action) => telemetryObjectsDirectory(action.owner.directory)))) {
-		// Only an emptied objects directory goes; rmdir refuses one that still holds a file.
-		if (unlinkedStateDirectory(plan.stateDir, directory)) await rmdir(directory).catch(() => {});
+	for (const scope of new Set(result.removed.map((action) => action.owner.directory))) {
+		// Only emptied directories go; rmdir refuses one that still holds a file. A dead writer's lock is not a file
+		// worth keeping a scope for, so it goes with them.
+		const objects = telemetryObjectsDirectory(scope);
+		if (unlinkedStateDirectory(plan.stateDir, objects)) await rmdir(objects).catch(() => {});
+		if (!unlinkedStateDirectory(plan.stateDir, scope)) continue;
+		if ((await names(scope)).length === 1) clearAbandonedStateLock(journalLock(scope));
+		await rmdir(scope).catch(() => {});
 	}
 	return result;
+}
+
+const SWEEP_INTERVAL_MS = DAY_MS;
+const SWEEP_BUDGET_MS = 2_000;
+
+/**
+ * The automatic retention sweep: at most once a day per state root, claimed by a stamp under a non-waiting lock so
+ * concurrent processes do not all sweep. Removal stops after its time budget; the rest goes on a later day. Null when
+ * the sweep was not due or another process holds the claim.
+ */
+export async function sweepTelemetryDaily(
+	stateDir: string,
+	options: { nowMs?: number; budgetMs?: number; stopped?: () => boolean } = {},
+): Promise<PruneResult | null> {
+	const nowMs = options.nowMs ?? Date.now();
+	const root = telemetryRoot(stateDir);
+	if (!unlinkedStateDirectory(stateDir, root)) return null;
+	const stamp = join(root, "prune.stamp");
+	const claim = tryWithStateFileLockSync(stamp, () => {
+		let last = Number.NaN;
+		try {
+			last = Number(readFileSync(stamp, "utf8").trim());
+		} catch {
+			// Never swept here.
+		}
+		if (Number.isFinite(last) && last <= nowMs && nowMs - last < SWEEP_INTERVAL_MS) return false;
+		writeFileSync(stamp, `${nowMs}\n`);
+		return true;
+	});
+	if (!claim.held || !claim.value) return null;
+	const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY, nowMs);
+	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
+	return await applyTelemetryPrune(plan, {
+		stopped: () => performance.now() > deadline || options.stopped?.() === true,
+	});
 }

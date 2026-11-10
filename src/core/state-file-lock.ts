@@ -151,6 +151,16 @@ function lockIsAbandoned(lockPath: string): boolean {
 	return ageMs !== null && ageMs > STALE_LOCK_MS;
 }
 
+/** Whether a lock's recorded owner is provably gone, the same test a stale takeover uses. */
+export function stateLockIsAbandoned(lockPath: string): boolean {
+	return lockIsAbandoned(lockPath);
+}
+
+/** Remove a lock whose owner is provably gone, under the same reclaim guard a waiter uses. */
+export function clearAbandonedStateLock(lockPath: string): void {
+	if (lockIsAbandoned(lockPath)) reclaimAbandonedLock(lockPath);
+}
+
 function removeLockFile(lockPath: string): void {
 	try {
 		unlinkSync(lockPath);
