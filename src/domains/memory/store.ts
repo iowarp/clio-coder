@@ -1,17 +1,38 @@
 import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { MEMORY_VERSION, type MemoryRecord, type MemoryStatus, type MemoryStoreFile } from "./types.js";
-import { validateMemoryStore } from "./validate.js";
+import { validateMemoryRecord } from "./validate.js";
 
 export const MEMORY_STORE_MAX_RECORDS = 500;
 export const MEMORY_STALE_APPROVED_DAYS = 180;
 export const MEMORY_STALE_UNAPPROVED_DAYS = 30;
 /** Prompt compilation fails closed above this read ceiling; store writers are unchanged. */
 export const MEMORY_PROMPT_STORE_MAX_BYTES = 16 * 1024 * 1024;
+/** Quarantined records kept beside the store; the oldest fall off first. */
+export const MEMORY_INVALID_RECORDS_MAX = 100;
+
+interface InvalidMemoryRecord {
+	record: unknown;
+	issues: string[];
+}
+
+interface ParsedMemoryStore {
+	records: MemoryRecord[];
+	invalid: InvalidMemoryRecord[];
+}
+
+/** Stores this process already told the operator about, so each gets one notice. */
+const noticedInvalidStores = new Set<string>();
+const pendingStoreNotices: string[] = [];
+
+/** Operator notices the store raised since the last call: invalid records it set aside. */
+export function takeMemoryStoreNotices(): string[] {
+	return pendingStoreNotices.splice(0);
+}
 
 export interface MemoryStoreSnapshot {
 	revision: string;
@@ -50,7 +71,7 @@ export function readMemoryStoreSnapshot(dataDir: string): MemoryStoreSnapshot {
 		closeSync(fd);
 	}
 	const raw = Buffer.concat(chunks);
-	const records = parseAndValidate(raw.toString("utf8"), path);
+	const { records } = parseAndValidate(raw.toString("utf8"), path);
 	if (records.length > MEMORY_STORE_MAX_RECORDS) throw new Error("memory prompt store exceeds record limit");
 	return { revision: createHash("sha256").update(raw).digest("hex"), records };
 }
@@ -63,6 +84,10 @@ export function memoryStorePath(dataDir: string): string {
 	return join(memoryRoot(dataDir), "records.json");
 }
 
+function memoryInvalidRecordsPath(dataDir: string): string {
+	return join(memoryRoot(dataDir), "records.invalid.json");
+}
+
 export async function loadMemoryRecords(dataDir: string): Promise<MemoryRecord[]> {
 	let raw: string;
 	try {
@@ -71,7 +96,7 @@ export async function loadMemoryRecords(dataDir: string): Promise<MemoryRecord[]
 		if (isErrorWithCode(error) && error.code === "ENOENT") return [];
 		throw error;
 	}
-	return parseAndValidate(raw, memoryStorePath(dataDir));
+	return parseAndValidate(raw, memoryStorePath(dataDir)).records;
 }
 
 /**
@@ -81,36 +106,103 @@ export async function loadMemoryRecords(dataDir: string): Promise<MemoryRecord[]
  * prompt compile site to thread an async boundary through the chat loop.
  */
 export function loadMemoryRecordsSync(dataDir: string): MemoryRecord[] {
+	return readParsedStoreSync(dataDir).records;
+}
+
+function readParsedStoreSync(dataDir: string): ParsedMemoryStore {
 	let raw: string;
 	try {
 		raw = readFileSync(memoryStorePath(dataDir), "utf8");
 	} catch (error) {
-		if (isErrorWithCode(error) && error.code === "ENOENT") return [];
+		if (isErrorWithCode(error) && error.code === "ENOENT") return { records: [], invalid: [] };
 		throw error;
 	}
 	return parseAndValidate(raw, memoryStorePath(dataDir));
 }
 
-function parseAndValidate(raw: string, source: string): MemoryRecord[] {
+/**
+ * The envelope must be valid; a record that is not is set aside rather than
+ * failing every read, and moves to `records.invalid.json` on the next write.
+ * A store a newer build wrote is never touched.
+ */
+function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	const parsed = parseJson(raw, source);
-	const result = validateMemoryStore(parsed, "$");
-	if (!result.valid) {
-		throw new Error(
-			`memory store invalid: ${result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error("memory store invalid: $: expected object");
+	}
+	const envelope = parsed as Record<string, unknown>;
+	const extra = Object.keys(envelope).filter((key) => key !== "version" && key !== "records");
+	if (typeof envelope.version === "number" && envelope.version > MEMORY_VERSION) {
+		throw new Error(`memory store version ${envelope.version} is newer than this build supports (${MEMORY_VERSION})`);
+	}
+	if (envelope.version !== MEMORY_VERSION) throw new Error("memory store invalid: $.version: expected 1");
+	if (extra.length > 0) throw new Error(`memory store invalid: $.${extra[0]}: unexpected field`);
+	if (!Array.isArray(envelope.records)) throw new Error("memory store invalid: $.records: expected array");
+	const records: MemoryRecord[] = [];
+	const invalid: InvalidMemoryRecord[] = [];
+	envelope.records.forEach((value: unknown, index) => {
+		const result = validateMemoryRecord(value, `$.records[${index}]`);
+		if (result.valid) records.push(result.record);
+		else invalid.push({ record: value, issues: result.issues.map((issue) => `${issue.path}: ${issue.message}`) });
+	});
+	if (invalid.length > 0 && !noticedInvalidStores.has(source)) {
+		noticedInvalidStores.add(source);
+		pendingStoreNotices.push(
+			`memory store: ${invalid.length} invalid record${invalid.length === 1 ? "" : "s"} skipped; moved to ${join(dirname(source), "records.invalid.json")} on the next store write`,
 		);
 	}
-	return sortMemoryRecords(result.store.records);
+	return { records: sortMemoryRecords(records), invalid };
+}
+
+function quarantineInvalidRecordsUnlocked(dataDir: string, invalid: ReadonlyArray<InvalidMemoryRecord>): void {
+	const path = memoryInvalidRecordsPath(dataDir);
+	let existing: unknown[] = [];
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		if (Array.isArray(parsed)) existing = parsed;
+	} catch {
+		// Missing or unreadable: start a fresh quarantine file.
+	}
+	const at = new Date().toISOString();
+	const entries = [...existing, ...invalid.map((item) => ({ quarantinedAt: at, ...item }))].slice(
+		-MEMORY_INVALID_RECORDS_MAX,
+	);
+	safeResourceWrite(path, `${JSON.stringify(entries, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<MemoryRecord>): string {
-	const sorted = sortMemoryRecords(records);
-	if (sorted.length > MEMORY_STORE_MAX_RECORDS) {
-		throw new Error(`memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio-coder memory prune --stale`);
-	}
+	const sorted = sortMemoryRecords(evictForRoom(records));
 	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
 	const path = memoryStorePath(dataDir);
-	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8" });
+	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 	return path;
+}
+
+/**
+ * At the cap, make room from proposals nobody decided on: those without a
+ * command or source evidence ref first, then evidence-backed ones, oldest
+ * first. Approved records and operator rejections are never evicted.
+ */
+function evictForRoom(records: ReadonlyArray<MemoryRecord>): ReadonlyArray<MemoryRecord> {
+	const excess = records.length - MEMORY_STORE_MAX_RECORDS;
+	if (excess <= 0) return records;
+	const evictable = records
+		.filter((record) => !record.approved && record.rejectedAt === undefined)
+		.sort(
+			(left, right) =>
+				Number(hasEvidenceRef(left)) - Number(hasEvidenceRef(right)) ||
+				left.createdAt.localeCompare(right.createdAt) ||
+				left.id.localeCompare(right.id),
+		);
+	if (evictable.length < excess) {
+		throw new Error(`memory store limit reached (${MEMORY_STORE_MAX_RECORDS}); run clio-coder memory prune --stale`);
+	}
+	const evicted = new Set(evictable.slice(0, excess));
+	return records.filter((record) => !evicted.has(record));
+}
+
+function hasEvidenceRef(record: MemoryRecord): boolean {
+	return record.evidenceRefs.some((ref) => /^(?:command|source):/u.test(ref));
 }
 
 /**
@@ -132,10 +224,14 @@ export async function mutateMemoryRecords<T>(
 		() => {
 			options.signal?.throwIfAborted();
 			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
-			const outcome = mutate(loadMemoryRecordsSync(dataDir));
+			const parsed = readParsedStoreSync(dataDir);
+			const outcome = mutate(parsed.records);
 			options.signal?.throwIfAborted();
 			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
-			if ("records" in outcome) writeMemoryRecordsUnlocked(dataDir, outcome.records);
+			if ("records" in outcome) {
+				if (parsed.invalid.length > 0) quarantineInvalidRecordsUnlocked(dataDir, parsed.invalid);
+				writeMemoryRecordsUnlocked(dataDir, outcome.records);
+			}
 			return outcome.result;
 		},
 		options,

@@ -21,9 +21,10 @@ import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gat
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
+import { takeMemoryStoreNotices } from "./store.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
-import { proposeInjectedTaskMemory } from "./task-bank-promotion.js";
+import { evidenceIdentity, proposeInjectedTaskMemory } from "./task-bank-promotion.js";
 import type { MemoryObservationKind, MemoryRecord } from "./types.js";
 
 export interface LessonFeedbackPorts {
@@ -189,11 +190,14 @@ export class MemoryLessonFeedback {
 
 	/**
 	 * Lessons still in the bank when its scope ends. One a later step already
-	 * kept is in the store; the rest are filed without evidence and wait for a
-	 * later session to learn the same thing.
+	 * kept is in the store; the rest are filed when they carry an evidence ref
+	 * and wait for a later session to learn the same thing. One with no evidence
+	 * ref could never be approved and would only fill the store.
 	 */
 	scopeEnd(input: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }): void {
-		const unfiled = input.lessons.filter((entry) => this.#proposed.get(entry.id)?.content !== entry.content);
+		const unfiled = input.lessons.filter(
+			(entry) => this.#proposed.get(entry.id)?.content !== entry.content && evidenceIdentity(entry).length > 0,
+		);
 		if (unfiled.length > 0) this.#propose(unfiled, null, input.sessionId);
 	}
 
@@ -475,7 +479,10 @@ export class MemoryLessonFeedback {
 			() => undefined,
 		);
 		this.#inFlight.add(settled);
-		void settled.then(() => this.#inFlight.delete(settled));
+		void settled.then(() => {
+			this.#inFlight.delete(settled);
+			for (const line of takeMemoryStoreNotices()) this.#ports.notice(line);
+		});
 	}
 }
 

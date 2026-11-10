@@ -148,7 +148,7 @@ function similarRepositoryLesson(
  * These name what the lesson recommends; they are not verdicts. Whether a
  * receipt satisfied them is decided by `lessonEvidence` and the gate.
  */
-function evidenceIdentity(entry: TaskMemoryEntry): string[] {
+export function evidenceIdentity(entry: TaskMemoryEntry): string[] {
 	const refs: string[] = [];
 	const command = entry.evidenceCommand?.trim();
 	if (command && simpleInvocation(command) !== null && entry.content.includes(`\`${command}\``))

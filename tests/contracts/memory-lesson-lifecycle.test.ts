@@ -171,7 +171,10 @@ test("a flow-restricted session files no lesson at scope end, and a clean one st
 	const root = mkdtempSync(join(tmpdir(), "memory-flow-"));
 	try {
 		const bank = new TaskMemoryBank();
-		const lesson = bank.saveKnowledge("Release with the token from the notes.", { durable: true });
+		const lesson = bank.saveKnowledge("Release with `pnpm run release`.", {
+			durable: true,
+			evidenceCommand: "pnpm run release",
+		});
 		const feedback = (dataDir: string, restricted: boolean) =>
 			new MemoryLessonFeedback({
 				dataDir: () => dataDir,
