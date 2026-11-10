@@ -245,6 +245,9 @@ function mergeFragmentValue(current: unknown, fragment: unknown): unknown {
 	if (!isRecord(current) || !isRecord(fragment)) return structuredClone(fragment);
 	const merged: Record<string, unknown> = { ...current };
 	for (const [key, value] of Object.entries(fragment)) {
+		// An archive can come from someone else, and YAML keeps `__proto__` as an own key; merging it would swap the
+		// merged object's prototype.
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
 		merged[key] = mergeFragmentValue(merged[key], value);
 	}
 	return merged;

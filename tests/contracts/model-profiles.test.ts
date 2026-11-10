@@ -355,3 +355,31 @@ it("a bad field in the user profile file costs that field, with a warning naming
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+it("a __proto__ key in the user profile file merges nothing and leaves the profile's prototype alone", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-model-profiles-"));
+	const packagedPath = join(root, "packaged.yaml");
+	const userPath = join(root, "user.yaml");
+	try {
+		writeFileSync(
+			packagedPath,
+			stringifyYaml({
+				version: 1,
+				models: [
+					{ id: "base", match: { familyPrefixes: ["foo"] }, claims: { capabilities: { tools: true } }, behavior: { a: 1 } },
+				],
+			}),
+		);
+		// stringifyYaml would drop an inherited key, so the file is written by hand.
+		writeFileSync(
+			userPath,
+			["version: 1", "models:", "  - id: base", "    behavior:", "      __proto__: { planted: true }", ""].join("\n"),
+		);
+		const behavior = loadModelProfiles({ packagedPath, userPath }).lookup("foo-1", "llamacpp")?.profile.behavior;
+		deepStrictEqual(behavior, { a: 1 });
+		strictEqual(Object.getPrototypeOf(behavior), Object.prototype);
+		strictEqual("planted" in (behavior ?? {}), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

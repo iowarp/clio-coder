@@ -177,8 +177,11 @@ function mergeFields(base: unknown, patch: unknown): unknown {
 		return structuredClone(patch);
 	}
 	const merged = structuredClone(base) as Record<string, unknown>;
-	for (const [key, value] of Object.entries(patch))
-		merged[key] = key in merged ? mergeFields(merged[key], value) : structuredClone(value);
+	for (const [key, value] of Object.entries(patch)) {
+		// YAML keeps `__proto__` as an own key; merging it would swap the merged object's prototype.
+		if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+		merged[key] = Object.hasOwn(merged, key) ? mergeFields(merged[key], value) : structuredClone(value);
+	}
 	return merged;
 }
 
