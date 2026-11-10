@@ -14,6 +14,8 @@ export interface AnthropicMessagesSynthesisInput {
 	defaultBaseUrl: string;
 	/** Cache retention for the session's own turn requests; workers and side calls keep the provider default (#422). */
 	mainThreadCacheRetention?: "long";
+	/** Wire flags the runtime sets for its own endpoint, merged over the catalog entry's. */
+	compat?: Model<"anthropic-messages">["compat"];
 }
 
 export function synthesizeAnthropicMessagesModel(input: AnthropicMessagesSynthesisInput): Model<Api> {
@@ -27,5 +29,6 @@ export function synthesizeAnthropicMessagesModel(input: AnthropicMessagesSynthes
 		provider: input.provider,
 		defaultBaseUrl: input.defaultBaseUrl,
 		...(input.mainThreadCacheRetention !== undefined ? { mainThreadCacheRetention: input.mainThreadCacheRetention } : {}),
+		...(input.compat !== undefined ? { anthropicCompat: input.compat } : {}),
 	});
 }

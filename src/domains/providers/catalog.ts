@@ -243,6 +243,8 @@ export interface CatalogBackedSynthesisInput {
 	 * so without this every request carrying a system prompt is a 400.
 	 */
 	compat?: Model<"openai-completions">["compat"];
+	/** The same for an `anthropic-messages` endpoint, merged over the catalog entry's flags. */
+	anthropicCompat?: Model<"anthropic-messages">["compat"];
 	/** Default request-body params for every call to this runtime; per-request keys still win. */
 	samplingParams?: Record<string, unknown>;
 	/**
@@ -321,6 +323,10 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 	if (input.compat && api === "openai-completions") {
 		const merged = { ...(model.compat as object | undefined), ...input.compat };
 		(model as Model<"openai-completions">).compat = merged;
+	}
+	if (input.anthropicCompat && api === "anthropic-messages") {
+		const merged = { ...(model.compat as object | undefined), ...input.anthropicCompat };
+		(model as Model<"anthropic-messages">).compat = merged;
 	}
 	if (input.samplingParams) {
 		model.samplingParams = { ...input.samplingParams, ...(model.samplingParams ?? {}) };

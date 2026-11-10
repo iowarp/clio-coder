@@ -146,6 +146,8 @@ const anthropicMaxRuntime = {
 			// subscription; at 5 minutes every approval wait or long tool run
 			// between requests rewrote the whole prefix (#422).
 			mainThreadCacheRetention: "long",
+			// Pi 1.5.1 message threads reshape every Anthropic request and are not driven live yet; enable after a live check.
+			anthropicCompat: { supportsMessageThreads: false },
 		});
 	},
 } satisfies RuntimeDescriptor;
