@@ -12,7 +12,7 @@ import {
 import { ArtifactList, ArtifactPage, ArtifactRead } from "./artifacts.js";
 import { AsideAnswer, AsideAskRequest, AsideCancelled, AsideDraftRequest, AsideDrafts } from "./aside.js";
 import { TURN_FILE_MAX, TURN_IMAGE_MAX, TurnFile, TurnImage } from "./attachments.js";
-import { ClientBootstrap, ClientCredential, EventTicket } from "./auth.js";
+import { ClientBootstrap, ClientCredential, EventTicket, LaunchChallenge } from "./auth.js";
 import { Autonomy } from "./autonomy.js";
 import {
 	DecisionSuperseded,
@@ -1191,6 +1191,15 @@ export const routes = {
 		summary: "OpenAPI contract",
 		...runtimeRoutes.openapi,
 	}),
+	authChallenge: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		response: LaunchChallenge,
+		summary:
+			"A single-use, short-lived challenge a launcher proves the launch token over at POST /api/auth/clients; needs no credential",
+		...runtimeRoutes.authChallenge,
+	}),
 	authClients: defineRoute({
 		...post,
 		status: 200,
@@ -1198,7 +1207,7 @@ export const routes = {
 		body: ClientBootstrap,
 		response: ClientCredential,
 		summary:
-			"Open this client's own short-lived credential from a launcher's proof of the launch token, a launch ticket, or a live credential; the launch token opens nothing else",
+			"Open this client's own short-lived credential from a launcher's proof of the launch token over a challenge, a launch ticket, or a live credential; the launch token opens nothing else",
 		...runtimeRoutes.authClients,
 	}),
 	authRotate: defineRoute({

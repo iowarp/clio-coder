@@ -87,6 +87,7 @@ export function machinesRoutes(
 		// A browser's credentials and tickets belong to this app; the node issues its own.
 		if (
 			path === routes.authClients.path ||
+			path === routes.authChallenge.path ||
 			path === routes.authRotate.path ||
 			path === routes.authRevoke.path ||
 			path === routes.eventTicket.path

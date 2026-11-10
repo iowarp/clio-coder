@@ -47,6 +47,13 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	const launchTokenPaths: string[] = [];
 	const server = createServer(async (req, res) => {
 		if (req.headers.authorization === `Bearer ${token}`) launchTokenPaths.push(`${req.method} ${req.url}`);
+		if (req.url === "/api/auth/challenge") {
+			assert.equal(req.method, "POST");
+			assert.equal(req.headers.authorization, undefined);
+			res.writeHead(mode === "legacy" ? 404 : 200);
+			res.end(mode === "legacy" ? "{}" : JSON.stringify({ challenge: "h".repeat(43), expiresIn: 60 }));
+			return;
+		}
 		if (req.url === "/api/auth/clients") {
 			assert.equal(req.method, "POST");
 			if (mode === "legacy") {
@@ -57,7 +64,8 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 			assert.equal(req.headers.authorization, undefined);
 			let text = "";
 			for await (const chunk of req) text += String(chunk);
-			const { nonce } = JSON.parse(text) as { nonce: string };
+			const { challenge } = JSON.parse(text) as { challenge: string };
+			assert.equal(challenge, "h".repeat(43));
 			const port = (server.address() as { port: number }).port;
 			res.end(
 				JSON.stringify({
@@ -65,7 +73,7 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 					credential,
 					rotateIn: 450,
 					expiresIn: 900,
-					serverProof: serverProof(token, nonce, port),
+					serverProof: serverProof(token, challenge, port),
 				}),
 			);
 			return;

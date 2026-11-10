@@ -47,7 +47,9 @@ export function openapi() {
 				? [{ bearer: [] }, { eventTicket: [] }]
 				: route === routes.authClients
 					? [{ launchToken: [] }]
-					: [{ bearer: [] }],
+					: route === routes.authChallenge
+						? []
+						: [{ bearer: [] }],
 			parameters: [
 				...parameters(route.params, "path"),
 				...parameters(route.query, "query"),

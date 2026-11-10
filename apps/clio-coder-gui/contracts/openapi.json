@@ -20636,10 +20636,98 @@
 				}
 			}
 		},
+		"/api/auth/challenge": {
+			"post": {
+				"operationId": "authChallenge",
+				"summary": "A single-use, short-lived challenge a launcher proves the launch token over at POST /api/auth/clients; needs no credential",
+				"security": [],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["challenge", "expiresIn"],
+									"properties": {
+										"challenge": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9_-]{43}$"
+										},
+										"expiresIn": {
+											"type": "integer",
+											"minimum": 1
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/auth/clients": {
 			"post": {
 				"operationId": "authClients",
-				"summary": "Open this client's own short-lived credential from a launcher's proof of the launch token, a launch ticket, or a live credential; the launch token opens nothing else",
+				"summary": "Open this client's own short-lived credential from a launcher's proof of the launch token over a challenge, a launch ticket, or a live credential; the launch token opens nothing else",
 				"security": [
 					{
 						"launchToken": []
@@ -20682,9 +20770,9 @@
 										"type": "string",
 										"pattern": "^[A-Za-z0-9_-]{8,64}$"
 									},
-									"nonce": {
+									"challenge": {
 										"type": "string",
-										"pattern": "^[a-z0-9]{1,12}\\.[A-Za-z0-9_-]{43}$"
+										"pattern": "^[A-Za-z0-9_-]{43}$"
 									},
 									"proof": {
 										"type": "string",

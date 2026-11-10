@@ -162,6 +162,7 @@ export const routes = {
 	telemetryExplain: { name: "telemetryExplain", method: "GET", path: "/api/telemetry/explain" },
 	meta: { name: "meta", method: "GET", path: "/api/meta" },
 	openapi: { name: "openapi", method: "GET", path: "/api/openapi.json" },
+	authChallenge: { name: "authChallenge", method: "POST", path: "/api/auth/challenge" },
 	authClients: { name: "authClients", method: "POST", path: "/api/auth/clients" },
 	authRotate: { name: "authRotate", method: "POST", path: "/api/auth/rotate" },
 	authLaunchTicket: { name: "authLaunchTicket", method: "POST", path: "/api/auth/launch-ticket" },

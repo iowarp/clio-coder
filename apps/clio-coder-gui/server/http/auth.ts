@@ -32,8 +32,9 @@ export function requestClient(context: Context): ClientRecord {
 
 /**
  * POST /api/auth/clients, which issues the caller its own credential, admits its caller itself
- * (`routes-auth.ts`): a launcher's proof of the launch token, a launch ticket, a live credential, or
- * the launch token as a bearer. Every other API request names its client with that credential, and the
+ * (`routes-auth.ts`): a launcher's proof of the launch token over a challenge from POST
+ * /api/auth/challenge (which needs nothing), a launch ticket, a live credential, or the launch token
+ * as a bearer. Every other API request names its client with that credential, and the
  * event stream, which a browser cannot give a header, with a single-use ticket.
  */
 export function auth(token: string, origin: () => string, clients: ClientRegistry): MiddlewareHandler {
@@ -52,7 +53,10 @@ export function auth(token: string, origin: () => string, clients: ClientRegistr
 			context.header("Cache-Control", "no-store");
 			const authorization = context.req.header("authorization");
 			const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-			if (context.req.path !== routes.authClients.path || context.req.method !== "POST") {
+			const opensClient =
+				context.req.method === "POST" &&
+				(context.req.path === routes.authClients.path || context.req.path === routes.authChallenge.path);
+			if (!opensClient) {
 				const ticket = streams.some((pattern) => pattern.test(api)) ? context.req.query("ticket") : undefined;
 				const client = bearer ? clients.authenticate(bearer) : ticket ? clients.redeem(ticket) : null;
 				if (!client)

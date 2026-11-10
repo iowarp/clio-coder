@@ -14,8 +14,9 @@ export const ClientBootstrap = Type.Object(
 	{
 		label: Type.Optional(ClientLabel),
 		resume: Type.Optional(ClientId),
-		/** A launcher's proof that it holds the launch token, bound to the port it dialed; the token itself is never sent. */
-		nonce: Type.Optional(Type.String({ pattern: "^[a-z0-9]{1,12}\\.[A-Za-z0-9_-]{43}$" })),
+		/** A challenge from POST /api/auth/challenge, spent by this request. */
+		challenge: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
+		/** A launcher's proof that it holds the launch token, over `challenge` and the port it dialed; the token itself is never sent. */
 		proof: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
 		/** A single-use launch ticket from the URL a launcher opened. */
 		ticket: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
@@ -39,6 +40,12 @@ export const ClientCredential = Type.Object(
 	{ additionalProperties: false },
 );
 export type ClientCredential = Static<typeof ClientCredential>;
+/** A single-use, short-lived challenge a launcher proves the launch token over, so a proof works once and only here. */
+export const LaunchChallenge = Type.Object(
+	{ challenge: Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" }), expiresIn: Type.Integer({ minimum: 1 }) },
+	{ additionalProperties: false },
+);
+export type LaunchChallenge = Static<typeof LaunchChallenge>;
 /** A single-use, short-lived proof for the one request a browser cannot attach a header to. */
 export const EventTicket = Type.Object(
 	{ ticket: Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" }), expiresIn: Type.Integer({ minimum: 1 }) },

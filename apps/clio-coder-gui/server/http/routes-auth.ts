@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { routes } from "../../contracts/routes.js";
-import { LaunchProofs, sameSecret } from "../launch-proof.js";
+import { answerLaunchProof, sameSecret } from "../launch-proof.js";
 import type { ClientRegistry } from "../services/clients.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -16,14 +16,19 @@ export function authRoutes(
 	controls: SessionControls,
 	launch: { token: string; origin: () => string },
 ) {
-	const proofs = new LaunchProofs(launch.token);
+	register(app, hub, routes.authChallenge, () => clients.launchChallenge());
 	register(app, hub, routes.authClients, ({ body }, context) => {
 		const authorization = context.req.header("authorization");
 		const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-		// Computed with this listener's own port, so a proof a squatter relays from the other port is refused.
+		// The challenge is spent whatever the proof, so each one admits at most one guess. The proof is
+		// checked with this listener's own port, so a proof a squatter relays from the other port is refused.
 		const answer =
-			!bearer && body.ticket === undefined && body.nonce !== undefined && body.proof !== undefined
-				? proofs.verify(body.nonce, body.proof, Number(new URL(launch.origin()).port))
+			!bearer &&
+			body.ticket === undefined &&
+			body.challenge !== undefined &&
+			body.proof !== undefined &&
+			clients.redeemChallenge(body.challenge)
+				? answerLaunchProof(launch.token, body.challenge, body.proof, Number(new URL(launch.origin()).port))
 				: null;
 		const admitted = bearer
 			? // The launch token as a bearer is what launchers and links from before 0.7.1 send; remove in 0.7.3.

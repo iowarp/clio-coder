@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { type TestContext, test } from "node:test";
 import { Value } from "typebox/value";
 import { tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { createCredentials } from "../client/api/credentials.js";
-import { ClientCredential } from "../contracts/auth.js";
+import { ClientCredential, LaunchChallenge } from "../contracts/auth.js";
 import { Problem } from "../contracts/common.js";
 import { routes } from "../contracts/routes.js";
+import { launcherProof, serverProof } from "../server/launch-proof.js";
 import {
 	ClientRegistry,
 	CREDENTIAL_TTL_MS,
@@ -47,6 +49,44 @@ test("the launch token opens only the exchange; each window gets its own attribu
 		body: "{}",
 	});
 	assert.equal(wrong.status, 401);
+});
+
+test("a launcher's proof opens one client, once, and only over a challenge this app issued", async (t) => {
+	type App = Awaited<ReturnType<typeof harness>>;
+	const post = (h: App, path: string, body: unknown) =>
+		h.app.request(`http://127.0.0.1:4317${path}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+			body: JSON.stringify(body),
+		});
+	const challenge = async (h: App) => {
+		const issued = await post(h, "/api/auth/challenge", {});
+		assert.equal(issued.status, 200);
+		const value = (await issued.json()) as LaunchChallenge;
+		assert.ok(Value.Check(LaunchChallenge, value));
+		return value.challenge;
+	};
+	const open = (h: App, proved: { challenge: string; proof: string }) =>
+		post(h, "/api/auth/clients", { label: "Launcher", ...proved });
+	const h = await harness();
+	t.after(h.close);
+	// A squatter on this port can only hand the launcher a challenge of its own; the proof it keeps opens nothing.
+	const forged = randomBytes(32).toString("base64url");
+	assert.equal((await open(h, { challenge: forged, proof: launcherProof("test-token", forged, 4317) })).status, 401);
+	const issued = await challenge(h);
+	const proved = { challenge: issued, proof: launcherProof("test-token", issued, 4317) };
+	const opened = await open(h, proved);
+	assert.equal(opened.status, 200);
+	assert.equal(((await opened.json()) as ClientCredential).serverProof, serverProof("test-token", issued, 4317));
+	// Replayed to the same app, or to the app started again on this port, the captured proof opens nothing.
+	assert.equal((await open(h, proved)).status, 401);
+	const restarted = await harness();
+	t.after(restarted.close);
+	assert.equal((await open(restarted, proved)).status, 401);
+	// A wrong proof spends the challenge, so each challenge admits one guess.
+	const other = await challenge(h);
+	assert.equal((await open(h, { challenge: other, proof: launcherProof("test-token", other, 4318) })).status, 401);
+	assert.equal((await open(h, { challenge: other, proof: launcherProof("test-token", other, 4317) })).status, 401);
 });
 
 test("the event stream opens on a single-use ticket, never on a bearer in its URL", async (t) => {

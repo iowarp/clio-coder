@@ -14,6 +14,8 @@ export const TICKET_TTL_MS = 30_000;
 /** A launch ticket rides in the URL handed to a browser opener, so it opens one client, once, briefly. */
 export const LAUNCH_TICKET_TTL_MS = 60_000;
 const MAX_LAUNCH_TICKETS = 64;
+export const LAUNCH_CHALLENGE_TTL_MS = 60_000;
+const MAX_LAUNCH_CHALLENGES = 256;
 /** A client with no open event stream still counts as present this long after its last request. */
 export const PRESENCE_MS = 30_000;
 const MAX_CLIENTS = 256;
@@ -36,6 +38,7 @@ export class ClientRegistry {
 	private readonly byCredential = new Map<string, string>();
 	private readonly tickets = new Map<string, { clientId: string; expiresAt: number }>();
 	private readonly launchTickets = new Map<string, number>();
+	private readonly launchChallenges = new Map<string, number>();
 	constructor(private readonly now: () => number = Date.now) {}
 
 	/** Issue a credential to a client that presented the launch token. */
@@ -130,6 +133,24 @@ export class ClientRegistry {
 		const hash = digest(ticket);
 		const expiresAt = this.launchTickets.get(hash);
 		this.launchTickets.delete(hash);
+		return expiresAt !== undefined && expiresAt > this.now();
+	}
+
+	/** A single-use challenge for a launcher's proof of the launch token; anyone may ask, and it opens nothing alone. */
+	launchChallenge() {
+		const now = this.now();
+		for (const [hash, expiresAt] of this.launchChallenges) if (expiresAt <= now) this.launchChallenges.delete(hash);
+		while (this.launchChallenges.size >= MAX_LAUNCH_CHALLENGES)
+			this.launchChallenges.delete(this.launchChallenges.keys().next().value as string);
+		const challenge = secret();
+		this.launchChallenges.set(digest(challenge), now + LAUNCH_CHALLENGE_TTL_MS);
+		return { challenge, expiresIn: LAUNCH_CHALLENGE_TTL_MS / 1000 };
+	}
+
+	redeemChallenge(challenge: string) {
+		const hash = digest(challenge);
+		const expiresAt = this.launchChallenges.get(hash);
+		this.launchChallenges.delete(hash);
 		return expiresAt !== undefined && expiresAt > this.now();
 	}
 

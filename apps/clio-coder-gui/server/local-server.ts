@@ -3,7 +3,7 @@ import { request } from "node:http";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { setTimeout } from "node:timers/promises";
-import { launcherNonce, launcherProof, sameSecret, serverProof } from "./launch-proof.js";
+import { launcherProof, sameSecret, serverProof } from "./launch-proof.js";
 import { listenPorts } from "./launcher/ports.js";
 
 /** What a ready background app reports about itself; `clio` is the version its process loaded. */
@@ -129,16 +129,21 @@ export async function clientCredential(
 		const next = rotated?.status === 200 ? adopt(key, rotated.value) : null;
 		if (next) return next;
 	}
-	const nonce = launcherNonce();
+	const issued = await exchange(port, listenerPort, "POST", "/api/auth/challenge", null, {});
+	const challenge = issued?.status === 200 ? issued.value?.challenge : undefined;
+	if (typeof challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
+		held.delete(key);
+		return null;
+	}
 	const opened = await exchange(port, listenerPort, "POST", "/api/auth/clients", null, {
 		label,
 		...(current ? { resume: current.clientId } : {}),
-		nonce,
-		proof: launcherProof(token, nonce, listenerPort),
+		challenge,
+		proof: launcherProof(token, challenge, listenerPort),
 	});
 	held.delete(key);
 	const answer = opened?.status === 200 ? opened.value?.serverProof : undefined;
-	return typeof answer === "string" && sameSecret(serverProof(token, nonce, listenerPort), answer)
+	return typeof answer === "string" && sameSecret(serverProof(token, challenge, listenerPort), answer)
 		? adopt(key, opened?.value ?? null)
 		: null;
 }
