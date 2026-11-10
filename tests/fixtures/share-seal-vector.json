@@ -1,0 +1,58 @@
+{
+	"comment": "Share intake contract v1 test vector. The recipient key is a test key, never the maintainers' key.",
+	"recipient": {
+		"publicKey": "9MRwbGGJod1aX4P/tNPNT+z/114HLH2rnjx76hw44XM=",
+		"kid": "c8dcde180a76fab3",
+		"privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VuBCIEIKioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio\n-----END PRIVATE KEY-----\n"
+	},
+	"ephemeralPrivateKey": "XV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0=",
+	"nonce": "AAECAwQFBgcICQoL",
+	"plaintext": {
+		"format": "clio-coder.share.plain",
+		"v": 1,
+		"kind": "telemetry-share",
+		"shareId": "shr_0123456789abcdef",
+		"day": "2025-01-02",
+		"clio": "0.7.1",
+		"consent": ["debug"],
+		"digest": {
+			"v": 1,
+			"os": "linux",
+			"install": "npm",
+			"profile": "content-free",
+			"scopes": {
+				"session": 1,
+				"run": 0,
+				"process": 0
+			},
+			"records": 2,
+			"events": {
+				"session.opened": 1,
+				"tool.settled": 1
+			},
+			"failureCauses": {},
+			"dispositions": {},
+			"tools": {
+				"read": {
+					"ok": 1,
+					"error": 0,
+					"denied": 0
+				}
+			},
+			"runTerminal": {},
+			"models": {}
+		},
+		"archiveFormat": "clio-coder.telemetry.share",
+		"archive": "bm90IGEgcmVhbCBhcmNoaXZl"
+	},
+	"envelope": {
+		"format": "clio-coder.share.sealed",
+		"v": 1,
+		"kid": "c8dcde180a76fab3",
+		"shareId": "shr_0123456789abcdef",
+		"kind": "telemetry-share",
+		"epk": "t5W8RdqHanNNTdkqZ+Tbzvq0S7mejRWvtSrq6Awpagw=",
+		"nonce": "AAECAwQFBgcICQoL",
+		"ct": "iym6ur1EWIaS5m9a15kAeDeXlAL8oWYRhMJHjHyrWnvzlTFQ5oAeN/mfLGJSWO8x2WX7aiW2bbMJ3qkNs6eUcnZ98dddB2T8m8FN5OJknHjyjqHIyYMGKCSV9VuI6Y6/iKgnHlYXvDSA5/Hq/9PpADKesRyPq1vXV+6X6iijc+7yZALO5kyN2rtBEYMWsg+Oy3Zz8oHJ4iBrfPQKAdtsT1Y+G6WBuYaco1+cdX4MoPLJ5UV9Y1VU0rH5RhVQcCOriNC+4OEksNDGTea25K4v9w+tm29J9i0qRpSjLxzAa9jWdTGEquf6VtEDW34BcAXnLZZEuZjfKPQFKtBWhr5lxQfhmBZvwSyQeHlbp2LgqPijoCUhvGYKaAnfehN2rzlJtogdAzsVDoaaUyOnwYIs7wURAUmi55u/6DoMBHV5TzSV2wbzJqlRUxv1x3JOz3OdWYQKoYN330nBVIokfg9UjmBahHRYQmR9Nnp1g0kzTqFwpsV+KH1t6wsl+Xq2Y6qgyKfwxLRBWePTU8ONgvq1fH7utdkbHHMAAG0G8FIKgSk656ZOnJoQx9rgdGKk6AtBR21f/VhLKocoLkoy7iJwZuJ+5RRdrNkokEfOplJhKvlmEq4EDeJrH9ARG9CF8Z74+dOKNyFbEVsn65n3NQuIaNNwRHwz5Vy1KYXCyWnPCCxoIjn/RsWYwsYjyKiZsfmtqtRmmMsrl/Z1"
+	}
+}

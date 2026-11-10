@@ -422,6 +422,7 @@ async function createDiscussion(
 	gh: string,
 	run: ReportCommandRunner,
 	options: GhOptions,
+	category = "Help",
 ): Promise<{ url: string; number: number } | { failed: string } | null> {
 	const ids = await run(
 		gh,
@@ -437,7 +438,7 @@ async function createDiscussion(
 			"-f",
 			"query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id discussionCategories(first: 50) { nodes { id name } } } }",
 			"--jq",
-			'[.data.repository.id, (.data.repository.discussionCategories.nodes[] | select(.name == "Help") | .id)] | @tsv',
+			`[.data.repository.id, (.data.repository.discussionCategories.nodes[] | select(.name == "${category}") | .id)] | @tsv`,
 		],
 		options,
 	);
@@ -470,6 +471,21 @@ async function createDiscussion(
 	if (match === null)
 		return { failed: failure("gh api graphql createDiscussion", created.stdout, created.stderr, created.timedOut) };
 	return { url: match[0], number: Number(match[1]) };
+}
+
+/**
+ * Post a public discussion in `category` on the report repository: the pointer a telemetry share leaves. Null when the
+ * category could not be found, so nothing was posted.
+ */
+export async function postDiscussion(
+	title: string,
+	bodyPath: string,
+	category: string,
+	gh: string,
+	deps: { run?: ReportCommandRunner; env?: NodeJS.ProcessEnv },
+): Promise<{ url: string; number: number } | { failed: string } | null> {
+	const options = { timeoutMs: REPORT_GH_TIMEOUT_MS, env: ghEnvironment(deps.env ?? process.env) };
+	return createDiscussion(title, bodyPath, gh, deps.run ?? runReportCommand, options, category);
 }
 
 async function addToIssue(

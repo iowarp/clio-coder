@@ -170,6 +170,34 @@ export {
 	SECRET_MASK_ID,
 	scrubText,
 } from "./scrub.js";
+export { reportBundleDigest, type ShareDigest, telemetryShareDigest } from "./share/digest.js";
+export {
+	deleteShareGist,
+	GIST_ID,
+	readShareGist,
+	type ShareUpload,
+	shareGistFile,
+	uploadShare,
+} from "./share/gist.js";
+export {
+	expiredShares,
+	readShareReceipts,
+	reportShare,
+	SHARE_RETENTION_DAYS,
+	type ShareReceipt,
+	shareReceiptsPath,
+	updateShareReceipt,
+} from "./share/receipts.js";
+export {
+	newShareId,
+	openShare,
+	type SealedShare,
+	SHARE_ID,
+	SHARE_RECIPIENT,
+	type ShareKind,
+	type SharePlaintext,
+	sealShare,
+} from "./share/seal.js";
 export {
 	deleteReportDraft,
 	listReportDrafts,
@@ -195,6 +223,7 @@ export {
 	ghEnvironment,
 	type LastAttempt,
 	newReportLink,
+	postDiscussion,
 	prefillLink,
 	REPORT_URL_BUDGET,
 	type ReportAction,
