@@ -20,6 +20,7 @@ import { readSettings, updateSettings, validateSettings } from "../../src/core/c
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../../src/core/defaults.js";
 import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
 import { extensionContentDigest } from "../../src/domains/extensions/integrity.js";
+import { applyPendingMigrationsAtBoot } from "../../src/domains/lifecycle/boot-migrations.js";
 import { convertWorkspaceOnce } from "../../src/domains/lifecycle/canonical-names.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import settingsV2, {
@@ -385,6 +386,15 @@ targets:
 		writeFileSync(settingsFile, written, "utf8");
 		deepStrictEqual((await runPending(stateDir)).applied, []);
 		strictEqual(readFileSync(settingsFile, "utf8"), written);
+	});
+
+	it("leaves a provisioned home's deny alone at boot after an upgrade from 0.7.0", async () => {
+		const written = "version: 2\nfleet:\n  permissions:\n    mode: deny\n";
+		writeFileSync(settingsFile, written, "utf8");
+		writeFileSync(join(stateDir, "home.json"), JSON.stringify({ version: "0.7.1", upgradedFrom: "0.7.0" }), "utf8");
+		await applyPendingMigrationsAtBoot(false);
+		strictEqual(readFileSync(settingsFile, "utf8"), written);
+		ok(!existsSync(join(scratch.dir, "config", "migrations.json")));
 	});
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {

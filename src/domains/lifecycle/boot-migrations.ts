@@ -9,6 +9,7 @@ import {
 	migrationManifestPath,
 	REGISTERED_MIGRATION_IDS,
 } from "./migrations/registry-ids.js";
+import { compareReleaseVersions } from "./release-version.js";
 
 /**
  * A background update installs the new package with `--no-post-install`, so the
@@ -49,10 +50,18 @@ export function takePendingMigrationNotices(): string[] {
 	}
 }
 
-function wasUpgraded(stateDir: string): boolean {
+// 0.6.0 is the first release whose initialization wrote the migration manifest.
+const FIRST_MANIFEST_RELEASE = "0.6.0";
+
+function wasUpgradedFromBeforeManifests(stateDir: string): boolean {
 	try {
 		const parsed = JSON.parse(readFileSync(join(stateDir, "home.json"), "utf8")) as { upgradedFrom?: unknown };
-		return typeof parsed.upgradedFrom === "string";
+		// Initialization stamps `upgradedFrom` on every version change, so a provisioned
+		// home records one at its first upgrade too. Only a home from before manifests
+		// holds settings an earlier template wrote; anything newer is the operator's.
+		return (
+			typeof parsed.upgradedFrom === "string" && compareReleaseVersions(parsed.upgradedFrom, FIRST_MANIFEST_RELEASE) === -1
+		);
 	} catch {
 		// No readable home.json means no recorded upgrade.
 		return false;
@@ -78,13 +87,14 @@ export async function applyPendingMigrationsAtBoot(
 		// A manifest still in the state root also goes to the runner, even with nothing pending, to be moved.
 	} else if (
 		!existsSync(legacyMigrationManifestPath(stateDir)) &&
-		!(existsSync(join(resolveClioDirs().config, "settings.yaml")) && wasUpgraded(stateDir))
+		!(existsSync(join(resolveClioDirs().config, "settings.yaml")) && wasUpgradedFromBeforeManifests(stateDir))
 	)
 		return;
 	// Settings without a manifest are either a home from before manifests (0.5.x),
-	// whose install.json `initializeClioHome()` renames and stamps `upgradedFrom`,
-	// or settings provisioned before first launch (dotfiles, images, CI), which
-	// are current-shape and must not be rewritten. Only the former goes to the runner.
+	// whose install.json `initializeClioHome()` renames and stamps with a pre-0.6.0
+	// `upgradedFrom`, or settings provisioned before first launch (dotfiles, images,
+	// CI), which stay the operator's through every later upgrade and must not be
+	// rewritten. Only the former goes to the runner.
 	try {
 		const { runPending } = await import("./migrations/index.js");
 		const result = await runPending(stateDir);
