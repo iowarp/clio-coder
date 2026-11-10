@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { get } from "node:http";
+import { userInfo } from "node:os";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { settingsPath, updateSettings } from "../core/config.js";
@@ -210,26 +211,109 @@ export interface AdoptedChatRoute {
 	route: DetectedChatRoute & { model: string };
 	settings: ClioSettings;
 	persisted: boolean;
+	/** Other environment keys that were found and passed over. */
+	alsoFound?: string[];
 }
 
 /** One sentence for the route a returning user landed on, the same words on every surface. */
-export function describeAdoptedRoute({ route, persisted }: Pick<AdoptedChatRoute, "route" | "persisted">): string {
-	return `Chat: ${route.runtime.id} / ${route.model} from ${route.source}.${persisted ? "" : " Session only; saved chat route unchanged."}`;
+export function describeAdoptedRoute({
+	route,
+	persisted,
+	alsoFound,
+}: Pick<AdoptedChatRoute, "route" | "persisted" | "alsoFound">): string {
+	const others = alsoFound && alsoFound.length > 0 ? ` Also found: ${alsoFound.join(", ")}.` : "";
+	return `Chat: ${route.runtime.id} / ${route.model} from ${route.source}.${others}${persisted ? "" : " Session only; saved chat route unchanged."}`;
 }
 
-/** A returning user's first detected route with a model, taken as their chat route. Null when nothing is found. */
-export async function adoptDetectedChatRoute(settings: Readonly<ClioSettings>): Promise<AdoptedChatRoute | null> {
+/** A route found by probing a default loopback port, which any local user can own. */
+function isProbedLoopback(route: DetectedChatRoute): boolean {
+	return route.target.url !== undefined && route.source === route.target.url;
+}
+
+/**
+ * The user name owning the socket listening on a loopback port, from Linux's
+ * `/proc/net/tcp{,6}`. Undefined when it cannot be read (other platforms).
+ */
+function loopbackListenerOwner(url: string): string | undefined {
+	const port = Number(new URL(url).port);
+	if (!port) return undefined;
+	const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
+	let uid: number | undefined;
+	for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+		let text: string;
+		try {
+			text = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		for (const line of text.split("\n").slice(1)) {
+			const fields = line.trim().split(/\s+/);
+			// fields: sl, local_address, rem_address, st, tx:rx, tr:when, retrnsmt, uid
+			if (fields[3] === "0A" && fields[1]?.endsWith(`:${hexPort}`)) {
+				uid = Number(fields[7]);
+				break;
+			}
+		}
+		if (uid !== undefined) break;
+	}
+	if (uid === undefined || !Number.isInteger(uid)) return undefined;
+	try {
+		if (uid === userInfo().uid) return userInfo().username;
+	} catch {
+		// Fall through to the passwd lookup.
+	}
+	try {
+		for (const line of readFileSync("/etc/passwd", "utf8").split("\n")) {
+			const [name, , id] = line.split(":");
+			if (name && Number(id) === uid) return name;
+		}
+	} catch {
+		// No passwd file to name the owner from.
+	}
+	return `uid ${uid}`;
+}
+
+/** Answers one yes/no question on the operator's terminal. */
+type ConfirmRoute = (question: string, defaultYes: boolean) => Promise<boolean>;
+
+/**
+ * A returning user's first detected route with a model, taken as their chat route. Null when nothing is found
+ * or the operator declines a probed loopback listener. Without `confirm`, a loopback listener is never taken.
+ */
+export async function adoptDetectedChatRoute(
+	settings: Readonly<ClioSettings>,
+	confirm?: ConfirmRoute,
+): Promise<AdoptedChatRoute | null> {
 	// The target dedicated to background memory is not a chat choice anyone made;
 	// taking it without asking would put the visible turn on the memory endpoint.
 	const memoryTarget = settings.targets.find((entry) => entry.id === settings.context.memory.target);
-	const found = (await detectChatRoutes(settings)).find(
+	const candidates = (await detectChatRoutes(settings)).filter(
 		(candidate) =>
 			candidate.model &&
 			(memoryTarget === undefined ||
 				(candidate.target.id !== memoryTarget.id &&
 					(memoryTarget.url === undefined || candidate.target.url !== memoryTarget.url))),
 	);
+	const found = candidates[0];
 	if (!found?.model) return null;
 	const route = { ...found, model: found.model };
-	return { route, ...useDetectedChatRoute(settings, route) };
+	if (isProbedLoopback(route)) {
+		// Any local user can own a default port; every prompt would go to them.
+		if (!confirm) return null;
+		const owner = process.platform === "linux" ? loopbackListenerOwner(route.source) : undefined;
+		let currentUser: string | undefined;
+		try {
+			currentUser = userInfo().username;
+		} catch {
+			currentUser = undefined;
+		}
+		const foreign = owner !== undefined && owner !== currentUser;
+		const question = `Use ${route.runtime.id} / ${route.model} at ${route.source} as your chat route?${foreign ? ` The listener belongs to user ${owner}.` : ""}`;
+		if (!(await confirm(question, !foreign))) return null;
+	}
+	const isEnvKey = (candidate: DetectedChatRoute) => candidate.source === candidate.runtime.credentialsEnvVar;
+	const alsoFound = isEnvKey(route)
+		? [...new Set(candidates.filter((c) => isEnvKey(c) && c.source !== route.source).map((c) => c.source))]
+		: [];
+	return { route, ...useDetectedChatRoute(settings, route), ...(alsoFound.length > 0 ? { alsoFound } : {}) };
 }

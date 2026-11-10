@@ -84,7 +84,16 @@ export async function runClioCommand(
 			process.stdout.write(wrapToTerminal(describeKeptChatRoute(startupSettings, verdict)));
 		} else if (existingHome && verdict.kind !== "usable") {
 			const { adoptDetectedChatRoute, describeAdoptedRoute } = await import("./detect-chat-routes.js");
-			const adopted = await adoptDetectedChatRoute(startupSettings);
+			const adopted = await adoptDetectedChatRoute(startupSettings, async (question, defaultYes) => {
+				const { createInterface } = await import("node:readline/promises");
+				const { askYesNo } = await import("./ask.js");
+				const rl = createInterface({ input: process.stdin, output: process.stdout });
+				try {
+					return await askYesNo(rl, wrapToTerminal(question).trimEnd(), defaultYes);
+				} finally {
+					rl.close();
+				}
+			});
 			if (adopted) {
 				startupSettings = adopted.settings;
 				detected = true;

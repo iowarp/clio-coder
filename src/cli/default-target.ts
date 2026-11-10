@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
 import { resolveClioDirs } from "../core/xdg.js";
@@ -22,15 +23,23 @@ export type DefaultTargetVerdict =
 	| { kind: "missing-credential"; targetId: string; store: string };
 
 /**
- * Whether this home has written a settings file before the current launch.
+ * Whether a user has made a route choice in this home before the current launch.
  *
- * Directory existence cannot say so: `clioConfigDir()` and its siblings create
- * the directory they are asked about, and the graphical app's server asks on
- * boot, so opening the app once would make the terminal treat a first run as a
- * returning one. Call this before `initializeClioHome()`, which writes the file.
+ * The file's existence cannot say so: the installer's post-install step,
+ * `doctor --fix` and a non-TTY first boot all write the scaffold. A choice
+ * leaves a target or a chat route behind, so the raw file is read for either;
+ * adopting a detected route adds a target, so a home that adopted once stays
+ * returning. Call this before `initializeClioHome()`, which writes the file.
  */
 export function homeIsReturning(): boolean {
-	return existsSync(join(resolveClioDirs().config, "settings.yaml"));
+	let raw: { targets?: unknown; chat?: { target?: unknown } } | null;
+	try {
+		raw = parseYaml(readFileSync(join(resolveClioDirs().config, "settings.yaml"), "utf8"));
+	} catch {
+		return false;
+	}
+	if (!raw || typeof raw !== "object") return false;
+	return (Array.isArray(raw.targets) && raw.targets.length > 0) || (raw.chat?.target ?? null) !== null;
 }
 
 export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSettings()): DefaultTargetVerdict {
