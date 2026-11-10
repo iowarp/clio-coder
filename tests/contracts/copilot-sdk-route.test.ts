@@ -771,10 +771,12 @@ test("parked tool handlers settle when the Clio session ends, and the session is
 	const records = join(resolveClioDirs().cache, "copilot-sdk", "sessions", session.sessionId);
 	ok(existsSync(join(records, "events.jsonl")));
 	disposeCopilotConversations("side-session");
-	await new Promise((resolve) => setTimeout(resolve, 20));
-	strictEqual(existsSync(records), false);
-	ok(fake().rejected.some((reason) => /Clio session ended/.test(reason)));
-	ok(fake().disconnected.includes(session.sessionId));
+	// Dispose rejects the parked handlers at once, then disconnects and removes the records asynchronously. Wait for
+	// those events, not for a fixed time a loaded host may not keep to; the bound only stops a real regression hanging.
+	const ended = () => fake().rejected.some((reason) => /Clio session ended/.test(reason));
+	ok(await eventually(ended, 60_000), "the parked handler was rejected");
+	ok(await eventually(() => fake().disconnected.includes(session.sessionId), 60_000), "the session was disconnected");
+	ok(await eventually(() => !existsSync(records), 60_000), "the session's records were removed");
 });
 
 test("a runtime that never answers abort still releases the session's hold", async () => {
