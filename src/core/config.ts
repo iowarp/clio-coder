@@ -1965,7 +1965,11 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						const escalation = rawFleet.permissions.escalation;
 						issues.unknownKeys("fleet.permissions.escalation", escalation, ["timeoutMs", "fallback"]);
 						if ("timeoutMs" in escalation) {
-							const parsed = expectInteger(issues, "fleet.permissions.escalation.timeoutMs", escalation.timeoutMs, { min: 1 });
+							const parsed = expectInteger(issues, "fleet.permissions.escalation.timeoutMs", escalation.timeoutMs, {
+								min: 1,
+								// The escalation deadline is armed as a timer; past this Node fires it at once.
+								max: MAX_TIMER_DELAY_MS,
+							});
 							if (parsed !== undefined) settings.fleet.permissions.escalation.timeoutMs = parsed;
 						}
 						if ("fallback" in escalation) {

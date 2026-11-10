@@ -47,7 +47,6 @@ import {
 } from "../../core/settings-areas.js";
 import type { SettingsShortcuts } from "../../core/settings-shortcuts.js";
 import { listSettingsShortcuts, rememberChangedSetting, setSettingPinned } from "../../core/settings-shortcuts.js";
-import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
 import type { RouteBreakerView } from "../../domains/dispatch/contract.js";
 import type { InteropAgentId, InteropProposal } from "../../domains/interop/index.js";
@@ -459,113 +458,6 @@ function selectModelSubmenu(
 
 function editTextSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return textInputSubmenu(title, note);
-}
-
-/**
- * The bound a number row enforces, shared by the editor and the apply path so
- * the two cannot drift: whatever the editor forwards, the apply path stores.
- * The bounds mirror the config validator's, so a value the Settings Center
- * refuses is one settings.yaml would have refused too, in the same words.
- */
-interface NumberSettingRule {
-	readonly min: number;
-	readonly max?: number;
-	readonly integer: boolean;
-	/** A blank submission clears the key instead of being a parse failure. */
-	readonly allowBlank?: boolean;
-}
-
-const NUMBER_SETTING_RULES = {
-	"budget.sessionCeilingUsd": { min: 0, integer: false },
-	"watchdog.cadenceToolCalls": { min: 1, integer: true, allowBlank: true },
-	"delegation.defaults.connectTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
-	"delegation.defaults.turnTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
-	"delegation.defaults.permissionTimeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
-	// The escalation deadline is armed as a timer, so it shares the delegation
-	// bounds; the rest mirror the config validator's own integer bounds.
-	"workers.escalation.timeoutMs": { min: 1, max: MAX_TIMER_DELAY_MS, integer: true },
-	"workers.resilienceCooldownMs": { min: 0, integer: true },
-	"guardrails.turnToolCallBudget": { min: 1, integer: true },
-	"guardrails.workerToolCallCap": { min: 1, integer: true },
-	"guardrails.maxDispatchRuns": { min: 1, integer: true },
-	"guardrails.readMaxBytes": { min: 1, integer: true },
-	"guardrails.observationTurnBudgetBytes": { min: 1, integer: true },
-	"guardrails.internalDispatchTimeoutMs": { min: 1, integer: true },
-	"context.compaction.maxTokens": { min: 1, integer: true },
-	// The config validator's bounds for both dock shares; half the axis is the cap.
-	"panes.workers.ratio": { min: 0.05, max: 0.5, integer: false },
-	"panes.yazi.ratio": { min: 0.05, max: 0.5, integer: false },
-} as const satisfies Partial<Record<EditableSettingId, NumberSettingRule>>;
-
-export type NumberSettingId = keyof typeof NUMBER_SETTING_RULES;
-
-type NumberSettingOutcome = { readonly value: number | null } | { readonly refusal: string };
-
-function describeSubmittedText(value: string): string {
-	const trimmed = value.trim();
-	return trimmed.length === 0 ? "an empty string" : JSON.stringify(trimmed);
-}
-
-/**
- * Parse one submitted number-row value under its rule. A null value means the
- * operator cleared an optional key. The refusal is worded like the config
- * validator's issue for the same key ("expected an integer >= 1, got 0"), with
- * a "Not applied:" prefix so it reads as the outcome of this submission.
- */
-function parseNumberSetting(value: string, rule: NumberSettingRule): NumberSettingOutcome {
-	const trimmed = value.trim();
-	const noun = rule.integer ? "an integer" : "a number";
-	if (trimmed.length === 0 && rule.allowBlank === true) return { value: null };
-	const parsed = trimmed.length === 0 ? Number.NaN : Number(trimmed);
-	if (!Number.isFinite(parsed) || (rule.integer && !Number.isInteger(parsed))) {
-		const shown = Number.isFinite(parsed) ? String(parsed) : describeSubmittedText(value);
-		return { refusal: `Not applied: expected ${noun}, got ${shown}.` };
-	}
-	if (parsed < rule.min) return { refusal: `Not applied: expected ${noun} >= ${rule.min}, got ${parsed}.` };
-	if (rule.max !== undefined && parsed > rule.max) {
-		return { refusal: `Not applied: expected ${noun} <= ${rule.max}, got ${parsed}.` };
-	}
-	return { value: parsed };
-}
-
-function numberSettingNote(rule: NumberSettingRule): string {
-	const noun = rule.integer ? "a whole number" : "a number";
-	const clears = rule.allowBlank === true ? "; blank clears it" : "";
-	if (rule.min > 0 && rule.max !== undefined) return `Use ${noun} from ${rule.min} to ${rule.max}${clears}.`;
-	if (rule.min > 0) return `Use ${noun} of at least ${rule.min}${clears}.`;
-	return `Use a non-negative ${rule.integer ? "whole number" : "number"}${clears}.`;
-}
-
-/**
- * A number editor that stays open on a refused submission. Closing with no
- * value looked like a successful edit that changed nothing, so the reason is
- * rendered under the input and the operator corrects the text in place; Esc
- * still leaves without applying.
- */
-function editNumberSubmenu(title: string, id: NumberSettingId): SettingSubmenuBuilder {
-	const rule = NUMBER_SETTING_RULES[id];
-	return (currentValue: string, done: (val?: string) => void) => {
-		const input = new Input();
-		input.focused = true;
-		const restored = keepDraftOnEscape(`number:${id}`, input, currentValue, done);
-		const wrapper = new SubmenuWrapper(
-			title,
-			input,
-			DRAFT_EDITOR_KEYS("confirm"),
-			joinNotes(restored, numberSettingNote(rule)),
-		);
-		input.onSubmit = (val) => {
-			const outcome = parseNumberSetting(val, rule);
-			if ("refusal" in outcome) {
-				wrapper.setProblem(outcome.refusal);
-				return;
-			}
-			wrapper.setProblem(null);
-			keptSettingDrafts.delete(`number:${id}`);
-			done(outcome.value === null ? "" : val.trim());
-		};
-		return wrapper;
-	};
 }
 
 /**
@@ -1440,7 +1332,6 @@ export function buildSettingItems(
 			values: ["judge", "deny", "fail", "escalate", "main"],
 		}),
 		settingItem("workers.escalation.timeoutMs", String(escalation.timeoutMs), {
-			submenu: editNumberSubmenu("Edit escalation timeout (ms)", "workers.escalation.timeoutMs"),
 			affordance: "free text",
 		}),
 		settingItem("workers.escalation.fallback", escalation.fallback, {
@@ -1516,7 +1407,6 @@ export function buildSettingItems(
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
 		settingItem("workers.resilienceCooldownMs", String(resilienceCooldownMs), {
-			submenu: editNumberSubmenu("Edit resilience cooldown (ms)", "workers.resilienceCooldownMs"),
 			affordance: "free text",
 		}),
 		...fleetProfileRows(settings, live, options),
@@ -1551,7 +1441,7 @@ export function buildSettingItems(
 			activeAgentRoles.length > 0
 				? activeAgentRoles.map((pair) => `${pair.agentId}/${pair.executionRole}`).join(", ")
 				: "(none)",
-			{ affordance: "edit settings.yaml", readOnly: true },
+			{},
 		),
 		...fleetNodeRows(
 			options?.getFleetNodes?.() ?? [],
@@ -1607,7 +1497,6 @@ export function buildSettingItems(
 		settingItem("panes.notifications", panes.notifications, { values: ["failures", "all", "off"] }),
 		settingItem("panes.layout", panes.layout, { values: ["off", "workers", "cockpit"] }),
 		settingItem("panes.workers.ratio", formatThreshold(panes.workers.ratio, "0.34"), {
-			submenu: editNumberSubmenu("Edit workers dock share (0.05–0.5)", "panes.workers.ratio"),
 			affordance: "free text",
 		}),
 		settingItem("panes.journal", String(settings.fleet.history.journal), { values: ["true", "false"] }),
@@ -1627,12 +1516,8 @@ export function buildSettingItems(
 		settingItem("modelSelector.recentLimit", String(settings.chat.modelPicker.recentLimit), {
 			values: ["6", "12", "20", "50"],
 		}),
-		settingItem("modelSelector.favorites", favorites.length > 0 ? `${favorites.length} pinned` : "(none)", {
-			affordance: "manage in /model",
-			readOnly: true,
-		}),
+		settingItem("modelSelector.favorites", favorites.length > 0 ? `${favorites.length} pinned` : "(none)", {}),
 		settingItem("budget.sessionCeilingUsd", String(settings.safety.limits.sessionCostUsd), {
-			submenu: editNumberSubmenu("Edit session cost ceiling USD", "budget.sessionCeilingUsd"),
 			affordance: "free text",
 		}),
 		settingItem("defaults.maxTokens", String(settings.chat.maxOutputTokens), {
@@ -1645,27 +1530,21 @@ export function buildSettingItems(
 			values: ["auto", "1", "2", "4", "8"],
 		}),
 		settingItem("guardrails.turnToolCallBudget", String(safetyLimits.chatToolCallsPerTurn), {
-			submenu: editNumberSubmenu("Edit turn tool-call budget", "guardrails.turnToolCallBudget"),
 			affordance: "free text",
 		}),
 		settingItem("guardrails.workerToolCallCap", String(fleetLimits.toolCallsPerRun), {
-			submenu: editNumberSubmenu("Edit worker tool-call cap", "guardrails.workerToolCallCap"),
 			affordance: "free text",
 		}),
 		settingItem("guardrails.maxDispatchRuns", String(settings.fleet.history.maxRuns), {
-			submenu: editNumberSubmenu("Edit run ledger retention", "guardrails.maxDispatchRuns"),
 			affordance: "free text",
 		}),
 		settingItem("guardrails.readMaxBytes", String(safetyLimits.readBytesPerCall), {
-			submenu: editNumberSubmenu("Edit read byte cap", "guardrails.readMaxBytes"),
 			affordance: "free text",
 		}),
 		settingItem("guardrails.observationTurnBudgetBytes", String(safetyLimits.observationBytesPerTurn), {
-			submenu: editNumberSubmenu("Edit observation byte pool", "guardrails.observationTurnBudgetBytes"),
 			affordance: "free text",
 		}),
 		settingItem("guardrails.internalDispatchTimeoutMs", String(fleetLimits.internalRunTimeoutMs), {
-			submenu: editNumberSubmenu("Edit internal dispatch timeout (ms)", "guardrails.internalDispatchTimeoutMs"),
 			affordance: "free text",
 		}),
 		settingItem("compaction.auto", String(compaction.auto), {
@@ -1675,7 +1554,6 @@ export function buildSettingItems(
 			values: ["0.7", "0.8", "0.85", "0.9"],
 		}),
 		settingItem("context.compaction.maxTokens", String(compaction.maxTokens ?? ""), {
-			submenu: editNumberSubmenu("Edit context token ceiling", "context.compaction.maxTokens"),
 			affordance: "free text",
 		}),
 		settingItem("context.compaction.provider", compaction.provider ?? "off", {
@@ -1746,7 +1624,6 @@ export function buildSettingItems(
 		settingItem("panes.yazi.profile", panes.files.profile, { values: ["managed", "user"] }),
 		settingItem("panes.yazi.followCwd", String(panes.files.followCwd), { values: ["true", "false"] }),
 		settingItem("panes.yazi.ratio", formatThreshold(panes.files.ratio, "0.3"), {
-			submenu: editNumberSubmenu("Edit files dock share (0.05–0.5)", "panes.yazi.ratio"),
 			affordance: "free text",
 		}),
 		settingItem("watchdog.enabled", String(watchdog.enabled), {
@@ -1764,10 +1641,6 @@ export function buildSettingItems(
 			"watchdog.cadenceToolCalls",
 			watchdog.cadenceToolCalls === undefined ? "(turn end only)" : String(watchdog.cadenceToolCalls),
 			{
-				submenu: editNumberSubmenu(
-					"Edit watchdog cadence in tool calls; blank fires at turn end only",
-					"watchdog.cadenceToolCalls",
-				),
 				affordance: "free text",
 				editValue: watchdog.cadenceToolCalls === undefined ? "" : String(watchdog.cadenceToolCalls),
 			},
@@ -1798,7 +1671,6 @@ export function buildSettingItems(
 			"delegation.defaults.connectTimeoutMs",
 			String(settings.integrations.externalAgents.defaults.connectTimeoutMs),
 			{
-				submenu: editNumberSubmenu("Edit delegate connect timeout (ms)", "delegation.defaults.connectTimeoutMs"),
 				affordance: "free text",
 			},
 		),
@@ -1806,7 +1678,6 @@ export function buildSettingItems(
 			"delegation.defaults.turnTimeoutMs",
 			String(settings.integrations.externalAgents.defaults.turnTimeoutMs),
 			{
-				submenu: editNumberSubmenu("Edit delegate turn timeout (ms)", "delegation.defaults.turnTimeoutMs"),
 				affordance: "free text",
 			},
 		),
@@ -1814,14 +1685,10 @@ export function buildSettingItems(
 			"delegation.defaults.permissionTimeoutMs",
 			String(settings.integrations.externalAgents.defaults.permissionTimeoutMs),
 			{
-				submenu: editNumberSubmenu("Edit delegate permission timeout (ms)", "delegation.defaults.permissionTimeoutMs"),
 				affordance: "free text",
 			},
 		),
-		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {
-			affordance: "edit settings.yaml",
-			readOnly: true,
-		}),
+		settingItem("keybindings", keybindingCount > 0 ? `${keybindingCount} override(s)` : "(defaults)", {}),
 		settingItem("delegation.agents", agents.length > 0 ? `${agents.length} agent(s)` : "(none)", {
 			...delegationAgentsAffordance(agents, options?.getInteropProposals?.() ?? []),
 		}),
@@ -1872,6 +1739,8 @@ export function buildSettingItems(
 									? JSON.stringify(value)
 									: String(value),
 				});
+				// Object.assign keeps the hand row's old steps; left in place, Space previewed values Enter ignored.
+				if (!replacement.values) delete item.values;
 			}
 		}
 	}
@@ -2258,8 +2127,6 @@ const SUGGESTED_SETTING_IDS: readonly string[] = [
 	"workers.default.model",
 	"budget.concurrency",
 	"watchdog.enabled",
-	"workers.onPermission",
-	"terminal.tuiMode",
 ];
 /** The most shortcuts the landing view shows: pins first, then recent, then suggested. */
 const SHORTCUT_SLOTS = 12;
@@ -2374,22 +2241,6 @@ function formatThreshold(value: number, fallback = "0.8"): string {
 	return Number.isFinite(value) ? String(value) : fallback;
 }
 
-function applyNonNegativeInteger(value: string, set: (next: number) => void): void {
-	const parsed = Number(value);
-	if (Number.isFinite(parsed) && parsed >= 0) set(Math.floor(parsed));
-}
-
-/**
- * Store a number-row submission under the row's shared rule. A refused value
- * leaves the setting alone; the editor has already shown the operator why, and
- * `describeNumberSettingRefusal` names the reason for any other caller.
- */
-function applyNumberSetting(id: NumberSettingId, value: string, set: (next: number | null) => void): void {
-	const outcome = parseNumberSetting(value, NUMBER_SETTING_RULES[id]);
-	if ("refusal" in outcome) return;
-	set(outcome.value);
-}
-
 /**
  * Pure mutation applied in place for Settings Center editable rows.
  */
@@ -2452,49 +2303,14 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "memory.intervention.enabled":
 			if (value === "true" || value === "false") settings.context.memory.enabled = value === "true";
 			return;
-		case "memory.intervention.everyNTools":
-		case "memory.intervention.windowSteps":
-		case "memory.intervention.maxTokens":
-		case "memory.intervention.timeoutMs":
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) {
-					// The v1 row ids are the presentation vocabulary; the v2 fields they
-					// write have their own names.
-					const key = (
-						{
-							"memory.intervention.everyNTools": "cadenceToolCalls",
-							"memory.intervention.windowSteps": "trajectorySteps",
-							"memory.intervention.maxTokens": "maxOutputTokens",
-							"memory.intervention.timeoutMs": "timeoutMs",
-						} as const
-					)[id];
-					if (key) settings.context.memory[key] = next;
-				}
-			});
-			return;
 		case "workers.default.thinkingLevel":
 			settings.fleet.default.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.fleet.default.thinkingLevel;
-			return;
-		case "workers.maxRetries":
-			applyNonNegativeInteger(value, (next) => {
-				settings.fleet.retry.maxRetries = next;
-			});
 			return;
 		case "panes.notifications":
 			if (value === "failures" || value === "all" || value === "off") settings.interface.panes.notifications = value;
 			return;
 		case "panes.layout":
 			if (value === "off" || value === "workers" || value === "cockpit") settings.interface.panes.layout = value;
-			return;
-		case "panes.workers.ratio":
-			applyNumberSetting(id, value, (next) => {
-				if (next !== null) settings.interface.panes.workers.ratio = next;
-			});
-			return;
-		case "panes.yazi.ratio":
-			applyNumberSetting(id, value, (next) => {
-				if (next !== null) settings.interface.panes.files.ratio = next;
-			});
 			return;
 		case "panes.journal":
 			if (value === "true" || value === "false") settings.fleet.history.journal = value === "true";
@@ -2511,34 +2327,9 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "panes.yazi.followCwd":
 			if (value === "true" || value === "false") settings.interface.panes.files.followCwd = value === "true";
 			return;
-		case "modelSelector.recentLimit":
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.chat.modelPicker.recentLimit = next;
-			});
-			return;
-		case "defaults.maxTokens":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.maxOutputTokens = next;
-			});
-			return;
-		case "budget.concurrency": {
-			if (value === "auto") {
-				settings.fleet.concurrency = "auto";
-				return;
-			}
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.fleet.concurrency = next;
-			});
-			return;
-		}
 		case "compaction.auto":
 			if (value === "true" || value === "false") settings.context.compaction.auto = value === "true";
 			return;
-		case "compaction.threshold": {
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) settings.context.compaction.threshold = parsed;
-			return;
-		}
 		case "compaction.model": {
 			const trimmed = value.trim();
 			if (trimmed) settings.context.compaction.model = trimmed;
@@ -2553,21 +2344,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		}
 		case "retry.enabled":
 			if (value === "true" || value === "false") settings.chat.retry.enabled = value === "true";
-			return;
-		case "retry.maxRetries":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.retry.maxRetries = next;
-			});
-			return;
-		case "retry.baseDelayMs":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.retry.baseDelayMs = next;
-			});
-			return;
-		case "retry.maxDelayMs":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.retry.maxDelayMs = next;
-			});
 			return;
 		case "terminal.showTerminalProgress":
 			if (value === "true" || value === "false") settings.interface.terminalProgress = value === "true";
@@ -2589,7 +2365,7 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "watchdog.enabled":
 			if (value === "true" || value === "false") settings.safety.review.enabled = value === "true";
 			return;
-		// Both watchdog options are absent-by-default, and an empty submission is
+		// The watchdog target is absent by default, and an empty submission is
 		// how the operator says "go back to the default" from a text row. Deleting
 		// the key rather than storing a blank keeps settings.yaml matching what the
 		// config validator accepts.
@@ -2599,12 +2375,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			else delete settings.safety.review.target;
 			return;
 		}
-		case "watchdog.cadenceToolCalls":
-			applyNumberSetting("watchdog.cadenceToolCalls", value, (next) => {
-				if (next === null) delete settings.safety.review.cadenceToolCalls;
-				else settings.safety.review.cadenceToolCalls = next;
-			});
-			return;
 		case "terminal.smoothStreaming":
 			if (value === "off" || value === "auto" || value === "on") settings.interface.smoothStreaming = value;
 			return;
@@ -2613,21 +2383,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 				.split(",")
 				.map((entry) => entry.trim())
 				.filter(Boolean);
-			return;
-		case "delegation.defaults.connectTimeoutMs":
-			applyNumberSetting("delegation.defaults.connectTimeoutMs", value, (next) => {
-				if (next !== null) settings.integrations.externalAgents.defaults.connectTimeoutMs = next;
-			});
-			return;
-		case "delegation.defaults.turnTimeoutMs":
-			applyNumberSetting("delegation.defaults.turnTimeoutMs", value, (next) => {
-				if (next !== null) settings.integrations.externalAgents.defaults.turnTimeoutMs = next;
-			});
-			return;
-		case "delegation.defaults.permissionTimeoutMs":
-			applyNumberSetting("delegation.defaults.permissionTimeoutMs", value, (next) => {
-				if (next !== null) settings.integrations.externalAgents.defaults.permissionTimeoutMs = next;
-			});
 			return;
 		case "orchestrator.target": {
 			const target = value === "(unset)" || value === "" ? null : value;
@@ -2675,20 +2430,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 					.map((v) => v.trim())
 					.filter(Boolean);
 			return;
-		case "budget.sessionCeilingUsd":
-			applyNumberSetting("budget.sessionCeilingUsd", value, (next) => {
-				if (next !== null) settings.safety.limits.sessionCostUsd = next;
-			});
-			return;
-		case "workers.escalation.timeoutMs":
-			applyNumberSetting("workers.escalation.timeoutMs", value, (next) => {
-				if (next === null) return;
-				settings.fleet.permissions.escalation = {
-					...(settings.fleet.permissions.escalation ?? SHIPPED_ESCALATION),
-					timeoutMs: next,
-				};
-			});
-			return;
 		case "workers.escalation.fallback": {
 			if (value !== "deny" && value !== "fail") return;
 			settings.fleet.permissions.escalation = {
@@ -2697,11 +2438,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			};
 			return;
 		}
-		case "workers.resilienceCooldownMs":
-			applyNumberSetting("workers.resilienceCooldownMs", value, (next) => {
-				if (next !== null) settings.fleet.retry.routeCooldownMs = next;
-			});
-			return;
 		case "routing.activeRoles": {
 			const outcome = parseEnumListSetting(value, ACTIVE_ROUTING_ROLES);
 			if ("values" in outcome) settings.fleet.adaptiveRouting.roles = outcome.values as ActiveRoutingRole[];
@@ -2715,27 +2451,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "prewarm.enabled":
 			if (value === "true" || value === "false") settings.chat.prewarm = value === "true";
 			return;
-		case "guardrails.turnToolCallBudget":
-		case "guardrails.workerToolCallCap":
-		case "guardrails.maxDispatchRuns":
-		case "guardrails.readMaxBytes":
-		case "guardrails.observationTurnBudgetBytes":
-		case "guardrails.internalDispatchTimeoutMs":
-			applyNumberSetting(id, value, (next) => {
-				if (next === null) return;
-				if (id === "guardrails.turnToolCallBudget") settings.safety.limits.chatToolCallsPerTurn = next;
-				else if (id === "guardrails.workerToolCallCap") settings.fleet.limits.toolCallsPerRun = next;
-				else if (id === "guardrails.maxDispatchRuns") settings.fleet.history.maxRuns = next;
-				else if (id === "guardrails.readMaxBytes") settings.safety.limits.readBytesPerCall = next;
-				else if (id === "guardrails.observationTurnBudgetBytes") settings.safety.limits.observationBytesPerTurn = next;
-				else settings.fleet.limits.internalRunTimeoutMs = next;
-			});
-			return;
-		case "context.toolResultMaxBytes":
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 4096) settings.context.toolResultMaxBytes = next;
-			});
-			return;
 		case "context.workingSet.enabled":
 			if (value === "true" || value === "false") settings.context.workingSet.enabled = value === "true";
 			return;
@@ -2746,44 +2461,6 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "context.workingSet.profile":
 			if (value === "default" || value === "data-analysis" || value === "web-design")
 				settings.context.workingSet.profile = value;
-			return;
-		case "context.workingSet.target": {
-			// The validator's bound is exclusive at both ends, so an eviction target
-			// of 0 or 1 is refused here rather than written and rejected at boot.
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed > 0 && parsed < 1) settings.context.workingSet.target = parsed;
-			return;
-		}
-		case "context.workingSet.protectLastTurns":
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.context.workingSet.protectLastTurns = next;
-			});
-			return;
-		case "context.workingSet.protectLastSteps":
-			applyNonNegativeInteger(value, (next) => {
-				if (next >= 1) settings.context.workingSet.protectLastSteps = next;
-			});
-			return;
-		case "context.workingSet.minEvictableTokens":
-			applyNonNegativeInteger(value, (next) => {
-				settings.context.workingSet.minEvictableTokens = next;
-			});
-			return;
-		case "context.workingSet.rearmFraction": {
-			// Zero disables the band; the validator refuses 1 and above.
-			const parsed = Number(value);
-			if (Number.isFinite(parsed) && parsed >= 0 && parsed < 1) settings.context.workingSet.rearmFraction = parsed;
-			return;
-		}
-		case "retry.streamStallMs":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.retry.streamStallMs = next;
-			});
-			return;
-		case "retry.firstTokenStallMs":
-			applyNonNegativeInteger(value, (next) => {
-				settings.chat.retry.firstTokenStallMs = next;
-			});
 			return;
 		case "library.catalog":
 		case "library.remote": {

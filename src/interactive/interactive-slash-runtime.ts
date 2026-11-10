@@ -233,7 +233,7 @@ export interface InteractiveSlashRuntimeDeps {
 	 */
 	openModelScope?: (ref: PendingModelScope) => void;
 	openConfigure?: () => void;
-	openSettings: (area?: SettingsAreaId, group?: string) => void;
+	openSettings: (area?: SettingsAreaId, group?: "model-picker") => void;
 	openFleetRuns?: () => void;
 	openResume: (target?: string) => void;
 	startNewSession: () => void;
