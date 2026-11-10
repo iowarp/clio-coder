@@ -84,6 +84,8 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			deps.closeOverlay,
 			query,
 			ctx.operatorExtensions?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? [])),
+			// A picked command lands in the composer unsent, cursor at the end.
+			(text) => deps.editor.setText(text),
 		);
 		deps.tui.requestRender();
 	};

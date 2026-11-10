@@ -1,7 +1,7 @@
 import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import type { OverlayHandle, TUI } from "../../engine/tui.js";
-import { commandReference, SLASH_COMMAND_GROUPS } from "../../session-control/slash-commands.js";
+import type { Keybinding, OverlayHandle, TUI } from "../../engine/tui.js";
+import { commandReference } from "../../session-control/slash-commands.js";
 import { CLOSED_ACTION_ORDER, GLOBAL_ACTION_ORDER } from "../application-controller.js";
 import { displaySafe } from "../display-safe.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
@@ -29,46 +29,48 @@ export function openHelpOverlay(
 	onClose: () => void,
 	initialFilter?: string,
 	extensionCommands: readonly ExtensionCommandRow[] = [],
+	onPick?: (text: string) => void,
 ): OverlayHandle {
-	// Commands are grouped by the verb they perform, in SLASH_COMMAND_GROUPS
-	// order, and keep registry order inside each group.
-	const groupRank = new Map(SLASH_COMMAND_GROUPS.map((group, index) => [group, index] as const));
-	const commands: ListOverlayItem[] = [...commandReference()]
-		.sort((a, b) => (groupRank.get(a.group) ?? 0) - (groupRank.get(b.group) ?? 0))
-		.map((ref) => {
-			// Below 80 columns the flags are dropped before the description is cut:
-			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
-			const { flags, ...withoutFlags } = ref.args ?? {};
-			const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
-			// The flags fold into one word so the row still says that it takes them.
-			const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
-			const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
-			const item: ListOverlayItem = {
-				id: ref.name,
-				label: `${ref.usage}  ${ref.description}`,
-				cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
-				group: ref.group,
-				// Overlay key actions are deliberately not duplicated here: each
-				// overlay's footer hint is the live source of its keys, and a static
-				// copy would rot exactly like the old SLASH_HOTKEYS table did.
-				...detailWithHead((width) => {
-					const theme = clioTheme();
-					const facts: Fact[] = [
-						{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
-						{ label: "Does", value: ref.description },
-						// The same copy the composer's detail panel shows for each subcommand.
-						...Object.entries(ref.subcommandDescriptions ?? {}).map(
-							([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
-						),
-					];
-					return {
-						head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
-						rest: factRows(theme, facts, width, FACT_OPTIONS),
-					};
-				}),
-			};
-			return item;
-		});
+	// What Enter puts in the composer for a row, by row id; rows without one open their detail.
+	const picks = new Map<string, string>();
+	// Commands keep commandReference() order; the group rides as the row's meta.
+	const commands: ListOverlayItem[] = commandReference().map((ref) => {
+		const needsArgument = ref.args?.positionals?.some((positional) => positional.required) === true;
+		picks.set(ref.name, `/${ref.name}${needsArgument ? " " : ""}`);
+		// Below 80 columns the flags are dropped before the description is cut:
+		// `/run [--agent-profile <profile>] …` left nothing of what /run does.
+		const { flags, ...withoutFlags } = ref.args ?? {};
+		const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
+		// The flags fold into one word so the row still says that it takes them.
+		const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
+		const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
+		const item: ListOverlayItem = {
+			id: ref.name,
+			label: `${ref.usage}  ${ref.description}  ${ref.group}`,
+			cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
+			group: "Commands",
+			meta: ref.group,
+			// Overlay key actions are deliberately not duplicated here: each
+			// overlay's footer hint is the live source of its keys, and a static
+			// copy would rot exactly like the old SLASH_HOTKEYS table did.
+			...detailWithHead((width) => {
+				const theme = clioTheme();
+				const facts: Fact[] = [
+					{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
+					{ label: "Does", value: ref.description },
+					// The same copy the composer's detail panel shows for each subcommand.
+					...Object.entries(ref.subcommandDescriptions ?? {}).map(
+						([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
+					),
+				];
+				return {
+					head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
+					rest: factRows(theme, facts, width, FACT_OPTIONS),
+				};
+			}),
+		};
+		return item;
+	});
 
 	// Operator commands carry text an extension author wrote; it is neutralized
 	// once here before any row or pane picks it up. The metas are getters so a
@@ -78,6 +80,7 @@ export function openHelpOverlay(
 		...displaySafe(extensionCommands).map((row): ListOverlayItem => {
 			// The row is one line; the pane's Does fact keeps the description's lines.
 			const summary = sanitizeCallTargetText(row.description);
+			picks.set(`extension:${row.invocation}`, `/${row.invocation}`);
 			return {
 				id: `extension:${row.invocation}`,
 				label: `/${row.invocation}  ${summary}`,
@@ -107,9 +110,16 @@ export function openHelpOverlay(
 		}),
 	);
 
+	// Editor, selection and viewport primitives are tables inside two topics, and
+	// an action with no key and no menu letter is named in the keyboard topic.
+	const isPrimitive = (id: string): boolean => /^tui\.(editor|input|select|altScreen)\./u.test(id);
+	const isUnbound = (id: Keybinding): boolean =>
+		manager.isDisabled(id) || (manager.getKeys(id).length === 0 && !manager.leaderTargets().some((t) => t.id === id));
+
 	const keyItems = (): ListOverlayItem[] => {
 		const conflicts = manager.getConflicts();
-		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
+		const entries = manager.hotkeyEntries().filter((row) => !isPrimitive(row.id) && !isUnbound(row.id));
+		const keys: ListOverlayItem[] = entries.map((row) => {
 			const formattedKeys = formatKey(manager.fullActionLabel(row.id));
 			// A rebound key says so, and a key two actions share carries the warning
 			// glyph, so the conflict is visible before the row is opened.
@@ -163,6 +173,42 @@ export function openHelpOverlay(
 		return keys;
 	};
 
+	const unboundLine = (): string[] => {
+		const names = manager
+			.hotkeyEntries()
+			.filter((row) => !isPrimitive(row.id) && isUnbound(row.id))
+			.map((row) => `\`${row.id}\` (${manager.getDescription(row.id)})`);
+		if (names.length === 0) return [];
+		return [
+			`${names.length} more action${names.length === 1 ? " has" : "s have"} no key; bind one under \`interface.keybindings\`: ${names.join(", ")}.`,
+		];
+	};
+
+	// A table of primitive keys built from the live bindings, so a rebind shows.
+	// The label carries every description, so the filter still finds a key by what it does.
+	const primitiveTopic = (id: string, lead: string, text: string, include: (id: string) => boolean): ListOverlayItem => {
+		const rows = () => manager.hotkeyEntries().filter((row) => include(row.id));
+		return {
+			id,
+			label: `${lead}  ${text}  ${rows()
+				.map((row) => manager.getDescription(row.id))
+				.join(" ")}`,
+			cells: { lead, text },
+			group: "Topics",
+			...detailWithHead((width) => {
+				const theme = clioTheme();
+				const facts: Fact[] = rows().map((row) => ({
+					label: formatKey(manager.isDisabled(row.id) ? "(unbound)" : manager.fullActionLabel(row.id)),
+					value: `${manager.getDescription(row.id)}${row.source === "user" ? " (user)" : ""}`,
+				}));
+				return {
+					head: [titleRow(theme, lead, width, { meta: "topic" })],
+					rest: factRows(theme, facts, width, FACT_OPTIONS),
+				};
+			}),
+		};
+	};
+
 	// Static concept topics. Unlike commands and keys these are not generated
 	// from a registry; keep each detail consistent with the enforced behavior
 	// and with the live footer hints on the surface it documents.
@@ -192,8 +238,21 @@ export function openHelpOverlay(
 				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: d background worker, x dismiss notice, y autonomy. Shift+Tab is t there. Arrows and Enter reach every entry.`,
 				"On an empty composer: ? shows the key card, / commands, ! shell, @ a file, left arrow the workers, down arrow the tasks. Esc stops a run; Ctrl+C twice or Ctrl+D exits.",
 				"Rebinding a direct key never moves its menu letter. An explicit [] disables both. This help lists your effective keys; settings are never rewritten.",
+				...unboundLine(),
 			],
 		},
+		primitiveTopic(
+			"topic-editing-keys",
+			"editing keys",
+			"Cursor, delete, yank, undo and selection keys in the composer and pickers",
+			(id) => /^tui\.(editor|input|select)\./u.test(id),
+		),
+		primitiveTopic(
+			"topic-transcript-keys",
+			"transcript keys (fullscreen layout)",
+			"Scroll, search and jump between prompts in the fullscreen transcript",
+			(id) => id.startsWith("tui.altScreen."),
+		),
 		{
 			id: "topic-fleet-runs",
 			label: "fleet runs & steering  Inspect, guide, and cancel delegated workers",
@@ -268,20 +327,51 @@ export function openHelpOverlay(
 		},
 	];
 
-	const items = [...commands, ...keyItems(), ...topics];
+	// Task-first entry points. If a spec renames one of these commands, its row changes with it.
+	const startHere: ReadonlyArray<{ id: string; task: string; pick?: string }> = [
+		{ id: "start-model", task: "Switch model", pick: "/model" },
+		{ id: "start-new", task: "Start a new session", pick: "/new" },
+		{ id: "start-compact", task: "Free up context", pick: "/compact" },
+		{ id: "start-context", task: "See what fills the context", pick: "/context" },
+		{ id: "start-rewind", task: "Undo file changes", pick: "/rewind" },
+		{ id: "start-run", task: "Hand work to a worker", pick: "/run " },
+		{ id: "start-settings", task: "Change a setting", pick: "/settings" },
+		{ id: "start-keys", task: "Keys and the action menu" },
+	];
+	const startItems: ListOverlayItem[] = startHere.map((row) => {
+		if (row.pick) picks.set(row.id, row.pick);
+		const shown = row.pick?.trim() ?? "keyboard model";
+		return { id: row.id, label: `${row.task}  ${shown}`, cells: { lead: row.task, text: shown }, group: "Start here" };
+	});
+
+	const allItems = (): ListOverlayItem[] => [...startItems, ...commands, ...keyItems(), ...topics];
 
 	const handle = openListOverlay(tui, {
 		markerId: "help",
 		title: "Help Center",
 		tall: true,
-		items,
+		items: allItems(),
 		filterable: true,
 		filterPlaceholder: "type to find a command, key or topic",
 		exactMatchesOnly: true,
 		...(initialFilter ? { initialFilter } : {}),
+		hints: (selected) => (selected && picks.has(selected.id) && onPick ? [{ key: "Enter", verb: "use" }] : []),
+		onSelect: (item) => {
+			const pick = picks.get(item.id);
+			if (pick !== undefined && onPick) {
+				onClose();
+				onPick(pick);
+				return;
+			}
+			if (item.id === "start-keys") {
+				handle.clearFilter();
+				handle.selectById("topic-keyboard-model");
+			}
+			handle.openDetail();
+		},
 		onClose,
 	});
-	const unsubscribe = manager.onReload(() => handle.setItems([...commands, ...keyItems(), ...topics]));
+	const unsubscribe = manager.onReload(() => handle.setItems(allItems()));
 	return {
 		...handle,
 		hide() {
