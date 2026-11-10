@@ -211,6 +211,7 @@ import { LOCAL_API_KEY_FALLBACK, resolveSideCallAuth } from "../domains/provider
 import { resolveTarget, unpricedRunRoutes } from "../domains/providers/unpriced-routes.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import { anthropicQuotaNotice, onAnthropicQuotaChange } from "../domains/quota/index.js";
+import { reportWiring } from "../domains/report/wiring.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -2023,6 +2024,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? null;
 	// The interactive surface installs this so the report tool can open an agent's draft for review (R-12).
 	let reportReviewOpener: ((draftId: string) => void) | null = null;
+	const reportSession = reportWiring({
+		stateDir: clioStateDir(),
+		session: () => session?.current(),
+		autonomy: resolveEffectiveAutonomy,
+		identitySettings: () => ({ targets: getCurrentSettings().targets }),
+	});
 	// ask_user is a human interview tool, so it is registered only where a person
 	// answers: the TUI, or an ACP client that advertised interviews. Headless and
 	// plain ACP surfaces have no operator, so the tool is absent there (documented
@@ -2628,22 +2635,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
 		// R-12: the agent drafts or offers a Clio Coder report; the host keeps the budget and never sends.
 		report: {
-			stateDir: clioStateDir(),
+			...reportSession,
 			version: readClioVersion(),
 			surface: interactive ? "tui" : acpMode ? "acp" : "headless",
-			session: () => {
-				const meta = session?.current();
-				if (!meta) return null;
-				return {
-					id: meta.id,
-					cwd: meta.cwd,
-					facts: {
-						...(meta.model ? { model: meta.model } : {}),
-						...(meta.target ? { runtime: meta.target } : {}),
-						autonomy: resolveEffectiveAutonomy(),
-					},
-				};
-			},
 			offers: () => getCurrentSettings().report?.offers ?? "ask",
 			writeOffersOff: () =>
 				persistSavedMutation((settings) => {
@@ -2652,7 +2646,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
 			attended: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
 			openReview: () => reportReviewOpener,
-			identitySettings: () => ({ targets: getCurrentSettings().targets }),
 		},
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
