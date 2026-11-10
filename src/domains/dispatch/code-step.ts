@@ -15,7 +15,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
@@ -44,6 +44,7 @@ import {
 	validatePlaybookCommandArgs,
 } from "../agents/playbook-commands.js";
 import type { CodeReportResult } from "../agents/result-contract.js";
+import { redactCommandOutputSecrets } from "../evidence/redact.js";
 
 /** Bytes of command output retained for the artifact log. */
 export const CODE_STEP_CAPTURE_MAX_BYTES = 1_048_576;
@@ -781,8 +782,9 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const artifactPaths: string[] = [];
 	if (input.artifactDir !== undefined) {
 		const artifactPath = join(input.artifactDir, `${input.stepId}.log`);
-		mkdirSync(input.artifactDir, { recursive: true });
-		writeFileSync(
+		mkdirSync(input.artifactDir, { recursive: true, mode: 0o700 });
+		chmodSync(input.artifactDir, 0o700);
+		safeResourceWrite(
 			artifactPath,
 			[
 				`$ ${rendered}`,
@@ -792,9 +794,9 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 				`timed_out: ${spawned.timedOut}`,
 				...(input.notes ?? []).map((note) => `note: ${note}`),
 				"",
-				capturedText,
+				redactCommandOutputSecrets(capturedText),
 			].join("\n"),
-			"utf8",
+			{ mode: 0o600 },
 		);
 		artifactPaths.push(artifactPath);
 	}
