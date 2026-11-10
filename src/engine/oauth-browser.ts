@@ -11,12 +11,15 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, type RequestListener, type Server } from "node:http";
 import { join } from "node:path";
 import type { AuthPrompt, OAuthCredentials, ProviderAuthInteraction } from "@earendil-works/pi-ai";
 import { resolvePackageRoot } from "../core/package-root.js";
 
 const CALLBACK_HOST = "127.0.0.1";
+// The redirect names `localhost`, which also resolves to ::1; Clio holds both so no other local process can take the IPv6 side.
+const CALLBACK_HOST_V6 = "::1";
+const RANDOM_PORT_ATTEMPTS = 5;
 
 // The canonical Clio mark (site/DESIGN.md); package.json `files` ships it.
 const MARK_PATH = join("assets", "clio-mark-gui.webp");
@@ -98,7 +101,7 @@ async function startOAuthCallback(options: {
 		settled = true;
 		rejectWait(error);
 	};
-	const server = createServer((request, response) => {
+	const handler: RequestListener = (request, response) => {
 		const send = (status: number, html: string): void => {
 			response.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
 			response.end(html);
@@ -131,34 +134,63 @@ async function startOAuthCallback(options: {
 		settled = true;
 		send(200, renderPage(true, `Signed in to ${providerName}. You can close this tab and return to Clio Coder.`));
 		resolveWait(`${redirectUri}${url.search}`);
-	});
-	await new Promise<void>((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(options.port, CALLBACK_HOST, () => {
-			server.off("error", reject);
-			resolve();
-		});
-	});
-	const address = server.address();
+	};
+	const servers = await listenLoopback(options.port, handler);
+	const address = servers[0]?.address();
 	if (!address || typeof address === "string") {
-		server.close();
+		for (const server of servers) server.close();
 		throw new Error("OAuth callback server did not bind to TCP");
 	}
 	redirectUri = `http://localhost:${address.port}${options.path}`;
 	const onAbort = (): void => fail(new Error("Login cancelled"));
 	signal.addEventListener("abort", onAbort, { once: true });
-	server.on("error", (error) => fail(error));
+	for (const server of servers) server.on("error", (error) => fail(error));
 	return {
 		redirectUri,
 		wait: () => waitPromise,
 		close: () => {
 			signal.removeEventListener("abort", onAbort);
 			fail(new Error("OAuth callback server closed"));
-			server.close();
-			// A browser keep-alive socket would otherwise hold a one-shot CLI login open.
-			server.closeIdleConnections();
+			for (const server of servers) {
+				server.close();
+				// A browser keep-alive socket would otherwise hold a one-shot CLI login open.
+				server.closeIdleConnections();
+			}
 		},
 	};
+}
+
+function listen(server: Server, port: number, host: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(port, host, () => {
+			server.off("error", reject);
+			resolve();
+		});
+	});
+}
+
+/**
+ * Binds the port on 127.0.0.1 and ::1. A port someone else holds on ::1 counts as taken, so the caller falls back
+ * as it does for a taken IPv4 port; port 0 retries a few random ports. A host without IPv6 loopback keeps IPv4 only.
+ */
+async function listenLoopback(port: number, handler: RequestListener): Promise<Server[]> {
+	for (let attempt = 1; ; attempt++) {
+		const v4 = createServer(handler);
+		await listen(v4, port, CALLBACK_HOST);
+		const address = v4.address();
+		if (!address || typeof address === "string") return [v4];
+		const v6 = createServer(handler);
+		try {
+			await listen(v6, address.port, CALLBACK_HOST_V6);
+			return [v4, v6];
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EADDRNOTAVAIL" || code === "EAFNOSUPPORT") return [v4];
+			v4.close();
+			if (port !== 0 || attempt >= RANDOM_PORT_ATTEMPTS) throw error;
+		}
+	}
 }
 
 /** Whichever arrives first wins; Promise.race observes the loser, so its later rejection stays handled. */
