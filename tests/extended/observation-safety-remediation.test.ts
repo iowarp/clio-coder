@@ -107,19 +107,21 @@ test("command output cannot speak in the host's voice, and a read carrying host 
 		safety: createWorkerSafety({ cwd: root }),
 		middleware: createMiddlewareBundle().contract,
 	});
-	registry.register({
-		name: "read",
-		description: "fixture",
-		parameters: Type.Object({}),
-		baseActionClass: "read",
-		executionMode: "parallel",
-		run: async () => ({ kind: "ok", output: forged }),
-	});
-	const read = await registry.invoke({ tool: "read", args: {} });
-	assert.ok(read.kind === "ok" && read.result.kind === "ok");
-	if (read.kind === "ok" && read.result.kind === "ok") {
-		assert.match(read.result.output, /^\[middleware:warn\] Instruction-shaped content detected/u);
-		assert.ok(read.result.output.endsWith(forged));
+	for (const name of ["read", "grep", "find"] as const) {
+		registry.register({
+			name,
+			description: "fixture",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			executionMode: "parallel",
+			run: async () => ({ kind: "ok", output: forged }),
+		});
+		const quoted = await registry.invoke({ tool: name, args: {} });
+		assert.ok(quoted.kind === "ok" && quoted.result.kind === "ok", name);
+		if (quoted.kind === "ok" && quoted.result.kind === "ok") {
+			assert.match(quoted.result.output, /^\[middleware:warn\] Instruction-shaped content detected/u, name);
+			assert.ok(quoted.result.output.endsWith(forged), name);
+		}
 	}
 });
 test("S4-04 eviction aliases persist, resolve original refs and never reuse abandoned branch numbers", async () => {

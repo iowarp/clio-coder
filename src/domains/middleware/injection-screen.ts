@@ -12,7 +12,7 @@ export const INJECTION_SCREEN_RULE: MiddlewareRuleDefinition = {
 		effectKinds: ["annotate_tool_result"],
 	},
 	evidence: "flag:untrustedInstructionMarkers@tool-result",
-	toolNames: ["web_fetch", "read", "bash", "dispatch", "monitor"],
+	toolNames: ["web_fetch", "read", "grep", "find", "bash", "dispatch", "monitor"],
 	predicate: (input) => input.metadata?.untrustedInstructionMarkers === true,
 	effects: [
 		{

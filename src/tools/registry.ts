@@ -3458,10 +3458,15 @@ function buildToolHookInput(
 	}
 	if (call.tool !== spec.name) metadata.requestedToolName = call.tool;
 	if (result !== undefined) {
-		if (hook === "after_tool" && ["web_fetch", "read", "bash", "dispatch", "monitor"].includes(spec.name)) {
+		if (
+			hook === "after_tool" &&
+			["web_fetch", "read", "grep", "find", "bash", "dispatch", "monitor"].includes(spec.name)
+		) {
 			const text = result.kind === "ok" ? result.output : result.kind === "error" ? result.message : "";
-			metadata.untrustedInstructionMarkers =
-				containsInstructionMarkers(text) || (spec.name === ToolNames.Read && carriesHostFraming(text));
+			// Read, grep and find quote file bytes or names that must stay exact
+			// for edit anchors, so framing there is flagged, not rewritten.
+			const quotesFiles = spec.name === ToolNames.Read || spec.name === ToolNames.Grep || spec.name === ToolNames.Find;
+			metadata.untrustedInstructionMarkers = containsInstructionMarkers(text) || (quotesFiles && carriesHostFraming(text));
 		}
 		metadata.resultKind = result.kind;
 		if (result.kind === "error") metadata.errorMessage = result.message;
