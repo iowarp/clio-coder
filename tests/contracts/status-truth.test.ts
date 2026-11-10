@@ -71,6 +71,7 @@ import {
 import { formatRetryStatus } from "../../src/interactive/renderers/retry-status.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
+import { createSilenceTranscriptRow } from "../../src/interactive/silence-row.js";
 import { buildSummary, reduceStatus, type StatusInputEvent } from "../../src/interactive/status/index.js";
 import {
 	approvalWaitWords,
@@ -1730,6 +1731,44 @@ test("a long silence states its evidence age, what is usual and the limit, and n
 		silenceNoteForms({ ...(waiting as object), phase: "tool_running" } as never, at, DEFAULT_RETRY_SETTINGS, null),
 		null,
 	);
+});
+
+test("a tool's run is not model silence: the next call's wait never counts from the last call's first byte", () => {
+	// v071 TUI: `sleep 300` ran, then the next call's wait opened on the previous request, and the transcript read
+	// "No output from Claude-haiku-5-5 for 5m2s after the response opened 14:23:25".
+	const t0 = 1_000_000;
+	const earlier: ModelRequestFacts = { sentAt: t0, modelId: "haiku", firstByteAt: t0 + 2_000, bytesObservable: true };
+	let status: AgentStatus = INITIAL_STATUS;
+	const at = (now: number, event: { type: string; [key: string]: unknown }) => {
+		status = reduceStatus(status, event as StatusInputEvent, { now, localRuntime: false, modelRequest: earlier });
+	};
+	at(t0, { type: "agent_start" });
+	at(t0, { type: "turn_start" });
+	at(t0 + 3_000, { type: "tool_execution_start", toolCallId: "b1", toolName: "bash", args: { command: "sleep 300" } });
+	at(t0 + 303_000, { type: "tool_execution_end", toolCallId: "b1", toolName: "bash", result: {}, isError: false });
+	at(t0 + 303_000, { type: "turn_end" });
+	at(t0 + 303_000, { type: "turn_start" });
+	strictEqual(status.phase, "waiting_model");
+	strictEqual(status.modelRequest, earlier, "the next request has not gone out yet");
+	let clock = t0 + 304_000;
+	const rows: Array<(width: number) => string[]> = [];
+	const row = createSilenceTranscriptRow({
+		append: (render) => rows.push(render),
+		modelName: () => "Claude-haiku-5-5",
+		now: () => clock,
+	});
+	row.observe(status, clock);
+	strictEqual(rows.length, 0);
+	// A minute into the new wait the row is owed, and counts from this wait.
+	clock = t0 + 363_000;
+	row.observe(status, clock);
+	match(
+		stripTerminalSequences(rows.flatMap((render) => render(200)).join("\n")),
+		/No output from Claude-haiku-5-5 for 1m0s/u,
+	);
+	const quiet = { ...status, lastMeaningfulAt: t0 + 303_000 };
+	const note = silenceNoteForms(quiet, t0 + 398_000, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "";
+	match(note, /^No output for 1m35s/u);
 });
 
 test("a write refused beside a lint that changed nothing is a blocked change, and any changed path keeps the old reading", () => {

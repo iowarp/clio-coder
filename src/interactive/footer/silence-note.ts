@@ -106,9 +106,10 @@ export function silenceNoteForms(
 			`Silent ${silent} · usual unknown · ${endsTight}`,
 		];
 	}
-	const request = status.modelRequest;
 	// The clock the rail beside this row counts, so the two never read a second apart. Only an admission moves the send.
 	const waitingFrom = status.retry?.attemptStartedAt ?? status.waitingSince ?? status.since;
+	// A request sent before this wait began is the last call's, answered before its tools ran (the rail's own rule).
+	const request = status.modelRequest && status.modelRequest.sentAt >= waitingFrom ? status.modelRequest : undefined;
 	const sentAt =
 		request?.admissionBeganAt !== undefined && request.admissionBeganAt >= waitingFrom ? request.sentAt : waitingFrom;
 	const evidenceMs = now - (request?.firstByteAt ?? sentAt);

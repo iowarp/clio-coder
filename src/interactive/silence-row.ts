@@ -39,9 +39,11 @@ function silentWait(status: AgentStatus, model: string): SilentWait | null {
 	const waiting = phase === "waiting_model" || (phase === "retrying" && status.retry?.stage === "attempt");
 	const run = status.runId ?? "run";
 	if (waiting) {
-		const request = status.modelRequest;
 		// The same clock the rail and the hint row count from, so the three never disagree about when the wait began.
 		const waitingFrom = status.retry?.attemptStartedAt ?? status.waitingSince ?? status.since;
+		// Until this wait's request goes out, the status still holds the last call's, whose first byte came before the
+		// tools it asked for ran. That byte is not evidence about this wait.
+		const request = status.modelRequest && status.modelRequest.sentAt >= waitingFrom ? status.modelRequest : undefined;
 		const sentAt =
 			request?.admissionBeganAt !== undefined && request.admissionBeganAt >= waitingFrom ? request.sentAt : waitingFrom;
 		if (request?.firstByteAt) {
