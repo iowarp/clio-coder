@@ -83,11 +83,11 @@ Project settings, hooks and safety policy require approval of their exact bytes.
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
-| `[clio-coder:trust] <file> is untrusted; project <surface> ignored. Review with clio-coder config trust <surface>.` (`<surface>` is `settings`, `hooks`, `safety`, `extensions` or `plugins`) | `.clio-coder/settings.yaml`, `settings.local.yaml`, `hooks.yaml`, `hooks.local.yaml`, `safety.yaml` (for `safety`, the nearest one in the workspace or an ancestor), `extensions/state.json` or `plugins/state.json` exists and no approval is recorded for this workspace. | `clio-coder config trust <surface>` prints the files, package identities where applicable, and a digest. Approve the reviewed surface with `clio-coder config trust <surface> --hash <sha256>`, then restart (reload extensions for hooks and extensions, `/library reload` for plugins). `--revoke` withdraws it. |
+| `[clio-coder:trust] <file> is untrusted; project <surface> ignored. Review with clio-coder config trust <surface>.` (`<surface>` is `settings`, `hooks`, `safety`, `extensions` or `plugins`) | `.clio-coder/settings.yaml`, `settings.local.yaml`, `hooks.yaml`, `hooks.local.yaml`, `safety.yaml` (for `safety`, the nearest one in the workspace or an ancestor), `extensions/state.json` or `plugins/state.json` exists and no approval is recorded for this workspace. | `clio-coder config trust <surface>` prints the files, package identities where applicable, and a digest. Approve the reviewed surface with `clio-coder config trust <surface> --hash <sha256>`, then restart (reload extensions for hooks and extensions, `/reload library` for plugins). `--revoke` withdraws it. |
 | The same notice with `is changed;` | The approved file bytes or package identities no longer match. | Review the new surface and approve its digest again. |
 | `project <surface> changed since review; inspect it again before approving` (exit 1) | The digest passed to `--hash` no longer matches the files. | Run `clio-coder config trust <surface>` again and approve the new digest. |
 | `no readable project <surface> files to approve` (exit 1) | The surface has no readable files. For `extensions` or `plugins`, the project has no install state yet. | Create or fix the file, or install the package first, then review it. |
-| `extensions list` shows `untrusted`, or a package carries `project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions`. The plugin form reads `project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins`, and `library list` shows the copy as `invalid` or a skill package as `requires trust`. | The project's installed package identities are unapproved or changed, so project copies of that kind are blocked. A user copy with the same ID still loads. | Review with `clio-coder config trust extensions` or `plugins`, approve the digest with `--hash`, then run `/extensions reload` or `/library reload`. |
+| `extensions list` shows `untrusted`, or a package carries `project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions`. The plugin form reads `project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins`, and `library list` shows the copy as `invalid` or a skill package as `requires trust`. | The project's installed package identities are unapproved or changed, so project copies of that kind are blocked. A user copy with the same ID still loads. | Review with `clio-coder config trust extensions` or `plugins`, approve the digest with `--hash`, then run `/reload extensions` or `/reload library`. |
 | Project packages stopped loading after an install, update, enable, disable or remove | A package identity changed without an applicable approval. Disabling, removing or reinstalling identical content preserves approval. An explicit operator install records approval for a new surface or an already trusted one; it does not approve unrelated existing changes. | Review changed identities with `clio-coder config trust <surface>` and approve the digest. |
 | A package installed with `library import`, `interop adopt`, `share import`, `/archive import` or a skill install offer into a project does not load | Those paths never approve workspace trust, including for the workspace's first project install. | Approve the project's install state with `clio-coder config trust extensions` or `plugins`. |
 | A dispatched worker's task worktree reports its project packages as untrusted | A Clio-created task worktree inherits its origin's current package approval only while the installed identities match the approved identities. A hand-made `git worktree` never inherits. | Approve the origin again, make the worktree package identities match it, or approve the worktree directly. |
@@ -279,6 +279,53 @@ provider deltas and terminal writes, as JSONL. The ring is the always-on subset
 of the same records, for the case where nobody armed the trace first.
 
 ---
+
+## Report a problem to the maintainers
+
+`/report` in the TUI and `clio-coder report` in a shell draft a bug report, a
+feature request or a question for Clio Coder's maintainers and post it on
+`github.com/iowarp/clio-coder`. Nothing leaves the machine until you send it.
+
+```bash
+clio-coder report bug --title "footer flickers on resize" --last --dry-run
+```
+
+- **Draft.** `/report bug|feature|question [summary]` uses the summary as the
+  title and adds what Clio Coder observed in the current session. In a shell,
+  `--title` and `--body-file <file>` (or `-` for stdin) supply the text, and in
+  a terminal without `--body-file`, `$EDITOR` opens a template. `--last` adds
+  the newest session in this directory and `--session <id>` a named one.
+- **Review.** The preview is the exact title and body that will be posted,
+  with what Clio Coder masked: local paths, URLs other than Clio Coder's own,
+  user, host, project, branch, remote and target names, e-mail and IP addresses,
+  and secrets. In the TUI `e` edits the text in `$EDITOR` and masks the edit
+  again, `m` masks or unmasks a value, Enter moves on, and Esc closes and keeps
+  a draft. No diagnostic bundle goes with a report; `--bundle` accepts only
+  `none` in this release.
+- **Send.** In the TUI only `s` on the send step sends; Enter never does. A
+  shell sends after you choose send at the prompt, or with `--yes`; outside a
+  terminal without `--yes` it exits 2, and `--dry-run` stops after the preview
+  without a network call. With a signed-in `gh`, Clio Coder first searches
+  GitHub for the same problem, then posts a public issue (bug or feature) or
+  discussion (question) under your account. An open match asks whether to add
+  your details to it, file a new issue that links it, or cancel; with `--yes`,
+  `--on-duplicate comment|new|stop` decides and defaults to `stop`. A closed
+  match fixed in a newer release suggests upgrading first. Without `gh` Clio
+  Coder opens a prefilled form in the browser, and without a browser it writes
+  the report to a file and prints the link to paste it into. `c` on the send
+  step, or `--credit`, asks for credit in the release notes.
+- **Afterwards.** `/report status` and `clio-coder report status` list your
+  reports and saved drafts, `clio-coder report show <id>` prints one,
+  `send <id>` reviews and sends a saved draft, and `forget <id>` deletes a draft
+  that has not left the machine. A posted report cannot be withdrawn from Clio
+  Coder; edit or close it on GitHub.
+
+`clio-coder report` exits 0 when the report was sent, opened in the browser,
+written or previewed, 1 when sending failed, and 2 on a usage error or outside a
+terminal without `--yes`. Security problems never go to a public issue:
+`/report security` and `clio-coder report security` print the link to the
+repository's private security advisory form and open it in a terminal session
+that has a browser.
 
 ## Diagnostic Commands
 

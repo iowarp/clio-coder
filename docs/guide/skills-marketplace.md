@@ -39,7 +39,7 @@ The `operating.skill-installs` fragment ([skill-installs.md](../../src/domains/p
 - Install only when the operator requests or approves it.
 - When a `[Marketplace]` reminder arrives, ask with `ask_user` (header "Install skill") and offer exactly "Install for this project", "Install globally", "Not now", and "Never offer this skill". A declined installation settles the offer for this task. The harness acts only on an answer that carries the offer's binding tag and performs the install itself, so the model never installs or loads a skill in the offer flow.
 - For an explicit operator request, the documented route is `clio-coder library install kind:name --user|--project` through bash with operator approval, and `--dry-run` previews it without a write or an approval prompt.
-- After an approved install, inspect readiness again and report `/library reload` if the running session has not admitted the skill. A committed `library install` itself ends with `A running session picks this up after /library reload.` in plain output.
+- After an approved install, inspect readiness again and report `/reload library` if the running session has not admitted the skill. A committed `library install` itself ends with `A running session picks this up after /reload library.` in plain output.
 - `/skill` is an interactive command, not a shell command.
 - Do not bypass integrity, import trust or workspace trust checks.
 
@@ -58,7 +58,7 @@ The marketplace offer is the unsolicited path. It is local: the matcher in [prom
 
 The Library overlay keys are in [resource-library.md](resource-library.md#interactive-library). Pin verification and drift checks are CLI-only: `clio-coder library pin` and `clio-coder library drift`.
 
-Model visibility and the trust rules for imported and loose skills are in [extensions-and-sharing.md](extensions-and-sharing.md#trust-and-compatibility-roots). Disabled, incompatible or drifted package resources do not load, and neither do the packages of a project whose plugin state the operator has not approved. `/library reload` refreshes an active session after a lifecycle change or a new approval.
+Model visibility and the trust rules for imported and loose skills are in [extensions-and-sharing.md](extensions-and-sharing.md#trust-and-compatibility-roots). Disabled, incompatible or drifted package resources do not load, and neither do the packages of a project whose plugin state the operator has not approved. `/reload library` refreshes an active session after a lifecycle change or a new approval.
 
 ## Model-facing inventory
 
@@ -71,7 +71,7 @@ Model visibility and the trust rules for imported and loose skills are in [exten
 
 The listing accepts `query`, `limit` (at most 200) and `offset`, and cuts by whole rows to fit the observation budget. Other agents' skill folders are discovery-only and never listed as ready, and availability through another agent's skill root does not mean Clio installed or copied that skill. Resetting Clio does not remove those external files.
 
-Readiness is separate from installation. A package's state reads `ready`, `requires trust` (a foreign package while `integrations.projectResources.trustProjectImports` is off, or an enabled project package while the project's plugin state is not approved), `pending reload; run /library reload`, `no ready skills; inspect /library`, `damaged`, `shadowed`, `disabled`, `incompatible`, or `invalid`. An install performed in another process appears as installed before `/library reload` admits it into the session. Only `ready` skills are advertised for use, and marketplace suggestions exclude actual Clio copies, not loose discoveries from other agents. A named load of an installed skill that is not ready reports its state and tells the model not to reinstall it.
+Readiness is separate from installation. A package's state reads `ready`, `requires trust` (a foreign package while `integrations.projectResources.trustProjectImports` is off, or an enabled project package while the project's plugin state is not approved), `pending reload; run /reload library`, `no ready skills; inspect /library`, `damaged`, `shadowed`, `disabled`, `incompatible`, or `invalid`. An install performed in another process appears as installed before `/reload library` admits it into the session. Only `ready` skills are advertised for use, and marketplace suggestions exclude actual Clio copies, not loose discoveries from other agents. A named load of an installed skill that is not ready reports its state and tells the model not to reinstall it.
 
 Catalog-origin copies show an update in `library list`, `/library`, and `context(scope="library")` when the catalog has a newer version or a different digest at the same version. Local and imported copies and older catalog versions do not produce that signal. `library update --all` processes eligible copies, skips extensions for individual review, and continues after a refusal while returning failure if any update failed. Inactive packages remain visible in `library components` and `library skills --all`, with remedies and `inactivePackages` in JSON; their resources stay unloaded.
 

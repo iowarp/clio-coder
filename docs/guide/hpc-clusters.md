@@ -82,8 +82,8 @@ refreshes and web fetches, and `clio-coder doctor` shows the proxy in effect.
 matches a host by exact name or as a domain suffix (`example.com`,
 `.example.com` and `*.example.com` all cover `api.example.com`), optionally
 with `:port`, and `NO_PROXY=*` turns the proxy off. CIDR ranges such as
-`192.168.0.0/16` and wildcards such as `192.168.*` are ignored without a
-warning, so a model server on a cluster or LAN address goes through the proxy
+`192.168.0.0/16` and wildcards such as `192.168.*` are ignored (a CIDR range
+gets one stderr line naming it), so a model server on a cluster or LAN address goes through the proxy
 unless `NO_PROXY` names its host or IP address exactly:
 
 ```bash
@@ -96,7 +96,9 @@ Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch`, `qstat`, `bsub`,
 `flux` and the rest) run outside the shell sandbox behind the same approval as
 `ssh`: an ask at the default autonomy level, the safety judge at yolo. A script
 that calls `sbatch` itself stays inside the sandbox and fails there, so submit
-from the command line the agent runs rather than from a wrapper script.
+from the command line the agent runs rather than from a wrapper script. A
+workspace script named like a client (`./sbatch`, `bin/ssh`) is not one and
+stays inside the sandbox.
 `/loop --command` and job poll commands get the environment `bash` gets, with
 credentials scrubbed and `safety.sandboxPassEnv` honored, and a failing poll
 shows its first stderr line. With the sandbox active, `clio-coder doctor` adds a
@@ -182,7 +184,7 @@ clio-coder library install skill:slurm-jobs --project
 clio-coder library install plugin:hpc --project
 ```
 
-Run `/library reload` in a running session afterward.
+Run `/reload library` in a running session afterward.
 
 | Skill | What it covers |
 | --- | --- |

@@ -154,7 +154,7 @@ clio-coder library install skill:slurm-jobs --project
 clio-coder library install plugin:hpc --project
 ```
 
-Then run `/library reload` in the session and ask for the sweep, for example
+Then run `/reload library` in the session and ask for the sweep, for example
 `/skill hpc-sweep dry run sweeps/decay.yaml`.
 
 The sweep file (YAML, or JSON when PyYAML is absent) names the sweep and lists
