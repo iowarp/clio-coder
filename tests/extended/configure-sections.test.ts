@@ -652,6 +652,30 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
+	it("imports a lab setup file from the first-run row after showing where prompts go", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			const file = join(testEnv.root, "lab.yaml");
+			writeFileSync(
+				file,
+				"targets:\n  - id: lab\n    runtime: litellm\n    url: https://llm.lab.example.edu\n    defaultModel: qwen3-coder\n    auth:\n      apiKeyEnvVar: LAB_API_KEY\nchat:\n  target: lab\n",
+			);
+			const result = await runWizard({ ...testEnv.env, LAB_API_KEY: "" }, [
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, DOWN, ENTER] },
+				{ waitFor: "Where is the setup file?", keys: [file, ENTER] },
+				{ waitFor: "prompts go to https://llm.lab.example.edu", keys: [ENTER] },
+			]);
+			const screen = plainText(result.transcript());
+			strictEqual(result.code, 0, screen);
+			ok(screen.includes("LAB_API_KEY"), `the missing key is not named:\n${screen}`);
+			const saved = parse(readFileSync(testEnv.settingsFile, "utf8"));
+			strictEqual(saved.chat.target, "lab");
+			strictEqual(saved.targets[0].url, "https://llm.lab.example.edu");
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
 	it("exits 130 when the very first step is cancelled, because nothing is configured", async () => {
 		const testEnv = unconfiguredEnv();
 		try {

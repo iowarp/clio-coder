@@ -53,6 +53,7 @@ import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
 import { editSettingControl, orderedSectionControls } from "./configure-controls.js";
 import { editSettings } from "./configure-editor.js";
+import { runConfigureImport } from "./configure-import.js";
 import { runInteropReview } from "./configure-interop.js";
 import {
 	type ConfigureCategory,
@@ -120,6 +121,9 @@ Usage:
   clio-coder configure --edit            edit all user settings in VISUAL/EDITOR;
                                          validate and review before saving
   clio-coder configure --interop         review detected coding agents as delegation peers
+  clio-coder configure --import <path|https-url> [--yes] [--replace]
+                                         add the targets a lab or site setup file
+                                         names; shows each address and asks once
   clio-coder configure --list            list target runtimes (user-facing only)
   clio-coder configure --list --all      list every registered runtime including aliases
   clio-coder configure --id <targetId> [flags] --runtime <runtimeId>
@@ -162,6 +166,9 @@ interface ParsedArgs {
 	list: boolean;
 	all: boolean;
 	interop: boolean;
+	import?: string;
+	yes: boolean;
+	replace: boolean;
 	json: boolean;
 	edit: boolean;
 	quick: boolean;
@@ -197,6 +204,8 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		list: false,
 		all: false,
 		interop: false,
+		yes: false,
+		replace: false,
 		json: false,
 		edit: false,
 		quick: false,
@@ -243,6 +252,15 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 				break;
 			case "--interop":
 				out.interop = true;
+				break;
+			case "--import":
+				out.import = need();
+				break;
+			case "--yes":
+				out.yes = true;
+				break;
+			case "--replace":
+				out.replace = true;
 				break;
 			case "--id":
 				out.id = need();
@@ -1890,6 +1908,8 @@ function emptyArgs(): ParsedArgs {
 		list: false,
 		all: false,
 		interop: false,
+		yes: false,
+		replace: false,
 		json: false,
 		edit: false,
 		quick: false,
@@ -2200,6 +2220,21 @@ export async function runConfigureCommand(
 		return 0;
 	}
 	ensureRegistryPopulated();
+	if (args.import !== undefined) {
+		const prompts = (inStream as { isTTY?: boolean }).isTTY ? new ConfigurePrompts(inStream, outStream) : null;
+		return runConfigureImport(args.import, {
+			yes: args.yes,
+			replace: args.replace,
+			out: outStream,
+			...(prompts
+				? { confirm: async (question: string) => /^y(es)?$/iu.test((await prompts.question(question)).trim()) }
+				: {}),
+		});
+	}
+	if (args.yes || args.replace) {
+		printError("--yes and --replace go with --import");
+		return 2;
+	}
 	if (args.edit) {
 		if (!(inStream as { isTTY?: boolean }).isTTY || !(outStream as { isTTY?: boolean }).isTTY) {
 			printError("--edit needs a terminal; use configure --json to inspect settings without one");

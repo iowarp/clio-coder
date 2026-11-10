@@ -32,6 +32,7 @@ export const coreTests = [
 	"default-containment",
 	"setup-status",
 	"key-prefix",
+	"configure-import",
 	"contained-secrets",
 	"true-yolo",
 	"contained-yolo",

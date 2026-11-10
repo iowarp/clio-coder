@@ -54,6 +54,7 @@ import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { observeHostCapacityFacts, resolveLocalConcurrency } from "../domains/scheduling/local-capacity.js";
 import type { ConfigureWizardHost } from "./configure-host.js";
+import { commitImport, describeImport, importChangesNothing, prepareImport } from "./configure-import.js";
 import type { ConfigureCategory } from "./configure-layout.js";
 import { CONFIGURE_CATEGORY_CHOICES } from "./configure-layout.js";
 import { loginOAuthRuntime } from "./configure-oauth.js";
@@ -129,6 +130,8 @@ interface Answers {
 	keyGiven?: boolean | undefined;
 	/** The provider the key itself named, by its prefix or its variable, so the provider list is not asked. */
 	keyProvider?: string | undefined;
+	/** The setup file's path or address, kept so Back from its review shows it again. */
+	setupSource?: string | undefined;
 	/** The review's "Choose a different model" asked for the list the flow otherwise skips. */
 	chooseModel?: boolean | undefined;
 	fixedRuntime?: boolean;
@@ -157,9 +160,9 @@ interface Answers {
 	signInLater?: string | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model";
+type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported";
 
-type Have = "key" | "subscription" | "server";
+type Have = "key" | "subscription" | "server" | "file";
 
 /** A route `collectSetupCandidates` found, with the runtime it runs on. */
 interface OfferedRoute extends DetectedChatRoute {
@@ -385,6 +388,7 @@ const HAVE_CHOICES: ReadonlyArray<{ value: Have; label: string; hint: string }> 
 		label: "A model server or gateway",
 		hint: "Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or any OpenAI-compatible address",
 	},
+	{ value: "file", label: "A setup file from my lab or team", hint: "a path or https address someone gave you" },
 ];
 
 /** Screen 1 when Clio found nothing, or the user wants something else: what they have, in their words. */
@@ -485,6 +489,69 @@ const KEY_STEP: Step = {
 		answers.targetId = runtime ? deriveTargetId(runtime.id, readSettings().targets) : undefined;
 		if (runtime) wizard.answer("Provider", `${runtime.displayName}  ${chalk.dim("(from the key)")}`);
 		return "next";
+	},
+};
+
+/** The setup-file path: the same import as `configure --import`, shown and confirmed on the rail. */
+const FILE_STEP: Step = {
+	id: "setup-file",
+	applies: (answers) => firstRunFlow(answers) && answers.have === "file",
+	run: async (wizard, answers) => {
+		let problem: string | undefined;
+		for (;;) {
+			const result = await wizard.text({
+				heading: [
+					"",
+					chalk.bold("Where is the setup file?"),
+					...(problem ? problem.split("\n").map((line) => chalk.red(line)) : []),
+				],
+				initial: answers.setupSource ?? "",
+				hint: "a path on this machine or an https:// address",
+				validate: (value) => (value.trim().length === 0 ? "Type a path or an https:// address." : null),
+				railPrefix: wizard.rail,
+				backLabel: "back",
+				clearOnExit: true,
+				input: wizard.input,
+				output: wizard.output,
+			});
+			if (result.kind === "quit") return "quit";
+			if (result.kind === "back") return "back";
+			const source = result.value.trim();
+			answers.setupSource = source;
+			const prepared = await prepareImport(source, false);
+			if (!prepared.ok) {
+				problem = prepared.error;
+				continue;
+			}
+			problem = undefined;
+			if (importChangesNothing(prepared.plan)) {
+				wizard.answer("Setup file", `${source}  ${chalk.dim("(already imported)")}`);
+				return "imported";
+			}
+			const confirm = await wizard.select<"apply" | "back">({
+				heading: ["", chalk.bold("This setup file will:"), ...describeImport(prepared)],
+				choices: [
+					{ value: "apply", label: "Apply", hint: "save these targets to your Clio settings" },
+					{ value: "back", label: "Back", hint: "choose another file" },
+				],
+				railPrefix: wizard.rail,
+				backLabel: "back",
+				clearOnExit: true,
+				input: wizard.input,
+				output: wizard.output,
+			});
+			if (confirm.kind === "quit") return "quit";
+			if (confirm.kind === "back" || confirm.value === "back") continue;
+			try {
+				const status = commitImport(prepared.file);
+				wizard.answer("Setup file", source);
+				for (const line of status) wizard.presenter.note(line.trim());
+			} catch (err) {
+				problem = err instanceof Error ? err.message : String(err);
+				continue;
+			}
+			return "imported";
+		}
 	},
 };
 
@@ -1492,6 +1559,7 @@ const REVIEW_STEP: Step = {
 const STEPS: ReadonlyArray<Step> = [
 	OFFERED_STEP,
 	HAVE_STEP,
+	FILE_STEP,
 	KEY_STEP,
 	CATEGORY_STEP,
 	RUNTIME_STEP,
@@ -1655,6 +1723,10 @@ export async function runOnboardingWizard(
 		wizard.goingBack = direction < 0;
 		const outcome = await step.run(wizard, answers);
 		if (outcome === "quit" || outcome === "cancel") return stop(outcome === "quit");
+		if (outcome === "imported") {
+			presenter.done("Done");
+			return 0;
+		}
 		if (outcome === "model") {
 			const modelStep = STEPS.indexOf(MODEL_STEP);
 			answers.chooseModel = true;
