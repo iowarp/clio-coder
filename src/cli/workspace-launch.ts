@@ -150,6 +150,7 @@ export async function maybeLaunchWorkspace(
 		cwd: process.cwd(),
 		clioArgv: clioArgv(),
 		clioEnv: clioPaneEnv(process.env, settings.targets),
+		notice: (line) => process.stderr.write(`Clio Coder: ${line}.\n`),
 	});
 	if (result.status === "fallback") {
 		process.stderr.write(`Clio Coder: terminal panes unavailable (${result.reason}). Continuing in this terminal.\n`);

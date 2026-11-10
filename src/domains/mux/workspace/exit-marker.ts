@@ -33,13 +33,20 @@ export const WORKSPACE_SESSION_PREFIX = "clio-coder-";
  * in one terminal would land in the other project's Clio. The directory is
  * resolved first, so a symlinked path reaches the same host as the directory
  * it names, and a second worktree, being a different directory, gets its own.
+ *
+ * One folder has a few ordered slots, so a second terminal in the same folder
+ * gets its own host instead of sharing the first one's view. Slot 0 keeps the
+ * original hash input, so hosts, locks and markers from earlier builds stay
+ * valid.
  */
-export function workspaceSessionFor(cwd: string): { session: string; cwd: string } {
+export const WORKSPACE_HOST_SLOTS = 4;
+
+export function workspaceSessionFor(cwd: string, slot = 0): { session: string; cwd: string } {
 	const canonical = realpathSync(cwd);
 	const state = realpathSync(clioStateDir());
 	return {
 		session: `${WORKSPACE_SESSION_PREFIX}${createHash("sha256")
-			.update(JSON.stringify([state, canonical]))
+			.update(JSON.stringify(slot === 0 ? [state, canonical] : [state, canonical, slot]))
 			.digest("hex")
 			.slice(0, 12)}`,
 		cwd: canonical,

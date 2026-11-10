@@ -63,6 +63,7 @@ import {
 	exitMarkerStem,
 	markWorkspaceExit,
 	readWorkspaceExitResult,
+	WORKSPACE_HOST_SLOTS,
 	WORKSPACE_SESSION_PREFIX,
 	workspaceSessionFor,
 } from "./exit-marker.js";
@@ -106,6 +107,8 @@ export interface WorkspaceLaunchOptions {
 	clioEnv?: Readonly<Record<string, string>>;
 	env?: NodeJS.ProcessEnv;
 	log?: MuxLog;
+	/** One line for the operator's terminal, written before herdr takes it over. */
+	notice?: (line: string) => void;
 }
 
 export type WorkspaceLaunchResult =
@@ -419,7 +422,8 @@ type Opened =
 			startedServer: boolean;
 			workspaceNonce: string;
 	  }
-	| { refused: string };
+	/** `heldBy` is set only when another live terminal shows this host's Clio, so the next slot may be tried. */
+	| { refused: string; heldBy?: number };
 
 /** Pane ids restart with the server; the nonce identifies the workspace this launcher actually opened. */
 async function stillOwnsWorkspace(client: MuxClient, opened: Exclude<Opened, { refused: string }>): Promise<boolean> {
@@ -481,6 +485,7 @@ async function openWorkspace(host: Host): Promise<Opened> {
 				await client.close();
 				return {
 					refused: `this folder's pane host is in use by another terminal, pid ${holder}, so this terminal starts its own session`,
+					heldBy: holder,
 				};
 			}
 			const workspaceNonce = await tagWorkspace(client, running);
@@ -527,33 +532,42 @@ async function openWorkspace(host: Host): Promise<Opened> {
 
 export async function launchWorkspace(options: WorkspaceLaunchOptions): Promise<WorkspaceLaunchResult> {
 	const platform = options.platform ?? muxHostPlatform();
-	let identity: { session: string; cwd: string };
-	let lockTarget: string;
-	try {
-		identity = workspaceSessionFor(options.cwd);
-		lockTarget = workspaceLockTarget(identity.session);
-	} catch (error) {
-		return { status: "fallback", reason: `could not prepare the workspace: ${messageOf(error)}` };
-	}
+	let refusal = "could not prepare the workspace";
+	// Take the first slot no live terminal shows; each slot's lock is taken alone, never nested.
+	for (let slot = 0; slot < WORKSPACE_HOST_SLOTS; slot += 1) {
+		let identity: { session: string; cwd: string };
+		let lockTarget: string;
+		try {
+			identity = workspaceSessionFor(options.cwd, slot);
+			lockTarget = workspaceLockTarget(identity.session);
+		} catch (error) {
+			return { status: "fallback", reason: `could not prepare the workspace: ${messageOf(error)}` };
+		}
 
-	let host: Host | null = null;
-	let opened: Opened;
-	try {
-		opened = await withStateFileLock(lockTarget, async (): Promise<Opened> => {
-			try {
-				host = resolveHost(options, identity, platform);
-			} catch (error) {
-				return { refused: `could not prepare the workspace: ${messageOf(error)}` };
-			}
-			return openWorkspace(host);
-		});
-	} catch (error) {
-		return { status: "fallback", reason: `could not take the workspace session lock: ${messageOf(error)}` };
+		let host: Host | null = null;
+		let opened: Opened;
+		try {
+			opened = await withStateFileLock(lockTarget, async (): Promise<Opened> => {
+				try {
+					host = resolveHost(options, identity, platform);
+				} catch (error) {
+					return { refused: `could not prepare the workspace: ${messageOf(error)}` };
+				}
+				return openWorkspace(host);
+			});
+		} catch (error) {
+			return { status: "fallback", reason: `could not take the workspace session lock: ${messageOf(error)}` };
+		}
+		if ("refused" in opened) {
+			if (opened.heldBy === undefined) return { status: "fallback", reason: opened.refused };
+			refusal = opened.refused;
+			continue;
+		}
+		if (host === null) return { status: "fallback", reason: refusal };
+		if (slot > 0) options.notice?.("this folder already has a Clio in another terminal; this one has its own panes");
+		return attachWorkspace(host, opened, lockTarget);
 	}
-	if ("refused" in opened || host === null) {
-		return { status: "fallback", reason: "refused" in opened ? opened.refused : "could not prepare the workspace" };
-	}
-	return attachWorkspace(host, opened, lockTarget);
+	return { status: "fallback", reason: refusal };
 }
 
 /** Hand the terminal to herdr's client, wait for the operator to leave, and clean up. */
