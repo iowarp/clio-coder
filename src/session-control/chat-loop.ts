@@ -3795,7 +3795,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const machineCancellation = pendingMachineCancellation;
 			pendingMachineCancellation = null;
 			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;
-			guardStoppedOwner = options?.source === "loop_guard" ? submitOwner : null;
+			// An operator who already stopped this turn keeps it stopped: a guard
+			// stop racing in after the Esc must not read as the guard's, or yolo
+			// would continue the turn (R2-safety-secrets-20).
+			const wasCanceledByOperator = state.activeInterruptReason !== null && state.activeInterruptByOperator;
+			guardStoppedOwner = options?.source === "loop_guard" && !wasCanceledByOperator ? submitOwner : null;
 			submitOwner?.abort();
 			turnRuntime.cancelRunWatchdog();
 			continuity.cancel();
@@ -3803,7 +3807,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			pendingVisionSidecar?.abort();
 			pendingCompactionPaint?.abort();
 			const wasStreaming = state.streaming;
-			const wasCanceledByOperator = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
 			// Settle the queue before the abort settles the in-flight prompt: a
@@ -3818,7 +3821,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				settle: options?.source === "loop_guard" || options?.source === "autonomy",
 			});
 			const requestedReason = options?.reason?.trim();
-			if (wasStreaming) {
+			if (wasStreaming && !wasCanceledByOperator) {
 				// Keep immediate feedback in the footer. A transcript notice here
 				// would split the streamed entry before message_end can finalize it.
 				// The reason is carried by the provider's aborted assistant, or by

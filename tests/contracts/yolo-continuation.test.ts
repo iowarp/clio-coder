@@ -16,7 +16,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const RATE_LIMITED = "429 rate_limit_error: This request would exceed your rate limit";
 
 /** What one model call does: cross the budget, lock the tools, both, finish, or throw. */
-type Step = "budget" | "hard" | "lockout" | "both" | "done" | { throws: string };
+type Step = "budget" | "hard" | "esc-then-hard" | "lockout" | "both" | "done" | { throws: string };
 
 interface Harness {
 	loop: ReturnType<typeof createChatLoop>;
@@ -100,13 +100,16 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 						if (typeof current === "object") throw new Error(current.throws);
 						await listener({ type: "agent_start" });
 						await listener({ type: "turn_start" });
-						if (current === "budget" || current === "both" || current === "hard") {
+						// The operator's Esc lands first; the guard's hard stop races it in the same turn.
+						if (current === "esc-then-hard") loop.cancel();
+						if (current === "budget" || current === "both" || current === "hard" || current === "esc-then-hard") {
+							const hard = current === "hard" || current === "esc-then-hard";
 							context.bus.emit("safety.tool_budget_exceeded", {
 								tool: "bash",
-								callsThisTurn: current === "hard" ? 75 : 60,
+								callsThisTurn: hard ? 75 : 60,
 								softBudget: 60,
 								hardCeiling: 75,
-								interrupted: current === "hard",
+								interrupted: hard,
 								at: Date.now(),
 							});
 						}
@@ -161,6 +164,18 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			const continuation = run.prompts[1] ?? "";
 			ok(continuation.includes("The previous turn stopped: it reached the per-turn tool budget"), continuation);
 			ok(!continuation.includes("This is continuation"), continuation);
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("never continues a turn the operator stopped before the hard ceiling did", async () => {
+		const run = await harness(["esc-then-hard", "done"]);
+		try {
+			await run.loop.submit("poll CI and the cluster until both are done");
+			await run.loop.whenSettled();
+			strictEqual(run.prompts.length, 1);
+			deepStrictEqual(run.continued, []);
 		} finally {
 			await run.close();
 		}
