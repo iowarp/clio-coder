@@ -531,7 +531,7 @@ export interface FleetSettings extends FleetRouteSettings {
 	adaptiveRouting: AdaptiveRoutingSettings;
 	permissions: FleetPermissionsSettings;
 	concurrency: "auto" | number;
-	/** Hold the rest of a parallel batch's native workers that share a prompt prefix until the first one streams (C-04). */
+	/** Opt-in: hold the rest of a parallel batch's native workers that share a prompt prefix until the first one streams (C-04). */
 	staggerSharedPrefix: boolean;
 	worktrees: FleetWorktreesSettings;
 	retry: FleetRetrySettings;
@@ -825,7 +825,7 @@ export const DEFAULT_SETTINGS = {
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
 		concurrency: "auto" as "auto" | number,
-		staggerSharedPrefix: true,
+		staggerSharedPrefix: false,
 		worktrees: { root: "disk" },
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
@@ -1027,8 +1027,8 @@ fleet:
       timeoutMs: 120000
       fallback: deny
   concurrency: auto
-  # Workers of one batch that share a prompt prefix start after the first one streams (at most 15 s).
-  staggerSharedPrefix: true
+  # Off by default; holds the batch up to 15 s while the leader starts, so workers that share a prompt prefix reuse its cache.
+  staggerSharedPrefix: false
   worktrees:
     root: disk
   retry:

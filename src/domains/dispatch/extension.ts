@@ -10416,9 +10416,9 @@ export function createDispatchBundle(
 			reqs.length > 1 && reqs.some((req) => (req.resolvedVerification?.length ?? 0) > 0)
 				? createBatchVerificationGate()
 				: undefined;
-		// C-04: workers that share a prompt prefix start after the first one streams, so they read its cache entry.
+		// C-04 (opt-in): workers that share a prompt prefix start after the first one streams, so they read its cache entry.
 		const prefixGroups =
-			reqs.length > 1 && getEffectiveSettings()?.fleet.staggerSharedPrefix !== false
+			reqs.length > 1 && getEffectiveSettings()?.fleet.staggerSharedPrefix === true
 				? new Map<string, DispatchPrefixGroup>()
 				: undefined;
 		const staggered = prefixGroups === undefined ? preparation : { ...preparation, prefixGroups };
