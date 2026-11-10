@@ -25,11 +25,21 @@ const SECRET_PREFIXES = ["AWS_", "PYPI_", "TWINE_", "VAULT_"] as const;
 /** Variables inside a secret family that only select a region or a profile. */
 const KEPT_NAMES = new Set(["AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"]);
 
+/**
+ * Credentials a client reads from its environment by a name no fragment above marks: a scheduler or CI JWT (`SLURM_JWT`,
+ * `CI_JOB_JWT`) and header sets (`ANTHROPIC_CUSTOM_HEADERS`, `OTEL_EXPORTER_OTLP_HEADERS`). Only the sandbox drops them:
+ * scheduler clients run outside it and a Slurm site using JWT auth needs `SLURM_JWT` there.
+ */
+const SANDBOX_SECRET_NAME_FRAGMENT = /JWT|HEADERS/u;
+
 /** Credential locations or channels whose names match no fragment. */
 const SECRET_NAMES = new Set(["KUBECONFIG", "NETRC"]);
 
 /** `scheme://user:password@`, the user possibly empty (`redis://:pw@host`). */
 const URL_CREDENTIALS = /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]*:[^\s/@]+@/iu;
+/** `scheme://TOKEN@`, a token as the whole username: a git host token, or a long opaque run holding a digit. */
+const URL_TOKEN_USER =
+	/[a-z][a-z0-9+.-]*:\/\/(?:(?:gh[pousr]_|github_pat_|glpat-)[a-z0-9_-]{8,}|(?=[a-z0-9_-]*\d)[a-z0-9_-]{20,})@/iu;
 /** A connection string carrying a password or a storage key (`Server=...;Password=...`). */
 const CONNECTION_STRING_SECRET = /(?:^|;)\s*(?:password|pwd|accountkey|sharedaccesskey)\s*=/iu;
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/u;
@@ -56,7 +66,17 @@ function isSandboxSecretEnvName(name: string): boolean {
 
 /** Pure: whether a value carries a credential whatever its variable is named. */
 function isSandboxSecretEnvValue(value: string): boolean {
-	return URL_CREDENTIALS.test(value) || CONNECTION_STRING_SECRET.test(value) || PRIVATE_KEY_BLOCK.test(value);
+	return (
+		URL_CREDENTIALS.test(value) ||
+		URL_TOKEN_USER.test(value) ||
+		CONNECTION_STRING_SECRET.test(value) ||
+		PRIVATE_KEY_BLOCK.test(value)
+	);
+}
+
+/** Pure: whether the sandbox scrub drops a variable by its name, which reaches past {@link isSandboxSecretEnvName}. */
+function isSandboxScrubbedEnvName(name: string): boolean {
+	return isSandboxSecretEnvName(name) || SANDBOX_SECRET_NAME_FRAGMENT.test(name.toUpperCase());
 }
 
 /**
@@ -76,7 +96,7 @@ export function scrubSandboxEnv(
 	const removed: string[] = [];
 	for (const [key, value] of Object.entries(env)) {
 		if (value === undefined) continue;
-		if (!pass.has(key) && (named.has(key) || isSandboxSecretEnvName(key) || isSandboxSecretEnvValue(value))) {
+		if (!pass.has(key) && (named.has(key) || isSandboxScrubbedEnvName(key) || isSandboxSecretEnvValue(value))) {
 			removed.push(key);
 			continue;
 		}
@@ -125,7 +145,7 @@ export function knownSecretValues(env: NodeJS.ProcessEnv, secretNames: Iterable<
 		const value = raw?.trim();
 		if (!value) continue;
 		if (isSandboxSecretEnvValue(value)) values.add(value);
-		else if ((named.has(key) || isSandboxSecretEnvName(key)) && !LOCATOR_VALUE.test(value)) values.add(value);
+		else if ((named.has(key) || isSandboxScrubbedEnvName(key)) && !LOCATOR_VALUE.test(value)) values.add(value);
 	}
 	return [...values];
 }

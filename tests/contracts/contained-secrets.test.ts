@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { runBashCommand } from "../../src/core/bash-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
-import { scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
+import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -34,6 +34,7 @@ test("the sandbox scrub keeps ordinary variables and drops credential names, cre
 		GIT_AUTHOR_NAME: "A Person",
 		AWS_REGION: "us-east-1",
 		TOKENIZERS_PARALLELISM: "false",
+		UPSTREAM: "ssh://git@github.com/o/r.git",
 	};
 	const dropped = {
 		GITHUB_TOKEN: "fake",
@@ -58,10 +59,17 @@ test("the sandbox scrub keeps ordinary variables and drops credential names, cre
 		http_proxy: "http://user:fakepass@proxy.example:3128",
 		SIGNING_MATERIAL: FAKE_PRIVATE_KEY,
 		LLM_GATEWAY: "fake",
+		SLURM_JWT: "fake",
+		CI_JOB_JWT: "fake",
+		ANTHROPIC_CUSTOM_HEADERS: "x-fake: fake",
+		OTEL_EXPORTER_OTLP_HEADERS: "authorization=fake",
+		MIRROR: `https://${["ghp", "FAKEfakeFAKEfake1234"].join("_")}@github.com/o/r.git`,
 	};
 	const { env, removed } = scrubSandboxEnv({ ...kept, ...dropped }, { passEnv: [], secretNames: ["LLM_GATEWAY"] });
 	deepStrictEqual(env, kept);
 	deepStrictEqual(removed.sort(), Object.keys(dropped).sort());
+	// A scheduler client runs outside the sandbox and keeps the JWT a Slurm site authenticates it with.
+	strictEqual(holdsNamedCredential("SLURM_JWT", "fake"), false);
 
 	// The operator's pass list keeps a name, from the unfiltered source when an earlier filter dropped it.
 	const passed = scrubSandboxEnv(
