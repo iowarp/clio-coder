@@ -343,7 +343,7 @@ it("offers permission-local stop, inspection and terms through the portable menu
 	f.terminal.input("xvt");
 	assert.equal(f.editor.getText(), "xvt", "unprefixed letters still edit the composer");
 });
-it("leader toggles its owner, survives delay/unknown suffix, and Ctrl+C cancels immediately", async () => {
+it("leader toggles its owner, survives delay/unknown suffix, and Ctrl+C closes only the menu", async () => {
 	const f = fixture();
 	f.editor.setText("unchanged");
 	f.terminal.input("\x07");
@@ -358,6 +358,8 @@ it("leader toggles its owner, survives delay/unknown suffix, and Ctrl+C cancels 
 	f.terminal.input("l");
 	assert.equal(f.state(), "closed");
 	f.terminal.input("\x07");
+	f.terminal.input("\x03");
+	assert.equal(f.counts.cancel, 0);
 	f.terminal.input("\x03");
 	assert.equal(f.counts.cancel, 1);
 });
@@ -580,6 +582,8 @@ it("docks the menu in the composer's slot at normal and small sizes, keeps the d
 		assert.match(text, /\[ctrl\+x\/Esc\] close/i);
 		assert.equal(f.editor.getText(), "draft stays visible");
 		f.terminal.input("\x03");
+		assert.equal(f.state(), "skills-hub");
+		f.terminal.input("\x03");
 		assert.equal(f.state(), "closed");
 		f.tui.renderNow();
 		assert.match(composerText(f.editor, columns), /draft stays visible/);
@@ -758,6 +762,8 @@ it("cancels a real Library child review before its parent, without writes or glo
 	assert.equal(f.counts.status, 0);
 	assert.equal(writes, 0);
 	assert.equal(f.editor.getText(), "draft");
+	f.terminal.input("\x03");
+	assert.equal(releases, 0, "the first Ctrl+C closes only the action menu");
 	f.terminal.input("\x03");
 	assert.equal(releases, 1);
 	assert.equal(f.state(), "skills-hub");

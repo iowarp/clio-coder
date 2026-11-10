@@ -6,7 +6,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
-import { dockBodyRows } from "./dock.js";
+import { dockGrowthRows } from "./dock.js";
 import type { LeaderKeyState, LeaderTarget } from "./leader-key.js";
 import {
 	buildResponsiveHint,
@@ -17,6 +17,11 @@ import {
 } from "./overlay-frame.js";
 import { clioTheme, GLYPH, padAnsi } from "./theme/index.js";
 
+/** Rows the menu shows: every entry when the dock can grow to hold them. */
+export function leaderMenuRows(tui: TUI, entries: number): number {
+	return Math.max(1, Math.min(entries, dockGrowthRows(tui) - 2));
+}
+
 /** Noncapturing presentation: controller retains the underlying cancellation owner. */
 export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: Keybinding) => string) {
 	let handle: OverlayHandle | null = null;
@@ -26,7 +31,7 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 		render(width) {
 			if (state.status === "idle") return [];
 			const selected = state.selected;
-			const count = Math.max(1, Math.min(10, dockBodyRows(tui) - 2));
+			const count = leaderMenuRows(tui, targets.length);
 			const [start, end] = centeredWindow(targets.length, selected, count);
 			const theme = clioTheme();
 			// The action, then its direct shortcut at the row's right edge. A row with no shortcut gives the
@@ -93,6 +98,7 @@ export function createLeaderMenu(tui: TUI, scope: () => string, keyLabel: (id: K
 				anchor: "top-center",
 				width: 88,
 				nonCapturing: true,
+				adaptiveHeight: true,
 				footerHint: buildResponsiveHint(
 					[
 						{ key: "↑↓", verb: "select", critical: true },

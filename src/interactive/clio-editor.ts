@@ -626,6 +626,8 @@ export class ClioEditor extends Editor {
 		const mode = composerMode(this.chrome, text);
 		const rail = this.railState(mode);
 		const steer = this.steerTarget(text);
+		// `!!` runs a shell line whose output stays out of the model's context, so the rail says so even when idle.
+		const keptShell = text.trimStart().startsWith("!!");
 		const draftLabel = steer
 			? theme.style(
 					steer.live && !steer.queued ? "draftState" : "warning",
@@ -640,9 +642,11 @@ export class ClioEditor extends Editor {
 				)
 			: mode === "STEER"
 				? theme.fg("draftState", mode)
-				: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
-					? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
-					: "";
+				: (mode === "FOLLOW-UP" || mode === "MESSAGE") && this.chrome.getDraftOperator?.(text) === "shell" && keptShell
+					? theme.fg("draftState", `SHELL ${GLYPH.dot} output kept from Clio`)
+					: mode === "FOLLOW-UP" && this.chrome.getDraftOperator?.(text)
+						? theme.fg("draftState", this.chrome.getDraftOperator(text) === "shell" ? "SHELL" : "COMMAND")
+						: "";
 		const join = (parts: readonly string[]): string =>
 			parts.filter(Boolean).join(theme.fg("separator", ` ${GLYPH.dot} `));
 		const note = this.draftNote(width);

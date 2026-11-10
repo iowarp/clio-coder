@@ -46,6 +46,7 @@ function composerRows(menuKey: string | null): QuickHelpRow[] {
 	return [
 		{ key: "/", verb: "commands" },
 		{ key: "!", verb: "run a shell command" },
+		{ key: "!!", verb: "shell, output kept from Clio" },
 		{ key: "@", verb: "mention a file" },
 		{ key: "←", verb: "workers" },
 		{ key: GLYPH.down, verb: "tasks" },

@@ -127,7 +127,7 @@ export interface ApplicationControllerDeps {
 	 * Ctrl+C armed the double-tap and is waiting for the second press, or the
 	 * window lapsed and it no longer is. Every other Ctrl+C outcome changes
 	 * something the operator can see; arming changed nothing at all, so the
-	 * 500ms window that quits was undiscoverable and a first press was
+	 * APPLICATION_DOUBLE_TAP_MS (3 s) window that quits was undiscoverable and a first press was
 	 * indistinguishable from a key the application never received (issue #108).
 	 * The footer's leader indicator exists for exactly this reason and this
 	 * rides beside it. While armed it fires again each second with the time left,
@@ -332,7 +332,13 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	};
 
 	const handleCtrlC = (): void => {
-		deps.leaderKeys.reset();
+		// An open action menu is what this press closes; a running turn keeps running.
+		if (deps.leaderKeys.isPending()) {
+			deps.leaderKeys.reset();
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
+			return;
+		}
 		if (deps.isSearchFocused?.()) {
 			deps.closeSearch?.();
 			lastCtrlCAt = 0;

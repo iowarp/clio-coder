@@ -18,7 +18,7 @@ import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { scrollTranscriptPage } from "./layout.js";
 import type { LeaderTarget } from "./leader-key.js";
 import { createLeaderKeyController } from "./leader-key.js";
-import { createLeaderMenu } from "./leader-menu.js";
+import { createLeaderMenu, leaderMenuRows } from "./leader-menu.js";
 import type { OverlayState } from "./overlay-lifecycle.js";
 import { routeOverlayKey } from "./overlay-lifecycle.js";
 import { permissionEscapeLayers } from "./permission-hint.js";
@@ -242,11 +242,16 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				model: "clio-coder.model.select",
 				tree: "clio-coder.session.tree",
 				"dispatch-board": "clio-coder.dispatchBoard.toggle",
+				tasks: "clio-coder.tasks.open",
+				"queue-navigator": "clio-coder.queue.open",
 			}) as Partial<Record<OverlayState, ClioKeybinding>>
 		)[deps.overlay.getState()];
 	const canToggleOwner = () => deps.overlay.getState() === "dispatch-board" || owner().keyboardScope === "browse";
 	const targets = (): ReadonlyArray<LeaderTarget> => {
-		const all = deps.keybindings.leaderTargets();
+		// Viewport actions work only in the fullscreen layout, so the default layout does not list them.
+		const all = deps.keybindings
+			.leaderTargets()
+			.filter(({ id }) => deps.tui instanceof TuiAltScreen || !id?.startsWith("tui.altScreen."));
 		const filtered = search()
 			? all.filter(({ id }) => id === "tui.editor.undo" || id === "tui.altScreen.search")
 			: deps.overlay.getState() === "closed"
@@ -355,6 +360,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		dispatchAction: dispatchLeader,
 		...(menu ? { onMenuChange: menu } : {}),
 		isRelease: isKeyRelease,
+		...(deps.tui ? { pageSize: () => (deps.tui ? leaderMenuRows(deps.tui, targets().length) : 10) } : {}),
 		onStateChange: (pending) => {
 			deps.onLeaderStateChange?.(pending);
 			deps.refreshFooter();
@@ -391,7 +397,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 				return true;
 			}
 			if (matchesKey(data, "left")) {
-				deps.overlay.toggleDispatchBoardOverlay();
+				(deps.actions.toggleWorkersDock ?? deps.overlay.toggleDispatchBoardOverlay)();
 				return true;
 			}
 			if (matchesKey(data, "down")) {

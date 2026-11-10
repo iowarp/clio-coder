@@ -14,7 +14,7 @@ import { TUI_KEYBINDINGS } from "../../engine/tui.js";
  * Clio-specific keybinding ids. Each entry represents a routable action in the
  * application controller's `CLOSED_ACTION_ORDER` or `GLOBAL_ACTION_ORDER`.
  * Ctrl+C is intentionally absent because its semantics (cancel stream, close
- * overlay, clear editor, protect the queue, double-tap exit) live in the
+ * overlay, protect the queue, double-tap exit) live in the
  * controller's `resolveApplicationCtrlCAction` and are not a simple keybinding.
  */
 export interface ClioAppKeybindings {
@@ -53,8 +53,8 @@ export type ClioKeybinding = keyof ClioAppKeybindings;
  *   - Ctrl+G then the same letter runs it in any terminal, including ones that do not deliver Alt.
  *   - `?` on an empty composer shows the card; `/help` lists everything.
  *
- * So an action's `leader` letter IS its Alt letter, and an action with no direct key still has its
- * letter in the menu. Shift+Tab (thinking) is the one non-Alt direct key, kept from pi. Letters are
+ * The menu letter equals the Alt letter for actions that have an Alt key; other actions are reached
+ * through the menu only. Shift+Tab (thinking) is the one non-Alt direct key, kept from pi. Letters are
  * fixed: rebinding a direct key never moves its menu letter (keyboard-model contract test). `b` and
  * `j` stay free for an active extension workspace (surfaces/registry.ts).
  */

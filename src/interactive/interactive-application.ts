@@ -633,7 +633,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 */
 	let leaderArmed = false;
 	/**
-	 * A Ctrl+C armed the double tap and its 500ms window is still open. Owned
+	 * A Ctrl+C armed the double tap and its APPLICATION_DOUBLE_TAP_MS (3 s) window is still open. Owned
 	 * here for the same reason as the leader flag above.
 	 */
 	/** False, or the armed line the footer shows while a second Ctrl+C would quit. */

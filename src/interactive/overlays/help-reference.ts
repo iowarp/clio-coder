@@ -234,7 +234,22 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Keyboard model",
-				"Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: Alt+M model, Alt+L library, Alt+O output, Alt+U dashboard, Alt+W workers, Alt+E files, Alt+A music, Alt+S send now, Alt+Q queue, Alt+G external editor; Shift+Tab cycles thinking effort.",
+				`Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: ${(
+					[
+						["clio-coder.model.select", "model"],
+						["clio-coder.library.toggle", "library"],
+						["clio-coder.output.cycle", "output"],
+						["clio-coder.status.toggle", "dashboard"],
+						["clio-coder.dispatchBoard.toggle", "workers"],
+						["clio-coder.files.toggle", "files"],
+						["clio-coder.music.toggle", "music"],
+						["clio-coder.message.interrupt", "send now"],
+						["clio-coder.queue.open", "queue"],
+						["clio-coder.editor.external", "external editor"],
+					] as const
+				)
+					.map(([id, name]) => `${manager.actionLabel(id)} ${name}`)
+					.join(", ")}; ${manager.actionLabel("clio-coder.thinking.cycle")} cycles thinking effort.`,
 				`${manager.actionLabel("clio-coder.leader")} opens the action menu, and the same letter runs the same action there, so it works in terminals that never deliver Alt. A few actions live only in the menu: d background worker, x dismiss notice, y autonomy. Shift+Tab is t there. Arrows and Enter reach every entry.`,
 				"On an empty composer: ? shows the key card, / commands, ! shell, @ a file, left arrow the workers, down arrow the tasks. Esc stops a run; Ctrl+C twice or Ctrl+D exits.",
 				"Rebinding a direct key never moves its menu letter. An explicit [] disables both. This help lists your effective keys; settings are never rewritten.",

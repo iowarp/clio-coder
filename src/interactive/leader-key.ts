@@ -14,6 +14,8 @@ export interface LeaderKeyRouteDeps {
 	leaderTargets: ReadonlyArray<LeaderTarget>;
 	dispatchAction(id: Keybinding): boolean;
 	isRelease?: (data: string) => boolean;
+	/** Rows the menu shows, so PgUp and PgDn move by what is on screen. */
+	pageSize?: number;
 }
 export interface LeaderKeyRouteResult {
 	state: LeaderKeyState;
@@ -22,7 +24,7 @@ export interface LeaderKeyRouteResult {
 
 export function routeLeaderKey(data: string, state: LeaderKeyState, deps: LeaderKeyRouteDeps): LeaderKeyRouteResult {
 	if (isKeyRelease(data)) return { state, consumed: state.status === "pending" };
-	if (matchesKey(data, "ctrl+c")) return { state: IDLE_LEADER_STATE, consumed: false };
+	if (matchesKey(data, "ctrl+c")) return { state: IDLE_LEADER_STATE, consumed: state.status === "pending" };
 	if (state.status === "idle") {
 		return deps.matchesLeader(data) && !isKeyRepeat(data)
 			? { state: { status: "pending", selected: 0 }, consumed: true }
@@ -37,6 +39,20 @@ export function routeLeaderKey(data: string, state: LeaderKeyState, deps: Leader
 			state: { status: "pending", selected: count ? (state.selected + delta + count) % count : 0 },
 			consumed: true,
 		};
+	}
+	// Home and End run the fullscreen top and bottom entries when those are listed; otherwise they select an end.
+	const paging = (["pageUp", "pageDown", "home", "end"] as const).find(
+		(name) => matchesKey(data, name) && !deps.leaderTargets.some((entry) => entry.key === name),
+	);
+	if (paging && count > 0) {
+		const page = Math.max(1, deps.pageSize ?? 10);
+		const selected =
+			paging === "home"
+				? 0
+				: paging === "end"
+					? count - 1
+					: Math.max(0, Math.min(count - 1, state.selected + (paging === "pageUp" ? -page : page)));
+		return { state: { status: "pending", selected }, consumed: true };
 	}
 	const key = data.includes("\x1b[200~")
 		? null
@@ -62,6 +78,7 @@ export interface LeaderKeyControllerDeps {
 	leaderTargets(): ReadonlyArray<LeaderTarget>;
 	dispatchAction(id: Keybinding): boolean;
 	isRelease: (data: string) => boolean;
+	pageSize?: () => number;
 	onStateChange?: (pending: boolean) => void;
 	onMenuChange?: (state: LeaderKeyState, targets: ReadonlyArray<LeaderTarget>) => void;
 }
@@ -82,7 +99,12 @@ export function createLeaderKeyController(deps: LeaderKeyControllerDeps): Leader
 	return {
 		isPending: () => state.status === "pending",
 		route(data) {
-			const result = routeLeaderKey(data, state, { ...deps, leaderTargets: deps.leaderTargets() });
+			const { pageSize, ...rest } = deps;
+			const result = routeLeaderKey(data, state, {
+				...rest,
+				leaderTargets: deps.leaderTargets(),
+				...(pageSize ? { pageSize: pageSize() } : {}),
+			});
 			if (result.state !== state) setState(result.state);
 			return result.consumed;
 		},

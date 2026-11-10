@@ -76,7 +76,7 @@ export interface SessionFacts {
 	 */
 	leaderArmed?: boolean;
 	/**
-	 * A Ctrl+C landed on an idle empty prompt and the 500ms window that quits is
+	 * A Ctrl+C landed on an idle empty prompt and the APPLICATION_DOUBLE_TAP_MS (3 s) window that quits is
 	 * open. Shown for the same reason as the leader above: the arming press left
 	 * the frame identical to the idle frame, so the operator had no way to learn
 	 * that a second press quits, and no way to tell the first press registered.
