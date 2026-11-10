@@ -684,10 +684,22 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				...(deps.takeReportOffer ? { takeOffer: deps.takeReportOffer } : {}),
 			}),
 		);
-		reportHost.then(use, (error: unknown) => {
-			reportHost = null;
-			notify("error", `/report could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
-		});
+		const report = (error: unknown, what: string): void =>
+			notify("error", `/report ${what}: ${error instanceof Error ? error.message : String(error)}`);
+		reportHost.then(
+			(host) => {
+				// A damaged or newer outbox throws from these synchronous reads; it must not end the session.
+				try {
+					use(host);
+				} catch (error) {
+					report(error, "failed");
+				}
+			},
+			(error: unknown) => {
+				reportHost = null;
+				report(error, "could not be loaded");
+			},
+		);
 	};
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 	const openQueueNavigatorState = overlayGeneralOpeners.openQueueNavigator;
