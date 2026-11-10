@@ -12,7 +12,7 @@ clio-coder library install plugin:hpc --project
 ```
 
 The pack requires the `slurm-jobs` skill package, which submits through the
-clio-kit Slurm MCP server. Run `/library reload` in a running session after
+clio-kit Slurm MCP server. Run `/reload library` in a running session after
 installing.
 
 | Skill | What it does | Drives |

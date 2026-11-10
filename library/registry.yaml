@@ -413,9 +413,9 @@ entries:
       Darshan I/O analysis, and ChronoLog run records. The skills drive the
       cluster's own command-line tools; the clio-kit Slurm server needs one
       online launch to build its environment before it runs offline."
-    version: 0.2.0
+    version: 0.2.1
     sourceUrl: plugins/hpc
-    sha256: be6eb6cdcc77aea183d47be5f2a0e1886b32db8df4f3eafca4679bf4cb52cbac
+    sha256: 903e17180272e6e9c116c957be2cb6cc46dd971787f6d785f37f6f78d2521f78
     requires:
       - skill:slurm-jobs
     provides:
@@ -541,9 +541,9 @@ entries:
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
-    version: 0.2.1
+    version: 0.2.2
     sourceUrl: plugins/materio
-    sha256: 57a38ba5a0061445f9e75b4cd622bfe9a066eeebd509f78f1b55177076238a20
+    sha256: 0487bd8d3a5a6d2cc53039e58d1205736d7f5030ecbf5357a91b3cd7ef705b4c
     provides:
       - kind: agent
         name: materio-lab-definer

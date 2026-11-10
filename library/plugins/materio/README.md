@@ -36,7 +36,7 @@ commands available and turns off every prompt takeover.
 ## Clio workflow
 
 Install the plugin with `clio-coder library install plugin:materio --project`
-from the Library, then use `/library reload` or restart the session. To add the
+from the Library, then use `/reload library` or restart the session. To add the
 lab bench, separately install `extension:materio` and review its permissions. An
 installed copy is a pinned tree; editing this source does not update that copy.
 
