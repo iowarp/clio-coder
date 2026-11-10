@@ -5,7 +5,7 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { runUpgradeCommand } from "../../src/cli/upgrade.js";
-import { initializeClioHome } from "../../src/core/init.js";
+import { detectNewerHome, initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { processBirthToken } from "../../src/core/process-identity.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
@@ -324,6 +324,15 @@ test("a fresh home records every registered migration and doctor reports none pe
 	assert.equal(row?.ok, true);
 	assert.equal(row?.level, undefined);
 	assert.equal(row?.detail, `${registered.length} registered, all recorded`);
+});
+
+test("a retired migration id in the manifest is not evidence of a newer Clio", async (t) => {
+	const home = await isolateClioEnv("clio-retired-migrations-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const applied = [...listMigrations().map((migration) => migration.id), "2026-09-01-clio-coder-naming"];
+	writeFileSync(join(home.dir, "config", "migrations.json"), `${JSON.stringify({ applied })}\n`);
+	assert.equal(detectNewerHome(), null);
 });
 
 test("post-install integrity rejects malformed settings with useful details", (t) => {

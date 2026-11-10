@@ -19,6 +19,19 @@ export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-11-07-remove-copilot-consent",
 ]);
 
+/**
+ * Ids an earlier release registered and a later one removed. Manifests keep
+ * them forever, so they are known ids, not evidence of a newer Clio.
+ */
+export const RETIRED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
+	"2026-04-17-initial",
+	"2026-06-11-compaction-single-threshold",
+	"2026-08-18-lmstudio-runtime-id",
+	"2026-09-01-clio-coder-naming",
+	"2026-09-01-extension-install-digests",
+	"2026-09-18-ollama-runtime-id",
+]);
+
 const MIGRATION_MANIFEST_FILE = "migrations.json";
 
 /**

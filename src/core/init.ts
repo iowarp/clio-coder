@@ -10,6 +10,7 @@ import {
 	legacyMigrationManifestPath,
 	migrationManifestPath,
 	REGISTERED_MIGRATION_IDS,
+	RETIRED_MIGRATION_IDS,
 } from "../domains/lifecycle/migrations/registry-ids.js";
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
@@ -290,7 +291,7 @@ function newerHomeOf(metadata: InstallMetadata, runningVersion: string, stateDir
 }
 
 function unknownAppliedMigrations(stateDir: string): string[] {
-	const registered = new Set<string>(REGISTERED_MIGRATION_IDS);
+	const registered = new Set<string>([...REGISTERED_MIGRATION_IDS, ...RETIRED_MIGRATION_IDS]);
 	for (const path of [migrationManifestPath(), legacyMigrationManifestPath(stateDir)]) {
 		if (!existsSync(path)) continue;
 		try {
