@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"packages": {
 		"@earendil-works/pi-agent-core": {
-			"version": "1.5.0",
+			"version": "1.5.2",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -56,7 +56,7 @@
 			}
 		},
 		"@earendil-works/pi-ai": {
-			"version": "1.5.0",
+			"version": "1.5.2",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -93,7 +93,14 @@
 						"BedrockCompat": "dc86c73f46ee4b19f132406c31da73249d0920a8d284dcb8f826ea2cd231e086",
 						"BedrockOptions": "2b8a52f25dcadb9c6e61713c10104f819c38befec6c91751fb1e45ae14fb396f",
 						"BedrockThinkingDisplay": "f601a34a697f49e809cc2fc49ff9b862eaf709839c3d95e7231ed9ac0c90677a",
+						"CACHE_WARMING_IDLE_CONTINUATION_PROBABILITY": "35a9ae34d32e005fd4377e2b2a6f110282f11015d5839f7ec0587e7f52d5a4e2",
+						"CACHE_WARMING_MAX_AGE_MS": "d0540ea6b408b8d82b2b9c0f8a1ba9cb1369c80e503cdb27d5f0c101947cf96f",
+						"CACHE_WARMING_MAX_IDLE_AGE_MS": "20307546df826d05181e844642fa97ac497fc4ad2ccca6125985d3fbfa0cfd74",
+						"CACHE_WARMING_MINIMUM_EXPECTED_SAVINGS": "a6f2318a0e1991d7de79f5b14b803ffb162ce06d9c2e3f3a08098b79a414af2b",
 						"CacheRetention": "10c887b8a53127e653b7af6b92d9337b13736275119f03c24bb9e0b926e262bc",
+						"CacheWarmingAction": "083a64dfced97c3dcff0534be2f55620658d855513dccef2ac7aad9ae99f35ee",
+						"CacheWarmingDecision": "284c40be6de65f04e6532747c7309ea266bd8c10e36d5ede0dfc2a337a09f397",
+						"CacheWarmingPhase": "0b759583a84a84df172b2e45f06e7f0b9ee2039db936e787bf02f17d50e861ca",
 						"calculateCost": "9405384a57949f2dc82a02b4a5442b0e63586f297a17d060792ebf8f7167dc09",
 						"ChatTemplateKwargValue": "65e99f98289fbf00bd4851252153489dc309ba236e0d7eb68004e1657f245f59",
 						"clampThinkingLevel": "d372431902afa54b8578e8d58dbd5815ef55ea1db87877b41c8b07682062f949",
@@ -139,6 +146,7 @@
 						"DeferredHandle": "b32ea987029f8406328cb03215ca6970ab84dd359af82c211cdd18b4a665ac67",
 						"DiagnosticErrorInfo": "e2395a705327f47cd8fd9766540cac90cd04bc16d94c14fa796d9990a51115e1",
 						"envApiKeyAuth": "5c3aa89af9e3379d96fb6fd5ad54148054c71fe695d6557e8d25508320c457ea",
+						"evaluateCacheWarming": "135ee50949bf23b2189aab3195b5488059a4f938f8ac058fdac747afc0dab956",
 						"EventStream": "533d3ef1046f5b75bface39e42420dbc6e7fc77e9c8e3833004c88c0d4314ec5",
 						"extractDiagnosticError": "4bae550d4bf55f3fb2f0276de1272a404f6f634d925e9ba631a405fe1259a265",
 						"fauxAssistantMessage": "b778e9f61407cfcb70a0b453bdea5a099b4b8b184c3108c0325c3cd5019abd4f",
@@ -157,6 +165,8 @@
 						"formatThrownValue": "f6830b7c7ce057aae1245a959b09bc791832184b1388e0a8670dacacf1c3ced4",
 						"formatUserAgent": "6714d19b43b66f989ba5a00044483e3b115f57497e83841e0f63d17c2cd24f05",
 						"getAttributionHeaders": "abf2aa5b90a70d77506523f14fe4089ffaafc5d11540727f52c3f589c773e7e4",
+						"getCacheWarmingDelayMs": "b60f16ee6a924ddaa64ad20231265b53d8d781df07ef40ca91ee2e514b2865a9",
+						"getCacheWarmingRequestOptions": "6cdc467eadf060c04685f4f68ea811279a9c6c1dd6cad7fd8ec9a34901a6560c",
 						"getClientVersion": "d543de0290a80c8548d7b1bdd92a9871c28c89352a306459d18b38bdc067501c",
 						"getCurrentSystemMessage": "4bf08d8e25ca8a920dda7c4243b4540c3a04aeb4e301dc55fc5ab5a7b0355b67",
 						"getCurrentSystemPrompt": "61e18fa7f0db962f266f0b03df0dbdd542ab6e0a0854928e0e5f114d2ea6cb91",
@@ -167,6 +177,7 @@
 						"getModelType": "7ffabb38ce78d51cebd84f69a599aa348c955c033fdbd07d20734bd98f134412",
 						"getOpenCodeSessionHeaders": "689dc05e283bd09cf2e3241ce3b9951aa678b09bf30f28f6dcbfe0b808d61d0a",
 						"getOverflowPatterns": "497b733fbf9776e325cb56d12cb9e537076de5e95d46545ef6d8ecb91bfe7daf",
+						"getPromptCacheTtlMs": "67f312f4a912897c7851d59a8097ad20b2c99a3b1fe6bfaadf8bcd223f736b95",
 						"getSupportedThinkingLevels": "9e3b52df94e6165a64a7d0045d3ee3921019ff4b298f2ca9ca7eba42174a9a22",
 						"getSystemMessageText": "b097ce704075b5fb454ced39d67bbc8a9884f8d7691201856ddf28c5d7f2da07",
 						"getToolStateChanges": "6d23ba834e3bbbf395532483d129beabb06ddbfb0b1c7cbb0c3186e8527b3b81",
@@ -189,6 +200,7 @@
 						"ImagesStopReason": "989baac49355fe57c009c53e2f47a91726ea93336868c2ede85479c7a8437e40",
 						"InMemoryCredentialStore": "58349d061f98c213f487949930f076314e1dc19d6732354cff8d4decc0730130",
 						"InMemoryModelsStore": "66de08a4c41639eca7a6309bf68dd4611dec9b6c4bbedda13629716bd1afe2eb",
+						"isCacheWarmingReplayable": "989a82a94daad264c34445ea46fc175da736e807daa8059207c30381844f0179",
 						"isContextOverflow": "a33a00f43e3f347e9878e158d038bd9855910067c78be6ebe78f02a7d003391f",
 						"isModelType": "508e9a673f3c3352423b613c3e400ff50b04fa8814a9202e588df64a2983a610",
 						"isRecoverableLength": "7c3164e506c6ed92efc6003541f1387c8e7d3f696a10c7aa7e7bafddefaee8a1",
@@ -201,11 +213,11 @@
 						"KnownApi": "ff1355bad6f962dc6428a68258e20069e89530f718d449bc44eae47645914c05",
 						"KnownClassifierApi": "392f280ede67cf620d5eb906f2d33f4cb26df53f7e46822523c61e8fed48429b",
 						"KnownImageApi": "e08fe93e3e8e303ac5ad15a5b2a70ca42b8ae5391665e9d15ac39505246bedac",
-						"KnownProvider": "5287c8bb4c4ca5d6b1b76079bf09b30ed375925fac537e930911f67e524a0700",
+						"KnownProvider": "2fb8ed6445545fde52493585ea188d949199d88c65d180200417ee7ef3f52e68",
 						"lazyApi": "fe2f2789f902e1916f66c9d5256ab7c1c091e960abab5d764fd58f348f743273",
 						"LazyApiCapabilities": "a8e18d5b9973ddacf0b5bc4460c824234893d108da9c4f074957f8074f5238d3",
 						"lazyOAuth": "f77062a2e38bfbdb11bf2838bbda7686aa6ce8b16e140b4aade7bd15c85f8d5c",
-						"lazyStream": "18f860d94ad39cc5158ca5682d95eceac06bf36a054c00a3164dd3410a9ebeb9",
+						"lazyStream": "4cc2c267b76c35e9006cae7c6a4ac8abc9d1ec3232c5512a434fbbc5a68d83be",
 						"LazyStreamObserver": "9cadc47434c7f165b38dbd8979e05173da76b8b8c975d58b0e780e9ac339e3f7",
 						"LoginOptions": "3e9787f59ff672dc85ef9fb5ae4b1ad0b34c689ca4dae32bfdc7731b2d04b40c",
 						"mergeClientIdentity": "d347d812d61f58aa36f1bd09e300682f9a6db777d2b6da6122eb454d349976ef",
@@ -265,12 +277,12 @@
 						"parseJsonWithRepair": "3859ef41e7d411212d89bafefb5ad040ae63cf24c5396538b1245eb298d202d4",
 						"parseStreamingJson": "5cd6b04d1f39ef3630dd666b2c72da49cb9e547a98e320249fdc3161563fb038",
 						"parseToolCallArguments": "b6add41c8d4c8aa8cdfb6550a3ff50e72b7e182822aa7f9d9292c8d91bcbd90b",
-						"PI_AI_VERSION": "55c125e41eac4252bde17e9799c444b8851381667366609f2eac337890fff7c4",
+						"PI_AI_VERSION": "c5e1e82b7b12e003e7d0d8df0c8c3e4bd019e7f330c7b5a1f93dfdb71e5282bc",
 						"PI_ATTRIBUTION": "97b684f2145f8abe3ca9c8776bd8d5c379ed91e7e1f2aa439c0b9187678c04ab",
 						"PiMessagesEvent": "7d20f13f4000438b681f14615bdf7923cbf73d101d77da4df129ddf35893d332",
 						"PiMessagesOptions": "a13078e7a6f4a4e804e950671ff8c393a1ec0cebea0ed575778a6e3087741ad4",
 						"PiMessagesRewriteImpact": "cb9a023a243623a013354e0409a61f64be950d09cd5a22f6fcdba7a0caafc50b",
-						"Provider": "0ad1bb204ccd06b025ac7605611220fbc06a45781338173b8b93b91b6d6bb03a",
+						"Provider": "394d4d579c319ef56b5f8dbf985a0ee9146f81ddfdfd42969bf63a70ab907af3",
 						"ProviderAuth": "af62d37d5e8323968192b109906d8cf0de8c86a6b9716ce86b33afbeb54393bb",
 						"ProviderAuthInteraction": "d5de54e831f0b2da4d32d7ab62639947edb5ea4ed9d51430c06cdf3e90783235",
 						"ProviderClassifier": "b8823729ca2a8aab50f77122960a5f79ff558249ee3f114d5917367a7533b562",
@@ -303,7 +315,7 @@
 						"StopReason": "0800bd6825524e418d0eadfe677b1cc7e4dca50e98752795cd9f3babdaa37a30",
 						"StreamFunction": "9123cbfbc733daa4e7af33656b57e74bd714e82bcace8f351db3b69b742c6585",
 						"StreamingJsonParser": "5dd8a0f9bf0820ec69ceb92b494ae11cdb8685a2092dbf595fd4ba5789ac3ffa",
-						"StreamOptions": "6a08bfc54d6d241724ecf12224f32d7b769c28b306ec91ddd1a1b3b43e6257b4",
+						"StreamOptions": "1f2e38d75055c6e8d5434ab38050e86cf092d503c8a24a7f3fbdf0561ba783c4",
 						"StringEnum": "0a95facb0382a8eee70e7ddc09283e4ebf43853ba01710bfcb723aae1fb758fb",
 						"SystemMessage": "71eef2d77a64dffb138cb3d90331856c7013600eddd4350495f2f327d0972965",
 						"SystemOneCompat": "6d05fd8261de4fa709b8c3c8ba4def5a82ec2b746bebf39f3edefef21082496b",
@@ -348,6 +360,7 @@
 					"declaration": "dist/api/bedrock-converse-stream.lazy.d.ts",
 					"exports": {
 						"bedrockConverseStreamApi": "d29e86f9b2c44c76dbee696a512f988aef3a756b84989b1832b6e46054ae6f10",
+						"setBedrockProviderLoader": "e839956593b4355420e9a40946709d9289b5e648c2148d4140c50ec420a7a5e6",
 						"setBedrockProviderModule": "19a1fc6a4fd994c43d1985356dbb7f289efb837177d3cb617f0a20afcea9d526"
 					}
 				},
@@ -436,7 +449,7 @@
 						"ModelsRequestTransforms": "d38841303cd1659cf1418bb678ad579b1fd5aafa4cba05dd9cc08d61830ebbdc",
 						"ModelsSimpleStreamOptions": "208f2c00b33c8b9865aceb34581a38a22b90fdf2f6818f849f87b71e39f7157e",
 						"MutableModels": "702ee082384504718ff54dc9e25f6f98acda4117ae230bdf93179d8b00e491ac",
-						"Provider": "0ad1bb204ccd06b025ac7605611220fbc06a45781338173b8b93b91b6d6bb03a",
+						"Provider": "394d4d579c319ef56b5f8dbf985a0ee9146f81ddfdfd42969bf63a70ab907af3",
 						"RefreshModelsContext": "b20205577580b6b64375be5189689f79d20f8992ab0f98e8ee90cec92bfed0b5"
 					}
 				},
@@ -475,12 +488,6 @@
 						"fauxThinking": "aaeadb8e03f0f82254ca46a8c471711b894cfe73a62027d8a1cd68efc05277be",
 						"fauxToolCall": "5e6f21c50a4e49fbb129771a2d7566ba39aeb2f135e04c397d3194e3cc7c92b9",
 						"RegisterFauxProviderOptions": "d81d0257b50d0af80082df2dec265be744388b253ca8eedc7ff87f06f9f73bc8"
-					}
-				},
-				"./providers/github-copilot": {
-					"declaration": "dist/providers/github-copilot.d.ts",
-					"exports": {
-						"githubCopilotProvider": "2c6f4165afa33215161344d60bdf94debf26c7008ad00fe419b0762453693d4a"
 					}
 				},
 				"./providers/google": {
@@ -541,7 +548,7 @@
 			}
 		},
 		"@earendil-works/pi-tui": {
-			"version": "1.5.0",
+			"version": "1.5.2",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -711,7 +718,7 @@
 						"TuiAltScreenOptions": "6715783523d00c7ed08bdc77c2420e800440974ce71a78448b4bdaa90a7d6455",
 						"TuiInputListener": "efc182cee2cc5dd33fc13abd27a297fad6f7220e53663c18e467a330d6450d9a",
 						"TuiInputListenerResult": "0a0dc1ac87f31d852110d5682d827f04dba2b4e56c146fd4462d21ae975e5f9f",
-						"TuiMainScreen": "f198043ff91d0dfb86e67de4b71078ce91f3d1f3a4c89b7d727e91dbf8873980",
+						"TuiMainScreen": "7c94ddc6c415a128b9fdf6bd6360915eb4dd03b391f68bf34c92e2aa1d8441e7",
 						"TuiMainScreenRenderState": "ec4a5729b71c88bd31ad53b8e1bb6886acb446660ba1769bc91ab8dfadcec2b1",
 						"TuiMode": "568125bdd3e63a04c2b42e3669a8076caf15c092ff3623a9424670728fa3bed4",
 						"TuiMouseButton": "f0534dbdd07ac984e3b8cd957228b3d43d8a3ec812ebec47f30360780b80e406",
