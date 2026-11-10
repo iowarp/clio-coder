@@ -1432,19 +1432,38 @@ function councilMemberView(
 			: row.status === "completed"
 				? { ...full, label: "done" }
 				: full;
+	const progress = councilMemberProgress(row);
 	return {
 		runId: row.runId,
 		label: council.label,
 		...(council.color !== undefined ? { color: council.color } : {}),
 		round: council.round,
 		route: formatRowRoute(row),
-		status: { ...presentation },
+		status: { ...presentation, ...(progress !== null ? { label: `${presentation.label} · ${progress}` } : {}) },
 		// Each line of the answer stays its own line: one flattened paragraph ran a claim into its citation.
 		tailText: sanitizeMultilineDisplayText(councilMemberTail(row)).text,
 		droppedLines: row.progress?.droppedLines ?? 0,
 		...(isTerminalStatus(row.status) ? { settled: true } : {}),
 		...memberWhy(row),
 	};
+}
+
+/**
+ * How long a member has run and how much it has produced, so a slow member reads as working rather than stuck. A
+ * running member shows the output it has streamed (an estimate, marked `~`) because its calls report usage only
+ * once they finish; a settled member shows the measured output when the read model has it.
+ */
+function councilMemberProgress(row: DispatchBoardRow): string | null {
+	if (row.status === "enqueued") return null;
+	const facts: string[] = [formatCompactMs(row.elapsedMs)];
+	const measured = dispatchUsageText(row.usage).measuredOutput;
+	if (isTerminalStatus(row.status)) {
+		if (measured !== null && measured > 0) facts.push(`${dispatchUsageText(row.usage).output} out`);
+	} else {
+		const streamed = row.progress?.streamedOutputTokens;
+		if (streamed !== undefined && streamed > 0) facts.push(`~${streamed} tok out`);
+	}
+	return facts.join(" · ");
 }
 
 function memberWhy(row: DispatchBoardRow): { why?: string } {

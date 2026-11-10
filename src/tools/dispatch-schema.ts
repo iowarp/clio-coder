@@ -373,6 +373,9 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 					),
 					synthesis: Type.Optional(StringEnum(["none", "judge", "vote"] as const, { description: "Council synthesis." })),
 					rounds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3, description: "Council rounds." })),
+					member_deadline_ms: Type.Optional(
+						Type.Integer({ minimum: 1, description: "End a council member past this; the council returns partial." }),
+					),
 				}
 			: {}),
 		writers: Type.Optional(

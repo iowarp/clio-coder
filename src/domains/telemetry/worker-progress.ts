@@ -142,6 +142,12 @@ export interface WorkerProgressSnapshot {
 	 * says how old the evidence is. Absent until the first such event.
 	 */
 	evidenceAtMs?: number;
+	/**
+	 * Output streamed in the attempt's open and finished calls, prose, reasoning and tool arguments together, as an
+	 * estimate of four characters a token. It moves while a call that has not reported usage is still open, so a slow
+	 * member shows it is producing. Absent until the first delta.
+	 */
+	streamedOutputTokens?: number;
 }
 
 /** Events that prove a worker's model or tools are moving, as opposed to its process merely being alive. */
@@ -233,6 +239,14 @@ export function workerTextDelta(event: unknown): string {
 	if (event.type !== "text_delta") return "";
 	if (typeof event.delta === "string") return event.delta;
 	return typeof event.text === "string" ? event.text : "";
+}
+
+/** Characters one streamed delta carries, of any kind; the content itself is not kept. */
+function streamedDeltaChars(event: Record<string, unknown>): number {
+	const inner =
+		event.type === "message_update" && isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : event;
+	if (inner.type !== "text_delta" && inner.type !== "thinking_delta" && inner.type !== "toolcall_delta") return 0;
+	return typeof inner.delta === "string" ? inner.delta.length : typeof inner.text === "string" ? inner.text.length : 0;
 }
 
 /** Whether this event opens or continues a reasoning block. Its content is never read. */
@@ -375,6 +389,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let approvalWindow: WorkerApprovalWindowFacts | null = null;
 	let quietSinceMs: number | null = null;
 	let evidenceAtMs: number | null = null;
+	let streamedChars = 0;
 	const recentActions: WorkerAction[] = [];
 	const toolNames: string[] = [];
 	let settled = false;
@@ -526,6 +541,9 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				quietSinceMs = null;
 				changed = touch();
 			}
+			// Counted on every delta, published only when the snapshot is next rebuilt (at most once a second
+			// from evidence alone), so a reasoning stream does not rebuild it per delta.
+			streamedChars += streamedDeltaChars(event);
 			if (
 				typeof event.type === "string" &&
 				EVIDENCE_EVENT_TYPES.has(event.type) &&
@@ -674,6 +692,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			approvalWindow = null;
 			quietSinceMs = null;
 			evidenceAtMs = null;
+			streamedChars = 0;
 			tailGuard = null;
 			inputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
@@ -714,6 +733,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				completed,
 				...(quietSinceMs !== null && !settled ? { quietSinceMs } : {}),
 				...(evidenceAtMs !== null && !settled ? { evidenceAtMs } : {}),
+				...(streamedChars > 0 ? { streamedOutputTokens: Math.ceil(streamedChars / 4) } : {}),
 			};
 			return cached;
 		},

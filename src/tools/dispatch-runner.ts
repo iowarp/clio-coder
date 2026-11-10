@@ -2153,15 +2153,23 @@ async function runCouncil(
 	const group = newGateGroupId("council");
 	const runs: CompletedRun[] = [];
 	let prior = new Map<string, CompletedRun>();
+	const timedOut = new Set<string>();
 	const runMember = async (request: DispatchRequest): Promise<CompletedRun> => {
 		if (signal?.aborted) throw new Error("council dispatch aborted");
 		const handle = await deps.dispatch.dispatch(request);
 		let timer: ReturnType<typeof setTimeout> | undefined;
-		if (timeoutMs !== undefined) {
-			timer = setTimeout(
-				() => deps.dispatch.abort(handle.runId, { cause: "timeout", detail: `timed out after ${timeoutMs}ms` }),
-				timeoutMs,
-			);
+		// A member deadline ends one slow voice, not the council: the others'
+		// answers come back and the report names who was cut off.
+		const deadline = request.gate?.role === "member" ? council.memberDeadlineMs : undefined;
+		const limit = deadline !== undefined && (timeoutMs === undefined || deadline < timeoutMs) ? deadline : timeoutMs;
+		if (limit !== undefined) {
+			timer = setTimeout(() => {
+				if (limit === deadline && request.council !== undefined) timedOut.add(request.council.label);
+				deps.dispatch.abort(handle.runId, {
+					cause: "timeout",
+					detail: limit === deadline ? `member deadline of ${limit}ms passed` : `timed out after ${limit}ms`,
+				});
+			}, limit);
 		}
 		const abort = (): void => deps.dispatch.abort(handle.runId, PARENT_CANCEL);
 		signal?.addEventListener("abort", abort, { once: true });
@@ -2341,7 +2349,11 @@ async function runCouncil(
 		// A judge council seals it on the same terms: the judge run's own
 		// receipt holds only its {"verdict","text"} payload, which carries no
 		// member answers and no roster labels for the main agent to act on.
-		const text = JSON.stringify({ members, synthesis } satisfies CouncilReport);
+		const text = JSON.stringify({
+			members,
+			synthesis,
+			...(timedOut.size > 0 ? { partial: { timedOut: [...timedOut].sort() } } : {}),
+		} satisfies CouncilReport);
 		const receipt = await deps.dispatch.sealCouncilSynthesis({
 			group,
 			round: council.rounds,
@@ -2359,7 +2371,11 @@ async function runCouncil(
 			}),
 		);
 	}
-	return { report: { members, synthesis }, runs, group };
+	return {
+		report: { members, synthesis, ...(timedOut.size > 0 ? { partial: { timedOut: [...timedOut].sort() } } : {}) },
+		runs,
+		group,
+	};
 }
 
 function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeof runCouncil>>): ToolResult {
@@ -2377,8 +2393,18 @@ function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeo
 		council: { group: outcome.group, ...outcome.report },
 	};
 	const finalRound = Math.max(...outcome.report.members.map((member) => member.round));
+	const timedOut = new Set(outcome.report.partial?.timedOut ?? []);
+	const finals = outcome.report.members.filter((member) => member.round === finalRound);
+	if (timedOut.size > 0) {
+		sections.unshift(
+			`[partial] council returned without ${[...timedOut].join(", ")}: member deadline passed; ${finals.filter((member) => member.failed === undefined).length} of ${finals.length} members answered`,
+		);
+	}
+	// A member the deadline ended is reported as partial, not as a failed
+	// council, as long as another member answered.
+	const answered = finals.some((member) => member.failed === undefined);
 	const failed =
-		outcome.report.members.some((member) => member.round === finalRound && member.failed !== undefined) ||
+		finals.some((member) => member.failed !== undefined && !(answered && timedOut.has(member.label))) ||
 		outcome.runs.some((run) => run.receipt.gate?.role === "synthesis" && isPipelineStepFailure(run.receipt));
 	return failed
 		? { kind: "error", message: sections.join("\n\n"), details }

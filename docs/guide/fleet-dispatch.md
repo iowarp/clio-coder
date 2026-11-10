@@ -650,7 +650,7 @@ task worktree (`worktree: true`) or run host verification checks (`intent.verifi
 | Detached | `detach: true` | Parallel mode only. Return logical assignment ids and a batch id immediately; collect later. |
 | Review gate | `review: true` or `review: {reviewer?, max_cycles?, node?, target?, model?}` | Builder, read-only reviewer verdict, bounded revise loop. The reviewer defaults to `verifier`. |
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
-| Council | `mode: "council", roster: "design"` | Two to five read-only members answer the same task, with optional vote or judge synthesis. An operator starts one with `/council [--roster <name>] [--rounds <n>] [--synthesis judge\|vote\|none] [--agent <id>] <task>`; without `--roster` the roster named `default` is used. |
+| Council | `mode: "council", roster: "design"` | Two to five read-only members answer the same task, with optional vote or judge synthesis. An operator starts one with `/council [--roster <name>] [--rounds <n>] [--synthesis judge\|vote\|none] [--agent <id>] [--deadline <N\|Ns\|Nm>] <task>`; without `--roster` the roster named `default` is used. |
 | Agent automation | `agent: "auto"` | Picks the agent from the task shape through a shared classifier: `coder` (write, debug, refactor, config), `tester`, `documenter`, `verifier` (review), `researcher`, `world-knowledge` and `scout` (read, unknown). That baseline is the agent that runs; the router's alternative stays shadow-only unless `fleet.adaptiveRouting.agentRoles` activates the pair. |
 | Scout split | `from_scout: {run_id, run_digest}` | Second call of the Scout continuation. A terminal Scout run either settles with findings or proposes at most four typed subtasks; this call compiles the proposal into one approval-gated dependency plan. Pass no other argument. |
 
@@ -1163,8 +1163,11 @@ refused, and the recipe's own result contract does not apply to the member slot 
 so a `coder` or `architect` member reads and argues but never writes. An unknown member agent is refused before approval
 (`council_member_agent_unknown`).
 Members default to the `scout` recipe, which keeps `grep`, `find`, `ls` and `code_nav` under the council profile. An operator starts a council with
-`/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] <task>`, where `--agent` seats
-members that name no agent of their own; without
+`/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] [--deadline <N|Ns|Nm>] <task>`, where `--agent` seats
+members that name no agent of their own and `--deadline` (dispatch arg `member_deadline_ms`; a bare number is seconds)
+bounds each member's run: a member still running at the deadline is stopped, the council returns the other members'
+answers, and the report marks itself partial and names who timed out. While members run, each board column shows its
+elapsed time and an estimate of the output it has streamed (`~N tok out`), then the measured output once it settles. Without
 `--roster` the roster named `default` is used. With no `--roster` and no `default` roster, `/council` prints
 `/council needs a roster. Declare one under fleet.rosters in settings.yaml, ...`, and a `--roster` name that is not
 configured is refused with `no roster named "<name>" in fleet.rosters (<configured rosters>)`. A member whose route resolves to

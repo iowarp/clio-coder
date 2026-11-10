@@ -1,5 +1,5 @@
 /**
- * `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] <task>`:
+ * `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] [--deadline <N|Ns|Nm>] <task>`:
  * the roster an operator-typed council resolves to and the dispatch-tool
  * arguments it becomes.
  *
@@ -37,6 +37,15 @@ export const COUNCIL_MAX_ROUNDS = 3;
  */
 export const COUNCIL_SYNTHESIS_LABEL = "synthesis";
 
+/** `--deadline` value: bare seconds, `Ns` or `Nm`, as milliseconds; undefined when malformed. */
+export function parseCouncilDeadline(value: string): number | undefined {
+	const match = /^(\d+)(s|m)?$/u.exec(value.trim());
+	if (match === null) return undefined;
+	const amount = Number(match[1]);
+	if (!Number.isSafeInteger(amount) || amount < 1) return undefined;
+	return amount * (match[2] === "m" ? 60_000 : 1_000);
+}
+
 export function isCouncilSynthesisMode(value: string): value is CouncilSynthesisMode {
 	return COUNCIL_SYNTHESIS_MODES.some((mode) => mode === value);
 }
@@ -54,6 +63,8 @@ export interface CouncilCommandOptions {
 	synthesis?: CouncilSynthesisMode;
 	/** Agent recipe the members without their own roster `agent` run as. */
 	agent?: string;
+	/** Per-member deadline in milliseconds; off when absent. */
+	memberDeadlineMs?: number;
 }
 
 export type CouncilRosterResolution = { ok: true; roster: string } | { ok: false; reason: string };
@@ -109,5 +120,6 @@ export function buildCouncilDispatchArgs(
 		...(options.rounds !== undefined ? { rounds: options.rounds } : {}),
 		...(options.synthesis !== undefined ? { synthesis: options.synthesis } : {}),
 		...(options.agent !== undefined ? { agent: options.agent } : {}),
+		...(options.memberDeadlineMs !== undefined ? { member_deadline_ms: options.memberDeadlineMs } : {}),
 	};
 }

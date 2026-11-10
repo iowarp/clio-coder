@@ -160,6 +160,10 @@ function councilSettingsFromArgs(
 	if (!Number.isInteger(rounds) || Number(rounds) < 1 || Number(rounds) > 3) {
 		return { ok: false, message: "dispatch: rounds must be an integer 1..3" };
 	}
+	const deadline = args.member_deadline_ms;
+	if (deadline !== undefined && (typeof deadline !== "number" || !Number.isInteger(deadline) || deadline < 1)) {
+		return { ok: false, message: "dispatch: member_deadline_ms must be a positive integer" };
+	}
 	const judge = isRecord(args.judge)
 		? Object.fromEntries(
 				["agent", "model", "target", "node"].flatMap((key) => {
@@ -168,7 +172,16 @@ function councilSettingsFromArgs(
 				}),
 			)
 		: undefined;
-	return { ok: true, council: { members, synthesis, rounds: Number(rounds), ...(judge ? { judge } : {}) } };
+	return {
+		ok: true,
+		council: {
+			members,
+			synthesis,
+			rounds: Number(rounds),
+			...(deadline !== undefined ? { memberDeadlineMs: deadline } : {}),
+			...(judge ? { judge } : {}),
+		},
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

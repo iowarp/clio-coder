@@ -544,6 +544,8 @@ export interface CouncilReport {
 		tally?: Record<string, number>;
 		judgeRunId?: string;
 	};
+	/** Members a per-member deadline ended; the council returned without their final answer. */
+	partial?: { timedOut: string[] };
 }
 
 export function parseCouncilReport(output: string | null): CouncilReport | null {
@@ -551,7 +553,11 @@ export function parseCouncilReport(output: string | null): CouncilReport | null 
 	const parsed = parseJsonObjectPayload(output);
 	if (!parsed.ok) return null;
 	const value = parsed.value;
-	if (!hasOnlyKeys(value, ["members", "synthesis"]) || !Array.isArray(value.members) || value.members.length === 0) {
+	if (
+		!hasOnlyKeys(value, ["members", "synthesis", "partial"]) ||
+		!Array.isArray(value.members) ||
+		value.members.length === 0
+	) {
 		return null;
 	}
 	const members: CouncilReportMember[] = [];
@@ -606,8 +612,22 @@ export function parseCouncilReport(output: string | null): CouncilReport | null 
 			tally[key] = Number(count);
 		}
 	}
+	let partial: CouncilReport["partial"];
+	if (value.partial !== undefined) {
+		const raw = value.partial as Record<string, unknown> | null;
+		if (
+			raw === null ||
+			typeof raw !== "object" ||
+			!hasOnlyKeys(raw, ["timedOut"]) ||
+			!Array.isArray(raw.timedOut) ||
+			!raw.timedOut.every(string)
+		)
+			return null;
+		partial = { timedOut: [...(raw.timedOut as string[])] };
+	}
 	return {
 		members,
+		...(partial !== undefined ? { partial } : {}),
 		synthesis: {
 			kind: rawSynthesis.kind,
 			...(rawSynthesis.text !== undefined ? { text: rawSynthesis.text as string } : {}),

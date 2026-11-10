@@ -35,6 +35,8 @@ export interface DispatchCouncilSettings {
 	members: DispatchCouncilMember[];
 	synthesis: "none" | "judge" | "vote";
 	rounds: number;
+	/** Per-member deadline; a member past it is ended and the council returns partial. */
+	memberDeadlineMs?: number;
 	judge?: DispatchCompeteSettings["judge"];
 	resolvedTasks?: ReadonlyArray<ResolvedDispatchPlanArtifact["tasks"][number]>;
 }

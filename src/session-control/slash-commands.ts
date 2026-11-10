@@ -73,6 +73,7 @@ import {
 	COUNCIL_SYNTHESIS_LABEL,
 	COUNCIL_SYNTHESIS_MODES,
 	isCouncilSynthesisMode,
+	parseCouncilDeadline,
 	resolveCouncilRoster,
 } from "./council.js";
 import { parseDraftArgs } from "./drafts.js";
@@ -2266,6 +2267,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "--rounds", takesValue: true, valueName: "n" },
 				{ name: "--synthesis", takesValue: true, values: COUNCIL_SYNTHESIS_MODES },
 				{ name: "--agent", takesValue: true, valueName: "id" },
+				{ name: "--deadline", takesValue: true, valueName: "N|Ns|Nm" },
 			],
 			positionals: [{ name: "task", required: true, rest: true }],
 		},
@@ -2278,6 +2280,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (typeof roster === "string") options.roster = roster;
 			const agent = parsed.flags.get("--agent");
 			if (typeof agent === "string" && agent.trim().length > 0) options.agent = agent.trim();
+			const deadline = parsed.flags.get("--deadline");
+			if (typeof deadline === "string") {
+				const ms = parseCouncilDeadline(deadline);
+				if (ms === undefined) return { kind: "council-usage", reason: "--deadline takes seconds, Ns or Nm" };
+				options.memberDeadlineMs = ms;
+			}
 			const rounds = parsed.flags.get("--rounds");
 			if (typeof rounds === "string") {
 				const parsedRounds = Number(rounds);
