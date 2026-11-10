@@ -13,6 +13,11 @@ onlyBuiltDependencies:
   - node-pty
   - protobufjs
 
+# koffi (via the @github/copilot-sdk devDependency) ships prebuilt binaries and loads without its
+# install hook, so skip the hook explicitly instead of leaving pnpm's ignored-build warning.
+ignoredBuiltDependencies:
+  - koffi
+
 # Keep dependency overrides effective across every workspace importer.
 overrides:
   # GHSA-rmxm-3fg6-px4f (moderate): fits the MCP SDK's ^1.19.9 || ^2.0.5 range.
