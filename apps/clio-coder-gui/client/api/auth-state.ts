@@ -43,6 +43,13 @@ export function tokenFromLaunchInput(text: string): string | null {
 	return token ?? null;
 }
 
+/** The single-use launch ticket inside a pasted link `clio-coder gui` printed, or null. */
+export function ticketFromLaunchInput(text: string): string | null {
+	const input = text.trim();
+	if (/https?:\/\//i.test(input) && !originFromLaunchInput(input)) return null;
+	return /[#&]ticket=([\w-]{43})(?:$|[&#\s])/.exec(`${input} `)?.[1] ?? null;
+}
+
 /** A pasted local launch link also carries the current port; never attach its token to the old origin. */
 export function originFromLaunchInput(text: string): string | null {
 	try {

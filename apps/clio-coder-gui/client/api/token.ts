@@ -109,13 +109,18 @@ export function dropStoredToken() {
 			/* Storage may be disabled. */
 		}
 }
-/** Adopt a token the operator pasted. It goes through the same launch path as a link, so it is validated once. */
-export function adoptToken(token: string, origin = location.origin) {
+/**
+ * Adopt a ticket or token the operator pasted. It goes through the same launch path as a link, so it is
+ * validated once.
+ */
+export function adoptLaunchSecret(secret: { ticket: string } | { token: string }, origin = location.origin) {
+	const hash =
+		"ticket" in secret ? `ticket=${encodeURIComponent(secret.ticket)}` : `token=${encodeURIComponent(secret.token)}`;
 	if (origin !== location.origin) {
-		location.assign(`${origin}/#token=${encodeURIComponent(token)}`);
+		location.assign(`${origin}/#${hash}`);
 		return;
 	}
-	location.hash = `token=${encodeURIComponent(token)}`;
+	location.hash = hash;
 	location.reload();
 }
 export function lastTokenWasRefused() {
