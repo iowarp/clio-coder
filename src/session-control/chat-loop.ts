@@ -1530,6 +1530,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	}
 
 	let submitOwner: AbortController | null = null;
+	// The owner a loop guard stop aborted. The guard ended that run, not the operator's request, so yolo may still continue it (#450).
+	let guardStoppedOwner: AbortController | null = null;
 	let submitGeneration = 0;
 	let disposed = false;
 	const context = createTurnContext({
@@ -3748,8 +3750,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 					}
 					state.activeUserTurnId = null;
+					const guardStopped =
+						owner !== null &&
+						owner === guardStoppedOwner &&
+						submitOwner === owner &&
+						!disposed &&
+						options.isAdmissionCurrent?.() !== false;
 					const continuation =
-						options.machineTurn === undefined && !canceled && !interviewDismissed && admissionCurrent()
+						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
 							? yoloContinuationDue()
 							: null;
 					if (
@@ -3782,6 +3790,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const machineCancellation = pendingMachineCancellation;
 			pendingMachineCancellation = null;
 			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;
+			guardStoppedOwner = options?.source === "loop_guard" ? submitOwner : null;
 			submitOwner?.abort();
 			turnRuntime.cancelRunWatchdog();
 			continuity.cancel();

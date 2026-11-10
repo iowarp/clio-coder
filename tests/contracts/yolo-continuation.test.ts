@@ -9,13 +9,14 @@ import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { MachineTurnResult } from "../../src/session-control/job-turn-types.js";
+import { subscribeLoopGuardStop } from "../../src/session-control/loop-guard-interrupt.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const RATE_LIMITED = "429 rate_limit_error: This request would exceed your rate limit";
 
 /** What one model call does: cross the budget, lock the tools, both, finish, or throw. */
-type Step = "budget" | "lockout" | "both" | "done" | { throws: string };
+type Step = "budget" | "hard" | "lockout" | "both" | "done" | { throws: string };
 
 interface Harness {
 	loop: ReturnType<typeof createChatLoop>;
@@ -98,13 +99,13 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 						if (typeof current === "object") throw new Error(current.throws);
 						await listener({ type: "agent_start" });
 						await listener({ type: "turn_start" });
-						if (current === "budget" || current === "both") {
+						if (current === "budget" || current === "both" || current === "hard") {
 							context.bus.emit("safety.tool_budget_exceeded", {
 								tool: "bash",
-								callsThisTurn: 60,
+								callsThisTurn: current === "hard" ? 75 : 60,
 								softBudget: 60,
 								hardCeiling: 75,
-								interrupted: false,
+								interrupted: current === "hard",
 								at: Date.now(),
 							});
 						}
@@ -125,6 +126,7 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 			};
 		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
+	const unsubscribeGuard = subscribeLoopGuardStop(context.bus, loop);
 	const events: unknown[] = [];
 	loop.onEvent((event) => {
 		events.push(event);
@@ -135,6 +137,7 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 		continued,
 		events,
 		close: async () => {
+			unsubscribeGuard();
 			loop.dispose();
 			await loop.whenSettled();
 			scratch.restore();
@@ -157,6 +160,18 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			const continuation = run.prompts[1] ?? "";
 			ok(continuation.includes("The previous turn stopped: it reached the per-turn tool budget"), continuation);
 			ok(!continuation.includes("This is continuation"), continuation);
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("continues a turn the hard tool-call ceiling stopped (#450)", async () => {
+		const run = await harness(["hard", "done"]);
+		try {
+			await run.loop.submit("poll CI and the cluster until both are done");
+			await run.loop.whenSettled();
+			strictEqual(run.prompts.length, 2);
+			deepStrictEqual(pairs(run.continued), [["tool_budget", 0]]);
 		} finally {
 			await run.close();
 		}
