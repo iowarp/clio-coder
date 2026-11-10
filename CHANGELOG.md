@@ -48,6 +48,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Eight ops: `tags`, `create`, `list`, `stat`, `get`, `put`, `note` and `remove`. `put` copies a workspace file into a tag and records where it came from, including the producing `run_script` run (script hash, redacted arguments, declared inputs), so provenance outlives the run-record sweep. `note` adds a remark, and every blob keeps a write-once history of puts, notes and removals.
 - `stat` reports what Clio Coder recorded (size, hash, producing script and inputs) and drift: `none`, `changed`, `missing` or `unrecorded`. `get` returns a path to pass unchanged to `data`, `read`, `run_script` or an MCP tool.
 - Store calls are admitted per op: `tags`, `list`, `stat` and `get` are reads; `create`, `put` and `note` are writes judged at their real target in Clio Coder's data directory; `remove`, and a `put` that would replace an existing blob, ask and name the blob. The gateway's `describe` of `store` states each op's authority. A `put` source is held to the workspace, the read scope and the path policy. Workers can read the store but never write it.
+- Concurrent `put` and `remove` calls on one blob are serialized across processes, so each record describes the bytes it stored, and a lock left by a process that died is broken. A `put` names its blob after the path that was approved, not a link target that changed afterwards. `stat` reports drift when a blob's bytes change under the same size and modification time, and `create` refuses an unknown class.
 - The built-in coder, researcher and scout workers can use `store` and `data` without extra setup, and reading a path that `store get` returned no longer asks. A weak model's `tag:blob` reference is read from the store instead of searched for in the working tree.
 - The store lives under the data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path. Its files are owner-only (0600 files, 0700 directories). `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing can recover it afterwards.
 
@@ -90,6 +91,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Per-session facts (Git state, the last session, the orientation time) moved out of the cached system prompt into the session's first message, and dispatched workers of one recipe get the same tool list whatever their task says, so prompt prefixes cache across sessions and workers. The system prompt no longer tells a session things that are false for it, such as `/rewind` in a headless run.
 - The per-turn capability hint names only strongly matching capabilities, offers Clio Coder's own docs, library and configure capabilities only for questions about Clio Coder, and is left out when nothing fits.
 - The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
+- A missing key, an unreachable model server or a missing model reads as one sentence that names the fix, the same in `doctor`, `run`, the TUI banner, a failed prompt and the desktop app.
 
 ### Shared folders and sessions
 
@@ -120,12 +122,17 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Escape sequences in assistant prose, thinking text and `ask_user` questions are shown as text instead of reaching the terminal.
 - Pane handoff briefs no longer pass through the pane shell's line editor, so control characters in a brief cannot run commands, and pane launch quoting is safe under fish.
 - Text inside host reminders and middleware notes (claims, memory lessons, fetched web pages) can no longer close its frame and inject a host-voiced block.
+- Command output can no longer mimic a host note: `[middleware:` lines and `system-reminder` tags in `bash` output are neutralized, and a `read`, `grep` or `find` whose output carries one stays byte-exact and gets an instruction-shaped warning in front of it.
+- Tool and approval cards mask JSON-keyed secrets (`"api_key": "..."`), `Bearer` values and GitHub tokens (`ghp_`, `gho_`).
+- Contained commands no longer inherit JWT-valued variables (such as `SLURM_JWT`), `*_HEADERS` variables or URLs that carry a token as the username.
+- `$EDITOR` report drafts are written under Clio Coder's private state directory instead of the shared temp directory, and browser openers (including `wslview` under WSL) get the parsed URL with shell-active characters percent-encoded.
+- `telemetry share --profile report` anonymizes System One engines, playbook step and command names, endpoint and directory digests and provider tool call ids, and clears the header birth token.
 - A `CLIO-CODER.md`, `CLIO-CODER.override.md` or `.clio-coder/rules` that is a symlink leaving the project is ignored with a diagnostic instead of loading outside files into the prompt.
 - Fleet code-step logs redact secrets in command output and are written 0600 in a 0700 directory.
-- A user `settings.yaml` can no longer reach `Object.prototype` through `__proto__`, `constructor` or `prototype` keys.
+- A user `settings.yaml`, a model profile or a shared archive's settings can no longer reach `Object.prototype` through `__proto__`, `constructor` or `prototype` keys.
 - Two regular expressions that could backtrack exponentially (C-family function detection in the code index and the safety current-directory check) are now linear, and minimatch moves to 11.0.5 (GHSA-g3hv-75wg-m249).
 - Session transcripts, spilled tool output and `runs.json` are owner-only, and `doctor` flags a state or data root other users can enter (see Upgrade notes).
-- `clio-coder auth login` no longer echoes an API key: a terminal gets a masked field, the key can be piped on stdin (`printf %s "$KEY" | clio-coder auth login openai`), and `--api-key` warns that it exposes the key in shell history and the process list.
+- `clio-coder auth login` no longer echoes an API key: a terminal gets a masked field, the key can be piped on stdin (`printf %s "$KEY" | clio-coder auth login openai`), and `--api-key` warns that it exposes the key in shell history and the process list. On a dumb terminal (`TERM=dumb`) the key is read with echo off, and a terminal without raw mode is refused with a `< keyfile` hint.
 - Anthropic and OpenAI browser sign-in hold the callback port on both IPv4 and IPv6 loopback, so another local program cannot take the other family's port, and Anthropic sign-in uses its own random state instead of sending the PKCE verifier as the OAuth state.
 - A target that project settings point at a non-loopback URL is never sent your stored or environment provider keys, on turns, side calls, target probes or System One engines; the run fails naming why, and only `--api-key` still applies to it.
 - Sign-in and other external links open only for `https:` or loopback `http:` URLs, and on Windows they open through `rundll32` instead of `cmd /c start`, which split a URL at `&` and truncated sign-in links.
@@ -203,6 +210,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - On a state directory shared by several hosts, starting Clio Coder on another host no longer expires a running fleet plan's reservation; another host's reservations expire only 15 minutes past their estimate. The `local` node and loopback endpoints are counted per host, a dead host's leases are reclaimed after five minutes, capacity denials name the holding host, and `session terminate --force` releases them.
 - A worker that ran `node --check` and reported it passed is credited with that check instead of sealing as an unmatched validation.
 - When a scout cites a location that does not exist, the worker row names that location and suggests another scout model instead of saying the answer was in the wrong format, and the scout prompt says how to cite a search that found nothing.
+- A council can seat a different agent per member (a roster or inline `agent`, or `/council --agent`), and members default to scout so they can search code; every member stays read-only. `/council --deadline` (`member_deadline_ms`) returns a partial council when a member is too slow, and member columns show elapsed time and streamed output. An operator `/council` runs under contained yolo.
 
 ### Extensions and MCP
 
@@ -210,6 +218,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - `gateway op=describe` reports an MCP tool's own trusted action class and confirmation rule.
 - When a worker's MCP call goes to the judge, the judge sees the tool's trusted action class and description.
 - `tool.decided` journal records include the confirmation rule that raised an ask (`confirmationRuleId`, optional).
+- Materio no longer draws its "Next: /materio:identify-research" band in repositories without a non-empty `.research/`; it appears once you enter the lab bench or open a research project.
 
 ### Release
 
@@ -243,6 +252,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Resumed sessions no longer replay a skill the model loaded through a tool as a user message between the tool call and its result.
 - `library list` names the installed version beside an available update, and a read-only agent's validation message names only the offending tools.
 - A long tool call no longer shows "No output from <model>" as the next model call starts, and a tool that prints nothing for minutes shows as running in the footer instead of "No output".
+- After a tool call the status no longer names the previous request's model, and a silent-wait row no longer says output arrived because of an earlier call's first byte.
 
 ### Internal
 
