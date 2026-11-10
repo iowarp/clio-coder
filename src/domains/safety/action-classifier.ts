@@ -733,7 +733,11 @@ const STORE_WRITE_OPS: ReadonlySet<unknown> = new Set(["create", "put", "note"])
 function classifyStore(args: Record<string, unknown> | undefined): Classification {
 	const op = args?.op;
 	if (op === "remove") {
-		const ref = typeof args?.ref === "string" ? args.ref : `${String(args?.tag)}:${String(args?.blob)}`;
+		// prepareStoreArguments reads `ref` only when `tag` is absent, so the reason does too and names the blob removed.
+		const ref =
+			typeof args?.tag === "string" || typeof args?.ref !== "string"
+				? `${String(args?.tag)}:${String(args?.blob)}`
+				: args.ref;
 		return { actionClass: "destructive", reasons: [`store-remove: ${ref}`] };
 	}
 	// tags, list, stat, get, and a missing or unknown op, which the tool rejects.
