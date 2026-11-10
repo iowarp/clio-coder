@@ -753,7 +753,9 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				path: `/${ref.name}`,
 				replacement,
 				appendSpace: Boolean(ref.args && (ref.args.positionals || ref.args.flags || ref.args.subcommands)),
-				runsBare: runsBare(ref.name),
+				// Only a row whose name the operator typed runs on Enter; a letters or description
+				// match (`/session` finding compact) completes and waits.
+				runsBare: (match.class === "exact" || match.class === "name") && runsBare(ref.name),
 			};
 			if (description) item.description = `${description}${group}`;
 			if (remainingGrammar) item.remainingGrammar = remainingGrammar;
