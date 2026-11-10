@@ -19,7 +19,9 @@ export interface EngineHost {
 /**
  * Resolved per call rather than at construction, so a rotated key reaches the
  * next question without restarting the session. A failure means no token: the
- * request goes out unauthenticated and the server's answer says why.
+ * request goes out unauthenticated and the server's answer says why. A refusal
+ * is not a failure: it throws, because "no token" lets the runtime fill the
+ * operator's environment key in for a project-chosen URL.
  */
 export async function resolveToken(
 	host: EngineHost,
@@ -28,14 +30,16 @@ export async function resolveToken(
 	signal: AbortSignal,
 ): Promise<string | undefined> {
 	if (host.auth === undefined) return undefined;
+	let resolution: Awaited<ReturnType<NonNullable<EngineAuth>["resolveForTarget"]>>;
 	try {
-		const resolution = await host.auth.resolveForTarget(target, runtime, { signal });
-		return resolution.apiKey ?? undefined;
+		resolution = await host.auth.resolveForTarget(target, runtime, { signal });
 	} catch {
 		// A credential store that cannot answer is the same as no credential; the
 		// request still fails visibly at the server if one was required.
 		return undefined;
 	}
+	if (resolution.refused) throw new Error(resolution.detail ?? `credential refused for target '${target.id}'`);
+	return resolution.apiKey ?? undefined;
 }
 
 export function errorText(err: unknown): string {
