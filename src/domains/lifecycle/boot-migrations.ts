@@ -49,6 +49,16 @@ export function takePendingMigrationNotices(): string[] {
 	}
 }
 
+function wasUpgraded(stateDir: string): boolean {
+	try {
+		const parsed = JSON.parse(readFileSync(join(stateDir, "home.json"), "utf8")) as { upgradedFrom?: unknown };
+		return typeof parsed.upgradedFrom === "string";
+	} catch {
+		// No readable home.json means no recorded upgrade.
+		return false;
+	}
+}
+
 export async function applyPendingMigrationsAtBoot(
 	interactive = process.env.CLIO_CODER_INTERACTIVE === "1",
 ): Promise<void> {
@@ -68,12 +78,13 @@ export async function applyPendingMigrationsAtBoot(
 		// A manifest still in the state root also goes to the runner, even with nothing pending, to be moved.
 	} else if (
 		!existsSync(legacyMigrationManifestPath(stateDir)) &&
-		!existsSync(join(resolveClioDirs().config, "settings.yaml"))
+		!(existsSync(join(resolveClioDirs().config, "settings.yaml")) && wasUpgraded(stateDir))
 	)
 		return;
-	// `initializeClioHome()` runs first and writes the manifest together with any
-	// settings file it creates, so settings without a manifest anywhere can only
-	// be a home from before manifests (0.5.x); it goes to the runner like any other.
+	// Settings without a manifest are either a home from before manifests (0.5.x),
+	// whose install.json `initializeClioHome()` renames and stamps `upgradedFrom`,
+	// or settings provisioned before first launch (dotfiles, images, CI), which
+	// are current-shape and must not be rewritten. Only the former goes to the runner.
 	try {
 		const { runPending } = await import("./migrations/index.js");
 		const result = await runPending(stateDir);
