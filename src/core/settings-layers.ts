@@ -322,48 +322,114 @@ function stripProjectTelemetry(
 }
 
 /**
- * The autonomous caps bound how long yolo runs without the operator, so a
- * repository may tighten them and never loosen or switch one off: a project
- * value stays only when it is a positive integer no larger than the
- * operator's own, where the operator's 0 (off) leaves any positive value
- * tighter.
+ * Every limit under `safety.limits` and `fleet.limits` bounds what Clio does
+ * without the operator, so a repository may tighten one and never loosen or
+ * switch it off (R2-safety-secrets-19): a project value stays only when it is
+ * positive and no larger than the operator's own. Where 0 means off (the
+ * session cost ceiling and the autonomous caps), the operator's 0 leaves any
+ * positive value tighter.
  */
-const AUTONOMOUS_CAP_KEYS = ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const;
+const PROJECT_LIMIT_KEYS: ReadonlyArray<{ block: "safety" | "fleet"; key: string; zeroIsOff: boolean }> = [
+	{ block: "safety", key: "sessionCostUsd", zeroIsOff: true },
+	{ block: "safety", key: "chatToolCallsPerTurn", zeroIsOff: false },
+	{ block: "safety", key: "readBytesPerCall", zeroIsOff: false },
+	{ block: "safety", key: "observationBytesPerTurn", zeroIsOff: false },
+	{ block: "safety", key: "workerResponseSeconds", zeroIsOff: false },
+	{ block: "safety", key: "autonomousToolCalls", zeroIsOff: true },
+	{ block: "safety", key: "autonomousMinutes", zeroIsOff: true },
+	{ block: "safety", key: "autonomousTokens", zeroIsOff: true },
+	{ block: "fleet", key: "toolCallsPerRun", zeroIsOff: false },
+	{ block: "fleet", key: "internalRunTimeoutMs", zeroIsOff: false },
+];
+const AUTONOMOUS_CAP_KEYS: ReadonlySet<string> = new Set([
+	"autonomousToolCalls",
+	"autonomousMinutes",
+	"autonomousTokens",
+]);
 
-function stripProjectAutonomousCaps(
+function stripProjectLimits(
 	blob: Record<string, unknown>,
 	origin: SettingsOrigin,
 	issues: SettingsLayerIssue[],
 	userBlob: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
-	if (!isRecord(blob.safety) || !isRecord(blob.safety.limits)) return blob;
+	let cleaned = blob;
+	for (const block of ["safety", "fleet"] as const) {
+		const section = cleaned[block];
+		if (!isRecord(section) || !isRecord(section.limits)) continue;
+		const operatorSection = userBlob?.[block];
+		const operatorLimits = isRecord(operatorSection) && isRecord(operatorSection.limits) ? operatorSection.limits : {};
+		const defaults = DEFAULT_SETTINGS[block].limits as unknown as Record<string, unknown>;
+		const limits: Record<string, unknown> = { ...section.limits };
+		let stripped = false;
+		for (const { key, zeroIsOff } of PROJECT_LIMIT_KEYS.filter((rule) => rule.block === block)) {
+			if (!Object.hasOwn(limits, key)) continue;
+			const requested = limits[key];
+			const operatorValue = typeof operatorLimits[key] === "number" ? operatorLimits[key] : defaults[key];
+			const tighter =
+				typeof requested === "number" &&
+				Number.isFinite(requested) &&
+				requested > 0 &&
+				typeof operatorValue === "number" &&
+				((zeroIsOff && operatorValue === 0) || requested <= operatorValue);
+			if (tighter) continue;
+			issues.push({
+				origin,
+				path: `${block}.limits.${key}`,
+				message: AUTONOMOUS_CAP_KEYS.has(key)
+					? "a project may only tighten an autonomous cap from user settings; project value ignored"
+					: "a project may only tighten a limit from user settings; project value ignored",
+			});
+			delete limits[key];
+			stripped = true;
+		}
+		if (!stripped) continue;
+		const next: Record<string, unknown> = { ...section };
+		if (Object.keys(limits).length === 0) delete next.limits;
+		else next.limits = limits;
+		cleaned = { ...cleaned, [block]: next };
+	}
+	return stripProjectReview(cleaned, origin, issues, userBlob);
+}
+
+/**
+ * The review watchdog checks the session for the operator, so a repository may
+ * switch it on or make it fire more often, never switch it off or slow it
+ * (R2-safety-secrets-19).
+ */
+function stripProjectReview(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!isRecord(blob.safety) || !isRecord(blob.safety.review)) return blob;
 	const operatorSafety = isRecord(userBlob?.safety) ? userBlob.safety : {};
-	const operatorLimits = isRecord(operatorSafety.limits) ? operatorSafety.limits : {};
-	const limits: Record<string, unknown> = { ...blob.safety.limits };
+	const operator = isRecord(operatorSafety.review) ? operatorSafety.review : {};
+	const review: Record<string, unknown> = { ...blob.safety.review };
 	let stripped = false;
-	for (const key of AUTONOMOUS_CAP_KEYS) {
-		if (!Object.hasOwn(limits, key)) continue;
-		const requested = limits[key];
-		const operatorValue =
-			typeof operatorLimits[key] === "number" ? operatorLimits[key] : DEFAULT_SETTINGS.safety.limits[key];
-		const tighter =
-			typeof requested === "number" &&
-			Number.isInteger(requested) &&
-			requested > 0 &&
-			(operatorValue === 0 || requested <= operatorValue);
-		if (tighter) continue;
-		issues.push({
-			origin,
-			path: `safety.limits.${key}`,
-			message: "a project may only tighten an autonomous cap from user settings; project value ignored",
-		});
-		delete limits[key];
+	const drop = (key: string, message: string) => {
+		issues.push({ origin, path: `safety.review.${key}`, message });
+		delete review[key];
 		stripped = true;
+	};
+	const operatorEnabled =
+		typeof operator.enabled === "boolean" ? operator.enabled : DEFAULT_SETTINGS.safety.review.enabled;
+	if (Object.hasOwn(review, "enabled") && review.enabled !== true && operatorEnabled) {
+		drop("enabled", "the review watchdog is switched off only in user settings; project value ignored");
+	}
+	if (Object.hasOwn(review, "cadenceToolCalls") && review.cadenceToolCalls !== null) {
+		const requested = review.cadenceToolCalls;
+		const operatorCadence = typeof operator.cadenceToolCalls === "number" ? operator.cadenceToolCalls : null;
+		const tighter =
+			typeof requested === "number" && requested > 0 && (operatorCadence === null || requested <= operatorCadence);
+		if (!tighter)
+			drop("cadenceToolCalls", "a project may only tighten a limit from user settings; project value ignored");
 	}
 	if (!stripped) return blob;
 	const safety: Record<string, unknown> = { ...blob.safety };
-	if (Object.keys(limits).length === 0) delete safety.limits;
-	else safety.limits = limits;
+	if (Object.keys(review).length === 0) delete safety.review;
+	else safety.review = review;
 	return { ...blob, safety };
 }
 
@@ -629,7 +695,7 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectAutonomousCaps(
+				: stripProjectLimits(
 						stripProjectTelemetry(
 							stripProjectWidening(
 								stripProjectOperatorSafety(

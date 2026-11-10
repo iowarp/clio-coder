@@ -432,6 +432,80 @@ test("a project may tighten an autonomous cap but never loosen or disable it", a
 	deepStrictEqual(flagged, ["safety.limits.autonomousMinutes"]);
 });
 
+test("a project may tighten any safety or fleet limit and switch review on, never loosen or switch them off", async (t) => {
+	const home = await isolateClioEnv("clio-project-limits-");
+	t.after(() => home.restore());
+	const workspace = join(home.dir, "workspace");
+	const projectDir = join(workspace, ".clio-coder");
+	mkdirSync(projectDir, { recursive: true });
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		join(home.dir, "config", "settings.yaml"),
+		[
+			"version: 2",
+			"safety:",
+			"  limits:",
+			"    sessionCostUsd: 2",
+			"    chatToolCallsPerTurn: 40",
+			"  review:",
+			"    enabled: true",
+			"    cadenceToolCalls: 20",
+			"fleet:",
+			"  limits:",
+			"    toolCallsPerRun: 50",
+			"",
+		].join("\n"),
+	);
+	writeFileSync(
+		join(projectDir, "settings.yaml"),
+		[
+			"safety:",
+			"  limits:",
+			"    sessionCostUsd: 0",
+			"    chatToolCallsPerTurn: 100000",
+			"    readBytesPerCall: 1024",
+			"  review:",
+			"    enabled: false",
+			"    cadenceToolCalls: 500",
+			"fleet:",
+			"  limits:",
+			"    toolCallsPerRun: 100000",
+			"    internalRunTimeoutMs: 1000",
+			"",
+		].join("\n"),
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	if (!snapshot.contentHash) throw new Error("missing project settings hash");
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	const layered = readLayeredSettings(workspace);
+	const { safety, fleet } = layered.settings;
+	strictEqual(safety.limits.sessionCostUsd, 2, "0 would switch the cost ceiling off");
+	strictEqual(safety.limits.chatToolCallsPerTurn, 40);
+	strictEqual(safety.limits.readBytesPerCall, 1024, "tightening is kept");
+	strictEqual(safety.review.enabled, true);
+	strictEqual(safety.review.cadenceToolCalls, 20);
+	strictEqual(fleet.limits.toolCallsPerRun, 50);
+	strictEqual(fleet.limits.internalRunTimeoutMs, 1000, "tightening is kept");
+	const flagged = layered.issues.filter((issue) => issue.origin === "project").map((issue) => issue.path);
+	deepStrictEqual(flagged.sort(), [
+		"fleet.limits.toolCallsPerRun",
+		"safety.limits.chatToolCallsPerTurn",
+		"safety.limits.sessionCostUsd",
+		"safety.review.cadenceToolCalls",
+		"safety.review.enabled",
+	]);
+
+	// With the operator's ceiling and review off, a project may still switch both on.
+	writeFileSync(join(home.dir, "config", "settings.yaml"), "version: 2\nsafety:\n  limits:\n    sessionCostUsd: 0\n");
+	writeFileSync(join(projectDir, "settings.yaml"), "safety:\n  limits:\n    sessionCostUsd: 3\n  review:\n    enabled: true\n");
+	const next = captureProjectSurface(workspace, "settings");
+	if (!next.contentHash) throw new Error("missing project settings hash");
+	recordProjectSurfaceTrust(workspace, "settings", next.contentHash);
+	const tightened = readLayeredSettings(workspace).settings.safety;
+	strictEqual(tightened.limits.sessionCostUsd, 3);
+	strictEqual(tightened.review.enabled, true);
+});
+
 function footerAt(status: AutonomyStatus, width: number): string {
 	const state = footerState();
 	state.session.autonomy = "yolo";
