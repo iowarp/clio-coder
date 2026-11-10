@@ -160,6 +160,7 @@ import {
 	explainInterruptedAssistant,
 	extractText,
 	isOperatorCancelReason,
+	nameMissingCredentialRemedy,
 	notConfiguredNotice,
 	noticeMessage,
 	OPERATOR_CANCEL_REASON,
@@ -1836,6 +1837,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			attemptRetryForecast = null;
 		}
 		if (event.type === "message_end") {
+			nameMissingCredentialRemedy(event.message);
 			if (event.message.role === "assistant") {
 				const terminal = terminalFailureFromAssistantMessage(event.message);
 				if (terminal?.failure) {

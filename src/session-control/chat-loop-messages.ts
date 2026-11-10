@@ -68,6 +68,15 @@ export function notConfiguredNotice(chat: { target?: string | null; model?: stri
 	].join("\n");
 }
 
+/** Pi's failure for a route with no credential names the provider but not the way out. */
+export function nameMissingCredentialRemedy(message: AgentMessage): void {
+	if (message.role !== "assistant") return;
+	const failure = message as { stopReason?: unknown; errorMessage?: unknown };
+	if (failure.stopReason !== "error" || typeof failure.errorMessage !== "string") return;
+	const missing = /^No API key for provider: (\S+)$/u.exec(failure.errorMessage.trim());
+	if (missing) failure.errorMessage = `${missing[0]}. Run: clio-coder auth login ${missing[1]}`;
+}
+
 export function extractText(message: AgentMessage | undefined): string {
 	if (
 		!message ||

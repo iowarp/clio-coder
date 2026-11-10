@@ -170,12 +170,20 @@ export async function detectChatRoutes(
 		}
 	}
 	const served = await localModels(readJson);
-	for (const [id] of Object.entries(DEFAULT_PORTS)) {
+	// One row per address: several runtimes share a default port, and a server answers as one of them.
+	const byOrigin = new Map<string, RuntimeDescriptor[]>();
+	for (const id of Object.keys(DEFAULT_PORTS)) {
 		const runtime = runtimes.find((entry) => entry.id === id);
 		const url = defaultUrlFor(id);
+		if (!runtime || !served.has(url)) continue;
+		byOrigin.set(url, [...(byOrigin.get(url) ?? []), runtime]);
+	}
+	for (const [url, sharing] of byOrigin) {
 		const model = served.get(url);
+		const runtime =
+			sharing.length > 1 ? (sharing.find((entry) => entry.id === "openai-compat") ?? sharing[0]) : sharing[0];
 		if (!runtime || !model) continue;
-		const target = buildDescriptor(runtime, deriveTargetId(id, settings.targets), { url, model });
+		const target = buildDescriptor(runtime, deriveTargetId(runtime.id, settings.targets), { url, model });
 		routes.push({ source: url, runtime, target, model });
 	}
 	return routes;

@@ -681,23 +681,14 @@ describe("contracts/configure-onboarding", () => {
 		try {
 			const alcf = getRuntimeRegistry().get("alcf");
 			ok(alcf);
-			const result = await runWizard(
-				testEnv.env,
-				[
-					{ waitFor: "Sign in to", keys: [DOWN, ENTER] },
-					{ waitFor: "ALCF gateway URL", keys: [ENTER] },
-					{ waitFor: "the ALCF gateway URL is required", keys: [CTRL_C] },
-				],
-				{ mode: "first", runtime: alcf },
-			);
+			const result = await runWizard(testEnv.env, [{ waitFor: "Sign in to", keys: [DOWN, ENTER] }], {
+				mode: "first",
+				runtime: alcf,
+			});
+			// S-78: "Later" ends setup with nothing saved and names the sign-in command.
 			const screen = plainText(result.transcript());
-			for (const expected of [
-				"Required. For example https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1",
-				"The right URL and model depend on the ALCF cluster or resource, such as Sophia or Metis.",
-				"paste the whole URL, scheme and path included",
-			]) {
-				ok(screen.includes(expected), `${JSON.stringify(expected)} missing from:\n${screen}`);
-			}
+			strictEqual(result.code, 130, screen);
+			ok(screen.includes("clio-coder auth login alcf, then clio-coder"), screen);
 			ok(!screen.includes("127.0.0.1"), `the ALCF prompt must offer no localhost default:\n${screen}`);
 			strictEqual(existsSync(testEnv.settingsFile), false);
 

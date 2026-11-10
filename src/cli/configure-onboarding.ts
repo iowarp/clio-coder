@@ -148,6 +148,8 @@ interface Answers {
 	unreachable?: string | undefined;
 	/** A runtime read-only admission accepts, bound to the read-only world-knowledge agent. */
 	colleague?: { runtimeId: string; targetId: string; model: string } | undefined;
+	/** The sign-in was put off or failed, so the wizard ends with nothing saved and names the login command. */
+	signInLater?: string | undefined;
 }
 
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected";
@@ -466,13 +468,21 @@ const URL_STEP: Step = {
 		if (!runtime) return "back";
 		const local = supportFor(runtime).group === "local-http";
 		const gateway = runtime.gatewayUrl;
+		const offered = offeredUrlFor(runtime);
 		const result = await wizard.text({
 			heading: [
 				"",
 				chalk.bold(gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
 				...gatewayUrlGuidance(runtime).map((line) => chalk.dim(line)),
 			],
-			initial: answers.url ?? offeredUrlFor(runtime) ?? "",
+			// An offered address is a placeholder, so a typed one replaces it instead of being appended to it.
+			...(answers.url !== undefined
+				? { initial: answers.url }
+				: offered !== undefined
+					? wizard.host
+						? { initial: offered }
+						: { placeholder: offered }
+					: {}),
 			hint: gateway
 				? "paste the whole URL, scheme and path included"
 				: "host:port is enough; Clio fills in the scheme and the port it knows",
@@ -712,7 +722,7 @@ const CREDENTIAL_STEP: Step = {
 						label: "Later",
 						hint: wizard.host
 							? "connect it from Settings → Connections before the first turn"
-							: `run \`clio-coder auth login ${runtime.id}\` before the first turn`,
+							: `ends setup with nothing saved; run \`clio-coder auth login ${runtime.id}\` later`,
 					},
 				],
 				initialIndex: answers.credential === "oauth-skip" ? 1 : 0,
@@ -732,13 +742,17 @@ const CREDENTIAL_STEP: Step = {
 					wizard.presenter.warn(
 						wizard.host
 							? "sign-in did not complete; connect it from Settings → Connections when ready"
-							: `sign-in did not complete; run \`clio-coder auth login ${runtime.id}\` when ready`,
+							: "sign-in did not complete",
 					);
-					wizard.answer("Credential", "not connected yet");
+				} else {
+					wizard.answer("Credential", `connected to ${runtime.id}`);
 					return "next";
 				}
-				wizard.answer("Credential", `connected to ${runtime.id}`);
-				return "next";
+			}
+			// A target saved without its credential opens as a home that looks configured and fails its first turn.
+			if (!wizard.host) {
+				answers.signInLater = runtime.id;
+				return "cancel";
 			}
 			wizard.answer("Credential", "not connected yet");
 			return "next";
@@ -960,20 +974,35 @@ const MODEL_STEP: Step = {
 			return "next";
 		}
 
-		const selected = inventory.models.indexOf(preferred ?? "");
+		// The curated default leads the list, marked, so a long catalog does not rest on whatever sorts first.
+		const recommended =
+			support.defaultModel !== undefined && inventory.models.includes(support.defaultModel)
+				? support.defaultModel
+				: undefined;
+		const models =
+			recommended !== undefined
+				? [recommended, ...inventory.models.filter((model) => model !== recommended)]
+				: inventory.models;
+		const selected = models.indexOf(preferred ?? "");
 		const result = await wizard.select<string>({
 			heading: [
 				"",
 				chalk.bold("Which model?"),
 				chalk.dim(inventoryNote(runtime, inventory) ?? "read live from the target just now"),
 			],
-			choices: inventory.models.map((model) => {
+			choices: models.map((model) => {
 				const state = inventory.modelStates?.[model]?.state;
-				const hint = model === preferred ? "default" : state !== undefined && state !== "unknown" ? state : undefined;
+				const hint =
+					model === preferred && model !== recommended
+						? "default"
+						: state !== undefined && state !== "unknown"
+							? state
+							: undefined;
 				const label = inventory.labels?.[model];
+				const named = label && label !== model ? `${model} — ${label}` : model;
 				return {
 					value: model,
-					label: label && label !== model ? `${model} — ${label}` : model,
+					label: model === recommended ? `${named} (recommended)` : named,
 					...(hint === undefined ? {} : { hint }),
 				};
 			}),
@@ -1518,6 +1547,14 @@ function cancel(
 	// exits 130 where leaving the settings menu exits 0. It is still the user's
 	// choice and not a failure, so the rail says it once and nothing follows on
 	// stderr; the closing line used to be chased by `error: configuration cancelled`.
+	if (answers.signInLater !== undefined && !options.quit) {
+		presenter.commandAdvice(
+			"Nothing was saved. When you are ready:",
+			`clio-coder auth login ${answers.signInLater}, then clio-coder`,
+		);
+		presenter.done("Nothing was saved");
+		return answers.mode === "first" ? 130 : 0;
+	}
 	if (answers.mode === "first" && options.advise !== false)
 		presenter.commandAdvice(
 			"Clio cannot start until a model is set up. When you are ready, run:",

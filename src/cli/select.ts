@@ -75,6 +75,8 @@ export interface TextPromptOptions {
 	heading?: PromptHeading;
 	/** Pre-filled and editable. Pressing enter on it returns it unchanged. */
 	initial?: string;
+	/** Shown dim while the field is empty; the first keystroke replaces it and enter on the empty field accepts it. */
+	placeholder?: string;
 	/** Dim line under the field, for what a good answer looks like. */
 	hint?: string;
 	/** Show dots instead of the characters, for a credential. */
@@ -597,11 +599,14 @@ export async function promptText(options: TextPromptOptions): Promise<TextResult
 		}
 		const room = Math.max(8, terminalColumns(output) - railWidth - 2);
 		const shown = options.mask === true ? "•".repeat(value.length) : value;
+		const empty = value.length === 0 && options.placeholder !== undefined;
 		const lines: string[] = [];
 		for (const line of head) lines.push(`${rail}${line}`.trimEnd());
 		if (head.length > 0) lines.push(rail.trimEnd());
 		const fieldIndex = lines.length;
-		lines.push(`${rail}${chalk.cyan("❯")} ${truncate(shown, room)}`);
+		lines.push(
+			`${rail}${chalk.cyan("❯")} ${empty ? chalk.dim(truncate(options.placeholder ?? "", room)) : truncate(shown, room)}`,
+		);
 		if (error !== null) lines.push(`${rail}${chalk.yellow(truncate(error, room))}`);
 		else if (options.hint !== undefined) lines.push(`${rail}${chalk.dim(truncate(options.hint, room))}`);
 		lines.push(rail.trimEnd());
@@ -671,7 +676,7 @@ export async function promptText(options: TextPromptOptions): Promise<TextResult
 					return;
 				case "return":
 				case "enter": {
-					const answer = value.trim();
+					const answer = value.trim() || (options.placeholder ?? "");
 					const reason = options.validate?.(answer) ?? null;
 					if (reason !== null) {
 						error = reason;

@@ -1362,10 +1362,12 @@ export function idleReadinessPresentation(
 	const quiet = { token: "counter" as const, live: false, namesRoute: true };
 	if (!facts.available) {
 		const why = facts.reason.trim();
+		const login = /^missing auth \((?:\S+ or )?store:([^)\s]+)\)$/u.exec(why)?.[1];
 		const label = fit([
 			{ text: "is unavailable", keep: 9 },
 			{ text: why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
 			{ ...MODEL_SWITCHES, keep: 8 },
+			{ text: login ? `Run: clio-coder auth login ${login}` : null, keep: 7 },
 		]);
 		return { glyph: GLYPH.warn, token: "warning", live: false, label, ...shown() };
 	}
