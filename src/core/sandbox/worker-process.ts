@@ -3,7 +3,7 @@ import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
-import { sandboxAvailability } from "./availability.js";
+import { sandboxAvailability, sandboxNetworkIsolation } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
 import { discoverSecretMasks } from "./secret-files.js";
 import type {
@@ -275,6 +275,13 @@ function reportSocketFallback(policy: WorkerSandboxSpec, availability: SandboxAv
 	process.stderr.write(`[worker] sandbox ${unixSocketStateLine(state)}\n`);
 }
 
+/** A network-off command also needs `--unshare-net`; without it the backend counts as unavailable. */
+function withNetworkIsolation(availability: SandboxAvailability, network: boolean): SandboxAvailability {
+	if (network) return availability;
+	const failure = sandboxNetworkIsolation(availability);
+	return failure === null ? availability : { available: false, backend: null, executable: null, reason: failure };
+}
+
 /**
  * Decide how one worker child process spawns. No policy means the host runs
  * it directly (orchestrator, or `safety.sandbox: off`). `auto` without a
@@ -289,7 +296,13 @@ export function planSandboxedSpawn(
 ): SandboxedSpawnPlan {
 	const policy = active;
 	if (policy === null) return { kind: "direct" };
-	const availability = sandboxAvailability();
+	const network = policy.network || options.network === true;
+	let availability = withNetworkIsolation(sandboxAvailability(), network);
+	// The orchestrator saw the backend work; one failed local probe (a
+	// timeout is not cached) gets one retry before the command is refused.
+	if (!availability.available && policy.backendExpected === true) {
+		availability = withNetworkIsolation(sandboxAvailability(), network);
+	}
 	// v060 review F1: only the typed Git seam supplies metadata writes, scoped
 	// to this invocation; ordinary commands cannot inherit them from a spec.
 	let invocation: SandboxInvocation | null;
@@ -297,7 +310,7 @@ export function planSandboxedSpawn(
 		invocation = composeWorkerSandboxInvocation(
 			// An attested MCP network grant opens only this one process's network;
 			// the masks, read-only home and write roots stay as the policy sets them.
-			{ ...policy, gitWritablePaths: typedGitWritablePaths, network: policy.network || options.network === true },
+			{ ...policy, gitWritablePaths: typedGitWritablePaths, network },
 			command,
 			cwd,
 			availability,
@@ -320,6 +333,12 @@ export function planSandboxedSpawn(
 		return {
 			kind: "refused",
 			message: `sandbox: safety.sandbox is "required" but no worker sandbox is available (${reason}); the command was not run`,
+		};
+	}
+	if (policy.backendExpected === true) {
+		return {
+			kind: "refused",
+			message: `sandbox: the orchestrator found a worker sandbox but this worker cannot start it (${reason}); the command was not run`,
 		};
 	}
 	if (!unavailableReported) {

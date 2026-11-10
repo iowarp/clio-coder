@@ -986,6 +986,7 @@ const WORKER_SANDBOX_KEYS = new Set([
 	"passEnv",
 	"secretEnv",
 	"unixSockets",
+	"backendExpected",
 ]);
 
 function readAbsolutePaths(value: unknown, source: string): void {
@@ -1015,6 +1016,8 @@ function validateWorkerSandbox(value: unknown): void {
 	}
 	if (sandbox.unixSockets !== undefined)
 		readEnum(sandbox.unixSockets, "WorkerSpec.sandbox.unixSockets", ["allow"] as const);
+	if (sandbox.backendExpected !== undefined && sandbox.backendExpected !== true)
+		throw new Error("WorkerSpec.sandbox.backendExpected must be true when present");
 }
 
 function validateWorkerFlowPolicy(value: unknown): void {

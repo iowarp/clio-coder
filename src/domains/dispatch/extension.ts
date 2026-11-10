@@ -2991,27 +2991,31 @@ function workerSandboxFor(input: {
 		input.req.taskWorktree !== undefined && mode !== "off" && sandboxAvailability().available
 			? shareTaskWorktreeDependencies(input.req.taskWorktree)
 			: [];
+	const spec = resolveWorkerSandboxSpec({
+		mode,
+		readOnly: input.readOnly,
+		cwd: input.req.cwd ?? process.cwd(),
+		writeBoundaries: input.pathScope.writeBoundaries,
+		...(input.req.taskWorktree !== undefined
+			? { taskWorktree: { path: input.req.taskWorktree.path, branch: input.req.taskWorktree.branch } }
+			: {}),
+		allowedTools: input.allowedTools,
+		networkSetting: input.settings?.safety.sandboxNetwork === true,
+		dependencyRoots,
+		...(input.settings !== undefined
+			? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
+			: {}),
+		// The hooks of the worker's tree stay read-only, as in the main-session sandbox.
+		...(mode !== "off"
+			? { gitHooksDirs: gitHookDirectories(input.req.taskWorktree?.path ?? input.req.cwd ?? process.cwd()).directories }
+			: {}),
+	});
+	// Only a worker that runs on this host shares this probe's answer; a fleet
+	// node probes its own backend.
+	const local = (input.settings?.fleet.nodes?.length ?? 0) === 0;
 	return {
 		applies: true,
-		spec: resolveWorkerSandboxSpec({
-			mode,
-			readOnly: input.readOnly,
-			cwd: input.req.cwd ?? process.cwd(),
-			writeBoundaries: input.pathScope.writeBoundaries,
-			...(input.req.taskWorktree !== undefined
-				? { taskWorktree: { path: input.req.taskWorktree.path, branch: input.req.taskWorktree.branch } }
-				: {}),
-			allowedTools: input.allowedTools,
-			networkSetting: input.settings?.safety.sandboxNetwork === true,
-			dependencyRoots,
-			...(input.settings !== undefined
-				? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
-				: {}),
-			// The hooks of the worker's tree stay read-only, as in the main-session sandbox.
-			...(mode !== "off"
-				? { gitHooksDirs: gitHookDirectories(input.req.taskWorktree?.path ?? input.req.cwd ?? process.cwd()).directories }
-				: {}),
-		}),
+		spec: spec !== undefined && local && sandboxAvailability().available ? { ...spec, backendExpected: true } : spec,
 	};
 }
 

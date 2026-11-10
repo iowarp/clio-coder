@@ -58,6 +58,11 @@ export interface WorkerSandboxSpec {
 	secretEnv?: ReadonlyArray<string>;
 	/** `safety.sandboxUnixSockets: allow`. Absent blocks Unix-domain sockets (unix-sockets.ts). */
 	unixSockets?: "allow";
+	/**
+	 * The orchestrator found the backend usable on this host. A worker whose
+	 * own probe then fails refuses the command instead of running it direct.
+	 */
+	backendExpected?: true;
 }
 
 /**
