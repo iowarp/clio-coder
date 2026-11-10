@@ -1,0 +1,66 @@
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { storeBlobPath, storeProjectDir } from "../../src/core/store-paths.js";
+import { STORE_TOOL_NAME } from "../../src/core/tool-names.js";
+import { classify } from "../../src/domains/safety/action-classifier.js";
+import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+describe("store safety admission", () => {
+	let scratch: IsolatedClioEnv;
+	let cwd: string;
+	let previousCwd: string;
+
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-coder-store-admission-");
+		cwd = join(scratch.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		previousCwd = process.cwd();
+		process.chdir(cwd);
+	});
+
+	afterEach(() => {
+		process.chdir(previousCwd);
+		scratch.restore();
+	});
+
+	it("classifies each op by what it does and names the store target, never the source", () => {
+		const store = (args: Record<string, unknown>) => classify({ tool: STORE_TOOL_NAME, args });
+		for (const op of ["tags", "list", "stat", "get", "frobnicate", undefined]) {
+			strictEqual(store({ op, tag: "sim", blob: "a.txt" }).actionClass, "read", String(op));
+		}
+		for (const op of ["create", "put", "note"]) {
+			strictEqual(store({ op, tag: "sim", blob: "a.txt", path: "a.txt" }).actionClass, "write", op);
+		}
+		const put = store({ op: "put", tag: "sim", path: "out/a.txt" });
+		deepStrictEqual(put.reasons, [`store-write: ${storeBlobPath(cwd, "sim", "a.txt")}`]);
+		deepStrictEqual(store({ op: "remove", tag: "sim", blob: "a.txt" }), {
+			actionClass: "destructive",
+			reasons: ["store-remove: sim:a.txt"],
+		});
+		deepStrictEqual(store({ op: "put", tag: "sim", path: "../outside.txt" }).reasons, [
+			"store-put-source-outside-workspace",
+		]);
+	});
+
+	it("refuses a store write outside the run's write roots", () => {
+		const engine = createSafetyPolicyEngine({ cwd, writeRoots: ["src/"] });
+		const put = engine.evaluate({ tool: STORE_TOOL_NAME, args: { op: "put", tag: "sim", path: "a.txt" } });
+		strictEqual(put.reasonCode, "write-root");
+	});
+
+	it("admits a cd into this project's store directory and not another project's", () => {
+		const own = storeProjectDir(cwd);
+		const other = storeProjectDir(scratch.dir);
+		mkdirSync(own, { recursive: true });
+		mkdirSync(other, { recursive: true });
+		const cd = (dir: string) => classify({ tool: "bash", args: { command: `cd ${dir} && ls` } }).reasons;
+		ok(!cd(own).some((reason) => reason.startsWith("bash-cd-outside-workspace")), cd(own).join("; "));
+		ok(
+			cd(other).some((reason) => reason.startsWith("bash-cd-outside-workspace")),
+			cd(other).join("; "),
+		);
+	});
+});

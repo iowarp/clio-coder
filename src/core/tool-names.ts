@@ -69,6 +69,13 @@ export const ToolNames = {
 
 export type BuiltinToolName = (typeof ToolNames)[keyof typeof ToolNames];
 
+/**
+ * The store capability's name, which the safety layer judges per op. Kept out
+ * of ToolNames until the capability registers with its placement and plane
+ * rows; then this becomes `ToolNames.Store`.
+ */
+export const STORE_TOOL_NAME = "store";
+
 declare const dynamicToolNameBrand: unique symbol;
 export type DynamicToolName = string & { readonly [dynamicToolNameBrand]: "dynamic-tool-name" };
 

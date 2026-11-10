@@ -14,7 +14,8 @@ import {
 } from "../../core/path-canonical.js";
 import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
-import { ToolNames } from "../../core/tool-names.js";
+import { storeWriteTarget } from "../../core/store-paths.js";
+import { STORE_TOOL_NAME, ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
 import type { RunScriptInterpreter } from "../../tools/run-script.js";
@@ -611,7 +612,14 @@ export const WRITE_ROOT_REFUSED_TOOLS: ReadonlySet<string> = new Set<string>([
 // own loop, so it is not covered by the lexical write-root containment below.
 const WRITE_ROOT_TOOLS = new Set<string>([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
 
-function writeRootTargetPath(call: ClassifierCall): string | null {
+/**
+ * A store write lands where `storeWriteTarget` predicts, never at its `path`
+ * argument (the source), so the store is judged by that target here. It stays
+ * out of WRITE_ROOT_TOOLS, which also drives the git-control check over the
+ * call's path arguments.
+ */
+function writeRootTargetPath(call: ClassifierCall, cwd: string = process.cwd()): string | null {
+	if (call.tool === STORE_TOOL_NAME) return storeWriteTarget(cwd, call.args);
 	if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
 	const target = pathArg(call.args);
 	if (target !== null) return target;
@@ -674,7 +682,7 @@ function writeRootViolation(
  */
 function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, call: ClassifierCall): string | null {
 	if (roots.length === 0) return null;
-	const target = writeRootTargetPath(call);
+	const target = writeRootTargetPath(call, writeRootCwd);
 	if (target === null) return null;
 	const memo = createPathWalkMemo();
 	return writeRootViolation(roots, target, canonicalizeRawPath(expandPath(target), writeRootCwd, memo), memo);
@@ -1995,6 +2003,14 @@ function pathPolicyTargets(
 			// before the reader opens it, under every spelling a read of the
 			// same path is checked against.
 			const target = pathArg(args);
+			return target === null
+				? []
+				: readScopeSpellings(target, callCwd).map((spelling) => ({ operation: "read" as const, path: spelling }));
+		}
+		case STORE_TOOL_NAME: {
+			// put reads its workspace source the way data reads its file, so a
+			// zero-access source is refused before the bytes are copied out.
+			const target = args?.op === "put" ? pathArg(args) : null;
 			return target === null
 				? []
 				: readScopeSpellings(target, callCwd).map((spelling) => ({ operation: "read" as const, path: spelling }));
@@ -4344,7 +4360,7 @@ function mayRewriteGitConfig(call: ClassifierCall, decision: SafetyPolicyDecisio
 		const command = commandArg(call.args);
 		return command !== null && GIT_CONFIG_COMMAND.test(command);
 	}
-	const target = writeRootTargetPath(call);
+	const target = writeRootTargetPath(call, cwd);
 	if (target === null) return false;
 	const landing = path.resolve(cwd, expandPath(target));
 	return (

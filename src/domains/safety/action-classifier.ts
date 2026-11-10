@@ -3,7 +3,8 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
-import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
+import { storeReadRoots, storeWriteTarget } from "../../core/store-paths.js";
+import { isHarnessExtensionToolName, STORE_TOOL_NAME, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
@@ -142,13 +143,14 @@ function isUnderPrefix(abs: string, prefix: string): boolean {
 /**
  * Trees outside the workspace that Clio writes and tells the model to read:
  * the offload scratch `writeToolOffload` (src/tools/result-shaping.ts) spills
- * an oversized result into. Resolved without creating anything, and an
+ * an oversized result into, and this project's store directory, whose blob
+ * paths the store tool hands back. Resolved without creating anything, and an
  * unresolvable Clio home names none.
  */
 function harnessReadRoots(): string[] {
 	try {
-		const root = canonicalizePath(path.join(resolveClioDirs().state, "scratch"));
-		return root === null ? [] : [root];
+		const candidates = [path.join(resolveClioDirs().state, "scratch"), ...storeReadRoots(process.cwd())];
+		return candidates.map((candidate) => canonicalizePath(candidate)).filter((root) => root !== null);
 	} catch {
 		// An unresolvable Clio home permits no extra cd target.
 		return [];
@@ -718,8 +720,44 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 	return next === null ? call : { ...call, args: next };
 }
 
+const STORE_WRITE_OPS: ReadonlySet<unknown> = new Set(["create", "put", "note"]);
+
+/**
+ * The store is one tool with read, write and destructive ops, and its writes
+ * land in Clio's own data directory rather than at the `path` argument, which
+ * for `put` is the source. So each op is judged for what it does, and a write
+ * names the target `storeWriteTarget` predicts, the one the tool writes. That
+ * target is outside the workspace by design, so it does not escalate to
+ * system_modify, for the same reason the artifact default does not.
+ */
+function classifyStore(args: Record<string, unknown> | undefined): Classification {
+	const op = args?.op;
+	if (op === "remove") {
+		const ref = typeof args?.ref === "string" ? args.ref : `${String(args?.tag)}:${String(args?.blob)}`;
+		return { actionClass: "destructive", reasons: [`store-remove: ${ref}`] };
+	}
+	// tags, list, stat, get, and a missing or unknown op, which the tool rejects.
+	if (!STORE_WRITE_OPS.has(op)) return { actionClass: "read", reasons: [] };
+	const sourceArg = args?.path ?? args?.file_path ?? args?.file;
+	if (op === "put" && typeof sourceArg === "string" && sourceArg.length > 0) {
+		const source = resolveCandidate(sourceArg);
+		// A source outside the workspace is a read of that path, and the tool refuses it.
+		if (source === null || source.startsWith("~") || !isInsideCwd(source)) {
+			return { actionClass: "read", reasons: ["store-put-source-outside-workspace"] };
+		}
+	}
+	let target: string | null = null;
+	try {
+		target = storeWriteTarget(process.cwd(), args);
+	} catch {
+		// An unresolvable Clio home names no target; the tool refuses the call too.
+	}
+	return { actionClass: "write", reasons: target === null ? [] : [`store-write: ${target}`] };
+}
+
 export function classify(rawCall: ClassifierCall): Classification {
 	const call = normalizeCallPaths(rawCall);
+	if (call.tool === STORE_TOOL_NAME) return classifyStore(call.args);
 	if (call.tool === ToolNames.Panes && call.args?.action === "handoff") {
 		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-handoff"] };
 	}
