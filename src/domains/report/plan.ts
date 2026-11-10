@@ -363,6 +363,8 @@ export type ReportFlowOutcome =
 			verdict: RelatedVerdict;
 			/** The share's gist when one was uploaded and kept. */
 			shared?: { shareId: string; gistId: string };
+			/** Why a requested share was not uploaded although the report went ahead. */
+			notShared?: string;
 	  }
 	| { kind: "stopped"; draft: ReportDraft; verdict: RelatedVerdict };
 
@@ -422,8 +424,14 @@ export async function runReportSend(
 	if (choice === "new" && "issue" in verdict && !final.links.includes(verdict.issue.number))
 		final = { ...final, links: [...final.links, verdict.issue.number] };
 	const route = routeFor(final.kind);
+	const commenting = choice === "comment" && verdict.kind === "comment";
+	// A comment's block is not scanned for shares, so a gist uploaded for it would sit where no maintainer finds it.
+	const notShared =
+		deps.share !== undefined && commenting
+			? "The bundle was not shared: a comment on an existing issue cannot carry it. Share it with a new report, or send telemetry with clio-coder telemetry share --send."
+			: undefined;
 	let shared: { shareId: string; gistId: string } | undefined;
-	if (deps.share !== undefined && deps.transport.kind === "gh") {
+	if (deps.share !== undefined && deps.transport.kind === "gh" && !commenting) {
 		const uploaded = await deps.share.upload();
 		if ("failed" in uploaded) {
 			saveReportDraft(deps.stateDir, final);
@@ -452,7 +460,7 @@ export async function runReportSend(
 			: renderReport(final, deps.identity, deps.reviewed ?? true, pointer);
 	saveReportDraft(deps.stateDir, final);
 	const action =
-		choice === "comment" && verdict.kind === "comment"
+		commenting && verdict.kind === "comment"
 			? { kind: "comment" as const, number: verdict.issue.number, body: renderComment(finalRendered, final) }
 			: { kind: "create" as const };
 	const result = await sendReport(finalRendered, route, deps.transport, action, {
@@ -497,6 +505,7 @@ export async function runReportSend(
 		rendered: finalRendered,
 		verdict,
 		...(shared !== undefined ? { shared } : {}),
+		...(notShared !== undefined ? { notShared } : {}),
 	};
 }
 

@@ -744,12 +744,33 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		const deleted: string[] = [];
 		let gistFails = false;
 		let postThrows = false;
+		let openMatch = false;
+		let commented = 0;
 		const run: ReportCommandRunner = async (file, args) => {
 			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
 			if (file === "git") return { exitCode: 1, stdout: "", stderr: "not a repository", timedOut: false };
 			if (args[0] === "auth") return reply("");
 			if (args.includes("user")) return reply("octo\n");
-			if (args.includes("search/issues")) return reply("[]");
+			if (args.includes("search/issues"))
+				return reply(
+					openMatch
+						? JSON.stringify([
+								{
+									number: 600,
+									title: "footer flickers while streaming tool output",
+									state: "open",
+									closed_at: null,
+									updated_at: "2026-11-01T00:00:00Z",
+									labels: [],
+								},
+							])
+						: "[]",
+				);
+			if (args[0] === "issue" && args[1] === "comment") {
+				commented++;
+				return reply("https://github.com/iowarp/clio-coder/issues/600#issuecomment-1\n");
+			}
+			if (args.some((arg) => arg.endsWith("/reactions"))) return reply("{}");
 			if (args.some((arg) => arg.endsWith("releases/latest"))) return reply("v0.0.1\n");
 			if (args.includes("POST") && args.includes("gists")) {
 				if (gistFails) return { exitCode: 1, stdout: "", stderr: "HTTP 403: missing scope", timedOut: false };
@@ -813,6 +834,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes"), 0);
 		const shareId = /#(shr_[0-9a-f]{16})/u.exec(posted)?.[1] ?? "";
 		ok(posted.includes(`bundle: gist:${gistId}#${shareId}\nconsent: debug\n`), posted);
+		ok(!out.includes("The report now links"), out);
 		strictEqual(gists.length, 1);
 		const shared = gists[0] as GistRequest;
 		strictEqual(shared.public, false);
@@ -844,6 +866,19 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(live[0]?.gistId, gistId);
 		strictEqual(live[0]?.kind, "report-bundle");
 		deepStrictEqual(deleted, [`gists/${gistId}`]);
+
+		// A comment on an existing issue is never scanned for shares, so nothing is uploaded for it.
+		postThrows = false;
+		openMatch = true;
+		out = "";
+		const before = gists.length;
+		const flicker = ["bug", "--title", "footer flickers while streaming tool output", "--body-file", bodyFile];
+		const shareFlags = ["--session", "ses_share", "--bundle", "mechanics", "--consent", "debug", "--share", "--yes"];
+		strictEqual(await runReport([...flicker, ...shareFlags, "--on-duplicate", "comment"], deps), 0);
+		strictEqual(commented, 1);
+		strictEqual(gists.length, before);
+		ok(out.includes("The bundle was not shared: a comment on an existing issue cannot carry it"), out);
+		ok(!out.includes("Shared the bundle encrypted"), out);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

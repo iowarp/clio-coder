@@ -637,14 +637,18 @@ async function confirmAndSend(
 			);
 		return 3;
 	}
+	// The rendered text also changes when a share's pointer is filled in; only new links are news.
+	const relinked = outcome.draft.links.join() !== draft.links.join();
 	draft = outcome.draft;
-	if (outcome.rendered !== plan.rendered && !options.json)
+	if (relinked && !options.json)
 		io.out(`The report now links #${outcome.draft.links.join(", #")}; its title is: ${outcome.rendered.title}\n`);
 	if (options.json) {
 		plan = { ...plan, rendered: outcome.rendered };
 		emit(outcome.result);
+		if (outcome.notShared !== undefined) io.err(`${outcome.notShared}\n`);
 	} else {
 		io.out(`${sentLine(outcome.result)}\n`);
+		if (outcome.notShared !== undefined) io.out(`${outcome.notShared}\n`);
 		if (outcome.shared !== undefined)
 			io.out(
 				`Shared the bundle encrypted as secret gist ${outcome.shared.gistId} (${outcome.shared.shareId}). clio-coder report forget ${draft.id} deletes it.\n`,
