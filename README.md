@@ -352,6 +352,19 @@ All surfaces share the same connections, project context, and tool policy.
 See [commands and modes](docs/guide/commands-and-modes.md),
 [the GUI guide](docs/guide/gui.md), and [interoperability](docs/guide/interop.md).
 
+## No call-home. Sharing is explicit.
+
+Clio Coder is built by a small team working live with a trusted group of
+scientists. It sends nothing home in the background, ever. When you want to
+help improve the harness from real usage, failures, bugs, feature requests and
+latent demand, you share one item at a time, by running the command yourself:
+`clio-coder report ... --bundle mechanics --consent debug --share` or
+`clio-coder telemetry share ... --send --consent debug`. Each share is
+previewed, encrypted so that only the maintainers can open it, uploaded as a
+secret gist in your own GitHub account, and deletable with `forget`; Clio
+deletes it after 180 days. Your agent never shares for you. See
+[Share with the maintainers](docs/guide/troubleshooting.md#share-with-the-maintainers).
+
 ## Safety and control
 
 Clio edits files and runs commands with your permissions. You decide how much

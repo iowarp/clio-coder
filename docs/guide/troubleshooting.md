@@ -349,8 +349,9 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   bundle. Every byte is checked for this machine's identifiers; a hit names the
   member and the kind of identifier and exits 1. The bundle is kept at 0600
   under the state directory's `reports/bundles/` only once the report is sent
-  or saved. The bundle stays
-  on this machine and the issue never carries it: `report show <id> --bundle`
+  or saved. Without `--share` the bundle stays on this machine and the issue
+  never carries it; [`--share`](#share-with-the-maintainers) sends it
+  encrypted. `report show <id> --bundle`
   prints it, `forget` deletes it, also after the report was sent, and the
   bundle of a sent report is deleted after 30 days. `clio-coder report selftest [--session <id>]` builds the same
   bundle in memory, writes nothing, and exits 1 when an identifier survived.
@@ -394,6 +395,47 @@ duplicate or a newer release stopped it and the draft was saved. Security proble
 `/report security` and `clio-coder report security` print the link to the
 repository's private security advisory form and open it in a terminal session
 that has a browser.
+
+### Share with the maintainers
+
+Clio Coder never calls home. Sharing is explicit, one item at a time, and only
+when you run the command yourself: it helps the maintainers, a small team
+working with a trusted group of scientists, improve the harness from real
+usage, failures, bugs, feature requests and latent demand.
+
+```bash
+clio-coder report bug --title "..." --last --bundle mechanics --consent debug --share
+clio-coder telemetry share --session <id> --send --consent debug
+clio-coder telemetry share list
+clio-coder telemetry share forget <shareId>
+```
+
+- **What goes.** `report ... --share` sends the report's diagnostic bundle;
+  `telemetry share ... --send` sends the telemetry archive `telemetry share`
+  would write, under the `content-free`, `structural` or `research` profile.
+  Both print what they hold, the consent text and where it goes before
+  anything is sent, and need gh signed in to github.com.
+- **How.** The bundle or archive is encrypted (X25519, HKDF-SHA256,
+  AES-256-GCM) so that only the Clio Coder maintainers' key opens it, and
+  uploaded as a secret gist in your own GitHub account through your `gh`
+  (`gh auth refresh -s gist` if gh lacks the gist scope). The public issue's
+  report block names it as `bundle: gist:<id>#<shareId>`; a telemetry share
+  opens a discussion in "Telemetry shares" on iowarp/clio-coder that names only
+  the gist. The gist is created only at send, and deleted again if posting
+  fails.
+- **Who reads it.** Only the maintainers. They keep counts derived from it,
+  never its contents or who sent it, in their private metrics repository to
+  rank what to fix next. `consent: debug` lets them read it to fix Clio Coder;
+  `dataset` also lets its mechanics go into public datasets, which cannot be
+  recalled once published.
+- **Deleting it.** `clio-coder report forget <id>` or `clio-coder telemetry
+  share forget <shareId>` deletes the gist, and the derived counts go on the
+  maintainers' next daily run. Clio Coder deletes its share gists 180 days
+  after sending them. `telemetry share list` shows every share this machine
+  sent; the receipts live in the state directory's `reports/shares.json`.
+- **Never for the agent.** The agent never shares or passes `--share` or
+  `--send`; both are refused in a command a Clio Coder session started, and
+  without `--yes` outside a terminal. It may tell you the command to run.
 
 ## Diagnostic Commands
 
