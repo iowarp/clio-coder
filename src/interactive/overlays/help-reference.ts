@@ -30,47 +30,50 @@ export function openHelpOverlay(
 	initialFilter?: string,
 	extensionCommands: readonly ExtensionCommandRow[] = [],
 	onPick?: (text: string) => void,
+	hidden: (command: string) => boolean = () => false,
 ): OverlayHandle {
 	// What Enter puts in the composer for a row, by row id; rows without one open their detail.
 	const picks = new Map<string, string>();
 	// Commands keep commandReference() order; the group rides as the row's meta.
-	const commands: ListOverlayItem[] = commandReference().map((ref) => {
-		const needsArgument = ref.args?.positionals?.some((positional) => positional.required) === true;
-		picks.set(ref.name, `/${ref.name}${needsArgument ? " " : ""}`);
-		// Below 80 columns the flags are dropped before the description is cut:
-		// `/run [--agent-profile <profile>] …` left nothing of what /run does.
-		const { flags, ...withoutFlags } = ref.args ?? {};
-		const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
-		// The flags fold into one word so the row still says that it takes them.
-		const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
-		const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
-		const item: ListOverlayItem = {
-			id: ref.name,
-			label: `${ref.usage}  ${ref.description}  ${ref.group}`,
-			cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
-			group: "Commands",
-			meta: ref.group,
-			// Overlay key actions are deliberately not duplicated here: each
-			// overlay's footer hint is the live source of its keys, and a static
-			// copy would rot exactly like the old SLASH_HOTKEYS table did.
-			...detailWithHead((width) => {
-				const theme = clioTheme();
-				const facts: Fact[] = [
-					{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
-					{ label: "Does", value: ref.description },
-					// The same copy the composer's detail panel shows for each subcommand.
-					...Object.entries(ref.subcommandDescriptions ?? {}).map(
-						([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
-					),
-				];
-				return {
-					head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
-					rest: factRows(theme, facts, width, FACT_OPTIONS),
-				};
-			}),
-		};
-		return item;
-	});
+	const commands: ListOverlayItem[] = commandReference()
+		.filter((ref) => !hidden(ref.name))
+		.map((ref) => {
+			const needsArgument = ref.args?.positionals?.some((positional) => positional.required) === true;
+			picks.set(ref.name, `/${ref.name}${needsArgument ? " " : ""}`);
+			// Below 80 columns the flags are dropped before the description is cut:
+			// `/run [--agent-profile <profile>] …` left nothing of what /run does.
+			const { flags, ...withoutFlags } = ref.args ?? {};
+			const positionals = ref.args ? compactArgumentHint(withoutFlags) : undefined;
+			// The flags fold into one word so the row still says that it takes them.
+			const options = flags !== undefined && Object.keys(flags).length > 0 ? " [options]" : "";
+			const narrowUsage = `${positionals ? `/${ref.name} ${positionals}` : `/${ref.name}`}${options}`;
+			const item: ListOverlayItem = {
+				id: ref.name,
+				label: `${ref.usage}  ${ref.description}  ${ref.group}`,
+				cells: { lead: ref.usage, narrowLead: narrowUsage, text: ref.description },
+				group: "Commands",
+				meta: ref.group,
+				// Overlay key actions are deliberately not duplicated here: each
+				// overlay's footer hint is the live source of its keys, and a static
+				// copy would rot exactly like the old SLASH_HOTKEYS table did.
+				...detailWithHead((width) => {
+					const theme = clioTheme();
+					const facts: Fact[] = [
+						{ label: "Usage", value: theme.fg("inlineCode", ref.usage) },
+						{ label: "Does", value: ref.description },
+						// The same copy the composer's detail panel shows for each subcommand.
+						...Object.entries(ref.subcommandDescriptions ?? {}).map(
+							([name, purpose]): Fact => ({ label: `/${ref.name} ${name}`, value: purpose }),
+						),
+					];
+					return {
+						head: [titleRow(theme, `/${ref.name}`, width, { meta: ref.group })],
+						rest: factRows(theme, facts, width, FACT_OPTIONS),
+					};
+				}),
+			};
+			return item;
+		});
 
 	// Operator commands carry text an extension author wrote; it is neutralized
 	// once here before any row or pane picks it up. The metas are getters so a

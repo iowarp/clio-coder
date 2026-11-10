@@ -24,6 +24,7 @@ export interface OverlayResourceOpenersDeps {
 	getSlashContext: () => SlashCommandContext;
 	resources?: Pick<ResourcesContract, "skills">;
 	closeOverlay: () => void;
+	commandHidden?: (command: string) => boolean;
 	openHelpOverlay?: typeof openHelpOverlay;
 	openSkillsHub?: typeof openLibraryOverlay;
 	openExtensionsOverlay?: typeof openExtensionsOverlay;
@@ -86,6 +87,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			ctx.operatorExtensions?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? [])),
 			// A picked command lands in the composer unsent, cursor at the end.
 			(text) => deps.editor.setText(text),
+			deps.commandHidden,
 		);
 		deps.tui.requestRender();
 	};

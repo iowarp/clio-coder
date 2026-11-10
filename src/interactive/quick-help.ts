@@ -56,10 +56,10 @@ function composerRows(menuKey: string | null): QuickHelpRow[] {
 	];
 }
 
-function actionRows(bindings: QuickHelpKeys): QuickHelpRow[] {
+function actionRows(bindings: QuickHelpKeys, omit: (id: ClioKeybinding) => boolean): QuickHelpRow[] {
 	const menu = new Set((bindings.leaderTargets?.() ?? []).map((target) => target.id));
 	return CLIO_APP_KEYBINDING_IDS.flatMap((id) => {
-		if (OFF_CARD.has(id)) return [];
+		if (OFF_CARD.has(id) || omit(id)) return [];
 		const keys = bindings.getKeys?.(id) ?? [];
 		if (keys.length === 0 && !menu.has(id)) return [];
 		const verb = bindings.getLabel?.(id) ?? bindings.getDescription?.(id) ?? "";
@@ -69,7 +69,7 @@ function actionRows(bindings: QuickHelpKeys): QuickHelpRow[] {
 }
 
 /** The two-column body, or one column below 84 cells, the documented stacking width. */
-function quickHelpRows(width: number, bindings: QuickHelpKeys): string[] {
+function quickHelpRows(width: number, bindings: QuickHelpKeys, omit: (id: ClioKeybinding) => boolean): string[] {
 	const theme = clioTheme();
 	const leader = bindings.getKeys?.("clio-coder.leader")[0];
 	const menuKey = leader ? formatKeyLabel(leader) : null;
@@ -77,7 +77,7 @@ function quickHelpRows(width: number, bindings: QuickHelpKeys): string[] {
 		? fitRow(theme.fg("annotation", `Alt+letter runs an action · ${menuKey} then the same letter works anywhere`), width)
 		: null;
 	const left = composerRows(menuKey);
-	const right = actionRows(bindings);
+	const right = actionRows(bindings, omit);
 	const column = (rows: ReadonlyArray<QuickHelpRow>, cells: number): string[] => {
 		const keyWidth = Math.min(16, Math.max(0, ...rows.map((row) => row.key.length)));
 		return rows.map((row) =>
@@ -104,7 +104,12 @@ export interface QuickHelp {
 	close(): void;
 }
 
-export function createQuickHelp(tui: TUI, bindings: QuickHelpKeys): QuickHelp {
+/** `omit` drops actions this session cannot use, such as music while it is off. */
+export function createQuickHelp(
+	tui: TUI,
+	bindings: QuickHelpKeys,
+	omit: (id: ClioKeybinding) => boolean = () => false,
+): QuickHelp {
 	let handle: OverlayHandle | null = null;
 	let cached: { width: number; generation: number | undefined; lines: string[] } | null = null;
 	let bodyRows = 0;
@@ -114,7 +119,7 @@ export function createQuickHelp(tui: TUI, bindings: QuickHelpKeys): QuickHelp {
 		},
 		render(width) {
 			if (cached?.width !== width || cached.generation !== bindings.generation)
-				cached = { width, generation: bindings.generation, lines: quickHelpRows(width, bindings) };
+				cached = { width, generation: bindings.generation, lines: quickHelpRows(width, bindings, omit) };
 			const lines = cached.lines;
 			if (bodyRows <= 1 || lines.length <= bodyRows) return lines;
 			// Any key closes this card, so rows it cannot show are named with where they live, not offered as a scroll.
@@ -132,6 +137,7 @@ export function createQuickHelp(tui: TUI, bindings: QuickHelpKeys): QuickHelp {
 		isOpen: () => handle !== null,
 		open() {
 			if (handle !== null) return;
+			cached = null;
 			handle = showClioOverlayFrame(tui, component, {
 				title: "Keys",
 				markerId: "quick-help",

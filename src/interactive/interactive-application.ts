@@ -829,8 +829,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			})
 		: undefined;
 	let lastSlashCommand: string | null = null;
+	const musicAvailable = (): boolean =>
+		deps.music !== undefined && deps.getSettings?.().integrations.music.enabled === true;
+	const commandHidden = (command: string): boolean => command === "music" && !musicAvailable();
 	const presentation = createInteractivePresentation({
 		getLastCommand: () => lastSlashCommand,
+		commandUnavailable: (command) =>
+			command === "panes" && deps.panes === undefined ? "needs a pane host; this session has none" : undefined,
+		commandHidden,
 		...(deps.jobs ? { jobs: deps.jobs } : {}),
 		getParkedCallCount: () => deps.toolRegistry?.parkedCount() ?? 0,
 		workersDockAvailable: () =>
@@ -1613,6 +1619,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onToolJudging: (toolCallId) => statusController.noteToolJudging(toolCallId),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
 		getDispatchRows: () => dispatchBoardStore.workerRows(),
+		commandHidden,
 		app: { ...deps, ...settingActions },
 		tui,
 		footer,
@@ -2135,6 +2142,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			backgroundActiveDispatch,
 			toggleFilesPane: () => pressFilesKey("composer"),
 			toggleMusic: () => pressMusicKey("composer"),
+			musicAvailable,
 			toggleWorkersDock: () => pressWorkersKey("composer"),
 		},
 		overlay: overlayLifecycle,

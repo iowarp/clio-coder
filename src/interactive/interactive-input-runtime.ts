@@ -90,6 +90,8 @@ export interface InteractiveInputRuntimeDeps {
 		toggleFilesPane(): void;
 		/** Toggle the music pane; the application decides what "inactive" says. */
 		toggleMusic?(): void;
+		/** False while music is off or this session has no pane host: its menu and card rows stay out. */
+		musicAvailable?(): boolean;
 		/** The workers key: the workers dock with a pane host, the Fleet Runs board without one. */
 		toggleWorkersDock?(): void;
 		/** Open the steering queue navigator overlay. */
@@ -247,11 +249,14 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 			}) as Partial<Record<OverlayState, ClioKeybinding>>
 		)[deps.overlay.getState()];
 	const canToggleOwner = () => deps.overlay.getState() === "dispatch-board" || owner().keyboardScope === "browse";
+	const omitAction = (id: Keybinding | undefined): boolean =>
+		id === "clio-coder.music.toggle" && deps.actions.musicAvailable?.() === false;
 	const targets = (): ReadonlyArray<LeaderTarget> => {
 		// Viewport actions work only in the fullscreen layout, so the default layout does not list them.
 		const all = deps.keybindings
 			.leaderTargets()
-			.filter(({ id }) => deps.tui instanceof TuiAltScreen || !id?.startsWith("tui.altScreen."));
+			.filter(({ id }) => deps.tui instanceof TuiAltScreen || !id?.startsWith("tui.altScreen."))
+			.filter(({ id }) => !omitAction(id));
 		const filtered = search()
 			? all.filter(({ id }) => id === "tui.editor.undo" || id === "tui.altScreen.search")
 			: deps.overlay.getState() === "closed"
@@ -296,7 +301,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		);
 		return [...builtins, ...extra];
 	};
-	const quickHelp = deps.tui ? createQuickHelp(deps.tui, deps.keybindings) : undefined;
+	const quickHelp = deps.tui ? createQuickHelp(deps.tui, deps.keybindings, omitAction) : undefined;
 	const menu = deps.tui
 		? createLeaderMenu(
 				deps.tui,

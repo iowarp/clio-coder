@@ -122,6 +122,10 @@ export interface SlashAutocompleteOptions {
 	 * five most-used commands first; without counts the rank order alone applies.
 	 */
 	commandCounts?: () => Readonly<Record<string, number>>;
+	/** Why this session cannot use a built-in command; its rows dim with the reason and sort last in their class. */
+	unavailable?: (command: string) => string | undefined;
+	/** Built-in commands this session leaves out of the palette; typed in full they still answer. */
+	hidden?: (command: string) => boolean;
 }
 
 /** How many of the operator's most-used commands lead a bare `/`. */
@@ -412,6 +416,8 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		private extensionCommands: () => ReadonlyArray<ExtensionCommandRow> = () => [],
 		private isTurnInFlight: () => boolean = () => false,
 		private commandCounts: () => Readonly<Record<string, number>> = () => ({}),
+		private unavailable: (command: string) => string | undefined = () => undefined,
+		private hidden: (command: string) => boolean = () => false,
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
@@ -549,8 +555,11 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			const prefix = context.line.slice(context.commandStart, cursorCol);
 			// A complete built-in name wins: Enter runs it instead of a longer sibling (`/skill`, not `/skills`).
 			if (refs.some((ref) => ref.name === prefix)) return null;
-			let matches: ReadonlyArray<CommandMatch> = matchCommandReference(prefix, refs);
+			let matches: ReadonlyArray<CommandMatch> = matchCommandReference(prefix, refs).filter(
+				(match) => !this.hidden(match.ref.name),
+			);
 			if (prefix.length === 0) matches = personalOrder(matches, this.commandCounts());
+			matches = this.usableFirst(matches);
 			const commandItems: SlashCompletionItem[] = matches.map((match) => this.commandItem(match, context));
 			const nameClass = commandItems.filter((_, index) => {
 				const kind = matches[index]?.class;
@@ -679,6 +688,21 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		return items.length ? { items, prefix: beforeCursor } : null;
 	}
 
+	/** Within each run of one match class, rows this session cannot use follow the usable ones. */
+	private usableFirst(matches: ReadonlyArray<CommandMatch>): ReadonlyArray<CommandMatch> {
+		const out: CommandMatch[] = [];
+		let start = 0;
+		while (start < matches.length) {
+			let end = start;
+			while (end < matches.length && matches[end]?.class === matches[start]?.class) end++;
+			const run = matches.slice(start, end);
+			const blocked = run.filter((match) => this.unavailable(match.ref.name) !== undefined);
+			out.push(...run.filter((match) => !blocked.includes(match)), ...blocked);
+			start = end;
+		}
+		return out;
+	}
+
 	/** One built-in command row; alias and verb rows insert the full command they stand for. */
 	private commandItem(match: CommandMatch, context: SlashContext): SlashCompletionItem {
 		const { ref } = match;
@@ -728,7 +752,12 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			if (description) item.description = `${description}${group}`;
 			if (remainingGrammar) item.remainingGrammar = remainingGrammar;
 		}
-		if (this.isTurnInFlight() && COMMANDS_REFUSED_DURING_TURN.has(ref.name)) {
+		const unavailable = this.unavailable(ref.name);
+		if (unavailable) {
+			item.disabledReason = unavailable;
+			item.description = unavailable;
+			item.nextAction = `Unavailable: ${unavailable}.`;
+		} else if (this.isTurnInFlight() && COMMANDS_REFUSED_DURING_TURN.has(ref.name)) {
 			item.disabledReason = REFUSED_DURING_TURN_REASON;
 			item.description = REFUSED_DURING_TURN_REASON;
 			item.nextAction = `Unavailable: ${REFUSED_DURING_TURN_REASON}.`;
@@ -815,5 +844,7 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.extensionCommands,
 		options.isTurnInFlight,
 		options.commandCounts,
+		options.unavailable,
+		options.hidden,
 	);
 }

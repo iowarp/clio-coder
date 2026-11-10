@@ -88,6 +88,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	now?: () => number;
 	app: OverlayLifecycleApplicationDeps;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
+	/** Built-in commands this session leaves out of `/help`, as the palette does. */
+	commandHidden?: (command: string) => boolean;
 	tui: import("../engine/tui.js").TUI;
 	footer: import("./footer/dashboard.js").FooterDashboardPanel;
 	interactiveTickers: import("./interactive-tickers.js").InteractiveTickers;
@@ -515,6 +517,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getSlashContext: deps.getSlashContext,
 		...(deps.app.resources ? { resources: deps.app.resources } : {}),
 		closeOverlay,
+		...(deps.commandHidden ? { commandHidden: deps.commandHidden } : {}),
 		...(openHelpOverlayFactory ? { openHelpOverlay: openHelpOverlayFactory } : {}),
 		...(openSkillsHubFactory ? { openSkillsHub: openSkillsHubFactory } : {}),
 		...(openExtensionsOverlayFactory ? { openExtensionsOverlay: openExtensionsOverlayFactory } : {}),

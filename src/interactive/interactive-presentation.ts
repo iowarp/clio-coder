@@ -142,6 +142,9 @@ export interface InteractivePresentationDeps {
 	getParkedCallCount?: () => number;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
+	/** Session facts that dim or omit palette rows: `/panes` without a pane host, `/music` while off. */
+	commandUnavailable?: (command: string) => string | undefined;
+	commandHidden?: (command: string) => boolean;
 	getExtensionStatus?: () => ReadonlyArray<string>;
 	/** What an active extension workspace draws in place of the host's parts. */
 	workspaceSurfaces?: WorkspaceSurfaces;
@@ -1045,6 +1048,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		// committed plugin snapshot; submitting one verifies its tree first.
 		promptTemplates: () => deps.resources?.promptsForDisplay(getCwd()).items ?? [],
 		...(deps.extensionCommands ? { extensionCommands: deps.extensionCommands } : {}),
+		...(deps.commandUnavailable ? { unavailable: deps.commandUnavailable } : {}),
+		...(deps.commandHidden ? { hidden: deps.commandHidden } : {}),
 		completionSources: {
 			agents: async () =>
 				(deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({
