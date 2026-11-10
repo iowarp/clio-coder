@@ -292,7 +292,8 @@ export function redactUrlCredentials(value: string): string {
 // cheap. A header keeps its scheme word. Names are whole words, as for URL parameters, so `author: "Jane Doe"` stays.
 const QUOTED_SECRET_CHARS = 1024;
 const QUOTED_HEADER_HEAD = String.raw`\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?`;
-const QUOTED_VALUE_LEAD = String.raw`--?([A-Za-z0-9_-]+)(?:=|\s+)|\b([A-Za-z0-9_.-]+)\s*[=:]\s*`;
+// A lead never starts inside a run of name characters and names stay bounded, so a long dash or `a-` run scans linearly.
+const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])--?([A-Za-z0-9_-]{1,64})(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{1,64})\s*[=:]\s*`;
 const QUOTED_HEADER_RE = new RegExp(
 	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
 	"giu",
