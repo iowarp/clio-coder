@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import { realpathInside } from "./contained-path.js";
 
 export interface ClioMdFingerprintFooter {
@@ -422,9 +423,16 @@ export function renderProjectContextFragment(parsed: ParsedClioMd | string, sour
 }
 
 const PROJECT_CONTEXT_CANDIDATES = ["CLIO-CODER.override.md", "CLIO-CODER.md"] as const;
+// Clio's own checkout keeps a hand-written handbook under its own name, so
+// `context init` stays free to generate CLIO-CODER.md there for comparison.
+const SELF_REPOSITORY_HANDBOOK = "CLIO-DEV.md";
 
 function selectedClioMdPath(directory: string, walkRoot: string, errors: ClioMdLoadError[]): string | null {
-	for (const filename of PROJECT_CONTEXT_CANDIDATES) {
+	const candidates =
+		detectClioCoderRepo(directory).repoRoot === resolve(directory)
+			? [SELF_REPOSITORY_HANDBOOK, ...PROJECT_CONTEXT_CANDIDATES]
+			: PROJECT_CONTEXT_CANDIDATES;
+	for (const filename of candidates) {
 		const filePath = join(directory, filename);
 		if (!existsSync(filePath)) continue;
 		// A cloned repository may ship a link to any file on this machine. Only

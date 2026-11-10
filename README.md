@@ -266,8 +266,8 @@ and decisions in the prompt. For more, use `clio-coder --help`,
 <summary><strong>Working on this repository instead</strong></summary>
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[architecture guide](docs/architecture/architecture.md). A local
-`CLIO-CODER.md` gives checkout guidance when present. Contributions target the
+[architecture guide](docs/architecture/architecture.md). The tracked
+`CLIO-DEV.md` gives checkout guidance. Contributions target the
 current version branch; `main` advances with releases.
 
 </details>

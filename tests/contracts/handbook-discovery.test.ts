@@ -46,4 +46,36 @@ describe("handbook discovery", () => {
 			[child],
 		);
 	});
+
+	it("loads CLIO-DEV.md ahead of CLIO-CODER.md only at the root of Clio's own checkout", () => {
+		const checkout = (dir: string, packageName: string): string => {
+			handbook(dir, "Generated");
+			for (const marker of [
+				"src/entry/orchestrator.ts",
+				"src/worker/entry.ts",
+				"src/domains/prompts/fragments/identity/clio.md",
+			]) {
+				mkdirSync(join(dir, marker, ".."), { recursive: true });
+				writeFileSync(join(dir, marker), "");
+			}
+			mkdirSync(join(dir, ".git"));
+			writeFileSync(
+				join(dir, "package.json"),
+				JSON.stringify({ name: packageName, repository: "https://github.com/iowarp/clio-coder" }),
+			);
+			const own = join(dir, "CLIO-DEV.md");
+			writeFileSync(own, "# Hand-written\n\nHand-written guidance.\n");
+			return own;
+		};
+		const own = checkout(join(root, "clio-checkout"), "@iowarp/clio-coder");
+		deepStrictEqual(
+			loadProjectClioMd(join(root, "clio-checkout")).files.map((file) => file.path),
+			[own],
+		);
+		checkout(join(root, "other-checkout"), "@example/other");
+		deepStrictEqual(
+			loadProjectClioMd(join(root, "other-checkout")).files.map((file) => file.path),
+			[join(root, "other-checkout", "CLIO-CODER.md")],
+		);
+	});
 });

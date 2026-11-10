@@ -741,6 +741,12 @@ function repositoryGroundingText(cwd: string, paths: ReadonlyArray<string>): str
 }
 
 /**
+ * Root files a generation run never reads or cites: its own output, and Clio's
+ * hand-written CLIO-DEV.md, which the generated handbook is compared against.
+ */
+const GENERATION_EXCLUDED_FILES: ReadonlySet<string> = new Set(["CLIO-CODER.md", "CLIO-DEV.md"]);
+
+/**
  * Everything Scout is allowed to cite: sibling agent-context prose, the existing
  * handbook, every indexed path, every indexed symbol, and every runnable package
  * script rendered the way this repository would type it.
@@ -782,7 +788,8 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	].join("\n");
 	let repositoryPaths: ReadonlyArray<string> = input.repositoryFiles ?? [];
 	try {
-		if (!input.repositoryFiles) repositoryPaths = enumerateWorkspaceFiles(input.cwd);
+		if (!input.repositoryFiles)
+			repositoryPaths = enumerateWorkspaceFiles(input.cwd).filter((path) => !GENERATION_EXCLUDED_FILES.has(path));
 	} catch {
 		// An unreadable tree leaves the indexed evidence as the only grounding.
 	}
@@ -2608,7 +2615,11 @@ async function runBootstrapWork(
 		// The handbook this run writes is its output, not repository evidence. A
 		// tracked draft let a rewrite ground slash-joined prose in its own
 		// previous text; only --apply hands the old handbook over, as existingClioMd.
-		const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter((path) => path !== "CLIO-CODER.md");
+		// Clio's own hand-written CLIO-DEV.md stays out too, so a generated
+		// handbook can be compared with it instead of copying it.
+		const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter(
+			(path) => !GENERATION_EXCLUDED_FILES.has(path),
+		);
 		const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
 		enforcementSeen = enforcement;
 		const anchors = codewiki.files
