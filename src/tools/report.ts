@@ -25,6 +25,7 @@ import {
 	reportFingerprint,
 	saveReportDraft,
 	scrubText,
+	stripHiddenText,
 	updateOutbox,
 } from "../domains/report/index.js";
 import { isOneOf, REPORT_AREAS, REPORT_KINDS } from "../domains/report/vocabulary.js";
@@ -81,7 +82,7 @@ interface ReportArgs {
 }
 
 function text(value: unknown): string {
-	return typeof value === "string" ? value.trim() : "";
+	return typeof value === "string" ? stripHiddenText(value).trim() : "";
 }
 
 function parseArgs(args: Record<string, unknown>): ReportArgs | string {

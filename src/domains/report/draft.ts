@@ -64,6 +64,21 @@ export const REPORT_TITLE_MAX = 120;
 export const REPORT_HAPPENED_MIN = 40;
 export const REPORT_BODY_MAX = 60_000;
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what this removes.
+const ESCAPE_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|[\]P_^X][\s\S]*?(?:\u0007|\u001b\\|$)|[ -/]*[0-~])?/gu;
+/** C0 but tab and newline, DEL, C1, zero-width and bidi controls: a terminal hides them, a send posts them. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this finds.
+const HIDDEN_CHARACTER = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/gu;
+
+/** Text the model wrote, without escape sequences or hidden characters, so the review shows all that is sent. */
+export function stripHiddenText(text: string): string {
+	return text.replace(/\r\n/gu, "\n").replace(ESCAPE_SEQUENCE, "").replace(HIDDEN_CHARACTER, "");
+}
+
+function holdsHiddenText(text: string): boolean {
+	return text.replace(/\r\n/gu, "\n").search(HIDDEN_CHARACTER) >= 0;
+}
+
 const CONVENTIONAL_PREFIX = /^(?:fix|feat)(?:\([^)\n]{0,40}\))?:\s*/iu;
 
 /** The title without a conventional prefix the writer may already have typed. */
@@ -78,6 +93,9 @@ export function validateDraft(draft: ReportDraft, rendered?: { body: string }): 
 	if (title.length < REPORT_TITLE_MIN || title.length > REPORT_TITLE_MAX)
 		failures.push(`The title needs ${REPORT_TITLE_MIN} to ${REPORT_TITLE_MAX} characters.`);
 	if (titleCore(draft.title).length === 0) failures.push("The title needs more than its prefix.");
+	const { happened, operatorWords, expected, reproduce, notKnown } = draft.sections;
+	if ([draft.title, happened, operatorWords, expected, reproduce, ...notKnown].some(holdsHiddenText))
+		failures.push("The text holds control or hidden characters a terminal does not show; edit them out.");
 	if (draft.sections.happened.trim().length < REPORT_HAPPENED_MIN && draft.observed.length === 0)
 		failures.push(`"What happened" needs at least ${REPORT_HAPPENED_MIN} characters.`);
 	if (rendered !== undefined && rendered.body.length >= REPORT_BODY_MAX)

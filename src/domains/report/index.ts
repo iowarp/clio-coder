@@ -64,6 +64,7 @@ export {
 	REPORT_BODY_MAX,
 	REPORT_ID,
 	type ReportDraft,
+	stripHiddenText,
 	titleCore,
 	validateDraft,
 } from "./draft.js";
