@@ -1,27 +1,27 @@
 # Dependency patches
 
-## Pi TUI 1.5.0: why the patch remains
+## Pi TUI 1.5.2: why the patch remains
 
-`@earendil-works__pi-tui@1.5.0.patch` is the sole Pi dependency patch, applied
+`@earendil-works__pi-tui@1.5.2.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
 unpatched.** The patch has seventeen hunks in ten `dist/` files and applies to the
-published, unmodified 1.5.0 package. It carries the semantic edit and search
-operations that stock 1.5.0 keeps private, the regular-screen render memo and the
+published, unmodified 1.5.2 package. It carries the semantic edit and search
+operations that stock 1.5.2 keeps private, the regular-screen render memo and the
 kept-rows hook that lets that memo skip rows Clio vouches for.
 Everything else earlier
 revisions patched is now stock Pi or an engine module, as
 [recorded below](#what-was-removed). The table lists every
-hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.5.0.patch` must equal the
+hunk; `grep -c '^@@' patches/@earendil-works__pi-tui@1.5.2.patch` must equal the
 hunk total.
 
-| Hunks | Patched API | Required behavior | Why stock 1.5.0 is insufficient |
+| Hunks | Patched API | Required behavior | Why stock 1.5.2 is insufficient |
 | --- | --- | --- | --- |
 | 2: `components/editor.d.ts`, `components/editor.js` | `Editor.applyEdit` | Invoke undo and the six delete operations (character and word deletion in both directions, and deletion to line start and end) directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. | The edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` alone does not express the same undo, cursor and kill-ring semantics. |
 | 2: `components/input.d.ts`, `components/input.js` | `Input.applyEdit` | The same operations plus `clear`, which keeps undo and kill-ring behavior. | The same private operations on `Input`. |
 | 2: `alt-screen-search.d.ts`, `alt-screen-search.js` | `AltScreenSearchComponent.applyEdit("undo")` | Undo the whole search query and notify the query listener. | The overlay's `Input` is private, and so is the `undo` it would need, so a router cannot undo a query. |
 | 2: `tui-alt-screen.d.ts`, `tui-alt-screen.js` | `TuiAltScreen.isSearchFocused` and `undoSearchQuery`; `scrollToPrompt`, `toggleSearch`, `closeSearch` and `navigateSearch` made public | Clio's input router sends Escape, undo, prompt navigation and match navigation to the current owner, including the native search overlay. | Search focus and these methods are private. The public viewport scroll methods cannot query or manipulate search ownership or its undo history, and `getScreenLines()` exposes painted rows, not search state. |
-| 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
-| 1: `tui-main-screen.js` | `TuiMainScreen.doRender` OSC 133 strip | Run the marker strip only on a row that starts with `\x1b]133;`, so a frame makes no regex call for any other row. The pattern is anchored at the row start, so the output is unchanged. | Stock 1.5.0 calls `replace` with the anchored pattern on every row of every frame, which cost 3.25 ms of a frame while a 500 KB reply streamed (#428). The call sits inside `doRender`, so no subclass can skip it. |
+| 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. The memo's `applyLineResets` replaces the stock method, so it also removes stray cursor markers from a row before normalizing it, as stock 1.5.2 does. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
+| 1: `tui-main-screen.js` | `TuiMainScreen.doRender` OSC 133 strip | Run the marker strip only on a row that starts with `\x1b]133;`, so a frame makes no regex call for any other row. The pattern is anchored at the row start, so the output is unchanged. | Stock 1.5.2 calls `replace` with the anchored pattern on every row of every frame, which cost 3.25 ms of a frame while a 500 KB reply streamed (#428). The call sits inside `doRender`, so no subclass can skip it. |
 | 3: `tui-main-screen.d.ts`, `tui-main-screen.js` | `TuiMainScreen.keptRenderedRows` (protected hook, 0 by default) and `keptLeadingRows` | A subclass may report how many leading rendered rows are the very strings of the last frame's. `doRender` clamps that count to rows outside both frames' viewports, at an unchanged size and with no overlay, then takes those rows as the last frame stripped, reset and resolved them: the OSC 133 strip rewrites its own array in place from the first row not kept, `applyLineResets` copies the kept rows' output and image flags, and the diff loop starts below them. Clio's `InstrumentedTuiMainScreen` answers from the root's count (`src/interactive/kept-rows.ts`). | The strip, the reset memo's compare and the diff loop each visited every row of a 500 KB transcript on every frame although only the last rows change, and they sit inside `doRender`. A keystroke frame at reply-500k went from 1.19 ms to 0.13 ms p50 ([measured below](#measured-cost-of-the-kept-rows-hook)). |
 
 The semantic operations call Pi's existing editing and search implementation;
@@ -36,12 +36,13 @@ auth boundary is Clio application code and adds no dependency patch.
 ## What was removed
 
 The patch carried 26 hunks before the Pi 1.0 adoption series and carries
-fourteen now: thirteen kept from then and the OSC 133 prefix check added since.
+seventeen now: thirteen kept from then, and the OSC 133 prefix check and the
+three kept-rows hunks added since.
 The thirteen removed hunks fall into five groups.
 
 | Removed | Replaced by | Cost and evidence |
 | --- | --- | --- |
-| `wrapTextWithAnsi` whitespace tokens (2 hunks in `dist/utils.js`) | Stock Pi 1.5.0 | None. `wrapTextWithAnsi("\x1b[1mhello\x1b[22m world", 5)` yields `hello` and `world` on the unmodified 1.5.0 package, and so does the foreground color form. |
+| `wrapTextWithAnsi` whitespace tokens (2 hunks in `dist/utils.js`) | Stock Pi 1.5.2 | None. `wrapTextWithAnsi("\x1b[1mhello\x1b[22m world", 5)` yields `hello` and `world` on the unmodified 1.5.2 package, and so does the foreground color form. |
 | `setApplicationInputPolicy` and its dispatch block (5 hunks in `dist/tui.d.ts` and `dist/tui.js`) | `src/engine/application-input-tui.ts`, a subclass pair that registers one gate through the public `addInputListener` | No operator-visible change. A policy returning `{ data: "" }` no longer drops the input before every listener, and stock `TuiAltScreen` instances (the fleet watch and follow views) no longer drop key releases before their listeners, which compare exact bytes releases never equal. |
 | `lexMarkdownBlocks` export (4 hunks in the Markdown and index files) | Stock `Markdown` for assistant text in `src/interactive/chat-panel.ts` (one per finished segment; a streaming segment renders its settled head and open tail apart, #428), with Clio's theme, a `highlightCode` hook and a `transform` hook for table fit and Mermaid | The visible changes are listed in [the Pi boundary table](../docs/architecture/pi-boundary.md). |
 | `Container.render` exact-size copy (1 hunk) | Stock Pi | A smaller regular-screen cost, measured below. |
@@ -86,12 +87,32 @@ synthetic 138-character styled rows cost 0.07 ms per frame at 2.2k rows,
 0.80 ms at 22.9k and 1.37 ms at 40k (Node 24, load average 0.5). The patch
 leaves it stock for the 1.4.0 upgrade; memoizing it is a separate decision.
 
-Stock 1.5.0 `doRender` also passes every row through an OSC 133 strip (a regex
+Since 1.5.0, stock `doRender` also passes every row through an OSC 133 strip (a regex
 replace and a new array) before compositing. A frame probe over 22.9k synthetic
 styled rows with one row changing per frame, patched on both versions, took a
 median of 1.0 to 1.1 ms on 1.4.0 and 1.6 to 1.7 ms on 1.5.0 (Node 24, two runs
 each). That new step is the likely cause, though it was not profiled, and the
-memo stays in effect. The patch leaves that step stock.
+memo stays in effect. The patch has since narrowed that step to rows that start
+with the marker, which is the OSC 133 row in the table above.
+
+### The 1.5.2 rebase
+
+Pi 1.5.1 and 1.5.2 changed six pi-tui files, and two of them carry hunks:
+`components/editor.js` (paste marker renumbering) and `tui-alt-screen.js` (Kitty
+image draw order). Neither change touches the patched lines, and
+`tui-main-screen.js` is byte-identical in the published 1.5.0 and 1.5.2
+packages. Fifteen hunks carried over unchanged and no hunk was dropped, because
+1.5.2 makes none of the patched seams public.
+
+Two hunks in `tui-main-screen.js` changed. Stock 1.5.2 `TuiBase.applyLineResets`
+removes every cursor marker from a row before normalizing it, so that an
+internal marker never reaches the terminal (upstream #9441). The reset memo
+replaces that method on the regular screen, so the memo hunk now makes the same
+`replaceAll(CURSOR_MARKER, "")` call on each row it normalizes, and the import
+hunk brings `CURSOR_MARKER` in from `./tui.js`. Without that edit the patch
+still applied cleanly and silently kept the 1.5.0 behavior on Clio's default
+screen. A row is stripped once and then reused from the memo. The frame cost
+figures above were not measured again on 1.5.2.
 
 ## Alternatives considered
 

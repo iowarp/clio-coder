@@ -38,7 +38,7 @@ index 7e6a8bc120ec687d4a647afff50d81fde6d5f23a..b98b2c14ac97c8e43ca0820bd78af2c2
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index ab247ab4b835d4e200ac0829fde0957474963030..30fdf441543f5619a571dd825d21a8cf5511f3f9 100644
+index c7c90ef1dcb541fede73c0061424a2c4f5e86099..6a3d35e15a3563bce2de0b186ba0c7ef288dc739 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -549,6 +549,18 @@ export class Editor {
@@ -126,7 +126,7 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..2592daf00852afb9a57d2fa78e84c337
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index cd41095edc02c3b6b9dc622414fd4942d095d0f6..61ffb093f8cff281cc671d5c68108f2509f35e1a 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..71481437b5d5ca786243a2ed67030fb5d84e7aff 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
@@ -159,20 +159,22 @@ index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a460
      protected beforeTerminalStop(options: TuiStopOptions): void;
      private collectKittyImageIds;
 diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
-index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7327408ce 100644
+index e00273ab6b20f916256aea3ddae374a88641e2ed..c09c85b1f16dbdf10fc4f7789eee56abbfa9fe18 100644
 --- a/dist/tui-main-screen.js
 +++ b/dist/tui-main-screen.js
-@@ -3,7 +3,8 @@ import * as os from "node:os";
+@@ -2,8 +2,9 @@ import * as fs from "node:fs";
+ import * as os from "node:os";
  import * as path from "node:path";
  import { deleteKittyImage, isImageLine } from "./terminal-image.js";
- import { TuiBase } from "./tui.js";
+-import { TuiBase } from "./tui.js";
 -import { visibleWidth } from "./utils.js";
++import { CURSOR_MARKER, TuiBase } from "./tui.js";
 +import { normalizeTerminalOutput, visibleWidth } from "./utils.js";
 +const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
  /** OSC 133 prompt markers at the start of a rendered line. Fullscreen uses them for prompt navigation. */
  const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
  const KITTY_SEQUENCE_PREFIX = "\x1b_G";
-@@ -109,6 +110,87 @@ export class TuiMainScreen extends TuiBase {
+@@ -109,6 +110,88 @@ export class TuiMainScreen extends TuiBase {
      hardwareCursorRow = 0;
      maxLinesRendered = 0;
      previousViewportTop = 0;
@@ -240,7 +242,8 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
 +                continue;
 +            }
 +            image[i] = 0;
-+            lines[i] = normalizeTerminalOutput(line) + SEGMENT_RESET;
++            // Clio patch: stock 1.5.2 `applyLineResets` drops stray cursor markers here, and this override replaces it.
++            lines[i] = normalizeTerminalOutput(line.replaceAll(CURSOR_MARKER, "")) + SEGMENT_RESET;
 +        }
 +        raw.length = lines.length;
 +        this.lineResetMemo = { raw, out: lines, image };
@@ -260,7 +263,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
      captureRenderState() {
          return {
              previousLines: [...this.previousLines],
-@@ -131,6 +213,8 @@ export class TuiMainScreen extends TuiBase {
+@@ -131,6 +214,8 @@ export class TuiMainScreen extends TuiBase {
          this.previousViewportTop = state.previousViewportTop;
      }
      resetRenderState() {
@@ -269,7 +272,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
          this.previousLines = [];
          this.previousWidth = -1;
          this.previousHeight = -1;
-@@ -153,8 +237,8 @@ export class TuiMainScreen extends TuiBase {
+@@ -153,8 +238,8 @@ export class TuiMainScreen extends TuiBase {
      }
      collectKittyImageIds(lines) {
          const ids = new Set();
@@ -280,7 +283,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
                  ids.add(id);
              }
          }
-@@ -185,7 +269,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -185,7 +270,7 @@ export class TuiMainScreen extends TuiBase {
          let expandedFirstChanged = firstChanged;
          let expandedLastChanged = lastChanged;
          const expandForLines = (lines) => {
@@ -289,7 +292,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
                  if (extractKittyImageIds(lines[i]).length === 0)
                      continue;
                  const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
-@@ -230,7 +314,27 @@ export class TuiMainScreen extends TuiBase {
+@@ -230,7 +315,27 @@ export class TuiMainScreen extends TuiBase {
          // Render all components to get new lines
          // Resolve fake cursors before compositing so overlays and line slicing see plain SGR codes
          // Drop OSC 133 markers: the terminal reads 133;A as a new shell prompt, which ends program status (OSC 7501)
@@ -318,7 +321,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
          // Composite overlays into the rendered lines (before differential compare)
          if (this.hasOverlayEntries) {
              newLines = this.compositeOverlays(newLines, width, height);
-@@ -238,6 +342,9 @@ export class TuiMainScreen extends TuiBase {
+@@ -238,6 +343,9 @@ export class TuiMainScreen extends TuiBase {
          // Extract cursor position before applying line resets (marker must be found first)
          const cursorPos = this.extractCursorPosition(newLines, height);
          newLines = this.applyLineResets(newLines);
@@ -328,7 +331,7 @@ index e00273ab6b20f916256aea3ddae374a88641e2ed..092127450b9592e0a24d4372fb55aad7
          // Helper to clear scrollback and viewport and render all new lines
          const fullRender = (clear) => {
              this.fullRedrawCount += 1;
-@@ -325,7 +432,7 @@ export class TuiMainScreen extends TuiBase {
+@@ -325,7 +433,7 @@ export class TuiMainScreen extends TuiBase {
          let firstChanged = -1;
          let lastChanged = -1;
          const maxLines = Math.max(newLines.length, this.previousLines.length);

@@ -139,9 +139,9 @@
 		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts"
 	},
 	"dependencies": {
-		"@earendil-works/pi-agent-core": "1.5.0",
-		"@earendil-works/pi-ai": "1.5.0",
-		"@earendil-works/pi-tui": "1.5.0",
+		"@earendil-works/pi-agent-core": "1.5.2",
+		"@earendil-works/pi-ai": "1.5.2",
+		"@earendil-works/pi-tui": "1.5.2",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"grok-mermaid": "0.2.2",
 		"minimatch": "11.0.5",

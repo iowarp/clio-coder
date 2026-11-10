@@ -38,4 +38,4 @@ overrides:
   # GHSA-mrhx-c7xc-m3w5 (high): the zod the Anthropic, OpenAI and MCP SDKs resolve.
   "zod@<4.6.6": "4.6.6"
 patchedDependencies:
-  '@earendil-works/pi-tui@1.5.0': patches/@earendil-works__pi-tui@1.5.0.patch
+  '@earendil-works/pi-tui@1.5.2': patches/@earendil-works__pi-tui@1.5.2.patch
