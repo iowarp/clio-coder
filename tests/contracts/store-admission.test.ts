@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { storeBlobPath, storeProjectDir } from "../../src/core/store-paths.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -43,6 +43,16 @@ describe("store safety admission", () => {
 		deepStrictEqual(store({ op: "put", tag: "sim", path: "../outside.txt" }).reasons, [
 			"store-put-source-outside-workspace",
 		]);
+	});
+
+	it("admits a put over an existing blob like a remove", () => {
+		const existing = storeBlobPath(cwd, "sim", "a.txt");
+		mkdirSync(dirname(existing), { recursive: true });
+		writeFileSync(existing, "irreplaceable\n");
+		deepStrictEqual(classify({ tool: ToolNames.Store, args: { op: "put", tag: "sim", path: "out/a.txt" } }), {
+			actionClass: "destructive",
+			reasons: ["store-replace: sim:a.txt"],
+		});
 	});
 
 	it("refuses a store write outside the run's write roots", () => {

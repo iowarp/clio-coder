@@ -722,6 +722,15 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 
 const STORE_WRITE_OPS: ReadonlySet<unknown> = new Set(["create", "put", "note"]);
 
+function isRegularFile(target: string): boolean {
+	try {
+		return lstatSync(target).isFile();
+	} catch {
+		// Missing, or under a non-directory: nothing there to replace.
+		return false;
+	}
+}
+
 /**
  * The store is one tool with read, write and destructive ops, and its writes
  * land in Clio's own data directory rather than at the `path` argument, which
@@ -755,6 +764,12 @@ function classifyStore(args: Record<string, unknown> | undefined): Classificatio
 		target = storeWriteTarget(process.cwd(), args);
 	} catch {
 		// An unresolvable Clio home names no target; the tool refuses the call too.
+	}
+	// The local backend keeps no blob versions and no snapshot covers the store, so a put over an
+	// existing blob destroys its bytes like remove does and is admitted like remove.
+	if (op === "put" && target !== null && isRegularFile(target)) {
+		const blob = typeof args?.blob === "string" && args.blob.length > 0 ? args.blob : path.basename(String(sourceArg));
+		return { actionClass: "destructive", reasons: [`store-replace: ${String(args?.tag)}:${blob}`] };
 	}
 	return { actionClass: "write", reasons: target === null ? [] : [`store-write: ${target}`] };
 }
