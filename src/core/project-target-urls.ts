@@ -1,12 +1,14 @@
 /**
- * Targets a project settings layer pointed at a non-loopback URL. Such a target
- * never receives the operator's stored or environment credential (review
+ * Targets a project settings layer pointed at a URL. Such a target never
+ * receives the operator's stored or environment credential (review
  * R1-safety-secrets-05): trusting a repository for its rules is not consent to
- * send provider keys wherever its settings say. The layered settings reader
- * records them; auth resolution reads them. Entries accumulate per process, so
- * a host reading several workspaces never forgets one it has seen.
+ * send provider keys wherever its settings say. A loopback URL is no
+ * exception for a target that sends a credential, since another user on a
+ * shared host can own the port (R2-safety-secrets-17). The layered settings
+ * reader records them; auth resolution reads them. Entries accumulate per
+ * process, so a host reading several workspaces never forgets one it has seen.
  */
-const projectRemoteTargets = new Set<string>();
+const projectTargets = new Set<string>();
 
 function entryKey(id: string, url: string): string {
 	return `${id}\u0000${url}`;
@@ -31,12 +33,17 @@ export function isLoopbackUrl(url: string): boolean {
 export function noteProjectTargets(targets: ReadonlyArray<{ id: string; url?: string }>): void {
 	for (const target of targets) {
 		const url = target.url?.trim();
-		if (url && !isLoopbackUrl(url)) projectRemoteTargets.add(entryKey(target.id, url));
+		if (url) projectTargets.add(entryKey(target.id, url));
 	}
 }
 
-/** The URL when this target came from a project layer and points off this machine, else null. */
-export function projectRemoteTargetUrl(target: { id: string; url?: string }): string | null {
+/**
+ * The URL when this target came from a project layer and the operator's
+ * credential must not follow it, else null. Only a loopback URL for a target
+ * that sends no credential is exempt.
+ */
+export function projectChosenTargetUrl(target: { id: string; url?: string }, sendsCredential: boolean): string | null {
 	const url = target.url?.trim();
-	return url && projectRemoteTargets.has(entryKey(target.id, url)) ? url : null;
+	if (!url || !projectTargets.has(entryKey(target.id, url))) return null;
+	return sendsCredential || !isLoopbackUrl(url) ? url : null;
 }

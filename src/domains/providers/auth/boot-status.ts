@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { projectRemoteTargetUrl } from "../../../core/project-target-urls.js";
+import { projectChosenTargetUrl } from "../../../core/project-target-urls.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/env-api-keys.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
@@ -57,7 +57,7 @@ export function bootAuthStatus(target: TargetDescriptor, runtime: RuntimeAuthMet
 	const providerId =
 		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
 	if (!required) return { providerId, required: false, available: true };
-	if (projectRemoteTargetUrl(target)) return { providerId, required: true, available: false };
+	if (projectChosenTargetUrl(target, true)) return { providerId, required: true, available: false };
 	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
 	return {
 		providerId,

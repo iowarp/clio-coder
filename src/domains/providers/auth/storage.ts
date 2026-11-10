@@ -1,5 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { projectRemoteTargetUrl } from "../../../core/project-target-urls.js";
+import { projectChosenTargetUrl } from "../../../core/project-target-urls.js";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import { telemetryHub } from "../../../core/telemetry/hub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
@@ -320,7 +320,7 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
 	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : target.auth?.apiKeyEnvVar?.trim();
 	if (targetEnvVar) authTarget.targetEnvVar = targetEnvVar;
-	const projectUrl = projectRemoteTargetUrl(target);
+	const projectUrl = projectChosenTargetUrl(target, targetRequiresAuth(target, runtime));
 	if (projectUrl) {
 		authTarget.credentialRefusal = `project settings point target ${target.id} at ${projectUrl}; Clio does not send your stored or environment ${providerId} credential to a URL a project chose. Define this target in your user settings to use it.`;
 	}
