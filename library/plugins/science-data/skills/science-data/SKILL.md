@@ -27,7 +27,9 @@ Call it with `gateway(op="call", capability="store", args={...})`.
 - Keep intermediates in a tag of class `cache` and results in a tag of class
   `output` (`op="create"` with `class` and a `description`).
 - When dispatching workers on data, name each blob as `<tag>:<blob>` in the
-  task text. Workers read the store; the dispatching session puts results.
+  task text, and grant the output tag with the dispatch's `tags` so the
+  worker can put its results there. Without a grant the worker reads the
+  store and the dispatching session puts results.
 - Never `op="remove"` a blob to make room unless the user asked. Say what is
   large instead.
 - With no tags, say so, and name `op="create"` and `clio-coder store put` as
