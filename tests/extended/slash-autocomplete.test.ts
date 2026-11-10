@@ -108,6 +108,16 @@ test("a retired name, alias or template typed in full offers no row, so Enter su
 	}
 });
 
+test("Enter runs bare only a row whose name was typed, never a letters or description match", async () => {
+	const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+	const bare = async (line: string) =>
+		((await provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal }))?.items ?? [])
+			.filter((item) => (item as SlashCompletionItem).runsBare)
+			.map((item) => item.value);
+	for (const line of ["/session", "/resources", "/save", "/start"]) deepStrictEqual(await bare(line), [], line);
+	deepStrictEqual(await bare("/comp"), ["compact"]);
+});
+
 // Stop presentation construction at its existing autocomplete factory seam;
 // the real presentation supplies the catalogs and the real provider consumes them.
 function presentationProvider(userTasks?: UserTasksStore) {
