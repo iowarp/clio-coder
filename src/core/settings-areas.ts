@@ -186,6 +186,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "fleet.worktrees.root":
 			return place("workspace", "Task copies");
 		case "fleet.concurrency":
+		case "fleet.staggerSharedPrefix":
 			return place("fleet", "Capacity & placement");
 		case "fleet.limits.toolCallsPerRun":
 		case "fleet.retry.maxRetries":

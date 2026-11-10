@@ -1406,6 +1406,7 @@ export function buildSettingItems(
 		settingItem("workers.maxRetries", String(settings.fleet.retry.maxRetries), {
 			values: ["0", "1", "2", "3", "5", "8"],
 		}),
+		settingItem("fleet.staggerSharedPrefix", String(settings.fleet.staggerSharedPrefix), { values: ["true", "false"] }),
 		settingItem("workers.resilienceCooldownMs", String(resilienceCooldownMs), {
 			affordance: "free text",
 		}),
@@ -2305,6 +2306,9 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 			return;
 		case "workers.default.thinkingLevel":
 			settings.fleet.default.thinkingLevel = thinkingLevelFromChoiceLabel(value) ?? settings.fleet.default.thinkingLevel;
+			return;
+		case "fleet.staggerSharedPrefix":
+			if (value === "true" || value === "false") settings.fleet.staggerSharedPrefix = value === "true";
 			return;
 		case "panes.notifications":
 			if (value === "failures" || value === "all" || value === "off") settings.interface.panes.notifications = value;

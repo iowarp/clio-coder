@@ -61,6 +61,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.profiles": "Add profile",
 	"workers.agentBindings": "Bind agent",
 	"workers.maxRetries": "Fleet retries",
+	"fleet.staggerSharedPrefix": "Stagger shared-prefix workers",
 	"workers.resilienceCooldownMs": "Wait after a route fails",
 	"routing.activeRoles": "Roles using automatic routing",
 	"routing.activePostures": "Automatic routing priorities",
@@ -159,6 +160,8 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.profiles": "Saved connection, model, and reasoning choices for workers. Enter adds one.",
 	"workers.agentBindings": "Choose which saved profile each Clio agent uses. Enter adds one.",
 	"workers.maxRetries": "Automatic retries for a retryable worker outcome.",
+	"fleet.staggerSharedPrefix":
+		"Start the rest of a parallel batch whose workers share a prompt prefix once the first streams (at most 15 s), so they reuse its cache.",
 	"workers.resilienceCooldownMs":
 		"How long a failing target, runtime, and model route is skipped before it is tried again.",
 	"routing.activeRoles": "Types of worker allowed to use an automatically selected model.",

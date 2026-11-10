@@ -252,6 +252,14 @@ export interface DispatchAdmissionObserver {
 	onAdmitted(run: { runId: string; pid: number | null; runtimeKind: RunEnvelope["runtimeKind"] }): void;
 }
 
+/** C-04: one shared-prefix group of a batch; its later runs hold until the leader's first token. */
+export interface DispatchPrefixGroup {
+	readonly leaderRunId: string;
+	readonly released: Promise<void>;
+	release(): void;
+	isReleased(): boolean;
+}
+
 /** Invocation-owned admission bounds; never serialized into model-authored requests. */
 export interface DispatchPreparationOptions {
 	turnConstraints?: TurnConstraints;
@@ -261,6 +269,8 @@ export interface DispatchPreparationOptions {
 	hostRun?: { readonly runId: string; readonly lineage: Readonly<RunLineage> };
 	signal?: AbortSignal;
 	deadlineAt?: number;
+	/** C-04: a parallel batch's shared-prefix groups, keyed by prefix; absent outside a staggered batch. */
+	prefixGroups?: Map<string, DispatchPrefixGroup>;
 }
 
 /** Side-effect-free effective routing used to construct a dispatch approval artifact. */

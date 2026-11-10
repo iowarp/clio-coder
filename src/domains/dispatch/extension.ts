@@ -312,6 +312,7 @@ import type {
 	DispatchContract,
 	DispatchDerivedGrants,
 	DispatchPlanTaskResolution,
+	DispatchPrefixGroup,
 	DispatchPreparationOptions,
 	DispatchRequest,
 	DispatchSnapshot,
@@ -397,6 +398,7 @@ import {
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
+import { holdForSharedPrefix } from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -7594,6 +7596,7 @@ export function createDispatchBundle(
 		let parentJournal: TelemetrySessionLease | undefined;
 		// How the worker loop ended, once known; a failed finalization still settles the run journal with it.
 		let resolvedTerminal: ResolvedTerminalReason | undefined;
+		let prefixLeader: DispatchPrefixGroup | undefined;
 		const closeRunJournal = async () => {
 			try {
 				await runJournal?.close();
@@ -7632,12 +7635,35 @@ export function createDispatchBundle(
 				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
 				...(spec.extensionHooks !== undefined ? { onHookRequest } : {}),
 			};
+			const prefixHold = await holdForSharedPrefix(
+				preparation?.prefixGroups,
+				lifecycle.runtimeKind === "http" && lifecycle.promptSignature !== null && req.runIdHint !== undefined
+					? sha256(
+							JSON.stringify([
+								lifecycle.target.target.id,
+								lifecycle.target.runtime.id,
+								endpoint?.key ?? null,
+								lifecycle.target.wireModelId,
+								lifecycle.toolSignature,
+								lifecycle.promptSignature,
+							]),
+						)
+					: null,
+				req.runIdHint ?? "",
+				preparation?.signal ? { signal: preparation.signal } : {},
+			);
+			if (prefixHold?.role === "leader") prefixLeader = prefixHold.group;
+			else if (prefixHold?.role === "follower") {
+				timing.prefixHoldMs = prefixHold.heldMs;
+				timing.prefixLeaderRunId = prefixHold.leaderRunId;
+			}
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
 			preparation?.signal?.throwIfAborted();
 			// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
 			if (narrowPermitToLiveLevel()) spec = buildSpec();
 			worker = (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
+			prefixLeader?.release();
 			await closeRunJournal();
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
@@ -7692,6 +7718,10 @@ export function createDispatchBundle(
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
 		const workerDone = worker.promise;
+		if (prefixLeader) {
+			const release = prefixLeader.release;
+			workerDone.then(release, release);
+		}
 
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
@@ -7791,6 +7821,17 @@ export function createDispatchBundle(
 				return;
 			}
 			outputCapture.observe(raw);
+			if (
+				prefixLeader &&
+				raw !== null &&
+				typeof raw === "object" &&
+				"type" in raw &&
+				(raw.type === "message_update" ||
+					(raw.type === "message_end" &&
+						"message" in raw &&
+						(raw.message as { role?: unknown } | null)?.role === "assistant"))
+			)
+				prefixLeader.release();
 			const event = raw as {
 				type?: string;
 				message?: {
@@ -10375,10 +10416,15 @@ export function createDispatchBundle(
 			reqs.length > 1 && reqs.some((req) => (req.resolvedVerification?.length ?? 0) > 0)
 				? createBatchVerificationGate()
 				: undefined;
+		// C-04: workers that share a prompt prefix start after the first one streams, so they read its cache entry.
+		const staggered =
+			reqs.length > 1 && getEffectiveSettings()?.fleet.staggerSharedPrefix !== false
+				? { ...preparation, prefixGroups: new Map<string, DispatchPrefixGroup>() }
+				: preparation;
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
 		try {
 			for (const req of reqs) {
-				const handle = await dispatch(req, undefined, preparation, settlement);
+				const handle = await dispatch(req, undefined, staggered, settlement);
 				handles.push({ ...handle, agentId: req.agentId });
 			}
 		} catch (err) {

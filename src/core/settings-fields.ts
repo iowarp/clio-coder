@@ -220,6 +220,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"snapshots",
 	"speculativeDispatch",
 	"speculativeDraftMaxTokens",
+	"staggerSharedPrefix",
 	"stallTimeoutMs",
 	"startup",
 	"station",

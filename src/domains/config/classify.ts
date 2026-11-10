@@ -99,6 +99,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.worktrees",
 	"fleet.limits",
 	"fleet.history",
+	"fleet.staggerSharedPrefix",
 	"context",
 	"safety.limits",
 	"safety.limits.workerResponseSeconds",

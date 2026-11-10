@@ -1740,6 +1740,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"nodes",
 				"permissions",
 				"concurrency",
+				"staggerSharedPrefix",
 				"worktrees",
 				"retry",
 				"limits",
@@ -1989,6 +1990,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				const parsed = expectInteger(issues, "fleet.concurrency", rawFleet.concurrency, { min: 1 });
 				if (parsed !== undefined) settings.fleet.concurrency = parsed;
 			}
+		}
+		if ("staggerSharedPrefix" in rawFleet) {
+			const parsed = expectBoolean(issues, "fleet.staggerSharedPrefix", rawFleet.staggerSharedPrefix);
+			if (parsed !== undefined) settings.fleet.staggerSharedPrefix = parsed;
 		}
 		if ("worktrees" in rawFleet) {
 			const rawWorktrees = rawFleet.worktrees;
