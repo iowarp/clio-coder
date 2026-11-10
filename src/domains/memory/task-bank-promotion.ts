@@ -15,7 +15,7 @@
  * made by hand from `/memory`.
  */
 
-import { commandEvidenceRef, simpleInvocation, sourceEvidenceRef } from "./command-evidence.js";
+import { commandClaimRef, commandEvidenceRef, simpleInvocation, sourceEvidenceRef } from "./command-evidence.js";
 import { applyMemoryGate } from "./guardian-gate.js";
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
 import { memoryRecordFromPromotion } from "./promotion.js";
@@ -157,17 +157,15 @@ function similarRepositoryLesson(
  * that also quotes a source carries its command only once the caller saw that
  * command succeed: the gate approves without the operator only on a `command:`
  * ref, and a lesson kept on its quote alone must not reach it by naming one.
+ * Until then it carries the command as a non-gating `command-claimed:` ref.
  */
 export function evidenceIdentity(entry: TaskMemoryEntry, commandVerified = false): string[] {
 	const refs: string[] = [];
 	const command = entry.evidenceCommand?.trim();
-	if (
-		command &&
-		(commandVerified || entry.evidenceSource === undefined) &&
-		simpleInvocation(command) !== null &&
-		entry.content.includes(`\`${command}\``)
-	)
-		refs.push(commandEvidenceRef(command));
+	if (command && simpleInvocation(command) !== null && entry.content.includes(`\`${command}\``))
+		refs.push(
+			commandVerified || entry.evidenceSource === undefined ? commandEvidenceRef(command) : commandClaimRef(command),
+		);
 	if (entry.evidenceSource) refs.push(sourceEvidenceRef(entry.evidenceSource.path, entry.evidenceSource.quote));
 	return refs;
 }

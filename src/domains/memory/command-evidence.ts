@@ -216,10 +216,19 @@ export function sameCommand(left: string, right: string): boolean {
 }
 
 export const COMMAND_EVIDENCE_REF_PREFIX = "command:";
+export const COMMAND_CLAIM_REF_PREFIX = "command-claimed:";
 
 /** Durable evidence identity for one exact command, kept apart from the claim's wording. */
 export function commandEvidenceRef(command: string): string {
 	return `${COMMAND_EVIDENCE_REF_PREFIX}${createHash("sha256").update(commandIdentity(command)).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * The same identity for a command a lesson names but the host has not seen succeed. It grants no evidence; it only
+ * lets the gate see that the lesson claims the command, so a rejected one still holds a later rewording.
+ */
+export function commandClaimRef(command: string): string {
+	return `${COMMAND_CLAIM_REF_PREFIX}${commandEvidenceRef(command).slice(COMMAND_EVIDENCE_REF_PREFIX.length)}`;
 }
 
 /** Durable evidence identity for one quoted source span. */

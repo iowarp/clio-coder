@@ -9,6 +9,7 @@ import { readRetention, retentionPath } from "../../src/domains/memory/completio
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
+import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -552,6 +553,40 @@ test("lessons quoting the same command stay separate claims, and one session hol
 		ok(
 			stored.every((record: { evidenceRefs: string[] }) => record.evidenceRefs.some((ref) => ref.startsWith("command:"))),
 		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a rewording of a rejected lesson is held even once its command is verified", async () => {
+	const root = mkdtempSync(join(tmpdir(), "memory-rejected-claim-"));
+	const dataDir = join(root, "data");
+	const cwd = join(root, "project");
+	mkdirSync(cwd, { recursive: true });
+	const entry = (content: string) =>
+		new TaskMemoryBank().saveKnowledge(content, {
+			durable: true,
+			evidenceCommand: COMMAND,
+			evidenceSource: { path: "scripts/check.mjs", quote: "process.exit(2);" },
+		});
+	try {
+		const first = await proposeInjectedTaskMemory(dataDir, {
+			sessionId: "s1",
+			cwd,
+			entries: [entry(`Run \`${COMMAND}\` before a release.`)],
+		});
+		const id = first.records[0]?.id;
+		ok(id);
+		await rejectMemoryRecord(dataDir, id);
+		const reworded = entry(`Always run \`${COMMAND}\` before releasing.`);
+		const second = await proposeInjectedTaskMemory(dataDir, {
+			sessionId: "s2",
+			cwd,
+			entries: [reworded],
+			observation: "held",
+			commandVerified: new Set([reworded.id]),
+		});
+		strictEqual(second.records[0]?.approved, false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

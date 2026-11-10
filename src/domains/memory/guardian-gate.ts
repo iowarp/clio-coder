@@ -17,6 +17,7 @@
  * an operator rejection or approval is a decision the guardian never revisits.
  */
 
+import { COMMAND_CLAIM_REF_PREFIX, COMMAND_EVIDENCE_REF_PREFIX } from "./command-evidence.js";
 import { cloneMemoryRecord } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { mutateMemoryRecords } from "./store.js";
@@ -104,7 +105,8 @@ function sourceOnlyEvidence(record: Pick<MemoryRecord, "evidenceRefs">): boolean
  * An operator-rejected record holds it too. The rejection matches only its
  * exact wording (`similarRepositoryLesson`), so without this a rewording of
  * the declined lesson citing the same command would be approved on one
- * session's word and delivered as though the operator had never ruled.
+ * session's word and delivered as though the operator had never ruled. A
+ * stored record's unverified `command-claimed:` ref counts as its claim here.
  */
 function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<MemoryRecord>): boolean {
 	const commands = record.evidenceRefs.filter((ref) => ref.startsWith("command:"));
@@ -117,7 +119,13 @@ function commandAlreadyClaimed(record: MemoryRecord, store: ReadonlyArray<Memory
 			other.scope === "repo" &&
 			other.repository?.kind === repository.kind &&
 			other.repository.key === repository.key &&
-			other.evidenceRefs.some((ref) => commands.includes(ref)),
+			other.evidenceRefs.some((ref) =>
+				commands.includes(
+					ref.startsWith(COMMAND_CLAIM_REF_PREFIX)
+						? `${COMMAND_EVIDENCE_REF_PREFIX}${ref.slice(COMMAND_CLAIM_REF_PREFIX.length)}`
+						: ref,
+				),
+			),
 	);
 }
 
