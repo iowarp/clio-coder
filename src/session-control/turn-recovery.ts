@@ -422,9 +422,17 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				return;
 			}
 			try {
-				await deps.markPersistedUserEcho(text, () =>
-					cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined),
-				);
+				// The rebuild from the ledger already carries a committed request (and any tool batch it started), so the
+				// retry continues it rather than sending the request a second time.
+				const tail = agentRuntime.agent.state.messages.at(-1)?.role;
+				const replayed = context.activeTurnCommitted?.() === true && (tail === "user" || tail === "toolResult");
+				if (replayed) {
+					if (!cancelled()) await agentRuntime.agent.continue();
+				} else {
+					await deps.markPersistedUserEcho(text, () =>
+						cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined),
+					);
+				}
 				if (cancelled()) return;
 				const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 				if (stillOverflowed) {

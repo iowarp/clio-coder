@@ -333,6 +333,8 @@ export interface TurnContext {
 	logPromptCompileIfPending(): void;
 	invalidateSessionPromptCache(): void;
 	addWorkingContextPaths(paths: ReadonlyArray<string>): void;
+	/** Whether the active user turn is in the ledger, so a rebuild from it already carries the request. */
+	activeTurnCommitted?(): boolean;
 	captureRuntimeContextSnapshot(
 		agentRuntime: AgentRuntime,
 		turnId: string,
@@ -3161,6 +3163,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		addWorkingContextPaths(paths: ReadonlyArray<string>): void {
 			for (const path of paths) sessionWorkingContextPaths.add(path);
+		},
+
+		activeTurnCommitted(): boolean {
+			const turnId = state.activeUserTurnId;
+			if (!turnId) return false;
+			return (deps.readSessionEntries?.() ?? []).some(
+				(entry) => entry.kind === "message" && entry.role === "user" && entry.turnId === turnId,
+			);
 		},
 
 		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal, contextChanged = false) {

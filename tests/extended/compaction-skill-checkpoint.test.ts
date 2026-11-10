@@ -197,6 +197,9 @@ function overflowFixture(activeTask = false) {
 			prompt: async (text: string) => {
 				requests.push(text);
 			},
+			continue: async () => {
+				requests.push("<continue>");
+			},
 		},
 	} as unknown as AgentRuntime;
 	state.runtime = runtime;
@@ -532,7 +535,8 @@ describe("mandatory request-fit compaction", () => {
 			message: "context window exceeded",
 		} as Parameters<typeof recovery.runCompactAndRetry>[2]);
 		strictEqual(f.budgets[0]?.budget?.keepRecentTokens, undefined);
-		deepStrictEqual(f.requests, ["Keep this task"]);
+		// The rebuilt context already ends on the committed request, so the retry continues it instead of resending it.
+		deepStrictEqual(f.requests, ["<continue>"]);
 		ok(notices.some((notice) => notice.includes("serving limit is unknown")));
 	});
 });
