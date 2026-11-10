@@ -86,6 +86,7 @@ test("council members run as their roster agent, else the council agent", async 
 			["plain", "researcher", "b", "low"],
 		],
 	);
+	for (const request of seated) match(request.briefing ?? "", /advising a council read-only/u);
 	const refused = await tool.run(
 		{
 			mode: "council",

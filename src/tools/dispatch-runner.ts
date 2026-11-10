@@ -2143,6 +2143,10 @@ function boundedCouncilBriefing(parts: ReadonlyArray<string>): string {
 	return truncateUtf8(parts.join("\n\n"), COUNCIL_BRIEFING_MAX_BYTES, COUNCIL_BRIEFING_TRUNCATION);
 }
 
+/** Every member's briefing opens with this, whatever recipe it runs as. */
+const COUNCIL_MEMBER_FRAMING =
+	"[council] You are advising a council read-only: read and search the code, then answer the question. Do not edit files, run builds or commit; no write tool is available in this seat.";
+
 async function runCouncil(
 	deps: RegisteredDispatchToolDeps,
 	base: DispatchRequest,
@@ -2188,7 +2192,9 @@ async function runCouncil(
 	for (let round = 1; round <= council.rounds; round += 1) {
 		const settled = await Promise.all(
 			council.members.map(async (member, index) => {
-				const peerParts: string[] = base.briefing === undefined ? [] : [`[original briefing] ${base.briefing}`];
+				// A seated coder or architect argues from its perspective; it must not try to edit and fail.
+				const peerParts: string[] = [COUNCIL_MEMBER_FRAMING];
+				if (base.briefing !== undefined) peerParts.push(`[original briefing] ${base.briefing}`);
 				if (round > 1) {
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
@@ -2252,11 +2258,10 @@ async function runCouncil(
 							: {}),
 					},
 					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
-					...(round > 1
-						? { briefing: boundedCouncilBriefing(peerParts) }
-						: base.briefing !== undefined
-							? { briefing: base.briefing }
-							: {}),
+					briefing:
+						round > 1
+							? boundedCouncilBriefing(peerParts)
+							: [COUNCIL_MEMBER_FRAMING, ...(base.briefing !== undefined ? [base.briefing] : [])].join("\n\n"),
 				};
 				return [
 					member.label,
