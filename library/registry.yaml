@@ -676,9 +676,9 @@ entries:
     name: materio
     description: Materials research lab bench with local commands, usage and
       advisory guardrails.
-    version: 0.2.3
+    version: 0.2.4
     sourceUrl: extensions/materio
-    sha256: 2c967fce05b48588cc6a9234261eaa27d848333b7e98076f0ecef840b1938ccf
+    sha256: 952b5d3940b70c855f3950473e1c472a3e630e693a816bbb02e27549b3effd82
     plugin: materio
     provides:
       - kind: extension

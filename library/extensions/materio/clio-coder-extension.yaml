@@ -1,6 +1,6 @@
 id: materio
 name: Materio
-version: 0.2.3
+version: 0.2.4
 description: Materials research lab bench with local commands, usage and advisory guardrails.
 plugin: materio
 compatibility:

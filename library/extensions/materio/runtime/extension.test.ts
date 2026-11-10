@@ -757,3 +757,27 @@ test("forms refuse changed files, missing answers and a second open form", async
 		rmSync(workspace, { recursive: true, force: true });
 	}
 });
+
+test("passive events stay silent outside a Materio project until the operator enters the lab", async () => {
+	assert.ok(process.env.TMPDIR, "Tests need a task-owned TMPDIR.");
+	const plain = mkdtempSync(path.join(process.env.TMPDIR, "materio-plain-"));
+	const outside = await createExtensionTestHost(ROOT, { workspace: plain, plugin: null });
+	const research = project();
+	const inside = await createExtensionTestHost(ROOT, { workspace: research, plugin: null });
+	try {
+		const opened = await outside.observe({ event: "session_open" });
+		assert.equal(opened?.band ?? null, null);
+		assert.equal(opened?.status ?? null, null);
+		assert.equal(readdirSync(plain).length, 0);
+		const entered = await outside.command("lab");
+		assert.deepEqual(entered.workspace, { enter: "lab" });
+		assert.ok(entered.band);
+		assert.ok((await outside.observe({ event: "fs_changed", paths: ["x"] }))?.band);
+		assert.ok((await inside.observe({ event: "session_open" }))?.band);
+	} finally {
+		await outside.dispose();
+		await inside.dispose();
+		rmSync(plain, { recursive: true, force: true });
+		rmSync(research, { recursive: true, force: true });
+	}
+});

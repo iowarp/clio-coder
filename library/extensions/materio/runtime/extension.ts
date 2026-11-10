@@ -1695,6 +1695,15 @@ async function observe(event: ExtensionObservationV2, ctx: ExtensionContextV2): 
 	}
 	return bench(ctx, "");
 }
+/**
+ * Passive events draw nothing outside a Materio project (no `.research/`) unless the operator has entered the
+ * lab bench; bookkeeping and toasts still pass through.
+ */
+function quiet(ctx: ExtensionContextV2, output: ExtensionOutputV2 | undefined): ExtensionOutputV2 | undefined {
+	if (!output || ctx.snapshot.activeWorkspace || existsSync(researchPath(ctx.snapshot.workspace))) return output;
+	const { band: _band, status: _status, islands: _islands, dock: _dock, regions: _regions, ...rest } = output;
+	return { ...rest, band: null, status: null, islands: null };
+}
 export default function extension(api: ExtensionApiV2): void {
 	// Serialize this process's file/state transitions; store CAS still handles other sessions.
 	let tail: Promise<unknown> = Promise.resolve();
@@ -1742,7 +1751,7 @@ export default function extension(api: ExtensionApiV2): void {
 		"fs_changed",
 		"workspace_enter",
 	] as const)
-		api.on(event, (observation, ctx) => serial(() => observe(observation, ctx)));
+		api.on(event, (observation, ctx) => serial(async () => quiet(ctx, await observe(observation, ctx))));
 	api.hook("before_tool", (event, ctx) =>
 		serial(async () => {
 			if (event.point !== "before_tool" || event.tool !== "dispatch" || !event.args || typeof event.args !== "object")
