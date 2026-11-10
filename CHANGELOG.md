@@ -4,7 +4,7 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## 0.7.1 - 2026-11-10
 
-Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, gives every install method one lifecycle, and moves releases to one resumable command. It adds a per-project store for results and datasets, makes headless `run` exit codes and `--json` streams say what the host decided, sends model traffic through the proxy your environment names, gives the TUI a ranked command palette with fewer, clearer commands, and lets you send the maintainers a report you review first with `/report` or `clio-coder report`. A second `clio-coder` started in a folder another terminal is using now opens its own session with its own panes instead of joining the first, the desktop app can no longer end or delete a session another Clio Coder holds, and two read-only runs in one checkout no longer refuse each other (#420). Installs prune unused versions and runtimes on Linux, macOS and Windows, `clio-coder uninstall --inactive` removes an installer root left behind after a move, and the uninstaller removes everything Clio Coder put on the machine and says what it kept. On Windows the installer's launcher and Clio Coder's git shim are native executables, so arguments containing `&`, quotes or `%NAME%` reach their program unchanged. The verifier recipe runs the gate commands its task names, `clio-coder research resume` continues a stopped campaign, `fleet nodes setup` installs and admits an SSH node in one command, and Clio Coder answers in a terser, evidence-first voice. The sandbox now hides other agents' logins and shell histories and keeps contained tools out of your caches, project settings can only tighten safety, loops can run until you stop them, and compaction, memory and large repositories no longer stall or break a session.
+Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, gives every install method one lifecycle, and moves releases to one resumable command. It adds a per-project store for results and datasets, makes headless `run` exit codes and `--json` streams say what the host decided, sends model traffic through the proxy your environment names, gives the TUI a ranked command palette with fewer, clearer commands, and lets you send the maintainers a report you review first with `/report` or `clio-coder report`. A second `clio-coder` started in a folder another terminal is using now opens its own session with its own panes instead of joining the first, the desktop app can no longer end or delete a session another Clio Coder holds, and two read-only runs in one checkout no longer refuse each other (#420). Installs prune unused versions and runtimes on Linux, macOS and Windows, `clio-coder uninstall --inactive` removes an installer root left behind after a move, and the uninstaller removes everything Clio Coder put on the machine and says what it kept. On Windows the installer's launcher and Clio Coder's git shim are native executables, so arguments containing `&`, quotes or `%NAME%` reach their program unchanged. The verifier recipe runs the gate commands its task names, `clio-coder research resume` continues a stopped campaign, `fleet nodes setup` installs and admits an SSH node in one command, and Clio Coder answers in a terser, evidence-first voice. The sandbox now hides other agents' logins and shell histories and keeps contained tools out of your caches, project settings can only tighten safety, loops can run until you stop them, Anthropic turns continue server-side message threads, and compaction, memory and large repositories no longer stall or break a session.
 
 ### Upgrade notes
 
@@ -89,6 +89,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - The Copilot route no longer counts cache-write tokens twice in input usage and totals, and Copilot's auto model, which reports a 0-token window, shows its context window as unknown instead of 0.
 - Per-session facts (Git state, the last session, the orientation time) moved out of the cached system prompt into the session's first message, and dispatched workers of one recipe get the same tool list whatever their task says, so prompt prefixes cache across sessions and workers. The system prompt no longer tells a session things that are false for it, such as `/rewind` in a headless run.
 - The per-turn capability hint names only strongly matching capabilities, offers Clio Coder's own docs, library and configure capabilities only for questions about Clio Coder, and is left out when nothing fits.
+- The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
 
 ### Shared folders and sessions
 
@@ -103,6 +104,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - A follow-up turn already running, or one queued after the loop's condition matched, is no longer killed or dropped by the loop's `--for` deadline, and a loop that uses up its runs before its `--until` condition matches says so instead of reporting finished (#450).
 - In yolo, a turn stopped by the hard per-turn tool-call ceiling continues like one that crossed the soft budget instead of ending as cancelled, and a waiting loop that reaches its deadline before its condition matches wakes the main turn once to report or continue instead of stopping silently (#450).
 - The job tool and yolo guidance tell the agent to wire every condition when asked to wait on several things (one job each or one combined `until`), and to use `until_stopped` for open-ended waits (#450).
+- Contained yolo runs dispatch plans (several tasks, compete, council, a Scout or Documenter pipeline, remote placement) with yolo authority instead of refusing them as needing you. Workers keep default's permits, ask routes and sandbox, and the main session keeps its sandbox, snapshots and safety judge.
 
 ### Security and sandbox
 
@@ -199,6 +201,8 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - `fleet.staggerSharedPrefix: true` (off by default) starts parallel workers that share a prompt prefix after the first one streams, at most 15 s later, so they read its prompt cache instead of prefilling the prefix again.
 - A run on a node that lacks an optional SDK fails once instead of retrying and names `clio-coder fleet nodes tools install <node> copilot-sdk|claude-sdk`, which now installs those SDKs on the node.
 - On a state directory shared by several hosts, starting Clio Coder on another host no longer expires a running fleet plan's reservation; another host's reservations expire only 15 minutes past their estimate. The `local` node and loopback endpoints are counted per host, a dead host's leases are reclaimed after five minutes, capacity denials name the holding host, and `session terminate --force` releases them.
+- A worker that ran `node --check` and reported it passed is credited with that check instead of sealing as an unmatched validation.
+- When a scout cites a location that does not exist, the worker row names that location and suggests another scout model instead of saying the answer was in the wrong format, and the scout prompt says how to cite a search that found nothing.
 
 ### Extensions and MCP
 
@@ -238,6 +242,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - `doctor` notes a Slurm, PBS, LSF or Flux client on `PATH`, and a failing `/loop --command` or job poll shows its first stderr line.
 - Resumed sessions no longer replay a skill the model loaded through a tool as a user message between the tool call and its result.
 - `library list` names the installed version beside an available update, and a read-only agent's validation message names only the offending tools.
+- A long tool call no longer shows "No output from <model>" as the next model call starts, and a tool that prints nothing for minutes shows as running in the footer instead of "No output".
 
 ### Internal
 
@@ -245,6 +250,8 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - The test harness stops a pane host over its socket and reaps abandoned hosts when a run ends by a signal, and the installed-package smoke waits on readiness instead of fixed timeouts.
 - The website paints sooner (one minified stylesheet, an inlined theme script, right-sized and eagerly loaded listing images, content-hashed asset URLs), and the retired glossary URL returns 404.
 - Issue forms ask only what happened and no longer request raw `doctor` output, and new issues are labeled from the report block or from the form's surface and platform fields.
+- Typecheck runs on tsrs `--fast` and falls back to `tsc` with a visible notice where tsrs cannot run (`CLIO_CODER_TYPECHECK=tsc` forces it). Release preparation keeps `tsc` 7.1 as the reference and fails a candidate on any difference, and a conformance corpus holds both to recorded diagnostics. `pnpm run check` runs typecheck and Biome as one fast pre-commit loop, hygiene checks run faster, and tsx 4.23.15 cuts per-file test startup from about 300 ms to about 170 ms.
+- In Clio Coder's own checkout, the tracked, hand-written `CLIO-DEV.md` is the contributor handbook Clio loads, and a generated `CLIO-CODER.md` stays local for comparison.
 
 ### Known limits
 
