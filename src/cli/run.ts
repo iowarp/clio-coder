@@ -46,7 +46,7 @@ import { createJsonCredentialScrub, projectDispatchJsonEvent } from "./modes/jso
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
-import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
+import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
 import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
@@ -302,6 +302,8 @@ export async function runClioRun(
 	options: { apiKey?: string; noContextFiles?: boolean; noSkills?: boolean; skillPaths?: ReadonlyArray<string> } = {},
 ): Promise<number> {
 	const parsed = parseRunCliArgs(args);
+	const coordinator = getTerminationCoordinator();
+	handleRunStdoutErrors((code) => coordinator.shutdown(code));
 	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
 	setAutonomousCommitProcess(true);
 	return withRunFailureReporting(parsed.json, async () => {

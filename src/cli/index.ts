@@ -8,7 +8,8 @@ process.title = "clio-coder";
 /**
  * A reader that closes early (`clio-coder agents | head -1`) ends the command with SIGPIPE status instead of
  * an unhandled EPIPE stack trace. Without a listener the same error would crash the process anyway, so this
- * changes only how it ends. `acp` and `worker` own their stdout errors, and `run` settles its own session.
+ * changes only how it ends. `acp` and `worker` own their stdout errors; `run` handles them in `runClioRun`
+ * (`handleRunStdoutErrors`), which cancels the turn and settles the session before exiting the same way.
  */
 const OWNS_STDOUT_ERRORS: ReadonlySet<string> = new Set(["acp", "worker", "run"]);
 

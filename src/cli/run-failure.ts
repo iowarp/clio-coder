@@ -3,7 +3,7 @@ import { writeSync } from "node:fs";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonTerminalTurnEndFrame } from "./modes/run-json-schema.js";
-import { flushRawStdout } from "./output-guard.js";
+import { flushRawStdout, isStdoutDead } from "./output-guard.js";
 
 interface RunFailureState {
 	pending: boolean;
@@ -40,7 +40,7 @@ export async function withRunFailureReporting(json: boolean, run: () => Promise<
 	});
 	// Audit finding 9: coordinated boot shutdown calls process.exit, which cannot await a stdout flush.
 	const onExit = (exitCode: number): void => {
-		if (!state.pending || exitCode === 0) return;
+		if (!state.pending || exitCode === 0 || isStdoutDead()) return;
 		state.pending = false;
 		writeSync(1, `${JSON.stringify(failureFrame(exitCode))}\n`);
 	};
