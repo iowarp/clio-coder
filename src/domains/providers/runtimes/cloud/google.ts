@@ -35,6 +35,7 @@ function trimTrailingSlash(value: string): string {
 
 function resolveKey(target: TargetDescriptor, ctx: ProbeContext): string | undefined {
 	if (ctx.authToken) return ctx.authToken;
+	if (ctx.credentialRefused) return undefined;
 	// pi-ai reads GEMINI_API_KEY at request time, so a key there serves requests and must list too.
 	const names = target.auth?.apiKeyEnvVar ? [target.auth.apiKeyEnvVar] : ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
 	for (const name of names) {

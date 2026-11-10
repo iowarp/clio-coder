@@ -1069,10 +1069,16 @@ async function doctorProbeContext(
 		httpTimeoutMs: DOCTOR_MODEL_PROBE_TIMEOUT_MS,
 		signal,
 	};
-	if (!targetRequiresAuth(target, runtime)) return ctx;
 	try {
 		const auth = openAuthStorage();
 		const authTarget = resolveAuthTarget(target, runtime);
+		// The runtime probes read the environment for any name listed in credentialsPresent; a refused target gets none.
+		if (auth.statusForTarget(authTarget, { includeFallback: false }).refused) {
+			ctx.credentialsPresent = new Set();
+			ctx.credentialRefused = true;
+			return ctx;
+		}
+		if (!targetRequiresAuth(target, runtime)) return ctx;
 		const stored = auth.get(authTarget.providerId);
 		// Standard doctor is read-only: resolving an expired OAuth credential
 		// would refresh it and persist the new token. Let the passive probe

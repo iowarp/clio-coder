@@ -392,9 +392,16 @@ export function createProvidersBundle(
 			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
 			...(signal ? { signal } : {}),
 		};
+		const authTarget = resolveAuthTarget(target, desc);
+		// The runtime probes read the environment for any name listed in credentialsPresent; a refused target gets none.
+		if (authStore.statusForTarget(authTarget, { includeFallback: false }).refused) {
+			probeCtx.credentialsPresent = new Set();
+			probeCtx.credentialRefused = true;
+			return probeCtx;
+		}
 		if (!targetRequiresAuth(target, desc)) return probeCtx;
 		try {
-			const resolution = await authStore.resolveForTarget(resolveAuthTarget(target, desc), {
+			const resolution = await authStore.resolveForTarget(authTarget, {
 				includeFallback: false,
 				...(signal ? { signal } : {}),
 			});

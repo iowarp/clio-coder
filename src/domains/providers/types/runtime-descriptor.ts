@@ -47,6 +47,12 @@ export interface ProbeContext {
 	 * storage directly.
 	 */
 	authToken?: string;
+	/**
+	 * Set when Clio refuses to send any credential to this target, for a URL a
+	 * project chose. Callers also pass an empty credentialsPresent; a probe that
+	 * reads the environment itself must check this and send nothing.
+	 */
+	credentialRefused?: true;
 }
 
 /**

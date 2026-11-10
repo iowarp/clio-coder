@@ -143,9 +143,18 @@ async function buildProbeContext(runtime?: RuntimeDescriptor, target?: TargetDes
 		credentialsPresent: credentialsPresent(),
 		httpTimeoutMs: 5000,
 	};
-	if (!runtime || !target || !targetRequiresAuth(target, runtime)) return probeCtx;
+	if (!runtime || !target) return probeCtx;
+	const auth = openAuthStorage();
+	const authTarget = resolveAuthTarget(target, runtime);
+	// The runtime probes read the environment for any name listed in credentialsPresent; a refused target gets none.
+	if (auth.statusForTarget(authTarget, { includeFallback: false }).refused) {
+		probeCtx.credentialsPresent = new Set();
+		probeCtx.credentialRefused = true;
+		return probeCtx;
+	}
+	if (!targetRequiresAuth(target, runtime)) return probeCtx;
 	try {
-		const resolution = await openAuthStorage().resolveForTarget(resolveAuthTarget(target, runtime), {
+		const resolution = await auth.resolveForTarget(authTarget, {
 			includeFallback: false,
 		});
 		if (resolution.apiKey) probeCtx.authToken = resolution.apiKey;
