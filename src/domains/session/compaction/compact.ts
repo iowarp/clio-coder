@@ -698,15 +698,29 @@ function priorCompactionContextEntries(entries: ReadonlyArray<SessionEntry>, com
  */
 const OPERATOR_NOTE_SENTENCE = /^(?:please\s+)?(?:remember|keep in mind|don'?t forget)\b/iu;
 const OPERATOR_NOTE_MAX_CHARS = 400;
+// The `/compact` instruction is the operator's own standing text: kept whole up to a hard bound.
+const COMPACT_NOTE_PREFIX = "/compact: ";
+const COMPACT_NOTE_MAX_CHARS = 8000;
 const OPERATOR_NOTE_MAX_COUNT = 30;
 const OPERATOR_NOTES_BLOCK = /<operator-notes\b([^>]*)>\s*\n([\s\S]*?)\n\s*<\/operator-notes\s*>/giu;
 
 function escapeOperatorNote(note: string): string {
-	return note.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
+	// Newlines are encoded so a multi-line note stays one `- ` line in the block.
+	return note
+		.replace(/&/gu, "&amp;")
+		.replace(/</gu, "&lt;")
+		.replace(/>/gu, "&gt;")
+		.replace(/\r/gu, "&#13;")
+		.replace(/\n/gu, "&#10;");
 }
 
 function unescapeOperatorNote(note: string): string {
-	return note.replace(/&lt;/gu, "<").replace(/&gt;/gu, ">").replace(/&amp;/gu, "&");
+	return note
+		.replace(/&lt;/gu, "<")
+		.replace(/&gt;/gu, ">")
+		.replace(/&#13;/gu, "\r")
+		.replace(/&#10;/gu, "\n")
+		.replace(/&amp;/gu, "&");
 }
 
 function operatorMessageText(entry: SessionEntry): string | null {
@@ -726,7 +740,8 @@ function extractOperatorNotes(entries: ReadonlyArray<SessionEntry>, latest?: str
 	const add = (note: string): void => {
 		const trimmed = note.trim();
 		if (trimmed.length === 0) return;
-		notes.add(trimmed.length > OPERATOR_NOTE_MAX_CHARS ? `${trimmed.slice(0, OPERATOR_NOTE_MAX_CHARS - 3)}...` : trimmed);
+		const max = trimmed.startsWith(COMPACT_NOTE_PREFIX) ? COMPACT_NOTE_MAX_CHARS : OPERATOR_NOTE_MAX_CHARS;
+		notes.add(trimmed.length > max ? `${trimmed.slice(0, max - 3)}...` : trimmed);
 	};
 	for (const entry of entries) {
 		if (entry.kind === "compactionSummary") {
@@ -1619,7 +1634,13 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			.join("\n\n---\n\n")
 			// The model sees the prior blocks inside <previous-context> and may echo them;
 			// the harness-built copies below are the one authoritative copy.
-			.replace(/\n*<operator-notes\b[^>]*>[\s\S]*?(?:<\/operator-notes\s*>|$)\n*/giu, "\n\n"),
+			// Only a block is stripped: an opening tag alone on its own line, through
+			// its closing tag or, if the echo was cut off, the end. An inline mention
+			// of the tag stays as summary text.
+			.replace(
+				/\n*^[^\S\n]*<operator-notes\b[^>\n]*>[^\S\n]*(?:\n[\s\S]*?<\/operator-notes\s*>|(?:\n[\s\S]*)?(?![\s\S]))\n*/gimu,
+				"\n\n",
+			),
 	).trim()}${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd)}${formatRecallableRefs(
 		input.entries,
 		cut.firstKeptEntryIndex,
