@@ -41,7 +41,8 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			strictEqual(readFileSync(path, "utf8"), "second");
 			strictEqual(readFileSync(source, "utf8"), "second");
 			const facts = await backend.facts();
-			strictEqual(facts.tiers, false);
+			// Only the local backend has no tiers; clio-core lists its runtime's targets.
+			strictEqual(facts.tiers === false, backend.kind === "local");
 			strictEqual(facts.blobVersions, false);
 		}));
 
