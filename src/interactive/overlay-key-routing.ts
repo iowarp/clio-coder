@@ -38,6 +38,8 @@ export type OverlayState =
 	| "side-question"
 	| "draft"
 	| "handoff-review"
+	| "report-review"
+	| "report-status"
 	| "fleet-run-approval"
 	| "queue-navigator";
 
@@ -375,6 +377,8 @@ export function routeOverlayKey(
 	// The handoff review overlay owns Enter, `e`, the arrows, and Esc itself, so
 	// every key goes to its own focus box rather than through the router.
 	if (overlayState === "handoff-review") return false;
+	// The report review owns Enter, its letter keys, the arrows and Esc; the status list is a list overlay.
+	if (overlayState === "report-review" || overlayState === "report-status") return false;
 	// The fleet-run approval overlay owns Enter, the arrows, and Esc itself, so
 	// every key goes to its own focus box rather than through the router.
 	if (overlayState === "fleet-run-approval") return false;

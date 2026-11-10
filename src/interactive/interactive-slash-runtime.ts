@@ -203,6 +203,10 @@ export interface InteractiveSlashRuntimeDeps {
 	openDraft: (request: string, count: number) => void;
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff: (goal: string) => void;
+	/** `/report`: the report review, its status list, and forgetting a draft. */
+	openReport?: SlashCommandContext["openReport"];
+	showReportStatus?: SlashCommandContext["showReportStatus"];
+	forgetReport?: SlashCommandContext["forgetReport"];
 	/** Run one `/fleet run <playbook>`: approval preview first, dispatch only on accept. */
 	startFleetRun?: (name: string, vars: Readonly<Record<string, string>>, options?: FleetRunStartOptions) => void;
 	/**
@@ -641,6 +645,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		standingTurnConstraints: () => deps.chat.toolLimits?.(),
 		oracleBriefing: oracleBriefingSources,
 		startHandoff: deps.startHandoff,
+		...(deps.openReport ? { openReport: deps.openReport } : {}),
+		...(deps.showReportStatus ? { showReportStatus: deps.showReportStatus } : {}),
+		...(deps.forgetReport ? { forgetReport: deps.forgetReport } : {}),
 		...(deps.startFleetRun ? { startFleetRun: deps.startFleetRun } : {}),
 		...(deps.openFleetRuns ? { openFleetRuns: deps.openFleetRuns } : {}),
 		...(deps.getSettings ? { getWorkerRosters: () => deps.getSettings?.().fleet.rosters ?? {} } : {}),

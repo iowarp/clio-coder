@@ -188,6 +188,12 @@ export interface OverlayLifecycleController {
 	openDraftOverlayState(request: string, count: number): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoffState(goal: string): void;
+	/** `/report`: review a report, and send it only on the send step's key. */
+	openReportState(request: import("../session-control/slash-commands.js").SlashReportRequest): void;
+	/** `/report status`: the reports and drafts on this machine. */
+	showReportStatusState(): void;
+	/** `/report forget <id>`: delete a local draft. */
+	forgetReportState(id: string): void;
 	startFleetRunState(
 		name: string,
 		vars: Readonly<Record<string, string>>,
@@ -644,6 +650,39 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openDraftOverlayState = overlayGeneralOpeners.openDraft;
 	const startFleetRunState = overlayGeneralOpeners.startFleetRun;
 	const startHandoffState = overlaySessions.startHandoff;
+	// The report host and the domain behind it load on the first /report, never at boot.
+	let reportHost: Promise<import("./report-flow.js").ReportHost> | null = null;
+	const withReportHost = (use: (host: import("./report-flow.js").ReportHost) => void): void => {
+		reportHost ??= import("./report-flow.js").then(({ createReportHost }) =>
+			createReportHost({
+				tui,
+				transitions: overlayTransitions,
+				stateDir: deps.app.stateDir,
+				notify,
+				terminal,
+				suspendTerminal: deps.suspendTerminal,
+				session: () => {
+					const meta = deps.app.session?.current();
+					if (!meta) return null;
+					const autonomy = deps.app.getSettings?.().safety.autonomy;
+					return {
+						id: meta.id,
+						cwd: meta.cwd,
+						facts: {
+							...(meta.model ? { model: meta.model } : {}),
+							...(meta.target ? { runtime: meta.target } : {}),
+							...(autonomy ? { autonomy } : {}),
+						},
+					};
+				},
+				identitySettings: () => ({ targets: deps.app.getSettings?.().targets ?? [] }),
+			}),
+		);
+		reportHost.then(use, (error: unknown) => {
+			reportHost = null;
+			notify("error", `/report could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	};
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
 	const openQueueNavigatorState = overlayGeneralOpeners.openQueueNavigator;
 
@@ -672,6 +711,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openDraftOverlayState,
 		startFleetRunState,
 		startHandoffState,
+		openReportState: (request) => withReportHost((host) => host.open(request)),
+		showReportStatusState: () => withReportHost((host) => host.status()),
+		forgetReportState: (id) => withReportHost((host) => host.forget(id)),
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		applyModelSessionState: overlayModelSelectors.applyModelSessionState,
 		openConfigureState: () => {

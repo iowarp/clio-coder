@@ -135,6 +135,24 @@ type ArchiveCommandVariant =
 	| { kind: "archive-export"; path: string }
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
 	| { kind: "archive-usage"; subcommand?: "export" | "import"; error?: string };
+type ReportCommandVariant =
+	| { kind: "report"; report: SlashReportKind; summary?: string }
+	| { kind: "report-status" }
+	| { kind: "report-send"; draftId: string }
+	| { kind: "report-forget"; id: string }
+	| { kind: "report-security" };
+
+/** The kinds of report `/report` composes; security goes to a private advisory instead. */
+export type SlashReportKind = "bug" | "feature" | "question";
+
+/**
+ * What `/report` asks the host to open: a new draft of a kind, with the summary as its title, or a saved draft to
+ * review and send. `security` opens the private advisory page instead of a public report.
+ */
+export type SlashReportRequest =
+	| { kind: SlashReportKind; summary?: string }
+	| { kind: "draft"; draftId: string }
+	| { kind: "security" };
 
 export const SETTINGS_AREA_IDS = SETTINGS_AREAS.map((area) => area.id);
 export type { SettingsAreaId };
@@ -193,6 +211,7 @@ type SlashCommandVariant =
 	| { kind: "skill-surface-clear" }
 	| ShareCommandVariant
 	| ArchiveCommandVariant
+	| ReportCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
 	| { kind: "run-usage" }
@@ -1173,6 +1192,15 @@ export interface SessionCommandContext {
 	 * the task-memory bank.
 	 */
 	startHandoff?: (goal: string) => void;
+	/**
+	 * `/report`: open the report review over the session, never sending until the operator presses the send key on
+	 * its send step. Absent on a surface without that review; the command then names `clio-coder report`.
+	 */
+	openReport?: (request: SlashReportRequest) => void;
+	/** `/report status`: the reports and drafts on this machine. */
+	showReportStatus?: () => void;
+	/** `/report forget <id>`: delete a local draft; a report that already left this machine is refused. */
+	forgetReport?: (id: string) => void;
 	/**
 	 * `/fleet run <playbook>`: compile the playbook's plan, show every wave, agent,
 	 * target, boundary, budget, and code-step argv for approval, and dispatch
@@ -3309,6 +3337,67 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUsage("new", { kind: "new" }),
 		handle(_command, ctx) {
 			ctx.startNewSession?.();
+		},
+	},
+	{
+		name: "report",
+		rank: 3,
+		acp: false,
+		description: "Preview, then send a bug, feature request or question to Clio Coder's maintainers",
+		group: "Session",
+		kinds: ["report", "report-status", "report-send", "report-forget", "report-security"],
+		subcommandDescriptions: {
+			bug: "Report a bug; the summary becomes the title",
+			feature: "Ask for a feature",
+			question: "Ask the maintainers a question",
+			security: "Report a security problem privately",
+			status: "List your reports and saved drafts",
+			send: "Review and send a saved draft",
+			forget: "Delete a saved draft",
+		},
+		args: {
+			subcommands: {
+				bug: { positionals: [{ name: "summary", required: false, rest: true }] },
+				feature: { positionals: [{ name: "summary", required: false, rest: true }] },
+				question: { positionals: [{ name: "summary", required: false, rest: true }] },
+				security: {},
+				status: {},
+				send: { positionals: [{ name: "draft", required: true }] },
+				forget: { positionals: [{ name: "id", required: true }] },
+			},
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "report", reason: parsed.error };
+			const sub = parsed.subcommand;
+			if (sub === "status") return { kind: "report-status" };
+			if (sub === "security") return { kind: "report-security" };
+			if (sub === "send") return { kind: "report-send", draftId: parsed.positionals[0] ?? "" };
+			if (sub === "forget") return { kind: "report-forget", id: parsed.positionals[0] ?? "" };
+			const report: SlashReportKind = sub === "feature" || sub === "question" ? sub : "bug";
+			const summary = parsed.rest?.trim() ?? "";
+			return { kind: "report", report, ...(summary.length > 0 ? { summary } : {}) };
+		},
+		// Not refused during a turn: a hung turn is a reason to report, and the review never touches the turn.
+		handle(command, ctx) {
+			const unavailable = () => ctx.notice("info", "reporting is not available on this surface; run `clio-coder report`");
+			if (command.kind === "report-status") {
+				if (ctx.showReportStatus) ctx.showReportStatus();
+				else unavailable();
+				return;
+			}
+			if (command.kind === "report-forget") {
+				if (ctx.forgetReport) ctx.forgetReport(command.id);
+				else unavailable();
+				return;
+			}
+			if (!ctx.openReport) {
+				unavailable();
+				return;
+			}
+			if (command.kind === "report-send") ctx.openReport({ kind: "draft", draftId: command.draftId });
+			else if (command.kind === "report-security") ctx.openReport({ kind: "security" });
+			else if (command.kind === "report")
+				ctx.openReport({ kind: command.report, ...(command.summary !== undefined ? { summary: command.summary } : {}) });
 		},
 	},
 	{

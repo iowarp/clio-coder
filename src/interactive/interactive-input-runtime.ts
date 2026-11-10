@@ -706,6 +706,8 @@ function overlayScopeLabel(state: OverlayState): string {
 		"side-question": "Side question",
 		draft: "Drafts",
 		"handoff-review": "Handoff review",
+		"report-review": "Report",
+		"report-status": "Reports",
 		"fleet-run-approval": "Run approval",
 		"queue-navigator": "Steering queue",
 	};
