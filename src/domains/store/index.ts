@@ -1,6 +1,7 @@
 import type { StoreBackend } from "./backend.js";
 
 export type { StoreBackend } from "./backend.js";
+export { type ClioCoreStoreOptions, createClioCoreStoreBackend } from "./backends/clio-core.js";
 export type {
 	StoreBackendFacts,
 	StoreBackendKind,

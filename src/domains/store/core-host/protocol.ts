@@ -10,13 +10,19 @@ import type { StoreBackendFacts, StoreBlobStat, StoreRefusalReason } from "../ty
 export const CORE_HOST_MAX_FRAME_BYTES = 1024 * 1024;
 export const CORE_HOST_MAX_RECORD_BYTES = 64 * 1024;
 
-/** The ops are exactly the `StoreBackend` methods plus `ping`. Records travel base64. */
+/**
+ * The ops are exactly the `StoreBackend` methods plus `ping`. Records travel base64.
+ * `tag` is the physical CTE tag name (`agentspace/<projectKey>/<tag>`); the host
+ * maps data ops on a tag to filesystem-module files under `/<tag>/` and, for a
+ * tag ending in `/.records`, to plain CTE blobs. `listBlobs` pages come back
+ * sorted; `listTags` returns the tag names that fully match `pattern`.
+ */
 export interface CoreHostOps {
 	ping: { args: Record<string, never>; result: Record<string, never> };
 	facts: { args: Record<string, never>; result: StoreBackendFacts };
 	getOrCreateTag: { args: { tag: string }; result: { created: boolean } };
 	tagExists: { args: { tag: string }; result: { exists: boolean } };
-	listTags: { args: Record<string, never>; result: { tags: string[] } };
+	listTags: { args: { pattern?: string }; result: { tags: string[] } };
 	delTag: { args: { tag: string }; result: Record<string, never> };
 	setTagXattr: { args: { tag: string; key: string; value: string }; result: Record<string, never> };
 	getTagXattrs: { args: { tag: string }; result: { xattrs: Record<string, string> } };
