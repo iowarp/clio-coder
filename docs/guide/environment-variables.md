@@ -43,6 +43,7 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | `CLIO_CODER_ASCII` | off | `1` selects ASCII UI marks, meters, common frames and composer rails at process startup, uses an identity-only welcome and textual thinking effort, and disables glyph animation. `TERM=dumb` and `TERM=unknown` select the same fallback. This is independent of color and stream pacing; Unicode in operator/provider content is not transliterated. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` uses the one-row identity welcome header and textual thinking effort, disables terminal animation, and makes smooth-streaming `auto` use the immediate coalescer. |
 | `CLIO_CODER_INSTANT_SHELL` | on | `0` disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or `1` mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit `CLIO_CODER_INTERACTIVE=1` keeps its force-interactive non-TTY behavior. |
+| `CLIO_INTAKE_KEY_FILE` | `~/.config/clio-intake/intake-x25519.pem` | Maintainers only. The X25519 private key `clio-coder dev flywheel --pull` opens shares with; `--key` beats it. Nobody else needs it, and Clio never reads it otherwise ([flywheel.ts](../../src/cli/flywheel.ts)). |
 
 ## Directory and install layout
 

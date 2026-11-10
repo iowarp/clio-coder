@@ -131,6 +131,7 @@ const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
 	{ name: "share", summary: "export or import Clio project/resource archives" },
 	{ name: "gui", summary: "start the opt-in alpha graphical application" },
+	{ name: "flywheel", summary: "print the maintainers' ranked backlog from shared usage" },
 ];
 
 const DEV_HELP = `Clio Coder harness instruments and power-user surfaces
@@ -353,6 +354,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["session", async (subArgs) => (await import("./session.js")).runSessionCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
 	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],
+	["flywheel", async (subArgs) => (await import("./flywheel.js")).runFlywheelCommand(subArgs)],
 	[
 		"dev",
 		async (subArgs, bootOptions) => {

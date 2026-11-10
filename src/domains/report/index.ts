@@ -51,7 +51,7 @@ export {
 	issueCanaryGate,
 	issueCanaryHits,
 } from "./canary.js";
-export type { ReportCommandResult, ReportCommandRunner } from "./command.js";
+export { type ReportCommandResult, type ReportCommandRunner, runReportCommand } from "./command.js";
 export {
 	CRASH_RECORD_LIMIT,
 	type CrashFrame,

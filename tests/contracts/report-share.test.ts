@@ -1,9 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { runFlywheelCommand } from "../../src/cli/flywheel.js";
 import { runTelemetryShare } from "../../src/cli/telemetry-share.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import {
@@ -209,6 +210,90 @@ test("telemetry share --send seals to the maintainers, posts the pointer discuss
 		ok(calls.slice(before).some((args) => args.includes("DELETE") && args.includes(`gists/${gistId}`)));
 		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
 		strictEqual(await share(["forget", "shr_0000000000000000"]), 1);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("dev flywheel prints the ranked backlog and pulls a pointed-at share with the intake key", async () => {
+	const root = await mkdtemp(join(tmpdir(), "flywheel-"));
+	try {
+		const csv = [
+			"rank,kind,key,title,score,evidence,issue,firstSeen,lastSeen,versions",
+			'1,failure,tool.bash.timeout,"bash times out, then retries",42.5,"7 shares, 3 versions",#512,2026-01-02,2026-02-01,0.7.0;0.7.1',
+			"2,demand,feature.panes,split panes,9,4 requests,,2026-01-05,2026-01-30,0.7.1",
+		].join("\n");
+		const bundle = Buffer.from("not really a tar.gz, only bytes to carry");
+		const shareId = "shr_00112233445566ff";
+		const gistId = "abcdefabcdefabcdefab";
+		const gone = "shr_ffeeddccbbaa9988";
+		const envelope = sealShare(
+			{
+				...vector.plaintext,
+				kind: "report-bundle",
+				shareId,
+				archiveFormat: "clio-coder.report.bundle",
+				archive: bundle.toString("base64"),
+			},
+			{ recipient: { publicKey: vector.recipient.publicKey } },
+		);
+		let access = true;
+		const run: ReportCommandRunner = async (_file, args) => {
+			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
+			const joined = args.join(" ");
+			if (joined.includes("backlog.csv?ref=data"))
+				return access ? reply(csv) : { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
+			if (joined.includes("labels=has-bundle"))
+				return reply(`bundle: gist:${gistId}#${shareId}\nconsent: debug\nbundle: gist:${"1".repeat(20)}#${gone}\n`);
+			if (joined.includes("discussions(first: 100")) return reply("");
+			if (joined.includes(`gists/${gistId}`)) return reply(JSON.stringify(envelope));
+			if (joined.includes(`gists/${"1".repeat(20)}`))
+				return { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
+			return { exitCode: 1, stdout: "", stderr: `unexpected ${joined}`, timedOut: false };
+		};
+		let out = "";
+		let err = "";
+		const flywheel = (...argv: string[]) =>
+			runFlywheelCommand(argv, {
+				run,
+				findGh: () => "/usr/bin/gh",
+				env: {},
+				cwd: root,
+				stateDir: join(root, "state"),
+				stdout: (text) => {
+					out += text;
+				},
+				stderr: (text) => {
+					err += text;
+				},
+			});
+
+		strictEqual(await flywheel(), 0);
+		ok(out.includes("bash times out, then retries") && out.includes("#512") && out.includes("split panes"), out);
+		out = "";
+		strictEqual(await flywheel("--json", "--limit", "1"), 0);
+		const rows = JSON.parse(out) as Array<Record<string, unknown>>;
+		strictEqual(rows.length, 1);
+		deepStrictEqual(
+			{ rank: rows[0]?.rank, score: rows[0]?.score, evidence: rows[0]?.evidence, versions: rows[0]?.versions },
+			{ rank: 1, score: 42.5, evidence: "7 shares, 3 versions", versions: "0.7.0;0.7.1" },
+		);
+		access = false;
+		strictEqual(await flywheel(), 1);
+		ok(err.includes("private to the Clio maintainers"), err);
+
+		strictEqual(await flywheel("--pull", "nope"), 2);
+		strictEqual(await flywheel("--pull", "all", "--key", join(root, "missing.pem")), 1);
+		ok(err.includes("no intake key at"), err);
+		const key = join(root, "intake.pem");
+		writeFileSync(key, vector.recipient.privateKeyPem);
+		out = "";
+		strictEqual(await flywheel("--pull", "all", "--key", key, "--out", root), 0);
+		deepStrictEqual(readFileSync(join(root, `${shareId}.tar.gz`)), bundle);
+		ok(out.includes(`${gone}: gist`) && out.includes("its sender forgot it"), out);
+		out = "";
+		strictEqual(await flywheel("--pull", shareId, "--key", key, "--out", root), 0);
+		ok(out.includes("report bundle already at"), out);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
