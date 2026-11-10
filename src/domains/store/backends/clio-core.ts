@@ -26,6 +26,8 @@ const XATTR_VALUE_MAX_BYTES = 64 * 1024;
 const RECORD_MAX_BYTES = 64 * 1024;
 const HOST_LIST_PAGE = 1000;
 const RECORD_NAME = /^(.+)#\d{8}$/u;
+/** The core host's in-flight put name (`.<leaf>#put-<12 hex>`); one a killed put left behind is never listed. */
+const PUT_TEMP = /(?:^|\/)\.[^/]+#put-[0-9a-f]{12}$/u;
 
 export interface ClioCoreStoreOptions {
 	/** Pool the host must address; `startCoreHost` was launched with it. Defaults to the chain top. */
@@ -351,7 +353,10 @@ export async function createClioCoreStoreBackend(
 				const matches: string[] = [];
 				for (let page = 0; matches.length < wanted; page += HOST_LIST_PAGE) {
 					const { names, hasMore } = await host.call("listBlobs", { tag: tagName, offset: page, limit: HOST_LIST_PAGE });
-					for (const name of names) if (matcher === null || matcher.test(name)) matches.push(name);
+					for (const name of names) {
+						if (!isRecordsTag(tag) && PUT_TEMP.test(name)) continue;
+						if (matcher === null || matcher.test(name)) matches.push(name);
+					}
 					if (!hasMore) break;
 				}
 				matches.sort();

@@ -36,6 +36,8 @@ XATTR_METHODS = ("AsyncTagSetXattr", "AsyncTagGetXattr", "AsyncTagListXattr")
 PUT_IF_ABSENT = "AsyncPutBlobIfAbsent"
 DEL_TAG_BINDING = "clio_cte_core_ext.Client.AsyncDelTag"
 FS_BINDING = "clio_cfs_ext.Client"
+# A put writes `.<leaf>#put-<12 hex>` beside the blob, then renames it over; `#` is never in a blob name.
+PUT_TEMP_SUFFIX = "#put-"
 DURABLE_LEVELS = ("temporary", "long_term")
 VOLATILE_BDEVS = ("ram", "hbm", "pinned", "noop")
 
@@ -391,34 +393,46 @@ class Core:
             raise Refusal("not-found", f"No file at {args['source']}.") from None
         except IsADirectoryError:
             raise Refusal("not-a-file", f"{args['source']} is not a regular file.") from None
+        # Never write the blob in place: a put killed midway (its host or the runtime) would leave a
+        # truncated blob behind (M-40 F18). The rename replaces the old blob in one step.
+        parent, leaf = path.rsplit("/", 1)
+        temp = f"{parent}/.{leaf}{PUT_TEMP_SUFFIX}{os.urandom(6).hex()}"
         with source:
             self.make_parents(fs, path)
-            fd = fs.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-            done = False
+            fd = fs.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             try:
-                offset, reported, reported_at = 0, 0, time.monotonic()
-                while True:
-                    chunk = source.read(STEP_BYTES)
-                    if not chunk:
-                        break
-                    written = 0
-                    while written < len(chunk):
-                        count = fs.pwrite(fd, chunk[written:] if written else chunk, offset + written)
-                        if count <= 0:
-                            raise Refusal("io", f"pwrite of {path} accepted no bytes at offset {offset + written}.")
-                        written += count
-                    offset += len(chunk)
-                    if offset - reported >= PROGRESS_BYTES or time.monotonic() - reported_at >= PROGRESS_SECONDS:
-                        progress(offset)
-                        reported, reported_at = offset, time.monotonic()
-                fs.fsync(fd)
-                done = True
-            finally:
+                done = False
                 try:
-                    fs.close(fd)
+                    offset, reported, reported_at = 0, 0, time.monotonic()
+                    while True:
+                        chunk = source.read(STEP_BYTES)
+                        if not chunk:
+                            break
+                        written = 0
+                        while written < len(chunk):
+                            count = fs.pwrite(fd, chunk[written:] if written else chunk, offset + written)
+                            if count <= 0:
+                                raise Refusal("io", f"pwrite of {path} accepted no bytes at offset {offset + written}.")
+                            written += count
+                        offset += len(chunk)
+                        if offset - reported >= PROGRESS_BYTES or time.monotonic() - reported_at >= PROGRESS_SECONDS:
+                            progress(offset)
+                            reported, reported_at = offset, time.monotonic()
+                    fs.fsync(fd)
+                    done = True
+                finally:
+                    try:
+                        fs.close(fd)
+                    except OSError:
+                        if done:
+                            raise
+                fs.rename(temp, path)
+            except BaseException:
+                try:
+                    fs.remove(temp)
                 except OSError:
-                    if done:
-                        raise
+                    pass  # Best effort: listings hide the temp name either way.
+                raise
         stat = self.blob_stat(fs, path)
         if stat is None:
             raise Refusal("io", f"{path} is missing right after its put.")
