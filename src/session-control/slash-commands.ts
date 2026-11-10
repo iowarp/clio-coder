@@ -302,6 +302,8 @@ export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
 		keepsText: true,
 	},
 	{ name: "notifications", since: "0.7.1", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
+	{ name: "health", since: "0.7.1", to: { command: "/usage health" } },
+	{ name: "systemone", since: "0.7.1", to: { command: "/usage health" } },
 ];
 
 function matchRetiredCommand(trimmed: string): SlashCommand | null {
