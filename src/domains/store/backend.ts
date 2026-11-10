@@ -32,4 +32,6 @@ export interface StoreBackend {
 		q: { pattern?: string; offset: number; limit: number },
 	): Promise<{ names: string[]; hasMore: boolean }>;
 	delBlob(tag: string, blob: string): Promise<boolean>;
+	/** The blob whose bytes a resolved local path (a `getBlobAsPath` result) holds, else null; provenance names inputs by it. */
+	blobRefOfPath(realPath: string): Promise<{ tag: string; blob: string } | null>;
 }

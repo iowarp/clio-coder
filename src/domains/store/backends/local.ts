@@ -465,5 +465,13 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				}
 				return true;
 			}),
+
+		blobRefOfPath: async (realPath) => {
+			const root = await realpath(projectDir).catch(() => null);
+			if (root === null) return null;
+			const [tags, encodedTag, blobs, ...rest] = path.relative(root, realPath).split(path.sep);
+			if (tags !== "tags" || encodedTag === undefined || blobs !== "blobs" || rest.length === 0) return null;
+			return { tag: decodeTagSegment(encodedTag), blob: rest.join("/") };
+		},
 	};
 }

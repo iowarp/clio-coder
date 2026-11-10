@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { type Dirent, constants as fsConstants } from "node:fs";
-import { access, chmod, lstat, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readdir, realpath, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import {
+	decodeTagSegment,
 	encodeTagSegment,
 	isRecordsTag,
 	recordsTag,
@@ -28,6 +29,8 @@ const HOST_LIST_PAGE = 1000;
 const RECORD_NAME = /^(.+)#\d{8}$/u;
 /** The core host's in-flight put name (`.<leaf>#put-<12 hex>`); one a killed put left behind is never listed. */
 const PUT_TEMP = /(?:^|\/)\.[^/]+#put-[0-9a-f]{12}$/u;
+/** `materialize`'s download directory beside the cached copies. */
+const GET_TEMP = /^\.get-\d+-[0-9a-f]{12}$/u;
 
 export interface ClioCoreStoreOptions {
 	/** Pool the host must address; `startCoreHost` was launched with it. Defaults to the chain top. */
@@ -370,5 +373,37 @@ export async function createClioCoreStoreBackend(
 				writable();
 				return (await host.call("delBlob", { tag: tagName, blob })).deleted;
 			}),
+
+		blobRefOfPath: async (realPath) => {
+			const segmentsUnder = async (root: string): Promise<string[] | null> => {
+				const resolved = await realpath(root).catch(() => null);
+				if (resolved === null) return null;
+				const relative = path.relative(resolved, realPath);
+				if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+				return relative.split(path.sep);
+			};
+			const named = (tag: string, blob: string) =>
+				validateTagName(tag) === null && validateBlobName(blob) === null ? { tag, blob } : null;
+			// A cached copy sits at <cache>/<projectKey>/<encoded tag>/<blob>, one segment per tag.
+			const cached = await segmentsUnder(path.join(cacheRoot, projectKey));
+			if (cached !== null) {
+				const [encodedTag, ...rest] = cached;
+				if (encodedTag === undefined || rest.length === 0 || GET_TEMP.test(rest[0] ?? "")) return null;
+				try {
+					return named(decodeTagSegment(encodedTag), rest.join("/"));
+				} catch {
+					// A malformed escape is no tag of ours.
+					return null;
+				}
+			}
+			if (options.mount === undefined) return null;
+			// A mount path does not show where a tag with '/' ends, so the split must name an existing blob.
+			const viewed = await segmentsUnder(path.join(options.mount, spacePrefix));
+			for (let split = 1; viewed !== null && split < viewed.length; split++) {
+				const ref = named(viewed.slice(0, split).join("/"), viewed.slice(split).join("/"));
+				if (ref !== null && (await statBlob(ref.tag, ref.blob).catch(() => null)) !== null) return ref;
+			}
+			return null;
+		},
 	};
 }

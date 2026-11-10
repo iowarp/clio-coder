@@ -13,7 +13,6 @@ import {
 	runRecordsDir,
 	workspaceRelativePath,
 } from "../../core/run-records.js";
-import { decodeTagSegment, storeProjectDir } from "../../core/store-paths.js";
 import { isSecretArgKey, redactSecretString } from "../safety/redaction.js";
 import type { StoreBackend } from "./backend.js";
 import {
@@ -68,29 +67,24 @@ export function findProducingRun(
 	return null;
 }
 
-/** The script's declared inputs as `used` entries; an input that resolves into this project's store names its blob. */
-function usedFrom(manifest: RunManifest, workspaceRoot: string): StoreRecordUse[] {
-	let storeDir: string | null;
-	try {
-		storeDir = realpathSync(storeProjectDir(workspaceRoot));
-	} catch {
-		storeDir = null;
-	}
-	return manifest.inputs.map((input) => {
+/** The script's declared inputs as `used` entries; an input that resolves to a blob of this project's store names it. */
+async function usedFrom(
+	manifest: RunManifest,
+	workspaceRoot: string,
+	backend: StoreBackend,
+): Promise<StoreRecordUse[]> {
+	const used: StoreRecordUse[] = [];
+	for (const input of manifest.inputs) {
 		const facts = { ...(input.bytes !== undefined ? { bytes: input.bytes } : {}), sha256: input.sha256 ?? null };
-		if (storeDir !== null) {
-			try {
-				const relative = path.relative(storeDir, realpathSync(path.resolve(workspaceRoot, input.path)));
-				const [tags, encodedTag, blobs, ...rest] = relative.split(path.sep);
-				if (tags === "tags" && encodedTag !== undefined && blobs === "blobs" && rest.length > 0) {
-					return { tag: decodeTagSegment(encodedTag), blob: rest.join("/"), ...facts };
-				}
-			} catch {
-				// A missing or unreadable input keeps its declared path.
-			}
+		let ref: { tag: string; blob: string } | null = null;
+		try {
+			ref = await backend.blobRefOfPath(realpathSync(path.resolve(workspaceRoot, input.path)));
+		} catch {
+			// A missing or unreadable input keeps its declared path.
 		}
-		return { path: input.path, ...facts };
-	});
+		used.push(ref !== null ? { ...ref, ...facts } : { path: input.path, ...facts });
+	}
+	return used;
 }
 
 export interface PutRecordInput {
@@ -144,7 +138,7 @@ export async function buildPutRecord(input: PutRecordInput): Promise<StoreRecord
 					finishedAt: manifest.finishedAt,
 					matchedBy: run.matchedBy,
 				};
-				used = usedFrom(manifest, input.cwd);
+				used = await usedFrom(manifest, input.cwd, input.backend);
 			}
 		} catch {
 			// A source that vanished after the put has no producing run to report.

@@ -1,10 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { runRecordsDir } from "../../src/core/run-records.js";
+import { storeProjectKey, storeProjectRoot } from "../../src/core/store-paths.js";
 import type { StoreBackend } from "../../src/domains/store/backend.js";
+import { createClioCoreStoreBackend } from "../../src/domains/store/backends/clio-core.js";
+import type { CoreHost } from "../../src/domains/store/core-host/supervisor.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { buildPutRecord, findProducingRun } from "../../src/domains/store/provenance.js";
 import {
@@ -106,6 +109,57 @@ describe("store records", () => {
 			mkdirSync(runDir, { recursive: true });
 			writeFileSync(join(runDir, "run.json"), manifest);
 			strictEqual(findProducingRun(root, "out.csv", { bytes: 2, mtimeMs: out.mtimeMs, sha256: sha("4\n") }), null);
+		}));
+
+	it("names a clio-core input read through its cached copy by tag and blob (M-40 F10)", () =>
+		withBackend(async (_local, root) => {
+			const host = {
+				state: "ready",
+				hello: null,
+				call: async (op: string) => {
+					if (op === "facts") return { durable: true };
+					throw new Error(`unexpected host op ${op}`);
+				},
+				stderrTail: () => "",
+				close: async () => {},
+			} as unknown as CoreHost;
+			const cacheRoot = join(root, "..", "cache");
+			const backend = await createClioCoreStoreBackend(root, host, { cacheRoot });
+			const cached = join(cacheRoot, storeProjectKey(storeProjectRoot(root)), "inputs", "sim.h5");
+			mkdirSync(dirname(cached), { recursive: true });
+			writeFileSync(cached, "h5");
+			mkdirSync(join(root, "data"));
+			symlinkSync(cached, join(root, "data", "sim.h5"));
+			writeFileSync(join(root, "out.json"), "{}");
+			const out = statSync(join(root, "out.json"));
+			const runId = "20261110T220000Z-abcdef";
+			mkdirSync(join(runRecordsDir(root), runId), { recursive: true });
+			writeFileSync(
+				join(runRecordsDir(root), runId, "run.json"),
+				JSON.stringify({
+					version: 1,
+					runId,
+					tool: "run_script",
+					finishedAt: "2026-11-10T22:00:01.000Z",
+					script: { path: "sum.py", sha256: null },
+					argv: ["python3", "sum.py"],
+					outcome: "succeeded",
+					inputs: [{ path: "data/sim.h5", exists: true, bytes: 2, sha256: null }],
+					outputs: [{ path: "out.json", exists: true, status: "created", bytes: 2, mtimeMs: out.mtimeMs }],
+				}),
+			);
+			const body = await buildPutRecord({
+				backend,
+				cwd: root,
+				tag: "results",
+				blob: "out.json",
+				sourceAbs: join(root, "out.json"),
+				stat: { bytes: 2, modifiedMs: 5, version: null },
+				hash: { sha256: null },
+				receipt: { backend: "clio-core", key: "out.json", version: null },
+				actor: "main",
+			});
+			deepStrictEqual(body.used, [{ tag: "inputs", blob: "sim.h5", bytes: 2, sha256: null }]);
 		}));
 
 	it("reports each drift value", () => {
