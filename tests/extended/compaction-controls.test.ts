@@ -958,8 +958,9 @@ describe("production compaction controls", () => {
 		strictEqual(await context.runAutoCompact(runtime, true), true, "/compact still runs while paused");
 		strictEqual(attempts, 4);
 		strictEqual(compactionEnds.at(-1)?.outcome, "completed");
+		// The success lifts the pause; the summary it committed then holds the next automatic one in its rearm band.
 		await context.runAutoCompact(runtime, false);
-		strictEqual(attempts, 5, "a successful compaction lifts the pause");
+		strictEqual(attempts, 4, "a committed summary holds the next automatic summary until context grows");
 	});
 
 	/** An automatic-path turn context over the fixture's six long user turns. */

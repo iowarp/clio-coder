@@ -683,6 +683,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// compaction succeeds or the session changes. /compact and overflow recovery
 	// are forced and still run.
 	let autoCompactFailures = 0;
+	// The chat and summarizer route the failures above were counted on: another route clears them.
+	let autoCompactRouteKey = "";
+	// After a committed summary, automatic summaries wait until the context grows past what it left by a band, so a
+	// floor near the threshold does not pay one summary per tool batch for a few hundred tokens. Forced runs ignore it.
+	let summaryRearm: { tokensAfter: number; band: number } | null = null;
 	// The summarizer request of the last automatic attempt whose checkpoint
 	// would not reduce context. The attempt key above changes with every tool
 	// batch, while a cut held behind a protected turn sends the same request
@@ -1648,7 +1653,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
-		if (!force && autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT) return false;
+		const routeKey = JSON.stringify([
+			agentRuntime.targetId,
+			agentRuntime.runtimeId,
+			agentRuntime.wireModelId,
+			cfg?.model ?? null,
+		]);
+		if (routeKey !== autoCompactRouteKey) {
+			autoCompactRouteKey = routeKey;
+			autoCompactFailures = 0;
+			summaryRearm = null;
+		}
 		const economic = compactionBudget(
 			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 			cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
@@ -1665,6 +1680,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			!shouldCompact(pressureEstimate.tokens, compactionThreshold, compactionWindow).shouldCompact
 		)
 			return false;
+		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
+		const summaryHeld = (tokens: number): boolean =>
+			!force &&
+			(autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT ||
+				(triggerOverride !== "overflow" && summaryRearm !== null && tokens < summaryRearm.tokensAfter + summaryRearm.band));
+		const preSummaryStageAvailable =
+			pressureEstimate !== null &&
+			Boolean(deps.session?.current()) &&
+			((process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) || settings.context.workingSet.enabled);
+		if (!force && !preSummaryStageAvailable && summaryHeld(pressureEstimate?.tokens ?? 0)) return false;
 		// The hysteresis band. A checkpoint runs before every request, so without
 		// it a policy with unconditional rungs fires an event per step and
 		// cold-starts the prefix cache each time. Inside the band the automatic
@@ -2010,6 +2035,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		}
 
+		if (summaryHeld(liveContextEstimate(agentRuntime, pendingUserText).tokens)) {
+			if (!preSummaryStageActed)
+				compactionConclusion =
+					autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT
+						? "automatic summaries paused after repeated failures"
+						: "summary held until context grows past the last summary";
+			return preSummaryStageActed;
+		}
 		if (!deps.autoCompact) {
 			rememberEmptyAutomaticAttempt();
 			return false;
@@ -2099,6 +2132,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				basis: "runtime-estimate",
 			};
 		};
+		const countAutomaticFailure = (): void => {
+			if (!force && ++autoCompactFailures === AUTO_COMPACT_FAILURE_LIMIT)
+				deps.emitNotice(
+					`automatic compaction paused after ${AUTO_COMPACT_FAILURE_LIMIT} consecutive failures; run /compact to retry`,
+				);
+		};
 		try {
 			result = await compactionTrigger.fire(async () => {
 				summarySignal = signal;
@@ -2184,10 +2223,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
 			summarySignal?.throwIfAborted();
-			if (!force && ++autoCompactFailures === AUTO_COMPACT_FAILURE_LIMIT)
-				deps.emitNotice(
-					`automatic compaction paused after ${AUTO_COMPACT_FAILURE_LIMIT} consecutive failures; run /compact to retry`,
-				);
+			countAutomaticFailure();
 			throw error;
 		}
 		if (
@@ -2207,6 +2243,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// is what repeats, and eviction already changed what it would read.
 			if (automaticSummary && result.summaryDigest !== undefined) noGainSummaryDigest = result.summaryDigest;
 			deps.emitNotice("compaction would not reduce context; checkpoint discarded (usage recorded)");
+			// A paid call that changed nothing is a failure toward the pause.
+			countAutomaticFailure();
 			settleWithoutSummary("summary would not reduce context (usage recorded)");
 			rememberEmptyAutomaticAttempt();
 			return false;
@@ -2288,6 +2326,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		emitCompactionActivity("completed", "context compaction complete");
 		autoCompactFailures = 0;
 		noGainSummaryDigest = null;
+		summaryRearm = {
+			tokensAfter,
+			band: Math.max(0.08 * compactionWindow, 2 * Math.ceil(result.summary.length / 4)),
+		};
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
@@ -3596,6 +3638,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			latestPromptCompile = null;
 			emptyAutoCompactContextKey = null;
 			autoCompactFailures = 0;
+			summaryRearm = null;
 			noGainSummaryDigest = null;
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
