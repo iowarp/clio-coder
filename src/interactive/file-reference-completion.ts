@@ -3,7 +3,7 @@ import { open, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../core/internal-git.js";
-import { enumerateWorkspaceFilesAsync } from "../core/workspace-files.js";
+import { enumerateWorkspaceFilesAsync, WORKSPACE_EXCLUDED_DIRS } from "../core/workspace-files.js";
 import { fuzzyFilter, stripTerminalSequences } from "../engine/tui.js";
 import { isEditorSteerTargetToken } from "./editor-steer.js";
 
@@ -11,6 +11,10 @@ const MAX_COMPLETION_ROWS = 40;
 const PREVIEW_BYTES = 2048;
 const PREVIEW_CHARS = 120;
 const SNAPSHOT_TTL_MS = 2_000;
+/** In a repository the list lives until `.git/index` changes, but never longer than this. */
+const GIT_SNAPSHOT_MAX_AGE_MS = 30_000;
+/** Fuzzy scoring is synchronous; past this many prefiltered survivors a bucket is truncated before scoring. */
+const MAX_SCORED_CANDIDATES = 5_000;
 const GIT_OUTPUT_LIMIT_BYTES = 128 * 1024 * 1024;
 
 export interface FileReferenceCompletionRequest {
@@ -46,6 +50,8 @@ export interface FileReferenceCompletionOptions {
 
 interface FileCandidate {
 	path: string;
+	/** Parent directory, `""` at the top level; precomputed because every query filters on it. */
+	parent: string;
 	absolutePath: string;
 	isDirectory: boolean;
 	tracked: boolean;
@@ -57,6 +63,14 @@ interface WorkspaceSnapshot {
 	candidates: FileCandidate[];
 	directories: ReadonlySet<string>;
 	trackedFiles: ReadonlySet<string>;
+}
+
+interface CachedSnapshot {
+	expiresAt: number;
+	/** The repository's index; its mtime changing invalidates the list. Null outside Git. */
+	indexPath: string | null;
+	indexMtime: number | null;
+	snapshot: WorkspaceSnapshot | null;
 }
 
 function posixPath(path: string): string {
@@ -71,6 +85,31 @@ function safeRelativePath(path: string): string | null {
 	const segments = normalized.split("/");
 	if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) return null;
 	return segments.join("/");
+}
+
+function gitIndexPath(basePath: string): Promise<string | null> {
+	return new Promise((resolveIndex) => {
+		let argv: string[];
+		try {
+			argv = internalGitArgv(["rev-parse", "--git-path", "index"], basePath);
+		} catch {
+			resolveIndex(null);
+			return;
+		}
+		execFile("git", argv, { cwd: basePath, encoding: "utf8" }, (error, stdout) => {
+			const path = stdout.trim();
+			resolveIndex(error || path.length === 0 ? null : resolve(basePath, path));
+		});
+	});
+}
+
+async function mtimeOf(path: string | null): Promise<number | null> {
+	if (path === null) return null;
+	try {
+		return (await stat(path)).mtimeMs;
+	} catch {
+		return null;
+	}
 }
 
 function gitTrackedFiles(basePath: string): Promise<ReadonlySet<string>> {
@@ -111,6 +150,7 @@ function buildWorkspaceSnapshot(
 		const tracked = trackedFiles.has(path);
 		files.push({
 			path,
+			parent: candidateParent(path),
 			absolutePath: join(basePath, path),
 			isDirectory: false,
 			tracked,
@@ -129,6 +169,7 @@ function buildWorkspaceSnapshot(
 	const directories = [...directoryFacts].map(
 		([path, facts]): FileCandidate => ({
 			path,
+			parent: candidateParent(path),
 			absolutePath: join(basePath, path),
 			isDirectory: true,
 			tracked: facts.tracked,
@@ -148,45 +189,97 @@ function candidateParent(path: string): string {
 	return parent === "." ? "" : parent;
 }
 
-function fuzzyOrdered(candidates: ReadonlyArray<FileCandidate>, query: string): FileCandidate[] {
+function searchText(candidate: FileCandidate): string {
+	return `${basename(candidate.path)} ${candidate.path}`;
+}
+
+/** Every character the fuzzy matcher needs, in any token: a cheap necessary condition before scoring. */
+function queryCharacters(query: string): string[] {
+	return [...new Set(query.toLowerCase().replace(/[\s/]+/gu, ""))];
+}
+
+/**
+ * Ranked candidates, at most `limit`. Buckets rank before scores, so a bucket
+ * is scored only while the rows above it leave room. Large buckets are
+ * prefiltered by the query's characters and capped before the synchronous
+ * fuzzy scorer; small workspaces rank exactly as before.
+ */
+function fuzzyOrdered(
+	candidates: ReadonlyArray<FileCandidate>,
+	query: string,
+	limit: number,
+	include: (candidate: FileCandidate) => boolean = () => true,
+	textOf: (candidate: FileCandidate) => string = searchText,
+): FileCandidate[] {
+	const required = queryCharacters(query);
 	const buckets: FileCandidate[][] = [[], [], [], []];
 	for (const candidate of candidates) {
+		if (!include(candidate)) continue;
 		const bucket = candidate.tracked ? (candidate.isDirectory ? 0 : 1) : candidate.isDirectory ? 2 : 3;
 		buckets[bucket]?.push(candidate);
 	}
-	return buckets.flatMap((bucket) =>
-		fuzzyFilter(bucket, query, (candidate) => `${basename(candidate.path)} ${candidate.path}`),
-	);
+	const ranked: FileCandidate[] = [];
+	for (const bucket of buckets) {
+		if (ranked.length >= limit) break;
+		let survivors = bucket;
+		if (required.length > 0 && bucket.length > MAX_SCORED_CANDIDATES) {
+			survivors = [];
+			for (const candidate of bucket) {
+				const text = textOf(candidate).toLowerCase();
+				if (required.every((character) => text.includes(character))) {
+					survivors.push(candidate);
+					if (survivors.length >= MAX_SCORED_CANDIDATES) break;
+				}
+			}
+		}
+		for (const candidate of fuzzyFilter(survivors, query, textOf)) {
+			if (ranked.length >= limit) break;
+			ranked.push(candidate);
+		}
+	}
+	return ranked;
+}
+
+function withDisplayPrefix(candidates: FileCandidate[], prefix: string): FileCandidate[] {
+	return prefix.length === 0
+		? candidates
+		: candidates.map((candidate) => ({ ...candidate, path: `${prefix}${candidate.path}` }));
 }
 
 function workspaceCandidates(snapshot: WorkspaceSnapshot, rawQuery: string): FileCandidate[] {
 	const explicitDot = rawQuery.startsWith("./");
 	const query = explicitDot ? rawQuery.slice(2) : rawQuery;
+	const displayPrefix = explicitDot ? "./" : "";
+	// Score against the displayed spelling, as before, without cloning every candidate per query.
+	const textOf = explicitDot
+		? (candidate: FileCandidate) => `${basename(candidate.path)} ./${candidate.path}`
+		: searchText;
 	const slash = query.lastIndexOf("/");
 	if (query.length === 0) {
-		return fuzzyOrdered(
-			snapshot.candidates
-				.filter((candidate) => candidateParent(candidate.path) === "")
-				.map((candidate) => (explicitDot ? { ...candidate, path: `./${candidate.path}` } : candidate)),
-			"",
+		return withDisplayPrefix(
+			fuzzyOrdered(snapshot.candidates, "", MAX_COMPLETION_ROWS, (candidate) => candidate.parent === "", textOf),
+			displayPrefix,
 		);
 	}
 	if (slash >= 0) {
 		const parent = query.slice(0, slash);
 		const fragment = query.slice(slash + 1);
 		if (parent.length === 0 || snapshot.directories.has(parent)) {
-			const displayPrefix = explicitDot ? "./" : "";
-			return fuzzyOrdered(
-				snapshot.candidates
-					.filter((candidate) => candidateParent(candidate.path) === parent)
-					.map((candidate) => ({ ...candidate, path: `${displayPrefix}${candidate.path}` })),
-				fragment,
+			return withDisplayPrefix(
+				fuzzyOrdered(
+					snapshot.candidates,
+					fragment,
+					MAX_COMPLETION_ROWS,
+					(candidate) => candidate.parent === parent,
+					textOf,
+				),
+				displayPrefix,
 			);
 		}
 	}
-	return fuzzyOrdered(
-		snapshot.candidates.map((candidate) => (explicitDot ? { ...candidate, path: `./${candidate.path}` } : candidate)),
-		query,
+	return withDisplayPrefix(
+		fuzzyOrdered(snapshot.candidates, query, MAX_COMPLETION_ROWS, undefined, textOf),
+		displayPrefix,
 	);
 }
 
@@ -206,19 +299,26 @@ function workspaceRelative(basePath: string, absolutePath: string): string | nul
 	return safeRelativePath(candidate);
 }
 
+/**
+ * One directory listing. `workspaceOnly` is the fallback for a workspace too
+ * large to enumerate outside Git: it lists the directory the typed prefix names
+ * and keeps the workspace rules for excluded directories and symlinks.
+ */
 async function explicitCandidates(
 	basePath: string,
 	query: string,
 	trackedFiles: ReadonlySet<string>,
+	workspaceOnly = false,
 ): Promise<FileCandidate[]> {
 	const slash = query.lastIndexOf("/");
-	if (slash < 0) return [];
+	if (slash < 0 && !workspaceOnly) return [];
 	const displayBase = query.slice(0, slash + 1);
 	const fragment = query.slice(slash + 1);
 	const directory = resolveDisplayBase(basePath, displayBase);
 	const candidates: FileCandidate[] = [];
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
 		if (entry.name === ".git" || /[\r\n\0]/u.test(entry.name)) continue;
+		if (workspaceOnly && (WORKSPACE_EXCLUDED_DIRS.has(entry.name) || entry.isSymbolicLink())) continue;
 		const absolutePath = join(directory, entry.name);
 		let isDirectory = entry.isDirectory();
 		let isFile = entry.isFile();
@@ -235,6 +335,7 @@ async function explicitCandidates(
 		const relativePath = workspaceRelative(basePath, absolutePath);
 		candidates.push({
 			path: `${displayBase}${entry.name}`,
+			parent: displayBase.replace(/\/$/u, ""),
 			absolutePath,
 			isDirectory,
 			tracked: relativePath !== null && trackedFiles.has(relativePath),
@@ -242,7 +343,7 @@ async function explicitCandidates(
 			workspace: relativePath !== null,
 		});
 	}
-	return fuzzyOrdered(candidates, fragment);
+	return fuzzyOrdered(candidates, fragment, MAX_COMPLETION_ROWS);
 }
 
 function formatBytes(bytes: number): string {
@@ -318,19 +419,39 @@ export function createFileReferenceCompletionSource(
 	const listWorkspaceFiles = options.listWorkspaceFiles ?? ((cwd: string) => enumerateWorkspaceFilesAsync(cwd));
 	const listTrackedFiles = options.listTrackedFiles ?? gitTrackedFiles;
 	const cacheTtlMs = options.cacheTtlMs ?? SNAPSHOT_TTL_MS;
-	let cached: { expiresAt: number; snapshot: WorkspaceSnapshot } | null = null;
-	let loading: Promise<WorkspaceSnapshot> | null = null;
+	// `snapshot: null` records an enumeration that failed (a non-Git tree over the
+	// walk's limits), so keystrokes fall back to one directory listing instead of
+	// walking the tree again.
+	let cached: CachedSnapshot | null = null;
+	let loading: Promise<CachedSnapshot> | null = null;
 
-	const snapshot = async (): Promise<WorkspaceSnapshot> => {
-		const now = Date.now();
-		if (cached && cached.expiresAt > now) return cached.snapshot;
-		loading ??= Promise.all([listWorkspaceFiles(basePath), listTrackedFiles(basePath)]).then(([visible, tracked]) =>
-			buildWorkspaceSnapshot(basePath, visible, tracked),
-		);
+	const fresh = async (entry: CachedSnapshot): Promise<boolean> => {
+		if (Date.now() >= entry.expiresAt) return false;
+		return entry.indexPath === null || (await mtimeOf(entry.indexPath)) === entry.indexMtime;
+	};
+
+	const load = async (): Promise<CachedSnapshot> => {
+		const indexPath = await gitIndexPath(basePath);
+		const indexMtime = await mtimeOf(indexPath);
+		let next: WorkspaceSnapshot | null = null;
 		try {
-			const next = await loading;
-			cached = { expiresAt: now + cacheTtlMs, snapshot: next };
-			return next;
+			const [visible, tracked] = await Promise.all([listWorkspaceFiles(basePath), listTrackedFiles(basePath)]);
+			next = buildWorkspaceSnapshot(basePath, visible, tracked);
+		} catch {
+			// Enumeration refused or failed; queries list one directory instead.
+		}
+		// Stamped when the load completes: a load slower than the TTL must still be reused.
+		const ttl = indexPath === null || indexMtime === null ? cacheTtlMs : GIT_SNAPSHOT_MAX_AGE_MS;
+		return { expiresAt: Date.now() + ttl, indexPath: indexMtime === null ? null : indexPath, indexMtime, snapshot: next };
+	};
+
+	const snapshot = async (): Promise<WorkspaceSnapshot | null> => {
+		if (cached && (await fresh(cached))) return cached.snapshot;
+		loading ??= load();
+		try {
+			const loaded = await loading;
+			cached = loaded;
+			return loaded.snapshot;
 		} finally {
 			loading = null;
 		}
@@ -342,8 +463,10 @@ export function createFileReferenceCompletionSource(
 			const workspace = await snapshot();
 			if (request.signal.aborted) return [];
 			const candidates = explicitPathQuery(request.query)
-				? await explicitCandidates(basePath, request.query, workspace.trackedFiles)
-				: workspaceCandidates(workspace, request.query);
+				? await explicitCandidates(basePath, request.query, workspace?.trackedFiles ?? new Set())
+				: workspace
+					? workspaceCandidates(workspace, request.query)
+					: await explicitCandidates(basePath, request.query, new Set(), true);
 			if (request.signal.aborted) return [];
 			const top = candidates.slice(0, MAX_COMPLETION_ROWS);
 			const descriptions = await Promise.all(top.map(candidateDescription));

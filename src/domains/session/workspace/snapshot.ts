@@ -1,5 +1,5 @@
 import { type GitProbeResult, probeGit, probeGitAsync } from "./git-probe.js";
-import { detectProjectType, type ProjectType } from "./project-type.js";
+import { detectProjectTypeAsync, detectProjectTypeHint, type ProjectType } from "./project-type.js";
 
 /**
  * Workspace snapshot captured at session bind. Read-only for the session's
@@ -46,14 +46,37 @@ export function emptyWorkspaceSnapshot(cwd: string): WorkspaceSnapshot {
 	};
 }
 
-function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
-	let projectType: WorkspaceSnapshot["projectType"];
-	try {
-		projectType = detectProjectType(cwd);
-	} catch {
-		projectType = "unknown";
+/**
+ * The full project type enumerates every workspace file (about 2 s on 200k
+ * files), so a snapshot starts with the root-manifest hint and the full value
+ * replaces it in place once an off-loop enumeration lands. One enumeration per
+ * cwd at a time; snapshots taken meanwhile join it.
+ */
+const projectTypeRefinements = new Map<string, WorkspaceSnapshot[]>();
+
+function refineProjectType(snapshot: WorkspaceSnapshot): void {
+	const { cwd } = snapshot;
+	const waiting = projectTypeRefinements.get(cwd);
+	if (waiting) {
+		waiting.push(snapshot);
+		return;
 	}
-	return {
+	const snapshots = [snapshot];
+	projectTypeRefinements.set(cwd, snapshots);
+	detectProjectTypeAsync(cwd)
+		.then((projectType) => {
+			for (const refined of snapshots) refined.projectType = projectType;
+		})
+		.catch(() => {
+			// The hint stays; a workspace that cannot be enumerated is not an error state.
+		})
+		.finally(() => {
+			if (projectTypeRefinements.get(cwd) === snapshots) projectTypeRefinements.delete(cwd);
+		});
+}
+
+function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
+	const snapshot: WorkspaceSnapshot = {
 		cwd,
 		isGit: git.isGit,
 		branch: git.branch,
@@ -63,10 +86,12 @@ function snapshotFrom(cwd: string, git: GitProbeResult): WorkspaceSnapshot {
 		recentCommits: git.recentCommits,
 		remoteUrl: git.remoteUrl,
 		...(git.detachedAt !== undefined ? { detachedAt: git.detachedAt } : {}),
-		projectType,
+		projectType: detectProjectTypeHint(cwd),
 		capturedAt: new Date().toISOString(),
 		...(git.undetermined === true ? { gitUnknown: true as const } : {}),
 	};
+	refineProjectType(snapshot);
+	return snapshot;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { closeSync, openSync, readdirSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { classifyCHeaderLanguage } from "../../../core/c-header-language.js";
-import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
+import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../../core/workspace-files.js";
 
 export type SourceProjectType =
 	| "typescript"
@@ -197,9 +197,17 @@ function dominantFromCounts(
 }
 
 export function detectProjectProfile(cwd: string): ProjectTypeProfile {
+	return profileFromFiles(cwd, enumerateWorkspaceFiles(cwd));
+}
+
+/** `detectProjectType` with the workspace enumerated off the event loop. */
+export async function detectProjectTypeAsync(cwd: string): Promise<ProjectType> {
+	return profileFromFiles(cwd, await enumerateWorkspaceFilesAsync(cwd)).projectType;
+}
+
+function profileFromFiles(cwd: string, files: ReadonlyArray<string>): ProjectTypeProfile {
 	const languageCounts = emptyLanguageCounts();
 	const manifestCounts: Partial<Record<SourceProjectType, number>> = {};
-	const files = enumerateWorkspaceFiles(cwd);
 	scanFiles(cwd, files, languageCounts, manifestCounts);
 	const sourceFiles = SOURCE_LANGUAGES.reduce((sum, language) => sum + languageCounts[language], 0);
 	const dominantSource = dominantFromCounts(languageCounts);
