@@ -451,6 +451,7 @@ import {
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
+	blockedStateChangingCalls,
 	blockedWriteAttempts,
 	blockedWriteDetail,
 	countToolCalls,
@@ -8867,6 +8868,7 @@ export function createDispatchBundle(
 						escalationsDenied: escalationCounts.denied,
 						...(escalationDeniedBy !== undefined ? { escalationDeniedBy } : {}),
 						escalationsTimedOut: escalationCounts.timedOut,
+						blockedStateChanging: blockedStateChangingCalls(toolStats, (tool) => safety.classify({ tool }).actionClass),
 						finalText: finishContractAssistantText,
 						limitationDetail:
 							finishContract?.assessment.evidence

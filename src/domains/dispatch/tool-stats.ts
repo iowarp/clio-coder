@@ -162,6 +162,19 @@ export function blockedWriteAttempts(
 	return attempted > 0 && blocked === attempted ? attempted : null;
 }
 
+/** Calls of the execute or write class that policy refused before they ran. */
+export function blockedStateChangingCalls(
+	stats: ReadonlyMap<string, ToolCallStat>,
+	classify: (tool: string) => ActionClass,
+): number {
+	let blocked = 0;
+	for (const stat of stats.values()) {
+		const actionClass = classify(stat.tool);
+		if (actionClass === "write" || actionClass === "execute") blocked += stat.blocked;
+	}
+	return blocked;
+}
+
 /** A clean process exit cannot overrule an edit worker's explicit report of inability. */
 export function workerNoWorkDetail(input: {
 	activity: ToolActivitySummary;
@@ -178,6 +191,8 @@ export function workerNoWorkDetail(input: {
 	escalationDeniedBy?: "operator" | "main agent" | "safety judge";
 	/** Permission asks nobody answered inside their window, which the fallback then denied. */
 	escalationsTimedOut?: number;
+	/** Execute- or write-class calls policy refused without an escalation. */
+	blockedStateChanging?: number;
 	finalText?: string;
 	limitationDetail?: string;
 }): string | null {
@@ -213,6 +228,10 @@ export function workerNoWorkDetail(input: {
 	}
 	if (input.toolLaneObserved !== false && input.activity.calls === 0) {
 		return "worker executed no tools, so it did none of its assignment";
+	}
+	const refused = input.blockedStateChanging ?? 0;
+	if (unchanged && refused > 0 && !input.activity.mutatingSucceeded) {
+		return `the worker's ${refused === 1 ? "state-changing call was" : `${refused} state-changing calls were`} refused by policy and nothing changed, so the assignment was not done`;
 	}
 	return null;
 }
