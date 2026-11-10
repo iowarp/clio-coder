@@ -1,4 +1,4 @@
-import { closeSync, constants, mkdirSync, openSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
@@ -268,17 +268,34 @@ function isDirectoryPath(entry: string): boolean {
 
 /** Secret files under the worker's own trees, on top of the home credential masks. */
 function workerSpawnMasks(policy: WorkerSandboxSpec): SandboxMaskedPath[] {
-	const base = [...workerSandboxMasks(), ...(policy.maskSettings === true ? settingsFileMask() : [])];
+	const base = [...workerSandboxMasks(), ...(policy.maskSettings === true ? settingsFileMasks() : [])];
 	return [...base, ...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks];
 }
 
-/** Clio's settings.yaml at its link target, since bubblewrap cannot mount over a symlink; absent needs no mask. */
-function settingsFileMask(): SandboxMaskedPath[] {
+/**
+ * Clio's settings.yaml and the copies Clio leaves beside it (`settings.yaml.bak`, `settings.yaml.v1.bak`, an interrupted
+ * write's `.settings.yaml.tmp-*`), which hold the same auth headers. Each regular file is masked at its link target,
+ * since bubblewrap cannot mount over a symlink; an absent or unreadable config dir needs no mask.
+ */
+export function settingsFileMasks(): SandboxMaskedPath[] {
+	const dir = clioConfigPath();
+	let names: string[];
 	try {
-		return [{ path: realpathSync(path.join(clioConfigPath(), "settings.yaml")), kind: "file" }];
+		names = readdirSync(dir);
 	} catch {
 		return [];
 	}
+	const masks: SandboxMaskedPath[] = [];
+	for (const name of names) {
+		if (!name.startsWith("settings.yaml") && !name.startsWith(".settings.yaml.tmp-")) continue;
+		try {
+			const target = realpathSync(path.join(dir, name));
+			if (statSync(target).isFile()) masks.push({ path: target, kind: "file" });
+		} catch {
+			// A file removed since the listing, or a dangling link, needs no mask.
+		}
+	}
+	return masks;
 }
 
 /** Once per worker, on stderr like the missing-backend line: the filter could not load and masks stand in. */

@@ -19,7 +19,7 @@ import type {
 } from "./types.js";
 import { unixSocketHostState, unixSocketLaunch, unixSocketStateLine } from "./unix-sockets.js";
 import { protectedInside } from "./worker-policy.js";
-import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
+import { physicalSandboxPath, settingsFileMasks, workerSandboxMasks } from "./worker-process.js";
 
 /**
  * The main session's shell sandbox. At autonomy default every bash and
@@ -674,7 +674,7 @@ export function planMainSandboxSpawn(
 		...workerSandboxMasks(),
 		...mainSandboxAgentMasks(),
 		...hookMasks,
-		...(policy.env.maskSettings === true ? existingFileMasks([path.join(clioConfigPath(), "settings.yaml")]) : []),
+		...(policy.env.maskSettings === true ? settingsFileMasks() : []),
 	];
 	const secretMasks = discoverSecretMasks(
 		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
@@ -714,19 +714,6 @@ export function planMainSandboxSpawn(
 		afterExit: () => sweepMainSandboxGitFiles(absentFiles),
 		env: policy.env,
 	};
-}
-
-/** File masks for the paths that exist, each at its link target, since bubblewrap cannot mount over a symlink. */
-function existingFileMasks(files: ReadonlyArray<string>): SandboxMaskedPath[] {
-	const masks: SandboxMaskedPath[] = [];
-	for (const file of files) {
-		try {
-			masks.push({ path: realpathSync(file), kind: "file" });
-		} catch {
-			// An absent file needs no mask.
-		}
-	}
-	return masks;
 }
 
 /**
