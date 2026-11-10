@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { assertClioDirLayout, type ClioDirs, clioDirLayoutProblems, xdgBaseDir } from "../../src/core/xdg.js";
+import {
+	assertClioDirLayout,
+	type ClioDirs,
+	clioDirLayoutProblems,
+	removableClioRootProblem,
+	xdgBaseDir,
+} from "../../src/core/xdg.js";
 import type { Installation } from "../../src/domains/lifecycle/install-method.js";
 import {
 	planSelfUpgrade,
@@ -56,6 +62,33 @@ test("lifecycle roots must be distinct and non-nesting through symlink aliases",
 		cache: join(root, "cache"),
 	};
 	match(clioDirLayoutProblems(nested).join("\n"), /config root contains data root/u);
+});
+
+test("an unmarked data or cache root of a CLIO_CODER_HOME home is removable only when the home vouches for it", async (t) => {
+	const home = await mkdtemp(join(tmpdir(), "clio-home-roots-"));
+	const names = ["CLIO_CODER_HOME", "CLIO_CODER_DATA_DIR", "CLIO_CODER_CACHE_DIR"] as const;
+	const saved = names.map((name) => process.env[name]);
+	t.after(async () => {
+		names.forEach((name, index) => {
+			const value = saved[index];
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		});
+		await import("node:fs/promises").then(({ rm }) => rm(home, { recursive: true, force: true }));
+	});
+	process.env.CLIO_CODER_HOME = home;
+	delete process.env.CLIO_CODER_DATA_DIR;
+	delete process.env.CLIO_CODER_CACHE_DIR;
+	await mkdir(join(home, "data"));
+	await mkdir(join(home, "cache"));
+	await mkdir(join(home, "state"));
+	// Before 0.7.1 such a home got no root marker, so reset and uninstall kept its data and cache every time.
+	ok(removableClioRootProblem("data", join(home, "data")) !== null);
+	await writeFile(join(home, "state", "home.json"), "{}\n");
+	strictEqual(removableClioRootProblem("data", join(home, "data")), null);
+	strictEqual(removableClioRootProblem("cache", join(home, "cache")), null);
+	process.env.CLIO_CODER_DATA_DIR = join(home, "data");
+	ok(removableClioRootProblem("data", join(home, "data")) !== null);
 });
 
 test("an empty or relative XDG base directory reads as unset", () => {
