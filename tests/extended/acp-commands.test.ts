@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { PendingSkillRequest } from "../../src/core/skill-activation.js";
-import { createReportTextHost } from "../../src/domains/report/index.js";
+import { createReportTextHost, readReportDraft, saveReportDraft } from "../../src/domains/report/index.js";
 import {
 	ACP_COMMAND_RULES,
 	ACP_COMMANDS_CAPABILITY,
@@ -427,4 +427,15 @@ test("/report previews as text with no transport call, and a read-only ceiling r
 	assert.equal(control.ceilingRefusal?.("report", ["status"], readOnly), null);
 	const status = await control.invoke({ command: "report", argv: ["status"] });
 	assert.ok(status.lines.some((line) => line.startsWith(`${draftId} | draft | bug`)));
+
+	const draft = readReportDraft(stateDir, draftId);
+	assert.ok(draft);
+	saveReportDraft(stateDir, { ...draft, origin: "agent" });
+	const refused = await control.invoke({ command: "report", argv: ["send", draftId] });
+	assert.equal(refused.level, "warn");
+	assert.match(refused.lines.join("\n"), /agent's draft is reviewed in a terminal/);
+	assert.deepEqual(
+		commands.filter((command) => command.startsWith(gh)),
+		[],
+	);
 });

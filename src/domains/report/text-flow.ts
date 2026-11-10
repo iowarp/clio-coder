@@ -146,6 +146,13 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 				};
 			const draft = readReportDraft(deps.stateDir, draftId);
 			if (draft === null) return { level: "error", text: `no saved draft ${draftId}; /report status lists them` };
+			// An agent's draft is sent only from the operator's terminal review, here as in the CLI.
+			if (draft.origin === "agent")
+				return {
+					level: "warn",
+					text: `Nothing was sent. An agent's draft is reviewed in a terminal: run \`clio-coder report send ${draftId}\` yourself.`,
+					report: { draftId, state: "draft" },
+				};
 			const who = await identity();
 			const plan = planReport(draft, { identity: who, transport: { kind: "file" }, stateDir: deps.stateDir });
 			if (plan.gates.length > 0)
