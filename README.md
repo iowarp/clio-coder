@@ -164,12 +164,16 @@ Return with `clio-coder upgrade --channel latest`.
 | Start model setup over | `clio-coder reset --settings` |
 | Remove Clio Coder, keeping settings and credentials | `clio-coder uninstall --keep-config` |
 | Remove everything | `clio-coder uninstall` |
+| Remove an installer copy left behind after switching to npm, pnpm, or Bun | `clio-coder uninstall --inactive` |
 
 An installer install checks its channel at most once a day while idle,
 installs a newer release beside the current one, and switches over at the
 next start; `/resume` picks your conversation back up. npm, pnpm, and Bun
-installs show a notice instead. Reset and uninstall preview what they remove
-and ask first. See [installation and lifecycle](docs/guide/installation-and-lifecycle.md).
+installs show a notice instead. Updates prune versions and runtimes nothing
+uses any more, keeping the current and previous version.
+Reset and uninstall preview what they remove and ask first, never delete a
+directory they cannot prove is Clio Coder's, and finish by saying what they
+removed and what they kept. See [installation and lifecycle](docs/guide/installation-and-lifecycle.md).
 
 </details>
 
@@ -357,10 +361,10 @@ of that it may do on its own.
 | --- | --- |
 | **Approvals** | Reads, edits, and sandboxed or recognized commands run; other commands and outward actions such as `git push` ask first. |
 | **Read-only** | `--read-only` leaves every user file exactly as it was. Clio may still write its own logs and memory. |
-| **Sandbox** | Workers and shell commands at default autonomy run in an OS sandbox (bubblewrap on Linux) when one is available. |
+| **Sandbox** | Workers and shell commands at default autonomy run in an OS sandbox (bubblewrap on Linux) when one is available. It hides credential files, other agents' logins, and shell histories, and contained commands write their own tool cache instead of yours. |
 | **Damage control** | Hard blocks and protected paths apply even in Yolo mode, which only removes ordinary prompts. |
 | **Secrets** | Credentials are masked in command output and approval cards. |
-| **Project trust** | Project plugins and extensions wait for your approval before they load. |
+| **Project trust** | Project plugins and extensions wait for your approval before they load, and project settings can only tighten safety. |
 
 Command scanning is static and has limits; the sandbox is the real boundary
 where it applies. A passing check proves only what that check exercised. See
