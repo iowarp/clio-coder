@@ -4,11 +4,19 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## 0.7.1 - 2026-11-09
 
-Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method one lifecycle, and moves releases to one resumable command. A second `clio-coder` started in a folder another terminal is using now opens its own session instead of joining the first, the desktop app can no longer end or delete a session another Clio Coder holds, and two read-only runs in one checkout no longer refuse each other (#420). Installs prune unused versions and runtimes on Linux, macOS and Windows, `clio-coder uninstall --inactive` removes an installer root left behind after a move, and the uninstaller removes everything Clio Coder put on the machine and says what it kept. On Windows the installer's launcher and Clio Coder's git shim are native executables, so arguments containing `&`, quotes or `%NAME%` reach their program unchanged. The verifier recipe runs the gate commands its task names, `clio-coder research resume` continues a stopped campaign, `fleet nodes setup` installs and admits an SSH node in one command, and Clio Coder answers in a terser, evidence-first voice.
+Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, gives every install method one lifecycle, and moves releases to one resumable command. A second `clio-coder` started in a folder another terminal is using now opens its own session with its own panes instead of joining the first, the desktop app can no longer end or delete a session another Clio Coder holds, and two read-only runs in one checkout no longer refuse each other (#420). Installs prune unused versions and runtimes on Linux, macOS and Windows, `clio-coder uninstall --inactive` removes an installer root left behind after a move, and the uninstaller removes everything Clio Coder put on the machine and says what it kept. On Windows the installer's launcher and Clio Coder's git shim are native executables, so arguments containing `&`, quotes or `%NAME%` reach their program unchanged. The verifier recipe runs the gate commands its task names, `clio-coder research resume` continues a stopped campaign, `fleet nodes setup` installs and admits an SSH node in one command, and Clio Coder answers in a terser, evidence-first voice. The sandbox now hides other agents' logins and shell histories and keeps contained tools out of your caches, project settings can only tighten safety, loops can run until you stop them, and compaction, memory and large repositories no longer stall or break a session.
 
 ### Upgrade notes
 
-- A second `clio-coder` started in a folder whose pane host another open terminal still shows says so and runs in that terminal without panes, with its own session. Separate git worktrees keep their own pane hosts.
+- A second `clio-coder` started in a folder whose pane host another open terminal still shows says so and gets its own pane host, up to four per folder. Past that it runs in its terminal without panes, with its own session. Separate git worktrees keep their own pane hosts.
+- A desktop app background service started by 0.7.0 must be restarted once with `clio-coder gui background restart` before this version's CLI can use it. Browsers signed in under 0.7.0 move to a client credential automatically on their next load. `--token` and `#token=` links still work but are deprecated and will be removed in 0.7.3.
+- Trusted project settings may only tighten `safety.sandbox`, `safety.sandboxNetwork`, `safety.snapshots` and `fleet.permissions.mode`, and can no longer set `integrations.runtimePlugins` or `trustProjectImports`. A team that committed `safety.sandbox: off` must move it to user settings. A runtime plugin must be a bare npm package name or a path under the config `runtimes/` directory; relative paths such as `./x.js` are refused.
+- Contained commands get their own persistent cache under Clio Coder's cache directory (`sandbox-cache`) instead of writing `~/.cache` or `~/.npm`, so the first contained install is cold. A tool that hard-codes `~/.cache` and ignores `XDG_CACHE_HOME` now fails on write; the hint names the variable to point at the sandbox cache.
+- A worker under `safety.sandbox: auto` that the orchestrator expects to be sandboxed refuses to run instead of running commands unsandboxed.
+- Running workers are stopped once session spend reaches `safety.limits.sessionCostUsd` (default $5) in every mode, not only under `clio-coder run --max-cost-usd`. Sessions that used to overrun the ceiling quietly will see workers stopped.
+- Outside a Git repository only the current directory's `CLIO-CODER.md` loads; parent handbooks are no longer inherited.
+- A memory lesson backed only by a quote from a repository file or by a command that cannot fail (`echo`, `ls`, `true`) waits for the operator instead of becoming durable, so expect more pending lessons in `clio-coder memory list`.
+- Telemetry now prunes itself once a day under the default retention (90 days or 1 GiB). The first sweep of a large home can take days; `clio-coder telemetry prune --apply` prunes at once.
 - Extension commands run inside the main session's OS sandbox when admission contains them, as `bash` does. An extension command that wrote outside the workspace at default is now blocked with bash's write hint; it can retry with `unsandboxed: true`, which raises the reviewed sandbox-escape ask.
 - On Windows the installer writes a native `clio-coder.exe` launcher instead of `clio-coder.cmd`. Installing over an earlier version replaces the `.cmd` with a short stub that points at the exe.
 - On hosted routes (cloud and subscription), a call that never produces its first token is aborted after `chat.retry.streamStallMs` (180 s) instead of `chat.retry.firstTokenStallMs` (600 s), which now applies to local and self-hosted endpoints.
@@ -17,9 +25,67 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 
 ### Shared folders and sessions
 
-- A second `clio-coder` in a folder whose pane host another open terminal still shows starts its own session in that terminal instead of joining the first one's pane (#420).
+- A second `clio-coder` in a folder whose pane host another open terminal still shows starts its own session with its own pane host and full panes, instead of joining the first one's pane (#420).
 - The desktop app opening a session another Clio Coder still has open no longer marks that session ended, so it can no longer be deleted while in use (#420).
+- Ending an abandoned session and deleting a session take the same lock as resume, so a concurrent resume can no longer have its live session marked ended or deleted. ACP `session/delete` reports `session_open` in that case.
 - Two read-only runs in one checkout at once no longer fail with `checkout_writer_lease_held`; read-only runs never take the exclusive checkout writer lease (#420).
+
+### Loops and yolo
+
+- `/loop --until-stopped`, the job tool's `until_stopped` and the `chat.loopsUntilStopped` setting run a loop until you stop it, with no run count, deadline or continuation cap. It backs off instead of pausing on repeated outages; the cost ceiling and the loop guard still apply (#450).
+- A follow-up turn already running is no longer killed by the loop's `--for` deadline, and a loop that uses up its runs before its `--until` condition matches says so instead of reporting finished (#450).
+- In yolo, a turn stopped by the hard per-turn tool-call ceiling continues like one that crossed the soft budget instead of ending as cancelled, and a waiting loop that reaches its deadline before its condition matches wakes the main turn once to report or continue instead of stopping silently (#450).
+- The job tool and yolo guidance tell the agent to wire every condition when asked to wait on several things (one job each or one combined `until`), and to use `until_stopped` for open-ended waits (#450).
+
+### Security and sandbox
+
+- The sandbox hides other agents' logins (Claude Code, Codex, Gemini, Copilot), tool token stores and shell histories, and typed tools refuse the same paths. It also hides Clio Coder's `settings.yaml` when a target declares `auth.headers`.
+- On Linux the sandbox hides masked credentials and secret files through every other mount of the same filesystem (such as WSL2's `/mnt/wslg/distro`), and refuses contained commands when it cannot read the mount table.
+- Contained commands no longer write the operator's `~/.cache` or `~/.npm`: `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` point at a sandbox cache, which closes a delayed escape through executable caches.
+- A worker under `safety.sandbox: auto` no longer runs unsandboxed after one slow bubblewrap probe; a timed-out probe is retried. The main session keeps its sandbox when only network isolation fails.
+- Project settings can only tighten safety, sandbox and fleet permission settings, and can no longer load runtime plugins (see Upgrade notes).
+- An `sh -c '<script>'` wrapper is judged by its script only in its bare form, so env prefixes, extra operands, redirects or startup options on the wrapper no longer bypass the approval ask. `grep <path> -e <pattern>` is no longer treated as a workspace read.
+- The approval card and the Exact invocation view show every character of a command, with control bytes as visible `\u{..}` text, and a clipped card says how many characters remain and that Alt+V shows them all.
+- An Enter already in flight when an approval card opens (two Enters in one read, a double tap, or an Enter meant for an overlay the card interrupted) no longer allows the call: the card ignores Enter for its first 400 ms, while Esc and Alt+X act at once.
+- Escape sequences in assistant prose, thinking text and `ask_user` questions are shown as text instead of reaching the terminal.
+- Pane handoff briefs no longer pass through the pane shell's line editor, so control characters in a brief cannot run commands, and pane launch quoting is safe under fish.
+- Text inside host reminders and middleware notes (claims, memory lessons, fetched web pages) can no longer close its frame and inject a host-voiced block.
+- A `CLIO-CODER.md`, `CLIO-CODER.override.md` or `.clio-coder/rules` that is a symlink leaving the project is ignored with a diagnostic instead of loading outside files into the prompt.
+- Fleet code-step logs redact secrets in command output and are written 0600 in a 0700 directory.
+- A user `settings.yaml` can no longer reach `Object.prototype` through `__proto__`, `constructor` or `prototype` keys.
+- Two regular expressions that could backtrack exponentially (C-family function detection in the code index and the safety current-directory check) are now linear, and minimatch moves to 11.0.5 (GHSA-g3hv-75wg-m249).
+
+### Desktop app
+
+- Launchers prove the launch token instead of sending it, and browser launches use a single-use ticket valid for 60 seconds, so the launch token is no longer kept in browser storage or passed on an opener's command line.
+- Browsers signed in under 0.7.0 stay connected after the upgrade: the stored launch token is exchanged once for a client credential and deleted. Windows opened by `clio-coder gui` or reopened with a remembered credential no longer land on "Open your launch link".
+
+### Context and compaction
+
+- A failed automatic compaction between tool batches no longer ends a run whose next request still fits; the run continues with a notice.
+- Recovering from a context overflow no longer sends the request to the model a second time.
+- Automatic compaction no longer re-summarizes for a few hundred tokens right after a summary, counts summaries that gained nothing toward its pause, keeps free working-set eviction running while paused, and re-arms after `/model`.
+- Compaction no longer fails permanently when one message is too large for the summarizer: the summarizer sees its head and tail, and the session keeps the full text.
+- `/compact` instructions are kept verbatim (multi-line, up to 8000 characters) as one operator note across compactions, and a summary that mentions `<operator-notes` inline no longer loses its later sections.
+
+### Memory
+
+- Lesson text carrying host framing tags is rejected, and lessons backed only by a file quote or a command that cannot fail wait for the operator.
+- A crafted `.git` file can no longer claim another repository's lessons, a repository and its subdirectories share lessons, and a new repository at a reused path no longer inherits the old one's lessons.
+- The memory store keeps working when it reaches 500 records or holds an invalid record: undecided proposals make room, invalid records move to `records.invalid.json` with one notice, and `records.json` is written 0600.
+
+### Large repositories and long sessions
+
+- Session start and `@file` completion no longer freeze on large repositories: indexed files skip per-file stats, the project type is refined in the background, and the `@` file list is cached until the Git index changes.
+- After `context init --adopt`, the footer no longer re-enumerates the whole workspace on every render.
+- Long sessions no longer slow down with each turn: the current position comes from memory instead of re-reading the whole session ledger on every append and submit, and `/tree` previews no longer scan large payloads.
+- One huge or pathological source file no longer disables `code_nav`: files over 2 MiB are indexed without symbols, each parse is capped at one second with a fallback, and build failures name the file. An unchanged tree is fingerprinted without reading files, and an edit re-reads only that file.
+- `grep` over a file with a very long line (a minified bundle or single-line JSON) no longer crashes Clio Coder; matches in lines over 1 MiB are omitted with a note.
+
+### Telemetry
+
+- A damaged line inside a call journal no longer stops the session's metering or hides later records: the journal is retired, a fresh segment continues, and cost shows `+?`.
+- Telemetry prunes itself daily, a killed process's journal lock no longer blocks pruning, and emptied scope directories are removed. Route history reads only the newest 2,000 runs from the last 30 days, and a dispatch no longer re-stats every file of every sealed run.
 
 ### Install, upgrade and uninstall
 
@@ -28,6 +94,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 - `doctor`, `paths` and `upgrade` say what an install follows or is pinned to, and how to release a pin.
 - Uninstall stops Clio Coder's private pane hosts, removes the exact PATH block `install.sh` added (kept while other programs share its directory), runs `npm uninstall` for an npm install (`--keep-package` keeps it), and closes with what was removed and what was kept, and why.
 - Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version.
+- `clio-coder uninstall` and `reset` no longer delete a root they cannot prove is Clio Coder's own (for example `CLIO_CODER_CONFIG_DIR=~/.config`); it is kept and named, and `CLIO_CODER_HOME` set to the home directory is refused.
 
 ### Windows
 
@@ -49,6 +116,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 - Fleet preflight matches `-dev` builds by the same clean commit or the same build id (`clio-coder version --build`), so a local rebuild invalidates earlier node records.
 - Preflight refuses a second node entry for a machine another node already holds, and setup does not keep such an entry; a node that is the client's own machine passes with a note.
 - Node installs prune install directories older than a week beyond the newest three, and `fleet nodes discover` marks peers that are already registered nodes.
+- Running workers are stopped once session spend reaches `safety.limits.sessionCostUsd` in every mode.
 - A run on a node that lacks an optional SDK fails once instead of retrying and names `clio-coder fleet nodes tools install <node> copilot-sdk|claude-sdk`, which now installs those SDKs on the node.
 
 ### Extensions and MCP
@@ -61,7 +129,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 ### Release
 
 - `pnpm run release:next` is one resumable command for status, rehearsal and release. It reads git, GitHub and npm, prints each position with its proof and expected wall time, holds one lock per clone, asks a typed phrase for every remote write, and records npm's acceptance so a publish is never offered twice.
-- Local qualification runs Node 22 and Node 24 at once in separate worktrees, and CI records `ci (24)` test results too. The rehearsal and the release share one `ci.yml` run.
+- CI qualifies the candidate: `release:next` reuses any green `ci.yml` run of its exact commit and goes on to the release. Local qualification runs only with `--local`, on Node 22 and Node 24 at once in separate worktrees, and CI records `ci (24)` test results too. The rehearsal and the release share one `ci.yml` run.
 - `release.yml` proves the tag, notes, `main` fast-forward and website before the owner publishes to npm, and can finish from a release-tooling fix once npm serves the candidate.
 - A close-out step fast-forwards local `main`, retires the released branch, opens the next development branch, re-pins the ACP registry entry, rebuilds the local install and lists issues still open, asking before any remote write.
 - The release scripts read GitHub with a 64 MiB buffer; the releases list had outgrown the 1 MiB default.
@@ -77,6 +145,9 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 - `doctor` reports a Copilot model the runtime serves but does not list as information and proposes no repair.
 - Headless `run` prints one answer when the citation check rewrites the draft, and `run --json` gives every gateway chain step's `tool_execution_end` frame a `durationMs`.
 - `clio-coder run --help` answers in about 0.05 s instead of about 0.4 s.
+- Landing a `worktree: true` task no longer deletes worker-authored files that `.gitignore` matches; the receipt names them and the worktree is kept.
+- Closing the terminal, an overwide row or an unexpected error in the TUI runs Clio Coder's shutdown hooks (draft recovery, telemetry exit status) instead of killing the process, and the TUI's crash dump stays in Clio Coder's state directory.
+- `web_fetch` decodes HTML entities once instead of twice and strips script and style blocks with loose end tags, and adopted project rules drop multi-line HTML comments.
 - The stalled-turn check no longer reads "Right now I'm" as an announced action, and the `data` tool description names argmin and argmax.
 - The overflow notice says Clio Coder refused the request when its own output-budget guard stopped it before sending, and the headless yolo halt notice counts the tool call that crossed the cap.
 - The desktop app keeps Review and Details in the session header at 1400 px, keeps the Home workspace notice below the onboarding steps, and reads only newly appended call-journal bytes on repeated reads.
@@ -85,10 +156,14 @@ Clio Coder 0.7.1 makes shared use of one folder safe, gives every install method
 
 - Release readiness checks the committed Windows launchers against their SHA-256 pins.
 - The test harness stops a pane host over its socket and reaps abandoned hosts when a run ends by a signal, and the installed-package smoke waits on readiness instead of fixed timeouts.
+- The website paints sooner (one minified stylesheet, an inlined theme script, right-sized and eagerly loaded listing images, content-hashed asset URLs), and the retired glossary URL returns 404.
 
 ### Known limits
 
-- A second `clio-coder` in a folder another terminal is using runs without panes until the first one exits; giving each launch its own pane host is planned.
+- A fifth `clio-coder` in one folder runs without panes until another exits. Per-launch pane hosts are verified on Linux only.
+- Waiting on several conditions relies on the agent wiring each one, as its guidance asks; Clio Coder does not check that every condition the operator named has a job.
+- A machine attaching to a 0.7.0 node reports that the node did not answer rather than a version mismatch, and launch proofs need the two clocks to agree within 120 seconds. After the desktop app's server restarts, a browser window without a remembered credential needs `clio-coder gui` again.
+- The sandbox does not mask macOS keychain or Application Support credential stores, and the macOS sandbox cache is unverified on hardware.
 - On Windows, npm and pnpm global installs still launch through npm's `clio-coder.cmd` shim, where cmd.exe interprets `&` and `%NAME%` in arguments; the installer's native launcher does not. The arm64 Windows launchers are built and pinned but have not run on arm64 hardware.
 - Pruning and uninstall on macOS are verified by unit tests only, and process discovery there reads command lines without working directories.
 - A research campaign tries one candidate per iteration and has no parameter sweeps. Only `.clio-coder/verifiers.yaml` is copied into an arena contender's worktree, so untracked files a check reads must be committed.
