@@ -61,8 +61,8 @@ skills:
   # ── meta ──
   - name: clio-coder-dev
     path: meta/clio-coder-dev
-    version: 0.7.0
-    sha256: b121ee33f164b5624b2804a37928178dd1b01cd82beebb8bc0f340a27a0a2c70
+    version: 0.7.1
+    sha256: cb5c0d06d1f5e5ab9f05f1f27827353786a794827b02673ce5f39b40ce3eab6e
   - name: clio-coder-test
     path: meta/clio-coder-test
     version: 0.5.0

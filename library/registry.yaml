@@ -137,9 +137,9 @@ entries:
       - change Clio context or session lifecycle
       - edit Clio skills tools or prompts
       - work a Clio lane brief or spec
-    version: 0.7.0
+    version: 0.7.1
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: 9301a7b03e4c6c8ac072bdd11988615263279d107623df440d9d2cab69484f23
+    sha256: 0080393b305a1cc42059e73ba56d76e0d61e880f7255bc1354663ce99695ebc7
     provides:
       - kind: skill
         name: clio-coder-dev

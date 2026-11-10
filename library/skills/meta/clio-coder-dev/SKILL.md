@@ -7,7 +7,7 @@ triggers:
   - change Clio context or session lifecycle
   - edit Clio skills tools or prompts
   - work a Clio lane brief or spec
-version: 0.7.0
+version: 0.7.1
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -89,11 +89,22 @@ the repository handbook are enforced by `pnpm run lint`.
 
 ## Flywheel
 
-When choosing, scoping, prioritising or triaging Clio work, run
-`clio-coder dev flywheel --json` and cite the backlog row you acted on
-(rank, key, evidence) in the issue or PR. A `has-bundle` issue carries an
-encrypted share that only a maintainer can pull with `--pull`; never pull or
-decrypt one unless the maintainer asks.
+Start a dev session that chooses, scopes, prioritises or triages Clio work by
+running `clio-coder dev flywheel --json`. It prints `{usage, backlog}`:
+`usage` is the week's headline for Clio Coder (npm downloads, install-script
+requests, GitHub views and clones, stars, forks, open reports, shares on
+file, the latest release and its share of downloads, stale data sources, the
+latest weekly digest issue); `backlog` is the ranked rows, highest first, with
+every column the backlog has, including `why` when present. Pick from the top
+rows, narrow with `--kind <kind>` and `--top N`, and cite the row you acted on
+(rank, key, evidence) in the issue or PR. Without access the command says the
+data is private to the maintainers; carry on without it.
+
+A `file-me` row is an issue the metrics suggest filing; its `title` is ready to
+paste. Show the maintainer the title, why and evidence and ask before filing
+it; never file one unasked. A `has-bundle` issue carries an encrypted share
+that only a maintainer can pull with `--pull`; never pull or decrypt one
+unless the maintainer asks.
 
 ## Git in a shared repository
 

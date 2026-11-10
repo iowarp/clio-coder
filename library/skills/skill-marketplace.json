@@ -205,7 +205,7 @@
 				"work a Clio lane brief or spec"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev",
-			"version": "0.7.0",
+			"version": "0.7.1",
 			"audit": "pass",
 			"category": "meta"
 		},

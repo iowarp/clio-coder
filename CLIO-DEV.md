@@ -96,6 +96,6 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 
 - The running Clio and the workspace are usually different trees: prompt fragments, built-in recipes and tool code come from the build that started the session (`clio-coder --version` shows its commit), while this handbook, `.clio-coder/rules/` and the two self-development skills come from the workspace. Test a workspace edit in a candidate built from the workspace (`pnpm run build`, then `node dist/cli/index.js` with an isolated home), never by rebuilding or relinking the running install.
 - Load `clio-coder-dev` before the first edit to this repository and `clio-coder-test` when choosing checks.
-- Before choosing, scoping or triaging Clio work, follow the Flywheel section of `clio-coder-dev`: rank against `clio-coder dev flywheel --json` and cite the evidence row.
+- Before choosing, scoping or triaging Clio work, follow the Flywheel section of `clio-coder-dev`: start from `clio-coder dev flywheel --json` (usage headline and ranked backlog), pick from the top rows, cite the evidence row, and ask the maintainer before filing a `file-me` item.
 - A dispatched worker receives this handbook's invariants and the sections for its role, cut to 6000 characters and filtered by the paths its task declares; it does not receive your loaded skills. Declare the paths, put any other rule it needs in the task, and write gate commands for a verifier in backticks.
 - Headless `clio-coder run` denies every permission ask and has no `ask_user`; put decisions in the task text.
