@@ -7650,12 +7650,18 @@ export function createDispatchBundle(
 						)
 					: null,
 				req.runIdHint ?? "",
-				preparation?.signal ? { signal: preparation.signal } : {},
+				{
+					...(preparation?.signal ? { signal: preparation.signal } : {}),
+					...(preparation?.onPrefixHold ? { onHold: preparation.onPrefixHold } : {}),
+				},
 			);
 			if (prefixHold?.role === "leader") prefixLeader = prefixHold.group;
 			else if (prefixHold?.role === "follower") {
 				timing.prefixHoldMs = prefixHold.heldMs;
 				timing.prefixLeaderRunId = prefixHold.leaderRunId;
+				// abort() during the hold cancels the assignment but cannot reach a worker that does not exist yet.
+				if (canceledControlRoots.has(controlRootsByAttempt.get(req.runIdHint ?? "") ?? capacityLease.assignmentId))
+					throw new AdmissionCanceledError("dispatch: cancelled while waiting for the shared-prefix leader");
 			}
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
 			preparation?.signal?.throwIfAborted();
@@ -10422,13 +10428,40 @@ export function createDispatchBundle(
 				? new Map<string, DispatchPrefixGroup>()
 				: undefined;
 		const staggered = prefixGroups === undefined ? preparation : { ...preparation, prefixGroups };
-		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
+		// A follower holding for its leader must not hold up the leaders of later groups (C-04), so admission moves on
+		// once it holds; every request is collected in order before the groups are released.
+		const admitted: Array<Promise<Awaited<ReturnType<typeof dispatch>>>> = [];
 		try {
 			for (const req of reqs) {
-				const handle = await dispatch(req, undefined, staggered, settlement);
-				handles.push({ ...handle, agentId: req.agentId });
+				let holding!: () => void;
+				const held = new Promise<void>((resolve) => {
+					holding = resolve;
+				});
+				const dispatched = dispatch(
+					req,
+					undefined,
+					prefixGroups === undefined ? staggered : { ...staggered, onPrefixHold: holding },
+					settlement,
+				);
+				admitted.push(dispatched);
+				// Collected below; a held follower's rejection must not surface as unhandled meanwhile.
+				dispatched.catch(() => {});
+				await Promise.race([dispatched, held]);
 			}
-		} catch (err) {
+		} catch {
+			// Stop admitting; held followers are released and settle below, and the rejection is rethrown there.
+			for (const group of prefixGroups?.values() ?? []) group.release();
+		}
+		const settled = await Promise.allSettled(admitted);
+		// Only this batch's runs can hold, so no group's cap timer outlives the batch's admission.
+		for (const group of prefixGroups?.values() ?? []) group.release();
+		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
+		let failure: PromiseRejectedResult | undefined;
+		for (const [index, result] of settled.entries()) {
+			if (result.status === "rejected") failure ??= result;
+			else handles.push({ ...result.value, agentId: reqs[index]?.agentId ?? "" });
+		}
+		if (failure !== undefined) {
 			for (const handle of handles) {
 				try {
 					contract.abort(handle.runId);
@@ -10436,10 +10469,7 @@ export function createDispatchBundle(
 					// best-effort cleanup for partially admitted batches
 				}
 			}
-			throw err;
-		} finally {
-			// Only this loop's runs can hold, so no group's cap timer outlives the batch's admission.
-			for (const group of prefixGroups?.values() ?? []) group.release();
+			throw failure.reason;
 		}
 		const batchRef = { current: createBatch(handles.map((handle) => handle.runId)) };
 		const finalPromise = Promise.all(

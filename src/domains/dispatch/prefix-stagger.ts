@@ -11,13 +11,14 @@ export type PrefixHold =
 /**
  * C-04: within one batch, the first native run of a prefix key leads and starts at once; a later run of the same key
  * waits until the leader streams its first token, settles, or the group's cap from the leader's start runs out, so it
- * reads the prefix the leader wrote instead of prefilling it again. Abort ends the wait; the caller rechecks the signal.
+ * reads the prefix the leader wrote instead of prefilling it again. `onHold` fires when a follower starts waiting, so
+ * its batch can admit the next run meanwhile. Abort ends the wait; the caller rechecks the signal and the run's cancel.
  */
 export async function holdForSharedPrefix(
 	groups: Map<string, DispatchPrefixGroup> | undefined,
 	key: string | null,
 	runId: string,
-	options: { signal?: AbortSignal; now?: () => number } = {},
+	options: { signal?: AbortSignal; now?: () => number; onHold?: () => void } = {},
 ): Promise<PrefixHold> {
 	if (groups === undefined || key === null) return null;
 	const existing = groups.get(key);
@@ -42,6 +43,7 @@ export async function holdForSharedPrefix(
 	const startedAt = now();
 	const signal = options.signal;
 	if (signal?.aborted) return null;
+	options.onHold?.();
 	let onAbort: (() => void) | undefined;
 	await Promise.race([
 		existing.released,

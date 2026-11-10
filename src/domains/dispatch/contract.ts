@@ -271,6 +271,8 @@ export interface DispatchPreparationOptions {
 	deadlineAt?: number;
 	/** C-04: a parallel batch's shared-prefix groups, keyed by prefix; absent outside a staggered batch. */
 	prefixGroups?: Map<string, DispatchPrefixGroup>;
+	/** C-04: called when this run starts holding for its group's leader, so the batch admits the next run meanwhile. */
+	onPrefixHold?: () => void;
 }
 
 /** Side-effect-free effective routing used to construct a dispatch approval artifact. */
