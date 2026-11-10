@@ -4222,15 +4222,16 @@ export function createDispatchBundle(
 	}
 
 	/**
-	 * Under a `clio-coder run --max-cost-usd` cap, admission alone let running
-	 * workers spend past it. Every metered worker call re-checks settled plus
-	 * in-flight spend and stops each running worker once the cap is reached, so
-	 * spend passes it only by the calls workers already had in flight.
+	 * Admission alone lets running workers spend past the session cost ceiling
+	 * (or a `clio-coder run --max-cost-usd` cap). Every metered worker call
+	 * re-checks settled plus in-flight spend and stops each running worker once
+	 * the ceiling is reached, so spend passes it only by the calls workers
+	 * already had in flight. A ceiling of 0 is off.
 	 */
-	function stopRunsAtRunCostCap(): void {
-		const cap = scheduling.runCostCap?.() ?? null;
-		if (cap === null) return;
+	function stopRunsAtCostCeiling(): void {
+		const cap = scheduling.runCostCap?.() ?? undefined;
 		const ceilingUsd = getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd();
+		if (!(ceilingUsd > 0)) return;
 		const preflight = scheduling.preflight();
 		const currentUsd = preflight.currentUsd + inFlightSpendUsd();
 		if (!sessionCeilingReached(currentUsd, ceilingUsd)) return;
@@ -6237,7 +6238,7 @@ export function createDispatchBundle(
 				const usage = callUsage?.snapshot();
 				if (usage) {
 					tokenMeter.usage = usage;
-					stopRunsAtRunCostCap();
+					stopRunsAtCostCeiling();
 				}
 				return;
 			}
@@ -7769,7 +7770,7 @@ export function createDispatchBundle(
 					const usage = callUsage.snapshot();
 					if (usage) {
 						tokenMeter.usage = usage;
-						stopRunsAtRunCostCap();
+						stopRunsAtCostCeiling();
 					}
 				}
 				return;
