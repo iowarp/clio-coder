@@ -16,7 +16,9 @@ import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { askYesNo } from "./ask.js";
+import { railPrefix } from "./configure-target.js";
 import { offerCopilotSignIn } from "./copilot-sign-in.js";
+import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import {
@@ -26,6 +28,7 @@ import {
 	renderConnectableProviderRows,
 	resolveCliProviderReference,
 } from "./provider-target.js";
+import { promptText } from "./select.js";
 import {
 	credentialWriteFailed,
 	formatColumns,
@@ -352,26 +355,60 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		return 1;
 	}
 
-	let apiKey = parsed.apiKey;
-	const rl = createInterface({ input, output });
+	let apiKey = parsed.apiKey?.trim();
+	if (parsed.apiKey !== undefined && input.isTTY) {
+		process.stderr.write(
+			'warning: --api-key leaves the key in shell history and in the process list. To keep it out of both, omit --api-key and paste it at the prompt, or pipe it: printf %s "$KEY" | clio-coder auth login <target>\n',
+		);
+	}
+	if (apiKey === undefined) {
+		const read = await readApiKey(`API key for ${resolved.runtime.displayName}`);
+		if (read === null) {
+			printError("login cancelled");
+			return 1;
+		}
+		apiKey = read;
+	}
+	if (!apiKey) {
+		printError("empty API key");
+		return 1;
+	}
 	try {
-		if (!apiKey) {
-			apiKey = (await rl.question(`API key for ${resolved.runtime.displayName}: `)).trim();
-		}
-		if (!apiKey) {
-			printError("empty API key");
-			return 1;
-		}
-		try {
-			auth.setApiKey(resolved.authTarget.providerId, apiKey);
-		} catch (error) {
-			printError(error instanceof Error ? error.message : String(error));
-			return 1;
-		}
-		if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not stored`)) return 1;
-		printOk(`authenticated ${resolved.authTarget.providerId}`);
-		printPlaintextCredentialWarning();
-		return 0;
+		auth.setApiKey(resolved.authTarget.providerId, apiKey);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+	if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not stored`)) return 1;
+	printOk(`authenticated ${resolved.authTarget.providerId}`);
+	printPlaintextCredentialWarning();
+	return 0;
+}
+
+/**
+ * A terminal gets the masked field the configure wizard uses, so the key never
+ * reaches scrollback; anything else is read as the first line of stdin, so a
+ * script can pipe the key in without it appearing in argv. Null means the user
+ * backed out of the prompt.
+ */
+async function readApiKey(label: string): Promise<string | null> {
+	if (input.isTTY && typeof input.setRawMode === "function" && process.env.TERM !== "dumb") {
+		const field = output.isTTY ? output : process.stderr;
+		const result = await promptText({
+			heading: ["", label],
+			railPrefix: railPrefix(createLifecyclePresenter({ stream: field }).isPlain()),
+			mask: true,
+			backLabel: "cancel",
+			clearOnExit: true,
+			input,
+			output: field,
+		});
+		return result.kind === "value" ? result.value.trim() : null;
+	}
+	const rl = createInterface({ input, terminal: false });
+	try {
+		for await (const line of rl) return line.trim();
+		return "";
 	} finally {
 		rl.close();
 	}
