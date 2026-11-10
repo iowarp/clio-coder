@@ -165,6 +165,20 @@ function isHighSurrogate(code: number): boolean {
 
 const REPLAY_TRUNCATION_MARKER = /\n\n\[\.\.\. \d+ more characters truncated from replay context\]$/u;
 
+/** The text of a user message, text blocks joined. */
+export function userMessageText(message: AgentMessage | undefined): string | null {
+	if (message?.role !== "user") return null;
+	if (typeof message.content === "string") return message.content;
+	return message.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+}
+
+/** True for a user message replay bounded, as `boundRefusedPrompt` and the ledger rebuild of a refused prompt do. */
+export function isBoundedReplayCopy(message: AgentMessage | undefined): boolean {
+	if (message?.role !== "user") return false;
+	if (typeof message.content === "string") return REPLAY_TRUNCATION_MARKER.test(message.content);
+	return message.content.some((block) => block.type === "text" && REPLAY_TRUNCATION_MARKER.test(block.text));
+}
+
 /**
  * A prompt the server refused for size was never cached, so the byte-exact replay #423 needs does not apply to it.
  * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too. Bounds only

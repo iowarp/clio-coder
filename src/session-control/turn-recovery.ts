@@ -33,7 +33,7 @@ import {
 	pruneFailedAssistantFromContext,
 	terminalFailureFromAssistantMessage,
 } from "./chat-loop-messages.js";
-import { boundRefusedPrompt } from "./session-replay-messages.js";
+import { boundRefusedPrompt, isBoundedReplayCopy, userMessageText } from "./session-replay-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, StallAbortReadState, StallAbortState, TurnRecoveryState } from "./turn-state.js";
@@ -425,9 +425,15 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			}
 			try {
 				// The rebuild from the ledger already carries a committed request (and any tool batch it started), so the
-				// retry continues it rather than sending the request a second time.
-				const tail = agentRuntime.agent.state.messages.at(-1)?.role;
-				const replayed = context.activeTurnCommitted?.() === true && (tail === "user" || tail === "toolResult");
+				// retry continues it rather than sending the request a second time. A refused prompt is rebuilt as a
+				// bounded copy, though; continuing that would send a truncated request, so the copy is dropped and the
+				// full request goes out once.
+				const messages = agentRuntime.agent.state.messages;
+				const tail = messages.at(-1);
+				const committed = context.activeTurnCommitted?.() === true;
+				const boundedCopy = isBoundedReplayCopy(tail) && userMessageText(tail) !== text;
+				const replayed = committed && (tail?.role === "toolResult" || (tail?.role === "user" && !boundedCopy));
+				if (committed && boundedCopy) agentRuntime.agent.state.messages = messages.slice(0, -1);
 				if (replayed) {
 					if (!cancelled()) await agentRuntime.agent.continue();
 				} else {
