@@ -3247,6 +3247,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const knownWindow = before.contextWindow > 0;
 			const verdict = shouldCompact(before.tokens, economic.threshold, economic.triggerWindow);
 			let compacted = false;
+			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
+			const messagesBefore = agentRuntime.agent.state.messages;
 			const mustFit =
 				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
 			if (mustFit || verdict.shouldCompact) {
@@ -3283,7 +3285,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}
-			return compacted ? continuationContextUpdate(agentRuntime) : undefined;
+			return compacted || agentRuntime.agent.state.messages !== messagesBefore
+				? continuationContextUpdate(agentRuntime)
+				: undefined;
 		},
 
 		contextUsage(): LiveContextUsage {
