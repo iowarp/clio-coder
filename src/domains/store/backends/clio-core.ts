@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type Dirent, constants as fsConstants } from "node:fs";
-import { access, chmod, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import {
 	encodeTagSegment,
@@ -67,9 +67,18 @@ function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-/** Remote mtime in nanoseconds as a cache-name suffix; the protocol carries milliseconds. */
-function mtimeKey(stat: StoreBlobStat): string {
-	return BigInt(Math.round(stat.modifiedMs * 1e6)).toString();
+/** A cached copy is current when its size and its mtime, set to the remote mtime, still match the blob. */
+function cacheIsCurrent(cached: { size: number; mtimeMs: number }, remote: StoreBlobStat): boolean {
+	return cached.size === remote.bytes && Math.round(cached.mtimeMs) === Math.round(remote.modifiedMs);
+}
+
+/** The cache mirrors blob names as paths, so a stale entry can block a new one ("d" cached as a file, "d/e" wanted now); entries are disposable. */
+async function clearCachePath(tagDir: string, target: string): Promise<void> {
+	for (let dir = path.dirname(target); dir.startsWith(`${tagDir}${path.sep}`); dir = path.dirname(dir)) {
+		const info = await lstat(dir).catch(() => null);
+		if (info !== null && !info.isDirectory()) await rm(dir, { force: true });
+	}
+	if ((await lstat(target).catch(() => null))?.isDirectory()) await rm(target, { recursive: true, force: true });
 }
 
 async function walkFiles(dir: string, out: { file: string; bytes: number; usedMs: number }[]): Promise<void> {
@@ -85,7 +94,7 @@ async function walkFiles(dir: string, out: { file: string; bytes: number; usedMs
 		else if (entry.isFile()) {
 			try {
 				const info = await stat(full);
-				out.push({ file: full, bytes: info.size, usedMs: info.mtimeMs });
+				out.push({ file: full, bytes: info.size, usedMs: info.atimeMs });
 			} catch {
 				// Removed by a concurrent prune.
 			}
@@ -93,7 +102,7 @@ async function walkFiles(dir: string, out: { file: string; bytes: number; usedMs
 	}
 }
 
-/** Least recently used first until the cache fits; a cache file's local mtime is its last use. */
+/** Least recently used first until the cache fits; a cache file's atime is its last use (its mtime is the remote one). */
 async function pruneCache(root: string, maxBytes: number, keep: string): Promise<void> {
 	const files: { file: string; bytes: number; usedMs: number }[] = [];
 	await walkFiles(root, files);
@@ -151,11 +160,12 @@ export async function createClioCoreStoreBackend(
 		const info = await statBlob(tag, blob);
 		if (info === null) throw new StoreRefusal("not-found", `Tag ${tag} has no blob named ${blob}.`);
 		const tagDir = path.join(cacheRoot, projectKey, encodeTagSegment(tag));
-		const target = path.join(tagDir, `${blob}.${mtimeKey(info)}`);
+		// The copy keeps the blob's own name (and extension) at a stable path; a replace refreshes it in place.
+		const target = path.join(tagDir, blob);
 		try {
-			if ((await stat(target)).size === info.bytes) {
-				const now = new Date();
-				await utimes(target, now, now);
+			const cached = await stat(target);
+			if (cached.isFile() && cacheIsCurrent(cached, info)) {
+				await utimes(target, new Date(), cached.mtime);
 				return target;
 			}
 		} catch {
@@ -176,19 +186,12 @@ export async function createClioCoreStoreBackend(
 			if ((await stat(got.path)).size !== info.bytes)
 				throw new StoreRefusal("io", `Blob ${blob} in tag ${tag} changed while it was being read; try again.`);
 			await chmod(got.path, 0o600);
+			await utimes(got.path, new Date(), new Date(info.modifiedMs));
+			await clearCachePath(tagDir, target);
 			await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
 			await rename(got.path, target);
 		} finally {
 			await rm(destDir, { recursive: true, force: true });
-		}
-		const base = path.basename(blob);
-		for (const sibling of await readdir(path.dirname(target)).catch(() => [] as string[])) {
-			if (
-				sibling !== path.basename(target) &&
-				sibling.startsWith(`${base}.`) &&
-				/^\d+$/u.test(sibling.slice(base.length + 1))
-			)
-				await rm(path.join(path.dirname(target), sibling), { force: true }).catch(() => {});
 		}
 		await pruneCache(cacheRoot, cacheMaxBytes, target);
 		return target;
