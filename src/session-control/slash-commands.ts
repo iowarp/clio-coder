@@ -3745,7 +3745,7 @@ export interface CommandMatch {
 	verb?: string;
 }
 
-function lettersInOrder(query: string, name: string): boolean {
+export function lettersInOrder(query: string, name: string): boolean {
 	let at = 0;
 	for (const letter of name) if (letter === query[at]) at++;
 	return at === query.length;

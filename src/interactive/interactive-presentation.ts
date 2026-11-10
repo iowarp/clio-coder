@@ -7,14 +7,16 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { CompactionPayload } from "../core/telemetry/live-events.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
+import { listPlaybooks } from "../domains/agents/playbook.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
 import { renderPromptContext } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
+import { PANES_PRESETS } from "../domains/mux/operations.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
+import { resolveModelRuntimeCapabilitiesForProviders, thinkingLevelChoiceLabel } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
@@ -56,6 +58,10 @@ import {
 import { dockTop, setDockFooterRows } from "./dock.js";
 import { parseEditorBashCommand } from "./editor-bash.js";
 import { parseEditorSteerMention, resolveSteerTarget } from "./editor-steer.js";
+import {
+	createFileReferenceCompletionSource,
+	type FileReferenceCompletionSource,
+} from "./file-reference-completion.js";
 import { createFleetDock } from "./fleet-dock.js";
 import { readDurableFleetPlans } from "./fleet-plan-history.js";
 import type { FleetPlanRunView } from "./fleet-plan-runs.js";
@@ -83,6 +89,7 @@ import {
 } from "./footer/widgets.js";
 import { loopSegment } from "./footer-panel.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
+import { resolveThinkingCapability } from "./interactive-slash-runtime.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import { actionKeyLabel, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
@@ -108,6 +115,15 @@ import type { WorkspaceFacts } from "./workspace-facts.js";
 
 /** How long one `/skill <name>` listing serves later keystrokes. */
 const SKILL_COMPLETION_TTL_MS = 2_000;
+const LIVE_RUN_STATUSES: ReadonlySet<string> = new Set(["enqueued", "running", "cancelling", "retrying"]);
+
+function runAge(settledAtMs: number | undefined): string {
+	if (settledAtMs === undefined) return "";
+	const minutes = Math.max(0, Math.round((Date.now() - settledAtMs) / 60_000));
+	if (minutes < 60) return ` · ${minutes}m ago`;
+	const hours = Math.round(minutes / 60);
+	return hours < 48 ? ` · ${hours}h ago` : ` · ${Math.round(hours / 24)}d ago`;
+}
 
 export interface PresentationTickerHandle {
 	unref?(): void;
@@ -1041,6 +1057,22 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	};
 	editor.focused = true;
 	let skillCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
+	let playbookCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
+	let pathSource: { cwd: string; source: FileReferenceCompletionSource } | undefined;
+	const settingKeys = (record: Readonly<Record<string, unknown>> | undefined, description: string): CompletionValue[] =>
+		Object.keys(record ?? {}).map((key) => ({ id: key, value: key, label: key, description }));
+	const runValues = (finishedOnly: boolean): CompletionValue[] =>
+		dispatchBoardStore
+			.rows()
+			.filter((row) => !finishedOnly || !LIVE_RUN_STATUSES.has(row.status))
+			.slice()
+			.sort((a, b) => (b.settledAtMs ?? 0) - (a.settledAtMs ?? 0))
+			.map((row) => ({
+				id: row.runId,
+				value: row.runId,
+				label: row.runId,
+				description: `${row.agentId} · ${row.status}${runAge(row.settledAtMs)}`,
+			}));
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		isTurnInFlight: () => deps.chat.isStreaming(),
 		commandCounts: () => readHarnessProfile().features,
@@ -1110,7 +1142,65 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 						label: task.title,
 						description: task.status,
 					})),
-			// Other slots remain empty when this presentation has no read-only catalog for them.
+			"thinking-levels": async () => {
+				const settings = deps.getSettings?.();
+				if (!settings) return [];
+				const thinking = resolveThinkingCapability(deps.providers, settings);
+				const current = settings.chat.thinkingLevel ?? "off";
+				const levels = thinking?.supportedLevels ?? ["off"];
+				return [...levels]
+					.sort((a, b) => Number(b === current) - Number(a === current))
+					.map((level) => ({
+						id: level,
+						value: level,
+						label: level,
+						description: `${thinkingLevelChoiceLabel(thinking?.mechanism ?? null, level)}${level === current ? " · current" : ""}`,
+					}));
+			},
+			// Parses every playbook file, so it shares the skills memo's window.
+			playbooks: async () => {
+				const cwd = getCwd();
+				const now = Date.now();
+				if (playbookCompletions?.cwd === cwd && now - playbookCompletions.at < SKILL_COMPLETION_TTL_MS)
+					return playbookCompletions.items;
+				const items = listPlaybooks(cwd).map((listing) => ({
+					id: listing.name,
+					value: listing.name,
+					label: listing.name,
+					description: listing.playbook?.description ?? listing.error?.replace(/^playbook \S+: /u, "") ?? listing.source,
+				}));
+				playbookCompletions = { cwd, at: now, items };
+				return items;
+			},
+			rosters: async () => settingKeys(deps.getSettings?.().fleet.rosters, "roster"),
+			"agent-profiles": async () => settingKeys(deps.getSettings?.().fleet.profiles, "worker profile"),
+			"external-agents": async () =>
+				(deps.getSettings?.().integrations.externalAgents.entries ?? []).map((entry) => ({
+					id: entry.id,
+					value: entry.id,
+					label: entry.id,
+					description: entry.command,
+				})),
+			"shareable-runs": async () => runValues(true),
+			runs: async () => runValues(false),
+			"pane-presets": async () =>
+				PANES_PRESETS.map((preset) => ({
+					id: preset.id,
+					value: preset.id,
+					label: preset.id,
+					description: preset.summary,
+				})),
+			paths: async ({ prefix, signal }) => {
+				const cwd = getCwd();
+				if (pathSource?.cwd !== cwd) pathSource = { cwd, source: createFileReferenceCompletionSource({ basePath: cwd }) };
+				const values = await pathSource.source({ query: prefix, signal });
+				return values.map((value) => {
+					const path = value.isDirectory ? `${value.path}/` : value.path;
+					// The `@` list opens a directory in place; here a directory is just a value.
+					const description = value.description.replace(/ · Tab\/Enter opens$/u, "");
+					return { id: value.id, value: path, label: path, description };
+				});
+			},
 		},
 	});
 	editor.setAutocompleteProvider(autocomplete);

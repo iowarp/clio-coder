@@ -27,33 +27,23 @@ export interface CommandPositionalSpec {
 }
 
 /**
- * Stable names for dynamic completion sources. The presentation layer supplies
- * read-only catalogs for available slots; unsupplied slots return no values.
+ * Stable names for dynamic completion sources. The interactive presentation
+ * supplies a read-only catalog for every slot; declare a slot only with its source.
  */
 export const COMPLETION_SLOT_NAMES = [
 	"agents",
 	"agent-profiles",
-	"worker-runtimes",
 	"targets",
 	"models",
-	"capabilities",
 	"external-agents",
 	"rosters",
 	"shareable-runs",
 	"skills",
 	"playbooks",
-	"playbook-vars",
-	"playbook-var-values",
 	"tasks",
-	"context-refs",
 	"runs",
-	"pane-runs-agents",
 	"pane-presets",
-	"pane-targets",
 	"thinking-levels",
-	"settings-areas",
-	"settings-groups",
-	"help-queries",
 	"paths",
 ] as const;
 

@@ -12,6 +12,7 @@ import {
 	COMMANDS_REFUSED_DURING_TURN,
 	type CommandMatch,
 	commandReference,
+	lettersInOrder,
 	matchCommandReference,
 	parseSlashCommand,
 	SETTINGS_AREA_IDS,
@@ -63,7 +64,8 @@ export interface CompletionSourceRequest {
 }
 
 export type CompletionSource = (request: CompletionSourceRequest) => Promise<ReadonlyArray<CompletionValue>>;
-export type CompletionSources = Partial<Record<CompletionSlotName, CompletionSource>>;
+/** Every declared slot needs a source, so a slot added without one fails typecheck. */
+export type CompletionSources = Record<CompletionSlotName, CompletionSource>;
 
 export interface SlashCompletionItem extends AutocompleteItem {
 	id: string;
@@ -145,8 +147,8 @@ function personalOrder(
 
 const REFUSED_DURING_TURN_REASON = "a turn is running · Esc stops it first";
 
-/** Slots without an in-app source return no dynamic values. */
-function emptyCompletionSources(): Record<CompletionSlotName, CompletionSource> {
+/** No dynamic values for any slot; the default when a caller supplies no sources. */
+export function emptyCompletionSources(): CompletionSources {
 	const sources = {} as Record<CompletionSlotName, CompletionSource>;
 	for (const slot of COMPLETION_SLOT_NAMES) sources[slot] = async () => [];
 	return sources;
@@ -185,29 +187,20 @@ export function compactArgumentHint(args: CommandArgsSpec | undefined): string |
 export const COMPLETION_SLOT_MANIFEST: Readonly<Record<string, CompletionSlotName>> = {
 	"run:pos:agent": "agents",
 	"run:flag:--agent-profile": "agent-profiles",
-	"run:flag:--runtime": "worker-runtimes",
 	"run:flag:--target": "targets",
 	"run:flag:--model": "models",
-	"run:flag:--require": "capabilities",
 	"delegate:pos:agent-id": "external-agents",
 	"council:flag:--roster": "rosters",
 	"skill:pos:name": "skills",
 	"fleet/share:pos:run-id": "shareable-runs",
 	"fleet/run:pos:playbook": "playbooks",
-	"fleet/run:flag:--var": "playbook-vars",
 	"tasks/hand:pos:id": "tasks",
 	"tasks/done:pos:id": "tasks",
 	"tasks/drop:pos:id": "tasks",
-	"context/recall:pos:ref": "context-refs",
 	"view/verify:pos:runId": "runs",
-	"panes/show:pos:run-or-agent": "pane-runs-agents",
 	"panes/open:pos:preset-or-argv": "pane-presets",
-	"panes/close:pos:target": "pane-targets",
 	"model:pos:pattern": "models",
 	"thinking:pos:level": "thinking-levels",
-	"settings:pos:area": "settings-areas",
-	"settings:pos:group": "settings-groups",
-	"help:pos:query": "help-queries",
 	"archive/export:pos:path": "paths",
 	"archive/import:pos:path": "paths",
 	"export:pos:path": "paths",
@@ -394,9 +387,16 @@ function fileReferenceContext(lines: string[], cursorLine: number, cursorCol: nu
 	return null;
 }
 
+/** Values the typed text names: prefix matches, then (two or more letters) its letters in order. */
 function sourceRows(values: ReadonlyArray<CompletionValue>, prefix: string): CompletionValue[] {
 	const lower = prefix.toLowerCase();
-	return values.filter((value) => !value.sensitive && value.value.toLowerCase().startsWith(lower));
+	const visible = values.filter((value) => !value.sensitive);
+	const byPrefix = visible.filter((value) => value.value.toLowerCase().startsWith(lower));
+	if (lower.length < 2) return byPrefix;
+	const byLetters = visible.filter(
+		(value) => !byPrefix.includes(value) && lettersInOrder(lower, value.value.toLowerCase()),
+	);
+	return [...byPrefix, ...byLetters];
 }
 
 class ClioAutocompleteProvider implements AutocompleteProvider {
@@ -421,7 +421,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
-		this.sourceBySlot = { ...emptyCompletionSources(), ...sources };
+		this.sourceBySlot = sources;
 		this.promptTemplates = promptTemplates ?? (() => []);
 	}
 
@@ -612,7 +612,10 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			return items.length ? { items, prefix } : null;
 		}
 
-		const ref = refs.find((candidate) => candidate.name.toLowerCase() === context.command.toLowerCase());
+		// A hidden command typed in full (`/archive`) still completes its arguments.
+		const ref = commandReference({ includeHidden: true }).find(
+			(candidate) => candidate.name.toLowerCase() === context.command.toLowerCase(),
+		);
 		if (!ref?.args) return null;
 		const argumentText = context.line.slice(context.argsStart);
 		const argumentCursor = Math.max(0, cursorCol - context.argsStart);
@@ -838,7 +841,7 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 	return new ClioAutocompleteProvider(
 		options.basePath ?? process.cwd(),
 		options.fdPath === undefined ? resolveFdBinary() : options.fdPath,
-		options.completionSources ?? {},
+		options.completionSources ?? emptyCompletionSources(),
 		options.fileReferenceSource,
 		options.promptTemplates,
 		options.extensionCommands,

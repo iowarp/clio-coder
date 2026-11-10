@@ -7,6 +7,7 @@ import {
 } from "../../src/interactive/interactive-presentation.js";
 import {
 	createSlashCommandAutocompleteProvider,
+	emptyCompletionSources,
 	type SlashAutocompleteOptions,
 	type SlashCompletionItem,
 } from "../../src/interactive/slash-autocomplete.js";
@@ -51,12 +52,15 @@ test("dynamic slash slots read current source values and replace the argument", 
 	};
 	const provider = createSlashCommandAutocompleteProvider({
 		fdPath: null,
-		completionSources: Object.fromEntries(
-			Object.entries(catalog).map(([slot, rows]) => [
-				slot,
-				async () => rows.map((row) => ({ ...row, value: row.id, label: row.id })),
-			]),
-		),
+		completionSources: {
+			...emptyCompletionSources(),
+			...Object.fromEntries(
+				Object.entries(catalog).map(([slot, rows]) => [
+					slot,
+					async () => rows.map((row) => ({ ...row, value: row.id, label: row.id })),
+				]),
+			),
+		},
 	});
 	for (const [line, expected] of [
 		["/run re", "researcher"],
