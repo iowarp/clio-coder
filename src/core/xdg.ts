@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * Resolve per-platform config/data/state/cache directories for Clio.
@@ -36,6 +36,13 @@ export interface ClioDirs {
 type ClioDirRole = keyof ClioDirs;
 
 const CLIO_DIR_ROLES: ReadonlyArray<ClioDirRole> = ["config", "data", "state", "cache"];
+
+const ROLE_ENV: Record<ClioDirRole, string> = {
+	config: "CLIO_CODER_CONFIG_DIR",
+	data: "CLIO_CODER_DATA_DIR",
+	state: "CLIO_CODER_STATE_DIR",
+	cache: "CLIO_CODER_CACHE_DIR",
+};
 
 /**
  * Resolve an existing prefix physically and append any missing suffix.
@@ -92,6 +99,22 @@ export function clioDirLayoutProblems(dirs: ClioDirs = resolveClioDirs()): strin
 		ClioDirRole,
 		string
 	>;
+	const home = physicalPath(homedir());
+	const clioHome = clioHomeOrNull();
+	const physicalClioHome = clioHome && isAbsolute(clioHome) ? physicalPath(clioHome) : null;
+	for (const role of CLIO_DIR_ROLES) {
+		if (atOrAbove(physical[role], home)) problems.push(`${role} root is the home directory or above it: ${dirs[role]}`);
+	}
+	// CLIO_CODER_HOME=$HOME would scatter config, data, state and cache directly in the home.
+	if (
+		clioHome !== null &&
+		physicalClioHome !== null &&
+		atOrAbove(physicalClioHome, home) &&
+		CLIO_DIR_ROLES.some(
+			(role) => envOrNull(ROLE_ENV[role]) === null && physical[role] === physicalPath(join(clioHome, role)),
+		)
+	)
+		problems.push(`CLIO_CODER_HOME is the home directory or above it: ${clioHome}`);
 	for (let leftIndex = 0; leftIndex < CLIO_DIR_ROLES.length; leftIndex += 1) {
 		const leftRole = CLIO_DIR_ROLES[leftIndex];
 		if (leftRole === undefined) continue;
@@ -118,6 +141,52 @@ export function assertClioDirLayout(dirs: ClioDirs = resolveClioDirs()): void {
 		`Unsafe Clio directory layout:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n` +
 			"Set four absolute, distinct, non-nesting CLIO_CODER_*_DIR paths, then run `clio-coder doctor`.",
 	);
+}
+
+function atOrAbove(path: string, target: string): boolean {
+	return path === target || containsPath(path, target);
+}
+
+/** The file whose presence marks a custom data or cache root as Clio's own. */
+export const CLIO_ROOT_MARKER = ".clio-coder-root";
+
+const ROLE_OWNERSHIP_FILE: Record<ClioDirRole, string> = {
+	config: "settings.yaml",
+	data: CLIO_ROOT_MARKER,
+	state: "home.json",
+	cache: CLIO_ROOT_MARKER,
+};
+
+/**
+ * Why a root must not be removed recursively, or null when it is Clio's own.
+ *
+ * Only reset and uninstall ask. The layout check proves the four roots are
+ * distinct; it does not prove a root is Clio's. `CLIO_CODER_CONFIG_DIR=~/.config`
+ * passes it, and a recursive delete of that root takes every other tool's
+ * configuration with it. A root qualifies by being the platform default, by
+ * the basename `clio-coder`, or by holding the role's Clio file, and never when
+ * it is the home, above it, or a shared XDG base directory.
+ */
+export function removableClioRootProblem(role: ClioDirRole, path: string): string | null {
+	const physical = physicalPath(path);
+	const home = physicalPath(homedir());
+	if (atOrAbove(physical, home)) return "the home directory or above it";
+	const shared = [
+		xdgBaseDir(process.env.XDG_CONFIG_HOME, join(homedir(), ".config")),
+		xdgBaseDir(process.env.XDG_DATA_HOME, join(homedir(), ".local", "share")),
+		xdgBaseDir(process.env.XDG_STATE_HOME, join(homedir(), ".local", "state")),
+		xdgBaseDir(process.env.XDG_CACHE_HOME, join(homedir(), ".cache")),
+		join(homedir(), ".config"),
+		join(homedir(), ".local", "share"),
+		join(homedir(), ".local", "state"),
+		join(homedir(), ".cache"),
+		join(homedir(), ".local"),
+	].map(physicalPath);
+	if (shared.includes(physical)) return "a shared base directory other tools use";
+	if (physical === physicalPath(platformDefaults()[role])) return null;
+	if (basename(physical).toLowerCase() === "clio-coder") return null;
+	if (existsSync(join(path, ROLE_OWNERSHIP_FILE[role]))) return null;
+	return `no ${ROLE_OWNERSHIP_FILE[role]} inside and not named clio-coder`;
 }
 
 let cachedConfigDir: string | undefined;
@@ -174,7 +243,8 @@ function platformDefaults(): ClioDirs {
 	};
 }
 
-function ensureDir(dir: string): string {
+function ensureDir(dir: string, marker?: ClioDirRole): string {
+	const created = marker !== undefined && !existsSync(dir);
 	try {
 		mkdirSync(dir, { recursive: true });
 	} catch (err) {
@@ -183,6 +253,14 @@ function ensureDir(dir: string): string {
 	}
 	const s = statSync(dir);
 	if (!s.isDirectory()) throw new Error(`Expected directory at ${dir}`);
+	// Only a root Clio created is marked: marking an existing directory would vouch for someone else's files.
+	if (created) {
+		try {
+			writeFileSync(join(dir, CLIO_ROOT_MARKER), `${marker}\n`, { flag: "wx" });
+		} catch {
+			// Without the marker a custom root is only kept at uninstall, never lost.
+		}
+	}
 	return dir;
 }
 
@@ -265,7 +343,7 @@ export function clioDataDir(): string {
 	if (cachedDataDir) return cachedDataDir;
 	const dirs = resolveClioDirs();
 	assertClioDirLayout(dirs);
-	cachedDataDir = ensureDir(dirs.data);
+	cachedDataDir = ensureDir(dirs.data, "data");
 	return cachedDataDir;
 }
 
@@ -281,7 +359,7 @@ export function clioCacheDir(): string {
 	if (cachedCacheDir) return cachedCacheDir;
 	const dirs = resolveClioDirs();
 	assertClioDirLayout(dirs);
-	cachedCacheDir = ensureDir(dirs.cache);
+	cachedCacheDir = ensureDir(dirs.cache, "cache");
 	return cachedCacheDir;
 }
 

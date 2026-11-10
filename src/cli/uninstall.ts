@@ -23,7 +23,7 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "no
 import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
-import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { clioDirLayoutProblems, removableClioRootProblem, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import type { Installation } from "../domains/lifecycle/install-method.js";
 import {
 	INSTALLER_LAUNCHER_MARK,
@@ -711,6 +711,18 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		return 1;
 	}
 
+	// A root that is not provably Clio's is never deleted recursively; it is kept and named.
+	const notClio = (role: "config" | "data" | "state" | "cache", exists: boolean): string | null => {
+		const problem = exists ? removableClioRootProblem(role, dirs[role]) : null;
+		return problem ? `not a Clio-only directory (${problem}); remove Clio's files inside it by hand` : null;
+	};
+	const refused = {
+		data: args.keepData ? null : notClio("data", dataSize.exists),
+		cache: notClio("cache", cacheSize.exists),
+		config: args.keepConfig ? null : notClio("config", configSize.exists),
+		state: notClio("state", stateSize.exists),
+	};
+
 	// The state root's own children (telemetry, sessions) are inside the State row
 	// and go with it; listing them again as separate removals double-counted the
 	// bytes and promised per-child results that one recursive delete never
@@ -720,28 +732,29 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			label: "Data",
 			path: dirs.data,
 			bytes: dataSize.bytes,
-			status: args.keepData ? "keep" : dataSize.exists ? "remove" : "absent",
-			detail: args.keepData ? "kept by --keep-data" : undefined,
+			status: args.keepData ? "keep" : refused.data ? "skip" : dataSize.exists ? "remove" : "absent",
+			detail: args.keepData ? "kept by --keep-data" : (refused.data ?? undefined),
 		},
 		{
 			label: "Cache",
 			path: dirs.cache,
 			bytes: cacheSize.bytes,
-			status: cacheSize.exists ? "remove" : "absent",
+			status: refused.cache ? "skip" : cacheSize.exists ? "remove" : "absent",
+			detail: refused.cache ?? undefined,
 		},
 		{
 			label: "Config",
 			path: dirs.config,
 			bytes: configSize.bytes,
-			status: args.keepConfig ? "keep" : configSize.exists ? "remove" : "absent",
-			detail: args.keepConfig ? "kept by --keep-config" : undefined,
+			status: args.keepConfig ? "keep" : refused.config ? "skip" : configSize.exists ? "remove" : "absent",
+			detail: args.keepConfig ? "kept by --keep-config" : (refused.config ?? undefined),
 		},
 		{
 			label: "State",
 			path: dirs.state,
 			bytes: stateSize.bytes,
-			status: stateSize.exists ? "remove" : "absent",
-			detail: stateSize.exists ? "sessions, telemetry" : undefined,
+			status: refused.state ? "skip" : stateSize.exists ? "remove" : "absent",
+			detail: refused.state ?? (stateSize.exists ? "sessions, telemetry" : undefined),
 		},
 		{
 			label: "Launcher",
@@ -786,7 +799,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const keepGuiState = web.unmanaged.length > 0 && existsSync(join(dirs.state, "gui"));
 	if (keepGuiState) {
 		const state = items.find((item) => item.label === "State");
-		if (state) state.detail = "sessions, telemetry; gui is kept";
+		if (state && !refused.state) state.detail = "sessions, telemetry; gui is kept";
 	}
 
 	for (const socket of paneHosts)
@@ -969,25 +982,25 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			return 1;
 		}
 
-		if (cacheSize.exists) {
+		if (cacheSize.exists && !refused.cache) {
 			const failure = removePath("cache", dirs.cache, false);
 			if (failure) failures.push(failure);
 			else presenter.completedStep("Removed Cache");
 		}
 
-		if (!args.keepData && dataSize.exists) {
+		if (!args.keepData && dataSize.exists && !refused.data) {
 			const failure = removePath("data", dirs.data, false);
 			if (failure) failures.push(failure);
 			else presenter.completedStep("Removed Data");
 		}
 
-		if (!args.keepConfig && configSize.exists) {
+		if (!args.keepConfig && configSize.exists && !refused.config) {
 			const failure = removePath("config", dirs.config, false);
 			if (failure) failures.push(failure);
 			else presenter.completedStep("Removed Config");
 		}
 
-		if (stateSize.exists) {
+		if (stateSize.exists && !refused.state) {
 			const targets = keepGuiState
 				? readdirSync(dirs.state)
 						.filter((name) => name !== "gui")
@@ -1125,6 +1138,11 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		);
 		if (survivor !== null)
 			presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
+		if (Object.values(refused).some((reason) => reason !== null)) {
+			presenter.fail("uninstall kept a root that is not Clio's own; see Kept, and why");
+			presenter.finish();
+			return 1;
+		}
 
 		presenter.message("Thank you for using Clio Coder.");
 		presenter.done("Done");

@@ -28,6 +28,7 @@ function fixture() {
 	mkdirSync(root);
 	writeFileSync(join(root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.4"}');
 	writeFileSync(history, "history must survive previews and failures");
+	writeFileSync(join(state, "home.json"), "{}\n");
 	function run(command: "reset" | "uninstall", args: string[]) {
 		const functionName = command === "reset" ? "runResetCommand" : "runUninstallCommand";
 		const argv = command === "reset" && !args.includes("--all") ? ["--state", ...args] : args;

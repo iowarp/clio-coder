@@ -2,7 +2,7 @@ import { type Dirent, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
-import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { clioDirLayoutProblems, removableClioRootProblem, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
@@ -381,20 +381,20 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 			return 1;
 		}
 	}
-	const toRemove: Array<{ label: string; path: string }> = [];
+	const toRemove: Array<{ label: string; path: string; role?: "config" | "data" | "state" | "cache" }> = [];
 	if (args.all) {
 		toRemove.push(
-			{ label: "Config", path: dirs.config },
-			{ label: "Data", path: dirs.data },
-			{ label: "State", path: dirs.state },
-			{ label: "Cache", path: dirs.cache },
+			{ label: "Config", path: dirs.config, role: "config" },
+			{ label: "Data", path: dirs.data, role: "data" },
+			{ label: "State", path: dirs.state, role: "state" },
+			{ label: "Cache", path: dirs.cache, role: "cache" },
 		);
 	} else {
 		if (args.settings) toRemove.push({ label: "Settings", path: settingsPath });
 		if (args.auth) toRemove.push({ label: "Credentials", path: credentialsPath });
-		if (args.data) toRemove.push({ label: "Data", path: dirs.data });
-		if (args.state) toRemove.push({ label: "State", path: dirs.state });
-		if (args.cache) toRemove.push({ label: "Cache", path: dirs.cache });
+		if (args.data) toRemove.push({ label: "Data", path: dirs.data, role: "data" });
+		if (args.state) toRemove.push({ label: "State", path: dirs.state, role: "state" });
+		if (args.cache) toRemove.push({ label: "Cache", path: dirs.cache, role: "cache" });
 	}
 
 	// `removePath` returns null both for a path it deleted and for one that was
@@ -404,6 +404,15 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	let cleared = 0;
 	for (const entry of toRemove) {
 		const existed = measurePath(entry.path).exists;
+		const notClio = existed && entry.role ? removableClioRootProblem(entry.role, entry.path) : null;
+		if (notClio) {
+			failures.push({
+				label: entry.label,
+				path: entry.path,
+				reason: `kept: not a Clio-only directory (${notClio}); remove Clio's files inside it by hand`,
+			});
+			continue;
+		}
 		const failure = removePath(entry.label, entry.path, false);
 		if (failure) failures.push(failure);
 		else if (existed) {
