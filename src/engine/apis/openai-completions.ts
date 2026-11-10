@@ -401,7 +401,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	} as TOptions;
 	const source = sourceFactory(capturedOptions);
 	const annotated = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			for await (const raw of source) {
 				const event = capture.diffusionFrames !== null ? applyDiffusionFrame(raw, capture.diffusionFrames) : raw;
@@ -471,7 +471,7 @@ function withLiteLLMRouteFailureAdvice(
 	if (metadata?.runtimeId !== "litellm") return source;
 	const advised = createAssistantMessageEventStream();
 	let hasPartialResponse = false;
-	(async () => {
+	void (async () => {
 		try {
 			for await (const event of source) {
 				if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
@@ -781,7 +781,7 @@ function stripNeverReasoningFromStream(
 ): AssistantMessageEventStream {
 	if (!stripsThinking(resolved)) return source;
 	const stripped = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			for await (const event of source) {
 				if (event.type === "done") {
@@ -965,7 +965,7 @@ function withReasoningTokenEstimate(
 	model: Model<Api>,
 ): AssistantMessageEventStream {
 	const annotated = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			for await (const event of source) {
 				if (event.type === "done") {
@@ -994,7 +994,7 @@ function withReasoningTokenEstimate(
  */
 function stripSentinelsFromStream(source: AssistantMessageEventStream, model: Model<Api>): AssistantMessageEventStream {
 	const sanitized = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			const strippers = new Map<number, ReturnType<typeof createSentinelStripper>>();
 			const safeText = new Map<number, string>();
@@ -1083,7 +1083,7 @@ function guardMalformedToolCalls(
 	}
 	if (requiredByTool.size === 0) return source;
 	const guarded = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			for await (const event of source) {
 				// The final stop reason distinguishes malformed output from a token
@@ -1237,7 +1237,7 @@ export function withLocalResidency(
 	const startResponseDeadline = deferResponseDeadline(options);
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	const reportAdmission = modelAdmissionReporter(options);
-	(async () => {
+	void (async () => {
 		let release = NO_RELEASE;
 		try {
 			options.signal?.throwIfAborted();

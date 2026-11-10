@@ -476,7 +476,7 @@ function runStream(
 		...(signal ? { signal } : {}),
 		...(baseUrl ? { listResident: () => listResidentOllamaModels(baseUrl, headers, signal) } : {}),
 	});
-	(async () => {
+	void (async () => {
 		try {
 			signal?.throwIfAborted();
 			const reportAdmission = modelAdmissionReporter(options);

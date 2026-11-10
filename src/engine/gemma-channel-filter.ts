@@ -161,7 +161,7 @@ export function filterGemmaChannelStream(
 	};
 	const projectedPartial = (event: { partial: AssistantMessage }): AssistantMessage => projectMessage(event.partial);
 
-	(async () => {
+	void (async () => {
 		try {
 			const closeActive = (originalIndex: number, partial: AssistantMessage) => {
 				const kind = activeKinds.get(originalIndex);

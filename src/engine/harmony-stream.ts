@@ -116,7 +116,7 @@ export function routeHarmonyStream(
 	fail: (stream: AssistantMessageEventStream, cause: unknown) => void,
 ): AssistantMessageEventStream {
 	const output = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		try {
 			const projected: ContentBlock[] = [];
 			/** pi content index to projected index; null when the block was dropped. */
@@ -426,7 +426,7 @@ export function retryHarmonyFailureOnce(
 	fail: (stream: AssistantMessageEventStream, cause: unknown) => void,
 ): AssistantMessageEventStream {
 	const output = createAssistantMessageEventStream();
-	(async () => {
+	void (async () => {
 		let source = first;
 		let attempt = 1;
 		let startForwarded = false;
