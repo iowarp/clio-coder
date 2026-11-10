@@ -153,7 +153,7 @@ it("reads every provider concurrently and appends the free local row", async () 
 
 	const again = await service.read();
 	assert.equal(paid.calls, 1, "a good snapshot inside the TTL must not spend another network read");
-	assert.equal(absent.calls, 2, "an absent credential is re-checked, since signing in must take effect");
+	assert.equal(absent.calls, 1, "an absent credential is held and re-checked through detect(), not another fetch");
 	assert.equal(again.length, 2);
 });
 
