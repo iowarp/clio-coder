@@ -421,14 +421,6 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
-			// A worker's run settles inside the dispatch domain, where a
-			// timeout abort seals "canceled" by design (DispatchContract.abort), so
-			// --timeout is a main-agent contract for now.
-			if (parsed.timeoutSeconds !== undefined && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --timeout applies to the main agent, not --agent dispatch\n");
-				process.stderr.write(USAGE);
-				return 2;
-			}
 			if (parsed.verify.length > 0 && parsed.agentId !== undefined) {
 				writeRunDiagnostic("clio-coder run: --verify applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
@@ -809,6 +801,18 @@ async function runDispatch(
 		const onSignal = (): void => dispatch.abort(handle.runId);
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
+		// --timeout expiry starts the coordinated shutdown. Abort the worker and
+		// let it settle so the run is recorded (as "canceled") before exit 124.
+		if (parsed.timeoutSeconds !== undefined) {
+			getTerminationCoordinator().onDrain(async () => {
+				try {
+					dispatch.abort(handle.runId);
+				} catch {
+					// The run already finished.
+				}
+				await handle.finalPromise.catch(() => undefined);
+			});
+		}
 
 		// Human output is the worker's final answer, settled limits, and result line. Native
 		// workers carry the answer in the last assistant message_end event;

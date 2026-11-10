@@ -39,7 +39,7 @@ Flags:
   --continue                append this turn to the most recent session for this cwd; after a yolo
                             autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
-  --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
+  --timeout <seconds>       wall-clock limit for the whole run; exit 124 on expiry
   --verify "<cmd>"          an acceptance check for this run only, repeatable: bash runs it in the run's cwd after
                             the turn, and the finish gate counts the agent's own run of it (see below)
   --verify-timeout <secs>   limit for each --verify check (default 300); a check that runs over fails
@@ -107,7 +107,8 @@ starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a
 running bash tool's process group is signaled, and the run is recorded with
 outcome "timed_out" before the process exits 124, the code timeout(1) uses. An
 external SIGTERM still seals "canceled" with exit 143. A timeout during boot,
-before the turn starts, exits 124 with no run recorded. Main agent only.
+before the turn starts, exits 124 with no run recorded. With --agent, expiry
+aborts the dispatched worker, which is recorded as "canceled".
 
 With --agent the exit code is the dispatched run's: 0 on success, 2 for a
 usage or admission error, 3 when the worker stopped on a refused permission

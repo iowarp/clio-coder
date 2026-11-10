@@ -206,12 +206,6 @@ describe("clio-coder run --timeout", () => {
 		const missing = await runCli(["run", "--timeout"], { env: scratch.env, cwd: scratch.root });
 		strictEqual(missing.code, 2, missing.stderr);
 		match(missing.stderr, /--timeout requires a value/);
-		const agent = await runCli(["run", "--timeout", "5", "--agent", "coder", "task"], {
-			env: scratch.env,
-			cwd: scratch.root,
-		});
-		strictEqual(agent.code, 2, agent.stderr);
-		match(agent.stderr, /--timeout applies to the main agent, not --agent dispatch/);
 	});
 
 	it("runs each --verify check after the turn and credits the agent's own run of it after its edit", async () => {
