@@ -13,7 +13,7 @@ import {
 	type IdentitySettings,
 	type LocalIdentity,
 	localIdentity,
-	observeSession,
+	observeSessionAsync,
 	outboxEntry,
 	planReport,
 	REPORT_DRAFT_SAVED,
@@ -204,18 +204,26 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			return;
 		}
 		const current = deps.session?.() ?? null;
-		const offer = request.kind === "bug" ? (deps.takeOffer?.() ?? null) : null;
-		const draft = composeReportDraft({
-			kind: request.kind,
-			surface: "tui",
-			...(offer !== null ? { offer } : {}),
-			...(request.summary !== undefined ? { title: request.summary } : {}),
-			session:
-				current === null
-					? null
-					: { id: current.id, observations: observeSession(deps.stateDir, current.id), facts: current.facts },
+		const kind = request.kind;
+		const summary = request.summary;
+		const offer = kind === "bug" ? (deps.takeOffer?.() ?? null) : null;
+		start(async () => {
+			const draft = composeReportDraft({
+				kind,
+				surface: "tui",
+				...(offer !== null ? { offer } : {}),
+				...(summary !== undefined ? { title: summary } : {}),
+				session:
+					current === null
+						? null
+						: {
+								id: current.id,
+								observations: await observeSessionAsync(deps.stateDir, current.id),
+								facts: current.facts,
+							},
+			});
+			await review(draft);
 		});
-		start(() => review(draft));
 	}
 
 	function status(options: { refresh?: boolean } = {}): void {

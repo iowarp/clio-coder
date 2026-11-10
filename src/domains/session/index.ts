@@ -133,6 +133,7 @@ export {
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
+	loadSessionTelemetrySourceAsync,
 	runTelemetryDirectoryExists,
 	runTelemetryWrittenMs,
 } from "./telemetry-source.js";

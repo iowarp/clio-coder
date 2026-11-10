@@ -90,7 +90,7 @@ export {
 	setReplyCheck,
 	takeFixedReportNotices,
 } from "./follow-up.js";
-export { observeSession, type ReportObservation, renderObservation } from "./observe.js";
+export { observeSession, observeSessionAsync, type ReportObservation, renderObservation } from "./observe.js";
 export {
 	createOfferTriggers,
 	HEADLESS_OFFER_LINE,

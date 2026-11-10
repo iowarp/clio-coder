@@ -1,4 +1,4 @@
-import { loadSessionTelemetrySource } from "../session/index.js";
+import { loadSessionTelemetrySource, loadSessionTelemetrySourceAsync } from "../session/index.js";
 import { whyStopped } from "../telemetry/index.js";
 
 /**
@@ -73,7 +73,15 @@ export function renderObservation(observation: ReportObservation): string {
 
 /** The session's last turn, its abort source, its last continuation and the last compaction outcome. */
 export function observeSession(stateDir: string, sessionId: string): ReportObservation[] {
-	const source = loadSessionTelemetrySource(stateDir, sessionId);
+	return observationsOf(loadSessionTelemetrySource(stateDir, sessionId));
+}
+
+/** `observeSession` without blocking: the TUI reads a long session's journal off its input loop. */
+export async function observeSessionAsync(stateDir: string, sessionId: string): Promise<ReportObservation[]> {
+	return observationsOf(await loadSessionTelemetrySourceAsync(stateDir, sessionId));
+}
+
+function observationsOf(source: ReturnType<typeof loadSessionTelemetrySource>): ReportObservation[] {
 	if (source === null) return [];
 	const observations: ReportObservation[] = [];
 	const last = whyStopped(source).lastTurn;
