@@ -12,7 +12,8 @@ export type ReportObservation =
 	  }
 	| { code: "turn-aborted"; values: { source: string } }
 	| { code: "turn-continued"; values: { cause: string; attempt: number; cap: number } }
-	| { code: "compaction"; values: { outcome: string } };
+	| { code: "compaction"; values: { outcome: string } }
+	| { code: "crash"; values: { name: string; frames: string[] } };
 
 const VOCABULARY_VALUE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/u;
 
@@ -23,6 +24,11 @@ function word(value: unknown): string {
 
 function count(value: unknown): number {
 	return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < 1_000_000 ? value : 0;
+}
+
+/** A crash frame is `function@module` from the crash record; anything else reads as unknown. */
+function frame(value: unknown): string {
+	return typeof value === "string" && /^[\w$.<>[\] -]{1,80}@[\w$./@:-]{1,120}$/u.test(value) ? value : "unknown";
 }
 
 const ABORT_SOURCES: Readonly<Record<string, string>> = {
@@ -57,6 +63,11 @@ export function renderObservation(observation: ReportObservation): string {
 		}
 		case "compaction":
 			return `The last compaction was ${COMPACTION_OUTCOMES[observation.values.outcome] ?? `\`${word(observation.values.outcome)}\``}.`;
+		case "crash": {
+			const frames = observation.values.frames.slice(0, 5).map(frame);
+			const top = frames.length > 0 ? `; top frames ${frames.map((item) => `\`${item}\``).join(", ")}` : "";
+			return `Clio Coder crashed with \`${word(observation.values.name)}\`${top}.`;
+		}
 	}
 }
 

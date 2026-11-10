@@ -154,7 +154,16 @@ export interface ComposeReportInput {
 	/** The session the report is about; its observations fill "What Clio observed". */
 	session?: { id: string; observations: ReadonlyArray<ReportObservation>; facts?: ReportSessionFacts } | null;
 	environment?: ReportEnvironment;
+	/** The offer the operator answered with /report: its trigger, cause and fingerprint replace the derived ones. */
+	offer?: ReportOfferPrefill | null;
 	now?: Date;
+}
+
+export interface ReportOfferPrefill {
+	trigger: "internal" | "crash" | "repeated";
+	cause: string;
+	fingerprint: string;
+	crash?: { name: string; frames: ReadonlyArray<{ fn: string; module: string }>; message: string };
 }
 
 /**
@@ -166,22 +175,36 @@ export function composeReportDraft(input: ComposeReportInput): ReportDraft {
 	const environment = input.environment ?? reportEnvironment(input.surface, input.session?.facts);
 	const observed = [...(input.session?.observations ?? [])];
 	const ended = observed.find((observation) => observation.code === "turn-ended");
-	const cause = ended?.code === "turn-ended" ? ended.values.cause : null;
-	const trigger = cause === "internal" ? "internal" : "operator";
+	const offer = input.offer ?? null;
+	const cause = offer !== null ? offer.cause : ended?.code === "turn-ended" ? ended.values.cause : null;
+	const trigger = offer !== null ? offer.trigger : cause === "internal" ? "internal" : "operator";
+	const crash = offer?.crash;
+	if (crash !== undefined)
+		observed.unshift({
+			code: "crash",
+			values: { name: crash.name, frames: crash.frames.map((frame) => `${frame.fn}@${frame.module}`) },
+		});
+	// The crash message is raw text from the record, so it goes where the operator's words go and is scrubbed with them.
+	const happened = input.happened?.trim() || (crash ? `Clio Coder crashed: ${crash.name}: ${crash.message}`.trim() : "");
 	return {
 		id: newReportId(now.getTime()),
 		createdAt: now.toISOString(),
 		kind: input.kind,
 		origin: "operator",
 		title: input.title?.trim() ?? "",
-		sections: { happened: input.happened?.trim() ?? "", operatorWords: "", expected: "", reproduce: "", notKnown: [] },
+		sections: { happened, operatorWords: "", expected: "", reproduce: "", notKnown: [] },
 		observed,
 		environment,
 		includeModel: true,
 		area: null,
 		trigger,
 		cause,
-		fingerprint: trigger === "internal" ? reportFingerprint({ trigger, cause, version: environment.clioCoder }) : null,
+		fingerprint:
+			offer !== null
+				? offer.fingerprint
+				: trigger === "internal"
+					? reportFingerprint({ trigger, cause, version: environment.clioCoder })
+					: null,
 		links: [],
 		sessionId: input.session?.id ?? null,
 		unmasked: [],

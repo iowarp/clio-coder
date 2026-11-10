@@ -4379,6 +4379,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				cwd: process.cwd(),
 			});
 			startRunOutput();
+			// R-11: a main turn that ended on Clio Coder's own fault earns one stderr line after the run.
+			let internalFault = false;
+			const unsubscribeInternalFault = bus.subscribe("turn.settled", (payload, context) => {
+				if (context?.agent.role === "main" && payload.terminal.cause === "internal") internalFault = true;
+			});
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
 				...(display ? { display } : {}),
@@ -4424,6 +4429,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
+			unsubscribeInternalFault();
+			if (internalFault) {
+				try {
+					const { HEADLESS_OFFER_LINE, takeHeadlessOffer } = await import("../domains/report/index.js");
+					const offered = takeHeadlessOffer({
+						stateDir: clioStateDir(),
+						sessionId: session?.current()?.id ?? null,
+						offers: getCurrentSettings().report?.offers ?? "ask",
+						mode: options.headless.mode ?? "text",
+						env: process.env,
+						now: new Date(),
+					});
+					if (offered) process.stderr.write(`${HEADLESS_OFFER_LINE}\n`);
+				} catch {
+					// The offer line is a courtesy; a ledger that cannot be read or written leaves the run's exit as it was.
+				}
+			}
 			if (code === 0) {
 				const deadline = options.headless.deadline;
 				await memoryOwner.retainTask(

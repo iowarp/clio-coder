@@ -39,6 +39,15 @@ export {
 } from "./canary.js";
 export type { ReportCommandResult, ReportCommandRunner } from "./command.js";
 export {
+	CRASH_RECORD_LIMIT,
+	type CrashFrame,
+	type CrashRecord,
+	crashesDirectory,
+	crashFingerprint,
+	latestCrashSince,
+	writeCrashRecord,
+} from "./crash.js";
+export {
 	applyVerdict,
 	changelogFixedIn,
 	findRelated,
@@ -59,8 +68,32 @@ export {
 	validateDraft,
 } from "./draft.js";
 export { type ReportEnvironment, type ReportSessionFacts, reportEnvironment } from "./environment.js";
+export {
+	REPORT_OFFER_KEY,
+	type ReportOfferWatcher,
+	type ReportOfferWatcherDeps,
+	startReportOfferWatcher,
+} from "./extension.js";
 export { crashFrames, minorVersion, reportFingerprint } from "./fingerprint.js";
 export { observeSession, type ReportObservation, renderObservation } from "./observe.js";
+export {
+	createOfferTriggers,
+	HEADLESS_OFFER_LINE,
+	isFirstSession,
+	mayOffer,
+	NEVER_OFFER_CAUSES,
+	OFFER_INTERVAL_MS,
+	type OfferCandidate,
+	type OfferLedger,
+	type OfferRefusal,
+	type OfferSession,
+	offerRefusal,
+	type ReportOffersSetting,
+	readOfferLedger,
+	recordAnswer,
+	recordOfferShown,
+	takeHeadlessOffer,
+} from "./offers.js";
 export {
 	type OutboxBundle,
 	type OutboxEntry,
@@ -89,6 +122,7 @@ export {
 	REPORT_THANKS,
 	type ReportFlowDeps,
 	type ReportFlowOutcome,
+	type ReportOfferPrefill,
 	type ReportPlan,
 	type ReportPlanTransport,
 	type ReportRow,

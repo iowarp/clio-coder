@@ -1500,6 +1500,18 @@ function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings)
 	}
 }
 
+function validateReport(issues: Issues, raw: unknown, settings: ClioSettings): void {
+	if (!isPlainObject(raw)) {
+		issues.add("report", `expected a map, got ${describe(raw)}`);
+		return;
+	}
+	issues.unknownKeys("report", raw, ["offers"]);
+	if ("offers" in raw) {
+		const parsed = expectEnum(issues, "report.offers", raw.offers, ["ask", "off"] as const);
+		if (parsed !== undefined) settings.report.offers = parsed;
+	}
+}
+
 const TOP_LEVEL_KEYS = [
 	"version",
 	"turnControl",
@@ -1512,6 +1524,7 @@ const TOP_LEVEL_KEYS = [
 	"interface",
 	"integrations",
 	"telemetry",
+	"report",
 	...V1_ONLY_ROOTS,
 ] as const;
 
@@ -2721,6 +2734,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	}
 
 	if ("telemetry" in raw) validateTelemetry(issues, raw.telemetry, settings);
+	if ("report" in raw) validateReport(issues, raw.report, settings);
 
 	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 }

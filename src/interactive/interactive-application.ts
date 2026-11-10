@@ -145,6 +145,13 @@ export {
 } from "./leader-key.js";
 export * from "./overlay-lifecycle.js";
 
+/** The report offer's notice key; dismissing it records a no (R-11). */
+const REPORT_OFFER_NOTICE_KEY = "report-offer";
+/** At yolo, an operator with no keypress for this long is away and is not offered a report. */
+const REPORT_OFFER_AWAY_MS = 2 * 60_000;
+/** The offer fades like any notice, a little slower so it can be read; it stays answerable through /report. */
+const REPORT_OFFER_TTL_MS = 60_000;
+
 export interface InteractiveDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	bus: TelemetryHub;
@@ -1616,8 +1623,16 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			terminalColors.refresh();
 		}
 	};
+	// R-11: the report offer watcher loads after the first frame; until then nothing can be offered.
+	let reportOffers: import("../domains/report/extension.js").ReportOfferWatcher | null = null;
+	let lastOperatorInputAt = Date.now();
 	overlayLifecycle = createOverlayLifecycle({
 		dismissNotification: (key) => notifications.dismiss(key),
+		takeReportOffer: () => {
+			const offer = reportOffers?.take() ?? null;
+			if (offer !== null) notifications.dismiss(REPORT_OFFER_NOTICE_KEY);
+			return offer;
+		},
 		onToolResumed: (toolCallId) => statusController.noteToolResumed(toolCallId),
 		onToolJudging: (toolCallId) => statusController.noteToolJudging(toolCallId),
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
@@ -2201,10 +2216,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		editor,
 		editorSubmit,
 		requestRender: () => tui.requestRender(),
+		// These are the operator's dismissals; dismissing the report offer is a no to its fingerprint.
 		notifications: {
 			...notifications,
+			dismiss: (idOrKey) => {
+				const offer = notifications.list().find((entry) => entry.key === REPORT_OFFER_NOTICE_KEY);
+				if (offer !== undefined && (offer.id === idOrKey || offer.key === idOrKey)) reportOffers?.decline();
+				return notifications.dismiss(idOrKey);
+			},
 			dismissAll: () => {
 				updateMonitor?.dismiss();
+				if (notifications.list().some((entry) => entry.key === REPORT_OFFER_NOTICE_KEY)) reportOffers?.decline();
 				notifications.dismissAll();
 			},
 		},
@@ -2306,6 +2328,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		registerInputListener: (listener) => {
 			const handleInput: typeof listener = (data) => {
+				lastOperatorInputAt = Date.now();
+				reportOffers?.poke();
 				const overlayState = overlayLifecycle.getState();
 				try {
 					return listener(data);
@@ -2379,6 +2403,36 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		});
 		if (!adopted) void applicationController.shutdown();
 	}
+
+	void import("../domains/report/extension.js")
+		.then(({ startReportOfferWatcher }) => {
+			if (getTerminationCoordinator().getPhase() !== "idle") return;
+			reportOffers = startReportOfferWatcher({
+				stateDir: deps.stateDir,
+				version: readClioVersion(),
+				sessionId: () => deps.session?.current()?.id ?? null,
+				offers: () => deps.getSettings?.().report?.offers ?? "ask",
+				turnRunning: () => deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle",
+				// At yolo the operator may have walked away; an offer waits for a key pressed in the last two minutes.
+				attended: () =>
+					deps.getSettings?.().safety.autonomy !== "yolo" || Date.now() - lastOperatorInputAt < REPORT_OFFER_AWAY_MS,
+				show: (candidate) => {
+					// An offer and a tip never stand after the same turn: the offer takes the tip's place.
+					for (const entry of notifications.list()) if (entry.key?.startsWith("guidance.")) notifications.dismiss(entry.id);
+					notifications.add({
+						level: "info",
+						text: candidate.text,
+						key: REPORT_OFFER_NOTICE_KEY,
+						ttlMs: REPORT_OFFER_TTL_MS,
+					});
+					tui.requestRender();
+				},
+			});
+			getTerminationCoordinator().onDrain(() => reportOffers?.dispose());
+		})
+		.catch(() => {
+			// The offer is optional; a watcher that cannot load leaves the session as it was.
+		});
 
 	const startupAbort = new AbortController();
 	const startupWorkspace = process.cwd();

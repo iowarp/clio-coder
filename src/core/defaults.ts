@@ -951,6 +951,9 @@ export const DEFAULT_SETTINGS = {
 		mode: "standard",
 		research: { content: false, deltas: true, providerHeaders: true, busTrace: false },
 	} as TelemetrySettings,
+	report: {
+		offers: "ask" as "ask" | "off",
+	},
 };
 
 /**
@@ -1211,6 +1214,12 @@ telemetry:
     deltas: true
     providerHeaders: true
     busTrace: false
+
+# When Clio itself fails (an internal error, a crash), it may suggest /report once:
+# at most one suggestion a week, never again for a problem you said no to. off
+# never suggests. Nothing is sent without your keypress.
+report:
+  offers: ask
 `;
 
 /**

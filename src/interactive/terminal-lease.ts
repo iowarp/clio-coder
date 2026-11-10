@@ -11,6 +11,7 @@
 import type { ClioSettings } from "../core/config.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { writeCrashRecord } from "../domains/report/crash.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import type { ApplicationInputTui } from "../engine/tui.js";
 import {
@@ -396,6 +397,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	// A throw in a render or event handler, or a stray rejection, still runs the
 	// shutdown hooks: the drain hook restores the terminal and the draft is recovered.
 	const onProcessFault = (error: unknown): void => {
+		// Never throws: a crash the next session can offer to report, written before shutdown.
+		writeCrashRecord(error, "tui");
 		lease.writeDiagnostic(
 			"stderr",
 			`Clio Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,

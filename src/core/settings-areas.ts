@@ -282,6 +282,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 	if (under(path, "safety.judge")) return place("safety", "Autonomy");
 	if (under(path, "systemOne") || under(path, "chat.steering")) return place("advanced", "Experimental");
 	if (under(path, "telemetry")) return place("advanced", "Telemetry");
+	if (under(path, "report")) return place("interface", "Guidance");
 	if (under(path, "context.workingSet") || under(path, "context.memory") || under(path, "context.compaction"))
 		return place("advanced", "Context tuning");
 	return place("advanced", "Other");

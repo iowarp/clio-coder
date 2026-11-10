@@ -483,7 +483,15 @@ main(process.argv.slice(2))
 	.then((code) => {
 		process.exitCode = code;
 	})
-	.catch((err) => {
+	.catch(async (err) => {
 		printError(err instanceof Error ? err.message : String(err));
 		process.exitCode = 1;
+		// A usage error is the caller's, not a crash; anything else leaves a record the next session can offer to report.
+		if (!/UsageError$/u.test((err as { constructor?: { name?: string } } | null)?.constructor?.name ?? "")) {
+			try {
+				(await import("../domains/report/crash.js")).writeCrashRecord(err, "cli");
+			} catch {
+				// The record is best effort; the exit status above stands.
+			}
+		}
 	});

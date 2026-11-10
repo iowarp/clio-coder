@@ -18,6 +18,7 @@ import {
 	planReport,
 	REPORT_DRAFT_SAVED,
 	type ReportDraft,
+	type ReportOfferPrefill,
 	type ReportPlanTransport,
 	type ReportSessionFacts,
 	type ReportTransport,
@@ -52,6 +53,8 @@ export interface ReportHostDeps {
 	findGh?: () => string | null;
 	detect?: (env: NodeJS.ProcessEnv) => Promise<ReportTransport>;
 	openReview?: typeof openReportReviewOverlay;
+	/** The report offer on screen, consumed by a bug report so its draft carries the offer's trigger and fingerprint. */
+	takeOffer?: () => ReportOfferPrefill | null;
 }
 
 export interface ReportHost {
@@ -196,9 +199,11 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			return;
 		}
 		const current = deps.session?.() ?? null;
+		const offer = request.kind === "bug" ? (deps.takeOffer?.() ?? null) : null;
 		const draft = composeReportDraft({
 			kind: request.kind,
 			surface: "tui",
+			...(offer !== null ? { offer } : {}),
 			...(request.summary !== undefined ? { title: request.summary } : {}),
 			session:
 				current === null

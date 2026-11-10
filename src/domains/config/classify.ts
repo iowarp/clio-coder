@@ -36,6 +36,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"chat.loopsUntilStopped",
 	"interface.outputDetail",
 	"interface.demo",
+	// The offer watcher and the report tool read it each time they decide.
+	"report.offers",
 	"interface.smoothStreaming",
 	// The update monitor reads it before each background install (#436).
 	"interface.autoUpdate",

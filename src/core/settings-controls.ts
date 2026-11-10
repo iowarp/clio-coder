@@ -475,6 +475,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"integrations.git.commitAuthor": ["auto", "human"],
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"telemetry.mode": ["standard", "research"],
+	"report.offers": ["ask", "off"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.yoloConfinement": ["contained", "unconfined"],
 	"safety.sandbox": ["auto", "required", "off"],
@@ -715,6 +716,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
+	],
+	"report.offers": [
+		"Suggest reports",
+		"When Clio itself fails, such as an internal error or a crash, it may suggest /report: at most once a session and once a week, and never again for a problem you declined. Off never suggests. Nothing is sent without your keypress.",
 	],
 	"turnControl.workflows": [
 		"Before Clio answers",

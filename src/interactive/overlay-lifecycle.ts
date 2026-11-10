@@ -97,6 +97,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	chatRenderer: { applyEvent(event: import("../session-control/chat-loop.js").ToolApprovalStateEvent): void };
 	notify: (level: import("./interactive-subscriptions.js").InteractiveNoticeLevel, text: string, key?: string) => void;
 	dismissNotification?: (key: string) => void;
+	/** The report offer on screen; `/report` consumes it to pre-fill the draft. */
+	takeReportOffer?: () => import("../domains/report/index.js").ReportOfferPrefill | null;
 	onToolResumed?: (toolCallId: string) => void;
 	/** The safety judge holds this started call before admission. */
 	onToolJudging?: (toolCallId: string) => void;
@@ -676,6 +678,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 					};
 				},
 				identitySettings: () => ({ targets: deps.app.getSettings?.().targets ?? [] }),
+				...(deps.takeReportOffer ? { takeOffer: deps.takeReportOffer } : {}),
 			}),
 		);
 		reportHost.then(use, (error: unknown) => {
