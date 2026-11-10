@@ -1079,6 +1079,8 @@ export class ClioEditor extends Editor {
 			this.surfacePainters.clear();
 			this.invalidate();
 		}
+		// The border and wrap need a few columns; narrower would overflow the stack.
+		if (width < 3) return [" ".repeat(Math.max(0, width))];
 		return withThemeContext(
 			{ surface: "composer", mode: this.chrome.getAutonomy?.() === "yolo" ? "yolo" : "normal" },
 			() => this.renderSurface(width),

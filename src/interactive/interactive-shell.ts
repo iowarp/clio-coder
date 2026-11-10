@@ -1,3 +1,6 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { clioStateDir } from "../core/xdg.js";
 import type { ApplicationInputTui, Component, Terminal, TuiMode, TuiRenderObserver } from "../engine/tui.js";
 import { InstrumentedTuiAltScreen, InstrumentedTuiMainScreen, ProcessTerminal } from "../engine/tui.js";
 import {
@@ -343,14 +346,18 @@ export function createProcessInteractiveShell(
 		setStreamPacingActive(options.streamPacingActive === true);
 		shell = createInteractiveShell({
 			createTerminal: options.testing?.createTerminal ?? (() => new ProcessTerminal()),
-			createTui: (terminal) =>
-				options.testing?.createTui?.(terminal) ??
-				(options.tuiMode === "fullscreen"
+			createTui: (terminal) => {
+				const testTui = options.testing?.createTui?.(terminal);
+				if (testTui) return testTui;
+				// pi-tui dumps every rendered row here when a row overflows; keep the transcript out of the shared temp dir.
+				const logDirectory = join(clioStateDir(), "tui");
+				mkdirSync(logDirectory, { recursive: true, mode: 0o700 });
+				return options.tuiMode === "fullscreen"
 					? new InstrumentedTuiAltScreen(
 							terminal,
 							renderObserver,
 							undefined,
-							undefined,
+							logDirectory,
 							{
 								// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
 								copySelection: (text) =>
@@ -360,7 +367,8 @@ export function createProcessInteractiveShell(
 							},
 							renderAdmission,
 						)
-					: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, undefined, renderAdmission)),
+					: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, logDirectory, renderAdmission);
+			},
 			prepareRoot: (root) => {
 				if (trace) restoreRoot = traceComponentRenders(root, trace);
 			},

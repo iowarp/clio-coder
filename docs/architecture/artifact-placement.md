@@ -111,6 +111,7 @@ problem.
 | `memory/recall-use-v1.json` | Per-record recall and use counts that demote memory a session keeps carrying unused ([recall-use.ts](../../src/domains/memory/recall-use.ts)) |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
 | `interviews/` | Interview transcripts |
+| `tui/` | The terminal renderer's crash dump `pi-tui-crash.log` (every rendered row, so the transcript), in a directory created mode `0700` |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
 | `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |

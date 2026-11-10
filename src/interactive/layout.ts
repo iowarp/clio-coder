@@ -1,5 +1,5 @@
 import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui.js";
-import { ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
+import { ScrollView, TuiAltScreen, truncateToWidth, VStack, visibleWidth } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { keptRows } from "./kept-rows.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
@@ -242,7 +242,9 @@ class RegularRoot implements Component {
 		let row = 0;
 		// The first row this frame wrote a string other than the one already there.
 		let firstChanged = -1;
-		const put = (line: string): void => {
+		const put = (raw: string): void => {
+			// The main-screen renderer throws on an overwide row; one component's bug clips instead.
+			const line = visibleWidth(raw) > width ? truncateToWidth(raw, width) : raw;
 			if (out[row] !== line) {
 				if (firstChanged < 0) firstChanged = row;
 				out[row] = line;

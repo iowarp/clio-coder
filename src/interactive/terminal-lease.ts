@@ -13,7 +13,16 @@ import { installDiagnosticSink } from "../core/diagnostics.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
 import type { ApplicationInputTui } from "../engine/tui.js";
-import { type Component, Container, isKeyRelease, isKeyRepeat, matchesKey, ScrollView, VStack } from "../engine/tui.js";
+import {
+	type Component,
+	Container,
+	isKeyRelease,
+	isKeyRepeat,
+	matchesKey,
+	ScrollView,
+	truncateToWidth,
+	VStack,
+} from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
@@ -106,6 +115,8 @@ export interface CreateProcessTerminalLeaseOptions {
 			shutdown(code: number): Promise<void>;
 		};
 		signals?: Pick<NodeJS.Process, "on" | "off">;
+		/** Streams whose EIO or EPIPE means the terminal is gone. */
+		streams?: ReadonlyArray<NodeJS.EventEmitter>;
 		write?: (stream: "stdout" | "stderr", text: string) => void;
 		now?: () => number;
 	};
@@ -114,6 +125,26 @@ export interface CreateProcessTerminalLeaseOptions {
 /** `0` is the immediate rollback. Unset and `1` enable the accepted default. */
 export function instantShellEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
 	return env[INSTANT_SHELL_ENV] !== "0";
+}
+
+/**
+ * A closed terminal (window closed, ssh dropped) fails the next write with EIO
+ * or EPIPE. Unheard, that error kills the process before the shutdown hooks
+ * that follow the terminal restore can run. The listeners stay for the process
+ * lifetime because restore and recovery writes come after the lease closes.
+ */
+const guardedStreams = new WeakSet<NodeJS.EventEmitter>();
+let onTerminalGone: () => void = () => {};
+function guardTerminalStreams(streams: ReadonlyArray<NodeJS.EventEmitter>, onGone: () => void): void {
+	onTerminalGone = onGone;
+	for (const stream of streams) {
+		if (guardedStreams.has(stream)) continue;
+		guardedStreams.add(stream);
+		stream.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code !== "EIO" && error.code !== "EPIPE") throw error;
+			onTerminalGone();
+		});
+	}
 }
 
 interface RootHost extends Component {
@@ -189,8 +220,16 @@ function stageZeroRoot(
 		keybindings.isDisabled(action) ? null : actionKeyLabel(action),
 	);
 	const footer: Component = {
-		render: () =>
-			shutdownArmed() ? [theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")] : [""],
+		render: (width) =>
+			shutdownArmed()
+				? [
+						truncateToWidth(
+							theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered"),
+							width,
+							GLYPH.ellipsis,
+						),
+					]
+				: [""],
 		invalidate: () => {},
 	};
 	if (settings.interface.mode === "fullscreen") {
@@ -351,6 +390,20 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		});
 	termination.installSignalHandlers();
 	const restoreInterruptOwner = termination.releaseInterruptOwnership();
+	guardTerminalStreams(options.testing?.streams ?? [process.stdout, process.stderr, process.stdin], () => {
+		void termination.shutdown(129);
+	});
+	// A throw in a render or event handler, or a stray rejection, still runs the
+	// shutdown hooks: the drain hook restores the terminal and the draft is recovered.
+	const onProcessFault = (error: unknown): void => {
+		lease.writeDiagnostic(
+			"stderr",
+			`Clio Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+		);
+		void termination.shutdown(1);
+	};
+	signals.on("uncaughtException", onProcessFault);
+	signals.on("unhandledRejection", onProcessFault);
 
 	const requestShutdown = (): void => {
 		void (async () => {
@@ -441,6 +494,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		if (!signalDisposed) {
 			signalDisposed = true;
 			signals.off("SIGINT", stableSignal);
+			signals.off("uncaughtException", onProcessFault);
+			signals.off("unhandledRejection", onProcessFault);
 			restoreInterruptOwner();
 		}
 	};
