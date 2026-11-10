@@ -37,6 +37,7 @@ import { createYoloActivation, YOLO_ACCEPT_LABEL, YOLO_DECLINE_LABEL } from "../
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
+import { jobCommandEffect } from "../../src/tools/job-command.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRunScriptTool, runScriptSafetyProjection } from "../../src/tools/run-script.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -756,6 +757,10 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	]) {
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 	}
+	// R1-safety-secrets-10: a command job runs its argv outside any sandbox, so required refuses it.
+	const job = jobCommandEffect({ kind: "command", argv: [join(cwd, "clean.sh")], executableSha256: "x" }, cwd)[0]?.call;
+	strictEqual(job !== undefined && engine.evaluate(job, "yolo", sandboxed).reasonCode, "yolo-sandbox-required");
+	strictEqual(job !== undefined && engine.evaluate(job, "yolo", OPERATOR_YOLO).kind, "allow");
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 

@@ -95,13 +95,20 @@ export function attestJobCommand(runner: Extract<JobRunner, { kind: "command" }>
 		);
 }
 
-/** Shell-shaped policy text only. Execution always uses the exact argv vector. */
+/**
+ * Shell-shaped policy text only. Execution always uses the exact argv vector,
+ * outside any sandbox, so the projection says `unsandboxed` and a
+ * `safety.sandbox: required` yolo session refuses it (R1-safety-secrets-10).
+ */
 export function jobCommandEffect(runner: JobRunner, cwd: string): readonly HostEffectCall[] {
 	if (runner.kind !== "command") return [];
 	return [
 		{
 			label: "scheduled command",
-			call: { tool: ToolNames.Bash, args: { command: runner.argv.map(shellQuote).join(" "), cwd } },
+			call: {
+				tool: ToolNames.Bash,
+				args: { command: runner.argv.map(shellQuote).join(" "), cwd, unsandboxed: true },
+			},
 		},
 	];
 }
