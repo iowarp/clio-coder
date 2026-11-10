@@ -284,6 +284,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			sources: { npm: { status: "ok" }, gsc: { status: "error" } },
 		};
 		let access = true;
+		const issuePages: number[] = [];
 		const run: ReportCommandRunner = async (_file, args) => {
 			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
 			const joined = args.join(" ");
@@ -292,9 +293,29 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 				return reply("41\tWeekly digest 2026-W45\thttps://github.com/iowarp/clio-metrics/issues/41\n");
 			if (joined.includes("backlog.csv?ref=data"))
 				return access ? reply(csv) : { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
-			if (joined.includes("labels=has-bundle"))
-				return reply(`bundle: gist:${gistId}#${shareId}\nconsent: debug\nbundle: gist:${"1".repeat(20)}#${gone}\n`);
-			if (joined.includes("discussions(first: 100")) return reply("");
+			// Every issue page is full, so the scan stops at its bound; the gone share is on the second discussion page.
+			if (joined.includes("labels=has-bundle")) {
+				const number = Number(/&page=(\d+)/u.exec(joined)?.[1]);
+				issuePages.push(number);
+				const page = Array.from({ length: 100 }, () => ({ body: null as string | null }));
+				if (number === 1) page[0] = { body: `bundle: gist:${gistId}#${shareId}\nconsent: debug\n` };
+				return reply(JSON.stringify(page));
+			}
+			if (joined.includes("discussions(first: 100")) {
+				const second = args.includes("after=cursor1");
+				return reply(
+					JSON.stringify({
+						data: {
+							repository: {
+								discussions: {
+									pageInfo: { hasNextPage: !second, endCursor: second ? "cursor2" : "cursor1" },
+									nodes: [{ body: second ? `share: gist:${"1".repeat(20)}#${gone}` : "no pointer" }],
+								},
+							},
+						},
+					}),
+				);
+			}
 			if (joined.includes(`gists/${gistId}`)) return reply(JSON.stringify(envelope));
 			if (joined.includes(`gists/${"1".repeat(20)}`))
 				return { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
@@ -372,6 +393,7 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		strictEqual(await flywheel("--pull", "all", "--key", key, "--out", root), 0);
 		deepStrictEqual(readFileSync(join(root, `${shareId}.tar.gz`)), bundle);
 		ok(out.includes(`${gone}: gist`) && out.includes("its sender forgot it"), out);
+		deepStrictEqual(issuePages.splice(0), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 		out = "";
 		strictEqual(await flywheel("--pull", shareId, "--key", key, "--out", root), 0);
 		ok(out.includes("report bundle already at"), out);

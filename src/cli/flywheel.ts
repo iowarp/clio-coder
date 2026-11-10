@@ -33,10 +33,10 @@ prints {usage, backlog}, every column kept, for agents and scripts. The
 repository is private to the maintainers.
 
 --pull is for maintainers: it finds the share pointers in iowarp/clio-coder's
-has-bundle issues and recent discussions, fetches each named gist, opens it with
-the intake key (--key, else CLIO_INTAKE_KEY_FILE, else
-~/.config/clio-intake/intake-x25519.pem) and checks it is the share its pointer
-names. A telemetry share is imported as telemetry import does; a report bundle
+latest 1000 has-bundle issues and latest 1000 discussions, fetches each named
+gist, opens it with the intake key (--key, else CLIO_INTAKE_KEY_FILE, else
+~/.config/clio-intake/intake-x25519.pem) and checks it is the share its
+pointer names. A telemetry share is imported as telemetry import does; a report bundle
 is saved as <shareId>.tar.gz in --out (default the current directory). A gist
 its sender deleted is skipped.
 `;
@@ -365,31 +365,44 @@ async function printBacklog(gh: Gh, view: BacklogView, out: (text: string) => vo
 	return 0;
 }
 
-/** Every share pointer in the coder repository's has-bundle issues and its latest discussions. */
+/** Pointers are read from at most this many issues and this many discussions, newest first. */
+const POINTER_SCAN_LIMIT = 1000;
+const PAGE_SIZE = 100;
+
+/** Every share pointer in the coder repository's latest has-bundle issues and discussions, up to the scan limit each. */
 async function sharePointers(gh: Gh): Promise<Map<string, string>> {
-	const issues = await gh.run([
-		"--paginate",
-		`repos/${CODER_REPOSITORY}/issues?state=all&labels=has-bundle&per_page=100`,
-		"--jq",
-		".[].body // empty",
-	]);
-	if (issues.exitCode !== 0) throw new Error(`gh could not list the has-bundle issues: ${firstLine(issues)}`);
+	const bodies: string[] = [];
+	for (let page = 1; page <= POINTER_SCAN_LIMIT / PAGE_SIZE; page += 1) {
+		const issues = await gh.run([
+			`repos/${CODER_REPOSITORY}/issues?state=all&labels=has-bundle&sort=created&direction=desc&per_page=${PAGE_SIZE}&page=${page}`,
+		]);
+		if (issues.exitCode !== 0) throw new Error(`gh could not list the has-bundle issues: ${firstLine(issues)}`);
+		const items = JSON.parse(issues.stdout) as Array<{ body?: string | null }>;
+		for (const item of items) bodies.push(item.body ?? "");
+		if (items.length < PAGE_SIZE) break;
+	}
 	const [owner, name] = CODER_REPOSITORY.split("/");
-	const discussions = await gh.run([
-		"graphql",
-		"-f",
-		`owner=${owner}`,
-		"-f",
-		`name=${name}`,
-		"-f",
-		"query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussions(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { body } } } }",
-		"--jq",
-		".data.repository.discussions.nodes[].body",
-	]);
-	if (discussions.exitCode !== 0) throw new Error(`gh could not list the discussions: ${firstLine(discussions)}`);
+	let after: string | null = null;
+	for (let page = 1; page <= POINTER_SCAN_LIMIT / PAGE_SIZE; page += 1) {
+		const discussions = await gh.run([
+			"graphql",
+			"-f",
+			`owner=${owner}`,
+			"-f",
+			`name=${name}`,
+			...(after !== null ? ["-f", `after=${after}`] : []),
+			"-f",
+			`query=query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { discussions(first: ${PAGE_SIZE}, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { body } } } }`,
+		]);
+		if (discussions.exitCode !== 0) throw new Error(`gh could not list the discussions: ${firstLine(discussions)}`);
+		const found = at(JSON.parse(discussions.stdout), "data", "repository", "discussions");
+		const nodes = at(found, "nodes");
+		if (Array.isArray(nodes)) for (const node of nodes) bodies.push(str(at(node, "body")) ?? "");
+		after = at(found, "pageInfo", "hasNextPage") === true ? str(at(found, "pageInfo", "endCursor")) : null;
+		if (after === null) break;
+	}
 	const pointers = new Map<string, string>();
-	for (const match of `${issues.stdout}\n${discussions.stdout}`.matchAll(POINTER))
-		pointers.set(match[2] as string, match[1] as string);
+	for (const match of bodies.join("\n").matchAll(POINTER)) pointers.set(match[2] as string, match[1] as string);
 	return pointers;
 }
 
