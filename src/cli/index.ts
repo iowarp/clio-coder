@@ -96,6 +96,7 @@ Usage:
   clio-coder research start|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
+  clio-coder report [bug|feature|question]|status|show|send|forget|security  preview, then send a report to the maintainers
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
   clio-coder telemetry insights [--project [<dir>]]  per-project research task categories and autonomy, a local heuristic
@@ -348,6 +349,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],
 	["telemetry", async (subArgs) => (await import("./telemetry.js")).runTelemetryCommand(subArgs)],
+	["report", async (subArgs) => (await import("./report.js")).runReport(subArgs)],
 	["session", async (subArgs) => (await import("./session.js")).runSessionCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
 	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],

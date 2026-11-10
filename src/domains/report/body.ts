@@ -59,7 +59,7 @@ export function renderReportBlock(draft: ReportDraft): string {
 		`regression: ${draft.regression === true ? "yes" : "no"}`,
 		"bundle: none",
 		"consent: none",
-		"credit: no",
+		`credit: ${draft.credit === true ? "yes" : "no"}`,
 	];
 	return `<details><summary>${REPORT_DETAILS_SUMMARY}</summary>\n\n\`\`\`${REPORT_BLOCK_TAG}\n${lines.join("\n")}\n\`\`\`\n</details>`;
 }

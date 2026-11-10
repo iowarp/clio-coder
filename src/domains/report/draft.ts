@@ -38,6 +38,8 @@ export interface ReportDraft {
 	unmasked: string[];
 	/** Set when the dedup step found the fix already shipped in this version. */
 	regression?: boolean;
+	/** The reporter asked to be credited in the release notes; off unless ticked. */
+	credit?: boolean;
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
