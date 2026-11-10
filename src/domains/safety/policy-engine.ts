@@ -73,6 +73,7 @@ import {
 	type ProjectCommandPolicy,
 } from "./project-policy.js";
 import {
+	bareInlineShellScript,
 	commandArgumentSegments,
 	decodedLocaleQuoting,
 	extractCommandDeleteTargets,
@@ -2157,10 +2158,17 @@ function evaluateBashPolicy(
 	// confirmed one-shot grant or yolo posture admits it after the safety scan.
 	// A command that is nothing but `sh -c '<script>'` is recognized by its
 	// script. Recognition can only narrow this way: the script is what runs, and
-	// judging the wrapper instead is what let the wrapper be a bypass.
-	const recognitionSource = inlineShellScript(command) ?? command;
+	// judging the wrapper instead is what let the wrapper be a bypass. Only the
+	// bare form qualifies; an env prefix, extra operand, redirect or startup
+	// option would run beside the script unexamined, so that line is judged whole.
+	const recognitionSource = bareInlineShellScript(command) ?? command;
 	const recognitionCommand = decodedAnsiCCommand(recognitionSource) ?? recognitionSource;
-	if (hasCommandSubstitution(recognitionCommand) && posture !== "confirmed" && posture !== "yolo" && !contained) {
+	if (
+		(hasCommandSubstitution(command) || hasCommandSubstitution(recognitionCommand)) &&
+		posture !== "confirmed" &&
+		posture !== "yolo" &&
+		!contained
+	) {
 		return {
 			kind: "ask",
 			ruleId: "bash-command-substitution",
@@ -3515,6 +3523,14 @@ function searchPatternIndex(command: string, args: ReadonlyArray<string>): numbe
 		return parsed.positionals[0]?.index ?? null;
 	}
 	if (!GREP_FAMILY.has(command)) return null;
+	// GNU grep permutes options, so `grep /etc/passwd -e root` takes its pattern
+	// from the later `-e` and every positional is a file.
+	if (
+		args.some(
+			(arg) => abbreviatesLongOption(arg, "--regexp") || abbreviatesLongOption(arg, "--file") || /^-[^-]*[ef]/u.test(arg),
+		)
+	)
+		return null;
 	const valueLetters = SHORT_VALUE_LETTERS.get(command) ?? "";
 	let optionsEnded = false;
 	for (const [index, arg] of args.entries()) {

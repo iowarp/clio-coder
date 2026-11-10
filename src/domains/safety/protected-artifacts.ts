@@ -534,6 +534,33 @@ export function inlineShellScript(command: string): string | null {
 	return segmentShellScript(shellCommandArguments(segment)) ?? null;
 }
 
+/** Shells a bare wrapper may name: the bare name only, never a path. */
+const BARE_WRAPPER_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "dash", "zsh"]);
+
+/**
+ * The script when the command is exactly `<shell> [options] -c '<script>'`
+ * and nothing else: no leading assignment or `env`, no pathful shell, no
+ * operand after the script, no redirect, and no option that runs other code
+ * first (`-x` with `PS4`, `-i`, `-l`, `--rcfile`, `--init-file`). Only this
+ * form may be judged by its script alone; anything else on the wrapper's line
+ * would run unexamined.
+ */
+export function bareInlineShellScript(command: string): string | null {
+	const segments = splitSegments(scanShellLike(command));
+	if (segments.length !== 1) return null;
+	const segment = segments[0];
+	if (segment === undefined || segment.some((token) => token.operator)) return null;
+	const words = segment.map((token) => token.value);
+	if (!BARE_WRAPPER_SHELLS.has(words[0] ?? "")) return null;
+	for (let index = 1; index < words.length; index += 1) {
+		const word = words[index] as string;
+		if (word === "--norc" || word === "--noprofile") continue;
+		if (!/^-[ceufv]+$/u.test(word)) return null;
+		if (word.includes("c")) return index === words.length - 2 ? (words[index + 1] as string) : null;
+	}
+	return null;
+}
+
 /**
  * Returns the directory each `cd`/`pushd` in the command targets. A bare
  * `cd` (and `cd -`, whose OLDPWD is unset in a fresh shell) is reported as
