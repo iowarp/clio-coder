@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { buildDescriptor, DEFAULT_PORTS } from "../../src/cli/configure-target.js";
 import { classifyDefaultTarget } from "../../src/cli/default-target.js";
-import { detectChatRoutes, headlessChatRoute, useDetectedChatRoute } from "../../src/cli/detect-chat-routes.js";
+import {
+	collectSetupCandidates,
+	detectChatRoutes,
+	headlessChatRoute,
+	useDetectedChatRoute,
+} from "../../src/cli/detect-chat-routes.js";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
 import { initializeClioHome } from "../../src/core/init.js";
 import { COPILOT_SDK_PACKAGE, COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
@@ -56,14 +61,15 @@ export class CopilotClient {
 		settings.targets = [{ id: "mine", runtime: "openai", defaultModel: "gpt-6-luna" }];
 	});
 	const signals: AbortSignal[] = [];
-	const routes = await detectChatRoutes(readSettings(), async (input, signal) => {
+	const readJson = async (input: string, signal: AbortSignal) => {
 		const url = new URL(input);
 		assert.equal(url.hostname, "127.0.0.1");
 		assert.ok(Object.values(DEFAULT_PORTS).includes(Number(url.port)));
 		signals.push(signal);
 		if (url.port === "1234") return { data: [{ id: "first-served" }, { id: "second-served" }] };
 		return new Promise<unknown>(() => {});
-	});
+	};
+	const routes = await detectChatRoutes(readSettings(), readJson);
 	assert.deepEqual(
 		routes.map((route) => route.source),
 		[
@@ -79,6 +85,17 @@ export class CopilotClient {
 	assert.equal(routes.at(-1)?.model, "first-served");
 	assert.equal(routes.find((route) => route.source === "OPENAI_API_KEY")?.model, "gpt-6-luna");
 	assert.ok(signals.length > 1 && signals.every((signal) => signal.aborted));
+	// One entry per endpoint, best source first: the configured target absorbs the OpenAI key and stored key.
+	const candidates = await collectSetupCandidates(readSettings(), { readJson });
+	assert.deepEqual(
+		candidates.map((candidate) => [candidate.source, candidate.label]),
+		[
+			["configured-target", "settings (mine)"],
+			["stored-login", "Clio stored login (openai-codex)"],
+			["env-key", "ANTHROPIC_API_KEY"],
+			["local-server", "http://127.0.0.1:1234"],
+		],
+	);
 });
 
 test("a detected chat route saves configure's descriptor only when no chat choice is saved", async (t) => {

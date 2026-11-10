@@ -38,6 +38,7 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
+import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import {
 	AUTONOMOUS_CAP_EXIT_CODE,
@@ -312,13 +313,18 @@ function toolResultText(content: unknown): string {
 		.trim();
 }
 
-function assistantError(message: AgentMessage | undefined): string | null {
+export function assistantError(message: AgentMessage | undefined): string | null {
 	if (!message || typeof message !== "object" || message.role !== "assistant") return null;
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted") return null;
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
+	// A request that never reached the endpoint ends with the setup status's sentence, the one the banner and doctor print.
+	const route = (message as { failureRoute?: Parameters<typeof missingFromFailedCall>[0] }).failureRoute;
+	const unanswered = typeof route?.targetId === "string" ? missingFromFailedCall(route) : null;
+	const fix = unanswered !== null ? ` ${describeMissing(unanswered).sentence}` : "";
 	// A provider's error can quote the URL it failed on, and from here it reaches stderr, the frame and the run record (#446).
-	if (typeof raw === "string" && raw.length > 0) return redactUrlCredentials(raw);
+	if (typeof raw === "string" && raw.length > 0)
+		return redactUrlCredentials(fix && !/[.!?]$/u.test(raw.trim()) ? `${raw.trim()}.${fix}` : `${raw}${fix}`);
 	return stopReason === "aborted" ? "request aborted" : "provider returned an error";
 }
 

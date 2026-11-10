@@ -28,6 +28,7 @@ export const coreTests = [
 	"internal-git-hooks",
 	"safety-gates",
 	"default-containment",
+	"setup-status",
 	"contained-secrets",
 	"true-yolo",
 	"contained-yolo",

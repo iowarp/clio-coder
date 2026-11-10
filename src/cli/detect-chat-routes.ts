@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { settingsPath, updateSettings } from "../core/config.js";
+import type { Candidate } from "../domains/lifecycle/setup-status.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { detectCopilotLogin } from "../domains/providers/copilot-setup.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/eligibility.js";
@@ -190,6 +191,53 @@ export async function detectChatRoutes(
 }
 
 /** A broken saved chat choice remains the user's choice; the fallback lives in the boot snapshot. */
+const CANDIDATE_RANK: Record<Candidate["source"], number> = {
+	"configured-target": 0,
+	project: 1,
+	"stored-login": 2,
+	"env-key": 3,
+	"local-server": 4,
+};
+
+function candidateSource(route: DetectedChatRoute): Candidate["source"] {
+	if (route.source.startsWith("settings (")) return "configured-target";
+	if (route.source === route.runtime.credentialsEnvVar) return "env-key";
+	if (route.target.url !== undefined && route.source === route.target.url) return "local-server";
+	return "stored-login";
+}
+
+/**
+ * The routes a home could chat on, best first (a configured target, then a stored login, an environment key,
+ * a local server) with one entry per endpoint, so a provider reachable through both a stored login and an
+ * environment key is offered once, through the stronger source. Detection itself is `detectChatRoutes`.
+ */
+export async function collectSetupCandidates(
+	settings: Readonly<ClioSettings>,
+	options: { headless?: boolean; readJson?: typeof readLoopbackJson } = {},
+): Promise<Candidate<TargetDescriptor>[]> {
+	const routes = await detectChatRoutes(settings, options.readJson, { headless: options.headless ?? false });
+	const ranked = routes
+		.map((route, order) => ({ route, order, source: candidateSource(route) }))
+		.sort((a, b) => CANDIDATE_RANK[a.source] - CANDIDATE_RANK[b.source] || a.order - b.order);
+	const seen = new Set<string>();
+	const candidates: Candidate<TargetDescriptor>[] = [];
+	for (const { route, source } of ranked) {
+		const endpoint = `${route.runtime.id}|${route.target.url ?? ""}`;
+		if (seen.has(endpoint)) continue;
+		seen.add(endpoint);
+		const owner =
+			source === "local-server" && process.platform === "linux" ? loopbackListenerOwner(route.source) : undefined;
+		candidates.push({
+			source,
+			label: route.source,
+			target: route.target,
+			...(route.model ? { model: route.model } : {}),
+			...(owner ? { owner } : {}),
+		});
+	}
+	return candidates;
+}
+
 export function useDetectedChatRoute(
 	settings: Readonly<ClioSettings>,
 	route: DetectedChatRoute & { model: string },

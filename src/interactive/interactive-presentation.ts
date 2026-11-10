@@ -12,6 +12,7 @@ import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
 import { renderPromptContext } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { missingFromTargetStatus } from "../domains/lifecycle/setup-status.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { PANES_PRESETS } from "../domains/mux/operations.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
@@ -897,6 +898,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
 				...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 			};
+			const missing = missingFromTargetStatus(target);
+			if (missing !== null) routeFacts.missing = missing;
 			if (lastCompactionStop !== null && !detail) {
 				const blocker = routeBlockerWords(routeFacts);
 				return compactionSettledPresentation(lastCompactionStop, width, reserved, phaseModelName(status), blocker);

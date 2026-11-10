@@ -3,6 +3,7 @@ import type { ContextActivityPhase } from "../../core/telemetry/live-events.js";
 import { renderUsdLimit, renderUsdSpend } from "../../core/telemetry/render.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
+import { describeMissing, type Missing } from "../../domains/lifecycle/setup-status.js";
 import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
@@ -1345,6 +1346,8 @@ export interface RouteReadinessFacts {
 	lastFailure?: TurnSummary["failure"];
 	/** A worker call on this exact route got output this session, which is evidence the model answers. */
 	workerAnswered?: boolean;
+	/** What the setup status says this route lacks, whose sentence the rail states as the way out. */
+	missing?: Missing;
 }
 
 /**
@@ -1363,14 +1366,18 @@ export function idleReadinessPresentation(
 	const fit = (list: ReadonlyArray<RailFact>): string => fitRailFacts(list, room, slot);
 	const shown = (): { subjectShown?: boolean } => (slot !== undefined ? { subjectShown: slot.shown } : {});
 	const quiet = { token: "counter" as const, live: false, namesRoute: true };
+	const fix = facts.missing !== undefined ? describeMissing(facts.missing) : null;
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		const login = /^missing auth \((?:\S+ or )?store:([^)\s]+)\)$/u.exec(why)?.[1];
+		const command = fix?.command ?? (login ? `clio-coder auth login ${login}` : undefined);
 		const label = fit([
 			{ text: "is unavailable", keep: 9 },
-			{ text: why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
+			{ text: fix === null && why.length > 0 ? truncateToWidth(why, 36, GLYPH.ellipsis, false) : null, keep: 3 },
 			{ ...MODEL_SWITCHES, keep: 8 },
-			{ text: login ? `Run: clio-coder auth login ${login}` : null, keep: 7 },
+			fix !== null
+				? { text: fix.sentence, ...(command !== undefined ? { short: `Run: ${command}` } : {}), keep: 7 }
+				: { text: command !== undefined ? `Run: ${command}` : null, keep: 7 },
 		]);
 		return { glyph: GLYPH.warn, token: "warning", live: false, label, ...shown() };
 	}
@@ -1378,7 +1385,9 @@ export function idleReadinessPresentation(
 		const label = fit([
 			{ text: room >= 40 ? `cannot reach ${facts.targetId}` : "server down", keep: 9 },
 			{ ...MODEL_SWITCHES, keep: 8 },
-			{ text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
+			fix?.sentence !== undefined && facts.missing?.kind === "unreachable"
+				? { text: fix.sentence, short: `clio-coder configure --id ${facts.targetId}`, keep: 2 }
+				: { text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
 		]);
 		return { glyph: GLYPH.error, token: "error", live: false, label, ...shown() };
 	}

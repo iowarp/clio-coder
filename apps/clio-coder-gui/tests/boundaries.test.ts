@@ -60,6 +60,7 @@ const wireDtoNames = new Set([
 const adapters = new Set([
 	"src/domains/interop/index.ts",
 	"src/domains/lifecycle/doctor.ts",
+	"src/domains/lifecycle/setup-status.ts",
 	"src/domains/resources/library-inventory.ts",
 	"src/domains/resources/library-actions.ts",
 	"src/domains/extensions/manager.ts",

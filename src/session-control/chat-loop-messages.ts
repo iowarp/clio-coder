@@ -33,6 +33,7 @@ import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPoli
 import { proseAnnouncesCall, readTrailingWrittenCalls, stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import { describeMissing } from "../domains/lifecycle/setup-status.js";
 import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
@@ -59,7 +60,7 @@ export interface RuntimeResolutionView {
 export function notConfiguredNotice(chat: { target?: string | null; model?: string | null } = {}): string {
 	const target = chat.target?.trim();
 	if (target && !chat.model?.trim()) {
-		return `[Clio Coder] Target '${target}' has no chat model; run \`clio-coder targets use ${target} --model <model>\`.`;
+		return `[Clio Coder] ${describeMissing({ kind: "model", target }).sentence}`;
 	}
 	return [
 		"[Clio Coder] No model target is configured; run `clio-coder configure` to choose one.",
@@ -74,7 +75,8 @@ export function nameMissingCredentialRemedy(message: AgentMessage): void {
 	const failure = message as { stopReason?: unknown; errorMessage?: unknown };
 	if (failure.stopReason !== "error" || typeof failure.errorMessage !== "string") return;
 	const missing = /^No API key for provider: (\S+)$/u.exec(failure.errorMessage.trim());
-	if (missing) failure.errorMessage = `${missing[0]}. Run: clio-coder auth login ${missing[1]}`;
+	if (missing?.[1])
+		failure.errorMessage = `${missing[0]}. ${describeMissing({ kind: "credential", target: missing[1], provider: missing[1] }).sentence}`;
 }
 
 export function extractText(message: AgentMessage | undefined): string {

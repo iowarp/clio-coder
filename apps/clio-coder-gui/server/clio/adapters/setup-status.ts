@@ -1,5 +1,6 @@
 import { readSettings } from "../../../../../src/core/config.js";
 import { readLayeredSettings } from "../../../../../src/core/settings-layers.js";
+import { describeMissing, setupStatus } from "../../../../../src/domains/lifecycle/setup-status.js";
 import {
 	openAuthStorage,
 	resolveAuthTarget,
@@ -13,6 +14,7 @@ import type { SetupStatus } from "../../../contracts/setup.js";
  * Saved routing and credential presence only; never probes, refreshes OAuth, or generates. With a
  * project directory the answer uses that project's effective settings, the same layers a task started
  * there runs with; without one it is the user settings alone, which is what first-run setup asks.
+ * The stage and the fix sentence come from the setup status every terminal surface reads.
  */
 export function readSetupStatus(cwd?: string): SetupStatus {
 	const registry = getRuntimeRegistry();
@@ -20,27 +22,53 @@ export function readSetupStatus(cwd?: string): SetupStatus {
 	const settings = cwd ? readLayeredSettings(cwd).settings : readSettings();
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const runtime = target ? registry.get(target.runtime) : undefined;
-	if (!target || !runtime || runtime.kind !== "http")
+	const authTarget = target && runtime ? resolveAuthTarget(target, runtime) : undefined;
+	const envVariable = target?.auth?.apiKeyEnvVar?.trim();
+	const status = setupStatus({
+		chat: settings.chat,
+		...(target && runtime?.kind === "http" && authTarget
+			? {
+					target: {
+						id: target.id,
+						runtime: target.runtime,
+						...(target.url !== undefined ? { url: target.url } : {}),
+						...(target.defaultModel !== undefined ? { defaultModel: target.defaultModel } : {}),
+						drivesChat: true,
+						...(targetRequiresAuth(target, runtime)
+							? {
+									credential: {
+										available: openAuthStorage().statusForTarget(authTarget, { includeFallback: false }).available,
+										provider: authTarget.providerId,
+										...(envVariable ? { envVariable } : {}),
+									},
+								}
+							: {}),
+					},
+				}
+			: {}),
+	});
+	if (status.stage === "choose")
 		return {
 			state: "unconfigured",
 			targetId: null,
 			model: null,
 			message: "Connect a model to start your first conversation.",
 		};
-	const model = settings.chat.model ?? target.defaultModel ?? null;
-	if (
-		targetRequiresAuth(target, runtime) &&
-		!openAuthStorage().statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false }).available
-	)
+	const model = status.route.model ?? null;
+	const first =
+		status.stage === "needs"
+			? status.missing.find((item) => item.kind === "credential" || item.kind === "env")
+			: undefined;
+	if (first !== undefined)
 		return {
 			state: "needs-credentials",
-			targetId: target.id,
+			targetId: status.route.target,
 			model,
-			message: "Your saved connection needs a key or browser sign-in.",
+			message: describeMissing(first).sentence,
 		};
 	return {
 		state: model ? "ready" : "needs-model",
-		targetId: target.id,
+		targetId: status.route.target,
 		model,
 		message: model
 			? "Using your saved setup. Live reachability has not been checked."

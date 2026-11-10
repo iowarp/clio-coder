@@ -26,6 +26,7 @@ import {
 	runDoctorRuntimeChecks,
 	withDoctorCommand,
 } from "../domains/lifecycle/doctor.js";
+import { describeMissing } from "../domains/lifecycle/setup-status.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { withFrontmatterCacheReadOnly } from "../domains/resources/skills/frontmatter-cache.js";
 import {
@@ -42,7 +43,7 @@ import {
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
 import { workspaceSnapshotRepositoryPresent } from "../domains/workspace-snapshots/store.js";
-import { classifyDefaultTarget, describeVerdict } from "./default-target.js";
+import { classifyDefaultTarget, describeVerdict, firstMissing } from "./default-target.js";
 import { copilotSignInReport } from "./doctor-copilot.js";
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { installationFindings } from "./doctor-installation.js";
@@ -287,7 +288,7 @@ const SETUP_COMMAND = "run `clio-coder configure` to choose one";
  * an error: an unconfigured home is not a broken one, and `doctor --fix` on a
  * fresh home still exits 0.
  */
-function chatReadinessFinding(untouched: boolean, connectionRows: ReadonlyArray<DoctorFinding>): DoctorFinding {
+export function chatReadinessFinding(untouched: boolean, connectionRows: ReadonlyArray<DoctorFinding>): DoctorFinding {
 	const warn = (detail: string): DoctorFinding => ({ ok: true, level: "warn", name: "chat", detail });
 	// No settings to read, and reading them through the ensuring accessors
 	// would create the home doctor promised to leave alone.
@@ -305,21 +306,25 @@ function chatReadinessFinding(untouched: boolean, connectionRows: ReadonlyArray<
 	}
 	const targetId = settings.chat.target ?? "";
 	const model = settings.chat.model?.trim();
-	if (!model) {
-		return warn(
-			`cannot run yet: target '${targetId}' has no chat model; run \`clio-coder targets use ${targetId} --model <model>\``,
-		);
-	}
+	if (!model) return warn(`cannot run yet: ${describeMissing({ kind: "model", target: targetId }).sentence}`);
 	const route = `target '${targetId}', model '${model}'`;
 	if (verdict.kind === "missing-credential") {
-		return warn(
-			`${route}; no stored credential under '${verdict.store}'; run \`clio-coder auth login ${verdict.store}\` if the endpoint requires one`,
-		);
+		const missing = firstMissing(settings) ?? { kind: "credential", target: targetId, provider: verdict.store };
+		return warn(`${route}; ${describeMissing(missing).sentence}`);
 	}
 	const failing = connectionRows.filter(
 		(row) =>
 			(row.name === `connection ${targetId}` || row.name === `model ${targetId}`) && (!row.ok || row.level === "warn"),
 	);
+	const url = settings.targets.find((entry) => entry.id === targetId)?.url;
+	const unanswered = failing
+		.map((row) => (row.name === `connection ${targetId}` ? /was not verified: (.+?)\. /u.exec(row.detail)?.[1] : null))
+		.find((detail) => detail != null && !/\b40[13]\b|auth|credential|key/iu.test(detail));
+	if (url !== undefined && unanswered != null) {
+		return warn(
+			`${route}; ${describeMissing({ kind: "unreachable", target: targetId, url, detail: unanswered }).sentence}`,
+		);
+	}
 	if (failing.length > 0) {
 		const checks = failing.map((row) => `\`${row.name}\``).join(" and ");
 		return warn(`${route}; configured, but ${checks} below did not pass`);

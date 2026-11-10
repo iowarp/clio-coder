@@ -1382,7 +1382,7 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 	if (seg.route && headline !== null) {
 		// The plain sentence and the way out read first; the row fold takes what the provider said before either.
 		for (const wrapped of wrapTextWithAnsi(headline, width)) out.push(`${RED_CRIT()}${wrapped}${RESET}`);
-		for (const row of [providerFailureAdvice(seg.route), providerFailureEvidence(seg.route, seg.text)])
+		for (const row of [providerFailureAdvice(seg.route, seg.text), providerFailureEvidence(seg.route, seg.text)])
 			for (const wrapped of wrapTextWithAnsi(row, width)) out.push(`${SECONDARY()}${wrapped}${RESET}`);
 		return out;
 	}
@@ -1399,7 +1399,7 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 		}
 	}
 	if (seg.route) {
-		for (const wrapped of wrapTextWithAnsi(providerFailureAdvice(seg.route), width))
+		for (const wrapped of wrapTextWithAnsi(providerFailureAdvice(seg.route, seg.text), width))
 			out.push(`${SECONDARY()}${wrapped}${RESET}`);
 	}
 	return out;

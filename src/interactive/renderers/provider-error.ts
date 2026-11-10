@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsText } from "../../domains/evidence/redact.js";
+import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
 import { redactStreamingSecretString, redactUrlCredentials } from "../../domains/safety/redaction.js";
 
 const SCAN_LIMIT = 8_192;
@@ -288,10 +289,18 @@ export function providerFailureRailFacts(
 }
 
 /** What failed, what was kept and the next step, worded for this failure rather than for every failure. */
-export function providerFailureAdvice(route: ProviderFailureRoute): string {
+export function providerFailureAdvice(route: ProviderFailureRoute, text?: string): string {
 	const configure = `clio-coder configure --id ${route.targetId}`;
 	const errorClass = route.errorClass ?? "";
-	if (route.stage === "auth") return `${configure} replaces it · ${SWITCH_ROUTE}.`;
+	if (route.stage === "auth") {
+		// The setup status's sentence for a route with no credential, so the banner, `run` and `doctor` read the same.
+		const provider = /No API key for provider: (\S+?)\.?(?:\s|$)/u.exec(text ?? "")?.[1];
+		if (provider !== undefined && errorClass !== "credential_expired" && httpStatusOf(errorClass) === null)
+			return `${describeMissing({ kind: "credential", target: route.targetId, provider }).sentence} · ${SWITCH_ROUTE}.`;
+		return `${configure} replaces it · ${SWITCH_ROUTE}.`;
+	}
+	const unanswered = missingFromFailedCall(route);
+	if (unanswered !== null) return `${describeMissing(unanswered).sentence} ${RESEND} · ${SWITCH_ROUTE}.`;
 	if (route.stage === "transport") {
 		// The block folds at few rows, so the way out leads and what the model missed follows it.
 		return route.partialReply === true
