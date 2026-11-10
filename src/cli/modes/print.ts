@@ -51,6 +51,7 @@ import {
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
+import { formatStatedWait } from "../../domains/session/retry.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
@@ -1076,6 +1077,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			} else {
 				writeJsonHeader(true);
 				for (const frame of frames) writeMainFrame(frame);
+			}
+		}
+		if (mode === "text" && event.type === "retry_status" && event.status.phase === "scheduled") {
+			const { attempt, delayMs = 0, retryAfterMs } = event.status;
+			if (delayMs >= 5000 || attempt % 5 === 0) {
+				const wait = formatStatedWait(delayMs);
+				const what = retryAfterMs !== undefined ? `provider asked to wait ${wait}` : `waiting ${wait}`;
+				process.stderr.write(`clio-coder run: ${what}, retrying (${attempt})\n`);
 			}
 		}
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {

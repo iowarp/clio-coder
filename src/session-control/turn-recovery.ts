@@ -16,6 +16,7 @@ import {
 	formatStatedWait,
 	isRateLimitErrorMessage,
 	isRetryableRecoveryFailure,
+	PROVIDER_WAIT_LIMIT,
 	RATE_LIMIT_WAIT_BUDGET_MS,
 	type RetryWaitCause,
 	recoveryRetryDelayMs,
@@ -353,9 +354,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return openForecast;
 		}
 		const settings = deps.retrySettings();
-		if (!settings.enabled || settings.maxRetries <= 0 || !retryableFailure(classified, message)) return null;
 		const statedMs = statedRetryWaitMs(message, failure.errorMessage);
-		if (statedMs !== null && pastWaitBudget(statedMs)) return null;
+		if (!settings.enabled || (settings.maxRetries <= 0 && statedMs === null) || !retryableFailure(classified, message))
+			return null;
+		if (statedMs !== null && (pastWaitBudget(statedMs) || chainProviderWaits >= PROVIDER_WAIT_LIMIT)) return null;
 		if (!mayAttempt(chainOwnRetries + 1, failure.errorMessage, message)) return null;
 		const onWait = isProviderWait(message, failure.errorMessage);
 		const waits = chainProviderWaits + (onWait ? 1 : 0);
@@ -575,7 +577,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			return true;
 		}
 		const settings = deps.retrySettings();
-		if (!moving() && (!settings.enabled || settings.maxRetries <= 0)) return false;
+		// A stated wait spends no retry, so it is sat out even when `maxRetries` is 0.
+		const noOwnRetries =
+			settings.maxRetries <= 0 && statedRetryWaitMs(initialFailure.message, initialFailure.errorMessage) === null;
+		if (!moving() && (!settings.enabled || noOwnRetries)) return false;
 		if (!moving() && !retryable(classified, initialFailure.message)) return false;
 
 		let failure = initialFailure;
@@ -594,7 +599,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const movedAborted = moving();
 			if (!moving()) {
 				const statedMs = statedRetryWaitMs(failure.message, failure.errorMessage);
-				if (statedMs !== null && pastWaitBudget(statedMs)) {
+				const pastWaitLimit = statedMs !== null && chainProviderWaits >= PROVIDER_WAIT_LIMIT;
+				if (statedMs !== null && (pastWaitBudget(statedMs) || pastWaitLimit)) {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt: chainAttempt,
@@ -607,14 +613,17 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					});
 					state.continuation.recordStop({
 						cause: "wait_past_budget",
-						reason: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
+						reason: pastWaitLimit
+							? `the provider asked to wait ${chainProviderWaits + 1} times, past the ${PROVIDER_WAIT_LIMIT} waits Clio sits out on one request`
+							: `the provider asked to wait ${formatStatedWait(statedMs)}, past the ${formatStatedWait(RATE_LIMIT_WAIT_BUDGET_MS)} Clio waits on one request`,
 						retryAfterMs: statedMs,
 					});
 					return true;
 				}
 				chainAttempt += 1;
 				attempt = chainAttempt;
-				const backoffMs = recoveryRetryDelayMs(chainOwnRetries + 1, settings, classified);
+				// Every attempt in the chain grows the backoff, so short stated waits back off too.
+				const backoffMs = recoveryRetryDelayMs(chainAttempt, settings, classified);
 				// Going back when told to is not the retry a count limits.
 				if (statedMs === null) chainOwnRetries += 1;
 				onWait = isProviderWait(failure.message, failure.errorMessage);

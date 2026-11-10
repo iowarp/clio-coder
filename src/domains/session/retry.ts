@@ -165,6 +165,9 @@ export function isRetryableRecoveryFailure(failure: RecoveryFailure): boolean {
  */
 export const RATE_LIMIT_WAIT_BUDGET_MS = 3_600_000;
 
+/** The most stated waits one chain sits out, however short each one is. */
+export const PROVIDER_WAIT_LIMIT = 30;
+
 const RATE_LIMIT_PATTERN =
 	/rate.?limit|too many requests|(?<![a-z0-9.$])429(?![a-z0-9])|overloaded|server_busy|model is at capacity|high demand/i;
 
