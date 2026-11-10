@@ -2508,6 +2508,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		safety,
 		autonomy: resolveEffectiveAutonomy,
 		admissionAutonomy: resolveAdmissionAutonomy,
+		sandboxEnv: () => sandboxEnvPolicy(getCurrentSettings()),
 		sessionCodeConsentPending: () => sessionCodeConsent.pending(),
 		untilStoppedDefault: () => getCurrentSettings().chat.loopsUntilStopped,
 		createSession: () => {

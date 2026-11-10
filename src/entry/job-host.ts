@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { type JobOwner, type JobRecord, TURN_CONTINUATION_CAP } from "../core/job-types.js";
+import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { captureProjectSurface } from "../core/workspace-trust.js";
@@ -34,6 +35,8 @@ export interface JobHostDeps {
 	 * Contained yolo admits as default does; absent, the operator's level.
 	 */
 	admissionAutonomy?(): AutonomyLevel;
+	/** `safety.sandboxPassEnv` and target key names, which scrub a job command's environment. */
+	sandboxEnv?(): SandboxEnvPolicy;
 	/** The session's test-runner consent is owed; a job command is admitted as its direct call would be. */
 	sessionCodeConsentPending?(): boolean;
 	/** `chat.loopsUntilStopped`, read at each create (#450). */
@@ -177,6 +180,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		constraints: runtimeDeps.constraints,
 		hostRefusal,
 		autonomy: admissionAutonomy,
+		...(deps.sandboxEnv !== undefined ? { sandboxEnv: deps.sandboxEnv } : {}),
 		admissionRefusal: (runner, creator, constraints) => jobAuthorityRefusal(runtimeDeps, creator, runner, constraints),
 	});
 	const subscriptions = [

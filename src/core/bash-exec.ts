@@ -13,6 +13,7 @@ import { SAFE_EXEC_PIPE_DRAIN_BOUND_MS } from "./safe-exec.js";
 import { holdsNamedCredential, knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { signalSandboxPayload } from "./sandbox/signal.js";
+import type { SandboxEnvPolicy } from "./sandbox/types.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
 
@@ -255,6 +256,19 @@ function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	// A contained-yolo session, or one launched pinned, holds every clio-coder its commands start to contained yolo.
 	if (toolEnvContainedYolo?.() === true || yoloConfinementPinned()) env[YOLO_CONFINEMENT_PIN_ENV] = "contained";
 	return env;
+}
+
+/**
+ * Clio's environment as a sandboxed bash command would get it, credentials scrubbed by the sandbox's rule
+ * and `safety.sandboxPassEnv` honored. Scheduled job commands run with this, so cluster and toolchain
+ * variables (`SLURM_CONF`, `LD_LIBRARY_PATH`, `MODULEPATH`, `VIRTUAL_ENV`) reach them.
+ */
+export function scrubbedCommandEnv(
+	policy: SandboxEnvPolicy,
+	source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+	const base = baseToolEnv(source);
+	return scrubSandboxEnv(base, policy, base).env;
 }
 
 function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {

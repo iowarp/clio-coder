@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
+import { scrubbedCommandEnv } from "../core/bash-exec.js";
 import type { JobRunner } from "../core/job-types.js";
 import { runCommandVector } from "../core/safe-exec.js";
+import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -104,7 +106,7 @@ export function jobCommandEffect(runner: JobRunner, cwd: string): readonly HostE
 	];
 }
 
-/** At yolo nobody is there to log a CLI in, so the code host tokens pass, and nothing else does (#445). */
+/** At yolo nobody is there to log a CLI in, so the code host tokens pass despite the credential scrub (#445). */
 function jobCommandEnv(autonomy: AutonomyLevel | undefined): Record<string, string> {
 	const env: Record<string, string> = {};
 	if (autonomy !== "yolo") return env;
@@ -115,7 +117,21 @@ function jobCommandEnv(autonomy: AutonomyLevel | undefined): Record<string, stri
 	return env;
 }
 
-export async function executeJobCommand(context: JobExecutionContext, autonomy?: AutonomyLevel): Promise<JobRunResult> {
+/** The first non-empty stderr line, so a poll that cannot start says why at once. */
+function firstStderrLine(stderr: string): string | undefined {
+	const line = stderr
+		.split(/\r?\n/u)
+		.map((text) => text.trim())
+		.find((text) => text.length > 0);
+	return line === undefined ? undefined : line.slice(0, 200);
+}
+
+/** The command gets the environment bash gets, credentials scrubbed, so cluster tools it calls work. */
+export async function executeJobCommand(
+	context: JobExecutionContext,
+	autonomy?: AutonomyLevel,
+	envPolicy: SandboxEnvPolicy = { passEnv: [], secretNames: [] },
+): Promise<JobRunResult> {
 	const runner = context.job.spec.runner;
 	if (runner.kind !== "command") throw new Error("Command job runner received a main occurrence.");
 	attestJobCommand(runner);
@@ -124,6 +140,7 @@ export async function executeJobCommand(context: JobExecutionContext, autonomy?:
 		cwd: context.job.owner.cwd,
 		workspaceRoot: context.job.owner.cwd,
 		timeoutMs: context.job.spec.timeoutMs,
+		baseEnv: scrubbedCommandEnv(envPolicy),
 		env: jobCommandEnv(autonomy),
 		maxOutputBytes: JOB_COMMAND_CAPTURE_BYTES,
 		signal: context.signal,
@@ -145,6 +162,7 @@ export async function executeJobCommand(context: JobExecutionContext, autonomy?:
 		result.cleanupIncomplete ||
 		result.pipeDrainIncomplete ||
 		result.exitCode !== 0;
+	const stderrHead = failed ? firstStderrLine(result.stderr) : undefined;
 	return {
 		outcome: failed ? "failed" : "succeeded",
 		summary: JSON.stringify({
@@ -156,6 +174,7 @@ export async function executeJobCommand(context: JobExecutionContext, autonomy?:
 			truncated: result.outputCapped,
 			cleanupIncomplete: result.cleanupIncomplete ?? false,
 			pipeDrainIncomplete: result.pipeDrainIncomplete ?? false,
+			...(stderrHead === undefined ? {} : { stderrHead }),
 			stdout: result.stdout,
 			stderr: result.stderr,
 		}),

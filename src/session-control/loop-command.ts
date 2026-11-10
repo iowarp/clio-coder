@@ -541,7 +541,7 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 	const pollFailure = jobPollFailure(job);
 	if (pollFailure !== null)
 		lines.push(
-			`${pollFailure.count} poll${pollFailure.count === 1 ? "" : "s"} failed in a row · last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`,
+			`${pollFailure.count} poll${pollFailure.count === 1 ? "" : "s"} failed in a row · last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}${pollFailure.stderr === null ? "" : `: ${pollFailure.stderr}`}`,
 		);
 	lines.push(
 		`timeout ${formatLoopDuration(job.spec.timeoutMs)}${

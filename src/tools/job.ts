@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord, JobRunner } from "../core/job-types.js";
+import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import {
@@ -24,6 +25,8 @@ import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./re
 export interface JobToolDeps {
 	/** Read at each occurrence; absent reads as below yolo (#445). */
 	autonomy?: () => AutonomyLevel;
+	/** The sandbox env policy from settings, read at each occurrence; a job command's environment is scrubbed by it. */
+	sandboxEnv?: () => SandboxEnvPolicy;
 	controller: JobController;
 	/** `chat.loopsUntilStopped`: a job created without count, for_ms or until_stopped runs until stopped (#450). */
 	untilStoppedDefault?: () => boolean;
@@ -267,7 +270,7 @@ export function createJobTool(deps: JobToolDeps): {
 			if (artifact.kind === "error") return { kind: "error", message: artifact.message };
 			try {
 				if (artifact.kind === "execution") {
-					const result = await executeJobCommand(artifact.context, deps.autonomy?.());
+					const result = await executeJobCommand(artifact.context, deps.autonomy?.(), deps.sandboxEnv?.());
 					return { kind: "ok", output: result.summary ?? result.outcome, details: { jobRunResult: result } };
 				}
 				const nowOwner = deps.owner();

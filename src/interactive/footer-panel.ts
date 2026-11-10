@@ -123,8 +123,10 @@ export function loopSegment(jobs: readonly JobRecord[], width: number, now: numb
 			theme.fg("composerRail", GLYPH.meterFull.repeat(filled)) + theme.fg("border", GLYPH.meterEmpty.repeat(6 - filled));
 		if (!append(`${meter} · ${counter}`)) append(counter);
 	} else append(counter);
-	if (pollFailure !== null)
-		append(`last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`);
+	if (pollFailure !== null) {
+		const last = `last poll ${pollFailure.exitCode === null ? "failed" : `exit ${pollFailure.exitCode}`}`;
+		if (pollFailure.stderr === null || !append(`${last}: ${pollFailure.stderr}`)) append(last);
+	}
 	if (jobs.length > 1) append(`+${jobs.length - 1} loops`);
 	if (dueAt !== null) append(dueAt <= now ? "due now" : `in ${formatCompactMs(dueAt - now)}`);
 	return theme.base(tone, fitFooterText(text, width, "…"));

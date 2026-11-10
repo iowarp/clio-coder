@@ -123,6 +123,8 @@ export interface RunCommandVectorOptions {
 	maxOutputBytes?: number;
 	signal?: AbortSignal;
 	env?: Record<string, string>;
+	/** Replaces the allowlisted environment as the base `env` is laid over; for commands that need the operator's full environment. */
+	baseEnv?: NodeJS.ProcessEnv;
 	/** Trusted typed Git metadata writes for this invocation only (v060 review F1). */
 	typedGitWritablePaths?: ReadonlyArray<string>;
 	/** Set for a contained main-session call (run_script, verify): it runs in the main-session sandbox with this policy. */
@@ -396,12 +398,14 @@ export function createProcessGroupCleanup(hooks: ProcessGroupCleanupHooks): Proc
 export function buildSafeToolEnv(
 	extra: Record<string, string> = {},
 	source: NodeJS.ProcessEnv = process.env,
+	base?: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = {};
-	for (const key of ENV_ALLOWLIST) {
-		const value = source[key];
-		if (value !== undefined) env[key] = value;
-	}
+	const env: NodeJS.ProcessEnv = { ...base };
+	if (base === undefined)
+		for (const key of ENV_ALLOWLIST) {
+			const value = source[key];
+			if (value !== undefined) env[key] = value;
+		}
 	for (const [key, value] of Object.entries(extra)) {
 		if (!/^[A-Z_][A-Z0-9_]*$/i.test(key)) continue;
 		env[key] = value;
@@ -448,10 +452,13 @@ export function runCommandVector(
 		let stdoutBytes = 0;
 		let stderrBytes = 0;
 		let sinkError: string | null = null;
-		const attribution = withManagedGitCommitAttributionEnvironment(buildSafeToolEnv(options.env), {
-			cwd,
-			enabled: gitCommitAttributionEnabled(process.env),
-		});
+		const attribution = withManagedGitCommitAttributionEnvironment(
+			buildSafeToolEnv(options.env, process.env, options.baseEnv),
+			{
+				cwd,
+				enabled: gitCommitAttributionEnabled(process.env),
+			},
+		);
 		reportCommitAttributionDiagnostic(attribution.diagnostic);
 		let aborted = false;
 		let timedOut = false;

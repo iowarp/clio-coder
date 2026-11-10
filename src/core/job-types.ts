@@ -155,9 +155,19 @@ export interface JobChangedPayload {
 }
 
 /** What a job's failing polls look like to a person: the streak and the last exit code when the record has one (#445). */
-export function jobPollFailure(job: JobRecord): { count: number; exitCode: string | null } | null {
+export function jobPollFailure(
+	job: JobRecord,
+): { count: number; exitCode: string | null; stderr: string | null } | null {
 	const count = job.failedPolls ?? 0;
 	if (count === 0) return null;
-	const exitCode = /"exitCode":(\d+)/u.exec(job.history.at(-1)?.evidence?.summary ?? "")?.[1] ?? null;
-	return { count, exitCode };
+	const summary = job.history.at(-1)?.evidence?.summary ?? "";
+	const exitCode = /"exitCode":(\d+)/u.exec(summary)?.[1] ?? null;
+	const quoted = /"stderrHead":("(?:[^"\\]|\\.)*")/u.exec(summary)?.[1];
+	let stderr: string | null = null;
+	try {
+		if (quoted !== undefined) stderr = JSON.parse(quoted) as string;
+	} catch {
+		/* A clipped summary has no readable stderr line. */
+	}
+	return { count, exitCode, stderr };
 }
