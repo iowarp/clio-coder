@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIPv6 } from "node:net";
 import { homedir, hostname, userInfo } from "node:os";
 import { basename, sep } from "node:path";
 import { FailureCause } from "../../core/telemetry/enums.js";
@@ -73,6 +74,9 @@ const PUBLIC_OWNER = "iowarp";
  * Words a name is never replaced as, so prose and the report's own structure are not mangled: a short stop list,
  * Clio's public names, and every word of the body's fixed headings, footer and block.
  */
+/** A name shorter than this collides with ordinary words and ids (R-19); the canary scan skips it. */
+export const CANARY_MIN_LENGTH = 4;
+
 const RESERVED_WORDS: ReadonlySet<string> = new Set(
 	[
 		"test",
@@ -138,6 +142,9 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set(
 	].map((word) => word.toLowerCase()),
 );
 
+/** Where a long name may start: not after a letter or digit, except the letter of a `\n` escape or a `%2F`. */
+const NAME_START = "(?:(?<![A-Za-z0-9])|(?<=\\\\[ntr]|%2[Ff]))";
+
 function maskId(kind: MaskKind, value: string): string {
 	return `${kind}-${createHash("sha256").update(`${kind}\u0000${value.toLowerCase()}`).digest("hex").slice(0, 8)}`;
 }
@@ -146,15 +153,31 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-const SEG = "[A-Za-z0-9._~@%+=-]+";
-/** A path, URL or address starts at the text's start or after a space or opening punctuation, never mid-word. */
-const START = "(?<![^\\s([{\"'`=:,;|])";
-const GENERIC_PATH = new RegExp(`${START}(?:~(?:/${SEG})+|(?:/${SEG}){2,})/?`, "gu");
-const WINDOWS_PATH = new RegExp(`${START}(?:[A-Za-z]:\\\\|\\\\\\\\)[^\\s"'\`<>|*?]+`, "gu");
+const SEG = "[\\p{L}\\p{N}._~@%+=-]+";
+/** What may follow a path's last segment: nothing that could continue it. */
+const SEG_END = "(?![\\p{L}\\p{N}._~@%+=-])";
+/**
+ * Under a known path, a directory whose name holds spaces: words that start with a letter or digit, up to the next
+ * separator, so `/home/me/My Project/x` is masked whole instead of leaving ` Project/x` behind.
+ */
+const SPACED_DIR = `${SEG}(?: [\\p{L}\\p{N}]${SEG.replace("+", "*")}){1,8}(?=[/\\\\])`;
+/**
+ * A path, URL or address starts at the text's start or after a space, opening punctuation or a marker such as `<`, `>`
+ * or `#`, or right after a one-letter flag such as `-I`; never mid-word.
+ */
+const START = "(?:(?<![^\\s([{\"'`=:,;|<>#])|(?<=(?:^|\\s)-[A-Za-z]))";
+const GENERIC_PATH = new RegExp(`${START}(?:~[\\p{L}\\p{N}._-]*(?:/${SEG})+|(?:/${SEG}){2,})/?`, "gu");
+const WINDOWS_CHAR = "[^\\s\"'`<>|*?\\\\]";
+const WINDOWS_PATH = new RegExp(
+	`${START}(?:[A-Za-z]:\\\\|\\\\\\\\)(?:${WINDOWS_CHAR}+(?: ${WINDOWS_CHAR}+){0,8}\\\\)*${WINDOWS_CHAR}*`,
+	"gu",
+);
 const SCP_REMOTE = /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:(?!\/\/)[A-Za-z0-9._~-][A-Za-z0-9._~/-]*/gu;
 const URL_PATTERN = /(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>"'`]+/gu;
 const EMAIL = /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/gu;
 const IPV4 = /(?<![0-9A-Za-z.])(?:\d{1,3}\.){3}\d{1,3}(?![0-9A-Za-z]|\.\d)/gu;
+/** An IPv6 literal candidate: hex groups and colons with at least two colons; {@link isIPv6} and a digit decide. */
+const IPV6 = /(?<![0-9A-Za-z:.])(?=[0-9A-Fa-f:]*:[0-9A-Fa-f]*:)[0-9A-Fa-f:]{2,39}(?![0-9A-Za-z:])/gu;
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/u;
 
 function isPublicUrl(raw: string): boolean {
@@ -234,7 +257,7 @@ function scrubOnce(
 	const paths = [...new Set(identity.paths)].filter((p) => p.length > 1).sort((a, b) => b.length - a.length);
 	if (paths.length > 0)
 		out = out.replace(
-			new RegExp(`(?:${paths.map(escapeRegExp).join("|")})(?:[/\\\\]${SEG})*(?![A-Za-z0-9._~@%+=-])`, "gu"),
+			new RegExp(`(?:${paths.map(escapeRegExp).join("|")})(?:[/\\\\](?:${SPACED_DIR}|${SEG}))*${SEG_END}`, "gu"),
 			(match) => mask("path", match),
 		);
 	const pathMask = (match: string) => {
@@ -244,20 +267,29 @@ function scrubOnce(
 	out = out.replace(GENERIC_PATH, pathMask);
 	out = out.replace(WINDOWS_PATH, pathMask);
 	out = out.replace(IPV4, (match) => (isPublicIp(match) ? match : mask("ip", match)));
+	out = out.replace(IPV6, (match) =>
+		!isIPv6(match) || !/\d/u.test(match) || match === "::1" ? match : mask("ip", match),
+	);
 
 	const kinds = new Map<string, IdentityKind>();
 	for (const { value, kind } of identity.names) {
 		const trimmed = value.trim();
 		if (usableName(trimmed) && !kinds.has(trimmed.toLowerCase())) kinds.set(trimmed.toLowerCase(), kind);
 	}
-	if (kinds.size > 0) {
-		const names = [...kinds.keys()].sort((a, b) => b.length - a.length);
-		const words = new RegExp(
-			`(?<![A-Za-z0-9_.-])(?:${names.map(escapeRegExp).join("|")})(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`,
-			"giu",
+	const byLength = (a: string, b: string) => b.length - a.length;
+	const long = [...kinds.keys()].filter((name) => name.length >= CANARY_MIN_LENGTH).sort(byLength);
+	const short = [...kinds.keys()].filter((name) => name.length < CANARY_MIN_LENGTH).sort(byLength);
+	const maskName = (match: string) => mask(kinds.get(match.toLowerCase()) ?? "user", match);
+	// A name the canary would find is masked wherever a letter or digit does not continue it: `jdoe-laptop`,
+	// `webapp.config.ts`, `id_jdoe`, and after a `\n` escape or a `%2F`. It is masked on screen (and unmaskable) instead
+	// of refused at Send. A shorter name the canary skips keeps the stricter boundaries, so a compound word keeps it.
+	if (long.length > 0)
+		out = out.replace(new RegExp(`${NAME_START}(?:${long.map(escapeRegExp).join("|")})(?![A-Za-z0-9])`, "giu"), maskName);
+	if (short.length > 0)
+		out = out.replace(
+			new RegExp(`(?<![A-Za-z0-9_.-])(?:${short.map(escapeRegExp).join("|")})(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, "giu"),
+			maskName,
 		);
-		out = out.replace(words, (match) => mask(kinds.get(match.toLowerCase()) ?? "user", match));
-	}
 	return out;
 }
 

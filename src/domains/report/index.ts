@@ -34,7 +34,10 @@ export {
 	canaryLocation,
 	canaryRefusal,
 	canaryScan,
+	type IssueCanaryFinding,
 	identityCanaries,
+	issueCanaryFinding,
+	issueCanaryGate,
 	issueCanaryHits,
 } from "./canary.js";
 export type { ReportCommandResult, ReportCommandRunner } from "./command.js";

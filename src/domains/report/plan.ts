@@ -1,5 +1,6 @@
 import { isFixedPoint, type RenderedReport, renderReport } from "./body.js";
 import { deleteReportBundle } from "./bundle.js";
+import { issueCanaryFinding, issueCanaryGate } from "./canary.js";
 import {
 	applyVerdict,
 	findRelated,
@@ -130,6 +131,8 @@ export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan
 	const gates = validateDraft(draft, rendered);
 	if (!isFixedPoint(rendered, options.identity, draft.unmasked))
 		gates.push("Scrubbing the report again would change it; edit the text so every masked value is gone.");
+	const left = issueCanaryFinding(rendered, options.identity);
+	if (left !== null) gates.push(issueCanaryGate(left));
 	let rateWarning: string | null = null;
 	if (options.stateDir !== undefined) {
 		try {

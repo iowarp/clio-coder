@@ -65,6 +65,21 @@ test("the scrubber masks this machine's path, host, remote, e-mail and a token, 
 	strictEqual(unmasked.text, scrubbed.text.replace("<host>", "lab-node7"));
 });
 
+test("names beside . _ - and escapes, spaced and non-ASCII path tails, flagged paths and IPv6 are masked (R2-safety-secrets-10)", () => {
+	const cases: Array<[string, string]> = [
+		["host lab-node7.local and alice.pem", "host <host>.local and <user>.pem"],
+		["/home/alice/My Secret Project/plan.md is gone", "<path> is gone"],
+		["acme-app_test and id_alice", "<project>_test and id_<user>"],
+		['{"log":"user\\nalice\\tok"}', '{"log":"user\\n<user>\\tok"}'],
+		["see %2Fsrv%2Falice%2Fwork", "see %2Fsrv%2F<user>%2Fwork"],
+		["~bob/secret-proj/x.ts and -I/opt/inc/x", "<path> and -I<path>"],
+		["C:\\Users\\Bob Smith\\Documents\\secret.txt", "<path>"],
+		["/srv/josé/notes/x.md", "<path>"],
+		["fe80::1ff:fe23:4567:890a and 2001:db8::7, not ::1 or 10:30:00", "<ip> and <ip>, not ::1 or 10:30:00"],
+	];
+	for (const [raw, expected] of cases) strictEqual(scrubText(raw, identity).text, expected, raw);
+});
+
 test("a rendered report is a fixed point of the scrubber, hostile prose included", () => {
 	const hostile = [
 		"see https://example.com/home/alice/x?p=/home/alice/y and https://github.com/iowarp/clio-coder/issues/445.",

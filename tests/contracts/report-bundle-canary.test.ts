@@ -18,12 +18,15 @@ import {
 	issueCanaryHits,
 	type LocalIdentity,
 	outboxEntry,
+	planReport,
 	REPORT_BUNDLE_ENVELOPE_SCHEMA,
 	type ReportBundleEnvelope,
 	type ReportCommandRunner,
 	type ReportDraft,
 	reportBundlePath,
+	routeFor,
 	scrubText,
+	sendReport,
 	sweepReportBundles,
 	updateOutbox,
 } from "../../src/domains/report/index.js";
@@ -326,6 +329,41 @@ test("the runtime scan finds escaped, cased and nested canaries and nothing in c
 	const body = scrubText(raw, IDENTITY, unmasked).text;
 	ok(body.includes(HOST));
 	deepStrictEqual(issueCanaryHits({ title: "t", body }, IDENTITY), []);
+});
+
+test("a name beside `-` or `.` is masked on screen, and a miss is a review gate naming it, not a Send refusal (R2b-report-01)", async () => {
+	const raw = `host ${USER}-laptop and ${HOST}.lan, see ${PROJECT}.config.ts and ${PROJECT}-api, the pre-${BRANCH} build`;
+	const scrubbed = scrubText(raw, IDENTITY);
+	strictEqual(
+		scrubbed.text,
+		"host <user>-laptop and <host>.lan, see <project>.config.ts and <project>-api, the pre-<branch> build",
+	);
+	deepStrictEqual(scrubbed.masks.map((mask) => mask.kind).sort(), ["branch", "host", "project", "user"]);
+	deepStrictEqual(issueCanaryHits({ title: "t", body: scrubbed.text }, IDENTITY), []);
+	// A name under the canary's minimum keeps the stricter boundaries.
+	const short: LocalIdentity = { ...IDENTITY, names: [{ value: "zqx", kind: "project" }] };
+	strictEqual(scrubText("zqx-api and zqx", short).text, "zqx-api and <project>");
+
+	// A remote too short for the scrubber is still a canary: review names it and Send refuses without blaming Clio.
+	const leaky: LocalIdentity = { ...IDENTITY, remotes: ["zq/abcd"] };
+	const draft = composeReportDraft({
+		kind: "bug",
+		surface: "headless",
+		title: "fix(report): the push step fails",
+		happened: "The push to zq/abcd failed after the third retry with a timeout.",
+	});
+	const plan = planReport(draft, { identity: leaky, transport: { kind: "browser" } });
+	const gate = 'The body still has this machine\'s remote "zq/abcd"; edit it out before sending.';
+	ok(plan.gates.includes(gate), plan.gates.join("\n"));
+	const stateDir = mkdtempSync(join(tmpdir(), "report-canary-gate-"));
+	try {
+		await rejects(
+			sendReport(plan.rendered, routeFor("bug"), { kind: "browser" }, { kind: "create" }, { stateDir, identity: leaky }),
+			{ message: `the report was not sent: ${gate}` },
+		);
+	} finally {
+		rmSync(stateDir, { recursive: true, force: true });
+	}
 });
 
 // ---------------------------------------------------------------------------------------------------------------

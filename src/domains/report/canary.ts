@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { telemetryInstallPath, unpackTelemetryArchive } from "../telemetry/index.js";
 import type { RenderedReport } from "./body.js";
-import { type IdentityKind, isReservedName, type LocalIdentity, scrubText } from "./scrub.js";
+import { CANARY_MIN_LENGTH, type IdentityKind, isReservedName, type LocalIdentity, scrubText } from "./scrub.js";
 
 /**
  * The second, independent proof that a bundle carries none of this machine's identifiers (R-19). The projection
@@ -31,8 +31,7 @@ export interface CanaryHit {
 	path: string | null;
 }
 
-/** A name shorter than this collides with ordinary words and ids (R-19). */
-export const CANARY_MIN_LENGTH = 4;
+export { CANARY_MIN_LENGTH };
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -237,4 +236,35 @@ export function issueCanaryHits(
 		],
 		identity,
 	);
+}
+
+export interface IssueCanaryFinding {
+	where: "title" | "body";
+	kind: CanaryKind;
+	/** The identifier itself; shown only to the reporter, on their own screen. */
+	value: string;
+}
+
+/**
+ * The first identifier the rendered issue still carries once every mask is applied again, with its value, so the
+ * review can name it before Send. Null when there is none.
+ */
+export function issueCanaryFinding(
+	rendered: Pick<RenderedReport, "title" | "body">,
+	identity: LocalIdentity,
+): IssueCanaryFinding | null {
+	const m = matcher(identityCanaries(identity));
+	for (const where of ["title", "body"] as const) {
+		const text = scrubText(rendered[where], identity).text;
+		const exact = m.exact?.exec(text);
+		if (exact) return { where, kind: m.exactKinds.get(exact[0]) ?? "path", value: exact[0] };
+		const word = m.words?.exec(text);
+		if (word) return { where, kind: m.wordKinds.get(word[0].toLowerCase()) ?? "user", value: word[0] };
+	}
+	return null;
+}
+
+/** The review gate, and the Send refusal, for a finding: the word and its kind, and what the reporter can do. */
+export function issueCanaryGate(finding: IssueCanaryFinding): string {
+	return `The ${finding.where} still has this machine's ${finding.kind} "${finding.value}"; edit it out before sending.`;
 }
