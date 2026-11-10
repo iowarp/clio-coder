@@ -170,8 +170,12 @@ function quarantineInvalidRecordsUnlocked(dataDir: string, invalid: ReadonlyArra
 	safeResourceWrite(path, `${JSON.stringify(entries, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<MemoryRecord>): string {
-	const sorted = sortMemoryRecords(evictForRoom(records));
+function writeMemoryRecordsUnlocked(
+	dataDir: string,
+	records: ReadonlyArray<MemoryRecord>,
+	storedIds: ReadonlySet<string>,
+): string {
+	const sorted = sortMemoryRecords(evictForRoom(records, storedIds));
 	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
 	const path = memoryStorePath(dataDir);
 	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
@@ -181,13 +185,17 @@ function writeMemoryRecordsUnlocked(dataDir: string, records: ReadonlyArray<Memo
 /**
  * At the cap, make room from proposals nobody decided on: those without a
  * command or source evidence ref first, then evidence-backed ones, oldest
- * first. Approved records and operator rejections are never evicted.
+ * first. Approved records, operator rejections and records this write adds
+ * are never evicted, so a write never reports a record it already dropped.
  */
-function evictForRoom(records: ReadonlyArray<MemoryRecord>): ReadonlyArray<MemoryRecord> {
+function evictForRoom(
+	records: ReadonlyArray<MemoryRecord>,
+	storedIds: ReadonlySet<string>,
+): ReadonlyArray<MemoryRecord> {
 	const excess = records.length - MEMORY_STORE_MAX_RECORDS;
 	if (excess <= 0) return records;
 	const evictable = records
-		.filter((record) => !record.approved && record.rejectedAt === undefined)
+		.filter((record) => storedIds.has(record.id) && !record.approved && record.rejectedAt === undefined)
 		.sort(
 			(left, right) =>
 				Number(hasEvidenceRef(left)) - Number(hasEvidenceRef(right)) ||
@@ -230,7 +238,7 @@ export async function mutateMemoryRecords<T>(
 			if (options.isCurrent?.() === false) throw new Error("memory write lost content authority");
 			if ("records" in outcome) {
 				if (parsed.invalid.length > 0) quarantineInvalidRecordsUnlocked(dataDir, parsed.invalid);
-				writeMemoryRecordsUnlocked(dataDir, outcome.records);
+				writeMemoryRecordsUnlocked(dataDir, outcome.records, new Set(parsed.records.map((record) => record.id)));
 			}
 			return outcome.result;
 		},
