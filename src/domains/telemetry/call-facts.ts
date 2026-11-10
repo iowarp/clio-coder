@@ -196,9 +196,14 @@ export function callSettlementFromMessage(
 		// billed with totalFromProvider, which OpenRouter reports for every call, on an unpriced target too.
 		if (external.cost === "provider-reported" || cost.totalFromProvider === true) pricing = pricedUsd("provider", usd);
 		else if (pricedBy !== "none") pricing = pricedUsd(pricedBy, usd);
-	} else if (!neverSent && !observed && !(reason === "error" && typeof failure.httpStatus === "number")) {
+	} else if (
+		!neverSent &&
+		!observed &&
+		!(reason === "error" && (typeof failure.httpStatus === "number" || !((interrupted?.output ?? 0) > 0)))
+	) {
 		// A sent call whose provider reported no usage is charged its request-size estimate on a priced route, so a cost
-		// cap still trips; a provider that answered with an error status billed nothing.
+		// cap still trips; a provider that answered with an error status billed nothing, and neither did an errored call
+		// that streamed no output, such as a refused connection, DNS failure or proxy refusal.
 		const estimatedUsd = amount(interrupted?.usd);
 		if (estimatedUsd !== null && (pricedBy === "target-rates" || pricedBy === "catalog"))
 			pricing = { usd: { kind: "estimated", value: estimatedUsd, method: "prompt-side-only" }, pricedBy };
