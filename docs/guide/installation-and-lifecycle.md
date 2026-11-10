@@ -981,7 +981,7 @@ roots and files that survive are listed too (`Survives: ...`). After a `--settin
 `clio-coder configure --section targets`.
 
 *   `--state`: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. Project approvals live in the config root and survive it. Its preview carries that note.
-*   `--data`: Deletes the data root only: memory and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
+*   `--data`: Deletes the data root only: memory, the project store (`store/`, every tag's blobs and records) and any vendored external tools (durable products). Stored blobs and records are not recoverable once deleted, so copy out what you need first; the [`store` tool's](tool-usage.md#store-keep-results-and-datasets-outside-the-working-tree) `get` gives each blob's path. Vendored tools can be fetched again: `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml` only. Removes all saved keys.
 *   `--settings`: Deletes `settings.yaml` only, which reverts preferences to default. Credentials stay.
@@ -1005,7 +1005,7 @@ hash -r
 ```
 
 `--keep-config` preserves the whole config root (`settings.yaml`, `credentials.yaml` and anything else
-in it) and `--keep-data` preserves the data root (memory and vendored tools). The cache and
+in it) and `--keep-data` preserves the data root (memory, the project store and vendored tools). The cache and
 state roots always go. `--force` (`-f`) skips the confirmation prompt. Without a terminal, `--force` or
 `--dry-run`, the command exits 2 with `` `clio-coder uninstall` needs a terminal to confirm; pass --force to skip the prompt ``.
 An unknown flag and an unsafe directory layout exit 2. A declined confirmation exits 0. A lock held by an installer,

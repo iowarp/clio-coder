@@ -421,7 +421,7 @@ Every blob keeps a write-once history of its puts, notes and removals. `ref: "<t
 
 Admission is per op. `tags`, `list`, `stat` and `get` are reads. `create`, `put` and `note` are writes, judged at their real target in Clio Coder's data directory. `remove` asks, and so does a `put` that would replace an existing blob, because the store keeps no earlier versions of a blob and no snapshot covers it; both approval reasons name the blob. The gateway's `describe` of `store` states each op's authority. A `put` source is held to the workspace, the read scope and the path policy. Dispatched workers can read the store but never write it; the built-in coder, researcher and scout workers have `store` and `data` without extra setup.
 
-The store lives at `<dataDir>/store/projects/<key>/tags/`, keyed by the main checkout's real path, and `clio-coder reset` and `uninstall` remove it with the data root. Only the local backend exists: a worker on a fleet node sees that node's own store, and `put` copies bytes rather than linking. Store files are owner-only: blobs and records are 0600 and directories 0700. The store has been exercised on Linux only.
+The store lives at `<dataDir>/store/projects/<key>/tags/`, keyed by the main checkout's real path, and `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root for good. Only the local backend exists: a worker on a fleet node sees that node's own store, and `put` copies bytes rather than linking. Store files are owner-only: blobs and records are 0600 and directories 0700. The store has been exercised on Linux only.
 
 ## grep: search file contents with ripgrep
 

@@ -66,7 +66,7 @@ removed; their desktop launchers are removed using the app's ownership manifests
 
 Flags:
   --keep-config    preserve the configuration root (settings.yaml, credentials)
-  --keep-data      preserve the data root (memory, vendored tools)
+  --keep-data      preserve the data root (memory, the project store, vendored tools)
   --keep-binary    keep the launcher and, for an install.sh install, its private Node and
                    installed versions. Without it the launcher goes only when it belongs
                    to this installation: a real file, or a link into a different clio-coder

@@ -19,7 +19,8 @@ Levels (name at least one; combinable except --all):
   --state       state root only. Holds every session transcript, so a
                 reset is the end of resume, /view, and the telemetry behind them.
                 Owned background services are stopped and removed first.
-  --data        data root only: memory and vendored tools (durable products)
+  --data        data root only: memory, the project store and vendored tools
+                (durable products)
   --cache       cache root only
   --auth        credentials.yaml only
   --settings    settings.yaml only
@@ -36,11 +37,12 @@ Safety:
 
 const ROOT_NOTES = {
 	state: "State holds every session transcript and telemetry journal; resume and /view lose their history.",
-	data: "Data holds memory and vendored tools; the tools have to be downloaded again.",
+	data:
+		"Data holds memory, the project store and vendored tools; stored blobs and records are not recoverable, and the tools have to be downloaded again.",
 	settings: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
 	cache: "Cache is disposable and rebuilds itself.",
-	all: "Everything goes: settings, credentials, memory, transcripts, and caches. A clean install remains.",
+	all: "Everything goes: settings, credentials, memory, the project store, transcripts, and caches. A clean install remains.",
 } as const;
 
 interface ParsedResetArgs {
