@@ -33,8 +33,9 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 import { reportToolSurface } from "./report-surface.js";
 
 export const REPORT_OFFER_REFUSED = "Do not offer or mention reporting again in this session.";
-export const REPORT_REVIEW_OPEN =
-	"The draft is open for the operator to review. You cannot send it; do not run gh for this.";
+/** No send command reaches the model: the agent drafts, the operator sends (R2b-report-04). */
+const REPORT_NOT_YOURS = "You cannot send it; do not run gh or clio-coder for this.";
+export const REPORT_REVIEW_OPEN = `The draft is open for the operator to review. ${REPORT_NOT_YOURS}`;
 /** Unsent agent drafts an install keeps before the tool stops writing new ones. */
 export const AGENT_DRAFT_LIMIT = 3;
 
@@ -185,7 +186,7 @@ export function createReportTool(deps: ReportToolDeps): ToolSpec {
 		const kept = existing ?? (unsent.length >= AGENT_DRAFT_LIMIT ? unsent[0]?.id : undefined);
 		if (kept !== undefined)
 			return ok(
-				`A draft already waits for the operator: ${kept}. Do not write another; the operator reviews it with /report or sends it with \`clio-coder report send ${kept}\`.`,
+				`A draft already waits for the operator: ${kept}. Do not write another; the operator reviews and sends it.`,
 				{ draftId: kept, created: false },
 			);
 
@@ -232,7 +233,7 @@ export function createReportTool(deps: ReportToolDeps): ToolSpec {
 			open(saved.id);
 			return ok(REPORT_REVIEW_OPEN, { draftId: saved.id, created: true, review: true });
 		}
-		return ok(`Saved as ${saved.id}. The operator sends it with \`clio-coder report send ${saved.id}\`.`, {
+		return ok(`Saved as ${saved.id} for the operator to review. ${REPORT_NOT_YOURS}`, {
 			draftId: saved.id,
 			created: true,
 			review: false,

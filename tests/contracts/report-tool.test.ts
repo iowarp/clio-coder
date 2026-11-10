@@ -58,7 +58,7 @@ describe("report tool", () => {
 		const first = await tool.run(DRAFT, {});
 		strictEqual(first.kind, "ok");
 		const id = (first.details as { draftId: string }).draftId;
-		ok(first.kind === "ok" && first.output.includes(`clio-coder report send ${id}`));
+		ok(first.kind === "ok" && !first.output.includes("report send"), first.kind === "ok" ? first.output : "");
 		const draft = readReportDraft(stateDir, id);
 		strictEqual(draft?.origin, "agent");
 		strictEqual(draft?.trigger, "agent");

@@ -383,6 +383,20 @@ async function confirmAndSend(
 	io: Io,
 	options: { dryRun: boolean; yes: boolean; json: boolean; onDuplicate: DuplicateChoice | null; replyCheck: boolean },
 ): Promise<number> {
+	// R-12 promises the agent drafts but never sends: a bash call has no terminal, and --yes skips the review the
+	// footer claims, so an agent's draft goes only through the interactive review. Refused before gh is asked anything.
+	if (!options.dryRun && initial.origin === "agent" && (options.yes || !io.interactive || options.json)) {
+		io.err(
+			`nothing sent: an agent's draft is reviewed in a terminal: run \`clio-coder report send ${initial.id}\` yourself\n`,
+		);
+		return 2;
+	}
+	// Set only in a command a Clio session's bash started below yolo; --yes there would send text nobody reviewed.
+	const ceiling = io.env.CLIO_CODER_AUTONOMY_CEILING;
+	if (!options.dryRun && options.yes && ceiling !== undefined && ceiling !== "") {
+		io.err("nothing sent: --yes is refused in a command a Clio session started; send it from your own terminal\n");
+		return 2;
+	}
 	const identity = await identityFor(io);
 	let transport: ReportTransport | null = null;
 	let planTransport: ReportPlanTransport;
