@@ -58,6 +58,11 @@ export interface SelectOptions<T> {
 	 * settings menu that returns to the same screen does not.
 	 */
 	clearOnExit?: boolean;
+	/**
+	 * Drop keys, other than Ctrl+C and Ctrl+D, that arrive within this many milliseconds of the menu appearing, so
+	 * input typed ahead of a consequential prompt cannot answer it before it is read.
+	 */
+	settleMs?: number;
 	input?: NodeJS.ReadStream;
 	output?: NodeJS.WriteStream;
 }
@@ -336,16 +341,21 @@ export async function promptSelect<T>(options: SelectOptions<T>): Promise<Select
 		frame.draw(lines);
 	};
 
+	let armedAt = 0;
 	const result = await readKeys<SelectResult<T>>(
 		input,
 		output,
 		true,
-		render,
+		() => {
+			armedAt = performance.now() + (options.settleMs ?? 0);
+			render();
+		},
 		(str, key, finish) => {
 			if (key.ctrl && (key.name === "c" || key.name === "d")) {
 				finish({ kind: "quit" });
 				return;
 			}
+			if (performance.now() < armedAt) return;
 			if (options.searchable) {
 				if (key.ctrl && key.name === "u") {
 					query = "";

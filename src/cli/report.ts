@@ -290,6 +290,9 @@ interface Io {
 	deps: ReportCliDeps;
 }
 
+/** An Enter typed while gh was being asked must not send: the prompt ignores keys for this long after it appears. */
+const REPORT_PROMPT_SETTLE_MS = 400;
+
 function fail(io: Io, message: string): void {
 	io.err(`error: ${message}\n`);
 }
@@ -477,6 +480,7 @@ async function confirmAndSend(
 				],
 				backLabel: "cancel",
 				clearOnExit: true,
+				settleMs: REPORT_PROMPT_SETTLE_MS,
 			});
 			const picked = choice.kind === "selected" ? choice.value : "cancel";
 			if (picked === "send") break;
@@ -530,6 +534,7 @@ async function confirmAndSend(
 				choices: choices.map((choice) => ({ value: choice.value, label: choice.label })),
 				backLabel: "cancel",
 				clearOnExit: true,
+				settleMs: REPORT_PROMPT_SETTLE_MS,
 			});
 			return picked.kind === "selected" ? picked.value : "stop";
 		},
