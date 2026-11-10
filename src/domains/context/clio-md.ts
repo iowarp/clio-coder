@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { realpathInside } from "./contained-path.js";
 
 export interface ClioMdFingerprintFooter {
 	initAt: string;
@@ -422,10 +423,20 @@ export function renderProjectContextFragment(parsed: ParsedClioMd | string, sour
 
 const PROJECT_CONTEXT_CANDIDATES = ["CLIO-CODER.override.md", "CLIO-CODER.md"] as const;
 
-function selectedClioMdPath(directory: string): string | null {
+function selectedClioMdPath(directory: string, walkRoot: string, errors: ClioMdLoadError[]): string | null {
 	for (const filename of PROJECT_CONTEXT_CANDIDATES) {
 		const filePath = join(directory, filename);
 		if (!existsSync(filePath)) continue;
+		// A cloned repository may ship a link to any file on this machine. Only
+		// a link that stays inside the project may stand in for its handbook.
+		try {
+			if (lstatSync(filePath).isSymbolicLink() && !realpathInside(filePath, walkRoot)) {
+				errors.push({ path: filePath, error: `${filename} is a link that leaves the project; ignored` });
+				continue;
+			}
+		} catch {
+			// The read below reports anything lstat could not.
+		}
 		try {
 			if (statSync(filePath).isFile()) return filePath;
 		} catch {
@@ -475,7 +486,7 @@ function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd 
 }
 
 /**
- * Load effective project handbooks from filesystem root through `cwd`.
+ * Load effective project handbooks from the repository root through `cwd`.
  * Candidate selection follows pi-coding-agent 0.84's
  * `loadProjectContextFiles`: an override wins over the base file in the same
  * directory. Clio's override additionally resets the inherited
@@ -486,20 +497,26 @@ export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
 	// The walk ends at the enclosing repository root (a `.git` directory, or a
 	// `.git` file in a worktree or submodule). A handbook written for a folder
 	// that holds many repositories would otherwise tell every one of them how
-	// to behave. Outside any repository the walk still reaches the filesystem root.
-	const directories: string[] = [];
+	// to behave. Outside any repository only `cwd`'s own handbook applies, since
+	// a parent such as `/tmp` may hold a handbook any local user can write.
+	let directories: string[] = [];
 	let directory = resolve(cwd);
 	while (true) {
 		directories.unshift(directory);
 		if (existsSync(join(directory, ".git"))) break;
 		const parent = dirname(directory);
-		if (parent === directory) break;
+		if (parent === directory) {
+			directories = [resolve(cwd)];
+			break;
+		}
 		directory = parent;
 	}
+	const walkRoot = directories[0] ?? resolve(cwd);
 
+	const errors: ClioMdLoadError[] = [];
 	const selectedPaths: string[] = [];
 	for (const current of directories) {
-		const selected = selectedClioMdPath(current);
+		const selected = selectedClioMdPath(current, walkRoot, errors);
 		if (!selected) continue;
 		if (basename(selected) === "CLIO-CODER.override.md") {
 			selectedPaths.length = 0;
@@ -508,7 +525,6 @@ export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
 	}
 
 	const files: LoadedClioMdFile[] = [];
-	const errors: ClioMdLoadError[] = [];
 	for (const filePath of selectedPaths) {
 		const read = readClioMdPath(filePath);
 		if (read.ok) files.push({ path: filePath, source: read.source, value: read.value });

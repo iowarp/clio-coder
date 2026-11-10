@@ -38,14 +38,12 @@ describe("handbook discovery", () => {
 		);
 	});
 
-	it("keeps layering every ancestor when no repository encloses the directory", () => {
-		const container = handbook(join(root, "plain"), "Plain");
+	it("outside any repository loads only the directory's own handbook", () => {
+		handbook(join(root, "plain"), "Plain");
 		const child = handbook(join(root, "plain", "child"), "Child");
 		deepStrictEqual(
-			loadProjectClioMd(join(root, "plain", "child"))
-				.files.map((file) => file.path)
-				.filter((path) => path.startsWith(root)),
-			[join(root, "CLIO-CODER.md"), container, child],
+			loadProjectClioMd(join(root, "plain", "child")).files.map((file) => file.path),
+			[child],
 		);
 	});
 });

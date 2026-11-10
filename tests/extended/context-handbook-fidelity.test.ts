@@ -346,6 +346,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 	});
 
 	it("preserves existing ancestor and override selection when rendering exact source", () => {
+		mkdirSync(join(cwd, ".git"), { recursive: true });
 		writeFileSync(path, authored);
 		const child = join(cwd, "src");
 		const base = "CHILD_HEADINGLESS_GUIDANCE\n\nPreserve the child-specific command.\n";

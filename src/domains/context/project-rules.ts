@@ -18,12 +18,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { compileGlobRegex, normalizeGlobInput } from "../../tools/ignore-policy.js";
 import { ceilChars } from "../session/context-accounting.js";
+import { realpathInside } from "./contained-path.js";
 
 export interface ProjectRule {
 	/** Stable id: the rule's posix path under `.clio-coder/rules`. */
@@ -186,6 +187,11 @@ export function loadProjectRules(cwd: string): ProjectRulesLoad {
 	const pathBase = relative(projectRoot, resolve(cwd)).split(sep).join("/");
 	const issues: string[] = [];
 	const files: string[] = [];
+	// A linked `.clio-coder` or `rules` directory must not pull files from outside the project.
+	if (existsSync(root) && !realpathInside(root, projectRoot)) {
+		issues.push(".clio-coder/rules is a link that leaves the project; ignored");
+		return { rules: [], excludes: [], issues };
+	}
 	walkMarkdown(root, root, files);
 	files.sort();
 	const rules: ProjectRule[] = [];
