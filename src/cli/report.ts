@@ -736,7 +736,9 @@ function shareHook(
 			),
 		abandon: async (gistId) => {
 			const deleted = await deleteShareGist(gistId, deps);
-			if ("failed" in deleted) io.err(`${deleted.failed}; delete it at https://gist.github.com/${gistId}\n`);
+			if (!("failed" in deleted)) return true;
+			io.err(`${deleted.failed}; delete it at https://gist.github.com/${gistId} or with clio-coder report forget\n`);
+			return false;
 		},
 	};
 }

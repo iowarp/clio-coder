@@ -743,6 +743,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		let posted = "";
 		const deleted: string[] = [];
 		let gistFails = false;
+		let postThrows = false;
 		const run: ReportCommandRunner = async (file, args) => {
 			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
 			if (file === "git") return { exitCode: 1, stdout: "", stderr: "not a repository", timedOut: false };
@@ -760,6 +761,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 				return reply("");
 			}
 			if (args[0] === "issue" && args[1] === "create") {
+				if (postThrows) throw new Error("gh was killed");
 				posted = readFileSync(args[args.indexOf("--body-file") + 1] ?? "", "utf8");
 				return reply("https://github.com/iowarp/clio-coder/issues/452\n");
 			}
@@ -833,6 +835,15 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		ok(out.includes(`deleted the encrypted share ${shareId}`), out);
 		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
 		ok(!existsSync(reportBundlePath(stateDir, sent)));
+
+		// The receipt is written before the post, so a post that dies still leaves the gist for forget and the sweep.
+		postThrows = true;
+		await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes").catch(() => 1);
+		const live = Object.values(readShareReceipts(stateDir)).filter((receipt) => receipt.deletedAt === null);
+		strictEqual(live.length, 1);
+		strictEqual(live[0]?.gistId, gistId);
+		strictEqual(live[0]?.kind, "report-bundle");
+		deepStrictEqual(deleted, [`gists/${gistId}`]);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

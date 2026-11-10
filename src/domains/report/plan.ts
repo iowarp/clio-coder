@@ -324,13 +324,13 @@ export function relatedLine(issue: RelatedIssue): string {
 
 /**
  * Uploads a report's encrypted bundle just before the report is posted, so the posted block can name its gist. Called
- * only through an authenticated `gh`; `abandon` deletes the gist again when nothing was posted.
+ * only through an authenticated `gh`; `abandon` deletes the gist again when nothing was posted and says whether it could.
  */
 export interface ReportShareHook {
 	shareId: string;
 	consent: ReportSharePointer["consent"];
 	upload(): Promise<{ gistId: string } | { failed: string }>;
-	abandon(gistId: string): Promise<void>;
+	abandon(gistId: string): Promise<boolean>;
 }
 
 export function sharePointer(gistId: string, shareId: string): string {
@@ -432,6 +432,15 @@ export async function runReportSend(
 			return { kind: "sent", result: { status: "failed", reason, path }, draft: final, rendered, verdict };
 		}
 		shared = { shareId: deps.share.shareId, gistId: uploaded.gistId };
+		// Recorded before anything is posted, so forget and the retention sweep can find the gist whatever happens next.
+		updateShareReceipt(deps.stateDir, shared.shareId, {
+			kind: "report-bundle",
+			gistId: shared.gistId,
+			sentAt: (deps.now ?? (() => new Date()))().toISOString(),
+			consent: deps.share.consent,
+			profile: "report",
+			reportId: final.id,
+		});
 	}
 	const pointer =
 		shared !== undefined && deps.share !== undefined
@@ -455,18 +464,11 @@ export async function runReportSend(
 	if (shared !== undefined && deps.share !== undefined) {
 		// A create that did not answer cleanly may still have posted the pointer; then the gist stays for forget.
 		if (result.status === "failed" && outboxEntry(deps.stateDir, final.id)?.state !== "sending") {
-			await deps.share.abandon(shared.gistId);
+			// A gist that could not be deleted keeps its live receipt for forget and the retention sweep.
+			if (await deps.share.abandon(shared.gistId)) updateShareReceipt(deps.stateDir, shared.shareId, { deletedAt: now });
 			shared = undefined;
 		} else {
-			updateShareReceipt(deps.stateDir, shared.shareId, {
-				kind: "report-bundle",
-				gistId: shared.gistId,
-				sentAt: now,
-				consent: deps.share.consent,
-				profile: "report",
-				reportId: final.id,
-				...(filed ? { url: result.url } : {}),
-			});
+			if (filed) updateShareReceipt(deps.stateDir, shared.shareId, { url: result.url });
 			updateOutbox(deps.stateDir, final.id, { kind: final.kind, title: finalRendered.title, share: shared });
 		}
 	}
