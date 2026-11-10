@@ -426,8 +426,7 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 		).join("\n");
 		match(hints, /Ctrl\+M Model(?! picker)/);
 		doesNotMatch(hints, /Alt\+M|Alt\+L|Library/);
-		match(hints, /newline/);
-		match(hints, /Thinking effort/);
+		match(hints, /\? Keys/);
 		const runHints = Array.from({ length: 40 }, (_, i) =>
 			footerKeyHint(i * 60000, false, Number.POSITIVE_INFINITY, "steer"),
 		).join("\n");
@@ -447,7 +446,6 @@ test("a key the operator already pressed leaves the learning rotation", () => {
 			).join("\n");
 		const fresh = rotation("idle", () => false);
 		match(fresh, /\? Keys/);
-		match(fresh, /Thinking effort/);
 		const learned = rotation("idle", (feature) => feature === "?" || feature === "key:clio-coder.thinking.cycle");
 		doesNotMatch(learned, /\? Keys|Thinking effort/);
 		match(learned, /newline/);

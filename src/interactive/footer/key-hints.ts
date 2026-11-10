@@ -46,9 +46,6 @@ export interface KeyHintFacts {
 	learned?: (feature: string) => boolean;
 }
 
-/** One learning hint holds this long. The row is read at a glance, so it must not move under the eye. */
-const LEARNING_SLOT_MS = 60_000;
-
 /** The one shortcut an empty idle composer always offers; the rest are learned one at a time beside it. */
 const IDLE_PINNED: keyof typeof CLIO_APP_KEYBINDINGS = "clio-coder.model.select";
 
@@ -170,12 +167,12 @@ function learningEntries(context: ComposerKeyContext, facts: KeyHintFacts): stri
 /**
  * The hint row's policy. The keys that answer this moment are pinned and describe
  * what the composer holds now. While the composer is empty one learning hint may
- * sit beside them, changing once a minute. A draft silences the learning, because
+ * sit beside them, changing only when its key is learned. A draft silences the learning, because
  * the operator is typing and the row is about their Enter. A key whose target does
  * not exist right now is never offered, and a hint wider than the row is never cut.
  */
 export function footerKeyHint(
-	now: number,
+	_now: number,
 	narrow = false,
 	width = Number.POSITIVE_INFINITY,
 	context: ComposerKeyContext = "send",
@@ -189,7 +186,8 @@ export function footerKeyHint(
 	const room = pinned.length > 0 ? width - visibleWidth(lead) - visibleWidth(HINT_SEPARATOR) : width;
 	const extras =
 		narrow && pinned.length > 0 ? [] : learningEntries(context, facts).filter((entry) => visibleWidth(entry) <= room);
-	const extra = extras[Math.floor(now / LEARNING_SLOT_MS) % Math.max(1, extras.length)];
+	// The first unlearned key holds until the operator uses it, so the row moves only when they learn something.
+	const extra = extras[0];
 	if (pinned.length === 0) return extra ?? null;
 	return extra ? `${lead}${HINT_SEPARATOR}${extra}` : lead;
 }
