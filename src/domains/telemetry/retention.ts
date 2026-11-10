@@ -542,9 +542,9 @@ const SWEEP_BUDGET_MS = 2_000;
 
 /**
  * The automatic retention sweep: at most once a day per state root, claimed by a stamp under a non-waiting lock so
- * concurrent processes do not all sweep. Planning and removal share one time budget; removal stops when it ends and
- * the rest goes on a later day. Null when the sweep was not due, another process holds the claim, or the budget ran
- * out while planning.
+ * concurrent processes do not all sweep. The time budget starts after planning and bounds removal only; removal
+ * stops when it ends and the rest goes on a later day. Null when the sweep was not due, another process holds the
+ * claim, or the host stopped it while planning.
  */
 export async function sweepTelemetryDaily(
 	stateDir: string,
@@ -566,14 +566,16 @@ export async function sweepTelemetryDaily(
 		return true;
 	});
 	if (!claim.held || !claim.value) return null;
-	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
-	const stopped = () => performance.now() > deadline || options.stopped?.() === true;
+	// Planning rescans the whole home each day, so it runs without the budget (only host shutdown stops it) and
+	// still yields per segment; a shared budget let a large home plan forever and never prune.
+	const hostStopped = () => options.stopped?.() === true;
 	let plan: PrunePlan;
 	try {
-		plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY, nowMs, { stopped });
+		plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY, nowMs, { stopped: hostStopped });
 	} catch (error) {
 		if (error instanceof PlanStopped) return null;
 		throw error;
 	}
-	return await applyTelemetryPrune(plan, { stopped });
+	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
+	return await applyTelemetryPrune(plan, { stopped: () => performance.now() > deadline || hostStopped() });
 }
