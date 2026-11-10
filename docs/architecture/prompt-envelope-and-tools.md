@@ -157,13 +157,8 @@ the plane design, the safety classifier, and the registered specs fails loudly
 instead of shipping a surface that behaves differently from what the policy
 engine assumes.
 
-Every builtin also names the contract tests that exercise it, in the
-`TOOL_CONTRACT_TESTS` map in [check-hygiene.ts](../../scripts/check-hygiene.ts). The map is keyed by
-the builtin name type, so a new tool fails typecheck until its test is named.
-`pnpm run lint` then fails when a named file is missing, lives outside
-`tests/contracts`,
-or never reaches the tool in code by importing its registered module or naming
-it on a registry the test builds.
+`validateBuiltinToolPolicy` in [policy.ts](../../src/tools/policy.ts) runs when the core tools register,
+so a tool whose declared action class disagrees with its plane or with the safety classifier fails at boot.
 
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |

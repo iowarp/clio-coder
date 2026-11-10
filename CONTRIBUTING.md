@@ -17,7 +17,9 @@ corepack enable pnpm
 pnpm install --frozen-lockfile
 pnpm run hooks:install
 pnpm run build
-pnpm run ci
+pnpm run typecheck
+pnpm run lint
+pnpm run test
 ```
 
 `hooks:install` adds pre-commit and pre-push guards that refuse any path `.gitignore` excludes, including one staged with `git add -f`. Keep private plans, prompts and notes under the ignored `.mine/`; `pnpm run lint` fails if an ignored path is ever tracked.
@@ -60,7 +62,7 @@ conversation, and lifecycle logs. Validate first-run changes with isolated
 
 ## Architecture Boundaries
 
-The lint suite enforces 6 boundary invariants:
+The lint suite enforces the boundary rules `rule1` to `rule17` in `tests/boundaries/check-boundaries.ts`. The main invariants:
 1. Only `src/engine/**` may import `@earendil-works/pi-*` packages (including type imports).
 2. Worker imports from domains are type-only except for declared provider rehydration seams.
 3. Domains communicate exclusively via contracts and events; do not cross-import another domain's `extension.ts`.
@@ -72,7 +74,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Submitting Changes
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v062` for 0.6.2. Open the pull request against that branch. `main` moves only when a release ships.
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, which is `v` plus the digits of the `package.json` version, such as `v071` for 0.7.1. Open the pull request against that branch. `main` moves only when a release ships.
 2. Add focused contract tests exercising the changed behavior.
 3. Keep commit subjects concise conventional commits (max 72 characters):
    ```text
@@ -80,7 +82,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
    docs: clarify worker permission scope
    feat(cli): add target inspection option
    ```
-4. Verify `pnpm run ci` passes before requesting review.
+4. Before requesting review, run `pnpm run typecheck`, `pnpm run lint`, focused `pnpm run test:file` runs for the behavior you changed and `pnpm run test` for the default contract list. `pnpm run ci` is release qualification, not a routine check.
 
 ## Branches and Releases
 
@@ -109,7 +111,7 @@ installed package on Node 22, runs the same tests and boot on Node 24, and
 publishes no result unless both pass. Its immutable
 `candidate-<sha>` artifact includes the versioned npm tarball, SHA-256 receipt,
 four installers extracted from that archive, release notes, and a prepared
-website. `results-<sha>` and `results24-<sha>` record the actual test counts. The development defaults select 20 root and six GUI files; package and runtime
+website. `results-<sha>` and `results24-<sha>` record the actual test counts. The development defaults select the root and GUI files listed in `scripts/ci-tests.mjs`; package and runtime
 checks remain part of explicit qualification. `pnpm run test:list` lists every selected
 file and every contract/GUI file reserved for full investigation. Redundant
 prose and appearance-specific tests are retired with maintainer approval. `test:full`, `test:gui:full`, and maintenance checks stay manual.
@@ -213,7 +215,7 @@ version. Do not claim it is verified by `npm publish --dry-run`.
 On GitHub, the `release` environment needs the owner as required reviewer.
 Leave Prevent self-review unchecked if the owner also dispatches releases.
 Keep the Tag rule `v*` and add a **Branch** deployment rule
-`v[0-9][0-9][0-9]` so publication from `v062` can reach the approval gate.
+`v[0-9][0-9][0-9]` so publication from a version branch such as `v071` can reach the approval gate.
 An agent authenticated with the owner's admin credentials could technically
 approve or bypass the gate. A strict owner-only boundary requires separate
 agent credentials and disabling administrator bypass.

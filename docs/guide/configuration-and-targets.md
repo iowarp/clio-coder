@@ -163,9 +163,9 @@ explains worker route selection.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `fleet.default.target` | `null` | next session |
-| `fleet.default.model` | `null` | next session |
-| `fleet.default.thinkingLevel` | `off` | next session |
+| `fleet.default.target` | `null` | next dispatch |
+| `fleet.default.model` | `null` | next dispatch |
+| `fleet.default.thinkingLevel` | `off` | next dispatch |
 | `fleet.profiles` | `{}` | next dispatch |
 | `fleet.rosters` | `{}` | next dispatch |
 | `fleet.agentProfiles` | `{}` | next dispatch |
