@@ -108,6 +108,9 @@ async function resolveDeepest(target: string): Promise<string> {
 	}
 }
 
+/** tempSibling's name shape, so list hides only the backend's own temps and still lists a blob named `*.tmp`. */
+const TEMP_SIBLING = /^\..+\.\d+\.[0-9a-f]{12}\.tmp$/u;
+
 function tempSibling(target: string): string {
 	const suffix = `${process.pid}.${randomBytes(6).toString("hex")}`;
 	return path.join(path.dirname(target), `.${path.basename(target)}.${suffix}.tmp`);
@@ -430,7 +433,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 						// Dirent types come from lstat, so a link is neither a directory nor a file here.
 						if (entry.isDirectory()) {
 							await walk(path.join(dir, entry.name), `${name}/`);
-						} else if (entry.isFile() && !entry.name.endsWith(".tmp")) {
+						} else if (entry.isFile() && !TEMP_SIBLING.test(entry.name)) {
 							if (matcher === null || matcher.test(name)) matches.push(name);
 						}
 					}
