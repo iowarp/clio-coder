@@ -22,6 +22,7 @@ import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatc
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
+import { WORKER_PROCESS_CLEANUP_BOUND_MS } from "../domains/dispatch/worker-spawn.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
@@ -801,18 +802,20 @@ async function runDispatch(
 		const onSignal = (): void => dispatch.abort(handle.runId);
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
-		// --timeout expiry starts the coordinated shutdown. Abort the worker and
-		// let it settle so the run is recorded (as "canceled") before exit 124.
-		if (parsed.timeoutSeconds !== undefined) {
-			getTerminationCoordinator().onDrain(async () => {
+		// Any coordinated shutdown (--timeout expiry, EPIPE on stdout) aborts the
+		// worker and lets it settle so the run is recorded as "canceled" before exit.
+		// The budget covers the worker's own abort bound.
+		getTerminationCoordinator().onDrain(
+			async () => {
 				try {
 					dispatch.abort(handle.runId);
 				} catch {
 					// The run already finished.
 				}
 				await handle.finalPromise.catch(() => undefined);
-			});
-		}
+			},
+			{ timeoutMs: WORKER_PROCESS_CLEANUP_BOUND_MS + 1000 },
+		);
 
 		// Human output is the worker's final answer, settled limits, and result line. Native
 		// workers carry the answer in the last assistant message_end event;
