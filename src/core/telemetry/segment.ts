@@ -63,7 +63,7 @@ export interface SegmentScan {
 	/** Last complete physical line, including future records the reader cannot interpret. */
 	validBytes: number;
 	tornTailBytes: number;
-	/** Interior corruption requires intervention; it must never truncate valid later records. */
+	/** First damaged interior line; it never truncates valid later records, which the scan keeps reading. */
 	corruptOffset: number | null;
 }
 
@@ -81,9 +81,16 @@ export function scanTelemetrySegment(bytes: Buffer): SegmentScan {
 		const suffix = line.subarray(-10).toString("ascii");
 		const json = line.subarray(0, -10);
 		if (!/^\t#[0-9a-f]{8}$/.test(suffix) || crc32(json) !== suffix.slice(2)) {
-			if (newline === bytes.length - 1) result.tornTailBytes = bytes.length - offset;
-			else result.corruptOffset = offset;
-			break;
+			if (newline === bytes.length - 1) {
+				result.tornTailBytes = bytes.length - offset;
+				break;
+			}
+			// A damaged interior line is one unknown row; the scan resyncs at its newline and keeps later records.
+			result.corruptOffset ??= offset;
+			result.rows.push({ kind: "damaged" });
+			offset = newline + 1;
+			result.validBytes = offset;
+			continue;
 		}
 		try {
 			result.rows.push(readTelemetryLine(json.toString("utf8")));

@@ -97,7 +97,9 @@ export type RecordRead =
 	| { kind: "header"; header: SegmentHeader }
 	/** A kind this version retired on purpose. It stays in the hash chain and counts as nothing: not unreadable, not skipped. */
 	| { kind: "retired"; k: string }
-	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true };
+	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true }
+	/** A complete interior line whose checksum failed; what it held is unknown. */
+	| { kind: "damaged" };
 
 /** Readers never retire future records; even a newer envelope is counted, not rewritten (#434). */
 /**

@@ -301,9 +301,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 				bytes = Buffer.alloc(0);
 			}
-			const scan = scanTelemetrySegment(bytes);
-			if (scan.corruptOffset !== null)
-				throw new Error(`call journal has interior corruption at byte ${scan.corruptOffset}`);
+			let scan = scanTelemetrySegment(bytes);
 			if (bytes.length > 0 && scan.rows[0]?.kind !== "header") {
 				// Another installation may own a newer segment format. Never truncate or retire it (#434).
 				throw new Error("call journal segment header is unsupported");
@@ -318,6 +316,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				rotatedRead = false;
 			}
 			const rotatedScans = rotated.map((segment) => scanTelemetrySegment(segment.bytes));
+			// A damaged segment cannot be chained or sealed; its records still read, and new calls still journal.
+			let intact = rotatedRead && rotatedScans.every((rotatedScan) => rotatedScan.corruptOffset === null);
 			const bundlePath = telemetryBundlePath(options.directory);
 			// An object write a stopped process left half done is not an object; the lock makes it abandoned (#434).
 			await removeInterruptedObjectWrites(options.directory);
@@ -327,9 +327,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				if (verdict.status === "failed")
 					throw new Error(`sealed telemetry scope does not verify: ${describeSealMismatch(verdict.mismatch)}`);
 			}
-			const prefix = bytes.subarray(0, scan.validBytes);
+			const damaged = scan.corruptOffset !== null;
+			const prefix = damaged ? Buffer.alloc(0) : bytes.subarray(0, scan.validBytes);
 			// Every earlier seal must still match the history it covers, with or without a manifest (#434).
-			const walk = rotatedRead
+			const walk = intact
 				? walkTelemetryChain([...rotated, ...(prefix.length > 0 ? [{ name: TELEMETRY_JOURNAL_FILE, bytes: prefix }] : [])])
 				: null;
 			if (walk && "mismatch" in walk)
@@ -337,15 +338,31 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			let chain: TelemetryChain = walk ? walk.chain : EMPTY_TELEMETRY_CHAIN;
 			const segments: ScopeFileEntry[] = walk ? walk.segments.slice(0, rotated.length) : [];
 			let sequence = rotated.reduce((max, { name }) => Math.max(max, telemetrySegmentSequence(name) ?? 0), 0);
+			// A damaged live segment is retired whole under the next sealed name, its bytes untouched, and a fresh one
+			// opens behind it, so one bad line never stops journaling or hides the records after it.
+			let retired: { name: string; lines: number } | undefined;
+			if (damaged) {
+				sequence += 1;
+				retired = {
+					name: telemetrySegmentFile(sequence),
+					lines: scan.rows.filter((row) => row.kind === "damaged").length,
+				};
+				await rename(path, join(options.directory, retired.name));
+				rotatedScans.push(scan);
+				intact = false;
+				bytes = Buffer.alloc(0);
+				scan = scanTelemetrySegment(bytes);
+			}
 			// Appending makes a sealed scope live again; its manifest goes before the first new byte (#434).
 			await rm(bundlePath, { force: true });
 			/** Whether this writer's seal is the scope's tip and its `bundle.json` is on disk. */
 			let sealCurrent = false;
 			const gap = (
-				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap",
+				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap" | "interior-corruption",
 				count: number,
+				sink: string = TELEMETRY_JOURNAL_FILE,
 			) =>
-				makeTelemetryRecord("journal.gap", { sink: TELEMETRY_JOURNAL_FILE, reason, count }, options.context, {
+				makeTelemetryRecord("journal.gap", { sink, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				});
@@ -356,6 +373,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			const opening = Buffer.concat([
 				encodeTelemetryLine(recovered ? { ...header, chainHead: recovered } : header),
 				...(scan.tornTailBytes ? [encodeTelemetryLine(gap("torn-tail", 1))] : []),
+				...(retired ? [encodeTelemetryLine(gap("interior-corruption", retired.lines, retired.name))] : []),
 			]);
 			if (bytes.length === 0 || scan.tornTailBytes > 0) {
 				await safeResourceWriteAsync(path, Buffer.concat([prefix, opening]), { mode: 0o600 });
@@ -368,7 +386,9 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			if (subscribed(hubOwner))
 				publishPersisted(
 					hubOwner,
-					scan.tornTailBytes > 0 ? { kind: "rewritten" } : { kind: "appended", bytes: opening, origin: header.clockOrigin },
+					scan.tornTailBytes > 0 || retired
+						? { kind: "rewritten" }
+						: { kind: "appended", bytes: opening, origin: header.clockOrigin },
 				);
 			let size = prefix.length + opening.length;
 			chain = chainTelemetryBytes(chain, opening);
@@ -630,7 +650,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			};
 			const sealNow = async (): Promise<boolean> => {
 				// Without every rotated segment's bytes the seal could not list the files it covers.
-				if (failed || !handle || !rotatedRead) return false;
+				if (failed || !handle || !intact) return false;
 				if (sealCurrent) return true;
 				const current = handle;
 				let objects: Awaited<ReturnType<typeof listScopeObjects>>;
@@ -841,7 +861,7 @@ export function appendPersistedTelemetry(result: CallJournalRead, batch: { bytes
 
 function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: ClockOrigin): void {
 	const scan = scanTelemetrySegment(bytes);
-	if (scan.corruptOffset !== null || scan.tornTailBytes > 0) result.damaged += 1;
+	if (scan.tornTailBytes > 0) result.damaged += 1;
 	if (continuing) result.writer = continuing;
 	foldSegmentRows(result, scan.rows, continuing);
 }
@@ -859,6 +879,7 @@ function foldSegmentRows(
 			result.modes = [...(result.modes ?? []), row.header.mode];
 		} else if (row.kind === "record" && origin)
 			result.records.push({ record: row.record, origin: row.record.origin ?? origin });
+		else if (row.kind === "damaged") result.damaged += 1;
 		else {
 			if (row.kind === "retired") continue;
 			if (row.kind === "skipped" && row.segment) origin = undefined;
@@ -877,7 +898,9 @@ interface CachedSegment {
 	/** The bytes just before `offset`: a rewrite in place that kept the size must not pass for the same file. */
 	tail: Buffer;
 	origin: ClockOrigin | undefined;
-	/** This file alone, as a cold read of its bytes would count it; `damaged` is 0 or 1. */
+	/** Whether `read.damaged` counts a torn tail, which a later complete line replaces. */
+	torn: 0 | 1;
+	/** This file alone, as a cold read of its bytes would count it. */
 	read: CallJournalRead;
 }
 
@@ -904,11 +927,14 @@ function readCachedSegment(path: string, files: Map<string, CachedSegment>, seen
 		offset: 0,
 		tail: Buffer.alloc(0),
 		origin: undefined,
+		torn: 0,
 		read: { records: [], skipped: 0, damaged: 0 },
 	};
 	const scan = scanTelemetrySegment(bytes.bytes.subarray(start));
 	state.origin = foldSegmentRows(state.read, scan.rows, state.origin);
-	state.read.damaged = scan.corruptOffset !== null || scan.tornTailBytes > 0 ? 1 : 0;
+	const torn = scan.tornTailBytes > 0 ? 1 : 0;
+	state.read.damaged += torn - state.torn;
+	state.torn = torn;
 	const end = start + scan.validBytes;
 	state.offset = bytes.start + end;
 	state.tail = Buffer.from(bytes.bytes.subarray(Math.max(0, end - CACHED_TAIL_BYTES), end));

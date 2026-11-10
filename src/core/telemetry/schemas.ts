@@ -589,6 +589,8 @@ export const JournalGapSchema = Type.Object(
 			"mode-filtered",
 			// The session's research capture reached its byte cap; accountability records continue (#434).
 			"research-cap",
+			// A damaged interior line retired the segment named by `sink`; `count` is its damaged lines.
+			"interior-corruption",
 		]),
 		count: Type.Integer({ minimum: 1 }),
 	},
