@@ -9,7 +9,7 @@
  *   EXECUTE      bash, git, verify, run_script
  *   ORCHESTRATE  dispatch, monitor, steer, tasks, ledger, panes, music, limitation, decide, consult
  *   RETRIEVE     web_read, web_fetch
- *   INTERACT     ask_user
+ *   INTERACT     ask_user, configure_clio, report
  *   ARTIFACT     artifact
  *   GATEWAY      gateway
  *
@@ -60,6 +60,7 @@ export const ToolNames = {
 	// INTERACT
 	AskUser: "ask_user",
 	ConfigureClio: "configure_clio",
+	Report: "report",
 	// ARTIFACT
 	Artifact: "artifact",
 	// GATEWAY: one fixed schema; secondary capabilities are surfaced through

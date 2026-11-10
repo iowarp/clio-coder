@@ -93,6 +93,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.WebFetch]: "gateway",
 	[ToolNames.AskUser]: "direct",
 	[ToolNames.ConfigureClio]: "gateway",
+	[ToolNames.Report]: "gateway",
 	[ToolNames.Artifact]: "gateway",
 	[ToolNames.Gateway]: "direct",
 };

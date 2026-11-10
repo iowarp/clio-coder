@@ -106,6 +106,8 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.ConfigureClio]: { plane: "interact", actionClass: "write", executionMode: "sequential" },
+	// report drafts or offers a Clio Coder report and never sends one; it writes only Clio's own report store.
+	[ToolNames.Report]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
 	// gateway lists, describes, and calls secondary capabilities. Its own class
 	// is read; a call carries the capability's class through the same admission.
@@ -156,6 +158,8 @@ const DECISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Consult]);
 const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 /** Registered only on the orchestrator registry, which owns the session task bank. */
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
+/** Registered only on the orchestrator registry: an agent's report is the main session's, never a worker's. */
+const REPORT_BOUND_TOOLS = new Set<ToolName>([ToolNames.Report]);
 
 /**
  * Builtin tools a native worker registry never registers on any host: the
@@ -176,7 +180,8 @@ export function isWorkerSurfaceExcludedTool(name: ToolName): boolean {
 		MUSIC_BOUND_TOOLS.has(name) ||
 		DECISION_BOUND_TOOLS.has(name) ||
 		VISION_BOUND_TOOLS.has(name) ||
-		MEMORY_RECALL_BOUND_TOOLS.has(name)
+		MEMORY_RECALL_BOUND_TOOLS.has(name) ||
+		REPORT_BOUND_TOOLS.has(name)
 	);
 }
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
@@ -266,6 +271,7 @@ export function validateBuiltinToolPolicy(
 		if (VISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MEMORY_RECALL_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (REPORT_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);

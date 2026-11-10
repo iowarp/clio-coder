@@ -290,6 +290,20 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 	)}`;
 }
 
+const CLIO_ISSUE_COMMAND = /\bgh\s+(?:issue\s+create\b|api\s+\S*\/issues\b)/u;
+export const CLIO_REPORT_NUDGE =
+	"Clio Coder has /report, which checks for duplicates, shows the operator the exact text and attaches versions.";
+
+/**
+ * A `gh` issue filed against Clio Coder's own repository bypasses /report (R-12). The call is not blocked, since the
+ * operator's credential is theirs; the result gains one note naming the route that dedups, shows the text and adds
+ * versions.
+ */
+export function clioIssueNudge(command: string): string {
+	if (!CLIO_ISSUE_COMMAND.test(command) || !command.includes("iowarp/clio-coder")) return "";
+	return `${TOOL_RESULT_NOTES_SEPARATOR}${toolResultNote("info", CLIO_REPORT_NUDGE)}`;
+}
+
 /** `5m`, `1h`, `90s`: a limit in the words a person reads it in; `300000ms` made the operator do arithmetic. */
 function limitWords(ms: number): string {
 	const seconds = Math.round(ms / 1000);
@@ -435,7 +449,7 @@ export const bashTool: ToolSpec = {
 				const sandboxHint =
 					options?.shellSandbox === undefined ? null : mainSandboxWriteHint(rawOutput, options.shellSandbox);
 				const status = `bash: command failed (exit ${code ?? "?"})${sandboxHint === null ? "" : `\n${sandboxHint}`}`;
-				const message = output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`;
+				const message = `${output.length > 0 ? `${output}\n\n${status}` : `${status}: ${error.message}`}${clioIssueNudge(args.command)}`;
 				return {
 					kind: "error",
 					message,
@@ -445,7 +459,7 @@ export const bashTool: ToolSpec = {
 			const body = rawOutput.length > 0 ? rawOutput : "(no output)";
 			return {
 				kind: "ok",
-				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}`,
+				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}${clioIssueNudge(args.command)}`,
 				details: bashResultDetails(result, rawOutput, "success", elapsedMs, args.command),
 			};
 		} catch (err) {

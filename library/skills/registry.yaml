@@ -36,8 +36,8 @@ skills:
     sha256: d70c692342cc84e225c2ebd983440567b47be64dfbb99811c830832f676c1d30
   - name: file-ticket
     path: git/file-ticket
-    version: 0.3.1
-    sha256: 284522801bd8d5b2f3e2135c2754561fc33da76d737e0cbadd0dfe59a9fd6d02
+    version: 0.3.2
+    sha256: a5bbda49d90222ed0a28d99929a999b53b94d42a8e245af3b8afa73a09c08344
   - name: fix-issue
     path: git/fix-issue
     version: 0.3.2

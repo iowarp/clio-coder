@@ -739,6 +739,14 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		consumes: ["action", "mode", "questions", "max_rounds", "decisions", "summary"],
 		pairs: interviewPairs,
 	},
+	[ToolNames.Report]: {
+		class: "interaction",
+		verbs: ["drafting", "drafted"],
+		verbsFor: (args) => (args.action === "offer" ? ["offering", "offered"] : null),
+		object: (args) => plain(joinDefined("report", text(args, "title"))),
+		consumes: ["action", "kind", "title", "happened", "operator_words", "expected", "reproduce", "not_known", "area"],
+		dropsUnknownArgs: true,
+	},
 	[ToolNames.Decide]: {
 		class: "interaction",
 		verbs: ["deciding", "decided"],

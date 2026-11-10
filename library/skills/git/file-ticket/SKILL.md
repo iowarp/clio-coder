@@ -7,7 +7,7 @@ triggers:
   - log this bug
   - ticket this behavior
   - create a tracker issue
-version: 0.3.1
+version: 0.3.2
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue operations), POSIX-compatible shell
 allowed-tools:
@@ -77,6 +77,8 @@ From the session that surfaced the behavior, record before anything scrolls away
 Complete when every bullet above is either filled or explicitly marked unknown.
 
 ## Step 2 — Resolve Repository and Dedup
+
+When the repository is `iowarp/clio-coder` and the session is Clio Coder, stop and use the `report` capability instead.
 
 1. Determine `--repo <owner/repo>` (provided flag or detected via `gh repo view`).
 2. Search for existing issues:

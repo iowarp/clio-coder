@@ -36,6 +36,7 @@ import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardr
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.js";
 import { installInternalGitPolicy } from "../core/internal-git.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import { readClioVersion } from "../core/package-root.js";
 import type { CatalogRanker } from "../core/precomputed-rank.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
@@ -2020,6 +2021,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		});
 	});
 	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? null;
+	// The interactive surface installs this so the report tool can open an agent's draft for review (R-12).
+	let reportReviewOpener: ((draftId: string) => void) | null = null;
 	// ask_user is a human interview tool, so it is registered only where a person
 	// answers: the TUI, or an ACP client that advertised interviews. Headless and
 	// plain ACP surfaces have no operator, so the tool is absent there (documented
@@ -2623,6 +2626,34 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dispatch,
 		bus,
 		...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
+		// R-12: the agent drafts or offers a Clio Coder report; the host keeps the budget and never sends.
+		report: {
+			stateDir: clioStateDir(),
+			version: readClioVersion(),
+			surface: interactive ? "tui" : acpMode ? "acp" : "headless",
+			session: () => {
+				const meta = session?.current();
+				if (!meta) return null;
+				return {
+					id: meta.id,
+					cwd: meta.cwd,
+					facts: {
+						...(meta.model ? { model: meta.model } : {}),
+						...(meta.target ? { runtime: meta.target } : {}),
+						autonomy: resolveEffectiveAutonomy(),
+					},
+				};
+			},
+			offers: () => getCurrentSettings().report?.offers ?? "ask",
+			writeOffersOff: () =>
+				persistSavedMutation((settings) => {
+					settings.report = { ...settings.report, offers: "off" };
+				}, "settings-ui"),
+			...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
+			attended: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
+			openReview: () => reportReviewOpener,
+			identitySettings: () => ({ targets: getCurrentSettings().targets }),
+		},
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
@@ -4605,6 +4636,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
 		stateDir: clioStateDir(),
 		dataDir: clioDataDir(),
+		registerReportReviewOpener: (open) => {
+			reportReviewOpener = open;
+			return () => {
+				if (reportReviewOpener === open) reportReviewOpener = null;
+			};
+		},
 		registerAskUserHandler: (handler) => {
 			askUserHandler = handler;
 			return () => {

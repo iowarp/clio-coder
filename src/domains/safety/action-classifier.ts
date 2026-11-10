@@ -185,6 +185,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Gateway:
 		case ToolNames.Monitor:
 		case ToolNames.AskUser:
+		case ToolNames.Report:
 		case ToolNames.CredentialPresent:
 		// tasks pick mutates only Clio-owned session-ledger and project-local
 		// .clio-coder runtime state, never source-workspace files. By intentional

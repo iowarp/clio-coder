@@ -122,7 +122,7 @@
 			"name": "file-ticket",
 			"source": "./library/skills/git/file-ticket",
 			"description": "Turns something noticed mid-session into a tracker issue: captures evidence, dedups against existing issues, composes a labeled issue with acceptance criteria, confirms, and creates it via gh. Not for batch ticket creation from a PRD; use backlog. Not for diagnosing an existing issue; use fix-issue.",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"category": "git",
 			"license": "Apache-2.0"
 		},

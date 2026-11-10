@@ -117,7 +117,7 @@
 				"create a tracker issue"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket",
-			"version": "0.3.1",
+			"version": "0.3.2",
 			"audit": "pass",
 			"category": "git"
 		},

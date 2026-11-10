@@ -1084,9 +1084,18 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			(toolSurfaceHasTool(session.toolNames, "gateway") && session.coordinatorCapabilities.includes("decide")))
 			? table.byId.get("operating.decisions")
 			: undefined;
+	// R-12: only the session that registered the report capability is told how to use it; workers never are.
+	const reportGuidance =
+		attended &&
+		session.providerSupportsTools !== false &&
+		(toolSurfaceHasTool(session.toolNames, "report") ||
+			(toolSurfaceHasTool(session.toolNames, "gateway") && session.coordinatorCapabilities.includes("report")))
+			? table.byId.get("operating.report-guidance")
+			: undefined;
 	const mainOperatingContract = [
 		withDecisions(operatingContract.body, decisions),
 		attendedContract?.body,
+		reportGuidance?.body,
 		headlessContract?.body,
 		userControl?.body,
 		steering?.body,

@@ -28,7 +28,7 @@ export interface CapabilityGate {
 // Calibrated on gateway rankings: unrelated workspace tasks top out near 0.51, a
 // Clio target question reaches 0.58 for clio_docs, a parquet summary 0.87 for data.
 const REMINDER_MIN_COVERAGE = 0.55;
-const CLIO_SCOPED_CAPABILITIES = new Set(["clio_docs", "clio_library", "configure_clio"]);
+const CLIO_SCOPED_CAPABILITIES = new Set(["clio_docs", "clio_library", "configure_clio", "report"]);
 const CLIO_SCOPE = /\b(?:clio(?:[\s-]coder)?|settings?|targets?|fleet|skills?|playbooks?)\b/iu;
 
 /**

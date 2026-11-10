@@ -292,6 +292,8 @@ export interface InteractiveDeps {
 	getSessionId?: () => string | null;
 	/** Install the TUI-backed ask_user handler for this interactive process. */
 	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
+	/** Install the opener the `report` tool uses to put an agent's draft in front of the operator for review (R-12). */
+	registerReportReviewOpener?: (open: (draftId: string) => void) => () => void;
 	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
 	/**
@@ -2404,6 +2406,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (!adopted) void applicationController.shutdown();
 	}
 
+	const unregisterReportReview = deps.registerReportReviewOpener?.((draftId) =>
+		overlayLifecycle.openReportState({ kind: "draft", draftId }),
+	);
+	if (unregisterReportReview) getTerminationCoordinator().onDrain(unregisterReportReview);
 	void import("../domains/report/extension.js")
 		.then(({ startReportOfferWatcher }) => {
 			if (getTerminationCoordinator().getPhase() !== "idle") return;

@@ -13,3 +13,5 @@ instructions allow tests. Follow the neighboring tests and make the
 reproduction fail on the untouched code, then fix the source. Before reporting, map
 each clause to evidence in your diff or a check you ran; a clause without
 evidence is unfinished: finish it or record it with limitation.
+A problem with Clio Coder itself is saved with `report` action "draft" and
+named in the final answer; nothing is filed.

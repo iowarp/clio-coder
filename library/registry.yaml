@@ -350,9 +350,9 @@ entries:
       - log this bug
       - ticket this behavior
       - create a tracker issue
-    version: 0.3.1
+    version: 0.3.2
     sourceUrl: skills/git/file-ticket
-    sha256: 0efc5ddc7df9143806660362a38b6363caa83fecab1642ec57aa8cb8300573cd
+    sha256: 599e43b9501ef61526c169ef3dd2a1c07685766b13ec4b4c76596dce10d9bdcc
     provides:
       - kind: skill
         name: file-ticket

@@ -580,6 +580,15 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			"When asked to change Clio settings or add a target, call configure_clio through gateway. Preview first, then apply the returned proposal id; the operator approves the exact diff on a card. Headless, read-only and yolo sessions only preview: hand the operator the diff and steps. Never run clio-coder configure, targets or auth from bash.",
 	},
+	[ToolNames.Report]: {
+		objective: "Draft a Clio Coder report for the operator to review, or ask once whether to; it never sends one.",
+		uiLabel: "Report",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: { kind: "exact", maxBytes: 4_096 },
+		costLatency: "local_fast",
+		promptHint:
+			'When Clio Coder itself is broken, call report through gateway with action="draft"; the operator reviews and sends it. action="offer" asks once and the host may refuse. Never file a Clio Coder issue with gh.',
+	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
 		objective: "Write terminal plan/review/report documents that complete the turn.",

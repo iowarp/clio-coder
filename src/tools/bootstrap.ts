@@ -30,6 +30,8 @@ import { monitorToolSurface } from "./monitor-surface.js";
 import { musicToolSurface } from "./music-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
 import type { RegistryDeps, ToolRegistry, ToolSpec } from "./registry.js";
+import type { ReportToolDeps } from "./report.js";
+import { reportToolSurface } from "./report-surface.js";
 import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
 import { steerToolSurface } from "./steer-surface.js";
 import { coordinatorToolPlacement } from "./surface.js";
@@ -84,6 +86,8 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	 * child process, such as a test's).
 	 */
 	mcpCapabilities?: McpCapabilitySource | false;
+	/** The agent's Clio Coder report tool. Orchestrator-only: workers never draft or offer a report. */
+	report?: ReportToolDeps;
 }
 
 export interface ToolBootstrapHandle {
@@ -245,6 +249,15 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 					(await import("./panes.js")).createPanesTool({ panes, ...(deps.flow !== undefined ? { flow: deps.flow } : {}) }),
 				),
 				{ path: "src/tools/panes.ts", scope: "core" },
+			),
+		});
+	}
+	if (deps.report) {
+		const report = deps.report;
+		registry.register({
+			...builtin(
+				lazyTool(reportToolSurface, async () => (await import("./report.js")).createReportTool(report)),
+				{ path: "src/tools/report.ts", scope: "core" },
 			),
 		});
 	}
