@@ -21,7 +21,6 @@ import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../../core/safe-
 import {
 	decodeTagSegment,
 	isRecordsTag,
-	STORE_RECORDS_SUFFIX,
 	storeBlobPath,
 	storeProjectDir,
 	storeProjectRoot,
@@ -65,7 +64,7 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T> {
 
 /** A records tag (`<tag>/.records`) is valid when its base tag is; validateTagName reserves the dot for it. */
 function tagProblem(tag: string): string | null {
-	return validateTagName(isRecordsTag(tag) ? tag.slice(0, -STORE_RECORDS_SUFFIX.length) : tag);
+	return validateTagName(tag, { allowRecords: true });
 }
 
 function checkTag(tag: string): void {

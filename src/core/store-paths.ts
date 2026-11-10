@@ -20,8 +20,8 @@ import { clioDataPath } from "./xdg.js";
 export const STORE_TAG_MAX_BYTES = 200;
 export const STORE_BLOB_MAX_BYTES = 480;
 export const STORE_RECORDS_SUFFIX = "/.records";
-/** Physical prefix a clio-core backend will use: `clio-coder/<projectKey>/<tag>`. */
-export const STORE_NATIVE_PREFIX = "clio-coder";
+/** Physical prefix a clio-core backend will use: `agentspace/<projectKey>/<tag>`. */
+export const STORE_NATIVE_PREFIX = "agentspace";
 
 const TAG_CHARS = /^[A-Za-z0-9._/-]+$/u;
 // Printable ASCII without `#` (reserved for record names) and `\`.
@@ -37,8 +37,14 @@ function pathShapeProblem(kind: string, name: string): string | null {
 	return null;
 }
 
-/** null when valid, else a sentence naming the rule broken. */
-export function validateTagName(tag: string): string | null {
+/**
+ * null when valid, else a sentence naming the rule broken. Judges names the
+ * model or operator supplies; internal callers pass `allowRecords` to also
+ * accept `recordsTag(t)` for a valid `t`.
+ */
+export function validateTagName(tag: string, options: { allowRecords?: boolean } = {}): string | null {
+	if (options.allowRecords === true && isRecordsTag(tag))
+		return validateTagName(tag.slice(0, -STORE_RECORDS_SUFFIX.length));
 	const bytes = Buffer.byteLength(tag, "utf8");
 	if (bytes === 0) return "A tag name must not be empty.";
 	if (bytes > STORE_TAG_MAX_BYTES) return `A tag name must be at most ${STORE_TAG_MAX_BYTES} bytes.`;

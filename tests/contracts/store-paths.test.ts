@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { notStrictEqual, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,6 +43,9 @@ test("store names follow the tag and blob rules and every refusal names its rule
 	];
 	for (const [blob, rule] of blobCases) strictEqual(rule.test(validateBlobName(blob) ?? ""), true, blob);
 	strictEqual(isRecordsTag(recordsTag("sim")), true);
+	notStrictEqual(validateTagName(recordsTag("sim")), null);
+	strictEqual(validateTagName(recordsTag("sim"), { allowRecords: true }), null);
+	notStrictEqual(validateTagName(recordsTag("../x"), { allowRecords: true }), null);
 	strictEqual(encodeTagSegment("sim/run7").includes("/"), false);
 	strictEqual(decodeTagSegment(encodeTagSegment("sim/run7")), "sim/run7");
 });
