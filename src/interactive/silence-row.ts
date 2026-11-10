@@ -32,6 +32,8 @@ interface SilentWait {
 	/** `No bytes` or `No output`: what has not arrived. */
 	missing: string;
 	model: string;
+	/** Epoch ms the wait began; a request sent before it belongs to an earlier call. */
+	waitingFrom: number;
 }
 
 function silentWait(status: AgentStatus, model: string): SilentWait | null {
@@ -53,6 +55,7 @@ function silentWait(status: AgentStatus, model: string): SilentWait | null {
 				evidence: `response opened ${clockTime(request.firstByteAt)}`,
 				missing: "No output",
 				model,
+				waitingFrom,
 			};
 		}
 		return {
@@ -61,6 +64,7 @@ function silentWait(status: AgentStatus, model: string): SilentWait | null {
 			evidence: `request sent ${clockTime(sentAt)}`,
 			missing: request?.bytesObservable ? "No bytes" : "No output",
 			model,
+			waitingFrom,
 		};
 	}
 	return null;
@@ -74,10 +78,12 @@ interface OpenRow {
 }
 
 /** How the wait ended, read from the status that replaced it. */
-function endingWords(next: AgentStatus, nextModel: string, model: string): string {
+function endingWords(next: AgentStatus, nextModel: string, wait: SilentWait): string {
 	const phase = next.phase === "stuck" ? next.resumePhase : next.phase;
-	if (phase === "waiting_model" && nextModel !== model) return `then the request moved to ${nextModel}`;
-	if (phase === "writing" || phase === "thinking" || next.modelRequest?.firstByteAt) return "then output arrived";
+	if (phase === "waiting_model" && nextModel !== wait.model) return `then the request moved to ${nextModel}`;
+	// Only a request this wait sent can say its output arrived; an earlier call's first byte is not this wait's.
+	const request = next.modelRequest && next.modelRequest.sentAt >= wait.waitingFrom ? next.modelRequest : undefined;
+	if (phase === "writing" || phase === "thinking" || request?.firstByteAt) return "then output arrived";
 	if (phase === "cancelling" || next.cancelRequestedAt !== undefined) return "then you stopped it";
 	if (phase === "retrying") return "then Clio retried";
 	if (phase === "tool_running" || phase === "tool_blocked") return "then a tool call arrived";
@@ -103,7 +109,7 @@ export function createSilenceTranscriptRow(deps: {
 			const wait = silentWait(status, deps.modelName(status));
 			if (open !== null && open.endedAt === null && wait?.key !== open.wait.key) {
 				open.endedAt = now;
-				open.ending = endingWords(status, deps.modelName(status), open.wait.model);
+				open.ending = endingWords(status, deps.modelName(status), open.wait);
 				open = null;
 			}
 			if (wait === null || recorded.has(wait.key) || now - wait.evidenceAt < SILENCE_ROW_AFTER_MS) return;

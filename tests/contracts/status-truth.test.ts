@@ -1776,6 +1776,12 @@ test("a tool's run is not model silence: the next call's wait never counts from 
 	const quiet = { ...status, lastMeaningfulAt: t0 + 303_000 };
 	const note = silenceNoteForms(quiet, t0 + 398_000, DEFAULT_RETRY_SETTINGS, null)?.[0] ?? "";
 	match(note, /^No output for 1m35s/u);
+	// The earlier call's first byte does not say how this wait ended either.
+	clock = t0 + 370_000;
+	row.observe({ ...status, phase: "tool_running" }, clock);
+	const settled = stripTerminalSequences(rows.flatMap((render) => render(200)).join("\n"));
+	match(settled, /then a tool call arrived/u);
+	doesNotMatch(settled, /then output arrived/u);
 });
 
 test("a quiet tool past the stuck threshold reads as that tool running, never as no output", () => {
