@@ -116,6 +116,8 @@ export interface HeadlessMainAgentOptions {
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	mode?: "text" | "json";
 	jsonEvents?: "full" | "terminal";
+	/** A route borrowed for this run only, written as the first notice frame in `--json` mode. */
+	routeNotice?: string;
 	steerChannel?: string;
 	getSessionHeader?: () => RunJsonMainSessionFrame | null;
 	shutdown?: HeadlessShutdownHooks;
@@ -1074,6 +1076,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		for (const frame of pendingJsonFrames) queueFrame(frame);
 		pendingJsonFrames.length = 0;
 	};
+	if (mode === "json" && options.routeNotice) {
+		writeMainFrame({ type: "notice", level: "info", surface: "transcript", text: options.routeNotice });
+	}
 	let terminalTurnStartWritten = false;
 	const writeTerminalTurnStart = (): void => {
 		if (terminalTurnStartWritten) return;

@@ -103,6 +103,7 @@ async function localModels(readJson: typeof readLoopbackJson): Promise<Map<strin
 export async function detectChatRoutes(
 	settings: Readonly<ClioSettings>,
 	readJson: typeof readLoopbackJson = readLoopbackJson,
+	{ headless = false }: { headless?: boolean } = {},
 ): Promise<DetectedChatRoute[]> {
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
@@ -153,6 +154,8 @@ export async function detectChatRoutes(
 			...(model ? { model } : {}),
 		});
 	}
+	// Headless keeps the Copilot keychain closed and must not send prompts to whoever owns a loopback port.
+	if (headless) return routes;
 	const copilot = runtimes.find((entry) => entry.id === "copilot-sdk");
 	if (copilot && !settings.targets.some((target) => target.runtime === copilot.id)) {
 		const login = await detectCopilotLogin(3_000);
@@ -316,4 +319,37 @@ export async function adoptDetectedChatRoute(
 		? [...new Set(candidates.filter((c) => isEnvKey(c) && c.source !== route.source).map((c) => c.source))]
 		: [];
 	return { route, ...useDetectedChatRoute(settings, route), ...(alsoFound.length > 0 ? { alsoFound } : {}) };
+}
+
+export type HeadlessChatRoute =
+	| { kind: "none" }
+	| { kind: "one"; route: DetectedChatRoute & { model: string }; settings: ClioSettings }
+	| { kind: "several"; routes: Array<DetectedChatRoute & { model: string }> };
+
+/**
+ * The route a headless run with no saved chat route uses for this run only, from credentialed
+ * targets, stored logins and environment keys. Nothing is written and no loopback port is probed;
+ * several candidates are never chosen between silently. `targetId` picks one candidate by id.
+ */
+export async function headlessChatRoute(
+	settings: Readonly<ClioSettings>,
+	targetId?: string,
+): Promise<HeadlessChatRoute> {
+	const memoryTarget = settings.context.memory.target;
+	const routes: Array<DetectedChatRoute & { model: string }> = [];
+	for (const candidate of await detectChatRoutes(settings, readLoopbackJson, { headless: true })) {
+		if (!candidate.model || candidate.target.id === memoryTarget) continue;
+		const fromSettings = candidate.source.startsWith("settings (");
+		// An environment key or stored login for a runtime already offered stands for the same choice.
+		if (!fromSettings && routes.some((route) => route.runtime.id === candidate.runtime.id)) continue;
+		routes.push({ ...candidate, model: candidate.model });
+	}
+	const chosen = targetId === undefined ? routes : routes.filter((route) => route.target.id === targetId);
+	const route = chosen[0];
+	if (!route) return { kind: "none" };
+	if (chosen.length > 1) return { kind: "several", routes: chosen };
+	const session = structuredClone(settings) as ClioSettings;
+	applyTarget(session, route.target);
+	setOrchestratorPointer(session, route.target, route.model);
+	return { kind: "one", route, settings: session };
 }

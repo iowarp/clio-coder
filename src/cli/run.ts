@@ -41,6 +41,7 @@ import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
 import { parseRunCliArgs, type RunCliArgs } from "./args.js";
 import { runClioCommand } from "./clio.js";
+import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { createJsonCredentialScrub, projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { writeFrame } from "./modes/jsonl.js";
@@ -129,6 +130,39 @@ export function explicitTargetMissing(targetId: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * A home with no saved chat route borrows the one usable credentialed route for this run only (S-74),
+ * in memory, so a CI job with one key in its environment runs without a setup step. Null leaves the
+ * run to its established path; a number is the exit code for a choice the operator has to make.
+ */
+async function borrowHeadlessRoute(
+	targetId: string | undefined,
+	model: string | undefined,
+): Promise<{ settings: ClioSettings; notice: string } | number | null> {
+	let settings: ClioSettings;
+	try {
+		settings = readStrictLayeredSettings(process.cwd()).settings;
+	} catch {
+		// The boot path reports unreadable settings with its own diagnostic.
+		return null;
+	}
+	if (classifyDefaultTarget(settings).kind !== "no-target") return null;
+	if (targetId !== undefined && settings.targets.some((target) => target.id === targetId)) return null;
+	const { headlessChatRoute } = await import("./detect-chat-routes.js");
+	const found = await headlessChatRoute(settings, targetId);
+	if (found.kind === "none") return null;
+	if (found.kind === "several") {
+		const list = found.routes.map((route) => `${route.target.id} from ${route.source}`).join(", ");
+		writeRunDiagnostic(`clio-coder run: several routes are usable (${list}); choose one with --target <id>\n`);
+		return 2;
+	}
+	const { route } = found;
+	return {
+		settings: found.settings,
+		notice: `no chat route is saved; using ${route.target.id} / ${model ?? route.model} from ${route.source} for this run`,
+	};
 }
 
 /** Exit code for a run interrupted before its first request, by the 128+SIGINT convention. */
@@ -459,7 +493,10 @@ async function executeRunCommand(
 					// operator config error, not an assistant response. Reject it before the
 					// headless turn so the resolver diagnostic never streams to stdout as a
 					// message_end/agent_end assistant turn.
-					if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
+					const borrowed = await borrowHeadlessRoute(parsed.target, parsed.model);
+					if (typeof borrowed === "number") return borrowed;
+					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
+					if (borrowed === null && parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
 						writeRunDiagnostic(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
 						return 2;
 					}
@@ -470,8 +507,10 @@ async function executeRunCommand(
 							...(options.noContextFiles ? { noContextFiles: true } : {}),
 							...(noSkills ? { noSkills: true } : {}),
 							...(skillPaths.length > 0 ? { skillPaths } : {}),
+							...(borrowed !== null ? { startupSettings: borrowed.settings } : {}),
 							headless: {
 								prompt: assembled.prompt,
+								...(borrowed !== null && parsed.json ? { routeNotice: borrowed.notice } : {}),
 								...(parsed.constraints ? { constraints: parsed.constraints } : {}),
 								mode: parsed.json ? "json" : "text",
 								jsonEvents: parsed.jsonEvents,
