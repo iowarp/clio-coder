@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type Dirent, constants as fsConstants } from "node:fs";
-import { access, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
 import {
 	encodeTagSegment,
@@ -162,7 +162,8 @@ export async function createClioCoreStoreBackend(
 			// Not cached yet.
 		}
 		const destDir = path.join(tagDir, `.get-${process.pid}-${randomBytes(6).toString("hex")}`);
-		await mkdir(destDir, { recursive: true });
+		// Cached copies are blob bytes, so they stay owner-only like the local backend's.
+		await mkdir(destDir, { recursive: true, mode: 0o700 });
 		try {
 			const got = await host.call(
 				"getBlobAsPath",
@@ -174,7 +175,8 @@ export async function createClioCoreStoreBackend(
 				throw new StoreRefusal("io", `The clio-core host wrote ${got.path}, outside ${destDir}.`);
 			if ((await stat(got.path)).size !== info.bytes)
 				throw new StoreRefusal("io", `Blob ${blob} in tag ${tag} changed while it was being read; try again.`);
-			await mkdir(path.dirname(target), { recursive: true });
+			await chmod(got.path, 0o600);
+			await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
 			await rename(got.path, target);
 		} finally {
 			await rm(destDir, { recursive: true, force: true });
