@@ -207,13 +207,17 @@ const REPEAT_THRESHOLD = 3;
 const COMPACTION_FAILURE_LIMIT = 3;
 const OFFER_TAIL = "/report shows exactly what a report would send, and nothing leaves without your say.";
 
+/** A crash's error name becomes the report block's `cause` unscrubbed, so only a plain word passes. */
+const CRASH_CAUSE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/u;
+
 /** The candidate for a crash written since the previous start. */
 export function crashCandidate(record: CrashRecord): OfferCandidate {
+	const cause = CRASH_CAUSE.test(record.name) ? record.name : "unknown";
 	return {
 		trigger: "crash",
-		cause: record.name,
+		cause,
 		fingerprint: crashFingerprint(record),
-		text: `Clio crashed last time (${record.name} in ${crashSite(record)}). If you'd like to help fix it, ${OFFER_TAIL}`,
+		text: `Clio crashed last time (${cause} in ${crashSite(record)}). If you'd like to help fix it, ${OFFER_TAIL}`,
 		crash: record,
 	};
 }

@@ -48,6 +48,8 @@ export interface ReportOfferWatcher {
 }
 
 export const REPORT_OFFER_KEY = "report-offer";
+/** How long a shown offer stays takeable: its notice stands 60 s, and `/report` typed soon after still inherits it. */
+export const REPORT_OFFER_TAKE_MS = 2 * 60_000;
 
 function mainAgentFact(context: TelemetryContext | undefined): boolean {
 	return context?.agent.role === "main";
@@ -74,7 +76,7 @@ export function startReportOfferWatcher(deps: ReportOfferWatcherDeps): ReportOff
 		return triggers;
 	};
 	let pending: { candidate: OfferCandidate; session: string | null } | null = null;
-	let shown: OfferCandidate | null = null;
+	let shown: { candidate: OfferCandidate; session: string | null; at: number } | null = null;
 	let timer: ReturnType<typeof setInterval> | undefined;
 
 	const stopTimer = (): void => {
@@ -123,12 +125,21 @@ export function startReportOfferWatcher(deps: ReportOfferWatcherDeps): ReportOff
 		} catch {
 			return;
 		}
-		shown = candidate;
+		shown = { candidate, session: current, at: now().getTime() };
 		deps.show(candidate);
 	};
 
+	/** The shown offer while it still belongs to this moment; a later session or a stale offer is dropped. */
+	const shownNow = (): OfferCandidate | null => {
+		if (shown === null) return null;
+		const current = deps.sessionId();
+		const moved = shown.session !== null && current !== shown.session;
+		if (moved || now().getTime() - shown.at > REPORT_OFFER_TAKE_MS) shown = null;
+		return shown?.candidate ?? null;
+	};
+
 	const consider = (candidate: OfferCandidate | null): void => {
-		if (candidate === null || pending !== null || shown !== null) return;
+		if (candidate === null || pending !== null || shownNow() !== null) return;
 		pending = { candidate, session: deps.sessionId() };
 		attempt();
 	};
@@ -154,12 +165,12 @@ export function startReportOfferWatcher(deps: ReportOfferWatcherDeps): ReportOff
 	return {
 		poke: attempt,
 		take() {
-			const offer = shown;
+			const offer = shownNow();
 			shown = null;
 			return offer;
 		},
 		decline() {
-			const offer = shown;
+			const offer = shownNow();
 			shown = null;
 			if (offer === null) return;
 			try {
