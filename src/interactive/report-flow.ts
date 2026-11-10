@@ -151,7 +151,14 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			},
 			onCancel: (current, plan) => {
 				deps.transitions.close();
-				keepDraft(current, plan.rendered.title);
+				try {
+					keepDraft(current, plan.rendered.title);
+				} catch (error) {
+					// The overlay's key handler has no try, so a damaged or newer outbox would end the TUI here.
+					const why = error instanceof Error ? error.message : String(error);
+					deps.notify("warning", `report: nothing sent; the draft was not fully kept: ${why}`, "report:cancelled");
+					return;
+				}
 				deps.notify("info", `report: nothing sent; ${REPORT_DRAFT_SAVED}`, "report:cancelled");
 			},
 			onDone: (done) => {
