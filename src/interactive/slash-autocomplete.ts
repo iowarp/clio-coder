@@ -10,10 +10,11 @@ import {
 } from "../engine/tui.js";
 import {
 	COMMANDS_REFUSED_DURING_TURN,
+	type CommandMatch,
 	commandReference,
+	matchCommandReference,
 	parseSlashCommand,
 	SETTINGS_AREA_IDS,
-	SLASH_COMMAND_GROUPS,
 	SUBCOMMANDS_REFUSED_DURING_TURN,
 } from "../session-control/slash-commands.js";
 import {
@@ -116,6 +117,26 @@ export interface SlashAutocompleteOptions {
 	fileReferenceSource?: FileReferenceCompletionSource;
 	/** True while a turn streams, when some commands refuse; their rows say why before Enter does. */
 	isTurnInFlight?: () => boolean;
+	/**
+	 * The operator's per-feature use counts (`"/model": 3`). A bare `/` lists the
+	 * five most-used commands first; without counts the rank order alone applies.
+	 */
+	commandCounts?: () => Readonly<Record<string, number>>;
+}
+
+/** How many of the operator's most-used commands lead a bare `/`. */
+const PERSONAL_TOP = 5;
+
+/** A bare `/`: the operator's most-used commands, then the rest in rank order. */
+function personalOrder(
+	matches: ReadonlyArray<CommandMatch>,
+	counts: Readonly<Record<string, number>>,
+): ReadonlyArray<CommandMatch> {
+	const used = matches
+		.filter((match) => (counts[`/${match.ref.name}`] ?? 0) > 0)
+		.sort((a, b) => (counts[`/${b.ref.name}`] ?? 0) - (counts[`/${a.ref.name}`] ?? 0))
+		.slice(0, PERSONAL_TOP);
+	return [...used, ...matches.filter((match) => !used.includes(match))];
 }
 
 const REFUSED_DURING_TURN_REASON = "a turn is running · Esc stops it first";
@@ -390,6 +411,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		promptTemplates?: () => ReadonlyArray<PromptCommandTemplate>,
 		private extensionCommands: () => ReadonlyArray<ExtensionCommandRow> = () => [],
 		private isTurnInFlight: () => boolean = () => false,
+		private commandCounts: () => Readonly<Record<string, number>> = () => ({}),
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
@@ -494,8 +516,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				})),
 			};
 		}
-		const reference = commandReference();
-		const refs = SLASH_COMMAND_GROUPS.flatMap((group) => reference.filter((ref) => ref.group === group));
+		const refs = commandReference();
 		const exactRef = refs.find((candidate) => candidate.name.toLowerCase() === context.command.toLowerCase());
 		if (cursorCol === context.commandEnd && options.force && exactRef && BARE_VALID_PARENTS.has(exactRef.name)) {
 			const item: SlashCompletionItem = {
@@ -528,35 +549,14 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			const prefix = context.line.slice(context.commandStart, cursorCol);
 			// A complete built-in name wins: Enter runs it instead of a longer sibling (`/skill`, not `/skills`).
 			if (refs.some((ref) => ref.name === prefix)) return null;
-			const items: SlashCompletionItem[] = refs
-				.filter((ref) => ref.name.toLowerCase().startsWith(prefix.toLowerCase()))
-				.map((ref) => {
-					const remainingGrammar = compactArgumentHint(ref.args);
-					const subcommands = Object.keys(ref.args?.subcommands ?? {});
-					const description = compactDescription(ref.description);
-					const item: SlashCompletionItem = {
-						id: `command:${ref.name}`,
-						kind: "command",
-						value: ref.name,
-						label:
-							subcommands.length > 0
-								? rowLabel(ref.name, `${PARENT_MARK} ${subcommands.join("|")}`)
-								: rowLabel(ref.name, labelGrammar(ref.args)),
-						effectDescription: ref.description,
-						path: `/${ref.name}`,
-						replacement: { start: context.commandStart, end: context.commandEnd },
-						appendSpace: Boolean(ref.args && (ref.args.positionals || ref.args.flags || ref.args.subcommands)),
-						runsBare: runsBare(ref.name),
-					};
-					if (description) item.description = description;
-					if (remainingGrammar) item.remainingGrammar = remainingGrammar;
-					if (this.isTurnInFlight() && COMMANDS_REFUSED_DURING_TURN.has(ref.name)) {
-						item.disabledReason = REFUSED_DURING_TURN_REASON;
-						item.description = REFUSED_DURING_TURN_REASON;
-						item.nextAction = `Unavailable: ${REFUSED_DURING_TURN_REASON}.`;
-					}
-					return item;
-				});
+			let matches: ReadonlyArray<CommandMatch> = matchCommandReference(prefix, refs);
+			if (prefix.length === 0) matches = personalOrder(matches, this.commandCounts());
+			const commandItems: SlashCompletionItem[] = matches.map((match) => this.commandItem(match, context));
+			const nameClass = commandItems.filter((_, index) => {
+				const kind = matches[index]?.class;
+				return kind === "exact" || kind === "name";
+			});
+			const items: SlashCompletionItem[] = [...nameClass];
 			// One listing serves both the template rows and the extension-command
 			// shadowing check; each listing of plugin prompts costs a plugin walk.
 			const templates = this.promptTemplates();
@@ -599,6 +599,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					...(!row.available ? { disabledReason: row.reason ?? "runtime unavailable" } : {}),
 				});
 			}
+			items.push(...commandItems.slice(nameClass.length));
 			return items.length ? { items, prefix } : null;
 		}
 
@@ -676,6 +677,63 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			items.push(item);
 		}
 		return items.length ? { items, prefix: beforeCursor } : null;
+	}
+
+	/** One built-in command row; alias and verb rows insert the full command they stand for. */
+	private commandItem(match: CommandMatch, context: SlashContext): SlashCompletionItem {
+		const { ref } = match;
+		const replacement = { start: context.commandStart, end: context.commandEnd };
+		const group = ` · ${ref.group.toLowerCase()}`;
+		let item: SlashCompletionItem;
+		if (match.alias || match.verb) {
+			const line = match.alias
+				? match.alias.args
+					? `${ref.name} ${match.alias.args}`
+					: ref.name
+				: `${ref.name} ${match.verb}`;
+			const spec = match.verb ? ref.args?.subcommands?.[match.verb] : match.alias?.args ? undefined : ref.args;
+			const effect = (match.verb ? ref.subcommandDescriptions?.[match.verb] : undefined) ?? ref.description;
+			item = {
+				id: match.alias ? `alias:${match.alias.name}` : `verb:${ref.name}:${match.verb}`,
+				kind: "command",
+				value: line,
+				label: match.alias ? `${match.alias.name} → /${line}` : rowLabel(line, labelGrammar(spec)),
+				effectDescription: effect,
+				path: `/${line.replace(" ", ` ${PATH_SEPARATOR} `)}`,
+				replacement,
+				appendSpace: line.includes(" ") || Boolean(spec && (spec.positionals || spec.flags || spec.subcommands)),
+				// An alias runs what it stands for (`/clear` Enter starts `/new`); a verb row only completes.
+				runsBare: match.alias !== undefined && runsBare(line),
+			};
+			const description = compactDescription(effect);
+			if (description) item.description = `${description}${group}`;
+		} else {
+			const remainingGrammar = compactArgumentHint(ref.args);
+			const subcommands = Object.keys(ref.args?.subcommands ?? {});
+			const description = compactDescription(ref.description);
+			item = {
+				id: `command:${ref.name}`,
+				kind: "command",
+				value: ref.name,
+				label:
+					subcommands.length > 0
+						? rowLabel(ref.name, `${PARENT_MARK} ${subcommands.join("|")}`)
+						: rowLabel(ref.name, labelGrammar(ref.args)),
+				effectDescription: ref.description,
+				path: `/${ref.name}`,
+				replacement,
+				appendSpace: Boolean(ref.args && (ref.args.positionals || ref.args.flags || ref.args.subcommands)),
+				runsBare: runsBare(ref.name),
+			};
+			if (description) item.description = `${description}${group}`;
+			if (remainingGrammar) item.remainingGrammar = remainingGrammar;
+		}
+		if (this.isTurnInFlight() && COMMANDS_REFUSED_DURING_TURN.has(ref.name)) {
+			item.disabledReason = REFUSED_DURING_TURN_REASON;
+			item.description = REFUSED_DURING_TURN_REASON;
+			item.nextAction = `Unavailable: ${REFUSED_DURING_TURN_REASON}.`;
+		}
+		return item;
 	}
 
 	private itemFromValue(
@@ -756,5 +814,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.promptTemplates,
 		options.extensionCommands,
 		options.isTurnInFlight,
+		options.commandCounts,
 	);
 }

@@ -199,7 +199,7 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 test("usage replaces cost in parsing, dispatch, autocomplete, and Escape routing", async () => {
 	deepStrictEqual(parseSlashCommand("/usage"), { kind: "usage" });
 	strictEqual(parseSlashCommand("/usage extra").kind, "usage-error");
-	strictEqual(parseSlashCommand("/cost").kind, "unknown-command");
+	deepStrictEqual(parseSlashCommand("/cost"), { kind: "usage" });
 	let opened = 0;
 	await dispatchSlashCommand(parseSlashCommand("/usage"), {
 		openUsage: () => {

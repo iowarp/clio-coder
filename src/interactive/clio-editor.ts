@@ -68,8 +68,10 @@ const EMPTY_PROMPT = `Ask Clio${GLYPH.ellipsis}  / for commands`;
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
 const COMPACTING_PROMPT = "Clio is compacting the session context";
-/** Rows the suggestion detail panel may take: breadcrumb, two effect lines, two next-action lines. */
-const SUGGESTION_PANEL_ROWS = 5;
+/** Rows the suggestion detail panel may take: the breadcrumb and one description line. */
+const SUGGESTION_PANEL_ROWS = 2;
+/** Most list rows the suggestion popup shows at once; the count row pages the rest. */
+const SUGGESTION_MAX_LIST_ROWS = 8;
 /** Fewest list rows kept visible when the panel has to share a short dock. */
 const SUGGESTION_MIN_LIST_ROWS = 3;
 
@@ -500,9 +502,9 @@ export class ClioEditor extends Editor {
 		this.dockHost = tui;
 	}
 
-	/** Rows the suggestion list may show: the dock's growth ceiling less the input, rule and detail panel. */
+	/** Rows the suggestion list may show: the dock's growth ceiling less the input, rule and detail panel, at most eight. */
 	private static suggestionListRows(tui: TUI): number {
-		return Math.max(3, dockGrowthRows(tui) - 3 - SUGGESTION_PANEL_ROWS);
+		return Math.min(SUGGESTION_MAX_LIST_ROWS, Math.max(3, dockGrowthRows(tui) - 3 - SUGGESTION_PANEL_ROWS));
 	}
 
 	/** The row the list has selected. The engine keeps its list private and the dock already reads its rendered rows. */

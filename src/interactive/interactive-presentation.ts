@@ -1040,6 +1040,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let skillCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		isTurnInFlight: () => deps.chat.isStreaming(),
+		commandCounts: () => readHarnessProfile().features,
 		// Completion runs per keystroke and only names templates, so it reads the
 		// committed plugin snapshot; submitting one verifies its tree first.
 		promptTemplates: () => deps.resources?.promptsForDisplay(getCwd()).items ?? [],

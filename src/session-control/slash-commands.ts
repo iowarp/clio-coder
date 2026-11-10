@@ -1333,11 +1333,22 @@ export interface CommandAcpAdmission {
 	readOnlyRefuses?: true | ReadonlyArray<string>;
 }
 
+export type CommandRank = 1 | 2 | 3;
+
+export interface CommandAlias {
+	name: string;
+	args?: string;
+}
+
 export interface BuiltinSlashCommand {
 	acp: false | CommandAcpAdmission;
 	name: string;
 	description: string;
 	group: SlashCommandGroup;
+	/** Palette order: 1 everyday, 2 regular, 3 rare. Required so a new command cannot be left unranked. */
+	rank: CommandRank;
+	/** Names other agents taught people, each resolving to this command with optional leading args. */
+	aliases?: ReadonlyArray<CommandAlias>;
 	/** Excluded from /help, autocomplete, and the docs command table. */
 	hidden?: boolean;
 	/**
@@ -1482,6 +1493,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "eggs",
+		rank: 3,
 		acp: { reads: ["", "status"], sessionOnly: ["off"] },
 		description: "Show active conversation eggs or turn them off",
 		group: "Inspect",
@@ -1501,6 +1513,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "reload",
+		rank: 3,
 		acp: false,
 		description: "Reload settings, library resources and extension runtimes with one report",
 		group: "Session",
@@ -1523,6 +1536,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "restart",
+		rank: 3,
 		acp: false,
 		description: "Save and restart into this session and workspace",
 		group: "Session",
@@ -1539,6 +1553,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "quit",
+		rank: 1,
+		aliases: [{ name: "exit" }],
 		acp: false,
 		description: "Exit Clio Coder",
 		group: "Session",
@@ -1551,6 +1567,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "help",
+		rank: 1,
 		acp: false,
 		description: "Open the help center for commands and keys",
 		group: "Inspect",
@@ -1567,6 +1584,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
+		rank: 2,
 		acp: { injectsUserTurn: true },
 		description: "Invoke a skill, or use `off` to clear active skill tools",
 		group: "Work",
@@ -1601,6 +1619,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "library",
+		rank: 2,
 		acp: false,
 		description: "Browse skills, agents, prompts, playbooks, plugins and extensions, or review an install or removal",
 		group: "Inspect",
@@ -1727,6 +1746,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "mcp",
+		rank: 3,
 		acp: { reads: ["", "list"] },
 		description: "List MCP servers, or trust or untrust one by id",
 		group: "Inspect",
@@ -1751,6 +1771,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "doctor",
+		rank: 3,
 		acp: { reads: [""] },
 		description: "Check this install; `deep` adds live tool probes and a contract dry run",
 		group: "Inspect",
@@ -1789,6 +1810,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "upgrade",
+		rank: 3,
 		acp: false,
 		description: "Review and approve a Clio Coder update, then restart when it succeeds",
 		group: "Configure",
@@ -1805,6 +1827,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "extensions",
+		rank: 3,
 		acp: false,
 		description: "Inspect extensions, manage dev and muted ones for this session, or leave a workspace",
 		group: "Inspect",
@@ -1839,6 +1862,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "share",
+		rank: 3,
 		acp: { injectsUserTurn: true },
 		description: "Share a worker result with the main agent (now /fleet share)",
 		group: "Work",
@@ -1855,6 +1879,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "archive",
+		rank: 3,
 		acp: {},
 		description: "Export or import a full Clio archive",
 		group: "Session",
@@ -1932,6 +1957,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "run",
+		rank: 1,
 		acp: { streams: "dispatch" },
 		description: "Run a fleet agent on a task",
 		group: "Work",
@@ -2041,6 +2067,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "delegate",
+		rank: 2,
 		acp: { streams: "dispatch" },
 		description: "Hand a task to an external ACP agent",
 		group: "Work",
@@ -2107,6 +2134,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "btw",
+		rank: 3,
 		acp: false,
 		description: "Ask a side question that never enters the session transcript",
 		group: "Work",
@@ -2131,6 +2159,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "draft",
+		rank: 3,
 		acp: false,
 		description: "Draft 2-4 answers in parallel and pick the strongest",
 		group: "Work",
@@ -2157,6 +2186,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "oracle",
+		rank: 3,
 		acp: { streams: "dispatch", injectsUserTurn: true, readOnlyRefuses: true },
 		description: "Have a read-only advisor challenge a question against settled decisions",
 		group: "Work",
@@ -2185,6 +2215,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "council",
+		rank: 3,
 		acp: { streams: "dispatch", promptTurn: true },
 		description: "Ask several read-only agents the same task, then vote or synthesize",
 		group: "Work",
@@ -2242,6 +2273,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "loop",
+		rank: 2,
 		// Its jobs fire user turns later, outside any prompt, which is what this marker tells a client.
 		// Listing and controlling jobs submits nothing, so those verbs stay available while a prompt runs.
 		acp: {
@@ -2305,6 +2337,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "usage",
+		rank: 1,
+		aliases: [{ name: "cost" }, { name: "status" }],
 		acp: false,
 		description: "Show quota, credits, session tokens and cost, workers, and health",
 		group: "Inspect",
@@ -2325,6 +2359,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "context",
+		rank: 1,
+		aliases: [{ name: "init", args: "init" }],
 		acp: {
 			subcommands: ["compact", "recall", "init", "refresh", "reset", "recover"],
 			promptTurnSubcommands: ["recover"],
@@ -2446,6 +2482,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fleet",
+		rank: 2,
 		// Only `share` crosses ACP; bare /fleet and /fleet run stay TUI-only.
 		acp: { subcommands: ["share"], injectsUserTurn: true },
 		description: "Show live fleet runs, share a worker result, or preview and run a playbook",
@@ -2520,6 +2557,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "decisions",
+		rank: 3,
 		acp: false,
 		description: "Show settled interview decisions and operator revisions",
 		group: "Inspect",
@@ -2534,6 +2572,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "research",
+		rank: 3,
 		acp: false,
 		description: "Show this project's research campaigns and their iteration timelines",
 		group: "Inspect",
@@ -2552,6 +2591,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "tasks",
+		rank: 1,
 		acp: {
 			subcommands: ["add", "hand", "done", "drop"],
 			injectsUserTurn: true,
@@ -2648,6 +2688,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "memory",
+		rank: 2,
 		acp: { subcommands: ["seed"] },
 		description: "Inspect, promote, or seed task memory",
 		group: "Inspect",
@@ -2685,6 +2726,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "view",
+		rank: 2,
 		acp: false,
 		description: "Browse session artifacts and verify run records",
 		group: "Inspect",
@@ -2723,6 +2765,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "panes",
+		rank: 3,
 		acp: false,
 		description: "Show pane status, watch a run, open a utility pane or a coding peer",
 		group: "Inspect",
@@ -2927,6 +2970,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "files",
+		rank: 3,
 		acp: false,
 		description: "Show or hide the files pane; picks land in the composer as @ mentions",
 		group: "Inspect",
@@ -2993,6 +3037,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "music",
+		rank: 3,
 		acp: false,
 		description: "Show or hide the focus-radio music pane (cliamp in a herdr dock)",
 		group: "Inspect",
@@ -3060,6 +3105,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "thinking",
+		rank: 2,
 		acp: false,
 		description: "Set the chat thinking level",
 		group: "Configure",
@@ -3090,6 +3136,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "model",
+		rank: 1,
 		acp: false,
 		description: "Pick a model, or set one by name",
 		group: "Configure",
@@ -3149,6 +3196,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "config",
+		rank: 2,
 		acp: false,
 		description: "Run setup and apply saved changes to this session",
 		group: "Configure",
@@ -3169,6 +3217,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "settings",
+		rank: 1,
+		aliases: [{ name: "login", args: "connections" }],
 		acp: false,
 		description: "Open interactive settings",
 		group: "Configure",
@@ -3205,6 +3255,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "resume",
+		rank: 1,
 		acp: false,
 		description: "Resume by id, unique id prefix, or exact unique name",
 		group: "Session",
@@ -3221,6 +3272,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "rename",
+		rank: 2,
 		acp: false,
 		description: "Name this session, or confirm a local suggestion from the conversation",
 		group: "Session",
@@ -3242,6 +3294,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "new",
+		rank: 1,
+		aliases: [{ name: "clear" }],
 		acp: false,
 		description: "Start a fresh session",
 		group: "Session",
@@ -3254,6 +3308,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "handoff",
+		rank: 2,
 		acp: false,
 		description: "Hand this session's working state to a fresh session for a stated goal",
 		group: "Session",
@@ -3278,6 +3333,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "tree",
+		rank: 2,
 		acp: false,
 		description: "Open session tree navigator",
 		group: "Session",
@@ -3290,6 +3346,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "rewind",
+		rank: 1,
+		aliases: [{ name: "undo" }],
 		acp: false,
 		description: "Restore workspace files from a snapshot taken before Clio's changes; /tree rewinds the conversation",
 		group: "Session",
@@ -3302,6 +3360,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fork",
+		rank: 2,
 		acp: false,
 		description: "Fork from an assistant turn into a new session; optionally name it",
 		group: "Session",
@@ -3318,6 +3377,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "export",
+		rank: 2,
 		acp: {},
 		description: "Export the transcript as HTML, or as Markdown for a .md path",
 		group: "Session",
@@ -3343,7 +3403,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		? [
 				{
 					...contextCommand,
+					aliases: [],
 					name: "compact",
+					rank: 1 as const,
 					acp: false as const,
 					kinds: [],
 					description: "Shrink session context (alias for /context compact)",
@@ -3371,6 +3433,35 @@ for (const entry of BUILTIN_SLASH_COMMANDS) {
 		}
 		HANDLER_BY_KIND.set(kind, entry);
 	}
+}
+
+/** Alias name to the command line it stands for, without the leading slash. */
+const ALIAS_TARGETS = new Map<string, { command: string; line: string }>();
+for (const entry of BUILTIN_SLASH_COMMANDS) {
+	for (const alias of entry.aliases ?? []) {
+		if (COMMAND_NAMES.has(alias.name)) {
+			throw new Error(`BUILTIN_SLASH_COMMANDS: alias "${alias.name}" of /${entry.name} equals the command /${alias.name}`);
+		}
+		const other = ALIAS_TARGETS.get(alias.name);
+		if (other) {
+			throw new Error(
+				`BUILTIN_SLASH_COMMANDS: alias "${alias.name}" is claimed by both /${other.command} and /${entry.name}`,
+			);
+		}
+		ALIAS_TARGETS.set(alias.name, {
+			command: entry.name,
+			line: alias.args ? `${entry.name} ${alias.args}` : entry.name,
+		});
+	}
+}
+
+/** `/clear foo` becomes `/new foo`; anything that is not an alias comes back unchanged. */
+function resolveAlias(trimmed: string): string {
+	const match = /^\/([A-Za-z][A-Za-z0-9-]*)(?=\s|$)/u.exec(trimmed);
+	const target = match ? ALIAS_TARGETS.get(match[1] ?? "") : undefined;
+	if (!match || !target) return trimmed;
+	const rest = trimmed.slice(match[0].length).trim();
+	return `/${target.line}${rest ? ` ${rest}` : ""}`;
 }
 
 /**
@@ -3462,8 +3553,9 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
 	const retiredVerb = matchRetiredCommand(trimmed, true);
 	if (retiredVerb) return retiredVerb;
+	const resolved = resolveAlias(trimmed);
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
-		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
+		const match = entry.match ? entry.match(resolved) : matchFromSpec(entry, resolved);
 		if (match) return match;
 	}
 	const retired = matchRetiredCommand(trimmed);
@@ -3581,7 +3673,15 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			});
 			return "accepted";
 		}
-		ctx.notice("error", refusal ? refusal.message : `/${command.token} is not a command. Type /help for the list.`);
+		const closest = refusal ? null : closestCommand(command.token);
+		ctx.notice(
+			"error",
+			refusal
+				? refusal.message
+				: closest
+					? `\`/${command.token}\` is not a command. Closest: \`/${closest.typed}\`${closest.runs ? ` (runs \`/${closest.runs}\`)` : ""}. \`/help\` lists them all.`
+					: `/${command.token} is not a command. Type /help for the list.`,
+		);
 		ctx.render?.();
 		return "rejected";
 	}
@@ -3603,57 +3703,19 @@ export interface CommandReferenceEntry {
 	usage: string;
 	description: string;
 	group: SlashCommandGroup;
+	rank: CommandRank;
+	aliases?: ReadonlyArray<CommandAlias>;
 	/** The command's args grammar, carried through for argument autocomplete. */
 	args?: CommandArgsSpec;
 	/** Stable copy shown beside first-token subcommand completions. */
 	subcommandDescriptions?: Readonly<Record<string, string>>;
 }
 
-const COMMAND_ORDER = [
-	"run",
-	"fleet",
-	"delegate",
-	"council",
-	"oracle",
-	"btw",
-	"draft",
-	"skill",
-	"tasks",
-	"context",
-	"compact",
-	"memory",
-	"view",
-	"panes",
-	"usage",
-	"doctor",
-	"upgrade",
-	"decisions",
-	"research",
-	"library",
-	"extensions",
-	"help",
-	"model",
-	"thinking",
-	"settings",
-	"config",
-	"new",
-	"resume",
-	"rename",
-	"handoff",
-	"fork",
-	"tree",
-	"rewind",
-	"export",
-	"archive",
-	"quit",
-] as const;
-const COMMAND_ORDER_INDEX = new Map<string, number>(COMMAND_ORDER.map((name, index) => [name, index]));
-
 /** `includeHidden` is for ACP, which still admits hidden commands such as `/archive` and `/eggs`. */
 export function commandReference(options: { includeHidden?: boolean } = {}): ReadonlyArray<CommandReferenceEntry> {
 	return BUILTIN_SLASH_COMMANDS.filter((entry) => options.includeHidden === true || entry.hidden !== true)
 		.slice()
-		.sort((a, b) => (COMMAND_ORDER_INDEX.get(a.name) ?? 99) - (COMMAND_ORDER_INDEX.get(b.name) ?? 99))
+		.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
 		.map((entry) => {
 			const usage = usageLine(entry)
 				.replace(/^\nusage:\s*/, "")
@@ -3663,10 +3725,128 @@ export function commandReference(options: { includeHidden?: boolean } = {}): Rea
 				usage,
 				description: entry.description,
 				group: entry.group,
+				rank: entry.rank,
+				...(entry.aliases?.length ? { aliases: entry.aliases } : {}),
 				...(entry.args ? { args: entry.args } : {}),
 				...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
 			};
 		});
+}
+
+/** Match classes, best first. */
+export type CommandMatchClass = "exact" | "name" | "alias" | "verb" | "letters" | "description";
+
+export interface CommandMatch {
+	ref: CommandReferenceEntry;
+	class: CommandMatchClass;
+	/** Set for an alias row: the alias the query matched. */
+	alias?: CommandAlias;
+	/** Set for a verb row: the subcommand the query matched. */
+	verb?: string;
+}
+
+function lettersInOrder(query: string, name: string): boolean {
+	let at = 0;
+	for (const letter of name) if (letter === query[at]) at++;
+	return at === query.length;
+}
+
+/**
+ * Commands for a typed `/query`, best class first and within a class by rank
+ * then name: exact name, name prefix, alias prefix, verb prefix, letters in
+ * order within the name (two or more letters), then a description word that
+ * starts with the query (three or more letters). A command appears once, in its
+ * best class, except that several of its verbs may match.
+ */
+export function matchCommandReference(
+	query: string,
+	reference: ReadonlyArray<CommandReferenceEntry> = commandReference(),
+): CommandMatch[] {
+	const q = query.toLowerCase();
+	if (q.length === 0) return reference.map((ref) => ({ ref, class: "name" }));
+	const out: CommandMatch[] = [];
+	const taken = new Set<string>();
+	const pass = (test: (ref: CommandReferenceEntry) => Omit<CommandMatch, "ref"> | null): void => {
+		for (const ref of reference) {
+			if (taken.has(ref.name)) continue;
+			const hit = test(ref);
+			if (!hit) continue;
+			out.push({ ref, ...hit });
+			taken.add(ref.name);
+		}
+	};
+	pass((ref) => (ref.name === q ? { class: "exact" } : null));
+	pass((ref) => (ref.name.startsWith(q) ? { class: "name" } : null));
+	pass((ref) => {
+		const alias = ref.aliases?.find((candidate) => candidate.name.startsWith(q));
+		return alias ? { class: "alias", alias } : null;
+	});
+	for (const ref of reference) {
+		if (taken.has(ref.name)) continue;
+		for (const verb of Object.keys(ref.args?.subcommands ?? {})) {
+			if (verb.startsWith(q)) out.push({ ref, class: "verb", verb });
+		}
+	}
+	for (const match of out) taken.add(match.ref.name);
+	if (q.length >= 2) pass((ref) => (lettersInOrder(q, ref.name) ? { class: "letters" } : null));
+	if (q.length >= 3) {
+		pass((ref) =>
+			ref.description
+				.toLowerCase()
+				.split(/[^a-z0-9]+/u)
+				.some((word) => word.startsWith(q))
+				? { class: "description" }
+				: null,
+		);
+	}
+	return out;
+}
+
+function editDistance(a: string, b: string): number {
+	let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+	for (let i = 1; i <= a.length; i++) {
+		const current = [i];
+		for (let j = 1; j <= b.length; j++) {
+			current[j] = Math.min(
+				(previous[j] ?? 0) + 1,
+				(current[j - 1] ?? 0) + 1,
+				(previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1),
+			);
+		}
+		previous = current;
+	}
+	return previous[b.length] ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The spelling an unknown `/token` most likely meant, with what it runs when
+ * that differs: the palette's best row, else the nearest name or alias within
+ * two edits.
+ */
+export function closestCommand(token: string): { typed: string; runs?: string } | null {
+	const reference = commandReference();
+	const best = matchCommandReference(token, reference)[0];
+	if (best?.alias) return { typed: best.alias.name, runs: aliasLine(best.ref.name, best.alias) };
+	if (best?.verb) return { typed: `${best.ref.name} ${best.verb}` };
+	if (best) return { typed: best.ref.name };
+	const q = token.toLowerCase();
+	let nearest: { typed: string; runs?: string; distance: number } | null = null;
+	for (const ref of reference) {
+		const candidates: Array<{ typed: string; runs?: string }> = [
+			{ typed: ref.name },
+			...(ref.aliases ?? []).map((alias) => ({ typed: alias.name, runs: aliasLine(ref.name, alias) })),
+		];
+		for (const candidate of candidates) {
+			const distance = editDistance(q, candidate.typed);
+			if (distance <= 2 && (nearest === null || distance < nearest.distance)) nearest = { ...candidate, distance };
+		}
+	}
+	if (!nearest) return null;
+	return nearest.runs ? { typed: nearest.typed, runs: nearest.runs } : { typed: nearest.typed };
+}
+
+function aliasLine(command: string, alias: CommandAlias): string {
+	return alias.args ? `${command} ${alias.args}` : command;
 }
 
 /** A reason as one sentence: capitalised, with closing punctuation. */

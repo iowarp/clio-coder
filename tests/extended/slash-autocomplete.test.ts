@@ -210,7 +210,7 @@ test("prompt templates from every resource root complete as namespaced slash com
 
 	const materio = await complete("/mat");
 	deepStrictEqual(
-		materio.map((item) => item.value),
+		materio.filter((item) => item.id.startsWith("prompt:")).map((item) => item.value),
 		["materio:execute-task", "materio:help"],
 	);
 	const execute = materio.find((item) => item.value === "materio:execute-task");
