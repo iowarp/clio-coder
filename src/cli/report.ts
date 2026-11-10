@@ -4,6 +4,7 @@ import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	applyReportEdit,
+	checkLastAttempt,
 	composeReportDraft,
 	type DuplicateChoice,
 	detectTransport,
@@ -410,6 +411,27 @@ async function confirmAndSend(
 			...(io.deps.browserAvailable !== undefined ? { browserAvailable: io.deps.browserAvailable } : {}),
 		});
 		planTransport = transport;
+	}
+	if (transport?.kind === "gh" && outboxEntry(io.stateDir, initial.id)?.state === "sending") {
+		const last = await checkLastAttempt(initial.id, transport, {
+			stateDir: io.stateDir,
+			env: io.env,
+			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+			...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
+		});
+		if (last.status === "unknown") {
+			fail(io, `nothing sent: ${last.reason}`);
+			return 1;
+		}
+		if (last.status === "filed") {
+			if (options.json)
+				io.out(
+					`${JSON.stringify({ result: { status: "sent", url: last.url, number: last.number, adopted: true } }, null, 2)}\n`,
+				);
+			else io.out(`${initial.id} was filed by its last attempt: ${last.url}\n`);
+			return 0;
+		}
+		if (!options.json) io.out(`GitHub has nothing from the last attempt to send ${initial.id}; it is a draft again.\n`);
 	}
 	const interactive = io.interactive && !options.json;
 	let draft = initial;

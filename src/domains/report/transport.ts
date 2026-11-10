@@ -270,7 +270,8 @@ export async function sendReport(
 		const link = prefillLink(rendered, route);
 		const open = deps.open ?? ((url: string) => openBrowser(url, env));
 		if (link !== null && transport.kind !== "file" && open(link.url)) {
-			record({ transport: "browser", state: "opened", url: link.url, sentAt: now().toISOString() });
+			// The outbox keeps the short link: the prefilled one embeds the whole body.
+			record({ transport: "browser", state: "opened", url: newReportLink(route), sentAt: now().toISOString() });
 			return { status: "opened", url: link.url, path, cut: link.cut };
 		}
 		const url = newReportLink(route);
@@ -315,6 +316,44 @@ export async function sendReport(
 }
 
 type GhOptions = { timeoutMs: number; env: Record<string, string> };
+
+export type LastAttempt =
+	| { status: "filed"; url: string; number: number }
+	| { status: "unfiled" }
+	| { status: "unknown"; reason: string };
+
+/**
+ * For a report left `sending`, whether its last create reached GitHub. A filed one is recorded `sent`; when GitHub
+ * shows none the entry becomes a draft again, so it may be forgotten or sent anew. Any other entry is `unfiled`.
+ */
+export async function checkLastAttempt(
+	id: string,
+	transport: Extract<ReportTransport, { kind: "gh" }>,
+	deps: Pick<SendDeps, "stateDir" | "run" | "env" | "now">,
+): Promise<LastAttempt> {
+	const entry = outboxEntry(deps.stateDir, id);
+	if (entry?.state !== "sending") return { status: "unfiled" };
+	const route = routeFor(entry.kind);
+	const run = deps.run ?? runReportCommand;
+	const options = { timeoutMs: REPORT_GH_TIMEOUT_MS, env: ghEnvironment(deps.env ?? process.env) };
+	const found = await findFiled(id, route, transport.login, transport.path, run, options);
+	if (found === undefined) return { status: "unknown", reason: "could not check whether the last attempt was filed" };
+	if (found === null) {
+		updateOutbox(deps.stateDir, id, { kind: entry.kind, title: entry.title, state: "draft" });
+		return { status: "unfiled" };
+	}
+	updateOutbox(deps.stateDir, id, {
+		kind: entry.kind,
+		title: entry.title,
+		route: route.name,
+		transport: "gh",
+		state: "sent",
+		url: found.url,
+		number: found.number,
+		sentAt: (deps.now ?? (() => new Date()))().toISOString(),
+	});
+	return { status: "filed", ...found };
+}
 
 /** The issue or discussion already carrying this report id; null when none; undefined when the search failed. */
 async function findFiled(

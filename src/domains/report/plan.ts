@@ -467,13 +467,21 @@ export function reportRows(stateDir: string): ReportRow[] {
 	return rows.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 }
 
-/** Delete a local draft. A report that already left this machine is refused: Clio cannot withdraw a public post. */
+/**
+ * Delete a local draft. A posted report is refused: Clio cannot withdraw a public post. One whose last create may have
+ * been filed waits until `report send` checks GitHub and finds nothing.
+ */
 export function forgetReport(stateDir: string, id: string): { ok: true } | { ok: false; reason: string } {
 	const entry = outboxEntry(stateDir, id);
-	if (entry !== null && (entry.state === "sent" || entry.state === "sending" || entry.state === "opened"))
+	if (entry?.state === "sent")
 		return {
 			ok: false,
 			reason: `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}. Clio cannot withdraw a public report; edit or close it on GitHub.`,
+		};
+	if (entry?.state === "sending")
+		return {
+			ok: false,
+			reason: `the last attempt to send ${id} may have been filed; run clio-coder report send ${id} in a terminal to check (it asks before sending), then forget it`,
 		};
 	if (entry === null && readReportDraft(stateDir, id) === null) return { ok: false, reason: `no report ${id}` };
 	deleteReportBundle(stateDir, id);

@@ -178,8 +178,10 @@ export {
 	type ReportTextReply,
 } from "./text-flow.js";
 export {
+	checkLastAttempt,
 	detectTransport,
 	ghEnvironment,
+	type LastAttempt,
 	newReportLink,
 	prefillLink,
 	REPORT_URL_BUDGET,
