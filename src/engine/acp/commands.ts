@@ -4,6 +4,7 @@ import type {
 	AcpCommandDescriptor,
 	AcpCommandFlagSpec,
 	AcpCommandPositionalSpec,
+	AcpCommandReportMeta,
 	AcpCommandResult,
 	AcpCommandsCapability,
 } from "./types.js";
@@ -14,6 +15,7 @@ export type {
 	AcpCommandDescriptor,
 	AcpCommandFlagSpec,
 	AcpCommandPositionalSpec,
+	AcpCommandReportMeta,
 	AcpCommandResult,
 } from "./types.js";
 
@@ -155,6 +157,7 @@ const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> 
 	memory: ["seedTaskMemory"],
 	export: ["exportTranscript"],
 	loop: ["jobs"],
+	report: ["reportHost"],
 };
 const CONTEXT_REQUIREMENTS: Record<string, keyof AcpCommandHost> = {
 	compact: "runCompact",
@@ -346,6 +349,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "listWorkerRuns"
 			| "oracleBriefing"
 			| "getWorkerRosters"
+			| "reportHost"
 			| "runCouncilDispatch"
 			| "runDoctor"
 			| "runLocalOperation"
@@ -533,9 +537,14 @@ export function invokeAcpCommand(
 		push(text);
 	};
 
+	let report: AcpCommandReportMeta | undefined;
 	const finish = (): AcpCommandResult => {
 		if (truncated) lines.push(`…output truncated at ${ACP_MAX_COMMAND_RESULT_LINES} lines`);
-		return { level: NOTICE_LEVELS[rank] ?? "info", lines };
+		return {
+			level: NOTICE_LEVELS[rank] ?? "info",
+			lines,
+			...(report !== undefined ? { _meta: { "clio-coder/report": report } } : {}),
+		};
 	};
 	const runDoctor = host.runDoctor;
 	if (parsed.kind === "doctor" && runDoctor) {
@@ -553,7 +562,9 @@ export function invokeAcpCommand(
 			);
 	}
 	const pending: Promise<void>[] = [];
-	const ctx = sessionCommandContext(host, notice, push, pending, rule.name);
+	const ctx = sessionCommandContext(host, notice, push, pending, rule.name, (next) => {
+		report = next;
+	});
 	let outcome: ReturnType<typeof dispatchSlashCommand>;
 	try {
 		outcome = dispatchSlashCommand(parsed, ctx);
@@ -572,6 +583,28 @@ export function invokeAcpCommand(
 		push(`${rule.name} started; progress arrives as _clio-coder/event dispatch kinds`);
 	}
 	return pending.length === 0 ? Promise.resolve(finish()) : Promise.all(pending).then(finish);
+}
+
+/** The report host, with each reply's draft and state also handed to the result's `_meta`. */
+function reportHostWithMeta(
+	host: NonNullable<SlashCommandContext["reportHost"]>,
+	onReport: (report: AcpCommandReportMeta) => void,
+): NonNullable<SlashCommandContext["reportHost"]> {
+	const seen = <T extends { report?: AcpCommandReportMeta }>(reply: Promise<T>): Promise<T> =>
+		reply.then((answer) => {
+			if (answer.report !== undefined)
+				onReport({
+					draftId: bounded(answer.report.draftId, ACP_MAX_COMMAND_NAME_BYTES),
+					state: bounded(answer.report.state, ACP_MAX_COMMAND_NAME_BYTES),
+				});
+			return answer;
+		});
+	return {
+		plan: (input) => seen(host.plan(input)),
+		send: (draftId, choices) => seen(host.send(draftId, choices)),
+		status: () => seen(host.status()),
+		forget: (id) => seen(host.forget(id)),
+	};
 }
 
 /** A report is two fields and nothing else the wire could not carry. */
@@ -594,6 +627,7 @@ function sessionCommandContext(
 	push: (text: string) => void,
 	pending: Promise<void>[],
 	commandName: string,
+	onReport: (report: AcpCommandReportMeta) => void,
 ): SlashCommandContext {
 	const submitTurn = host.submitTurn;
 	// A context operation the operator stopped settles its own canonical
@@ -657,6 +691,7 @@ function sessionCommandContext(
 		...(host.jobs ? { jobs: host.jobs } : {}),
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
+		...(host.reportHost ? { reportHost: reportHostWithMeta(host.reportHost, onReport) } : {}),
 		...(runContextRecall
 			? { runContextRecall: (ref: string) => awaited("context recall", () => runContextRecall(ref), true) }
 			: {}),

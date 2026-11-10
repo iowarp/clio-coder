@@ -46,6 +46,7 @@ import {
 	type SecondOpinionCandidate,
 	secondOpinionIndependence,
 } from "../domains/providers/model-lineage.js";
+import type { ReportTextDuplicate, ReportTextHost } from "../domains/report/text-flow.js";
 import type {
 	LibraryEntryKind,
 	PromptTemplate,
@@ -138,7 +139,7 @@ type ArchiveCommandVariant =
 type ReportCommandVariant =
 	| { kind: "report"; report: SlashReportKind; summary?: string }
 	| { kind: "report-status" }
-	| { kind: "report-send"; draftId: string }
+	| { kind: "report-send"; draftId: string; duplicate?: ReportTextDuplicate }
 	| { kind: "report-forget"; id: string }
 	| { kind: "report-security" };
 
@@ -1201,6 +1202,11 @@ export interface SessionCommandContext {
 	showReportStatus?: () => void;
 	/** `/report forget <id>`: delete a local draft; a report that already left this machine is refused. */
 	forgetReport?: (id: string) => void;
+	/**
+	 * `/report` with no review to press send in (ACP): a kind previews the draft as text and saves it, and only
+	 * `/report send <id>` sends. Used when {@link openReport} is absent.
+	 */
+	reportHost?: ReportTextHost;
 	/**
 	 * `/fleet run <playbook>`: compile the playbook's plan, show every wave, agent,
 	 * target, boundary, budget, and code-step argv for approval, and dispatch
@@ -3342,7 +3348,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "report",
 		rank: 3,
-		acp: false,
+		acp: {
+			subcommands: ["bug", "feature", "question", "status", "send", "forget", "security"],
+			reads: ["status", "security"],
+			readOnlyRefuses: ["send", "forget"],
+		},
 		description: "Preview, then send a bug, feature request or question to Clio Coder's maintainers",
 		group: "Session",
 		kinds: ["report", "report-status", "report-send", "report-forget", "report-security"],
@@ -3362,7 +3372,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				question: { positionals: [{ name: "summary", required: false, rest: true }] },
 				security: {},
 				status: {},
-				send: { positionals: [{ name: "draft", required: true }] },
+				send: {
+					positionals: [{ name: "draft", required: true }],
+					flags: [{ name: "--comment", takesValue: true, valueName: "n" }, { name: "--new" }],
+				},
 				forget: { positionals: [{ name: "id", required: true }] },
 			},
 		},
@@ -3371,7 +3384,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const sub = parsed.subcommand;
 			if (sub === "status") return { kind: "report-status" };
 			if (sub === "security") return { kind: "report-security" };
-			if (sub === "send") return { kind: "report-send", draftId: parsed.positionals[0] ?? "" };
+			if (sub === "send") {
+				const draftId = parsed.positionals[0] ?? "";
+				const comment = parsed.flags.get("--comment");
+				if (comment !== undefined && parsed.flags.has("--new"))
+					return { kind: "usage-error", command: "report", reason: "--comment and --new are alternatives; pass one" };
+				if (comment !== undefined) {
+					if (typeof comment !== "string" || !/^[1-9]\d*$/u.test(comment))
+						return { kind: "usage-error", command: "report", reason: "--comment takes an issue number" };
+					return { kind: "report-send", draftId, duplicate: { comment: Number(comment) } };
+				}
+				return { kind: "report-send", draftId, ...(parsed.flags.has("--new") ? { duplicate: "new" as const } : {}) };
+			}
 			if (sub === "forget") return { kind: "report-forget", id: parsed.positionals[0] ?? "" };
 			const report: SlashReportKind = sub === "feature" || sub === "question" ? sub : "bug";
 			const summary = parsed.rest?.trim() ?? "";
@@ -3380,6 +3404,28 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		// Not refused during a turn: a hung turn is a reason to report, and the review never touches the turn.
 		handle(command, ctx) {
 			const unavailable = () => ctx.notice("info", "reporting is not available on this surface; run `clio-coder report`");
+			const text = ctx.openReport ? undefined : ctx.reportHost;
+			if (text) {
+				let reply: ReturnType<ReportTextHost["status"]>;
+				if (command.kind === "report-status") reply = text.status();
+				else if (command.kind === "report-forget") reply = text.forget(command.id);
+				else if (command.kind === "report-send")
+					reply = text.send(command.draftId, command.duplicate !== undefined ? { duplicate: command.duplicate } : {});
+				else if (command.kind === "report-security") reply = text.plan({ kind: "security" });
+				else if (command.kind === "report")
+					reply = text.plan({
+						kind: command.report,
+						...(command.summary !== undefined ? { summary: command.summary } : {}),
+					});
+				else return;
+				const shown = reply.then((answer) => ctx.notice(answer.level, answer.text));
+				if (ctx.holdReplyFor) ctx.holdReplyFor(shown);
+				else
+					shown.catch((error: unknown) =>
+						ctx.notice("error", `report failed: ${error instanceof Error ? error.message : String(error)}`),
+					);
+				return;
+			}
 			if (command.kind === "report-status") {
 				if (ctx.showReportStatus) ctx.showReportStatus();
 				else unavailable();

@@ -1,5 +1,6 @@
 import type { ReportSessionFacts } from "./environment.js";
 import type { IdentitySettings } from "./scrub.js";
+import type { ReportTextDeps, ReportTextHost } from "./text-flow.js";
 
 export interface ReportWiringSource {
 	stateDir: string;
@@ -30,5 +31,20 @@ export function reportWiring(source: ReportWiringSource) {
 			};
 		},
 		identitySettings: source.identitySettings,
+	};
+}
+
+/** The ACP report host; the report domain loads on the first `/report`, never at boot. */
+export function lazyReportTextHost(deps: ReportTextDeps): ReportTextHost {
+	let loaded: Promise<ReportTextHost> | null = null;
+	const load = (): Promise<ReportTextHost> => {
+		loaded ??= import("./index.js").then(({ createReportTextHost }) => createReportTextHost(deps));
+		return loaded;
+	};
+	return {
+		plan: async (input) => (await load()).plan(input),
+		send: async (draftId, choices) => (await load()).send(draftId, choices),
+		status: async () => (await load()).status(),
+		forget: async (id) => (await load()).forget(id),
 	};
 }

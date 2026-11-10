@@ -169,6 +169,14 @@ export {
 	writeReportMarkdown,
 } from "./store.js";
 export {
+	createReportTextHost,
+	formatReportPlanText,
+	type ReportTextDeps,
+	type ReportTextDuplicate,
+	type ReportTextHost,
+	type ReportTextReply,
+} from "./text-flow.js";
+export {
 	detectTransport,
 	ghEnvironment,
 	newReportLink,

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { PendingSkillRequest } from "../../src/core/skill-activation.js";
+import { createReportTextHost } from "../../src/domains/report/index.js";
 import {
 	ACP_COMMAND_RULES,
 	ACP_COMMANDS_CAPABILITY,
@@ -54,12 +58,12 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all sixteen allowlisted commands", async () => {
+test("the catalog projects all seventeen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
-	assert.equal(ACP_COMMAND_RULES.length, 16);
-	assert.equal(catalog.commands.length, 16);
-	assert.equal(ACP_COMMANDS_CAPABILITY.count, 16);
+	assert.equal(ACP_COMMAND_RULES.length, 17);
+	assert.equal(catalog.commands.length, 17);
+	assert.equal(ACP_COMMANDS_CAPABILITY.count, 17);
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
 		[
@@ -78,6 +82,7 @@ test("the catalog projects all sixteen allowlisted commands", async () => {
 			"fleet",
 			"tasks",
 			"memory",
+			"report",
 			"export",
 		],
 	);
@@ -331,7 +336,7 @@ test("the announced capability names the two methods a client calls", async () =
 			version: 1,
 			list: "_clio-coder/commands/list",
 			invoke: "_clio-coder/commands/invoke",
-			count: 16,
+			count: 17,
 		},
 	);
 });
@@ -382,4 +387,44 @@ test("doctor returns completed asynchronous findings and contains failures", asy
 		level: "error",
 		lines: ["doctor failed: probe failed"],
 	});
+});
+
+test("/report previews as text with no transport call, and a read-only ceiling refuses send but not status", async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "acp-report-"));
+	const gh = "/fake/bin/gh";
+	const commands: string[] = [];
+	const reportHost = createReportTextHost({
+		stateDir,
+		cwd: () => stateDir,
+		env: {},
+		findGh: () => gh,
+		run: async (command, args) => {
+			commands.push([command, ...args].join(" "));
+			return { exitCode: 1, stdout: "", stderr: "", timedOut: false };
+		},
+	});
+	const control = acpCommandControl(host({ reportHost }));
+	assert.ok(control.catalog().commands.some((command) => command.name === "report"));
+	assert.ok(
+		!acpCommandControl(host())
+			.catalog()
+			.commands.some((command) => command.name === "report"),
+	);
+
+	const preview = await control.invoke({ command: "report", argv: ["bug", "the diff view is empty"] });
+	const draftId = preview._meta?.["clio-coder/report"].draftId ?? "";
+	assert.match(draftId, /^rpt_/);
+	assert.ok(preview.lines.includes("Title: fix: the diff view is empty"));
+	assert.ok(preview.lines.includes(`id: ${draftId}`), "the full body, report block included, is in the preview");
+	assert.ok(preview.lines.some((line) => line.includes(`To send: \`/report send ${draftId}\``)));
+	assert.deepEqual(
+		commands.filter((command) => command.startsWith(gh)),
+		[],
+	);
+
+	const readOnly = { readOnly: true } as Parameters<NonNullable<typeof control.ceilingRefusal>>[2];
+	assert.match(control.ceilingRefusal?.("report", ["send", draftId], readOnly) ?? "", /ceiling is read-only/);
+	assert.equal(control.ceilingRefusal?.("report", ["status"], readOnly), null);
+	const status = await control.invoke({ command: "report", argv: ["status"] });
+	assert.ok(status.lines.some((line) => line.startsWith(`${draftId} | draft | bug`)));
 });

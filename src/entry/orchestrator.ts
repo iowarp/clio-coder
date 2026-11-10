@@ -211,7 +211,7 @@ import { LOCAL_API_KEY_FALLBACK, resolveSideCallAuth } from "../domains/provider
 import { resolveTarget, unpricedRunRoutes } from "../domains/providers/unpriced-routes.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import { anthropicQuotaNotice, onAnthropicQuotaChange } from "../domains/quota/index.js";
-import { reportWiring } from "../domains/report/wiring.js";
+import { lazyReportTextHost, reportWiring } from "../domains/report/wiring.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -3941,6 +3941,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										}
 									: {}),
 								...(share ? archiveCommandHost(share) : {}),
+								// `/report` previews as text and sends only on a second `/report send <id>`.
+								reportHost: lazyReportTextHost(reportSession),
 								getChatTarget: () => getCurrentSettings().chat.target,
 								getChatModel: () => getCurrentSettings().chat.model,
 								getFleetAgentProfiles: () => getCurrentSettings().fleet.agentProfiles,

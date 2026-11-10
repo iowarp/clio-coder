@@ -1499,9 +1499,17 @@ export interface AcpCommandCatalog {
 	prompts?: string[];
 }
 
+/** `_meta["clio-coder/report"]` on a `/report` result: the draft it is about and its outbox state. */
+export interface AcpCommandReportMeta {
+	draftId: string;
+	state: string;
+}
+
 export interface AcpCommandResult {
 	level: "info" | "success" | "warn" | "error";
 	lines: string[];
+	/** Present only on a `/report` result, so a client can build its own dialog without parsing the lines. */
+	_meta?: { "clio-coder/report": AcpCommandReportMeta };
 }
 
 /**
@@ -2036,6 +2044,17 @@ export const AcpCommandResultSchema = Type.Object(
 	{
 		level: Type.Union([Type.Literal("info"), Type.Literal("success"), Type.Literal("warn"), Type.Literal("error")]),
 		lines: Type.Array(Type.String({ maxLength: 1024 }), { maxItems: 201 }),
+		_meta: Type.Optional(
+			Type.Object(
+				{
+					"clio-coder/report": Type.Object(
+						{ draftId: Type.String({ maxLength: 256 }), state: Type.String({ maxLength: 256 }) },
+						closed,
+					),
+				},
+				closed,
+			),
+		),
 	},
 	closed,
 );
