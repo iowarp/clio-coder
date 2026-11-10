@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { storeTagDir } from "../../src/core/store-paths.js";
+import { storeProjectDir, storeTagDir } from "../../src/core/store-paths.js";
 import type { StoreBackend } from "../../src/domains/store/backend.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
@@ -72,14 +72,15 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			await backend.getOrCreateTag("t");
 			const source = join(scratch, "s");
 			writeFileSync(source, "s");
-			for (const blob of ["a/b", "a-c", "b.txt", "c.txt", "d/e.txt"]) await backend.putBlobFromFile("t", blob, source);
+			for (const blob of ["a/b", "a-c", "b.txt", "c.txt", "d/e.txt", "keep.tmp"])
+				await backend.putBlobFromFile("t", blob, source);
 			const outside = join(scratch, "outside");
 			mkdirSync(outside);
 			writeFileSync(join(outside, "x.txt"), "x");
 			symlinkSync(outside, join(storeTagDir(cwd, "t"), "blobs", "link"));
 			deepStrictEqual(await backend.listBlobs("t", { offset: 0, limit: 2 }), { names: ["a-c", "a/b"], hasMore: true });
-			deepStrictEqual(await backend.listBlobs("t", { offset: 2, limit: 3 }), {
-				names: ["b.txt", "c.txt", "d/e.txt"],
+			deepStrictEqual(await backend.listBlobs("t", { offset: 2, limit: 4 }), {
+				names: ["b.txt", "c.txt", "d/e.txt", "keep.tmp"],
 				hasMore: false,
 			});
 			deepStrictEqual(await backend.listBlobs("t", { pattern: ".*\\.txt", offset: 0, limit: 10 }), {
@@ -120,3 +121,38 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 }
 
 runStoreBackendConformance("local", openStoreBackend);
+
+test("local: every store directory is 0700 and every file 0600 under umask 022", async () => {
+	const env = await isolateClioEnv("clio-coder-store-modes-");
+	const umask = process.umask(0o022);
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		const backend = await openStoreBackend(cwd);
+		const source = join(env.dir, "s");
+		writeFileSync(source, "s");
+		await backend.getOrCreateTag("t");
+		await backend.setTagXattr("t", "class", "output");
+		await backend.putBlobFromFile("t", "out/a.bin", source);
+		await backend.putRecordIfAbsent("t/.records", "r#00000001", Buffer.from("argv"));
+		const modes: string[] = [];
+		const walk = (dir: string): void => {
+			for (const name of readdirSync(dir)) {
+				const entry = join(dir, name);
+				const stat = lstatSync(entry);
+				modes.push(`${(stat.mode & 0o777).toString(8)} ${name}`);
+				if (stat.isDirectory()) walk(entry);
+			}
+		};
+		walk(storeProjectDir(cwd));
+		ok(modes.some((line) => line.endsWith(" a.bin")));
+		deepStrictEqual(
+			modes.filter((line) => !line.startsWith("700 ") && !line.startsWith("600 ")),
+			[],
+		);
+		strictEqual(lstatSync(storeProjectDir(cwd)).mode & 0o777, 0o700);
+	} finally {
+		process.umask(umask);
+		env.restore();
+	}
+});
