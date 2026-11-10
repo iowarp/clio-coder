@@ -1,5 +1,5 @@
 import { readSettings } from "../core/config.js";
-import { openAuthStorage } from "../domains/providers/auth/index.js";
+import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
 	EMPTY_CAPABILITIES,
 	listProviderSupportEntries,
@@ -78,12 +78,22 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 		.filter((entry) => entry.connectable)
 		.map((entry) => {
 			const runtime = getRuntimeRegistry().get(entry.runtimeId);
-			const status = runtime ? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }) : null;
-			return {
-				entry,
-				status,
-				targetCount: settings.targets.filter((target) => target.runtime === entry.runtimeId).length,
-			};
+			const targets = settings.targets.filter((target) => target.runtime === entry.runtimeId);
+			let status = runtime ? auth.statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false }) : null;
+			// configure stores a target's key under its own `apiKeyRef` (`target:<id>`),
+			// which the runtime's credential never reads. A connected target connects
+			// the runtime.
+			if (runtime && status && !status.available) {
+				for (const target of targets) {
+					if (!targetRequiresAuth(target, runtime)) continue;
+					const targetStatus = auth.statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false });
+					if (targetStatus.available) {
+						status = targetStatus;
+						break;
+					}
+				}
+			}
+			return { entry, status, targetCount: targets.length };
 		});
 }
 
