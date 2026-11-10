@@ -29,6 +29,7 @@ import {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryImportedStateDir,
 	telemetryInstallPath,
+	telemetryProcessDirectory,
 	telemetryRunDirectory,
 	telemetryRunsDirectory,
 	telemetrySessionDirectory,
@@ -43,6 +44,7 @@ import {
 	SHARE_SEAL_EVENT,
 	scopeBundleManifest,
 	verifyTelemetryScope,
+	walkTelemetryChain,
 } from "./seal.js";
 import type { ShareArchiveEntry } from "./share-archive.js";
 import {
@@ -55,15 +57,16 @@ import type { AnonKind } from "./share-projection.js";
 import { conformingAnonymous, projectSharedObject, projectSharedPayload } from "./share-projection.js";
 
 /**
- * `telemetry share` and `telemetry import` (#434). A share filters sealed scope bundles through a named profile,
- * re-applies secret redaction to every record and object it keeps, reseals each filtered scope with `share.sealed` over
- * exactly the bytes it carries, and packs them into one tar.gz with a manifest naming the profile, the source's random
- * install id and the Clio version. Nothing is uploaded. An import verifies every bundle and places it under
- * `<stateDir>/telemetry/imported/<installId>/`, apart from the operator's own telemetry.
+ * `telemetry share` and `telemetry import` (#434). A share filters sealed scope bundles, or a live scope's validated
+ * snapshot, through a named profile, re-applies secret redaction to every record and object it keeps, reseals each
+ * filtered scope with `share.sealed` over exactly the bytes it carries, and packs them into one tar.gz with a manifest
+ * naming the profile, the source's random install id and the Clio version. Nothing is uploaded. An import verifies
+ * every bundle and places it under `<stateDir>/telemetry/imported/<installId>/`, apart from the operator's own
+ * telemetry.
  */
 
 export type ShareProfile = Static<typeof ShareProfileSchema>;
-export type ShareScopeKind = "session" | "run";
+export type ShareScopeKind = "session" | "run" | "process";
 
 export interface ShareProfileDefinition {
 	/** One line for the profile picker and the preview. */
@@ -102,10 +105,15 @@ export function isShareProfile(value: string): value is ShareProfile {
 	return Object.hasOwn(SHARE_PROFILES, value);
 }
 
-const SCOPE_DIRECTORY: Readonly<Record<ShareScopeKind, string>> = { session: "sessions", run: "runs" };
+const SCOPE_DIRECTORY: Readonly<Record<ShareScopeKind, string>> = {
+	session: "sessions",
+	run: "runs",
+	process: "process",
+};
 const SOURCE_SEALS: ReadonlySet<string> = new Set([...Object.values(SEAL_EVENTS), SHARE_SEAL_EVENT]);
 
 function scopeDirectory(stateDir: string, kind: ShareScopeKind, id: string): string {
+	if (kind === "process") return telemetryProcessDirectory(stateDir, id);
 	return kind === "session" ? telemetrySessionDirectory(stateDir, id) : telemetryRunDirectory(stateDir, id);
 }
 
@@ -164,13 +172,23 @@ export interface ShareSelection {
 	/** ISO bounds on a scope's seal time; they filter repository and time-range candidates, never named scopes. */
 	since: string | null;
 	until: string | null;
+	/** Process scopes by id; the running process's own journal is live, so it is reachable only by snapshot. */
+	processes?: ReadonlyArray<string>;
+	/**
+	 * What a named scope with no seal gets: `refuse` skips it, `snapshot` shares the validated chain prefix on disk
+	 * without writing to the scope. Repository and time-range candidates are never snapshotted. Default `refuse`.
+	 */
+	live?: "refuse" | "snapshot";
 }
 
 export interface ShareScopeSource {
 	kind: ShareScopeKind;
 	id: string;
+	/** The seal time, or for a snapshot the newest record's time. */
 	sealedAt: string;
 	files: TelemetryScopeFiles;
+	/** A live scope read as a validated prefix; the source holds no seal. */
+	snapshot?: true;
 }
 
 export interface ShareSkip {
@@ -229,8 +247,33 @@ function referencedRuns(files: TelemetryScopeFiles): string[] {
 }
 
 /**
+ * A live scope as the validated chain prefix on disk, read once and never written. The live segment ends at its last
+ * complete line: a torn final line is the writer mid-append, not damage. Any other break in the chain skips the scope.
+ */
+function snapshotScope(
+	kind: ShareScopeKind,
+	id: string,
+	files: TelemetryScopeFiles,
+): { files: TelemetryScopeFiles; sealedAt: string } | { reason: string } {
+	const segments = files.segments.map((segment, index) => {
+		if (index !== files.segments.length - 1 || segment.name !== TELEMETRY_JOURNAL_FILE) return segment;
+		const scan = scanTelemetrySegment(segment.bytes);
+		return scan.tornTailBytes > 0 ? { ...segment, bytes: segment.bytes.subarray(0, scan.validBytes) } : segment;
+	});
+	const walk = walkTelemetryChain(segments, { scope: { kind, id } });
+	if ("mismatch" in walk) return { reason: `live snapshot fails verification: ${describeSealMismatch(walk.mismatch)}` };
+	let newest: string | null = null;
+	for (const segment of segments)
+		for (const row of scanTelemetrySegment(segment.bytes).rows)
+			if (row.kind === "record" && (newest === null || row.record.t > newest)) newest = row.record.t;
+	if (newest === null) return { reason: "live snapshot holds no record" };
+	return { files: { ...files, segments }, sealedAt: newest };
+}
+
+/**
  * The sealed, verified scopes a selection names, each once. A session brings the runs it references; a scope that is
- * live, missing or fails verification is skipped with its reason, never shared.
+ * live, missing or fails verification is skipped with its reason, never shared. With `live: "snapshot"`, a named
+ * scope that is live is shared as a snapshot instead.
  */
 export function resolveShareScopes(
 	stateDir: string,
@@ -244,6 +287,7 @@ export function resolveShareScopes(
 	const queue: Array<{ kind: ShareScopeKind; id: string; windowed: boolean }> = [
 		...selection.sessions.map((id) => ({ kind: "session" as const, id, windowed: false })),
 		...selection.runs.map((id) => ({ kind: "run" as const, id, windowed: false })),
+		...(selection.processes ?? []).map((id) => ({ kind: "process" as const, id, windowed: false })),
 	];
 	if (selection.repo !== null)
 		for (const id of listIds(join(stateDir, "sessions", cwdHash(selection.repo))))
@@ -274,6 +318,17 @@ export function resolveShareScopes(
 			files = readTelemetryScopeFilesSync(directory);
 		} catch (error) {
 			skipped.push({ kind, id, reason: `unreadable: ${error instanceof Error ? error.message : String(error)}` });
+			continue;
+		}
+		if (files.manifest === null && !windowed && selection.live === "snapshot") {
+			const taken = snapshotScope(kind, id, files);
+			if ("reason" in taken) {
+				skipped.push({ kind, id, reason: taken.reason });
+				continue;
+			}
+			scopes.push({ kind, id, sealedAt: taken.sealedAt, files: taken.files, snapshot: true });
+			if (kind === "session")
+				for (const runId of referencedRuns(taken.files)) queue.push({ kind: "run", id: runId, windowed: false });
 			continue;
 		}
 		const verdict = verifyTelemetryScope(files);
@@ -321,6 +376,8 @@ export interface ShareScopePlan {
 	id: string;
 	/** The profile this scope was filtered under: `structural` when `research` was asked of a scope without consent. */
 	profile: ShareProfile;
+	/** Set when the scope was live and shared as a snapshot: the newest record's time. */
+	snapshotAt?: string;
 	journal: Buffer;
 	bundle: Buffer;
 	objects: Array<{ id: string; bytes: Buffer }>;
@@ -456,9 +513,11 @@ function filterScope(
 		projected: 0,
 	};
 	let sourceSeal: TelemetryRecord | undefined;
+	let lastRecord: TelemetryRecord | undefined;
 	for (const segment of source.files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
 			if (row.kind === "header") headers.push(row.header);
+			if (row.kind === "record") lastRecord = row.record;
 			if (row.kind === "retired") continue;
 			if (row.kind === "skipped" || row.kind === "damaged") dropped.unreadable += 1;
 			else if (row.kind === "header") rows.push(row);
@@ -469,7 +528,9 @@ function filterScope(
 		}
 	const first = headers[0];
 	const last = headers.at(-1);
-	if (!sourceSeal || !first || !last) throw new Error(`${source.kind} ${source.id} has no seal or header`);
+	// A live snapshot has no seal of its own; its share seal names the scope as its last record does.
+	const ctx = sourceSeal?.ctx ?? (source.snapshot ? lastRecord?.ctx : undefined);
+	if (!ctx || !first || !last) throw new Error(`${source.kind} ${source.id} has no seal or header`);
 	// Consent at capture is what admitted content; a scope captured without it shares structure at most (#434, O6).
 	const consented = headers.some((header) => header.capture.content);
 	const profile: ShareProfile = requested === "research" && !consented ? "structural" : requested;
@@ -552,7 +613,7 @@ function filterScope(
 		installId,
 		writer,
 		header: last,
-		ctx: sourceSeal.ctx,
+		ctx,
 		now,
 	});
 	const check = verifyTelemetryScope({
@@ -588,6 +649,7 @@ function filterScope(
 		kind: source.kind,
 		id: source.id,
 		profile,
+		...(source.snapshot ? { snapshotAt: source.sealedAt } : {}),
 		journal,
 		bundle,
 		objects,
@@ -645,7 +707,7 @@ const ShareManifestSchema = Type.Object(
 		scopes: Type.Array(
 			Type.Object(
 				{
-					kind: Type.Union([Type.Literal("session"), Type.Literal("run")]),
+					kind: Type.Union([Type.Literal("session"), Type.Literal("run"), Type.Literal("process")]),
 					id: Type.String(),
 					profile: ShareProfileSchema,
 					head: Type.String({ pattern: "^[0-9a-f]{64}$" }),
@@ -712,7 +774,8 @@ export interface ShareArchiveCheck {
 	failure: string | null;
 }
 
-const MEMBER = /^(sessions|runs)\/([^/]+)\/(.+)$/u;
+const MEMBER = /^(sessions|runs|process)\/([^/]+)\/(.+)$/u;
+const MEMBER_KIND: Readonly<Record<string, ShareScopeKind>> = { sessions: "session", runs: "run", process: "process" };
 
 /**
  * The profile a shared scope's records and objects must stay within, checked line by line (#434). Every header and
@@ -794,7 +857,7 @@ export function verifyShareArchive(archive: Buffer): ShareArchiveCheck {
 			check.failure = `unexpected archive member ${entry.path}`;
 			return check;
 		}
-		const kind: ShareScopeKind = match[1] === "sessions" ? "session" : "run";
+		const kind = MEMBER_KIND[match[1] as string] as ShareScopeKind;
 		const id = match[2] as string;
 		const key = `${kind}:${id}`;
 		const group = groups.get(key) ?? { kind, id, files: { manifest: null, segments: [], objects: [] } };

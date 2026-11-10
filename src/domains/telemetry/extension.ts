@@ -427,6 +427,12 @@ export function createTelemetryBundle(context: DomainContext): TelemetryBundle {
 		setExitStatus(code) {
 			exitStatus = code;
 		},
+		async flush() {
+			// Records still acquiring a writer are queued too; each settles on its own and never rejects.
+			await Promise.all([...pendingRecords]);
+			await journals.flush();
+			await processJournal?.flush();
+		},
 		recordResearchTrace(origin, agent, kind, data, preimage) {
 			if (stopping) return;
 			// Facts can point at live runtime state; the journal keeps what the event saw (#434).

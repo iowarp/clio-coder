@@ -20,14 +20,18 @@ import { formatBytes } from "./lifecycle-presenter.js";
 import { canSelect, promptMultiSelect, promptSelect } from "./select.js";
 import { printError } from "./shared.js";
 
-export const SHARE_HELP = `clio-coder telemetry share [--session <id>]... [--run <id>]... [--repo <path>] [--since <iso>] [--until <iso>]
+export const SHARE_HELP = `clio-coder telemetry share [--session <id>]... [--run <id>]... [--process <id>]... [--repo <path>]
+                           [--since <iso>] [--until <iso>] [--live]
                            [--profile content-free|structural|research] [--out <file>] [--dry-run]
 clio-coder telemetry import <archive>
 
 share packs sealed telemetry scopes into one tar.gz for the maintainer; nothing is
 uploaded. Pick sessions, runs, a repository's sessions or a seal-time range; a
 session brings the runs it references, and a scope that is live or fails
-verification is skipped and named. In a terminal with no scope flags it asks
+verification is skipped and named. --live shares a named scope that is still
+live as a snapshot of what is on disk, without sealing or touching it; a
+process scope (boot, health, domain loads, exit) is reachable by --process,
+and the running process's own only with --live. In a terminal with no scope flags it asks
 which scopes and which profile. Profiles:
   content-free  ${SHARE_PROFILES["content-free"].summary} (default)
   structural    ${SHARE_PROFILES.structural.summary}
@@ -80,8 +84,9 @@ function preview(plan: SharePlan): string {
 	let redactions = 0;
 	const downgraded: string[] = [];
 	for (const scope of plan.scopes) {
+		const live = scope.snapshotAt === undefined ? "" : `live, snapshot at ${scope.snapshotAt}, `;
 		lines.push(
-			`  ${scope.kind} ${scope.id}: ${scope.profile}, ${scope.records} record(s), ${scope.objects.length} object(s) (${formatBytes(scope.objectBytes)}), ${scope.redactions} secret(s) redacted`,
+			`  ${scope.kind} ${scope.id}: ${live}${scope.profile}, ${scope.records} record(s), ${scope.objects.length} object(s) (${formatBytes(scope.objectBytes)}), ${scope.redactions} secret(s) redacted`,
 		);
 		for (const [tier, count] of Object.entries(scope.byTier)) byTier[tier] = (byTier[tier] ?? 0) + count;
 		for (const [event, count] of Object.entries(scope.byEvent)) byEvent[event] = (byEvent[event] ?? 0) + count;
@@ -115,21 +120,29 @@ const SINGLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["--repo", "--since", "-
 function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	const sessions: string[] = [];
 	const runs: string[] = [];
+	const processes: string[] = [];
 	const single = new Map<string, string>();
 	let dryRun = false;
+	let live = false;
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index] as string;
 		if (arg === "--dry-run") {
 			dryRun = true;
 			continue;
 		}
+		if (arg === "--live") {
+			live = true;
+			continue;
+		}
 		const value = argv[index + 1];
 		if (!arg.startsWith("--")) return `unexpected argument: ${arg}`;
-		if (arg !== "--session" && arg !== "--run" && !SINGLE_VALUE_FLAGS.has(arg)) return `unknown flag: ${arg}`;
+		if (arg !== "--session" && arg !== "--run" && arg !== "--process" && !SINGLE_VALUE_FLAGS.has(arg))
+			return `unknown flag: ${arg}`;
 		if (value === undefined || value.startsWith("--")) return `${arg} needs a value`;
 		index += 1;
 		if (arg === "--session") sessions.push(value);
 		else if (arg === "--run") runs.push(value);
+		else if (arg === "--process") processes.push(value);
 		else if (!single.has(arg)) single.set(arg, value);
 		else return `repeated flag ${arg}`;
 	}
@@ -148,7 +161,15 @@ function parseShare(argv: ReadonlyArray<string>): ShareArgs | string {
 	const repo = single.get("--repo");
 	const out = single.get("--out");
 	return {
-		selection: { sessions, runs, repo: repo === undefined ? null : resolve(repo), since, until },
+		selection: {
+			sessions,
+			runs,
+			processes,
+			repo: repo === undefined ? null : resolve(repo),
+			since,
+			until,
+			live: live ? "snapshot" : "refuse",
+		},
 		profile,
 		out: out === undefined ? null : resolve(out),
 		dryRun,
@@ -159,6 +180,7 @@ function selectsNothing(selection: ShareSelection): boolean {
 	return (
 		selection.sessions.length === 0 &&
 		selection.runs.length === 0 &&
+		(selection.processes ?? []).length === 0 &&
 		selection.repo === null &&
 		selection.since === null &&
 		selection.until === null
@@ -178,7 +200,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 	let selection = args.selection;
 	if (selectsNothing(selection)) {
 		if (!interactive) {
-			printError("share needs --session, --run, --repo, or --since/--until outside a terminal");
+			printError("share needs --session, --run, --process, --repo, or --since/--until outside a terminal");
 			process.stderr.write(SHARE_HELP);
 			return 2;
 		}

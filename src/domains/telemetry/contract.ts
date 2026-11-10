@@ -206,6 +206,11 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	 */
 	setExitStatus?(code: number): void;
 	/**
+	 * Resolves when every record queued at the call, session and process scoped, is on disk, so a reader of the
+	 * journals (a live share snapshot) sees it (#434).
+	 */
+	flush(): Promise<void>;
+	/**
 	 * Spend so far as the budget gate enforces it: the live read model's `session:<id>#usd` (own calls plus referenced
 	 * runs) for the bound session, or with no session this process's own calls (`process:<id>#usd`), its estimated
 	 * and unpriced parts flagged. Read from persisted batches only; the gate itself reads {@link settledSessionSpend}.

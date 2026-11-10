@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,6 +9,7 @@ import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { SegmentHeader } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { newProcessId } from "../../src/core/telemetry/ids.js";
 import type { ObjectRef } from "../../src/core/telemetry/schemas.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
@@ -18,6 +19,7 @@ import { storeTelemetryObject, telemetryCommitment } from "../../src/domains/tel
 import {
 	telemetryImportedStateDir,
 	telemetryObjectsDirectory,
+	telemetryProcessDirectory,
 	telemetrySessionDirectory,
 } from "../../src/domains/telemetry/paths.js";
 import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
@@ -343,6 +345,97 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			(objects) => objects.map((object) => (object.id === projectedId ? { id: rawId, bytes: raw } : object)),
 		);
 		match(verifyShareArchive(unprojected).failure ?? "", /prompt-structure object .* beyond the structural projection/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+/** A live scope's journal as its writer leaves it between batches: flushed, never sealed. */
+async function liveJournal(
+	directory: string,
+	context: TelemetryContext,
+	records: ReadonlyArray<{ kind: string; data: unknown }>,
+): Promise<string> {
+	const journal = await openCallJournal({ directory, context, writer });
+	for (const { kind, data } of records)
+		journal.enqueue({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() } as Parameters<
+			typeof journal.enqueue
+		>[0]);
+	await journal.flush();
+	await journal.close();
+	return join(directory, "journal.jsonl");
+}
+
+test("a live session shares as a snapshot cut at a torn tail, leaving the source untouched (R-15)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-live-"));
+	try {
+		const stateDir = join(root, "operator");
+		const sessionId = "ses_live";
+		const directory = telemetrySessionDirectory(stateDir, sessionId);
+		const path = await liveJournal(directory, { sessionId, agent: { role: "main", id: sessionId } }, [
+			{ kind: "session.opened", data: {} },
+			{
+				kind: "turn.settled",
+				data: { stopReason: "stop", terminal: { cause: null, stage: null, retries: 0, callIds: [] } },
+			},
+		]);
+		// The writer mid-append: a final line without its checksum or newline.
+		await appendFile(path, '{"v":1,"k":"turn.settled"');
+		const bytes = await readFile(path);
+		const mtime = (await stat(path)).mtimeMs;
+		const selection = { sessions: [sessionId], runs: [], repo: null, since: null, until: null };
+		deepStrictEqual(resolveShareScopes(stateDir, selection).skipped, [
+			{ kind: "session", id: sessionId, reason: "not sealed (live or never sealed)" },
+		]);
+		const { scopes, skipped } = resolveShareScopes(stateDir, { ...selection, live: "snapshot" });
+		deepStrictEqual(skipped, []);
+		const plan = planShare({ scopes, skipped, profile: "content-free", source: telemetryShareSource(stateDir), writer });
+		strictEqual(plan.scopes[0]?.byEvent["turn.settled"], 1);
+		strictEqual(plan.scopes[0]?.snapshotAt, scopes[0]?.sealedAt);
+		const out = join(root, "live.tar.gz");
+		await writeShare(plan, out);
+		strictEqual(verifyShareArchive(await readFile(out)).failure, null);
+		ok((await readFile(path)).equals(bytes), "the snapshot changed the live journal");
+		strictEqual((await stat(path)).mtimeMs, mtime);
+		strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(directory)).status, "unsealed");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a live process scope shares by snapshot and imports under process/ (R-15)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-process-"));
+	try {
+		const stateDir = join(root, "operator");
+		const processId = newProcessId();
+		await liveJournal(
+			telemetryProcessDirectory(stateDir, processId),
+			{ sessionId: null, processId, agent: { role: "main", id: processId } },
+			[{ kind: "process.started", data: {} }],
+		);
+		const { scopes, skipped } = resolveShareScopes(stateDir, {
+			sessions: [],
+			runs: [],
+			processes: [processId],
+			repo: null,
+			since: null,
+			until: null,
+			live: "snapshot",
+		});
+		deepStrictEqual(skipped, []);
+		const source = telemetryShareSource(stateDir);
+		const out = join(root, "process.tar.gz");
+		await writeShare(planShare({ scopes, skipped, profile: "content-free", source, writer }), out);
+		const imported = await importShareArchive(join(root, "maintainer"), await readFile(out));
+		const placed = telemetryProcessDirectory(
+			telemetryImportedStateDir(join(root, "maintainer"), source.installId),
+			processId,
+		);
+		deepStrictEqual(
+			imported.placed.map(({ kind, id, directory }) => ({ kind, id, directory })),
+			[{ kind: "process", id: processId, directory: placed }],
+		);
+		strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(placed)).status, "verified");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
