@@ -122,6 +122,12 @@ export interface SessionContract {
 	 */
 	tree(sessionId?: string): TreeSnapshot;
 	/**
+	 * The session's current leaf (next append point), equal to
+	 * `tree(sessionId).leafId`. The current session answers from memory with
+	 * no file read; another session falls back to its tree snapshot.
+	 */
+	leafId(sessionId?: string): string | null;
+	/**
 	 * Switch the active session to `sessionId`. Semantically mirrors `resume`:
 	 * the /tree overlay uses this to rewire the chat-loop when the user picks
 	 * a different branch. Returns the new SessionMeta.

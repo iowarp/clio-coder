@@ -19,6 +19,7 @@ for (const succeeds of [true, false]) {
 				if (succeeds) sessionId = "child-session";
 			},
 			tree: () => ({ leafId: "fork-point" }),
+			leafId: () => "fork-point",
 		} as unknown as SessionContract;
 		const transitions: OverlayTransitions = {
 			state: "closed",

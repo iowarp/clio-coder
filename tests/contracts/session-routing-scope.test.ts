@@ -194,7 +194,7 @@ test("restoring a resumed route patches the session and records a route the sess
 				session: {
 					current: () => ({ id: "s1", target: "alpha", model: "alpha-default" }) as SessionMeta,
 					readEntries: () => recorded,
-					tree: () => ({ leafId: "leaf-1" }) as never,
+					leafId: () => "leaf-1",
 					appendEntry: (row) => {
 						appended.push(row as never);
 						return row as never;
@@ -289,6 +289,7 @@ test("a thinking change is recorded in the session it took effect in", async () 
 		flushAppends: () => {},
 		replaceEntries: () => {},
 		tree: () => ({ leafId: null, nodes: [] }),
+		leafId: () => null,
 	} as unknown as SessionContract;
 	const loop = createChatLoop({
 		getSettings: () => settings,

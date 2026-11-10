@@ -845,7 +845,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				deps.session.appendEntry({
 					kind: "custom",
 					customType: TURN_HUMAN_WAIT_ENTRY,
-					parentTurnId: deps.session.tree().leafId ?? null,
+					parentTurnId: deps.session.leafId() ?? null,
 					display: false,
 					data: fields,
 				});
@@ -1318,7 +1318,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				deps.session.appendEntry({
 					kind: "custom",
 					customType: OPERATOR_COMMAND_ENTRY,
-					parentTurnId: deps.session.tree().leafId ?? null,
+					parentTurnId: deps.session.leafId() ?? null,
 					data: { text },
 				});
 			} catch {
@@ -1939,7 +1939,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			try {
 				sessionTranscript.ensureSessionForLocalEntry();
 				if (!deps.session?.current()) return;
-				deps.session.appendEntry({ ...fields, parentTurnId: deps.session.tree().leafId ?? null });
+				deps.session.appendEntry({ ...fields, parentTurnId: deps.session.leafId() ?? null });
 			} catch {
 				// Best effort; the live block already rendered.
 			}
@@ -1950,7 +1950,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				deps.session.appendEntry({
 					kind: "custom",
 					customType: WORKER_SETTLED_ENTRY,
-					parentTurnId: deps.session.tree().leafId ?? null,
+					parentTurnId: deps.session.leafId() ?? null,
 					display: false,
 					data: fields,
 				});

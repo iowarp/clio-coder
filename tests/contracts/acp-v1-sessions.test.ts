@@ -103,6 +103,7 @@ function fixture(
 			current = null;
 		},
 		tree: () => ({ leafId: null }),
+		leafId: () => null,
 		setName: (name: string, id: string) => {
 			const meta = history.find((row) => row.id === id);
 			if (meta) meta.name = name;

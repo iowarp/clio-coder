@@ -15,7 +15,7 @@ export function hydrateResumedSessionPresentation(
 ): void {
 	const meta = session.current();
 	if (!meta) return;
-	const leaf = session.tree(meta.id).leafId;
+	const leaf = session.leafId(meta.id);
 	const entries = readEntries(meta.id);
 	const options = withContinuityReplay(entries, leaf === null ? {} : { activeLeafTurnId: leaf }, session);
 	rehydrateChatPanelFromTurns(panel, entries, options);

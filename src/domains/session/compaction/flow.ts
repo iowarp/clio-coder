@@ -190,9 +190,9 @@ export async function runCompactionFlow(
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
-	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
+	const activeLeafTurnId = session.leafId(meta.id) ?? undefined;
 	const isOriginCurrent = () =>
-		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
+		session.current()?.id === meta.id && (session.leafId(meta.id) ?? undefined) === activeLeafTurnId;
 	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).

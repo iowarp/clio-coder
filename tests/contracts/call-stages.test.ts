@@ -98,6 +98,7 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 	const session = {
 		current: () => ({ id: "stages-session", cwd: env.dir, cwdHash: "stages-repo" }),
 		tree: () => ({ leafId: entries.at(-1)?.turnId ?? null }),
+		leafId: () => entries.at(-1)?.turnId ?? null,
 		append(turn: TurnInput) {
 			const id = `turn-${entries.length + 1}`;
 			entries.push({
@@ -466,6 +467,7 @@ it("a main call journals the model change and the Codex transport resets the hos
 	const session = {
 		current: () => ({ id: "cold-session", cwd: env.dir, cwdHash: "cold-repo" }),
 		tree: () => ({ leafId: entries.at(-1)?.turnId ?? null }),
+		leafId: () => entries.at(-1)?.turnId ?? null,
 		append(turn: TurnInput) {
 			const id = `turn-${entries.length + 1}`;
 			entries.push({

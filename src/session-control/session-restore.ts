@@ -5,7 +5,7 @@ import type { ChatLoop } from "./chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns, withContinuityReplay } from "./model-session-replay.js";
 
 export interface SessionReplayPorts {
-	session: Pick<SessionContract, "current" | "tree">;
+	session: Pick<SessionContract, "current" | "leafId">;
 	chat: Pick<ChatLoop, "resetForSession">;
 	readEntries(id: string): ReadonlyArray<SessionEntry>;
 	buildMessages?(
@@ -25,7 +25,7 @@ export function replayCurrentSession(
 	if (ports.session.current()?.id !== id) throw new Error("resume identity mismatch");
 	let leafTurnId = selectedLeaf !== undefined ? selectedLeaf : fallbackLeaf;
 	try {
-		if (selectedLeaf === undefined) leafTurnId = ports.session.tree(id).leafId ?? fallbackLeaf;
+		if (selectedLeaf === undefined) leafTurnId = ports.session.leafId(id) ?? fallbackLeaf;
 		const entries = ports.readEntries(id);
 		const replayOptions = withContinuityReplay(
 			entries,

@@ -228,6 +228,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			? ({
 					current: () => state.meta,
 					tree: () => ({ leafId: leaf }),
+					leafId: () => leaf,
 					append: (turn: Parameters<typeof appendTurn>[1]) => {
 						const record = appendTurn(state, turn);
 						leaf = record.id;
@@ -382,6 +383,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 		const session = {
 			current: () => state.meta,
 			tree: () => ({ leafId: null }),
+			leafId: () => null,
 			appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
 			readEntries: () => readCurrentEntries(state),
 		} as unknown as SessionContract;

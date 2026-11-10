@@ -45,6 +45,7 @@ function limitedChatLoop(sessionToolLimits: SessionToolLimits) {
 		flushAppends: () => {},
 		replaceEntries: () => {},
 		tree: () => ({ leafId: null, nodes: [] }),
+		leafId: () => null,
 	} as unknown as SessionContract;
 	return createChatLoop({
 		getSettings: () => settings,

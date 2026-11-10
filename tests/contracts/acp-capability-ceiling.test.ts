@@ -54,6 +54,7 @@ test("an ACP client's session and prompt ceilings narrow the operator's limits a
 		flushAppends: () => {},
 		replaceEntries: () => {},
 		tree: () => ({ leafId: null, nodes: [], nodesById: { "turn-1": { kind: "user" } } }),
+		leafId: () => null,
 		fork: () => {
 			current = { ...(current as SessionMeta), id: "acp-ceiling-fork" };
 			return current;

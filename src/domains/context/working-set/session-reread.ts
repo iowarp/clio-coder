@@ -18,7 +18,7 @@ export function createSessionRereadPort(session: SessionContract, bus: Telemetry
 		},
 		activeLeafTurnId: () => {
 			const meta = session.current();
-			return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+			return meta ? (session.leafId(meta.id) ?? undefined) : undefined;
 		},
 		cwd: () => session.current()?.cwd ?? null,
 		appendEntry: (entry) => session.appendEntry(entry),

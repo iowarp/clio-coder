@@ -906,6 +906,7 @@ test("a collected block is persisted before the first model call while operator 
 	const session = {
 		current: () => ({ id: "orientation-session", cwd: process.cwd() }),
 		tree: () => ({ leafId: leaf }),
+		leafId: () => leaf,
 		append(turn: Parameters<SessionContract["append"]>[0]) {
 			const id = turn.id ?? `turn-${entries.length + 1}`;
 			leaf = id;

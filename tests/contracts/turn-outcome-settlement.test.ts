@@ -43,6 +43,7 @@ for (const continuation of [false, true])
 			const session = {
 				current: () => ({ id: "outcome-session", cwd: scratch.dir, cwdHash: "outcome-repo" }),
 				tree: () => ({ leafId: leaf }),
+				leafId: () => leaf,
 				append(turn: TurnInput) {
 					const id = continuation ? (turn.id ?? `turn-${entries.length + 1}`) : `turn-${entries.length + 1}`;
 					leaf = id;
@@ -222,6 +223,7 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 	const session = {
 		current: () => ({ id: "outcome-session", cwd: scratch.dir, cwdHash: "outcome-repo" }),
 		tree: () => ({ leafId: null }),
+		leafId: () => null,
 		appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
 			const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() } as SessionEntry;
 			entries.push(row);

@@ -23,11 +23,11 @@ export function entriesBeforeMemoryOff<T extends { kind?: unknown }>(entries: re
  * one. The ledger is the only state, so a restart and a fork that copied the marker answer the same way.
  */
 export function markMemoryOffRecording(
-	target: Pick<SessionContract, "current" | "tree" | "readEntries" | "appendEntry">,
+	target: Pick<SessionContract, "current" | "leafId" | "readEntries" | "appendEntry">,
 ): void {
 	const meta = target.current();
 	if (!meta) return;
-	const leaf = target.tree(meta.id).leafId ?? null;
+	const leaf = target.leafId(meta.id) ?? null;
 	if (filterEntriesToActivePath(target.readEntries(), leaf ?? undefined).some((entry) => isMemoryOffEntry(entry)))
 		return;
 	target.appendEntry({

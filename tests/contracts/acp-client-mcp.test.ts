@@ -54,6 +54,7 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 			return stored;
 		},
 		tree: () => ({ leafId: null }),
+		leafId: () => null,
 		close: async () => {
 			if (stored) stored.endedAt = new Date().toISOString();
 			current = null;

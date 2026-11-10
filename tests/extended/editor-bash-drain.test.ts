@@ -14,7 +14,7 @@ function controller(runBash: EditorSubmitDeps["runBash"], appendEntry: (entry: u
 		io: { stdout: noop, stderr: noop },
 		chat: { isStreaming: () => false },
 		dispatch: {},
-		session: { current: () => ({}), tree: () => ({ leafId: null }), appendEntry },
+		session: { current: () => ({}), tree: () => ({ leafId: null }), leafId: () => null, appendEntry },
 		sessionTranscript: {
 			ensureSessionForLocalEntry: noop,
 			refreshChatContextFromSession: noop,

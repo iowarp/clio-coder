@@ -478,6 +478,7 @@ function gatedLoop(halt: { current: AutonomyHalt | null }) {
 	const session = {
 		current: () => ({ id: "autonomy-session", cwd: process.cwd(), cwdHash: "autonomy-repo" }),
 		tree: () => ({ leafId: entries.at(-1)?.turnId ?? null }),
+		leafId: () => entries.at(-1)?.turnId ?? null,
 		append(turn: TurnInput) {
 			const id = `turn-${entries.length + 1}`;
 			entries.push({
@@ -593,6 +594,7 @@ test("the judge host reports its escalation, which a paused yolo window latches 
 		current: () => ({ id: "session-1" }),
 		readEntries: () => [],
 		tree: () => ({ leafId: null }),
+		leafId: () => null,
 		appendEntry: (input: unknown) => input,
 	} as unknown as SessionContract;
 	const escalations: SafetyJudgeNote[] = [];

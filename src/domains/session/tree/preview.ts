@@ -25,6 +25,9 @@ import { operatorTextOfUserPayload } from "../history.js";
  */
 const TURN_PREVIEW_MAX_CHARS = 60;
 
+/** Head of a payload scanned for a preview: room for ANSI codes and whitespace runs that collapse away. */
+const SANITIZE_SCAN_CHARS = 4096;
+
 /** Minimal turn shape buildTurnPreview accepts. */
 type TurnPreviewInput = Pick<ClioTurnRecord, "kind" | "payload">;
 
@@ -59,7 +62,11 @@ function collapseSingleLine(text: string): string {
  * collapse because some CSI sequences embed literal spaces.
  */
 function sanitize(text: string): string {
-	return collapseSingleLine(stripTokenizerSentinels(stripAnsi(text)));
+	// Previews are clamped to a few dozen characters, so only a bounded head
+	// is cleaned; scanning a megabyte payload for a 60-character row made
+	// every /tree snapshot linear in transcript size.
+	const head = text.length > SANITIZE_SCAN_CHARS ? text.slice(0, SANITIZE_SCAN_CHARS) : text;
+	return collapseSingleLine(stripTokenizerSentinels(stripAnsi(head)));
 }
 
 function clamp(text: string, max: number): string {

@@ -205,7 +205,7 @@ export function createSafetyJudgeHost(deps: {
 			if (session === undefined || !meta) return [];
 			let leaf: string | undefined;
 			try {
-				leaf = session.tree(meta.id).leafId ?? undefined;
+				leaf = session.leafId(meta.id) ?? undefined;
 			} catch {
 				// An unreadable tree snapshot must not erase every operator message: the
 				// newest ledger message stands in as the leaf, and the call's own turn

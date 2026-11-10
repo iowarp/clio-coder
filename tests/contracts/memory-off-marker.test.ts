@@ -125,6 +125,7 @@ it("the marker is decided from the active path, so a /tree branch gets its own",
 	const target = {
 		current: () => ({ id: "s" }),
 		tree: () => ({ leafId: leaf }),
+		leafId: () => leaf,
 		readEntries: () => ledger,
 		appendEntry: (entry: Record<string, unknown>) => {
 			ledger.push({ ...base, ...entry, turnId: `m${ledger.length}` });

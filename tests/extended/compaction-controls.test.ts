@@ -173,6 +173,7 @@ describe("production compaction controls", () => {
 		const session = {
 			current: () => state.meta,
 			tree: () => ({ leafId: leaf }),
+			leafId: () => leaf,
 			appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
 			readEntries: () => readCurrentEntries(state),
 		} as unknown as SessionContract;

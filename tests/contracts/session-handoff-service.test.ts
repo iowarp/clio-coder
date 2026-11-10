@@ -111,6 +111,7 @@ function fakeSession(
 			return entry;
 		},
 		tree: () => ({ leafId: null }),
+		leafId: () => null,
 		deleteSession: (id: string) => {
 			if (id === current) throw new Error("refusing to delete the open session");
 			metas.delete(id);

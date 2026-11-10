@@ -39,7 +39,7 @@ export function createMemorySessionProjection(
 			memoryProjection.sessionId !== meta.id ||
 			memoryProjection.pinned !== pinned
 		) {
-			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined));
+			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.leafId(meta.id) ?? undefined));
 			const checkpointIndex = active.reduce(
 				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
 				-1,

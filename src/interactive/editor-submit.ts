@@ -102,7 +102,7 @@ type EditorSubmitChat = Pick<
 /** What the operator chose when a send-now found a tool still running. */
 export type SendNowChoice = "stop" | "wait" | "cancelled";
 type EditorSubmitDispatch = Pick<DispatchContract, "snapshot" | "steer">;
-type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "tree">;
+type EditorSubmitSession = Pick<SessionContract, "appendEntry" | "current" | "leafId">;
 
 export interface EditorSubmitSessionTranscript {
 	ensureSessionForLocalEntry(): void;
@@ -208,7 +208,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		let parentTurnId: string | null = null;
 		try {
 			deps.sessionTranscript.ensureSessionForLocalEntry();
-			parentTurnId = deps.session?.tree().leafId ?? null;
+			parentTurnId = deps.session?.leafId() ?? null;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[bash] session setup failed: ${msg}\n`);
@@ -298,8 +298,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				// one wedged every later submit on a parent that was no longer
 				// the leaf. The refresh resets the chat loop, which aborts a live
 				// turn, so a turn that started during the line finishes first.
-				const refresh = () =>
-					deps.sessionTranscript.refreshChatContextFromSession(deps.session?.tree().leafId ?? parentTurnId);
+				const refresh = () => deps.sessionTranscript.refreshChatContextFromSession(deps.session?.leafId() ?? parentTurnId);
 				if (!deps.chat.isStreaming()) refresh();
 				else
 					void (async () => {

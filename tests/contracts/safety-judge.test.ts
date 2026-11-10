@@ -263,6 +263,7 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 		current: () => ({ id: "session-1" }),
 		readEntries: () => entries,
 		tree: () => ({ leafId: leaf }),
+		leafId: () => leaf,
 		appendEntry: (input: unknown) => input,
 	} as unknown as SessionContract;
 	const prompts: string[] = [];

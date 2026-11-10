@@ -157,7 +157,7 @@ export function createFlowLedger(deps: {
 					customType: FLOW_RESTRICTION_ENTRY_TYPE,
 					// A fact about the session's provenance, never a model message.
 					display: false,
-					parentTurnId: session.tree(meta.id).leafId ?? null,
+					parentTurnId: session.leafId(meta.id) ?? null,
 					data: {
 						set: next.set,
 						...(next.origin.tool !== undefined ? { tool: next.origin.tool } : {}),

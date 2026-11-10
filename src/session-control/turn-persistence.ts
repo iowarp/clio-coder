@@ -151,7 +151,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		} catch (err) {
 			const current = session.current();
 			if (!current) throw err;
-			const leaf = session.tree(current.id).leafId;
+			const leaf = session.leafId(current.id);
 			if (leaf === state.lastTurnId) throw err;
 			state.lastTurnId = leaf;
 			return session.append({ ...turn, parentId: leaf } as TurnInput);

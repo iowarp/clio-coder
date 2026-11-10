@@ -22,6 +22,7 @@ if (mode === "editor") {
 		session: {
 			current: () => ({}),
 			tree: () => ({ leafId: null }),
+			leafId: () => null,
 			appendEntry: (entry: unknown) => {
 				writeFileSync(join(root, "entry.json"), JSON.stringify(entry));
 				return entry;

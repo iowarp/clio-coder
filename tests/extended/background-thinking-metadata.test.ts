@@ -85,6 +85,7 @@ for (const role of ["memory", "compaction"] as const) {
 				const session = {
 					current: () => state.meta,
 					tree: () => ({ leafId: leaf }),
+					leafId: () => leaf,
 					appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
 					readEntries: () => readCurrentEntries(state),
 				} as unknown as SessionContract;
@@ -224,6 +225,7 @@ test("compaction rechecks its origin after cold metadata preparation before spen
 		const session = {
 			current: () => current,
 			tree: () => ({ leafId: leaf }),
+			leafId: () => leaf,
 			appendEntry: (entry: Parameters<typeof appendEntry>[1]) => appendEntry(state, entry),
 			readEntries: () => readCurrentEntries(state),
 		} as unknown as SessionContract;

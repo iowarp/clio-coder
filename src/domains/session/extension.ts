@@ -326,6 +326,12 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			if (state?.meta.id === id) void flushIfCurrent(id);
 			return snapshotFor(id);
 		},
+		leafId(sessionId) {
+			const id = sessionId ?? state?.meta.id;
+			if (!id) throw new Error("session.leafId: no sessionId provided and no current session");
+			if (state?.meta.id === id) return currentTurnId;
+			return snapshotFor(id).leafId;
+		},
 		switchBranch(sessionId) {
 			// /tree-driven branch switch delegates to resume. Kept as a distinct
 			// contract method so telemetry or chat-loop rewiring can be layered on

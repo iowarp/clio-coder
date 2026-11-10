@@ -41,7 +41,7 @@ export function resumedSessionRoute(
 
 /** What restoring a resumed session's route reads and writes; the composition root supplies each. */
 export interface ResumedRouteRestorePorts {
-	session: Pick<SessionContract, "current" | "readEntries" | "tree" | "appendEntry"> | null;
+	session: Pick<SessionContract, "current" | "readEntries" | "leafId" | "appendEntry"> | null;
 	/** The live effective settings, re-read after `applyPatch`. */
 	currentSettings(): Readonly<ClioSettings>;
 	/** The configured thinking level a legacy ledger without a thinking row falls back to. */
@@ -82,7 +82,7 @@ export function restoreResumedSessionRoute(
 	const effective = settings.chat;
 	const parentTurnId = (() => {
 		try {
-			return session.tree(meta.id).leafId;
+			return session.leafId(meta.id);
 		} catch {
 			return null;
 		}

@@ -411,7 +411,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			}
 			// Settlement can append an interrupted assistant turn. Select only now,
 			// and honor /tree's active leaf instead of the newest sibling (#444).
-			const leafId = session.tree().leafId;
+			const leafId = session.leafId();
 			const active = filterEntriesToActivePath(session.readEntries(), leafId ?? undefined);
 			const parent = active.reverse().find((entry) => entry.kind === "message" && entry.role === "assistant");
 			if (!parent) {

@@ -5225,7 +5225,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			let replay: PreparedAcpReplay | undefined;
 			try {
 				entries = options.readSessionEntries(id);
-				const leaf = options.session.tree(id).leafId;
+				const leaf = options.session.leafId(id);
 				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, stored.target) : undefined;
 			} catch {
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
@@ -6916,7 +6916,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			notify({ sessionUpdate: "tool_call_update", toolCallId, status: "in_progress", content: toolCallContent(text) });
 		};
 		try {
-			const parentTurnId = durable.tree().leafId ?? null;
+			const parentTurnId = durable.leafId() ?? null;
 			notify({
 				sessionUpdate: "tool_call",
 				toolCallId,
@@ -6943,7 +6943,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				entry = durable.appendEntry(run.entry);
 				// As in the terminal: the entry stays anchored where the line started,
 				// and the context is rebuilt from the leaf the session has now.
-				const leafTurnId = durable.tree().leafId ?? parentTurnId;
+				const leafTurnId = durable.leafId() ?? parentTurnId;
 				resetForSession.call(
 					options.chat,
 					leafTurnId,

@@ -189,7 +189,7 @@ export interface InteractiveSlashRuntimeDeps {
 	 * `/context recall` uses the same leaf for its fold, plus `appendEntry` for
 	 * the `contextRecall` record.
 	 */
-	session?: Pick<SessionContract, "tree" | "current" | "appendEntry" | "setName">;
+	session?: Pick<SessionContract, "leafId" | "current" | "appendEntry" | "setName">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	/** Render-trace stamps for one chat submit; the armed trace is the only consumer. */
 	onSubmitPhase?: (submitSeq: number, phase: SubmitPhase) => void;
@@ -333,7 +333,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	const oracleBriefingSources = (): Omit<OracleDigestSources, "question"> => {
 		const sessionId = deps.chat.getSessionId();
 		if (sessionId === null) return { decisions: [], tasks: [], compactionSummary: null };
-		const leafTurnId = deps.session?.tree(sessionId).leafId ?? undefined;
+		const leafTurnId = deps.session?.leafId(sessionId) ?? undefined;
 		return oracleBriefingFromEntries(deps.readStructuredEntries(sessionId), leafTurnId);
 	};
 
@@ -835,7 +835,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// file still holds the abandoned branch after the pin, and an unscoped
 				// rehydrate exported it as ordinary history (issue #109). No session
 				// contract means no pin can exist for this reader, so the file replays whole.
-				const leafTurnId = deps.session?.tree(sessionId).leafId ?? null;
+				const leafTurnId = deps.session?.leafId(sessionId) ?? null;
 				// The export shows the same continuity the model sees, resolved from
 				// the same ledger through the same helper, so the two cannot drift.
 				// It is labelled as assistant handoff text and is never rendered as an
@@ -939,7 +939,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 							},
 							activeLeafTurnId: () => {
 								const meta = session.current();
-								return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+								return meta ? (session.leafId(meta.id) ?? undefined) : undefined;
 							},
 							appendEntry: (entry) => session.appendEntry(entry),
 							onRecalled: (payload) =>

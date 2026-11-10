@@ -1330,7 +1330,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			readEntries: () => {
 				const meta = session?.current();
 				if (!session || !meta) return [];
-				return filterEntriesToActivePath(session.readEntries(), session.tree(meta.id).leafId ?? undefined);
+				return filterEntriesToActivePath(session.readEntries(), session.leafId(meta.id) ?? undefined);
 			},
 			cwd: () => process.cwd(),
 		}),
@@ -2038,7 +2038,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const activePathEntries = (): ReadonlyArray<unknown> => {
 		const meta = session?.current();
 		if (!session || !meta) return [];
-		const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+		const leafTurnId = session?.leafId(meta.id) ?? undefined;
 		return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 	};
 	const taskBoard = createTaskBoardStore({
@@ -2057,12 +2057,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		readEntries: () => {
 			const meta = session?.current();
 			if (!session || !meta) return [];
-			const leafTurnId = session?.tree(meta.id).leafId ?? undefined;
+			const leafTurnId = session?.leafId(meta.id) ?? undefined;
 			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
 		},
 		getActiveLeafTurnId: () => {
 			const meta = session?.current();
-			return meta ? (session?.tree(meta.id).leafId ?? null) : null;
+			return meta ? (session?.leafId(meta.id) ?? null) : null;
 		},
 		appendEntry: (entry) => {
 			if (!session) throw new Error("decision board: no session ledger is available");
@@ -2342,7 +2342,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			? (resolved.target.modelRuntime.thinking.effort ??
 				(resolved.target.effectiveThinkingLevel === "off" ? "none" : resolved.target.effectiveThinkingLevel))
 			: undefined;
-		appendSessionThinkingLevel(session, level, effort, session.tree(meta.id).leafId);
+		appendSessionThinkingLevel(session, level, effort, session.leafId(meta.id));
 	};
 
 	effectiveSettingsForDispatch = getCurrentSettings;
@@ -2538,7 +2538,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					getRecentVisionImages: () => {
 						const meta = session?.current();
 						if (!session || !meta) return [];
-						const leaf = session?.tree(meta.id).leafId ?? undefined;
+						const leaf = session?.leafId(meta.id) ?? undefined;
 						return latestUserImages(session.readEntries(), leaf);
 					},
 				}
@@ -3404,7 +3404,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (resumedMeta) {
 			let leafTurnId: string | null = null;
 			try {
-				leafTurnId = session.tree(resumedMeta.id).leafId;
+				leafTurnId = session.leafId(resumedMeta.id);
 			} catch (err) {
 				bootStderr(
 					`Clio Coder: failed to read resumed session tree ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -3903,7 +3903,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											exportTranscript: (path?: string): AcpHostReport =>
 												writeTranscriptExport({
 													sessionId: chat.getSessionId(),
-													leafTurnId: (id) => session.tree(id).leafId,
+													leafTurnId: (id) => session.leafId(id),
 													readEntries: readSessionEntriesForCompact,
 													cwd: process.cwd(),
 													...(path === undefined ? {} : { path }),
@@ -3922,7 +3922,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 												if (sessionId === null) return { decisions: [], tasks: [], compactionSummary: null };
 												return oracleBriefingFromEntries(
 													readSessionEntriesForCompact(sessionId),
-													session.tree(sessionId).leafId ?? undefined,
+													session.leafId(sessionId) ?? undefined,
 												);
 											},
 										}
@@ -3962,7 +3962,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 													readEntries: readCurrentSessionEntries,
 													activeLeafTurnId: () => {
 														const meta = session.current();
-														return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
+														return meta ? (session.leafId(meta.id) ?? undefined) : undefined;
 													},
 													appendEntry: (entry) => session.appendEntry(entry),
 													onRecalled: (payload) =>
@@ -4167,7 +4167,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							if (recorded.target !== target || recorded.model !== model) {
 								session.appendEntry({
 									kind: "modelChange",
-									parentTurnId: session.tree(meta.id).leafId,
+									parentTurnId: session.leafId(meta.id),
 									provider: providers.getTarget(target)?.runtime ?? target,
 									target,
 									modelId: model,

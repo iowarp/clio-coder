@@ -42,6 +42,7 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 	const session = {
 		current: () => ({ id: "continuation-session", cwd: scratch.dir, cwdHash: "continuation-repo" }),
 		tree: () => ({ leafId: leaf }),
+		leafId: () => leaf,
 		append(turn: TurnInput) {
 			const id = turn.id ?? `turn-${entries.length + 1}`;
 			leaf = id;

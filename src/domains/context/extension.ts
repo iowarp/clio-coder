@@ -440,7 +440,7 @@ export function createContextBundle(
 						session.appendEntry({
 							kind: "custom",
 							customType: CONTEXT_OPERATION_CUSTOM_TYPE,
-							parentTurnId: session.tree(sessionId).leafId ?? null,
+							parentTurnId: session.leafId(sessionId) ?? null,
 							data: event.operation,
 						});
 					} catch {
@@ -671,5 +671,5 @@ async function currentDecisions(context: DomainContext) {
 	if (!session || !current) return [];
 	session.flushAppends?.();
 	const read = await readSessionEntriesForId(clioStateDir(), current.id);
-	return foldDecisionBoard(filterEntriesToActivePath(read.entries, session.tree(current.id).leafId ?? undefined));
+	return foldDecisionBoard(filterEntriesToActivePath(read.entries, session.leafId(current.id) ?? undefined));
 }
