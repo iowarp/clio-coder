@@ -95,9 +95,11 @@ export function oversizeFileBytes(path: string): number | null {
 }
 
 /** Hash and count lines in fixed-size chunks so no whole-file buffer or string is held. */
+const STREAM_CHUNK = Buffer.allocUnsafe(1024 * 1024);
+
 export function streamFile(path: string): StreamedFile {
 	const hash = createHash("sha256");
-	const chunk = Buffer.allocUnsafe(1024 * 1024);
+	const chunk = STREAM_CHUNK;
 	const fd = openSync(path, "r");
 	let bytes = 0;
 	let newlines = 0;
