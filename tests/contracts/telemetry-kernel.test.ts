@@ -389,6 +389,14 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 	strictEqual(dropped.usage?.output.kind, "unknown");
 	strictEqual(dropped.pricing.usd.kind, "unknown");
 	strictEqual(dropped.stop.failure, undefined);
+	// A refused connection has no HTTP status and streamed nothing, so a cost cap charges it no prompt estimate.
+	const refused = { stopReason: "error", failure: { stage: "transport", invoked: true }, usage };
+	const estimate = { input: 4000, output: 0, usd: 0.4 };
+	strictEqual(callSettlementFromMessage(refused, "target-rates", undefined, estimate).pricing.usd.kind, "unknown");
+	strictEqual(
+		callSettlementFromMessage(refused, "target-rates", undefined, { ...estimate, output: 12 }).pricing.usd.kind,
+		"estimated",
+	);
 	const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
 	const codex = (request: "full" | "delta", attribution = "exclusive") =>
 		callSettlementFromMessage(
