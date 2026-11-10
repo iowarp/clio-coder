@@ -405,12 +405,15 @@ usage, failures, bugs, feature requests and latent demand.
 
 ```bash
 clio-coder report bug --title "..." --last --bundle mechanics --consent debug --share
+clio-coder report send <id> --share
 clio-coder telemetry share --session <id> --send --consent debug
 clio-coder telemetry share list
 clio-coder telemetry share forget <shareId>
 ```
 
-- **What goes.** `report ... --share` sends the report's diagnostic bundle;
+- **What goes.** `report ... --share` sends the report's diagnostic bundle,
+  and `report send <id> --share` the bundle saved with a draft, under the
+  consent it was saved with;
   `telemetry share ... --send` sends the telemetry archive `telemetry share`
   would write, under the `content-free`, `structural` or `research` profile.
   Both print what they hold, the consent text and where it goes before
