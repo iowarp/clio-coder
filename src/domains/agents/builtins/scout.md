@@ -4,7 +4,7 @@ name: Scout
 description: Reconnaissance and code review with cited findings. Use for codebase orientation, bug or risk review of named files, structure and entry-point mapping, or multi-file symbol hunting; read-only, so several run in parallel, and spends no main-context tool calls.
 tools:
   required: [read]
-  optional: [grep, find, ls, context, code_nav, git, ledger]
+  optional: [grep, find, ls, context, code_nav, git, ledger, store, data]
 skills: []
 audience: shadow
 category: explore

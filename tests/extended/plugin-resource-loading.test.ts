@@ -47,7 +47,10 @@ function fixture(root: string): void {
 	const recipe = readFileSync(resolve("src/domains/agents/builtins/researcher.md"), "utf8")
 		.replace("audience: shadow", "audience: custom")
 		.replace("required: [read]", "required: [read, context]")
-		.replace("optional: [web_fetch, context, ledger, git]", "optional: [web_fetch, ledger, git]")
+		.replace(
+			"optional: [web_fetch, context, ledger, git, store, data]",
+			"optional: [web_fetch, ledger, git, store, data]",
+		)
 		.replace("skills: []", "skills: [fixture-research]");
 	write(
 		root,

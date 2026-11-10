@@ -4,7 +4,7 @@ name: Researcher
 description: Researches external docs, standards, and papers. Shadow agent for coding decisions, official documentation, release notes, and academic sources.
 tools:
   required: [read]
-  optional: [web_fetch, context, ledger, git]
+  optional: [web_fetch, context, ledger, git, store, data]
 skills: []
 audience: shadow
 category: research
