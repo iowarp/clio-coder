@@ -84,12 +84,17 @@ function detect(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): Detected {
 		// stays on, does not lose its sandbox to it.
 		const { failure, timedOut } = probe(bwrapProbe(bwrap, true));
 		if (failure !== null) {
+			// EPERM is policy, not a broken install: bwrap's own line (often
+			// `pivot_root: Operation not permitted` in a container) does not say so.
+			const cause = /Operation not permitted/u.test(failure)
+				? " (the kernel or an enclosing container forbids the namespaces or mounts bubblewrap needs)"
+				: "";
 			return {
 				availability: {
 					available: false,
 					backend: null,
 					executable: null,
-					reason: `bubblewrap cannot create a sandbox here: ${failure}`,
+					reason: `bubblewrap cannot create a sandbox here: ${failure}${cause}`,
 				},
 				timedOut,
 			};
