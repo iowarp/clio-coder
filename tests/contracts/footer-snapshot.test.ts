@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { it, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
@@ -259,7 +259,8 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 			const compact = renderCompactDashboard(state, width);
 			match(compact.map(stripTerminalSequences).join("\n"), /Alt\+G → choose key/u);
 			const queued = queue.render(width);
-			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q\] review, a restores all/u);
+			match(queued.map(stripTerminalSequences).join("\n"), /\[Alt\+Q\] review/u);
+			doesNotMatch(queued.map(stripTerminalSequences).join("\n"), /restores all/u);
 			state.session.leaderArmed = false;
 			state.notices = [notice];
 			const badge = renderCompactDashboard(state, width);

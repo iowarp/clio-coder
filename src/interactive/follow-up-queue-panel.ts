@@ -5,6 +5,9 @@ import { formatQueueAge, queueEntryMarks, queueSlotWord } from "./overlays/queue
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
+/** The dock previews the head of the queue; the navigator holds the whole of it. */
+const QUEUE_PREVIEW_ROWS = 3;
+
 export interface FollowUpQueuePanel extends Component {
 	setMessages(messages: ReadonlyArray<QueuedChatMessage>): void;
 }
@@ -53,7 +56,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		const theme = clioTheme();
 		const bodyWidth = Math.max(12, width - 4);
 		const lines: string[] = [];
-		for (const message of messages) {
+		for (const message of messages.slice(0, QUEUE_PREVIEW_ROWS)) {
 			const slot = queueSlotWord(message);
 			const marks = queueEntryMarks(message);
 			// A steer is the user's voice redirecting the live turn, so it carries
@@ -76,8 +79,10 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 		if (overlay === "closed") {
 			const navigate = options.getNavigateKey?.();
 			const sendNow = options.getSendNowKey?.();
+			const hidden = messages.length - QUEUE_PREVIEW_ROWS;
 			const row = [
-				`[${navigate && navigate.length > 0 ? navigate : "/help"}] review, a restores all`,
+				...(hidden > 0 ? [`+${hidden} more`] : []),
+				`[${navigate && navigate.length > 0 ? navigate : "/help"}] review`,
 				...(sendNow && sendNow.length > 0 ? [`[${sendNow}] send now`] : []),
 			].join(" · ");
 			lines.push(truncateToWidth(theme.fg("annotation", row), bodyWidth, "…", false));
