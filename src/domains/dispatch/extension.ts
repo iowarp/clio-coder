@@ -7446,6 +7446,17 @@ export function createDispatchBundle(
 					},
 					config ?? undefined,
 				);
+			// workerSandboxFor cannot see placement, so it expects this host's
+			// backend only with no fleet nodes. A worker placed here with nodes
+			// configured shares this probe's answer too (R1-safety-secrets-13).
+			const placedHere = placement === null || (placement.node.kind === "local" && placement.spawn === undefined);
+			const buildUnplacedSpec = buildSpec;
+			buildSpec = () => {
+				const built = buildUnplacedSpec();
+				if (placedHere && built.sandbox !== undefined && sandboxAvailability().available)
+					built.sandbox = { ...built.sandbox, backendExpected: true };
+				return built;
+			};
 			spec = buildSpec();
 		} catch (error) {
 			leaseSlot.release();

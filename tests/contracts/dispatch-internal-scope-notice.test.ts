@@ -2,9 +2,12 @@ import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/st
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { declaredScopeReplacementDiagnostic, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
+import { localNodeIdentity } from "../../src/domains/dispatch/transport.js";
+import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -120,6 +123,35 @@ it("announces withheld checks for narrow roots without an OS sandbox", async () 
 		ok(tools[1]?.includes(ToolNames.Verify));
 	} finally {
 		unsubscribe();
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+it("a worker placed on this host expects its sandbox backend even with fleet nodes configured", async (t) => {
+	if (!sandboxAvailability().available) return t.skip("no OS sandbox backend on this host");
+	const env = await isolateClioEnv("placed-here-backend-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.nodes = [{ id: "gpu1", host: "gpu1.invalid", maxWorkers: 1 }];
+	const sandboxes: Array<WorkerSpec["sandbox"]> = [];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		spawnWorker: (spec) => {
+			sandboxes.push(spec.sandbox);
+			throw new Error("fixture: placed");
+		},
+		resolveNode: () => ({ node: localNodeIdentity() }),
+		previewNode: () => ({ node: localNodeIdentity() }),
+	});
+	try {
+		await bundle.extension.start();
+		await rejects(
+			bundle.contract.dispatch({ agentId: "coder", executionRole: "builder", task: "Run npm test.", cwd: env.dir }),
+			/fixture: placed/u,
+		);
+		strictEqual(sandboxes.length, 1);
+		strictEqual(sandboxes[0]?.mode, "auto");
+		strictEqual(sandboxes[0]?.backendExpected, true, "a timed-out probe in the worker must refuse, not run direct");
+	} finally {
 		await bundle.extension.stop?.();
 		env.restore();
 	}
