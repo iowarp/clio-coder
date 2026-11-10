@@ -35,7 +35,7 @@ import { appendNotice } from "../../src/interactive/command-output.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { dockTop } from "../../src/interactive/dock.js";
 import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
-import { openHealthOverlay } from "../../src/interactive/health-overlay.js";
+import { healthData, healthLines } from "../../src/interactive/health-overlay.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -1137,21 +1137,13 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
-	it("lists System One's engine breakers on /health beside the route breakers", () => {
-		const tui = {
-			showOverlay: () => ({ hide() {} }),
-			requestRender() {},
-		} as unknown as TUI;
-		const handle = openHealthOverlay(tui, undefined, {
+	it("lists System One's engine breakers on the Health tab beside the route breakers", () => {
+		const data = healthData(undefined, {
 			getSystemOneBreakers: () => [{ engine: "local-small", state: "open", failures: 3, remainingMs: 120_000 }],
 		});
-		try {
-			const plain = (dockTop(tui)?.frame.renderDockBody(120, 80) ?? []).map(stripTerminalSequences).join("\n");
-			match(plain, /System One engines/u);
-			match(plain, /local-small paused 120s after 3 consecutive timeouts/u);
-		} finally {
-			handle.hide();
-		}
+		const plain = healthLines(data, 120, "standard").map(stripTerminalSequences).join("\n");
+		match(plain, /System One engines/u);
+		match(plain, /local-small paused 120s after 3 consecutive timeouts/u);
 	});
 
 	it("keeps framed bounds live through visibility, resize, and removal", () => {

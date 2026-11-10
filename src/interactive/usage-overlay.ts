@@ -12,8 +12,10 @@ import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { USAGE_TAB_NAMES, type UsageTab } from "../session-control/slash-commands.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
+import { type HealthDataOptions, healthData, healthLines } from "./health-overlay.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
@@ -338,6 +340,10 @@ export interface OpenUsageOverlayOptions {
 	/** ISO instant this session began, for the elapsed time. */
 	sessionStartedAt?: string | null;
 	now?: () => number;
+	/** The tab it opens on; Activity when absent. */
+	tab?: UsageTab;
+	/** Route and System One state for the Health tab, read live on each frame. */
+	health?: HealthDataOptions;
 }
 
 /**
@@ -480,11 +486,11 @@ function recordedRunReader(): (view: TelemetryView | null) => ReadonlyArray<Reco
 	};
 }
 
-const USAGE_TABS = ["Activity", "Accounts", "Session", "Models", "Workers"] as const;
+const USAGE_TABS = ["Activity", "Accounts", "Session", "Models", "Workers", "Health"] as const;
 
 class UsageOverlayBody implements Component {
-	private tab = 0;
-	private offsets = [0, 0, 0, 0, 0];
+	tab = 0;
+	private offsets = [0, 0, 0, 0, 0, 0];
 	private height = 20;
 	private pageHeight = 16;
 	private lineCount = 0;
@@ -503,6 +509,7 @@ class UsageOverlayBody implements Component {
 			now: () => number;
 		},
 		private readonly getOutputStyle: () => OutputStyle,
+		private readonly getHealthLines: (width: number, style: OutputStyle) => string[],
 	) {}
 
 	/** Whether the open view has more than it shows, so the scroll keys move something. */
@@ -516,7 +523,7 @@ class UsageOverlayBody implements Component {
 	}
 
 	handleInput(data: string): void {
-		const selected = (["1", "2", "3", "4", "5"] as const).findIndex((key) => matchesKey(data, key));
+		const selected = (["1", "2", "3", "4", "5", "6"] as const).findIndex((key) => matchesKey(data, key));
 		if (selected >= 0) this.tab = selected;
 		else if (matchesKey(data, "tab") || matchesKey(data, "right")) this.tab = (this.tab + 1) % USAGE_TABS.length;
 		else if (matchesKey(data, "shift+tab") || matchesKey(data, "left"))
@@ -612,7 +619,8 @@ class UsageOverlayBody implements Component {
 					: []),
 				...(data.view ? modelLines(data.view, contentWidth, style) : [theme.fg("annotation", data.missing)]),
 			];
-		} else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth, style);
+		} else if (this.tab === 5) body = this.getHealthLines(contentWidth, style);
+		else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth, style);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
 		// One row stays free for the `n–m / N` indicator a scrolled page carries.
@@ -674,7 +682,9 @@ export function openUsageOverlay(
 			now,
 		},
 		options?.getOutputStyle ?? (() => "standard"),
+		(width, style) => healthLines(healthData(readModel, options?.health), width, style),
 	);
+	if (options?.tab) body.tab = Math.max(0, USAGE_TAB_NAMES.indexOf(options.tab));
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: USAGE_OVERLAY_WIDTH,
@@ -683,7 +693,7 @@ export function openUsageOverlay(
 		// The scroll keys are named only while the open view has more than it shows.
 		footerHint: (innerWidth) =>
 			buildResponsiveHint([
-				{ key: "1–5 / Tab", verb: "view", critical: true },
+				{ key: "1–6 / Tab", verb: "view", critical: true },
 				...(body.overflows()
 					? [
 							{ key: "↑↓", verb: "scroll" },
@@ -706,7 +716,7 @@ export function openUsageOverlay(
 		tui.requestRender();
 	};
 	const offs = readModel
-		? (["session", "calls", "cost", "cache", "runs", "quota"] as const).map((topic) =>
+		? (["session", "calls", "cost", "cache", "runs", "quota", "health"] as const).map((topic) =>
 				readModel.subscribe(topic, refresh),
 			)
 		: [];

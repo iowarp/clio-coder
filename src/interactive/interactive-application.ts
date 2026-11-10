@@ -153,9 +153,9 @@ export interface InteractiveDeps {
 	agents?: AgentsContract;
 	/** Session budget state `/fleet run` shows as the ceiling a plan is admitted under. */
 	scheduling?: SchedulingContract;
-	/** `/systemone`: the terminal control over the one setting. */
+	/** System One status lines for the `/usage` Health tab. */
 	systemOneControl?: { run(): string[] };
-	/** The session's System One instance, for the breakers `/health` shows. */
+	/** The session's System One instance, for the breakers the `/usage` Health tab shows. */
 	systemOne?: SystemOne;
 	telemetry: TelemetryContract;
 	/** The owning composition's right to point the run projection at this terminal's live readers. */
@@ -1422,9 +1422,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openTransientAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		openSkillsHub: (request) => openSkillsHubState(request),
-		openUsage: () => openUsageOverlayState(),
-		openHealth: () => openHealthOverlayState(),
-		...(deps.systemOneControl ? { systemOneControl: deps.systemOneControl } : {}),
+		openUsage: (tab) => openUsageOverlayState(tab),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		openDraft: (request, count) => openDraftOverlayState(request, count),
 		startHandoff: (goal) => startHandoffState(goal),
@@ -1668,7 +1666,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openAskUserOverlayState,
 		openTransientAskUserOverlayState,
 		openUsageOverlayState,
-		openHealthOverlayState,
 		openSideQuestionOverlayState,
 		openDraftOverlayState,
 		startHandoffState,

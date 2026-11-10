@@ -256,6 +256,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		},
 		read: {
 			live: () => view,
+			health: () => null,
 			quota: () => ({ providers: quotaRows(quota) }),
 			subscribe: (_topic: string, update: () => void) => {
 				updates.add(update);
@@ -387,6 +388,8 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(render(), /Credentials expired.*run agy/);
 		frame?.handleInput?.("5");
 		match(render(), /No worker invocations/);
+		frame?.handleInput?.("\t");
+		match(render(), /Health/);
 		frame?.handleInput?.("\t");
 		match(render(), /Less .* More/);
 	} finally {

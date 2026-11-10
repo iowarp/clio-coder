@@ -41,7 +41,7 @@ import { createWorkspaceSnapshots, type WorkspaceSnapshots } from "../domains/wo
 import type { TUI } from "../engine/tui.js";
 import type { DraftOutcome } from "../session-control/chat-loop.js";
 import { type OutOfTurnRoute, outOfTurnRouteLabel } from "../session-control/side-question.js";
-import type { ContextClearCommandOptions, FleetRunStartOptions } from "../session-control/slash-commands.js";
+import type { ContextClearCommandOptions, FleetRunStartOptions, UsageTab } from "../session-control/slash-commands.js";
 import type { OpenContextOverlayOptions } from "./context-overlay.js";
 import { openContextOverlay } from "./context-overlay.js";
 import {
@@ -54,7 +54,6 @@ import {
 } from "./dispatch-board.js";
 import type { FleetPlanRuns, FleetPlanRunView } from "./fleet-plan-runs.js";
 import { progressNoticeKeys } from "./footer/notifications.js";
-import { openHealthOverlay } from "./health-overlay.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
@@ -109,8 +108,10 @@ export interface OverlayGeneralOpenersDeps {
 	/** Writes a command's record to the transcript. */
 	getSlashNotice?: () => import("./command-fallbacks.js").CommandNotice;
 	dispatch: DispatchContract;
-	/** The process's System One, whose engine breakers `/health` shows; read when the overlay opens. */
+	/** The process's System One, whose engine breakers the Health tab shows; read when the overlay opens. */
 	systemOne?: () => SystemOne | undefined;
+	/** System One's status lines, shown above its breakers on the Health tab. */
+	systemOneControl?: () => { run(): string[] } | undefined;
 	stateDir: string;
 	getSessionMeta: () => SessionMeta | null;
 	/** Every session of this workspace, for the usage activity graph. */
@@ -204,8 +205,7 @@ export interface OverlayGeneralOpenersDeps {
 }
 
 export interface OverlayGeneralOpeners {
-	openUsage(): void;
-	openHealth(): void;
+	openUsage(tab?: UsageTab): void;
 	openContextView(): void;
 	openContextReset(): void;
 	toggleFooter(): void;
@@ -238,7 +238,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const showOverlayFrameFactory = deps.showOverlayFrame ?? showClioOverlayFrame;
 	const openSideQuestionOverlayFactory = deps.openSideQuestionOverlay ?? openSideQuestionOverlay;
 
-	const openUsage = (): void => {
+	const openUsage = (tab?: UsageTab): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "usage";
 		// The changes probe is a subprocess; the card opens at once and the row
@@ -249,6 +249,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			changes = result;
 			deps.requestRender();
 		});
+		const systemOne = deps.systemOne?.();
+		const systemOneControl = deps.systemOneControl?.();
 		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.telemetry, {
 			getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
@@ -260,18 +262,12 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 						getSessionEntries: () => deps.readSessionEntries?.() ?? [],
 					}
 				: {}),
-		});
-		deps.requestRender();
-	};
-
-	const openHealth = (): void => {
-		if (deps.transitions.state !== "closed") return;
-		deps.transitions.state = "health";
-		const systemOne = deps.systemOne?.();
-		deps.transitions.handle = openHealthOverlay(deps.tui, deps.telemetry.read, {
-			getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
-			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
-			...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
+			...(tab ? { tab } : {}),
+			health: {
+				getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
+				...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
+				...(systemOne && systemOneControl ? { getSystemOneStatus: () => systemOneControl.run() } : {}),
+			},
 		});
 		deps.requestRender();
 	};
@@ -912,7 +908,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 
 	return {
 		openUsage,
-		openHealth,
 		openContextView,
 		openContextReset,
 		toggleFooter,

@@ -3,7 +3,7 @@ import { renderCount } from "../core/telemetry/render.js";
 
 /**
  * Journal drop alerts (#434 §14). A journal that drops, rejects or fails to write records leaves every total it
- * feeds partial, so the operator hears of it, once per owner per minute; `/health` carries the counts.
+ * feeds partial, so the operator hears of it, once per owner per minute; `/usage health` carries the counts.
  */
 export const DROP_ALERT_WINDOW_MS = 60_000;
 
@@ -31,7 +31,7 @@ function describe(owner: string, rise: Losses): string {
 		...(rise.invalid > 0 ? [`${renderCount(rise.invalid)} invalid`] : []),
 		...(rise.writeErrors > 0 ? [plural(rise.writeErrors, "write error")] : []),
 	];
-	return `Telemetry journal ${owner.replace(":", " ")}: ${parts.join(", ")}. Totals it feeds are partial; /health has the detail.`;
+	return `Telemetry journal ${owner.replace(":", " ")}: ${parts.join(", ")}. Totals it feeds are partial; /usage health has the detail.`;
 }
 
 export interface DropAlerts {

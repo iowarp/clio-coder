@@ -78,7 +78,7 @@ export function describeStatus(input: StatusInput): SystemOneStatus {
 	return { use: shown, scope, headline: [headline, ...reach, ...costs].join(". ") };
 }
 
-/** The lines `/systemone` and `clio-coder systemone status` print. */
+/** The lines the `/usage` Health tab and `clio-coder systemone status` print. */
 export function formatStatus(status: SystemOneStatus): string[] {
 	return [`system one (experimental): ${status.headline}`, `choice: ${status.use ?? "unset"} (${status.scope})`];
 }

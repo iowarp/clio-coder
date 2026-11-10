@@ -213,10 +213,7 @@ type SlashCommandVariant =
 	/** `/loop`: a bounded recurring job, or one of its control verbs. The words are parsed by loop-command.ts. */
 	| { kind: "loop"; command: LoopCommand }
 	| { kind: "agents"; connect?: boolean }
-	| { kind: "usage" }
-	| { kind: "systemone" }
-	| { kind: "systemone-usage"; reason?: string }
-	| { kind: "health" }
+	| { kind: "usage"; tab?: UsageTab }
 	| { kind: "workspace"; action: "off" | "status" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
@@ -269,6 +266,10 @@ type SlashCommandVariant =
 	| { kind: "unknown-command"; token: string; text: string }
 	| { kind: "usage-error"; command: string; reason: string }
 	| { kind: "empty" };
+
+/** The `/usage [tab]` values, in the overlay's tab order. */
+export const USAGE_TAB_NAMES = ["activity", "accounts", "session", "models", "workers", "health"] as const;
+export type UsageTab = (typeof USAGE_TAB_NAMES)[number];
 
 export type SlashCommand =
 	| SlashCommandVariant
@@ -1072,11 +1073,8 @@ export interface SessionCommandContext {
 	listAgents?: () => ReadonlyArray<AgentSpec>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
-	openUsage?: () => void;
-	/** `/health`: telemetry journal losses, event-loop lag, the session's transport, quota, route and System One breakers. */
-	openHealth?: () => void;
-	/** `/systemone`: its lines come from the composition root, which owns the routes. */
-	systemOne?: { run(): string[] };
+	/** `/usage [tab]`; the Health tab shows journal losses, event-loop lag, transport, quota and breakers. */
+	openUsage?: (tab?: UsageTab) => void;
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
 	 * `deep` adds the live tool probe on the session's targets and the
@@ -2355,46 +2353,21 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "usage",
 		acp: false,
-		description: "Show subscription quota, credits, and session token and cost totals",
+		description: "Show quota, credits, session tokens and cost, workers, and health",
 		group: "Inspect",
 		kinds: ["usage"],
-		args: {},
-		fromArgs: fromArgsOrUsage("usage", { kind: "usage" }),
-		handle(_command, ctx) {
-			ctx.openUsage?.();
-		},
-	},
-	{
-		name: "systemone",
-		acp: false,
-		description: "Show whether System One is on and what answers it",
-		group: "Inspect",
-		kinds: ["systemone", "systemone-usage"],
-		args: {},
+		args: { positionals: [{ name: "tab", required: false, values: [...USAGE_TAB_NAMES] }] },
 		fromArgs(parsed) {
-			return parsed.error ? { kind: "systemone-usage", reason: parsed.error } : { kind: "systemone" };
+			if (parsed.error) return { kind: "usage-error", command: "usage", reason: parsed.error };
+			const tab = parsed.positionals[0];
+			if (tab === undefined) return { kind: "usage" };
+			if (!(USAGE_TAB_NAMES as ReadonlyArray<string>).includes(tab))
+				return { kind: "usage-error", command: "usage", reason: `Choose ${USAGE_TAB_NAMES.join(", ")}` };
+			return { kind: "usage", tab: tab as UsageTab };
 		},
 		handle(command, ctx) {
-			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "systemone");
-			if (command.kind === "systemone-usage") {
-				if (entry) ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
-				return;
-			}
-			if (command.kind !== "systemone") return;
-			const lines = ctx.systemOne?.run();
-			ctx.io.stdout(`${(lines ?? ["System One is not available on this surface."]).join("\n")}\n`);
-		},
-	},
-	{
-		name: "health",
-		acp: false,
-		description: "Show telemetry journal losses, event-loop lag, transport, quota, route and System One breakers",
-		group: "Inspect",
-		kinds: ["health"],
-		args: {},
-		fromArgs: fromArgsOrUsage("health", { kind: "health" }),
-		handle(_command, ctx) {
-			ctx.openHealth?.();
+			if (command.kind !== "usage") return;
+			ctx.openUsage?.(command.tab);
 		},
 	},
 	{
@@ -3747,8 +3720,6 @@ const COMMAND_ORDER = [
 	"view",
 	"panes",
 	"usage",
-	"systemone",
-	"health",
 	"doctor",
 	"upgrade",
 	"decisions",

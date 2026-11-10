@@ -1,5 +1,5 @@
 /**
- * `/systemone`: what System One is doing in this process. Which engine answers is
+ * What System One is doing in this process. Which engine answers is
  * fixed at startup, so choosing one belongs to `clio-coder systemone use`.
  */
 

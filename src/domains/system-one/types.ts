@@ -203,7 +203,7 @@ export interface RouteInfo {
 	readonly problem?: string;
 }
 
-/** One engine's timeout breaker, as `/health` shows it (#434 §11.3). */
+/** One engine's timeout breaker, as the `/usage` Health tab shows it (#434 §11.3). */
 export interface SystemOneBreakerView {
 	readonly engine: string;
 	/** `closed` while it counts timeouts, `open` while it cools down, `probing` during the one call past the cooldown, `half-open` once the next call may probe. */

@@ -7,8 +7,7 @@ import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { SystemOneBreakerView } from "../domains/system-one/index.js";
 import type { TelemetryReadModel } from "../domains/telemetry/contract.js";
 import { HEALTH_WINDOW_MS } from "../domains/telemetry/health-window.js";
-import { type OverlayHandle, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { buildResponsiveHint, ScrollingBody, showClioOverlayFrame } from "./overlay-frame.js";
+import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { routeBreakerPhrase } from "./overlays/settings.js";
 import { quotaAccountRows } from "./quota-view.js";
 import {
@@ -26,13 +25,12 @@ import {
 import { stripUsageClause, usageCoverage, usageFigure, usageGap, usageUnmeasured } from "./usage-words.js";
 
 /**
- * `/health`: what Clio's own telemetry can vouch for right now (#434 §14). It opens on one sentence that answers
+ * The Health tab of `/usage`: what Clio's own telemetry can vouch for right now (#434 §14). It opens on one sentence that answers
  * whether Clio is saving what it records and responding promptly, then the details behind it: each journal writer
  * and its losses, the records no writer took, event-loop lag, the session's connection, provider limits, route
  * breakers and System One's engine breakers. Every telemetry number is the read model's own display, and the
  * breakers are their owners' live state, all read on render from memory; nothing here reads a journal.
  */
-const HEALTH_OVERLAY_WIDTH = 96;
 /**
  * A tick that runs this late is where typing and scrolling start to feel slow (the usual 100 ms limit for a response
  * that reads as immediate), so a slowest-1% figure past it is what the summary calls slow.
@@ -42,7 +40,7 @@ const SLOW_TICK_MS = 100;
 const STALL_MS = 1000;
 const WINDOW_SECONDS = Math.round(HEALTH_WINDOW_MS / 1000);
 
-interface HealthData {
+export interface HealthData {
 	health: HealthV1 | null;
 	/** The session the open view reads, so its journal reads as "this session"; null with no session yet. */
 	sessionId: string | null;
@@ -51,6 +49,8 @@ interface HealthData {
 	breakers: ReadonlyArray<RouteBreakerView>;
 	/** Null when this process has no System One. */
 	systemOne: ReadonlyArray<SystemOneBreakerView> | null;
+	/** `/systemone`'s status lines, shown above its breakers; null when this process has no System One. */
+	systemOneStatus?: ReadonlyArray<string> | null;
 }
 
 /** One System One breaker's state, worded as the route breakers are. */
@@ -387,8 +387,10 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 			`${statusChip(theme, route.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
 		);
 
-	if (style === "detailed" || (data.systemOne?.length ?? 0) > 0)
+	const systemOneStatus = data.systemOneStatus ?? [];
+	if (style === "detailed" || (data.systemOne?.length ?? 0) > 0 || systemOneStatus.length > 0)
 		lines.push(sectionRule(theme, safe, "System One engines"));
+	for (const line of systemOneStatus) lines.push(...wrapTextWithAnsi(theme.fg("body", line), safe));
 	if (style === "detailed" && data.systemOne === null)
 		lines.push(...missing("Not available: this process has no System One."));
 	else if (style === "detailed" && data.systemOne?.length === 0)
@@ -406,7 +408,7 @@ export function healthLines(data: HealthData, width: number, style: OutputStyle)
 /**
  * Each journal's counts: a table while every column fits whole, else one block per journal with its counts as
  * `saved 40 · waiting 0 · …` chips that wrap between counts. The table used to drop its numeric columns below
- * 80 cells and cut the process id mid-word, which left a narrow /health with names and no numbers.
+ * 80 cells and cut the process id mid-word, which left a narrow Health view with names and no numbers.
  */
 function journalRows(
 	journals: ReadonlyArray<Journal>,
@@ -504,82 +506,23 @@ function journalRows(
 
 const NO_JOURNAL = "no journal open";
 
-export interface OpenHealthOverlayOptions {
-	getOutputStyle?: () => OutputStyle;
+export interface HealthDataOptions {
 	getBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Absent when this process has no System One. */
 	getSystemOneBreakers?: () => ReadonlyArray<SystemOneBreakerView>;
+	/** System One's status lines; absent when this process has no System One. */
+	getSystemOneStatus?: () => ReadonlyArray<string>;
 }
 
-/** Mount the read-only health overlay; it repaints on the read model's coalesced health, quota and session updates. */
-export function openHealthOverlay(
-	tui: TUI,
-	telemetry: TelemetryReadModel | undefined,
-	options?: OpenHealthOverlayOptions,
-): OverlayHandle {
-	const body = new ScrollingBody(
-		(width) =>
-			healthLines(
-				{
-					health: telemetry?.health() ?? null,
-					sessionId: telemetry?.live()?.sessionId ?? null,
-					transport: telemetry ? (telemetry.live()?.session().transport ?? null) : undefined,
-					quota: telemetry?.quota() ?? null,
-					breakers: options?.getBreakers?.() ?? [],
-					systemOne: options?.getSystemOneBreakers?.() ?? null,
-				},
-				width,
-				options?.getOutputStyle?.() ?? "standard",
-			),
-		() => tui.requestRender(),
-		18,
-	);
-	let renderedStyle: OutputStyle | undefined;
-	const panel = {
-		render(width: number): string[] {
-			const style = options?.getOutputStyle?.() ?? "standard";
-			if (renderedStyle !== style) {
-				renderedStyle = style;
-				body.touch();
-			}
-			return body.render(width);
-		},
-		setBodyRows: (rows: number) => body.setBodyRows(rows),
-		handleInput: (data: string) => body.handleInput(data),
-		invalidate: () => body.invalidate(),
-	};
-	const handle = showClioOverlayFrame(tui, panel, {
-		anchor: "center",
-		width: HEALTH_OVERLAY_WIDTH,
-		markerId: "health",
-		title: "Health",
-		// The scroll keys are named only while they move something.
-		footerHint: (innerWidth) =>
-			buildResponsiveHint(
-				body.overflows()
-					? [
-							{ key: "↑↓", verb: "scroll", critical: true },
-							{ key: "PgUp/PgDn", verb: "page" },
-						]
-					: [],
-			)(innerWidth),
-	});
-	// The breakers are read live and have no update topic, so a frame the
-	// owner requests for any reason still sees them fresh; the read model's
-	// topics mark the cached lines stale.
-	const offs = telemetry
-		? (["health", "quota", "session"] as const).map((topic) =>
-				telemetry.subscribe(topic, () => {
-					body.touch();
-					tui.requestRender();
-				}),
-			)
-		: [];
+/** What the Health view reads, once per frame, from memory. */
+export function healthData(telemetry: TelemetryReadModel | undefined, options?: HealthDataOptions): HealthData {
 	return {
-		...handle,
-		hide(): void {
-			for (const off of offs) off();
-			handle.hide();
-		},
+		health: telemetry?.health() ?? null,
+		sessionId: telemetry?.live()?.sessionId ?? null,
+		transport: telemetry ? (telemetry.live()?.session().transport ?? null) : undefined,
+		quota: telemetry?.quota() ?? null,
+		breakers: options?.getBreakers?.() ?? [],
+		systemOne: options?.getSystemOneBreakers?.() ?? null,
+		systemOneStatus: options?.getSystemOneStatus?.() ?? null,
 	};
 }
