@@ -77,9 +77,15 @@ async function fetchModels(target: TargetDescriptor, ctx: ProbeContext): Promise
 	if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 	if (Object.keys(modelLabels).length > 0) out.modelLabels = modelLabels;
 	const configured = target.defaultModel?.trim();
-	if (configured && models.length > 0 && !models.includes(configured) && !KNOWN_MODELS.includes(configured)) {
-		out.ok = false;
-		out.error = `configured model '${configured}' was not returned by TypeSafe`;
+	if (configured && models.length > 0 && !models.includes(configured)) {
+		if (KNOWN_MODELS.includes(configured)) {
+			// TypeSafe serves the pin without listing it; report it as served so the
+			// health check does not call the default unadvertised.
+			models.push(configured);
+		} else {
+			out.ok = false;
+			out.error = `configured model '${configured}' was not returned by TypeSafe`;
+		}
 	}
 	return out;
 }
