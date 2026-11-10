@@ -79,7 +79,8 @@ this machine: show <id> --bundle prints every byte of it and forget deletes it.
 selftest builds that bundle for the newest session here, writes nothing, and
 says whether any of this machine's identifiers survived into it.
 Exit codes: 0 sent, opened, written or previewed; 1 on a send failure or a refused
-bundle; 2 on a usage error or a call outside a terminal without --yes.
+bundle; 2 on a usage error or a call outside a terminal without --yes; 3 when a
+likely duplicate or a newer release stopped it and the draft was saved.
 `;
 
 /** Everything that reaches outside the process, injectable so a test never runs `gh` or opens a browser. */
@@ -539,7 +540,7 @@ async function confirmAndSend(
 			io.out(
 				`nothing sent; saved as draft ${outcome.draft.id}. Pass --on-duplicate comment or new with --yes, or run clio-coder report send ${outcome.draft.id} in a terminal.\n`,
 			);
-		return 0;
+		return 3;
 	}
 	draft = outcome.draft;
 	if (outcome.rendered !== plan.rendered && !options.json)
@@ -706,7 +707,10 @@ function security(io: Io): number {
 	return 0;
 }
 
-/** `clio-coder report`: exit 0 sent, opened, written or previewed; 1 on a send failure; 2 on usage or without --yes. */
+/**
+ * `clio-coder report`: exit 0 sent, opened, written or previewed; 1 on a send failure; 2 on usage or without --yes;
+ * 3 when a likely duplicate stopped it.
+ */
 export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps = {}): Promise<number> {
 	const out = deps.stdout ?? ((text: string) => void process.stdout.write(text));
 	const err = deps.stderr ?? ((text: string) => void process.stderr.write(text));
