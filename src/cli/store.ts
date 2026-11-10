@@ -433,6 +433,7 @@ export async function storeAdopt(cwd: string, key?: string) {
 	await safeResourceWriteAsync(
 		path.join(target, "project.json"),
 		`${JSON.stringify({ v: 1, root, createdAt: new Date().toISOString(), adoptedFrom: { key, root: entry.root } })}\n`,
+		{ mode: 0o600 },
 	);
 	return {
 		adopted: true as const,
