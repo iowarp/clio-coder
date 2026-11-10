@@ -940,6 +940,9 @@ export function buildReplayAgentMessagesFromTurns(
 				break;
 			}
 			case "skillActivation":
+				// A tool-triggered load sits between its call and result in the ledger; the tool result already
+				// carries the skill body, so replay sends what the live process sent and keeps the pairing intact.
+				if (entry.activation.triggeredBy === "tool") break;
 				if (entry.activation.runId !== undefined || (skillState && !skillState.activationRefs.includes(entry.turnId)))
 					break;
 				appendContextMessage(out, "user", skillActivationContextText(entry), entry.timestamp);
