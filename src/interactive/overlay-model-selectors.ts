@@ -64,8 +64,8 @@ export interface OverlayModelSelectorsDeps {
 
 export interface OverlayModelSelectors {
 	openModelOverlayState(): void;
-	/** Ask where a resolved swap lands, then apply it. Nothing changes until the operator answers. */
-	openModelScopeState(ref: PendingModelScope): void;
+	/** Apply a resolved swap for this session, as Enter in the picker does. */
+	applyModelSessionState(ref: PendingModelScope): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	refreshSettingsOverlay(): void;
 }
@@ -120,23 +120,89 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 	const openSettings = deps.openSettingsOverlay ?? openSettingsOverlay;
 	let settingsOverlayRefresh: (() => void) | null = null;
 
+	/** Apply a resolved pick at a scope and say what landed, or why nothing did. */
+	const applyModelScope = (ref: PendingModelScope, scope: ModelScopeChoice): void => {
+		const swap = formatPendingModelScope(ref);
+		// A refused save (a project setting that outranks the user file, an
+		// ineligible runtime) leaves the route where it was; say so here
+		// rather than let the throw escape the key handler after the success
+		// line was never shown.
+		const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+		try {
+			deps.onSelectModel?.({ target: ref.target, model: ref.model }, scope);
+		} catch (error) {
+			deps.notify("error", `model unchanged: ${swap} was not applied: ${failure(error)}`);
+			deps.refreshFooter();
+			return;
+		}
+		try {
+			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, scope);
+		} catch (error) {
+			deps.notify("warning", `model applied, thinking unchanged: ${failure(error)}`);
+			deps.refreshFooter();
+			return;
+		}
+		const timing = deps.moveWaitingRequest
+			? moveOutcomeClause(deps.moveWaitingRequest())
+			: deps.isTurnInFlight?.() === true
+				? " · from the next turn"
+				: "";
+		const applied =
+			scope === "global"
+				? `active and saved globally: ${swap}${timing}`
+				: scope === "project"
+					? `active and saved for this project: ${swap}${timing}`
+					: `active this session: ${swap}${timing}`;
+		const down = deps.providers.list().find((status) => status.target.id === ref.target)?.health.status === "down";
+		const thinking = resolveModelRuntimeCapabilitiesForProviders(
+			deps.providers,
+			ref.target,
+			ref.model,
+			deps.getSettings?.().chat?.thinkingLevel ?? "off",
+		)?.thinking;
+		// The rail's words for the same fact: `thinking on (medium runs as on)` made the reader decode a mapping (TY05).
+		const note = thinking ? thinkingNoteWords(thinking) : null;
+		const facts = [
+			applied,
+			down ? "this route is down, so turns fail until it answers; /model switches" : null,
+			note !== null && thinking ? `thinking ${thinking.display} (${note})` : null,
+		];
+		deps.notify(
+			down ? "warning" : "success",
+			facts.filter(Boolean).join(" · "),
+			routeAppliedNoticeKey(ref.target, ref.model),
+		);
+		deps.refreshFooter();
+	};
+
 	const openModelOverlayState = (initialSelection?: string): void => {
 		if (deps.transitions.state !== "closed") return;
 		const settings = deps.getSettings?.();
 		if (!settings) return;
 		deps.transitions.state = "model";
+		// Sized once per open, as the card did: the detail renders every frame and the history does not grow under the picker.
+		const history = deps.historyTokens?.();
+		const switchCosts = new Map<string, string | null>();
 		deps.transitions.handle = openModel(deps.tui, {
 			settings,
 			...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 			...(deps.routeMoveWait ? { turnEffect: () => modelListTurnEffect(deps.routeMoveWait?.() ?? "idle") } : {}),
 			providers: deps.providers,
 			bus: deps.bus,
-			// The picker resolves what to run; the scope dialog resolves where it
-			// lands. Closing this overlay first keeps one modal on screen at a time.
 			...(initialSelection ? { initialSelection } : {}),
+			// Enter uses the pick for this session; `s` opens the card that saves it.
 			onSelect: (ref) => {
 				deps.closeOverlay();
-				openModelScopeState(ref, () => openModelOverlayState(`${ref.target}/${ref.model}`));
+				applyModelScope(ref, "session");
+			},
+			onSave: (ref) => {
+				deps.closeOverlay();
+				openModelScopeState(ref, () => openModelOverlayState(`${ref.target}/${ref.model}`), true);
+			},
+			switchCost: (ref) => {
+				const key = `${ref.target}/${ref.model}`;
+				if (!switchCosts.has(key)) switchCosts.set(key, routeSwitchCost(history, deps.routeLeavesCache?.(ref) ?? false));
+				return switchCosts.get(key) ?? null;
 			},
 			onToggleFavorite: (ref, favorite) => {
 				if (!deps.getSettings || !deps.writeSettings) return;
@@ -157,7 +223,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		deps.tui.requestRender();
 	};
 
-	const openModelScopeState = (ref: PendingModelScope, backToPicker?: () => void): void => {
+	const openModelScopeState = (ref: PendingModelScope, backToPicker?: () => void, saveOnly = false): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "model-scope";
 		// Sized once: nothing grows the context while a request waits, and the frame loop must not re-estimate it.
@@ -177,6 +243,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 		const current = liveTarget.length === 0 ? null : liveModel.length === 0 ? liveTarget : `${liveTarget} · ${liveModel}`;
 		deps.transitions.handle = openModelScope(deps.tui, {
 			ref,
+			...(saveOnly ? { saveOnly } : {}),
 			...(current ? { current } : {}),
 			...(residency ? { residency } : {}),
 			...(switchCost ? { switchCost } : {}),
@@ -185,57 +252,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 				: {}),
 			onChoose: (scope) => {
 				deps.closeOverlay();
-				const swap = formatPendingModelScope(ref);
-				// A refused save (a project setting that outranks the user file, an
-				// ineligible runtime) leaves the route where it was; say so here
-				// rather than let the throw escape the key handler after the success
-				// line was never shown.
-				const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-				try {
-					deps.onSelectModel?.({ target: ref.target, model: ref.model }, scope);
-				} catch (error) {
-					deps.notify("error", `model unchanged: ${swap} was not applied: ${failure(error)}`);
-					deps.refreshFooter();
-					return;
-				}
-				try {
-					if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, scope);
-				} catch (error) {
-					deps.notify("warning", `model applied, thinking unchanged: ${failure(error)}`);
-					deps.refreshFooter();
-					return;
-				}
-				const timing = deps.moveWaitingRequest
-					? moveOutcomeClause(deps.moveWaitingRequest())
-					: deps.isTurnInFlight?.() === true
-						? " · from the next turn"
-						: "";
-				const applied =
-					scope === "global"
-						? `active and saved globally: ${swap}${timing}`
-						: scope === "project"
-							? `active and saved for this project: ${swap}${timing}`
-							: `active this session: ${swap}${timing}`;
-				const down = deps.providers.list().find((status) => status.target.id === ref.target)?.health.status === "down";
-				const thinking = resolveModelRuntimeCapabilitiesForProviders(
-					deps.providers,
-					ref.target,
-					ref.model,
-					deps.getSettings?.().chat?.thinkingLevel ?? "off",
-				)?.thinking;
-				// The rail's words for the same fact: `thinking on (medium runs as on)` made the reader decode a mapping (TY05).
-				const note = thinking ? thinkingNoteWords(thinking) : null;
-				const facts = [
-					applied,
-					down ? "this route is down, so turns fail until it answers; /model switches" : null,
-					note !== null && thinking ? `thinking ${thinking.display} (${note})` : null,
-				];
-				deps.notify(
-					down ? "warning" : "success",
-					facts.filter(Boolean).join(" · "),
-					routeAppliedNoticeKey(ref.target, ref.model),
-				);
-				deps.refreshFooter();
+				applyModelScope(ref, scope);
 			},
 			onCancel: () => {
 				deps.closeOverlay();
@@ -300,7 +317,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 
 	return {
 		openModelOverlayState,
-		openModelScopeState,
+		applyModelSessionState: (ref) => applyModelScope(ref, "session"),
 		openSettingsOverlayState,
 		refreshSettingsOverlay: () => settingsOverlayRefresh?.(),
 	};

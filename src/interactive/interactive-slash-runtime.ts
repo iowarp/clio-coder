@@ -225,11 +225,8 @@ export interface InteractiveSlashRuntimeDeps {
 	/** The shared job control behind `/loop`. Absent where no session-owned job host exists. */
 	jobs?: JobOperations;
 	openModel: () => void;
-	/**
-	 * Ask where a resolved `/model <pattern>` swap lands before anything applies.
-	 * Absent on a host with no overlay layer, where the swap stays session-scoped.
-	 */
-	openModelScope?: (ref: PendingModelScope) => void;
+	/** Apply a resolved `/model <pattern>` swap for this session the way Enter in the picker does, notice included. */
+	applyModelSession?: (ref: PendingModelScope) => void;
 	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: "model-picker") => void;
 	openFleetRuns?: () => void;
@@ -731,16 +728,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		getFleetAgentProfiles: () => deps.getSettings?.().fleet.agentProfiles ?? {},
 		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "default",
 		applyModelRef: (ref) => {
-			// A mid-conversation swap used to rewrite the orchestrator role in
-			// settings.yaml with no prompt, so the next launch could come up on a
-			// dead endpoint (smoke pass 2, G3). The scope dialog owns the commit
-			// now, and it applies nothing until the operator answers.
-			if (deps.openModelScope) {
-				deps.openModelScope(ref);
-				return "pending";
+			// Session scope only: a mid-conversation swap that rewrote settings.yaml
+			// could bring the next launch up on a dead endpoint (smoke pass 2, G3).
+			// Saving goes through the picker's `s` card.
+			if (deps.applyModelSession) {
+				deps.applyModelSession(ref);
+				return "reported";
 			}
-			// No overlay layer to ask with: session scope is the answer that cannot
-			// outlive the session that chose it.
 			deps.onSelectModel?.({ target: ref.target, model: ref.model }, "session", "slash-command");
 			if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, "session", "slash-command");
 			deps.requestRender();

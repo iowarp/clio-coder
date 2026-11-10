@@ -1445,7 +1445,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.music ? { music: deps.music } : {}),
 		...(loopJobs ? { jobs: loopJobs.jobs } : {}),
 		openModel: () => openModelOverlayState(),
-		openModelScope: (ref) => openModelScopeState(ref),
+		applyModelSession: (ref) => applyModelSessionState(ref),
 		openConfigure: () => overlayLifecycle.openConfigureState(),
 		openSettings: (area, group) => {
 			if (!area) return openSettingsOverlayState();
@@ -1679,7 +1679,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openModelOverlayState,
-		openModelScopeState,
+		applyModelSessionState,
 		openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

@@ -202,7 +202,7 @@ const captureStdout = (run: () => Promise<number>) => captureStream(process.stdo
 const captureStderr = (run: () => Promise<number>) => captureStream(process.stderr, run);
 
 describe("provider transport boundary", () => {
-	it("applies a model-picker selection after the scope confirmation", () => {
+	it("applies a model-picker selection for the session on Enter", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
 		settings.chat.target = "old-target";
 		settings.chat.model = "old-model";
@@ -248,10 +248,8 @@ describe("provider transport boundary", () => {
 		selectors.openModelOverlayState();
 		strictEqual(transitions.state, "model");
 		captured.modelView?.handleInput("\r");
-		strictEqual(transitions.state, "model-scope", "Enter must leave the apply confirmation open");
-		strictEqual(settings.chat.target, "old-target", "selection alone must not apply before confirmation");
-		strictEqual(settings.chat.model, "old-model", "selection alone must not apply before confirmation");
-		captured.scopeDeps?.onChoose("session");
+		strictEqual(transitions.state, "closed", "Enter must apply without a scope card");
+		strictEqual(captured.scopeDeps, undefined);
 		strictEqual(settings.chat.target, "next-target");
 		strictEqual(settings.chat.model, "next-model");
 	});

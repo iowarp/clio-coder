@@ -42,6 +42,7 @@ import {
 	diagnosticSeverityToken,
 	FILTER_HINT,
 	formatRuntimeResolutionDiagnostic,
+	type HintEntry,
 	type RowBudgetedBody,
 	showClioOverlayFrame,
 	windowRows,
@@ -106,7 +107,12 @@ export interface OpenModelOverlayDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	bus?: TelemetryHub;
+	/** Enter: use the row for this session. */
 	onSelect: (ref: ModelSelection) => void;
+	/** `s`: save the row as a default, through the scope card. */
+	onSave?: (ref: ModelSelection) => void;
+	/** What switching to the row costs this session's prompt cache, shown in its detail since Enter no longer stops at the card. */
+	switchCost?: (ref: ModelSelection) => string | null;
 	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
 	autoRefresh?: boolean;
@@ -748,7 +754,7 @@ function healthStatus(row: ModelRow): StatusKind {
  * diagnostics stays dim, so the table above keeps the eye. `maxRows` is what
  * the body can spare; the facts give way first and say where they were cut.
  */
-function formatModelDetail(row: ModelRow, width: number, maxRows: number): string[] {
+function formatModelDetail(row: ModelRow, width: number, maxRows: number, switchCost?: string | null): string[] {
 	const theme = clioTheme();
 	const tags: string[] = [];
 	if (row.active) tags.push("in use");
@@ -767,6 +773,7 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 					width,
 				).slice(0, 2)
 			: [];
+	const costLines = switchCost ? wrapTextWithAnsi(theme.fg("annotation", switchCost), width).slice(0, 2) : [];
 	// Severity colors the way the targets hub colors it, through the shared mapping. The thinking
 	// fact already says what runs and why, and an unknown context window is the context fact's own
 	// value, so neither repeats as a diagnostic.
@@ -830,7 +837,7 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		: [];
 	const factBudget = Math.max(
 		1,
-		Math.min(factLines.length, maxRows - 1 - next.length - residencyLines.length - diagnostics.length),
+		Math.min(factLines.length, maxRows - 1 - next.length - residencyLines.length - costLines.length - diagnostics.length),
 	);
 	const kept = capWrapped(factLines, factBudget);
 	return [
@@ -846,6 +853,7 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		),
 		...next,
 		...residencyLines,
+		...costLines,
 		...kept,
 		...diagnostics,
 	];
@@ -995,6 +1003,7 @@ function renderModelOverlayLines(input: {
 	refreshing?: ModelRefreshScope | null;
 	refreshError?: RuntimeResolutionDiagnostic | null;
 	selectionError?: string | null;
+	switchCost?: (ref: ModelSelection) => string | null;
 }): string[] {
 	const width = Math.max(1, input.width);
 	const theme = clioTheme();
@@ -1038,7 +1047,11 @@ function renderModelOverlayLines(input: {
 	const bodyRows = input.bodyRows !== undefined && input.bodyRows > 0 ? input.bodyRows : 0;
 	// Two detail rows are owed before the table is sized; whatever the table
 	// leaves goes back to the detail, so a short list explains its row in full.
-	let detail = selected ? formatModelDetail(selected, width, 3) : [];
+	const cost =
+		selected?.selectable && input.switchCost
+			? input.switchCost({ target: selected.target, model: selected.model })
+			: null;
+	let detail = selected ? formatModelDetail(selected, width, 3, cost) : [];
 	const extraChrome = lines.length - 1 + Math.max(0, detail.length - 2);
 	const budget =
 		bodyRows > 0 ? Math.max(MODEL_MIN_VISIBLE_ROWS, bodyRows - MODEL_CHROME_ROWS - extraChrome - 1) : VISIBLE_ROWS;
@@ -1080,7 +1093,7 @@ function renderModelOverlayLines(input: {
 	if (spare >= 3) lines.push("");
 	if (selected) {
 		const room = Math.max(1, spare >= 3 ? spare - 1 : spare);
-		detail = capWrapped(formatModelDetail(selected, width, room), room);
+		detail = capWrapped(formatModelDetail(selected, width, room, cost), room);
 		lines.push(...detail);
 	} else lines.push(theme.fg("menuDescription", "no selected model"));
 	return lines.map((line) => padAnsi(line, width, GLYPH.ellipsis));
@@ -1106,6 +1119,7 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		return true;
 	}
 	private showAll = false;
+	private showAllChosen = false;
 	private rows: ModelRow[];
 	private summary: ModelOverlaySummary;
 	private refreshing: ModelRefreshScope | null = null;
@@ -1122,9 +1136,17 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		private readonly onClose: () => void,
 		private readonly refreshActions: ModelRefreshActions = {},
 		private readonly turnEffect?: () => string | null,
+		private readonly extras: Pick<OpenModelOverlayDeps, "onSave" | "switchCost"> = {},
 	) {
 		this.rows = [...rows];
 		this.summary = summary;
+		this.openOnAllWhenFocusHides();
+	}
+
+	/** A focus view of fewer than two rows hides the choice it exists to offer, so the picker lists everything until Tab says otherwise. */
+	private openOnAllWhenFocusHides(): void {
+		if (this.showAllChosen) return;
+		this.showAll = this.rows.filter((row) => row.visibleByDefault !== false).length < 2;
 	}
 
 	selectedValue(): string | null {
@@ -1140,6 +1162,7 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		this.rows = [...result.rows];
 		this.summary = result.summary;
 		this.selectionError = null;
+		this.openOnAllWhenFocusHides();
 		this.restoreSelection(preferredValue);
 	}
 
@@ -1194,6 +1217,7 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 	private toggleShowAll(): void {
 		this.selectionError = null;
 		this.showAll = !this.showAll;
+		this.showAllChosen = true;
 		this.selectedIndex = 0;
 	}
 
@@ -1266,25 +1290,26 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 			refreshing: this.refreshing,
 			refreshError: this.refreshError,
 			selectionError: this.selectionError,
+			...(this.extras.switchCost ? { switchCost: this.extras.switchCost } : {}),
 		});
 	}
 
 	invalidate(): void {}
 
-	/** While a query is typed, r, R and * type into it, and Esc clears it instead of closing. */
+	/** While a query is typed, s, r, R and * type into it, and Esc clears it instead of closing. */
 	railHint(innerWidth: number): string {
+		const use: HintEntry = { key: "Enter", verb: "use this session", short: "use" };
+		// A narrow rail keeps its last extras, so r and R lead here to be the first to go.
 		return this.query.length > 0
-			? buildResponsiveHint(
-					[FILTER_HINT, { key: "Tab", verb: "focus/all" }, { key: "Enter", verb: "use" }],
-					"clear filter",
-				)(innerWidth)
+			? buildResponsiveHint([FILTER_HINT, use, { key: "Tab", verb: "focus/all" }], "clear filter")(innerWidth)
 			: buildResponsiveHint([
-					FILTER_HINT,
-					{ key: "Tab", verb: "focus/all" },
 					{ key: "r", verb: "refresh target", short: "refresh" },
 					{ key: "R", verb: "refresh all" },
+					FILTER_HINT,
+					use,
+					...(this.extras.onSave ? [{ key: "s", verb: "save as default", short: "save" }] : []),
+					{ key: "Tab", verb: "focus/all" },
 					{ key: "*", verb: "fav" },
-					{ key: "Enter", verb: "use" },
 				])(innerWidth);
 	}
 
@@ -1317,10 +1342,8 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		if (kb.matches(data, "tui.select.confirm") || matchesKey(data, "enter") || data === "\n") {
 			const row = this.selectedRow();
 			if (row?.selectable) {
-				// Close the picker before handing the selection to its owner. The
-				// application opens the session/global scope confirmation from
-				// onSelect; closing afterwards would immediately close that new overlay
-				// and leave the model binding unchanged.
+				// Close the picker before handing the selection to its owner, which
+				// may open another overlay that closing afterwards would dismiss.
 				this.onClose();
 				this.onSelect({ target: row.target, model: row.model });
 				return;
@@ -1360,6 +1383,14 @@ export class ModelOverlayView implements Component, RowBudgetedBody {
 		}
 		if (data === "*" && this.query.length === 0) {
 			this.toggleFavorite();
+			return;
+		}
+		if (data === "s" && this.query.length === 0 && this.extras.onSave) {
+			const row = this.selectedRow();
+			if (row?.selectable) {
+				this.onClose();
+				this.extras.onSave({ target: row.target, model: row.model });
+			}
 			return;
 		}
 		this.queryInput.handleInput(data);
@@ -1407,6 +1438,10 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 			requestRender: () => tui.requestRender(),
 		},
 		deps.turnEffect,
+		{
+			...(deps.onSave ? { onSave: deps.onSave } : {}),
+			...(deps.switchCost ? { switchCost: deps.switchCost } : {}),
+		},
 	);
 	if (deps.initialSelection) view.setSelectedValue(deps.initialSelection);
 	else if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);

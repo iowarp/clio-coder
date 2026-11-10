@@ -48,6 +48,8 @@ export interface OpenModelScopeOverlayDeps {
 	residency?: string | null;
 	/** The route in use now, named the way the composer names it, so the card reads as a change from one to the other. */
 	current?: string | null;
+	/** Opened by the picker's `s`: Enter already applies for the session, so the card offers only the saving scopes. */
+	saveOnly?: boolean;
 }
 
 /** The swap as the operator typed it, for the dialog title. */
@@ -57,8 +59,8 @@ export function formatPendingModelScope(ref: PendingModelScope): string {
 }
 
 /** Three outcomes, least durable first, matching the settings center's order. */
-function buildModelScopeItems(): ChoiceItem[] {
-	return [
+function buildModelScopeItems(saveOnly: boolean): ChoiceItem[] {
+	const items: ChoiceItem[] = [
 		{
 			value: "session",
 			label: "Apply this session",
@@ -80,10 +82,11 @@ function buildModelScopeItems(): ChoiceItem[] {
 			description: "Nothing changes; Clio keeps the current model",
 		},
 	];
+	return saveOnly ? items.filter((item) => item.value !== "session") : items;
 }
 
 export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps): OverlayHandle {
-	const items = buildModelScopeItems();
+	const items = buildModelScopeItems(deps.saveOnly === true);
 	// The same choice list the settings center confirms with: each destination
 	// carries its consequence under it, so the label never has to be cut to fit
 	// beside a description column.

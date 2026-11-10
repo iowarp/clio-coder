@@ -191,8 +191,8 @@ export interface OverlayLifecycleController {
 		options?: import("../session-control/slash-commands.js").FleetRunStartOptions,
 	): void;
 	openModelOverlayState(): void;
-	/** `/model <pattern>` and the picker both land here: choose session or global before anything applies. */
-	openModelScopeState(ref: PendingModelScope): void;
+	/** `/model <pattern>` lands here: applied for this session, as Enter in the picker does. */
+	applyModelSessionState(ref: PendingModelScope): void;
 	openConfigureState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(target?: string): void;
@@ -669,7 +669,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		startFleetRunState,
 		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
-		openModelScopeState: overlayModelSelectors.openModelScopeState,
+		applyModelSessionState: overlayModelSelectors.applyModelSessionState,
 		openConfigureState: () => {
 			if (!deps.app.onConfigure || !deps.suspendTerminalAsync) {
 				notify("warning", "/config needs an interactive terminal.");

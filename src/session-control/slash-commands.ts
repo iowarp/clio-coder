@@ -1235,11 +1235,10 @@ export interface SessionCommandContext {
 	/** The session's effective autonomy level. */
 	getAutonomy?: () => AutonomyLevel;
 	/**
-	 * Apply a resolved model reference, or hand it to the scope dialog. "pending"
-	 * means the operator has yet to choose session or global and nothing has
-	 * changed; the dialog reports the outcome itself.
+	 * Apply a resolved model reference for this session. "reported" means the
+	 * host applied it and already said what landed, so no second notice is due.
 	 */
-	applyModelRef?: (ref: ResolvedModelRef) => "applied" | "pending";
+	applyModelRef?: (ref: ResolvedModelRef) => "applied" | "reported";
 	openConfigure?: () => void;
 	openSettings?: (area?: SettingsAreaId, group?: "model-picker") => void;
 	openFleetRuns?: () => void;
@@ -3119,9 +3118,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return;
 				}
 				if (result.warning) ctx.notice("warn", result.warning);
-				// "pending" means the scope dialog is up: it says what landed and
-				// where, so announcing a swap here would be announcing a choice the
-				// operator has not made yet.
+				// "reported" means the host's own notice already said what landed.
 				if (ctx.applyModelRef?.(result.ref) === "applied") {
 					const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
 					const status = ctx.providers.list().find((candidate) => candidate.target.id === result.ref?.target);
