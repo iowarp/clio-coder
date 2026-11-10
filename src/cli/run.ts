@@ -306,15 +306,20 @@ export async function runClioRun(
 	handleRunStdoutErrors((code) => coordinator.shutdown(code));
 	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
 	setAutonomousCommitProcess(true);
-	return withRunFailureReporting(parsed.json, async () => {
-		try {
-			return await executeRunCommand(parsed, options);
-		} catch (error) {
-			if (!(error instanceof FileReferenceError)) throw error;
-			writeRunDiagnostic(`${error.message}\n`);
-			return 2;
-		}
-	});
+	const fullMainStream = parsed.json && parsed.agentId === undefined && parsed.jsonEvents !== "terminal";
+	return withRunFailureReporting(
+		parsed.json,
+		async () => {
+			try {
+				return await executeRunCommand(parsed, options);
+			} catch (error) {
+				if (!(error instanceof FileReferenceError)) throw error;
+				writeRunDiagnostic(`${error.message}\n`);
+				return 2;
+			}
+		},
+		fullMainStream,
+	);
 }
 
 async function executeRunCommand(

@@ -240,6 +240,21 @@ export interface RunJsonTerminalTurnEndFrame {
 	verify?: RunJsonVerifyResult[];
 }
 
+/**
+ * The host's verdict on a full-mode `run --json` stream, always its last line (S-51). The model's own `turn_end` and
+ * `agent_end` say how the model stopped; this says whether the run succeeded, and carries the terminal frame's verdict.
+ */
+export interface RunJsonRunEndFrame {
+	type: "run_end";
+	startedAt: string;
+	endedAt: string;
+	exitCode: number;
+	error?: string;
+	outcome: RunResult["outcome"];
+	outcomeDetail?: string;
+	safety?: RunJsonTerminalTurnEndFrame["safety"];
+}
+
 /** One `run --verify` check, run with bash in the run's cwd once the turn settled. */
 export interface RunJsonVerifyResult {
 	/** `run-acceptance`, then `run-acceptance-2` and on, in flag order. */
@@ -332,6 +347,7 @@ export type RunJsonMainFrame =
 	| RunJsonChatLoopFrame
 	| RunJsonTerminalTurnStartFrame
 	| RunJsonTerminalTurnEndFrame
+	| RunJsonRunEndFrame
 	| RunJsonDispatchScopeNoticeFrame
 	| RunJsonDispatchSettlementFrame
 	| RunJsonAutonomyFrame

@@ -67,6 +67,7 @@ import {
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
+import { noteRunEndWritten } from "../run-failure.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import {
 	type DispatchedRunsSettlement,
@@ -994,12 +995,41 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 	};
 
+	// The host's verdict, one builder for terminal mode's turn_end and full mode's run_end so the two cannot drift.
+	const runVerdict = (terminal: HeadlessTerminalOutcome, endedAt: string) => ({
+		startedAt,
+		endedAt,
+		exitCode: terminal.exitCode,
+		...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
+		outcome: terminal.outcome,
+		...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
+		safety: {
+			decisions: { ...runStats.decisions },
+			blockedAttempts: [...runStats.blockedAttempts],
+			...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
+		},
+	});
+	// A full stream's last line says whether the run succeeded, which the model's own turn_end cannot (S-51).
+	let runEndWritten = false;
+	const writeRunEnd = (terminal: HeadlessTerminalOutcome): void => {
+		if (mode !== "json" || jsonEvents === "terminal" || runEndWritten) return;
+		runEndWritten = true;
+		noteRunEndWritten();
+		writeJsonHeader(true, true);
+		queueFrame({ type: "run_end", ...runVerdict(terminal, new Date().toISOString()) });
+	};
+
 	// Registered after the composition root's chat drain hook, which disposes
 	// the loop and awaits settlement, so the stats folded below are final by
 	// the time this runs. Queued frames reach stdout before the seal.
 	termination.onDrain(async () => {
 		await frameChain;
-		await recordRun(interruptedTerminal());
+		const interrupted = interruptedTerminal();
+		writeRunEnd(interrupted);
+		await frameChain;
+		await recordRun(interrupted);
+		// A timeout or signal exits after this hook, so a reader that is behind still gets whole lines and the run_end.
+		await flushRawStdout();
 	});
 
 	// Fresh sessions acquire their identity during submit, after admission notices
@@ -1337,25 +1367,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeJsonHeader(true);
 		writeMainFrame({
 			type: "turn_end",
-			startedAt,
-			endedAt,
-			exitCode,
+			...runVerdict(terminal, endedAt),
 			text: settledAnswer(
 				result.sawTerminatingToolResult
 					? result.terminatingToolText
 					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text),
 			),
-			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
-			// The run's own verdict, so a host bridge reads why the run ended,
-			// and which calls a headless run refused, without parsing prose.
-			outcome: terminal.outcome,
-			...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
 			...(runStats.toolRounds.length > 0 ? { toolRounds: runStats.toolRounds } : {}),
-			safety: {
-				decisions: { ...runStats.decisions },
-				blockedAttempts: [...runStats.blockedAttempts],
-				...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
-			},
 			...(autonomy !== null ? { autonomy } : {}),
 			...(verify !== null ? { verify } : {}),
 		});
@@ -1371,6 +1389,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
 	if (mode === "json") writeJsonHeader(true, true);
+	writeRunEnd(terminal);
 	await frameChain;
 	await flushRawStdout();
 	return exitCode;
