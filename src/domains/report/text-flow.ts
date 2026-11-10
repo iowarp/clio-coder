@@ -113,7 +113,8 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 			const draft = composeReportDraft({
 				kind: input.kind,
 				surface: "acp",
-				...(input.summary !== undefined ? { title: input.summary } : {}),
+				// ACP has no editor, so the summary is also the "What happened" text.
+				...(input.summary !== undefined ? { title: input.summary, happened: input.summary } : {}),
 				session:
 					current === null
 						? null
