@@ -17,6 +17,7 @@ import { DEMO_GUIDANCE } from "./demo-guidance.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 import { modelGuidanceFragmentId } from "./model-guidance.js";
+import { type AutonomyCondition, heldPreconditions, renderRowConditions, type SessionFacts } from "./preconditions.js";
 import type { ProjectPreloadClass } from "./preload.js";
 
 /**
@@ -108,6 +109,10 @@ export interface SessionPromptInputs {
 	memorySection?: string;
 	/** Bounded host facts from completed operator context operations; never a user message. */
 	contextOperationUpdate?: string;
+	/** True when the main session's shell commands run under an OS sandbox on this host. */
+	sandbox?: boolean;
+	/** True when another installed agent is listed as a peer this session can hand work to. */
+	peers?: boolean;
 }
 
 export interface CompileInputs {
@@ -148,6 +153,8 @@ export interface WorkerPromptInputs {
 	permit?: Pick<WorkerPermit, "ceiling" | "allowance">;
 	/** True when the host created a task worktree this run owns; a git worktree permit is effective only then. */
 	taskWorktree?: boolean;
+	/** True when this worker's commands run under an OS sandbox. */
+	sandbox?: boolean;
 	/** One stable persona: the recipe body or bounded override, including bound-skill mechanics. */
 	persona: RenderedPromptFragment;
 	/**
@@ -164,6 +171,8 @@ export interface FragmentManifestEntry {
 	relPath: string;
 	contentHash: string;
 	dynamic: boolean;
+	/** The frontmatter preconditions that held for this compile, such as `surface:attended` or `requires:decide`. */
+	preconditions?: ReadonlyArray<string>;
 }
 
 export interface RenderedPromptFragment {
@@ -594,15 +603,17 @@ function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
 	];
 }
 
-function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: string): string {
-	if (inputs.providerSupportsTools === false) {
-		return [
-			"# Tool Contract",
-			TOOL_RESULT_TRUST_CONTRACT,
-			"Provider tool calls: unavailable.",
-			"This target cannot call tools; answer from the visible user request and compact context only.",
-		].join("\n");
-	}
+interface SessionReach {
+	/** The attached schemas' names. */
+	names: string[];
+	admitted: ReadonlySet<string>;
+	hasGateway: boolean;
+	reachable: (name: string) => boolean;
+	/** Reachable and listed on this surface's capability map. */
+	mapped: (name: string) => boolean;
+}
+
+function sessionReach(inputs: SessionPromptInputs): SessionReach {
 	const capabilityNames = [
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
@@ -610,11 +621,6 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 	// web_fetch, an extension command); the attached schemas are their direct
 	// projection, with `gateway` standing in for every capability it reaches.
 	const names = directSurfaceNames(capabilityNames).sort();
-	if (names.length === 0) {
-		return ["# Tool Contract", TOOL_RESULT_TRUST_CONTRACT, "Direct tools: none. Answer from supplied context."].join(
-			"\n",
-		);
-	}
 	// Asked twice in one session which tools it had, a live model gave two
 	// different answers and invented `web_find`. The authoritative list is one
 	// line above; pointing at it beats letting the model recall the schemas.
@@ -628,6 +634,101 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 			turnAllowsTool(inputs.turnConstraints, name));
 	const mapped = (name: string) =>
 		reachable(name) && (inputs.headless !== true || admitted.has(name) || !HEADLESS_UNMAPPED_CAPABILITIES.has(name));
+	return { names, admitted, hasGateway, reachable, mapped };
+}
+
+/**
+ * The facts a session's fragment preconditions and row conditions read. Its
+ * capabilities are exactly those its capability map can list, so a fragment
+ * that requires one never names a tool the map leaves out.
+ */
+function sessionFacts(inputs: SessionPromptInputs, autonomyLevel: string): SessionFacts {
+	const reach = inputs.providerSupportsTools === false ? undefined : sessionReach(inputs);
+	const candidates = new Set([...(reach?.names ?? []), ...inputs.coordinatorCapabilities]);
+	return {
+		surface: inputs.headless === true ? "headless" : "attended",
+		capabilities: new Set(reach ? [...candidates].filter(reach.mapped) : []),
+		sandbox: inputs.sandbox === true,
+		autonomy: sessionAutonomyCondition(autonomyLevel, inputs.yoloConfinement),
+		demo: inputs.demo === true,
+		peers: inputs.peers === true,
+	};
+}
+
+function sessionAutonomyCondition(autonomyLevel: string, confinement: YoloConfinement | undefined): AutonomyCondition {
+	if (autonomyLevel !== "yolo") return "default";
+	return confinement === "unconfined" ? "yolo-unconfined" : "yolo";
+}
+
+function workerFacts(inputs: WorkerPromptInputs): SessionFacts {
+	return {
+		surface: "worker",
+		capabilities: new Set(canonicalWorkerTools(inputs)),
+		sandbox: inputs.sandbox === true,
+		autonomy: inputs.permit?.allowance.executeAutonomy === "yolo" ? "yolo" : "default",
+		demo: false,
+		peers: false,
+	};
+}
+
+/**
+ * Fragments picked for one compile, with their row conditions rendered and
+ * the preconditions that admitted each kept for the manifest.
+ */
+class FragmentPicker {
+	readonly held = new Map<string, ReadonlyArray<string>>();
+	constructor(
+		private readonly table: FragmentTable,
+		private readonly facts: SessionFacts,
+	) {}
+
+	/** The fragment when it exists and its preconditions hold. */
+	pick(id: string): LoadedFragment | undefined {
+		const fragment = this.table.byId.get(id);
+		if (!fragment) return undefined;
+		const held = heldPreconditions(fragment, this.facts);
+		if (held === null) return undefined;
+		if (held.length > 0) this.held.set(id, held);
+		return this.render(fragment);
+	}
+
+	/** A fragment the prompt cannot do without; its rows still follow the facts. */
+	require(id: string, role: string): LoadedFragment {
+		return this.render(lookupFragment(this.table, id, role));
+	}
+
+	render(fragment: LoadedFragment): LoadedFragment {
+		const body = renderRowConditions(fragment.body, this.facts);
+		return body === fragment.body ? fragment : { ...fragment, body };
+	}
+
+	manifest(fragment: { id: string; relPath: string; contentHash: string; dynamic: boolean }): FragmentManifestEntry {
+		const held = this.held.get(fragment.id);
+		return {
+			id: fragment.id,
+			relPath: fragment.relPath,
+			contentHash: fragment.contentHash,
+			dynamic: fragment.dynamic,
+			...(held ? { preconditions: held } : {}),
+		};
+	}
+}
+
+function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: string): string {
+	if (inputs.providerSupportsTools === false) {
+		return [
+			"# Tool Contract",
+			TOOL_RESULT_TRUST_CONTRACT,
+			"Provider tool calls: unavailable.",
+			"This target cannot call tools; answer from the visible user request and compact context only.",
+		].join("\n");
+	}
+	const { names, admitted, hasGateway, reachable, mapped } = sessionReach(inputs);
+	if (names.length === 0) {
+		return ["# Tool Contract", TOOL_RESULT_TRUST_CONTRACT, "Direct tools: none. Answer from supplied context."].join(
+			"\n",
+		);
+	}
 	const starterCalls = new Map<string, string>();
 	for (const { tool, starterArgs } of inputs.toolDiscoveryHints ?? []) {
 		if (starterArgs === undefined || starterCalls.has(tool.trim())) continue;
@@ -948,15 +1049,17 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
  * states the volatility rule that fixes it.
  */
 export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSessionPrompt {
-	const identity = lookupFragment(table, inputs.identity, "identity");
-	const operatingContract = lookupFragment(table, inputs.operatingContract, "operating contract");
 	const posture = lookupFragment(table, inputs.safety, "safety");
 	const autonomyLevel = posture.id.startsWith("safety.") ? posture.id.slice("safety.".length) : posture.id;
 	const session = inputs.sessionInputs;
-	const safety =
+	const picker = new FragmentPicker(table, sessionFacts(session, autonomyLevel));
+	const identity = picker.require(inputs.identity, "identity");
+	const operatingContract = picker.require(inputs.operatingContract, "operating contract");
+	const safety = picker.render(
 		autonomyLevel === "yolo" && session.yoloConfinement === "unconfined"
 			? safetyFragmentFor(table, autonomyLevel, session.yoloConfinement)
-			: posture;
+			: posture,
+	);
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -973,18 +1076,18 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// request. The flag is fixed for a session, so its prefix stays byte-stable.
 	const attended = session.headless !== true;
 	const clioIdentity = identity.id === "identity.clio";
-	const selfAwareness = clioIdentity ? table.byId.get("identity.self-awareness") : undefined;
+	const selfAwareness = clioIdentity ? picker.pick("identity.self-awareness") : undefined;
 	// Conversation manners, in-chat memory, multi-turn and decision-board rules
 	// and skill installation only arise with an operator attached; a headless
-	// run is one task and its report, so it keeps the core rules alone.
-	const attendedIdentity = clioIdentity && attended ? table.byId.get("identity.clio-attended") : undefined;
-	const attendedSelfAwareness =
-		selfAwareness && attended ? table.byId.get("identity.self-awareness-attended") : undefined;
-	const attendedContract = attended ? table.byId.get("operating.contract-attended") : undefined;
+	// run is one task and its report, so it keeps the core rules alone. Each of
+	// these fragments declares `surfaces` in its frontmatter.
+	const attendedIdentity = clioIdentity ? picker.pick("identity.clio-attended") : undefined;
+	const attendedSelfAwareness = selfAwareness ? picker.pick("identity.self-awareness-attended") : undefined;
+	const attendedContract = picker.pick("operating.contract-attended");
 	// Every harness in the 2026-10 campaign lost T3 by finishing with a
 	// performance clause unaddressed; a headless run has no operator to catch it.
-	const headlessContract = attended ? undefined : table.byId.get("operating.contract-headless");
-	const skillInstalls = attended ? table.byId.get("operating.skill-installs") : undefined;
+	const headlessContract = picker.pick("operating.contract-headless");
+	const skillInstalls = picker.pick("operating.skill-installs");
 	// The routing directives teach a gateway call, so they render only when
 	// gateway is on the surface and the provider supports tool calls. The paths
 	// and the code-outranks-docs rule name no tool and stay unconditional. The
@@ -999,14 +1102,14 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		toolSurfaceHasTool(session.toolNames, "gateway") &&
 		session.coordinatorCapabilities.includes("clio_docs") &&
 		turnAllowsTool(session.turnConstraints, "clio_docs")
-			? table.byId.get("identity.docs-lookup")
+			? picker.pick("identity.docs-lookup")
 			: undefined;
-	const docsRouting = docsLookup && attended ? table.byId.get("identity.docs-routing") : undefined;
+	const docsRouting = docsLookup && attended ? picker.pick("identity.docs-routing") : undefined;
 	// Defer procedures only when this session can retrieve them. Restricted or
 	// tool-less sessions keep the same guidance without an impossible tool route.
 	const inlineGuidance =
 		identity.id === "identity.clio" && attended && !docsRouting
-			? ["operating.memory-guidance", "operating.support-guidance"].map((id) => lookupFragment(table, id, "guidance"))
+			? ["operating.memory-guidance", "operating.support-guidance"].map((id) => picker.require(id, "guidance"))
 			: [];
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
@@ -1025,8 +1128,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			)
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		const settingsRouting =
-			attended && sessionHasContext(session) ? table.byId.get("identity.settings-routing") : undefined;
+		const settingsRouting = picker.pick("identity.settings-routing");
 		harnessAwareness = [
 			rendered.trim(),
 			...(attendedSelfAwareness ? [attendedSelfAwareness.body.trim()] : []),
@@ -1058,9 +1160,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Role guidance requires a reachable tool so it never teaches an unavailable call.
 	const delegation =
 		sessionCanDispatch(session) && session.turnConstraints?.mode !== "answer"
-			? table.byId.get("operating.coordinator")
+			? picker.pick("operating.coordinator")
 			: undefined;
-	const skills = sessionCanUseSkills(session) ? table.byId.get("operating.discovered-skills") : undefined;
+	const skills = sessionCanUseSkills(session) ? picker.pick("operating.discovered-skills") : undefined;
 	const resolvedSkillActivation =
 		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills()
 			? 'Load a matching ready skill through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}); honor its workflow and tool restrictions. Load the next skill only when its step is reached.'
@@ -1070,28 +1172,16 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// section, which already varies only with the model. A target that cannot
 	// call tools gets none, since the notes are about acting between tool calls.
 	const modelNotesId = session.providerSupportsTools === false ? null : modelGuidanceFragmentId(session.model);
-	const modelNotes = modelNotesId === null ? undefined : table.byId.get(modelNotesId);
-	const userControl = attended ? table.byId.get("operating.user-control") : undefined;
+	const modelNotes = modelNotesId === null ? undefined : picker.pick(modelNotesId);
+	const userControl = picker.pick("operating.user-control");
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
-	const steering = session.liveSteering === false ? undefined : table.byId.get("operating.steering");
-	// Decision-record guidance only where `decide` is reachable from this
-	// session's fixed surface; a headless run leaves it off its map (S-89).
-	const decisions =
-		attended &&
-		session.providerSupportsTools !== false &&
-		(toolSurfaceHasTool(session.toolNames, "decide") ||
-			(toolSurfaceHasTool(session.toolNames, "gateway") && session.coordinatorCapabilities.includes("decide")))
-			? table.byId.get("operating.decisions")
-			: undefined;
-	// R-12: only the session that registered the report capability is told how to use it; workers never are.
-	const reportGuidance =
-		attended &&
-		session.providerSupportsTools !== false &&
-		(toolSurfaceHasTool(session.toolNames, "report") ||
-			(toolSurfaceHasTool(session.toolNames, "gateway") && session.coordinatorCapabilities.includes("report")))
-			? table.byId.get("operating.report-guidance")
-			: undefined;
+	const steering = session.liveSteering === false ? undefined : picker.pick("operating.steering");
+	// Decision-record guidance only where `decide` is on this session's map; a
+	// headless run leaves it off (S-89). The report guidance follows the same
+	// rule (R-12). Both declare it in frontmatter.
+	const decisions = picker.pick("operating.decisions");
+	const reportGuidance = picker.pick("operating.report-guidance");
 	const mainOperatingContract = [
 		withDecisions(operatingContract.body, decisions),
 		attendedContract?.body,
@@ -1111,7 +1201,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		["harness-awareness", harnessAwareness],
 		[
 			"delegation",
-			[delegation?.body, delegation && session.hasFleetNodes ? table.byId.get("operating.fleet")?.body : undefined]
+			[delegation?.body, delegation && session.hasFleetNodes ? picker.pick("operating.fleet")?.body : undefined]
 				.filter(Boolean)
 				.join("\n\n"),
 		],
@@ -1174,20 +1264,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		safety,
 		...(modelNotes ? [modelNotes] : []),
 	];
-	const fragmentManifest: FragmentManifestEntry[] = baseFragments.map((f) => ({
-		id: f.id,
-		relPath: f.relPath,
-		contentHash: f.contentHash,
-		dynamic: f.dynamic,
-	}));
-	for (const fragment of inputs.additionalFragments ?? []) {
-		fragmentManifest.push({
-			id: fragment.id,
-			relPath: fragment.relPath,
-			contentHash: fragment.contentHash,
-			dynamic: fragment.dynamic,
-		});
-	}
+	const fragmentManifest: FragmentManifestEntry[] = [...baseFragments, ...(inputs.additionalFragments ?? [])].map(
+		(fragment) => picker.manifest(fragment),
+	);
 
 	return {
 		systemPrompt,
@@ -1229,17 +1308,19 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	if (inputs.hasBoundSkills && !inputs.hasCanonicalContext) {
 		throw new Error("prompts/compiler: bound skills require canonical context in the final attached tool surface");
 	}
-	const identity = lookupFragment(table, "identity.clio-coder-worker", "worker identity");
-	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
-	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
-	const decisions = canonicalWorkerTools(inputs).includes("decide") ? table.byId.get("operating.decisions") : undefined;
+	const picker = new FragmentPicker(table, workerFacts(inputs));
+	const identity = picker.require("identity.clio-coder-worker", "worker identity");
+	const operatingContract = picker.require("operating.contract", "operating contract");
+	const workerContract = picker.require("operating.worker", "worker contract");
+	const decisions = picker.pick("operating.decisions");
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
-	const steering = inputs.liveSteering === false ? undefined : table.byId.get("operating.steering");
+	const steering = inputs.liveSteering === false ? undefined : picker.pick("operating.steering");
 	// A worker that inherited the operator's yolo reads what it may do under it (#407).
 	const safety =
 		inputs.permit?.allowance.executeAutonomy === "yolo"
-			? lookupFragment(table, "safety.yolo-worker", "safety")
-			: lookupFragment(table, "safety.default", "safety");
+			? picker.require("safety.yolo-worker", "safety")
+			: picker.require("safety.default", "safety");
+	const readOnly = inputs.readOnly === true ? picker.require("dispatch.read-only", "read-only restriction") : undefined;
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -1255,8 +1336,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	if (steering) push("steering", steering.body);
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
-	if (inputs.readOnly === true)
-		push("dispatch.read-only", lookupFragment(table, "dispatch.read-only", "read-only restriction").body);
+	if (readOnly) push("dispatch.read-only", readOnly.body);
 	push("persona", inputs.persona.body);
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
@@ -1270,15 +1350,10 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 		workerContract,
 		...(steering ? [steering] : []),
 		safety,
-		...(inputs.readOnly === true ? [lookupFragment(table, "dispatch.read-only", "read-only restriction")] : []),
+		...(readOnly ? [readOnly] : []),
 		inputs.persona,
 		...(inputs.additionalFragments ?? []),
-	].map((fragment) => ({
-		id: fragment.id,
-		relPath: fragment.relPath,
-		contentHash: fragment.contentHash,
-		dynamic: fragment.dynamic,
-	}));
+	].map((fragment) => picker.manifest(fragment));
 
 	return {
 		systemPrompt,

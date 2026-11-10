@@ -27,7 +27,9 @@ import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js";
 import { resolvePackageRoot } from "../src/core/package-root.js";
+import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
+import { renderRowConditions, type SessionFacts } from "../src/domains/prompts/preconditions.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
 
@@ -1356,6 +1358,78 @@ async function checkRetiredCommands(): Promise<void> {
 	}
 }
 
+/**
+ * Text a precondition does not cover, kept with the reason it may stay. Each
+ * entry is `<fragment id> <name>`; a new fragment gets a precondition instead.
+ */
+const PROMPT_PRECONDITION_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
+	["identity.clio `read`", "the citation rule names where a line number comes from; a tool-less target cites none"],
+	["operating.worker `write`", "names where a worker's writes reach; a worker without write reads it as a limit"],
+	["operating.worker `edit`", "names where a worker's writes reach; a worker without edit reads it as a limit"],
+	["operating.worker `bash`", "tells a worker with bash not to stage scripts; one without it stages none"],
+	["safety.default /rewind", "renderSafetySection removes the clause for headless sessions"],
+	["safety.yolo `job`", "the paragraph carries its own headless fallback"],
+	["safety.yolo-unconfined `job`", "the paragraph carries its own headless fallback"],
+	["wiki.page `code_nav`", "rendered by the codewiki pipeline, whose page writers always admit code_nav"],
+	["wiki.plan `code_nav`", "rendered by the codewiki pipeline, whose planners always admit code_nav"],
+]);
+
+/**
+ * A fragment that names a tool in backticks, or a slash command, must carry
+ * the precondition that makes the name true: `requires` or a `{tool}` row for
+ * a tool, `surfaces: [attended]` or an `{attended}` row for a slash command.
+ * Each name is checked by rendering the body with only that name false.
+ */
+async function checkPromptPreconditions(): Promise<void> {
+	const { BUILTIN_SLASH_COMMANDS } = await import("../src/session-control/slash-commands.js");
+	const slashCommands = new Set(BUILTIN_SLASH_COMMANDS.map((entry) => entry.name));
+	const tools = new Set<string>(ALL_TOOL_NAMES);
+	const facts = (surface: SessionFacts["surface"], without?: string): SessionFacts => ({
+		surface,
+		capabilities: new Set([...tools].filter((tool) => tool !== without)),
+		sandbox: true,
+		autonomy: "default",
+		demo: true,
+		peers: true,
+	});
+	const used = new Set<string>();
+	for (const fragment of loadFragments().byId.values()) {
+		const raw = readFileSync(fragment.path, "utf8");
+		const bodyLine = raw.slice(0, raw.length - fragment.body.length).split("\n").length - 1;
+		const names = new Map<string, number>();
+		fragment.body.split("\n").forEach((line, index) => {
+			for (const match of line.matchAll(/`([a-z_]+)`/g)) {
+				if (tools.has(match[1] ?? "") && !names.has(`\`${match[1]}\``)) names.set(`\`${match[1]}\``, index + 1);
+			}
+			for (const match of line.matchAll(/(?:^|[\s("'])\/([a-z][a-z-]*)\b/g)) {
+				if (slashCommands.has(match[1] ?? "") && !names.has(`/${match[1]}`)) names.set(`/${match[1]}`, index + 1);
+			}
+		});
+		for (const [name, line] of names) {
+			const slash = name.startsWith("/");
+			const tool = name.slice(1, slash ? undefined : -1);
+			if (slash ? fragment.surfaces?.every((surface) => surface === "attended") : fragment.requires?.includes(tool)) {
+				continue;
+			}
+			const rendered = renderRowConditions(fragment.body, slash ? facts("headless") : facts("attended", tool));
+			const stillNamed = slash ? new RegExp(`(?:^|[\\s("'])\\/${tool}\\b`, "m").test(rendered) : rendered.includes(name);
+			if (!stillNamed) continue;
+			const key = `${fragment.id} ${name}`;
+			if (PROMPT_PRECONDITION_EXEMPTIONS.has(key)) {
+				used.add(key);
+				continue;
+			}
+			fail(
+				"prompt-preconditions",
+				`${relative(root, fragment.path)}:${bodyLine + line}: ${name} needs ${slash ? "surfaces: [attended] or an {attended} row" : `requires: [${tool}] or a {${tool}} row`}`,
+			);
+		}
+	}
+	for (const key of PROMPT_PRECONDITION_EXEMPTIONS.keys()) {
+		if (!used.has(key)) fail("prompt-preconditions", `exemption "${key}" no longer matches; delete it`);
+	}
+}
+
 // Checks that wait on a worker or a child process come first: they start, then
 // overlap the synchronous checks after them.
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
@@ -1378,6 +1452,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["prompts", checkPromptsDocLinks],
 	["docs-source", checkDocsSource],
 	["retired-commands", checkRetiredCommands],
+	["prompt-preconditions", checkPromptPreconditions],
 ];
 
 const startedAt = performance.now();

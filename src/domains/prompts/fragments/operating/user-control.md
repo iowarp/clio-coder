@@ -2,6 +2,7 @@
 id: operating.user-control
 version: 1
 description: Preserve user agency and understanding as part of task completion
+surfaces: [attended]
 ---
 
 # User control and understanding

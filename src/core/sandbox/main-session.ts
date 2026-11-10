@@ -85,6 +85,18 @@ export function yoloShellState(
 	return yoloScriptSandboxState(mode, availability);
 }
 
+/** Whether the main session's shell commands run under the OS sandbox at this autonomy level. */
+export function mainSessionShellSandboxed(
+	autonomy: string,
+	confinement: YoloConfinement,
+	mode: SandboxMode,
+	availability: SandboxAvailability,
+): boolean {
+	if (autonomy !== "yolo") return mainShellContained(mode, availability);
+	const state = yoloShellState(confinement, mode, availability);
+	return state === "contained-sandbox" || state === "sandboxed";
+}
+
 export interface MainSandboxPolicyInput {
 	/** The session workspace root. */
 	workspace: string;

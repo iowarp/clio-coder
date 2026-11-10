@@ -2,6 +2,8 @@
 id: operating.report-guidance
 version: 1
 description: Drafting and offering reports about Clio Coder's own problems through the report capability
+surfaces: [attended]
+requires: [report]
 ---
 
 # Reporting Clio Coder's own problems

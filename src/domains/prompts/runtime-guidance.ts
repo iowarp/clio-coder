@@ -1,4 +1,5 @@
 import { type LoadedFragment, loadFragments } from "./fragment-loader.js";
+import { stripRowMarkers } from "./preconditions.js";
 
 let cachedGuidance: ReadonlyMap<string, LoadedFragment> | undefined;
 
@@ -21,6 +22,6 @@ export function guidanceForDocs(query: string): ReadonlyArray<{ id: string; text
 	const guidance = cachedGuidance;
 	return ids.flatMap((id) => {
 		const fragment = guidance.get(id);
-		return fragment ? [{ id, text: fragment.body.trim() }] : [];
+		return fragment ? [{ id, text: stripRowMarkers(fragment.body).trim() }] : [];
 	});
 }

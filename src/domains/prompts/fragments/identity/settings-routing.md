@@ -2,6 +2,8 @@
 id: identity.settings-routing
 version: 1
 description: Questions about Clio Coder's own settings go to context(scope="settings"); renders whenever context is on the surface, independent of skills. {SETTINGS_CHANGE_POLICY} names configure_clio only where it is registered and autonomy lets it run.
+surfaces: [attended]
+requires: [context]
 ---
 
 # Clio Coder settings routing

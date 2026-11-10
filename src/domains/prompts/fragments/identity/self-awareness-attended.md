@@ -2,6 +2,7 @@
 id: identity.self-awareness-attended
 version: 1
 description: How Clio Coder answers an operator's questions about the software from its bundled docs and source
+surfaces: [attended]
 ---
 
 These are readable authorities on Clio Coder's capabilities and configuration even in an

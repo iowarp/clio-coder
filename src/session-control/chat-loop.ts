@@ -10,6 +10,7 @@ import {
 	turnContinuationDelayMs,
 } from "../core/job-types.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
+import type { SandboxAvailability } from "../core/sandbox/types.js";
 import {
 	mainAgent,
 	observedToolCallOrigin,
@@ -907,6 +908,8 @@ export interface CreateChatLoopDeps {
 	headless?: boolean;
 	/** False when no operator message can arrive mid-run (a headless run without a steer channel). */
 	liveSteering?: boolean;
+	/** This host's sandbox backend; absent, the session prompt claims no sandbox. */
+	sandboxAvailability?: () => SandboxAvailability;
 	scheduling?: SchedulingContract;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
@@ -1545,6 +1548,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		operatorInterviews: deps.operatorInterviews === true,
 		headless: deps.headless === true,
 		...(deps.liveSteering === false ? { liveSteering: false } : {}),
+		...(deps.sandboxAvailability ? { sandboxAvailability: deps.sandboxAvailability } : {}),
 		state,
 		getSettings: deps.getSettings,
 		...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),

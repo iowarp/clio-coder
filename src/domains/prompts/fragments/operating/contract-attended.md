@@ -2,6 +2,7 @@
 id: operating.contract-attended
 version: 1
 description: Operating rules that only arise with an operator attached across turns
+surfaces: [attended]
 ---
 
 For a path outside the workspace, you may instead ask whether to act on it

@@ -12,6 +12,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
 	"memory-off-marker",
+	"prompt-preconditions",
+	"prompt-tier-golden",
 	"memory-recall-hygiene",
 	"memory-observation-envelope",
 	"dispatch-memory-scope",

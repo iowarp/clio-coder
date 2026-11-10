@@ -2,6 +2,7 @@
 id: operating.skill-installs
 version: 1
 description: Skill installation and marketplace etiquette for an attended session
+surfaces: [attended]
 ---
 
 Install only when requested or approved. Honor a [Marketplace] reminder's exact

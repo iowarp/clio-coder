@@ -3226,6 +3226,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		headless: options.headless !== undefined,
 		// Without a steer channel nothing can reach a headless run mid-turn.
 		...(options.headless !== undefined && options.headless.steerChannel === undefined ? { liveSteering: false } : {}),
+		sandboxAvailability,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
 		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
 		registerPrewarmEndpointSlot: (runtime) => {

@@ -2,6 +2,8 @@
 id: operating.decisions
 version: 1
 description: Decision-record discipline; renders only where the decide capability is reachable (attended main sessions, workers admitting decide)
+surfaces: [attended, worker]
+requires: [decide]
 ---
 
 Record consequential design choices with an admitted decision tool when

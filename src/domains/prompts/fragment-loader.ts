@@ -3,12 +3,18 @@ import path from "node:path";
 import yaml from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { sha256 } from "./hash.js";
+import {
+	type FragmentPreconditions,
+	parseFragmentPreconditions,
+	ROW_CONDITION_NAMES,
+	rowConditionMarkers,
+} from "./preconditions.js";
 
 /**
  * A single prompt fragment loaded from disk, with parsed frontmatter plus the
  * raw content hash used to seed the prompts domain's reproducibility contract.
  */
-export interface LoadedFragment {
+export interface LoadedFragment extends FragmentPreconditions {
 	path: string;
 	relPath: string;
 	id: string;
@@ -99,6 +105,18 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 		throw new Error(`fragment-loader: ${relPath}: frontmatter.dynamic must be a boolean when present`);
 	}
 
+	let preconditions: FragmentPreconditions;
+	try {
+		preconditions = parseFragmentPreconditions(fm);
+	} catch (err) {
+		throw new Error(`fragment-loader: ${relPath}: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	for (const marker of rowConditionMarkers(body)) {
+		if (!ROW_CONDITION_NAMES.has(marker.name)) {
+			throw new Error(`fragment-loader: ${relPath}: body line ${marker.line} has unknown row condition {${marker.name}}`);
+		}
+	}
+
 	return {
 		path: filePath,
 		relPath,
@@ -106,6 +124,7 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 		version,
 		description,
 		dynamic: dynamicRaw === true,
+		...preconditions,
 		body,
 		contentHash: sha256(raw),
 	};

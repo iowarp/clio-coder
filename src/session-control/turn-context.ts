@@ -4,6 +4,8 @@ import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
+import { mainSessionShellSandboxed } from "../core/sandbox/main-session.js";
+import type { SandboxAvailability } from "../core/sandbox/types.js";
 import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
@@ -206,6 +208,8 @@ export interface TurnContextDeps {
 	headless?: boolean;
 	/** False when no operator message can arrive mid-run; the prompt then omits steering guidance. */
 	liveSteering?: boolean;
+	/** This host's sandbox backend; absent, the session prompt claims no sandbox. */
+	sandboxAvailability?: () => SandboxAvailability;
 	state: TurnContextState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
@@ -2900,6 +2904,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(effectiveYoloConfinement(settings.safety) === "unconfined" ? { yoloConfinement: "unconfined" as const } : {}),
 				...(deps.liveSteering === false ? { liveSteering: false } : {}),
 				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
+				// Only the sandboxed case is carried, so a host without a backend keeps its prompt key.
+				...(deps.sandboxAvailability &&
+				mainSessionShellSandboxed(
+					compiledAutonomy,
+					effectiveYoloConfinement(settings.safety),
+					settings.safety.sandbox,
+					deps.sandboxAvailability(),
+				)
+					? { sandbox: true }
+					: {}),
 			};
 			const memoryOn = deps.memoryEnabled?.() !== false;
 			if (!memoryOn) frozenMemorySection = null;

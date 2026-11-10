@@ -2,6 +2,7 @@
 id: operating.contract-headless
 version: 1
 description: Finishing discipline for a headless run that delivers one task and its report
+surfaces: [headless]
 ---
 
 This run is one task and its final report. Restate the task as its separate
@@ -13,5 +14,5 @@ instructions allow tests. Follow the neighboring tests and make the
 reproduction fail on the untouched code, then fix the source. Before reporting, map
 each clause to evidence in your diff or a check you ran; a clause without
 evidence is unfinished: finish it or record it with limitation.
-A problem with Clio Coder itself is saved with `report` action "draft" and
+{report} A problem with Clio Coder itself is saved with `report` action "draft" and
 named in the final answer; nothing is filed.
