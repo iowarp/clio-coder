@@ -73,6 +73,7 @@ test("storeWriteTarget predicts each write op's path and is null for reads and m
 		storeBlobPath(cwd, tag, "out/a.h5"),
 	);
 	strictEqual(storeWriteTarget(cwd, { op: "put", tag, path: "data/x.h5" }), storeBlobPath(cwd, tag, "x.h5"));
+	strictEqual(storeWriteTarget(cwd, { op: "put", tag, blob: "", path: "data/x.h5" }), storeBlobPath(cwd, tag, "x.h5"));
 	strictEqual(storeWriteTarget(cwd, { op: "note", tag }), storeTagDir(cwd, recordsTag(tag)));
 	strictEqual(storeWriteTarget(cwd, { op: "remove", tag, blob: "x.h5" }), storeBlobPath(cwd, tag, "x.h5"));
 	for (const op of ["tags", "list", "stat", "get", "frobnicate"])

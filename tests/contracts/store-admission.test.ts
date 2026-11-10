@@ -40,6 +40,10 @@ describe("store safety admission", () => {
 			actionClass: "destructive",
 			reasons: ["store-remove: sim:a.txt"],
 		});
+		// The tool reads `ref` only without `tag`, so the reason names the blob it removes, not the ref's.
+		deepStrictEqual(store({ op: "remove", tag: "sim", blob: "a.txt", ref: "other:b.txt" }).reasons, [
+			"store-remove: sim:a.txt",
+		]);
 		deepStrictEqual(store({ op: "put", tag: "sim", path: "../outside.txt" }).reasons, [
 			"store-put-source-outside-workspace",
 		]);
