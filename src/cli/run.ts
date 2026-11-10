@@ -49,7 +49,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
-import { formatDispatchHumanOutput } from "./run-output.js";
+import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
@@ -801,9 +801,11 @@ async function runDispatch(
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
 		if (parsed.json) {
 			for (const frame of credentials.finish<RunJsonAgentFrame>(receipt.exitCode === 0)) writeAgentFrame(frame);
+			const verifier = verifierVerdict(receipt);
 			for (const frame of credentials.scrub<RunJsonAgentFrame>({
 				type: "result",
 				result: receipt,
+				...(verifier !== null ? { verdict: verifier.verdict, failedChecks: verifier.failedChecks } : {}),
 				...(recording !== undefined ? { recording } : {}),
 			}))
 				writeAgentFrame(frame);
@@ -872,5 +874,7 @@ const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
 ]);
 
 function mapExitCode(r: RunResult): number {
+	// A verifier that reported a failed verdict makes `run --agent verifier ... && deploy` stop, though its run succeeded.
+	if (r.exitCode === 0 && verifierVerdict(r)?.verdict === "fail") return 1;
 	return PASS_THROUGH_EXIT_CODES.has(r.exitCode) ? r.exitCode : 1;
 }

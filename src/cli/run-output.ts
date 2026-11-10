@@ -33,25 +33,39 @@ function failedChecks(value: unknown): string[] {
 	);
 }
 
-/** DF-6: project only contract fields from the sealed result, never infer limits from narration. */
-function sealedResultLimitations(receipt: RunResult): string[] {
+function sealedReport(receipt: RunResult): { kind: string; data: Record<string, unknown> } | null {
 	const output = receipt.output;
-	if (output?.state !== "final" || output.truncated) return [];
+	if (output?.state !== "final" || output.truncated) return null;
 	const fact = receipt.quality.resultContract;
 	// Verifier and debugger reports seal typed JSON without the helper envelope.
 	const kind = output.structured?.kind ?? (fact?.conformance === "pass" ? fact.sourceId.split(":")[1] : undefined);
-	if (kind === undefined) return [];
+	if (kind === undefined) return null;
 	const parsed = output.structured
 		? { ok: true as const, value: output.structured.data }
 		: kind === "verifier-report"
 			? parseVerifierPayload(output.text)
 			: parseJsonObjectPayload(output.text);
-	if (!parsed.ok) return [];
-	const data = parsed.value;
+	return parsed.ok ? { kind, data: parsed.value } : null;
+}
+
+/**
+ * A verifier's own verdict and the checks it ran that failed. A verifier that found a failure did its job, so the
+ * run settles succeeded; only the process exit status says the gate failed. Other reports keep their semantics.
+ */
+export function verifierVerdict(receipt: RunResult): { verdict: string; failedChecks: string[] } | null {
+	const report = sealedReport(receipt);
+	if (report?.kind !== "verifier-report" || typeof report.data.verdict !== "string") return null;
+	return { verdict: report.data.verdict, failedChecks: failedChecks(report.data.checks) };
+}
+
+/** DF-6: project only contract fields from the sealed result, never infer limits from narration. */
+function sealedResultLimitations(receipt: RunResult): string[] {
+	const report = sealedReport(receipt);
+	if (report === null) return [];
+	const { kind, data } = report;
 	switch (kind) {
 		case "mutation-report":
 			return [...strings(data.declaredChecks), ...failedChecks(data.validations)];
-		case "verifier-report":
 		case "code-report":
 			return failedChecks(data.checks);
 		case "scout-report":
@@ -161,6 +175,11 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const cutOff = receipt.output === undefined ? receipt.exitCode !== 0 : receipt.output.state === "partial";
 	const answer = cutOff ? holdCutOffText(whole) : whole;
 	const limitations = sealedResultLimitations(receipt);
+	const verifier = verifierVerdict(receipt);
+	const failedBlock =
+		verifier !== null && verifier.failedChecks.length > 0
+			? `\nFailed checks:\n${verifier.failedChecks.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
+			: "";
 	const block =
 		limitations.length > 0
 			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
@@ -177,7 +196,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const caveat = found?.kind === "no-tools" ? null : found;
 	const finishedWith = caveat === null ? "" : `\nFinished with a caveat: ${caveat.words}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier)}\n`,
 	);
 }
 
@@ -198,12 +217,19 @@ function receiptCaveat(receipt: RunResult): CompletedRunCaveat | null {
 	});
 }
 
-function formatResultLine(r: RunResult, notVerified: number): string {
+function formatResultLine(
+	r: RunResult,
+	notVerified: number,
+	verifier: { verdict: string; failedChecks: string[] } | null,
+): string {
 	const reasoningFact = r.spend.usage.reasoning;
 	const reasoning =
 		reasoningFact.kind === "measured" && reasoningFact.value > 0 ? ` reasoning=${renderFactField(reasoningFact)}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
-	const verification = notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "";
+	const verification =
+		(verifier !== null ? ` verdict=${verifier.verdict}` : "") +
+		(verifier !== null && verifier.failedChecks.length > 0 ? ` failed_checks=${verifier.failedChecks.length}` : "") +
+		(notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "");
 	const responseModelIdObservation = runResponseModelIdObservationLabel(r);
 	const gatewayRouting = runGatewayRoutingLabel(r);
 	return `result: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${renderFactField(r.spend.totalTokens)}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;

@@ -315,6 +315,10 @@ export interface RunJsonResultFrame {
 	recording?: import("../../domains/dispatch/index.js").RecordingReference;
 	type: "result";
 	result: RunResult;
+	/** A verifier report's own verdict; `fail` makes the process exit 1 though the run succeeded. */
+	verdict?: string;
+	/** The verifier's checks that ran and failed, as `name: evidence`. */
+	failedChecks?: string[];
 }
 
 // ---------------------------------------------------------------------------
