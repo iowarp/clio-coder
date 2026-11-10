@@ -260,6 +260,8 @@ interface WorkerSpecFields {
 	 * calls (native, claude-sdk); dispatch refuses it on subprocess runtimes.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/** Store tags this run may put into and the dispatch run its records name (M-31). */
+	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 	/**
 	 * OS sandbox policy for this worker's own child processes. Absent means
 	 * unsandboxed (`safety.sandbox: off`, or a runtime whose tools Clio does not
@@ -1231,6 +1233,13 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		for (const root of roots) {
 			if (root.trim().length === 0) throw new Error("WorkerSpec.writeRoots entries must be non-empty strings");
 		}
+	}
+	if (spec.storeGrant !== undefined) {
+		const grant = readRecord(spec.storeGrant, "WorkerSpec.storeGrant");
+		if (readStringArray(grant.tags, "WorkerSpec.storeGrant.tags").length === 0) {
+			throw new Error("WorkerSpec.storeGrant.tags must be a non-empty array when present");
+		}
+		if (grant.dispatchRunId !== undefined) readString(grant.dispatchRunId, "WorkerSpec.storeGrant.dispatchRunId");
 	}
 	if (spec.sandbox !== undefined) validateWorkerSandbox(spec.sandbox);
 	return spec as unknown as WorkerSpec;

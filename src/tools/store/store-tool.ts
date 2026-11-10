@@ -50,11 +50,17 @@ export interface StoreToolDeps {
 	getCwd?: () => string;
 	/** False in a worker: the dispatching session puts results. */
 	writable: boolean;
+	/**
+	 * A worker's dispatch grant (M-31): it may put and note into these tags
+	 * only, and its records name it as a worker of that dispatch run.
+	 */
+	grant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 }
 
 const WRITE_OPS: ReadonlySet<StoreOp> = new Set(["create", "put", "note", "remove"]);
 const READ_ONLY_REFUSAL =
 	"store: this session can read the store but not write to it; the dispatching session puts results";
+const GRANTABLE_OPS: ReadonlySet<StoreOp> = new Set(["put", "note"]);
 const LIST_DEFAULT_LIMIT = 100;
 const LIST_MAX_LIMIT = 500;
 const TAG_CLASSES: ReadonlySet<string> = new Set<StoreTagClass>(["input", "output", "cache", "archive"]);
@@ -214,13 +220,16 @@ async function runOp(
 	cwd: string,
 	backend: StoreBackend,
 	options: ToolInvokeOptions | undefined,
+	grant: StoreToolDeps["grant"],
 ): Promise<OpResult> {
 	const signal = options?.signal;
+	const actor = grant === undefined ? ("main" as const) : ("worker" as const);
 	const ids = {
 		...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 		...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
+		...(grant?.dispatchRunId !== undefined ? { dispatchRunId: grant.dispatchRunId } : {}),
 	};
-	const producedBy = { actor: "main" as const, ...ids };
+	const producedBy = { actor, ...ids };
 	if (op === "tags") {
 		const names = (await backend.listTags()).filter((tag) => !isRecordsTag(tag));
 		const tags = [];
@@ -316,7 +325,7 @@ async function runOp(
 					stat: written,
 					hash,
 					receipt: { backend: backend.kind, key: storedPath, version: written.version },
-					actor: "main",
+					actor,
 					ids,
 					...(typeof args.note === "string" ? { note: args.note } : {}),
 					derivedFrom: derived,
@@ -406,7 +415,16 @@ export function createStoreTool(deps: StoreToolDeps): ToolSpec {
 			if (!isStoreOp(op)) {
 				return { kind: "error", message: `store: op must be one of ${STORE_OPS.join(", ")}; got '${op}'` };
 			}
-			if (!deps.writable && WRITE_OPS.has(op)) return { kind: "error", message: READ_ONLY_REFUSAL };
+			if (!deps.writable && WRITE_OPS.has(op)) {
+				const tag = typeof args.tag === "string" ? args.tag : "";
+				if (!GRANTABLE_OPS.has(op) || deps.grant === undefined) return { kind: "error", message: READ_ONLY_REFUSAL };
+				if (!deps.grant.tags.includes(tag)) {
+					return {
+						kind: "error",
+						message: `store: this run has no grant for tag '${tag}'; the dispatcher grants it with tags: ["${tag}"]`,
+					};
+				}
+			}
 			const reservation = reserveObservation(STORE_OBSERVATION_SELF_CAP_BYTES, options);
 			const subject = typeof args.tag === "string" ? `${op} ${args.tag}` : op;
 			if (reservation.exhausted) {
@@ -422,7 +440,7 @@ export function createStoreTool(deps: StoreToolDeps): ToolSpec {
 			commitObservationReservation(reservation);
 			try {
 				const cwd = getCwd();
-				const result = await runOp(op, args, cwd, await openStoreBackend(cwd), options);
+				const result = await runOp(op, args, cwd, await openStoreBackend(cwd), options, deps.grant);
 				return finalizeObservation({
 					tool: STORE_TOOL_NAME,
 					unit: result.unit,

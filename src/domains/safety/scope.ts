@@ -1,5 +1,6 @@
 import path from "node:path";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { storeProjectDir } from "../../core/store-paths.js";
 import type { ActionClass } from "./action-classifier.js";
 
 /**
@@ -47,7 +48,15 @@ export const READONLY_SCOPE: ScopeSpec = {
  * fails closed instead of widening worker writes past the orchestrator.
  */
 function processWorkspaceRoots(): string[] {
-	return [asDirectoryPathBoundary(path.resolve(process.cwd()))];
+	const workspace = asDirectoryPathBoundary(path.resolve(process.cwd()));
+	try {
+		// The main session already writes this project's store through the store
+		// tool, so stating it lets a worker's tag grant (M-31) pass isSubset.
+		return [workspace, asDirectoryPathBoundary(storeProjectDir(process.cwd()))];
+	} catch {
+		// An unresolvable Clio home has no store, so no grant can name it.
+		return [workspace];
+	}
 }
 
 export const WORKSPACE_SCOPE: ScopeSpec = {

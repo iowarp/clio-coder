@@ -35,6 +35,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
+import { openStoreBackend } from "../store/index.js";
 import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 import { readToolRounds } from "./types.js";
@@ -82,6 +83,7 @@ import {
 	workerSandboxReceipt,
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import { storeGrantBoundaries } from "../../core/store-paths.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { workerAgent } from "../../core/telemetry/context.js";
@@ -1328,6 +1330,37 @@ export function admissionWriteBoundaries(
 		const mapped = resolvePath(worktree.root, rel);
 		return directory ? asDirectoryPathBoundary(mapped) : mapped;
 	});
+}
+
+/**
+ * A tag grant (M-31) adds each granted tag's directory and records directory to
+ * a run that declared write roots. A run without declared roots already has the
+ * workspace scope, which states this project's store directory.
+ */
+function withStoreGrantBoundaries(req: DispatchRequest, pathScope: DispatchPathScope): DispatchPathScope {
+	const tags = req.storeTags ?? [];
+	if (tags.length === 0 || pathScope.writeBoundaries.length === 0) return pathScope;
+	const granted = storeGrantBoundaries(req.cwd ?? process.cwd(), tags);
+	return { ...pathScope, writeBoundaries: [...new Set([...pathScope.writeBoundaries, ...granted])] };
+}
+
+/** Refuse a tag grant a run cannot use: a read-only run, or a tag that does not exist. */
+async function assertStoreGrantAdmissible(req: DispatchRequest, readOnly: boolean): Promise<void> {
+	const tags = req.storeTags ?? [];
+	if (tags.length === 0) return;
+	if (readOnly) {
+		throw new Error(
+			`dispatch: admission denied: agent '${req.agentId}' runs read-only, so a store grant (tags: ${JSON.stringify(tags)}) contradicts its scope; dispatch a writing recipe or drop tags`,
+		);
+	}
+	const backend = await openStoreBackend(req.cwd ?? process.cwd());
+	for (const tag of tags) {
+		if (!(await backend.tagExists(tag))) {
+			throw new Error(
+				`dispatch: admission denied: store tag '${tag}' does not exist; create it with store create before granting it`,
+			);
+		}
+	}
 }
 
 function pickWorkerScope(
@@ -3315,6 +3348,12 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// Carry canonical write boundaries to the worker safety seam. Exact files
 	// remain exact and trailing-slash entries remain subtrees after resolution.
 	if (input.pathScope.writeBoundaries.length > 0) spec.writeRoots = [...input.pathScope.writeBoundaries];
+	if (input.req.storeTags !== undefined && input.req.storeTags.length > 0 && !input.readOnly) {
+		spec.storeGrant = {
+			tags: [...input.req.storeTags],
+			...(input.req.runIdHint ? { dispatchRunId: input.req.runIdHint } : {}),
+		};
+	}
 	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
 	const sandbox = workerSandboxFor({
 		runtimeKind: input.target.runtime.kind,
@@ -5695,7 +5734,7 @@ export function createDispatchBundle(
 						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
-		const pathScope = resolveDispatchPathScope(req);
+		const pathScope = withStoreGrantBoundaries(req, resolveDispatchPathScope(req));
 		publishDispatchPathScope(req, pathScope);
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
@@ -5759,6 +5798,7 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const cwd = req.cwd ?? process.cwd();
 		const readOnly = req.readOnly === true || spec.capabilityClass === "read-only";
+		await assertStoreGrantAdmissible(req, readOnly);
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
 		}
@@ -5989,6 +6029,11 @@ export function createDispatchBundle(
 			dispatchResultContract(req, spec);
 		}
 		assertWorkerContextRequest(req, false);
+		if (req.storeTags !== undefined && req.storeTags.length > 0) {
+			throw new Error(
+				"dispatch: store tags cannot be granted to an ACP delegation target; the external agent has no Clio store tool. Dispatch to a native worker.",
+			);
+		}
 		if (!settings) throw new Error("dispatch: effective settings required for ACP delegation");
 		const configured = settings.integrations.externalAgents.entries.find((entry) => entry.id === agentId);
 		if (!configured) throw new Error(`dispatch: ACP delegation agent '${agentId}' not configured`);
@@ -7239,6 +7284,12 @@ export function createDispatchBundle(
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
+		if (placement?.node.kind === "ssh" && req.storeTags !== undefined && req.storeTags.length > 0) {
+			// The local backend lives in this host's data directory, which a fleet node cannot reach.
+			throw new Error(
+				`dispatch: admission denied: node '${placement.node.id}' is remote and the store backend is local, so it cannot be granted tags ${JSON.stringify(req.storeTags)}; run this task on the local node or drop tags`,
+			);
+		}
 		let remoteReturn: FleetChangeReturn | undefined;
 		let remoteImport: FleetChangeImport | undefined;
 		if (placement?.node.kind === "ssh") {
@@ -10085,7 +10136,7 @@ export function createDispatchBundle(
 		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
 			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
 		}
-		const pathScope = resolveDispatchPathScope(req);
+		const pathScope = withStoreGrantBoundaries(req, resolveDispatchPathScope(req));
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
 		const target = resolveDispatchTarget(

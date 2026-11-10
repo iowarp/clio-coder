@@ -313,6 +313,8 @@ export interface WorkerRunInput {
 	 * native registry and the Claude SDK hook path block out-of-root writes.
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/** Store tags this run may put into and the dispatch run its records name (M-31). */
+	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 	/**
 	 * Information-flow restrictions the inherited context carries. Every model
 	 * request of this run is judged against them and against what the run's
@@ -895,6 +897,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 			: undefined,
 		(effects, hookInput) => protectedArtifacts.absorbAwaited(hookInput, effects),
+		input.storeGrant,
 	);
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;

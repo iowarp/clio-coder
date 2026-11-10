@@ -10,6 +10,7 @@ import path from "node:path";
 import { THINKING_LEVELS, type ThinkingLevel } from "../../core/defaults.js";
 import { asDirectoryPathBoundary, resolvePathBoundary } from "../../core/path-boundary.js";
 import { cloneValidatedResponseSchema } from "../../core/response-schema.js";
+import { validateTagName } from "../../core/store-paths.js";
 import { isToolProfileName, type ToolProfileName } from "../../tools/profiles.js";
 import type { AgentProduct } from "../agents/spec.js";
 import { cloneDispatchBudgetRequest, type DispatchBudgetRequest } from "./budget-envelope.js";
@@ -143,6 +144,8 @@ export interface JobSpec {
 	 * per-tool calls (subprocess).
 	 */
 	writeRoots?: ReadonlyArray<string>;
+	/** Store tags this worker may put blobs into (M-31); admission checks each exists. */
+	storeTags?: ReadonlyArray<string>;
 	/** Normalized model-declared path, output, and host verification intent. */
 	intent?: DispatchIntent;
 	requestOrigin?: DispatchRequestOrigin;
@@ -218,6 +221,7 @@ const KNOWN_KEYS = new Set([
 	"trustProjectCompatRoots",
 	"responseSchema",
 	"writeRoots",
+	"storeTags",
 	"intent",
 	"requestOrigin",
 	"pipelineInput",
@@ -493,6 +497,16 @@ export function validateJobSpec(spec: unknown): Validated {
 			errors.push("writeRoots must be a non-empty array of non-empty strings");
 		}
 	}
+	if ("storeTags" in spec && spec.storeTags !== undefined) {
+		if (!Array.isArray(spec.storeTags) || spec.storeTags.length === 0) {
+			errors.push("storeTags must be a non-empty array of tag names");
+		} else {
+			for (const tag of spec.storeTags) {
+				const problem = typeof tag === "string" ? validateTagName(tag) : "A tag name must be a string.";
+				if (problem !== null) errors.push(`storeTags: '${String(tag)}': ${problem}`);
+			}
+		}
+	}
 	// One owner for the typed-intent migration rules (#163). Every dispatch
 	// producer reaches a worker through this validator, so classifying here is
 	// what makes the compatibility table true of the fleet, CLI, ACP, and
@@ -645,6 +659,9 @@ export function validateJobSpec(spec: unknown): Validated {
 		out.writeRoots = isDispatchIntent(spec.intent)
 			? effectiveWriteRoots.map((root) => resolvePathBoundary(jobCwd, String(root)))
 			: effectiveWriteRoots.map((root) => asDirectoryPathBoundary(path.resolve(jobCwd, String(root))));
+	}
+	if (Array.isArray(spec.storeTags) && spec.storeTags.length > 0) {
+		out.storeTags = [...new Set(spec.storeTags.map((tag) => String(tag)))];
 	}
 	if (typeof spec.requestOrigin === "string" && VALID_REQUEST_ORIGINS.has(spec.requestOrigin)) {
 		out.requestOrigin = spec.requestOrigin as DispatchRequestOrigin;

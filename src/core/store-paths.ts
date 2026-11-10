@@ -133,6 +133,20 @@ export function storeBlobPath(cwd: string, tag: string, blob: string): string {
 	return join(storeTagDir(cwd, tag), "blobs", blob);
 }
 
+/**
+ * Directory boundaries a dispatch grant of `tags` adds to a worker's write
+ * scope: each tag's blob directory and its records tag (M-31).
+ */
+export function storeGrantBoundaries(cwd: string, tags: ReadonlyArray<string>): string[] {
+	return tags.flatMap((tag) => [`${storeTagDir(cwd, tag)}/`, `${storeTagDir(cwd, recordsTag(tag))}/`]);
+}
+
+/** True when an absolute path lies inside the store root. */
+export function isStorePath(candidate: string): boolean {
+	const root = storeRoot();
+	return candidate === root || candidate.startsWith(`${root}/`);
+}
+
 /** Trees outside the workspace the model may read: this project's store directory. */
 export function storeReadRoots(cwd: string): string[] {
 	return [storeProjectDir(cwd)];

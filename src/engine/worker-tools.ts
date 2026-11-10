@@ -197,6 +197,8 @@ export function createWorkerToolRegistry(
 	mcpSource?: (registry: ToolRegistry) => McpCapabilitySource,
 	/** Applies protect_path effects of awaited hooks, which run after the guard's own step. */
 	absorbAwaitedEffects?: RegistryDeps["absorbAwaitedEffects"],
+	/** The dispatch's store tag grant (M-31); absent leaves the store read-only. */
+	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string },
 ): ToolRegistry {
 	// A worker always gets a middleware contract, even without a snapshot from
 	// the orchestrator, because the loop guard rides on it as a before_tool
@@ -229,6 +231,7 @@ export function createWorkerToolRegistry(
 	const registration = registerCoreTools(registry, {
 		...(mcpSource !== undefined ? { mcpCapabilities: mcpSource(registry) } : {}),
 		includeLedgerTools: true,
+		...(storeGrant !== undefined && storeGrant.tags.length > 0 ? { storeGrant } : {}),
 		...(workerRecall ? { workerRecall } : {}),
 		...(agentLedger ? { agentLedger } : {}),
 		// A worker cannot install a skill or reach the operator who could, so

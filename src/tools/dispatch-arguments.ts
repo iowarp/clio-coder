@@ -1,6 +1,8 @@
 import { parseWorkerContextPolicy } from "../domains/context/worker/contract.js";
+
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
+import { validateTagName } from "../core/store-paths.js";
 import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
@@ -224,6 +226,14 @@ function dispatchRequestFromArgs(
 	if (args.worktree !== undefined) {
 		if (args.worktree !== true) return { ok: false, message: "worktree must be true when present" };
 		request.worktree = true;
+	}
+	if (args.tags !== undefined) {
+		if (!Array.isArray(args.tags)) return { ok: false, message: "tags must be an array of store tag names" };
+		for (const tag of args.tags) {
+			const problem = typeof tag === "string" ? validateTagName(tag) : "A tag name must be a string.";
+			if (problem !== null) return { ok: false, message: `tags: '${String(tag)}': ${problem}` };
+		}
+		if (args.tags.length > 0) request.storeTags = [...new Set(args.tags as string[])];
 	}
 	if (args.apply !== undefined) {
 		if (args.apply !== "merge" && args.apply !== "preserve")

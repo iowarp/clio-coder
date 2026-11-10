@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { isStorePath } from "../../core/store-paths.js";
 import type { AgentSpec } from "../agents/spec.js";
 import type { DispatchRequest } from "./contract.js";
 
@@ -10,8 +11,14 @@ export function canonicalWriteRoots(request: Pick<DispatchRequest, "cwd" | "writ
 	);
 }
 
-/** True when a root on one side contains, or is contained by, a root on the other. */
+/**
+ * True when a root on one side contains, or is contained by, a root on the other.
+ * Store directories never overlap: a put is atomic and its record write-once,
+ * so two writers granted one tag both land (M-31, D-MCP 4.6).
+ */
 export function writeRootsOverlap(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
+	left = left.filter((root) => !isStorePath(root));
+	right = right.filter((root) => !isStorePath(root));
 	const contains = (parent: string, child: string) => {
 		const rel = relative(parent, child);
 		return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));

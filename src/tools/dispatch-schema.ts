@@ -92,6 +92,7 @@ export function coordinatorDispatchParameters() {
 				"One self-contained assignment with outcome and constraints, never the operator's words; empty only with list or tasks.",
 		}),
 		intent: Type.Optional(intent),
+		tags: Type.Optional(DispatchStoreTagsSchema),
 		briefing: Type.Optional(Type.String()),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
@@ -212,6 +213,11 @@ const DispatchIntentSchema = Type.Object(
 			"Required paths and check IDs. Per-task values override defaults. Parallel write_roots must be disjoint; expected_outputs does not confine access.",
 	},
 );
+
+const DispatchStoreTagsSchema = Type.Array(Type.String(), {
+	maxItems: 16,
+	description: "Existing store tags this worker may put blobs into. Per-task values override defaults.",
+});
 
 const MODE_DESCRIPTION: Record<"full" | "noCouncil" | "noCompete" | "neither", string> = {
 	full:
@@ -350,6 +356,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						model: Type.Optional(Type.String()),
 						node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
 						worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
+						tags: Type.Optional(DispatchStoreTagsSchema),
 						intent: Type.Optional(DispatchIntentSchema),
 						gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
 						result_summary_max_bytes: Type.Optional(
@@ -384,6 +391,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		worktree: Type.Optional(
 			Type.Literal(true, { description: "Run a singular writer task in an isolated git worktree." }),
 		),
+		tags: Type.Optional(DispatchStoreTagsSchema),
 		apply: Type.Optional(
 			StringEnum(["merge", "preserve"], { description: "merge (default) or preserve the worktree branch." }),
 		),

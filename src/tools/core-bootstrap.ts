@@ -124,6 +124,8 @@ export interface CoreToolBootstrapDeps {
 	 * so its `store` reads and refuses create, put, note and remove.
 	 */
 	storeWritable?: boolean;
+	/** A worker's dispatch tag grant (M-31): put and note into these tags only. */
+	storeGrant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
 }
 
 export interface CoreToolRegistration {
@@ -225,6 +227,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 					(await import("./store/store-tool.js")).createStoreTool({
 						getCwd: getWorkspaceRoot,
 						writable: deps.storeWritable === true,
+						...(deps.storeGrant !== undefined ? { grant: deps.storeGrant } : {}),
 					}),
 			),
 			{ path: "src/tools/store/store-tool.ts", scope: "core" },

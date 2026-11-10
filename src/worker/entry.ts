@@ -289,6 +289,7 @@ async function main(): Promise<number> {
 		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 		...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
 		...(spec.writeRoots !== undefined ? { writeRoots: [...spec.writeRoots] } : {}),
+		...(spec.storeGrant !== undefined ? { storeGrant: structuredClone(spec.storeGrant) } : {}),
 		...(spec.flowPolicy !== undefined ? { flowPolicy: structuredClone(spec.flowPolicy) } : {}),
 		...(spec.flowRestrictions !== undefined ? { flowRestrictions: structuredClone(spec.flowRestrictions) } : {}),
 		...(spec.protectedArtifactState !== undefined
