@@ -48,11 +48,3 @@ virtualenv) is setup, not a verdict: say so, run the project's install command
 change does not touch predates it, a missing module imported only there
 included: report it instead of repairing it or installing for it. Report file
 changes you could not validate.
-
-Record consequential design choices with an admitted decision tool when
-available before implementing. Before committing, verify the actual
-implementation against active decisions (e.g. scalar types as well as
-indexability). A decision trailer proves attribution, not adherence. If the
-policy changes, explicitly revise an agent choice with the same decision key
-and rationale before commit; operator choices require operator revision. If
-revision is unavailable, report the mismatch and stop before commit.

@@ -299,14 +299,37 @@ function safetyFragmentFor(
 		: lookupFragment(table, `safety.${level}`, "safety");
 }
 
+/**
+ * Safety text true for the session that reads it. A headless run has no
+ * /rewind and no ask_user, so those clauses leave the body; an attended yolo
+ * session with ask_user attached has an operator who may answer, so the
+ * "nobody will answer" sentences become what holds there (S-89).
+ */
+function sessionSafetyBody(body: string, headless: boolean, askUserAttached: boolean): string {
+	if (headless) {
+		return body
+			.replace(/,\s+and the operator can undo them with \/rewind;/u, ";")
+			.replace(/an ask_user gate marked exposure=outward,\s+/u, "");
+	}
+	if (!askUserAttached) return body;
+	return body
+		.replace(/ and is away by contract: nothing waits for them\./u, ": nothing waits for their approval.")
+		.replace(/ and is away by contract\./u, ".")
+		.replace(
+			/Nobody will answer a question\. When a choice is open,/u,
+			"An operator may be present, but approvals are not requested. Use ask_user only for a decision that is the operator's to make, never to confirm an action. When a choice is open,",
+		);
+}
+
 function renderSafetySection(
 	safetyFragment: LoadedFragment,
 	level: string,
 	headless: boolean,
 	confinement?: YoloConfinement,
+	askUserAttached = false,
 ): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level, confinement)}`;
-	const body = safetyFragment.body.trim();
+	const body = sessionSafetyBody(safetyFragment.body.trim(), headless, askUserAttached);
 	// Nothing parks under yolo of either confinement (#407): contained yolo
 	// refuses what would park, which its body says, so no line says what parking means.
 	const approval = level === "yolo" ? null : headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
@@ -324,7 +347,13 @@ export function renderSessionPostureUpdate(table: FragmentTable, level: string, 
 		"[Clio Coder host policy update]",
 		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
 		"# Safety",
-		renderSafetySection(safety, level, inputs.headless === true, inputs.yoloConfinement),
+		renderSafetySection(
+			safety,
+			level,
+			inputs.headless === true,
+			inputs.yoloConfinement,
+			toolSurfaceHasTool(inputs.toolNames, "ask_user"),
+		),
 		...(hasEnding
 			? [renderTurnEndingContract((inputs.toolNames ?? []).includes("ask_user"), level === "yolo").join("\n")]
 			: []),
@@ -504,8 +533,8 @@ function renderCapabilityMap(
 /**
  * Capabilities a headless run leaves out of its map and usage notes. They serve
  * an attended operator: questions about Clio itself, credential checks,
- * terminal plan and report documents, the decision and task boards, and
- * evidence bundles. A headless run still reaches each through gateway find; it
+ * terminal plan and report documents, the decision and task boards,
+ * evidence bundles, and jobs, which a headless run cannot own. A headless run still reaches each through gateway find; it
  * just stops paying for their lines on every request.
  */
 const HEADLESS_UNMAPPED_CAPABILITIES: ReadonlySet<string> = new Set([
@@ -515,6 +544,7 @@ const HEADLESS_UNMAPPED_CAPABILITIES: ReadonlySet<string> = new Set([
 	"credential_present",
 	"decide",
 	"evidence",
+	"job",
 	"tasks",
 ]);
 
@@ -690,8 +720,21 @@ function workerPermissionSentence(mode: WorkerPromptInputs["onPermission"]): str
  * session. What "approval-required" resolves to for a worker is stated once,
  * in its safety section, by `workerPermissionSentence`.
  */
-function renderWorkerOperatingContract(operatingContract: LoadedFragment, workerContract: LoadedFragment): string {
-	return [operatingContract.body.trim(), workerContract.body.trim(), WORKER_CLAIM_GUIDANCE].join("\n\n");
+function renderWorkerOperatingContract(
+	operatingContract: LoadedFragment,
+	workerContract: LoadedFragment,
+	decisions: LoadedFragment | undefined,
+): string {
+	return [
+		withDecisions(operatingContract.body, decisions).trim(),
+		workerContract.body.trim(),
+		WORKER_CLAIM_GUIDANCE,
+	].join("\n\n");
+}
+
+/** The decision paragraph closes the operating contract, byte-identical to when it lived in that fragment. */
+function withDecisions(contract: string, decisions: LoadedFragment | undefined): string {
+	return decisions ? `${contract.trimEnd()}\n\n${decisions.body.trim()}\n` : contract;
 }
 
 function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
@@ -947,8 +990,11 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// and the code-outranks-docs rule name no tool and stay unconditional. The
 	// clio_docs lookup serves headless runs too: without it a headless question
 	// about Clio listed and grepped the docs tree for several turns.
+	// It names clio_docs only where the capability map lists it: a headless map
+	// leaves clio_docs out unless it is attached directly (S-89).
 	const docsLookup =
 		selfAwareness &&
+		(attended || toolSurfaceHasTool(session.toolNames, "clio_docs")) &&
 		session.providerSupportsTools !== false &&
 		toolSurfaceHasTool(session.toolNames, "gateway") &&
 		session.coordinatorCapabilities.includes("clio_docs") &&
@@ -1029,8 +1075,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
 	const steering = session.liveSteering === false ? undefined : table.byId.get("operating.steering");
+	// Decision-record guidance only where `decide` is reachable from this
+	// session's fixed surface; a headless run leaves it off its map (S-89).
+	const decisions =
+		attended &&
+		session.providerSupportsTools !== false &&
+		(toolSurfaceHasTool(session.toolNames, "decide") ||
+			(toolSurfaceHasTool(session.toolNames, "gateway") && session.coordinatorCapabilities.includes("decide")))
+			? table.byId.get("operating.decisions")
+			: undefined;
 	const mainOperatingContract = [
-		operatingContract.body,
+		withDecisions(operatingContract.body, decisions),
 		attendedContract?.body,
 		headlessContract?.body,
 		userControl?.body,
@@ -1059,7 +1114,16 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 						.join("\n")
 				: "",
 		],
-		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, session.yoloConfinement)],
+		[
+			"safety",
+			renderSafetySection(
+				safety,
+				autonomyLevel,
+				session.headless === true,
+				session.yoloConfinement,
+				toolSurfaceHasTool(session.toolNames, "ask_user"),
+			),
+		],
 		["runtime", [renderRuntimeBlock(session), modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
 		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],
@@ -1090,6 +1154,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(docsLookup ? [docsLookup] : []),
 		...(docsRouting ? [docsRouting] : []),
 		operatingContract,
+		...(decisions ? [decisions] : []),
 		...(attendedContract ? [attendedContract] : []),
 		...(headlessContract ? [headlessContract] : []),
 		...(userControl ? [userControl] : []),
@@ -1158,6 +1223,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const identity = lookupFragment(table, "identity.clio-coder-worker", "worker identity");
 	const operatingContract = lookupFragment(table, "operating.contract", "operating contract");
 	const workerContract = lookupFragment(table, "operating.worker", "worker contract");
+	const decisions = canonicalWorkerTools(inputs).includes("decide") ? table.byId.get("operating.decisions") : undefined;
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
 	const steering = inputs.liveSteering === false ? undefined : table.byId.get("operating.steering");
 	// A worker that inherited the operator's yolo reads what it may do under it (#407).
@@ -1176,7 +1242,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	};
 
 	push("identity", identity.body);
-	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract));
+	push("operating-contract", renderWorkerOperatingContract(operatingContract, workerContract, decisions));
 	if (steering) push("steering", steering.body);
 	push("tool-contract", renderWorkerToolContractBlock(inputs));
 	push("safety", renderWorkerSafetySection(safety, inputs));
@@ -1191,6 +1257,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const fragmentManifest: FragmentManifestEntry[] = [
 		identity,
 		operatingContract,
+		...(decisions ? [decisions] : []),
 		workerContract,
 		...(steering ? [steering] : []),
 		safety,
@@ -1206,7 +1273,10 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 
 	return {
 		systemPrompt,
-		stablePrefix: prefixIdentity(identity.body, renderWorkerOperatingContract(operatingContract, workerContract)),
+		stablePrefix: prefixIdentity(
+			identity.body,
+			renderWorkerOperatingContract(operatingContract, workerContract, decisions),
+		),
 		systemPromptHash: sha256(systemPrompt),
 		tokenEstimate: estimatePromptTokens(systemPrompt),
 		sections,

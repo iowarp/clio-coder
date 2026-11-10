@@ -674,7 +674,9 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 	}
 	if (catalogs.playbooks.length > 0) {
 		sections.push(
-			"Playbooks (multi-step workflows the fleet runs; the operator starts one with /fleet run <playbook>, so suggest it rather than dispatching its steps yourself):",
+			inputs.headless === true
+				? "Playbooks (multi-step workflows the fleet runs; not startable from this run):"
+				: "Playbooks (multi-step workflows the fleet runs; the operator starts one with /fleet run <playbook>, so suggest it rather than dispatching its steps yourself):",
 			...catalogLines(catalogs.playbooks),
 		);
 	}

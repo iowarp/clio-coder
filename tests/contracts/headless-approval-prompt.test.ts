@@ -118,7 +118,7 @@ describe("interactive-only guidance in the session prompt", () => {
 		);
 		ok(!prompt(true).includes("# Answering questions about Clio"), "no inline support guidance replaces the routing");
 		const lookup = 'call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering';
-		ok(prompt(true).includes(lookup), "a headless question about Clio still goes to clio_docs first");
+		ok(!prompt(true).includes(lookup), "a headless map without clio_docs never names the lookup");
 		strictEqual(prompt(false).split(lookup).length, 2, "the attended prompt carries the lookup once");
 		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
 	});
@@ -161,8 +161,8 @@ describe("interactive-only guidance in the session prompt", () => {
 		for (const prompt of [attended, main(true), worker]) {
 			match(prompt, /Name the blocking guard and its stated way to proceed/u);
 			match(prompt, /Preserve mathematical notation, units, scientific Unicode/u);
-			match(prompt, /Before committing, verify the actual implementation against active decisions/u);
-			match(prompt, /operator choices require operator revision/u);
+			// None of these surfaces reaches a decide tool, so the decision paragraph stays out.
+			strictEqual(prompt.includes("verify the actual implementation against active decisions"), false);
 			match(prompt, /For an approach or design question, stop once/u);
 			match(prompt, /unless the operator says to switch/u);
 			match(prompt, /declared dependencies were never installed/u);
