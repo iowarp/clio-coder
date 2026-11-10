@@ -37,6 +37,9 @@ import { reportToolSurface } from "./report-surface.js";
 export const REPORT_OFFER_REFUSED = "Do not offer or mention reporting again in this session.";
 /** No send command reaches the model: the agent drafts, the operator sends (R2b-report-04). */
 const REPORT_NOT_YOURS = "You cannot send it; do not run gh or clio-coder for this.";
+/** Sharing is the operator's own act; the agent may only name it (docs: troubleshooting.md#share-with-the-maintainers). */
+const REPORT_SHARE_NOTE =
+	"The operator may also share a diagnostic bundle, encrypted to the maintainers and deletable with forget; never pass --share or --send yourself, but you may tell them the command in docs/guide/troubleshooting.md#share-with-the-maintainers.";
 /** Unsent agent drafts an install keeps before the tool stops writing new ones. */
 export const AGENT_DRAFT_LIMIT = 3;
 
@@ -234,7 +237,7 @@ export function createReportTool(deps: ReportToolDeps): ToolSpec {
 		if (sessionId !== null) sessionDrafts.set(sessionId, saved.id);
 		const notice = deps.openReview();
 		notice?.(saved.id);
-		return ok(`Saved as ${saved.id} for the operator to review. ${REPORT_NOT_YOURS}`, {
+		return ok(`Saved as ${saved.id} for the operator to review. ${REPORT_NOT_YOURS} ${REPORT_SHARE_NOTE}`, {
 			draftId: saved.id,
 			created: true,
 			notified: notice !== null,

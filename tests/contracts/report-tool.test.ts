@@ -75,6 +75,7 @@ describe("report tool", () => {
 		);
 		const result = await tool.run(DRAFT, {});
 		ok(result.kind === "ok" && result.output.includes("for the operator to review"));
+		ok(result.kind === "ok" && result.output.includes("never pass --share or --send yourself"));
 		strictEqual(noticed.length, 1);
 	});
 
