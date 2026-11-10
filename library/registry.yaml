@@ -124,10 +124,11 @@ entries:
           worktree-create. Not for integrating branches; use worktre
   - kind: skill
     name: clio-coder-dev
-    description: "Develop Clio Coder inside its own repository: trace source
-      contracts, implement bounded changes, coordinate sprint work, and preserve
-      running-agent and session correctness. Use before changing Clio source,
-      prompts, tools, or library; pair with clio-coder-test for validation."
+    description: "Develop Clio Coder inside its own repository: orient on the
+      running build versus the workspace, trace owners, avoid the checks that
+      fail landings, apply each edit the right way and hand the work back. Use
+      before changing Clio source, prompts, tools or library; pair with
+      clio-coder-test for validation."
     category: meta
     audit: pass
     triggers:
@@ -135,16 +136,17 @@ entries:
       - implement a Clio sprint packet
       - change Clio context or session lifecycle
       - edit Clio skills tools or prompts
-    version: 0.5.1
+      - work a Clio lane brief or spec
+    version: 0.6.0
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: bd4fedb4ce5ce30cd2854f0df6d1aa9d64df34ce4f9913d43763677c5bb835ef
+    sha256: 18ba54fe2a37019467fa960beca2514ed8e8d35102fd317dbe38ffbbb02676ec
     provides:
       - kind: skill
         name: clio-coder-dev
-        description: "Develop Clio Coder inside its own repository: trace source
-          contracts, implement bounded changes, coordinate sprint work, and
-          preserve running-agent and session correctness. Use before changing
-          Clio source, prompts, tools, or library; pair with clio-coder-t"
+        description: "Develop Clio Coder inside its own repository: orient on the
+          running build versus the workspace, trace owners, avoid the checks
+          that fail landings, apply each edit the right way and hand the work
+          back. Use before changing Clio source, prompts, tools or libr"
   - kind: skill
     name: clio-coder-test
     description: "Validate Clio Coder changes: pick checks from the diff, know what

@@ -49,8 +49,8 @@
 		{
 			"name": "clio-coder-dev",
 			"source": "./library/skills/meta/clio-coder-dev",
-			"description": "Develop Clio Coder inside its own repository: trace source contracts, implement bounded changes, coordinate sprint work, and preserve running-agent and session correctness. Use before changing Clio source, prompts, tools, or library; pair with clio-coder-test for validation.",
-			"version": "0.5.1",
+			"description": "Develop Clio Coder inside its own repository: orient on the running build versus the workspace, trace owners, avoid the checks that fail landings, apply each edit the right way and hand the work back. Use before changing Clio source, prompts, tools or library; pair with clio-coder-test for validation.",
+			"version": "0.6.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},

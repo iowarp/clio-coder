@@ -1,12 +1,13 @@
 ---
 name: clio-coder-dev
-description: "Develop Clio Coder inside its own repository: trace source contracts, implement bounded changes, coordinate sprint work, and preserve running-agent and session correctness. Use before changing Clio source, prompts, tools, or library; pair with clio-coder-test for validation."
+description: "Develop Clio Coder inside its own repository: orient on the running build versus the workspace, trace owners, avoid the checks that fail landings, apply each edit the right way and hand the work back. Use before changing Clio source, prompts, tools or library; pair with clio-coder-test for validation."
 triggers:
   - develop Clio in its own repository
   - implement a Clio sprint packet
   - change Clio context or session lifecycle
   - edit Clio skills tools or prompts
-version: 0.5.1
+  - work a Clio lane brief or spec
+version: 0.6.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -17,87 +18,102 @@ clio-coder:
 
 # Clio self-development
 
-Use this workflow when the requested task changes Clio itself. The canonical
-name is `clio-coder-dev`. In a detected Clio checkout,
-the source skill is natively discoverable unless an installed package owns its
-name. Discovery does not mean its body has already been loaded.
+Use this when the task changes Clio Coder inside its own repository. Load
+`clio-coder-test` when you choose checks. The lane brief, the spec and
+`.clio-coder/rules/` outrank this skill; the repository handbook is already in
+your prompt.
 
-## Establish the actual assignment
+## Know which Clio you are
 
-Read `CONTRIBUTING.md`, applicable repository instructions, and the user's
-assigned packet or issue. Check cwd, branch, status, and the base commit before
-editing. Use the detected repository root even when launched from a subdirectory
-or worktree. A Clio npm installation or an unrelated nested repository is not a
-self-development checkout.
+Two trees are involved and they are usually different directories.
 
-Distinguish design, implementation, review, and validation. Deliver the phase the
-user authorized. A comprehensive sprint plan does not launch implementation.
-Existing authorization persists: do not demand a second confirmation for an
-already authorized action. Complete authorized local work and verification;
-remote writes and release actions need matching user intent and repository rules.
+- The running Clio is the build that started this session;
+  `clio-coder --version` prints its commit. Prompt
+  fragments, built-in agent recipes, tool code, bundled docs and
+  `code_nav(source="clio")` come from that root.
+- The workspace is the checkout or worktree you edit. The repository handbook,
+  `.clio-coder/rules/` and these two skills (when no installed package owns
+  their names) come from the workspace.
 
-## Trace the behavior before changing it
+An edit in the workspace does not change the running session except where
+[references/live-edit.md](references/live-edit.md) says so. Read that table
+after your first edit and before you claim a change works. Never make an edit
+live by touching the running install: no build in its checkout, no
+`scripts/install-local.sh`, no `pnpm run install:local`, no launcher relink.
+Other sessions run from it. Build the workspace and start a separate candidate
+process from the workspace's own `dist/cli/index.js`.
 
-Find the owning source and current callers with `rg`, then read its contract,
-nearby tests, and relevant architecture guide. Use code navigation when available
-for symbol/caller relationships; read exact source before changing semantics.
-Treat handbooks, generated wiki, and old sprint reports as navigation aids.
-`CLIO-CODER.md` may be absent or ignored; do not regenerate project context simply
-because you are developing Clio.
+## Establish the assignment
 
-Choose a checkable before/after behavior and its smallest useful integration
-boundary. Put pure policy next to the owning domain; compose dependencies at the
-entry seam. Preserve these enforced boundaries:
+Read the brief or spec fully; its acceptance criteria are the contract. Check
+`git status`, the branch and `git log -1`, and confirm you are in the assigned
+worktree, not the main checkout. When the brief is silent: change source,
+add at most one focused regression test per defect in the nearest existing
+test file, make only the inventory rows lint demands in `docs/`, and never
+edit `CHANGELOG.md`. Proposed changelog lines and deferred docs go in the
+handback. A spec that is wrong or unsafe as written is a question, not a
+licence to improvise.
 
-- Pi package imports, including types, stay in `src/engine/**`.
-- Worker domain value imports stay within declared provider rehydration seams.
-- Domains communicate through contracts, never another domain's `extension.ts`.
-- Tools do not import interactive UI; turn-runtime modules do not import entry.
-- Keep the protected instant-shell graph and lazy CLI imports within their seams.
+## Trace before changing
 
-For source maps and high-risk lifecycle changes, read
-[references/change-map.md](references/change-map.md). Do not widen tool authority,
-worker write scope, memory applicability, or release claims to simplify a change.
+Find the owner and its callers with `code_nav` or `grep`, then read the
+contract, the nearest tests and the architecture page for that area. Use
+[references/change-map.md](references/change-map.md) for owners and for the
+seams a setting, tool, command or contract type must touch. Put policy in the
+owning domain and compose at the entry seam. The hard invariants in
+the repository handbook are enforced by `pnpm run lint`.
 
-## Implement and verify against the requested scope
+## What failed landings
 
-Load `clio-coder-test` through the normal skill interface when choosing checks.
-If it is unavailable, use the checkout's `CONTRIBUTING.md` and package scripts;
-continue the assignment without an installation detour. The two skills are
-companions, not a recursive required-loading chain.
+- Composition root: `src/entry/orchestrator.ts` is at its line ceiling and
+  may not gain module-scope functions or feature imports (rule15). Put wiring
+  in the owning domain and call it from one existing line.
+- Export hygiene: an `export function` whose name appears in one file fails
+  lint. Remove the keyword, then `pnpm exec biome check --write <file>`.
+- GUI contract: after editing `src/core/telemetry/dto.ts` or a schema module
+  it imports, `src/engine/acp/types.ts` or `apps/clio-coder-gui/contracts/*.ts`,
+  run `pnpm --filter @iowarp/clio-coder-gui run openapi` and commit
+  `apps/clio-coder-gui/contracts/openapi.json`. Only `test:gui` catches a
+  stale file.
+- Files parallel lanes collide in: `src/session-control/slash-commands.ts`,
+  `src/domains/report/index.ts`, `src/interactive/interactive-application.ts`,
+  `src/domains/dispatch/extension.ts`, `src/interactive/overlay-lifecycle.ts`,
+  `src/entry/orchestrator.ts`. Add your entry as one hunk,
+  leave neighbours unformatted and unordered as they are, and never add a
+  required field to a shared entry type inside a feature commit.
+- A new test file runs in no gate until `scripts/ci-tests.mjs` lists it.
+- Strict types: optional properties are spread in, never assigned
+  `undefined`; relative imports end in `.js`; type imports use `import type`.
+- Library edits: bump the version in `SKILL.md` and `plugin.json`, then
+  `pnpm run skills:pin` and `pnpm run library:pin`.
 
-Prefer meaningful regression tests for changed contracts. For a documentation
-or instruction-only edit, verify the facts, links, and package metadata without
-inventing runtime tests for prose. For skills, update the manifest version, then
-regenerate both skill and full-library pins.
-Active installed resource trees remain operator-managed: edit curated source
-under `library/`, not `.clio-coder/plugins`, config plugins, or a symlink to them.
+## Git in a shared repository
 
-A source edit does not change the running agent's loaded ESM modules. Build and
-dogfood a candidate in an isolated worktree when the main checkout's `dist/` may
-back the running CLI. Restart a separate candidate process; do not replace the
-active installation, relink the CLI, or mutate real user state as a test shortcut.
+Every worktree shares one `.git/config`, one stash and one object store.
+Never `git stash`, never move a branch by relative ref, never commit in the
+main checkout, never merge or rebase other lanes in. Before any git-driven
+runner (`git bisect run`, hooks, `git rebase --exec`) unset `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` and `GIT_PREFIX` for the
+command it runs; a test fixture's `git config` otherwise writes the shared
+config.
 
-## Working from a sprint packet
+Commit small conventional commits with the trailer the brief names. After
+each commit read it back: `git log -1 --format='%an <%ae>%n%B'`. Clio's commit
+attribution may set the author or append trailers
+(`integrations.git.commitAttribution`, `integrations.git.commitAuthor`). If
+the result differs from what the brief requires, stop and report it; do not
+rewrite history to hide it.
 
-Read the packet and its approval/status record before coding. If delegation was
-authorized, give each worker a bounded result, exact base/worktree, owned files,
-required checks, and report path. Pass skill bindings through the worker recipe
-when available; do not assume the parent model's loaded skills reach the worker.
-An instruction in this skill is not itself authorization to spawn workers.
+## Delegating
 
-Ignored `.mine/` plans do not appear in a new Git worktree. Supply the
-absolute packet path or a scoped copy of the necessary briefing. Keep each
-worker's write scope inside its assignment; the orchestrator owns shared seams,
-review, and serialized integration. Preserve authorized uncommitted work and
-record unfinished work in a handoff instead of broad staging or cleanup.
+A dispatched worker does not inherit your loaded skills. Put the rules it
+needs in the task or briefing: owned files, the traps above that apply, the
+checks to run and what to return. Parallel workers need disjoint write roots.
+You own shared registries and integration.
 
-## Finish with evidence
+## Hand back
 
-State what changed, why, the exact checks and outcomes, and remaining limitations.
-Distinguish source tests, built-process tests, installed-package tests, and actual
-model evidence. Update user docs/changelog only for implemented behavior. For a
-long-running task, update the assigned status/report with branch, commits,
-authority, evidence refs, and next action. Use `context-handoff` only when a
-handoff is needed; do not turn every local change into a separate interview,
-release, or repository initialization workflow.
+Run the checks `clio-coder-test` selects, verify the behaviour live unless
+the brief waives it, then write the handback in
+[references/lane.md](references/lane.md). Separate what a test proved, what a
+built process proved, what a live model proved and what was not run.

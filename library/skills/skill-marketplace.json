@@ -196,15 +196,16 @@
 		},
 		{
 			"name": "clio-coder-dev",
-			"description": "Develop Clio Coder inside its own repository: trace source contracts, implement bounded changes, coordinate sprint work, and preserve running-agent and session correctness. Use before changing Clio source, prompts, tools, or library; pair with clio-coder-test for validation.",
+			"description": "Develop Clio Coder inside its own repository: orient on the running build versus the workspace, trace owners, avoid the checks that fail landings, apply each edit the right way and hand the work back. Use before changing Clio source, prompts, tools or library; pair with clio-coder-test for validation.",
 			"triggers": [
 				"develop Clio in its own repository",
 				"implement a Clio sprint packet",
 				"change Clio context or session lifecycle",
-				"edit Clio skills tools or prompts"
+				"edit Clio skills tools or prompts",
+				"work a Clio lane brief or spec"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev",
-			"version": "0.5.1",
+			"version": "0.6.0",
 			"audit": "pass",
 			"category": "meta"
 		},
