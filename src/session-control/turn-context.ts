@@ -3198,8 +3198,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						signal,
 					);
 				} catch (err) {
-					throw new Error(
-						`[Clio Coder] post-tool context guard could not compact before continuation: ${err instanceof Error ? err.message : String(err)}`,
+					const reason = err instanceof Error ? err.message : String(err);
+					const aborted = signal?.aborted || (err instanceof Error && err.name === "AbortError");
+					if (mustFit || aborted)
+						throw new Error(`[Clio Coder] post-tool context guard could not compact before continuation: ${reason}`);
+					// Optional compaction: the request still fits, so the run goes on and the fit check below stays the stop.
+					deps.emitNotice(
+						`[Clio Coder] automatic compaction failed: ${reason.replace(/[.\s]+$/u, "")}. This turn goes on without it.`,
 					);
 				}
 			}
