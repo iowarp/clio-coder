@@ -16,7 +16,7 @@ function decodeMountField(field: string): string {
 }
 
 /** Parses mountinfo text; throws on a line without the fields a record needs. */
-export function parseMountInfo(text: string): MountRecord[] {
+function parseMountInfo(text: string): MountRecord[] {
 	const records: MountRecord[] = [];
 	for (const line of text.split("\n")) {
 		if (line.trim().length === 0) continue;
@@ -42,10 +42,7 @@ function within(parent: string, child: string): string | null {
  * root. A mask covers one path, so each alias needs its own. A mount of a
  * subtree inside a masked directory is an alias too. Masks are realpaths.
  */
-export function maskAliases(
-	masks: ReadonlyArray<SandboxMaskedPath>,
-	mounts: ReadonlyArray<MountRecord>,
-): SandboxMaskedPath[] {
+function maskAliases(masks: ReadonlyArray<SandboxMaskedPath>, mounts: ReadonlyArray<MountRecord>): SandboxMaskedPath[] {
 	const aliases: SandboxMaskedPath[] = [];
 	for (const mask of masks) {
 		let serving: MountRecord | undefined;
