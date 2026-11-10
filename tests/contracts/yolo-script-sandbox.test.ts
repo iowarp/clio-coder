@@ -32,11 +32,10 @@ test("the main-session sandbox writes the workspace and scratch roots only, keep
 	const policy = resolveMainSandboxPolicy({
 		workspace: "/w",
 		scratchRoots: ["/tmp", "/bench"],
-		cacheRoots: ["/home/u/.cache", "/home/u/.npm"],
-		codeCaches: [],
+		sandboxCache: "/home/u/.cache/clio-coder/sandbox-cache",
 		clioDirs: ["/home/u/.config/clio-coder", "/home/u/.local/share/clio-coder", "/home/u/.cache/clio-coder"],
 	});
-	assert.deepEqual(policy.writableRoots, ["/w", "/tmp", "/bench", "/home/u/.cache", "/home/u/.npm"]);
+	assert.deepEqual(policy.writableRoots, ["/w", "/tmp", "/bench", "/home/u/.cache/clio-coder/sandbox-cache"]);
 	assert.equal(
 		policy.writableRoots.some((root) => root.startsWith("/home/u/.local")),
 		false,
@@ -96,8 +95,6 @@ test("the sandbox write hint points a read-only tool cache at the run's writable
 		resolveMainSandboxPolicy({
 			workspace: "/w",
 			scratchRoots: writableRoots,
-			cacheRoots: [],
-			codeCaches: [],
 			clioDirs: [],
 		});
 	const withTemp = mainSandboxWriteHint("uv: Read-only file system (os error 30)", roots([temp])) ?? "";
@@ -125,8 +122,7 @@ test("under bwrap a yolo script writes its workspace and scratch roots, sees the
 	const policy = resolveMainSandboxPolicy({
 		workspace,
 		scratchRoots: [bench],
-		cacheRoots: [cache],
-		codeCaches: [],
+		sandboxCache: join(cache, "clio-coder", "sandbox-cache"),
 		clioDirs: [join(cache, "clio-coder")],
 	});
 	// A private /tmp is a fresh tmpfs on its own device; the host's keeps its device and inode.
@@ -134,7 +130,7 @@ test("under bwrap a yolo script writes its workspace and scratch roots, sees the
 		"stat -c tmp-id=%d:%i /tmp",
 		`echo a > ${join(workspace, "a.txt")}`,
 		`echo b > ${join(bench, "b.txt")}`,
-		`echo e > ${join(cache, "e.txt")}`,
+		'echo e > "$XDG_CACHE_HOME/e.txt"',
 		`echo f > ${join(cache, "clio-coder", "f.txt")} 2>/dev/null || echo clio-cache-refused`,
 		`echo c > ${join(outside, "c.txt")} 2>/dev/null || echo outside-refused`,
 		`echo d > ${join(workspace, ".git", "d")} 2>/dev/null || echo git-refused`,
@@ -147,7 +143,7 @@ test("under bwrap a yolo script writes its workspace and scratch roots, sees the
 	assert.match(result.output, /outside-refused/u);
 	assert.match(result.output, /git-refused/u);
 	assert.match(result.output, /clio-cache-refused/u);
-	assert.equal(existsSync(join(cache, "e.txt")), true);
+	assert.equal(existsSync(join(cache, "clio-coder", "sandbox-cache", "e.txt")), true);
 	assert.match(
 		result.output,
 		new RegExp(`tmp-id=${statSync("/tmp").dev}:${statSync("/tmp").ino}\\b`, "u"),
@@ -170,8 +166,6 @@ test("the yolo script sandbox makes the repository's git dirs writable and keeps
 	const policy = resolveMainSandboxPolicy({
 		workspace: "/w",
 		scratchRoots: ["/tmp"],
-		cacheRoots: [],
-		codeCaches: [],
 		clioDirs: [],
 		git: {
 			mountDirs: ["/w/.git", "/w/.git/modules", "/w/.git/modules/sub"],
@@ -245,8 +239,6 @@ test("under bwrap git commits from a yolo script while hooks, config, commondir 
 	const policy = resolveMainSandboxPolicy({
 		workspace,
 		scratchRoots: [],
-		cacheRoots: [],
-		codeCaches: [],
 		clioDirs: [],
 		...(layout !== undefined ? { git: layout } : {}),
 	});
@@ -309,8 +301,6 @@ test("under bwrap a yolo script runs in its own PID namespace and cannot reach a
 	const policy = resolveMainSandboxPolicy({
 		workspace: scratch,
 		scratchRoots: [],
-		cacheRoots: [],
-		codeCaches: [],
 		clioDirs: [],
 	});
 	const script = [

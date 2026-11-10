@@ -26,7 +26,7 @@ import { physicalSandboxPath, workerSandboxMasks } from "./worker-process.js";
  * runs a project command, runs inside the OS sandbox the
  * dispatched workers use, whenever a backend exists and `safety.sandbox` is
  * not off: the filesystem stays readable, writes land only in the workspace,
- * the effective scratch roots, the package caches and the repository's git
+ * the effective scratch roots, Clio's sandbox cache and the repository's git
  * dirs, credentials and the SSH agent are masked, the secret files inside the
  * workspace and scratch roots cannot be read, the inherited environment loses
  * its credential variables (env-scrub.ts), the command gets its own PID
@@ -90,12 +90,12 @@ export interface MainSandboxPolicyInput {
 	/** Effective scratch roots: the built-in temp roots, the real /tmp among them, plus `safety.scratchRoots`. */
 	scratchRoots: ReadonlyArray<string>;
 	/**
-	 * Package-manager caches a script may fill: the XDG cache dir and ~/.npm.
-	 * Unlike the scratch roots they are not delete targets for the judge.
+	 * The contained commands' own tool cache under Clio's cache dir, which the
+	 * cache variables point at. The operator's ~/.cache and ~/.npm stay
+	 * read-only: tools there run code later outside the sandbox. Unlike the
+	 * scratch roots it is not a delete target for the judge.
 	 */
-	cacheRoots: ReadonlyArray<string>;
-	/** Existing caches inside the cache roots that hold code run later outside the sandbox; kept read-only. */
-	codeCaches: ReadonlyArray<string>;
+	sandboxCache?: string;
 	/** Clio's own config, data, state and cache directories. */
 	clioDirs: ReadonlyArray<string>;
 	/** The workspace repository's git layout, when the workspace is inside one. */
@@ -129,6 +129,8 @@ export interface MainSandboxPolicy {
 	env: SandboxEnvPolicy;
 	/** Whether a contained command may create Unix-domain sockets (unix-sockets.ts). */
 	unixSockets: UnixSocketMode;
+	/** Also a writable root; bound again after the read-only paths, since it lives inside Clio's cache dir. */
+	sandboxCache?: string;
 	/**
 	 * The read-only sandbox of a read-only session: the one writable root is
 	 * the session's scratch directory, created at spawn, and the command gets
@@ -452,8 +454,8 @@ export function mainSandboxGitControlPaths(workspace: string): string[] {
 }
 
 /**
- * Pure: the writable roots are the workspace, the scratch roots, the cache
- * roots and the workspace repository's git dirs, and nothing else. Each other root's .git
+ * Pure: the writable roots are the workspace, the scratch roots, the sandbox
+ * cache and the workspace repository's git dirs, and nothing else. Each other root's .git
  * and every .clio-coder are re-bound read-only as the worker policy does, the
  * git layout keeps its hooks and config read-only, and so are Clio's own
  * directories, which matters when one of them lives under a scratch root.
@@ -463,7 +465,12 @@ export function mainSandboxGitControlPaths(workspace: string): string[] {
 export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSandboxPolicy {
 	const git = input.git;
 	const writableRoots = [
-		...new Set([input.workspace, ...input.scratchRoots, ...input.cacheRoots, ...(git?.mountDirs ?? [])]),
+		...new Set([
+			input.workspace,
+			...input.scratchRoots,
+			...(input.sandboxCache !== undefined ? [input.sandboxCache] : []),
+			...(git?.mountDirs ?? []),
+		]),
 	];
 	const workspaceProtected =
 		git === undefined ? protectedInside(input.workspace) : [path.join(input.workspace, ".clio-coder")];
@@ -472,11 +479,10 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		readOnlyPaths: [
 			...new Set([
 				...workspaceProtected,
-				...[...input.scratchRoots, ...input.cacheRoots].flatMap(protectedInside),
+				...input.scratchRoots.flatMap(protectedInside),
 				...(git?.readOnlyPaths ?? []),
 				...(git?.absentHooks ?? []),
 				...(git?.absentFiles ?? []),
-				...input.codeCaches,
 				...input.clioDirs,
 			]),
 		],
@@ -487,28 +493,29 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		secretRoots: { workspace: input.workspace, scratchRoots: input.scratchRoots },
 		env: input.env ?? DEFAULT_SANDBOX_ENV_POLICY,
 		unixSockets: input.unixSockets ?? "block",
+		...(input.sandboxCache !== undefined ? { sandboxCache: input.sandboxCache } : {}),
 	};
 }
 
 /**
- * The built-in cache roots. ~/.local stays read-only: ~/.local/bin on PATH
- * would turn a script's write into a command the operator runs later.
+ * The contained commands' tool cache, kept across sessions so installs stay
+ * warm. The operator's ~/.cache, ~/.npm and ~/.local stay read-only: npx,
+ * corepack, uv, pre-commit, Playwright, shell frameworks and ~/.local/bin on
+ * PATH all run what they hold later and outside the sandbox.
  */
-function mainSandboxCacheRoots(): { cacheRoots: string[]; codeCaches: string[] } {
-	const xdgCache = process.env.XDG_CACHE_HOME?.trim();
-	// The XDG spec ignores a relative value.
-	const cache = xdgCache !== undefined && path.isAbsolute(xdgCache) ? xdgCache : path.join(homedir(), ".cache");
-	const npm = path.join(homedir(), ".npm");
-	// npx, corepack and uv run packages and tools from their caches, and
-	// pre-commit runs hook environments from its own, all later and outside the
-	// sandbox. An absent one is skipped rather than created.
-	const codeCaches = [
-		path.join(npm, "_npx"),
-		path.join(cache, "pre-commit"),
-		path.join(cache, "node", "corepack"),
-		path.join(cache, "uv"),
-	].filter(pathExists);
-	return { cacheRoots: [cache, npm], codeCaches };
+function mainSandboxCacheDir(cacheDir: string = clioCachePath()): string {
+	return path.join(cacheDir, "sandbox-cache");
+}
+
+/** Pure: the variables that point package managers and tools at the sandbox cache. */
+function mainSandboxCacheEnv(cache: string): Record<string, string> {
+	return {
+		XDG_CACHE_HOME: cache,
+		npm_config_cache: path.join(cache, "npm"),
+		PIP_CACHE_DIR: path.join(cache, "pip"),
+		UV_CACHE_DIR: path.join(cache, "uv"),
+		PLAYWRIGHT_BROWSERS_PATH: path.join(cache, "ms-playwright"),
+	};
 }
 
 /**
@@ -526,7 +533,7 @@ export function mainSandboxPolicy(roots: {
 	assertClioDirLayout();
 	return resolveMainSandboxPolicy({
 		...roots,
-		...mainSandboxCacheRoots(),
+		sandboxCache: mainSandboxCacheDir(),
 		clioDirs: [clioConfigPath(), clioDataPath(), clioStatePath(), clioCachePath()],
 		...(git !== undefined ? { git } : {}),
 	});
@@ -590,7 +597,12 @@ export function mainSandboxInvocationSpec(
 					readableRoots: [policy.secretRoots.workspace],
 					setEnv: { TMPDIR: "/tmp", TMP: "/tmp", TEMP: "/tmp" },
 				}
-			: { privateTmp: false }),
+			: {
+					privateTmp: false,
+					...(policy.sandboxCache !== undefined
+						? { gitWritablePaths: [policy.sandboxCache], setEnv: mainSandboxCacheEnv(policy.sandboxCache) }
+						: {}),
+				}),
 	};
 }
 
@@ -634,7 +646,11 @@ export function planMainSandboxSpawn(
 	// No existence shortcut: a recursive mkdir passes only a directory, so a
 	// dangling link or a regular file in a root's place refuses the command.
 	// A read-only run's scratch directory is created the same way.
-	for (const dir of [...policy.clioDirs, ...(policy.readOnly === true ? policy.writableRoots : [])]) {
+	for (const dir of [
+		...policy.clioDirs,
+		...(policy.sandboxCache !== undefined ? [policy.sandboxCache] : []),
+		...(policy.readOnly === true ? policy.writableRoots : []),
+	]) {
 		try {
 			mkdirSync(dir, { recursive: true });
 		} catch (error) {
@@ -648,6 +664,7 @@ export function planMainSandboxSpawn(
 		...policy,
 		writableRoots: policy.writableRoots.map(physicalSandboxPath),
 		readOnlyPaths: policy.readOnlyPaths.map(physicalSandboxPath),
+		...(policy.sandboxCache !== undefined ? { sandboxCache: physicalSandboxPath(policy.sandboxCache) } : {}),
 	};
 	const hookMasks: SandboxMaskedPath[] = policy.absentGitHooks
 		.filter((hooks) => !pathExists(hooks))
@@ -772,9 +789,11 @@ export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy):
 	}
 	const temp = writableTempDir(policy.writableRoots);
 	const cache =
-		temp === null
-			? ""
-			: ` A tool cache outside these roots, such as uv's ~/.cache/uv or a UV_CACHE_DIR set elsewhere, stays read-only because the tool later runs code from it outside the sandbox: point it at a new directory under ${temp} for this command (UV_CACHE_DIR=${path.join(temp, "uv-cache")}).`;
+		policy.sandboxCache !== undefined
+			? ` The operator's ~/.cache and ~/.npm stay read-only because tools later run code from them outside the sandbox; contained commands get their own cache at ${policy.sandboxCache} through XDG_CACHE_HOME, npm_config_cache, PIP_CACHE_DIR, UV_CACHE_DIR and PLAYWRIGHT_BROWSERS_PATH: point any other tool's cache variable at a new directory there.`
+			: temp === null
+				? ""
+				: ` A tool cache outside these roots, such as uv's ~/.cache/uv or a UV_CACHE_DIR set elsewhere, stays read-only because the tool later runs code from it outside the sandbox: point it at a new directory under ${temp} for this command (UV_CACHE_DIR=${path.join(temp, "uv-cache")}).`;
 	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden).${cache} If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request (Clio's own settings and credentials are never changed from a shell: propose settings with configure_clio and leave credentials to the operator); a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 

@@ -67,8 +67,6 @@ describe("main-session sandbox Clio roots", () => {
 			const policy = resolveMainSandboxPolicy({
 				workspace,
 				scratchRoots: [],
-				cacheRoots: [],
-				codeCaches: [],
 				clioDirs: [dir],
 			});
 			const plan = planMainSandboxSpawn(policy, { argv: ["/bin/true"] }, workspace, available);
@@ -91,7 +89,7 @@ describe("main-session sandbox Clio roots", () => {
 		const script = [
 			`mkdir -p ${clioCache} 2>/dev/null`,
 			`echo forged > ${forged} 2>/dev/null || echo clio-cache-refused`,
-			`echo ok > ${join(xdgCache, "package.txt")}`,
+			'echo ok > "$XDG_CACHE_HOME/package.txt"',
 		].join("; ");
 		const plan = planMainSandboxSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
 		equal(plan.kind, "sandboxed");
@@ -101,6 +99,6 @@ describe("main-session sandbox Clio roots", () => {
 		equal(result.code, 0, result.output);
 		match(result.output, /clio-cache-refused/u);
 		ok(!existsSync(forged), "no forged cache file");
-		ok(existsSync(join(xdgCache, "package.txt")), "the rest of the cache root stays writable");
+		ok(existsSync(join(clioCache, "sandbox-cache", "package.txt")), "the sandbox cache stays writable");
 	});
 });

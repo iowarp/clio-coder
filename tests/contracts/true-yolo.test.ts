@@ -738,7 +738,7 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 
-// #419: an admitted yolo script commits through git, fills the package caches,
+// #419: an admitted yolo script commits through git, fills its own package cache,
 // and leaves no commondir behind to redirect the host's next git command.
 test("a yolo script run through bash commits in the workspace repository and its planted commondir is swept", async (t) => {
 	const availability = sandboxAvailability();
@@ -751,15 +751,7 @@ test("a yolo script run through bash commits in the workspace repository and its
 	mkdirSync(cache);
 	const savedCache = process.env.XDG_CACHE_HOME;
 	process.env.XDG_CACHE_HOME = cache;
-	// An absent code cache is skipped, not created.
-	strictEqual(
-		mainSandboxPolicy({ workspace: cwd, scratchRoots: [] }).readOnlyPaths.includes(join(cache, "pre-commit")),
-		false,
-	);
-	strictEqual(existsSync(join(cache, "pre-commit")), false);
 	mkdirSync(join(cache, "pre-commit"));
-	mkdirSync(join(cache, "node", "corepack"), { recursive: true });
-	mkdirSync(join(cache, "uv"));
 	t.after(() => {
 		if (savedCache === undefined) delete process.env.XDG_CACHE_HOME;
 		else process.env.XDG_CACHE_HOME = savedCache;
@@ -768,20 +760,18 @@ test("a yolo script run through bash commits in the workspace repository and its
 	execFileSync("git", ["init", "-q"], { cwd });
 	execFileSync("git", [...git, "commit", "-q", "--allow-empty", "-m", "init"], { cwd });
 	const policy = mainSandboxPolicy({ workspace: cwd, scratchRoots: [] });
-	for (const root of [join(cwd, ".git"), cache, join(homedir(), ".npm")]) {
-		strictEqual(policy.writableRoots.includes(root), true, root);
+	strictEqual(policy.writableRoots.includes(join(cwd, ".git")), true);
+	for (const root of [cache, join(homedir(), ".npm"), join(homedir(), ".local")]) {
+		strictEqual(policy.writableRoots.includes(root), false, root);
 	}
-	strictEqual(policy.writableRoots.includes(join(homedir(), ".local")), false);
-	for (const code of [join(cache, "pre-commit"), join(cache, "node", "corepack"), join(cache, "uv")]) {
-		strictEqual(policy.readOnlyPaths.includes(code), true, code);
-	}
+	const sandboxCache = policy.sandboxCache ?? "";
 	const result = await runBashCommand(
-		`git ${git.join(" ")} commit -q --allow-empty -m sandboxed && echo c > ${join(cache, "c")} && echo /evil > .git/commondir; echo h 2>/dev/null > ${join(cache, "pre-commit", "h")} || echo code-cache-refused`,
+		`git ${git.join(" ")} commit -q --allow-empty -m sandboxed && echo c > "$XDG_CACHE_HOME/c" && echo /evil > .git/commondir; echo h 2>/dev/null > ${join(cache, "pre-commit", "h")} || echo code-cache-refused`,
 		{ cwd, shellSandbox: policy },
 	);
 	strictEqual(result.exitCode, 0, `${result.stdout}${result.stderr}`);
 	strictEqual(existsSync(join(cwd, ".git", "commondir")), false);
-	strictEqual(existsSync(join(cache, "c")), true);
+	strictEqual(existsSync(join(sandboxCache, "c")), true);
 	strictEqual(existsSync(join(cache, "pre-commit", "h")), false, "pre-commit's cache runs hooks later");
 	match(result.stdout, /code-cache-refused/u);
 	match(execFileSync("git", ["log", "-1", "--format=%s"], { cwd, encoding: "utf8" }), /sandboxed/u);
