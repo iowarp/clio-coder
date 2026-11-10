@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { instructionUnits } from "./instruction-units.js";
 
@@ -79,12 +79,15 @@ export interface AdoptionScanOptions {
 	cwd: string;
 	homeDir?: string;
 	includeGlobal?: boolean;
+	/** Pre-enumerated workspace files; skips the synchronous enumeration. */
+	workspaceFiles?: ReadonlyArray<string>;
 }
 
 export interface AdoptionSourcesChangedOptions {
 	cwd?: string;
 	homeDir?: string;
 	includeGlobal?: boolean;
+	workspaceFiles?: ReadonlyArray<string>;
 }
 
 interface CandidateSpec {
@@ -271,7 +274,12 @@ function jsonLike(filePath: string): boolean {
 	return extname(filePath).toLowerCase() === ".json";
 }
 
-function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolean): CandidateSpec[] {
+function discoverCandidateSpecs(
+	cwd: string,
+	home: string,
+	includeGlobal: boolean,
+	workspaceFiles?: ReadonlyArray<string>,
+): CandidateSpec[] {
 	const specs: CandidateSpec[] = [];
 	const seen = new Set<string>();
 	let order = 0;
@@ -316,7 +324,7 @@ function discoverCandidateSpecs(cwd: string, home: string, includeGlobal: boolea
 	// Nested constitutions are part of the claimed provenance set. Let the
 	// walker's typed limit/incomplete failures propagate instead of silently
 	// publishing an authoritative-looking partial adoption snapshot.
-	const visibleWorkspaceFiles = enumerateWorkspaceFiles(cwd);
+	const visibleWorkspaceFiles = workspaceFiles ?? enumerateWorkspaceFiles(cwd);
 	for (const relPath of visibleWorkspaceFiles) {
 		const parts = relPath.split("/");
 		if (parts.length - 1 > 6) continue;
@@ -701,7 +709,7 @@ export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResu
 	const sources: AdoptionSource[] = [];
 	const rejected: AdoptionRejectedSource[] = [];
 	let acceptedSourceBytes = 0;
-	for (const spec of discoverCandidateSpecs(cwd, home, includeGlobal)) {
+	for (const spec of discoverCandidateSpecs(cwd, home, includeGlobal, options.workspaceFiles)) {
 		const result = readCandidate(spec, cwd, home);
 		if (!result) continue;
 		if (!("content" in result)) {
@@ -856,30 +864,51 @@ export function adoptionSourcesChanged(
 ): boolean {
 	const homeDir = resolve(options.homeDir ?? inferAdoptionHome(snapshots) ?? homedir());
 	const cwd = options.cwd ? resolve(options.cwd) : inferAdoptionCwd(snapshots, homeDir);
-	if (!cwd) {
-		for (const snapshot of snapshots) {
-			const current = readCandidate(
-				{
-					path: snapshot.path,
-					scope: snapshot.scope,
-					provider: snapshot.provider,
-					kind: snapshot.kind,
-					order: 0,
-				},
-				resolve(snapshot.path, ".."),
-				homeDir,
-			);
-			if (!current || adoptionSnapshotsHash([sourceSnapshot(current)]) !== adoptionSnapshotsHash([snapshot])) {
-				return true;
-			}
-		}
-		return false;
-	}
+	if (!cwd) return recordedAdoptionSourcesChanged(snapshots, homeDir);
 
 	const current = scanAgentConfigs({
 		cwd,
 		homeDir,
 		includeGlobal: options.includeGlobal ?? snapshots.some((snapshot) => snapshot.scope === "global"),
+		...(options.workspaceFiles ? { workspaceFiles: options.workspaceFiles } : {}),
 	}).sourceSnapshots;
 	return adoptionSnapshotsHash(current) !== adoptionSnapshotsHash(snapshots);
+}
+
+/**
+ * Re-read only the recorded source paths: no discovery, no workspace
+ * enumeration. Catches edits and removals of what was adopted; a newly added
+ * instruction file needs the full `adoptionSourcesChanged` scan.
+ */
+export function recordedAdoptionSourcesChanged(
+	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
+	homeDirOverride?: string,
+): boolean {
+	const homeDir = resolve(homeDirOverride ?? inferAdoptionHome(snapshots) ?? homedir());
+	for (const snapshot of snapshots) {
+		const current = readCandidate(
+			{
+				path: snapshot.path,
+				scope: snapshot.scope,
+				provider: snapshot.provider,
+				kind: snapshot.kind,
+				order: 0,
+			},
+			resolve(snapshot.path, ".."),
+			homeDir,
+		);
+		if (!current || adoptionSnapshotsHash([sourceSnapshot(current)]) !== adoptionSnapshotsHash([snapshot])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/** `adoptionSourcesChanged` with the workspace enumerated off the event loop's critical path. */
+export async function adoptionSourcesChangedAsync(
+	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
+	options: AdoptionSourcesChangedOptions & { cwd: string },
+): Promise<boolean> {
+	const workspaceFiles = await enumerateWorkspaceFilesAsync(resolve(options.cwd));
+	return adoptionSourcesChanged(snapshots, { ...options, workspaceFiles });
 }
