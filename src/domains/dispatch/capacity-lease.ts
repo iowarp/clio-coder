@@ -17,6 +17,14 @@ export { processBirthToken } from "../../core/process-identity.js";
 
 export const MAX_CAPACITY_LEASES = 1_000;
 export const DEFAULT_CAPACITY_LEASE_TTL_MS = 30_000;
+/**
+ * A lease from another host cannot be probed here, so it is dropped only once
+ * it is this far past its expiry. A live owner renews on every heartbeat, so
+ * only a dead or partitioned owner gets this old.
+ */
+const FOREIGN_LEASE_GRACE_MS = 10 * DEFAULT_CAPACITY_LEASE_TTL_MS;
+/** `LOCAL_NODE_ID` in transport.ts; imported by value it would pull worker spawning into every admission reader. */
+const LOCAL_NODE_ID = "local";
 // Admission waits and lease renewal yield while they wait for the lock, but
 // release, rename, reservation writes and the planners' usage reads still block
 // the event loop, and a blocked process cannot renew. If such a caller could
@@ -72,6 +80,35 @@ export interface LeaseOwnerProbe {
 	tokenProvesDeath?: boolean;
 	/** Liveness fallback for platforms with no birth-token source. */
 	alive?(pid: number): boolean;
+}
+
+function onThisHost(host: string | undefined): boolean {
+	return (host ?? hostname()) === hostname();
+}
+function isLoopbackEndpoint(endpointKey: string): boolean {
+	let host: string;
+	try {
+		host = new URL(endpointKey).hostname;
+	} catch {
+		// Not a URL (a provider-scoped key such as copilot-sdk), so it names a shared service.
+		return false;
+	}
+	return host === "localhost" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+/**
+ * On a shared state dir the node `local` is a different machine on every host,
+ * so its slots count only where they were taken. A named node is the same
+ * machine from everywhere, and so is a shared provider endpoint, but a loopback
+ * endpoint is each host's own server.
+ */
+export function countsOnThisNode(host: string | undefined, nodeId: string): boolean {
+	return nodeId !== LOCAL_NODE_ID || onThisHost(host);
+}
+export function countsOnThisEndpoint(host: string | undefined, endpointKey: string): boolean {
+	return !isLoopbackEndpoint(endpointKey) || onThisHost(host);
+}
+function leaseOnEndpoint(lease: CapacityLease, endpointKey: string): boolean {
+	return lease.endpointKey === endpointKey && countsOnThisEndpoint(lease.host, endpointKey);
 }
 
 function capacityStatePath(): string {
@@ -211,9 +248,9 @@ function ownerHoldsLease(lease: CapacityLease, probe: LeaseOwnerProbe): boolean 
 }
 function reclaim(file: CapacityStateFile, nowMs: number, probe: LeaseOwnerProbe): void {
 	file.leases = file.leases.filter((lease) => {
-		// A lease from another host is never adjudicated here: on a shared state
-		// dir a local pid probe would inspect the wrong process.
-		if (lease.host !== undefined && lease.host !== hostname()) return true;
+		// A lease from another host is never probed here: on a shared state dir a
+		// local pid probe would inspect the wrong process. Only its age can end it.
+		if (!onThisHost(lease.host)) return Date.parse(lease.expiresAt) + FOREIGN_LEASE_GRACE_MS > nowMs;
 		if (!ownerHoldsLease(lease, probe)) return false;
 		// A real birth token identifies this exact process, so it outranks the
 		// expiry: an owner that missed heartbeats because it sat blocked on the
@@ -248,17 +285,33 @@ function heldReservationUsage(
 	global: number;
 	nodes: Record<string, number>;
 	endpoints: Record<string, number>;
+	/** Hosts other than this one whose held slots were counted. */
+	foreignHosts: Set<string>;
+	/** Whether this process owns any counted held slot. */
+	ownHeld: boolean;
 } {
 	let global = 0;
 	const nodes: Record<string, number> = {};
 	const endpoints: Record<string, number> = {};
+	const foreignHosts = new Set<string>();
+	let ownHeld = false;
 	for (const value of values) {
 		if (typeof value !== "object" || value === null)
 			throw new Error("dispatch capacity store has invalid reservation records");
-		const record = value as { ownerId?: unknown; status?: unknown; members?: unknown };
+		const record = value as {
+			ownerId?: unknown;
+			ownerPid?: unknown;
+			host?: unknown;
+			status?: unknown;
+			members?: unknown;
+		};
 		if (typeof record.status !== "string" || !RESERVATION_STATUSES.has(record.status) || !Array.isArray(record.members))
 			throw new Error("dispatch capacity store has invalid reservation records");
 		if (record.status !== "active") continue;
+		if (record.host !== undefined && typeof record.host !== "string")
+			throw new Error("dispatch capacity store has invalid reservation records");
+		const host = record.host;
+		let counted = false;
 		const byWave = new Map<number, number>();
 		const byNodeWave = new Map<string, Map<number, number>>();
 		const byEndpointWave = new Map<string, Map<number, number>>();
@@ -292,11 +345,15 @@ function heldReservationUsage(
 			// compete with this lease; other waves stay held in durable state and
 			// still count at their full peak against every other owner.
 			if (transferringWave !== undefined && wave !== transferringWave) continue;
-			byWave.set(wave, (byWave.get(wave) ?? 0) + 1);
-			const nodeWaves = byNodeWave.get(member.nodeId) ?? new Map<number, number>();
-			nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
-			byNodeWave.set(member.nodeId, nodeWaves);
-			if (typeof member.endpointKey === "string") {
+			if (countsOnThisNode(host, member.nodeId)) {
+				counted = true;
+				byWave.set(wave, (byWave.get(wave) ?? 0) + 1);
+				const nodeWaves = byNodeWave.get(member.nodeId) ?? new Map<number, number>();
+				nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
+				byNodeWave.set(member.nodeId, nodeWaves);
+			}
+			if (typeof member.endpointKey === "string" && countsOnThisEndpoint(host, member.endpointKey)) {
+				counted = true;
 				const endpointWaves = byEndpointWave.get(member.endpointKey) ?? new Map<number, number>();
 				endpointWaves.set(wave, (endpointWaves.get(wave) ?? 0) + 1);
 				byEndpointWave.set(member.endpointKey, endpointWaves);
@@ -305,8 +362,22 @@ function heldReservationUsage(
 		global += Math.max(0, ...byWave.values());
 		for (const [id, waves] of byNodeWave) nodes[id] = (nodes[id] ?? 0) + Math.max(0, ...waves.values());
 		for (const [key, waves] of byEndpointWave) endpoints[key] = (endpoints[key] ?? 0) + Math.max(0, ...waves.values());
+		if (!counted) continue;
+		if (!onThisHost(host)) foreignHosts.add(host as string);
+		else if (record.ownerPid === process.pid) ownHeld = true;
 	}
-	return { global, nodes, endpoints };
+	return { global, nodes, endpoints, foreignHosts, ownHeld };
+}
+
+/**
+ * Names the other hosts holding counted slots and the way to free a dead one's,
+ * since this host cannot see whether those processes are alive.
+ */
+function foreignHoldersNote(leases: ReadonlyArray<CapacityLease>, reservationHosts: ReadonlySet<string>): string {
+	const hosts = new Set(reservationHosts);
+	for (const lease of leases) if (!onThisHost(lease.host)) hosts.add(lease.host as string);
+	if (hosts.size === 0) return "";
+	return ` (held by ${[...hosts].sort().join(", ")}; if that process is gone: clio-coder session terminate <id> --force)`;
 }
 
 export interface EndpointCapacityHolders {
@@ -321,7 +392,7 @@ export function endpointCapacityHolders(endpointKey: string): EndpointCapacityHo
 		const file = readCapacityStateUnsafe();
 		reclaim(file, Date.now(), defaultProbe);
 		return {
-			leases: file.leases.filter((lease) => lease.endpointKey === endpointKey).length,
+			leases: file.leases.filter((lease) => leaseOnEndpoint(lease, endpointKey)).length,
 			reservations: heldReservationUsage(file.reservations).endpoints[endpointKey] ?? 0,
 			foregroundStreams: foregroundStreamUsage()[endpointKey] ?? 0,
 		};
@@ -379,36 +450,42 @@ function assertCapacity(
 	transferring?: { ownerId: string; memberId: string },
 ): void {
 	const held = heldReservationUsage(file.reservations, transferring);
-	const globalUsed = file.leases.length + held.global;
+	const counted = file.leases.filter((lease) => countsOnThisNode(lease.host, lease.nodeId));
+	const globalUsed = counted.length + held.global;
 	// The denial names the compliant next move, not just the gate. A model told
 	// only that it is full re-dispatches with a different agent; the work it is
 	// waiting on is already running under its own detached assignments.
 	if (globalUsed >= limits.global) {
+		const ownsSlots = held.ownHeld || counted.some((lease) => onThisHost(lease.host) && lease.ownerPid === process.pid);
 		throw new Error(
-			`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global}). Collect the runs already in flight before dispatching more; re-dispatching with a different agent or options does not free a slot.`,
+			`dispatch: admission denied: global capacity reached (${globalUsed}/${limits.global})${foreignHoldersNote(counted, held.foreignHosts)}.${ownsSlots ? " Collect the runs already in flight before dispatching more; re-dispatching with a different agent or options does not free a slot." : ""}`,
 		);
 	}
 	const nodeLimit = limits.nodes[nodeId];
 	if (nodeLimit !== undefined) {
 		if (nodeLimit < 1) throw new Error(`dispatch: admission denied: node '${nodeId}' capacity unavailable`);
-		const used = file.leases.filter((lease) => lease.nodeId === nodeId).length + (held.nodes[nodeId] ?? 0);
+		const onNode = counted.filter((lease) => lease.nodeId === nodeId);
+		const used = onNode.length + (held.nodes[nodeId] ?? 0);
 		if (used >= nodeLimit)
-			throw new Error(`dispatch: admission denied: node '${nodeId}' capacity reached (${used}/${nodeLimit})`);
+			throw new Error(
+				`dispatch: admission denied: node '${nodeId}' capacity reached (${used}/${nodeLimit})${foreignHoldersNote(onNode, held.foreignHosts)}`,
+			);
 	}
 	if (endpointKey !== undefined) {
 		const endpointLimit = limits.endpoints[endpointKey];
 		if (endpointLimit !== undefined) {
 			if (endpointLimit < 1)
 				throw new Error(`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity unavailable`);
+			const onEndpoint = file.leases.filter((lease) => leaseOnEndpoint(lease, endpointKey));
 			const holders: EndpointCapacityHolders = {
-				leases: file.leases.filter((lease) => lease.endpointKey === endpointKey).length,
+				leases: onEndpoint.length,
 				reservations: held.endpoints[endpointKey] ?? 0,
 				foregroundStreams: foregroundStreamUsage()[endpointKey] ?? 0,
 			};
 			const used = holders.leases + holders.reservations + holders.foregroundStreams;
 			if (used >= endpointLimit)
 				throw new Error(
-					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}; ${endpointCapacityRemedy(endpointKey)}`,
+					`dispatch: admission denied: endpoint '${endpointLabel(endpointKey)}' capacity reached (${used}/${endpointLimit} slots): ${describeEndpointCapacityHolders(holders)}${foreignHoldersNote(onEndpoint, held.foreignHosts)}; ${endpointCapacityRemedy(endpointKey)}`,
 				);
 		}
 	}
@@ -596,6 +673,7 @@ export function capacityLeaseUsageUnsafe(options?: {
 	reclaim(file, options?.nowMs ?? Date.now(), options?.probe ?? defaultProbe);
 	if (before !== file.leases.length) writeCapacityStateUnsafe(file);
 	const leases = file.leases;
+	let global = 0;
 	const nodes: Record<string, number> = {};
 	const foreground = foregroundStreamUsage();
 	const endpoints: Record<string, number> = { ...foreground };
@@ -606,14 +684,17 @@ export function capacityLeaseUsageUnsafe(options?: {
 		]),
 	);
 	for (const lease of leases) {
-		nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
-		if (lease.endpointKey !== undefined) {
+		if (countsOnThisNode(lease.host, lease.nodeId)) {
+			global += 1;
+			nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
+		}
+		if (lease.endpointKey !== undefined && countsOnThisEndpoint(lease.host, lease.endpointKey)) {
 			endpoints[lease.endpointKey] = (endpoints[lease.endpointKey] ?? 0) + 1;
 			const holders = endpointHolders[lease.endpointKey] ?? { leases: 0, reservations: 0, foregroundStreams: 0 };
 			endpointHolders[lease.endpointKey] = { ...holders, leases: holders.leases + 1 };
 		}
 	}
-	return { global: leases.length, nodes, endpoints, endpointHolders };
+	return { global, nodes, endpoints, endpointHolders };
 }
 
 /** Coherent current endpoint occupancy, including held reservation waves.
@@ -627,7 +708,8 @@ export function endpointCapacityUsage(): Readonly<Record<string, number>> {
 		const usage: Record<string, number> = { ...foregroundStreamUsage() };
 		for (const [key, count] of Object.entries(held.endpoints)) usage[key] = (usage[key] ?? 0) + count;
 		for (const lease of file.leases) {
-			if (lease.endpointKey !== undefined) usage[lease.endpointKey] = (usage[lease.endpointKey] ?? 0) + 1;
+			if (lease.endpointKey !== undefined && leaseOnEndpoint(lease, lease.endpointKey))
+				usage[lease.endpointKey] = (usage[lease.endpointKey] ?? 0) + 1;
 		}
 		return usage;
 	});
@@ -661,8 +743,8 @@ export function createNodeLeaseUsageReader(options: {
 }
 /**
  * Drop every lease whose owner is exactly `owner` ({host, pid, birth}). Leases
- * from another host are never reclaimed by `reclaim`, so a node that died with
- * a lease held would pin its slots forever; `clio-coder session terminate
+ * from another host are reclaimed by `reclaim` only after a long grace, so a
+ * node that died with a lease held pins its slots until then; `clio-coder session terminate
  * --force` calls this once that node's session heartbeat is stale (#439). A
  * legacy lease without a host reads as this host, as `reclaim` reads it.
  */

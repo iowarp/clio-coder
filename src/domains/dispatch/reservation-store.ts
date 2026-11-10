@@ -12,6 +12,8 @@ import {
 	type CapacityLimits,
 	type CapacityStateFile,
 	capacityStateLockPath,
+	countsOnThisEndpoint,
+	countsOnThisNode,
 	describeEndpointCapacityHolders,
 	endpointCapacityRemedy,
 	readCapacityStateUnsafe,
@@ -219,6 +221,16 @@ function outstandingTasks(record: DispatchReservationRecord): ReservationPlanTas
 		.map(({ status: _status, consumedAt: _consumedAt, releasedAt: _releasedAt, ...task }) => task);
 }
 
+/** Slots another plan holds against this host, by the rules `capacity-lease.ts` counts leases with. */
+function heldAllocation(record: DispatchReservationRecord): ReservationAllocation {
+	const tasks = outstandingTasks(record);
+	const onNodes = reservationAllocation(tasks.filter((task) => countsOnThisNode(record.host, task.nodeId)));
+	const onEndpoints = reservationAllocation(
+		tasks.filter((task) => task.endpointKey !== undefined && countsOnThisEndpoint(record.host, task.endpointKey)),
+	);
+	return { ...onNodes, endpointSlots: onEndpoints.endpointSlots };
+}
+
 function allocateReservation(
 	tasks: ReadonlyArray<ReservationPlanTask>,
 	existing: ReadonlyArray<DispatchReservationRecord>,
@@ -230,7 +242,7 @@ function allocateReservation(
 	if (duplicate) return { ok: false, reason: `duplicate reservation member '${duplicate.memberId}'` };
 	const requested = reservationAllocation(tasks);
 	const activeRecords = existing.filter((record) => record.status === "active");
-	const held = activeRecords.map((record) => reservationAllocation(outstandingTasks(record)));
+	const held = activeRecords.map(heldAllocation);
 	const globalUsed = capacity.global.active + held.reduce((sum, allocation) => sum + allocation.globalSlots, 0);
 	if (globalUsed + requested.globalSlots > capacity.global.limit) {
 		return {
@@ -413,10 +425,7 @@ export function rebindDispatchReservationMember(input: {
 				const siblingSlots = record.members.filter(
 					(entry) => entry !== member && entry.status !== "released" && entry.endpointKey === endpointKey,
 				).length;
-				const otherHeld = others.reduce(
-					(sum, entry) => sum + (reservationAllocation(outstandingTasks(entry)).endpointSlots[endpointKey] ?? 0),
-					0,
-				);
+				const otherHeld = others.reduce((sum, entry) => sum + (heldAllocation(entry).endpointSlots[endpointKey] ?? 0), 0);
 				const used = endpoint.active + otherHeld + siblingSlots;
 				if (used + 1 > endpoint.limit) {
 					throw new Error(
@@ -441,10 +450,7 @@ export function rebindDispatchReservationMember(input: {
 				const siblingSlots = record.members.filter(
 					(entry) => entry !== member && entry.status !== "released" && entry.nodeId === input.nodeId,
 				).length;
-				const otherHeld = others.reduce(
-					(sum, entry) => sum + (reservationAllocation(outstandingTasks(entry)).nodeSlots[input.nodeId] ?? 0),
-					0,
-				);
+				const otherHeld = others.reduce((sum, entry) => sum + (heldAllocation(entry).nodeSlots[input.nodeId] ?? 0), 0);
 				const used = node.active + otherHeld + siblingSlots;
 				if (used + 1 > node.limit) {
 					throw new Error(
