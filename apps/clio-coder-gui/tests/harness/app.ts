@@ -45,12 +45,21 @@ export async function harness(
 		origin?: () => string;
 		clientDir?: string;
 		pwa?: boolean;
+		/**
+		 * false: no domain lanes. A test that drives only the supervisor and session routes never calls them, and
+		 * booting two lanes costs seconds of CPU per harness. A call reaching one rejects.
+		 */
+		lanes?: boolean;
 	} = {},
 ) {
 	const home = await scratchHome();
 	const env = { ...home.env, ...options.env };
-	const reads = new WorkerHost("reads", { fixture: true, ...settings }, env),
-		ops = new WorkerHost("ops", { fixture: true, ...settings }, env);
+	const lane = (name: "reads" | "ops") =>
+		options.lanes === false
+			? (absentLane(name) as unknown as WorkerHost)
+			: new WorkerHost(name, { fixture: true, ...settings }, env);
+	const reads = lane("reads"),
+		ops = lane("ops");
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(join(home.path, "state")),
@@ -195,6 +204,22 @@ export async function harness(
 		client,
 		close,
 	};
+}
+/** A stand-in for a lane the harness did not boot: ready and close settle, every other method rejects. */
+function absentLane(name: string): object {
+	return new Proxy(
+		{},
+		{
+			get: (_target, key) =>
+				key === "ready" || key === "close"
+					? async () => undefined
+					: key === "then"
+						? undefined
+						: async () => {
+								throw new Error(`This harness has no ${name} lane; it was built with lanes: false.`);
+							},
+		},
+	);
 }
 export async function json<S extends TSchema>(response: Response, schema: S): Promise<Static<S>> {
 	return parse(schema, await response.json());

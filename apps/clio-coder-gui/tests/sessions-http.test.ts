@@ -38,17 +38,21 @@ test("ACP problems explain missing credentials and failed turns without forwardi
 		assert.doesNotMatch(JSON.stringify(problem), /private-provider-secret/);
 });
 
-async function waitUntil(check: () => boolean) {
-	for (let i = 0; i < 200; i++) {
-		if (check()) return;
+/**
+ * Waits for a state the test drives toward. The bound is past every test's own timeout, so a slow host fails on the
+ * test's budget and a stuck one never leaves this loop running after its test.
+ */
+async function waitUntil(check: () => boolean | Promise<boolean>) {
+	const deadline = Date.now() + 30_000;
+	while (!(await check())) {
+		if (Date.now() > deadline) throw new Error("Timed out waiting for a turn.");
 		await setTimeout(25);
 	}
-	throw new Error("Timed out waiting for a turn.");
 }
 
 for (const scenario of ["steer", "queue-push"]) {
 	test(`idle parking preserves held operator messages with ${scenario} updates`, { timeout: 20000 }, async (t) => {
-		const h = await harness({}, { scenario, parkAfterMs: 100 });
+		const h = await harness({}, { scenario, parkAfterMs: 100, lanes: false });
 		t.after(h.close);
 		const workspace = await h.workspaces.open(h.home.path);
 		const held = await h.supervisor.open(workspace.id);
@@ -67,7 +71,7 @@ for (const scenario of ["steer", "queue-push"]) {
 }
 
 test("idle parking keeps a child whose queue ownership cannot be read", { timeout: 20000 }, async (t) => {
-	const h = await harness({}, { scenario: "steer", parkAfterMs: 100 });
+	const h = await harness({}, { scenario: "steer", parkAfterMs: 100, lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path);
 	const held = await h.supervisor.open(workspace.id);
@@ -83,7 +87,7 @@ test("idle parking keeps a child whose queue ownership cannot be read", { timeou
 test("workspace and session routes stream one complete turn with recorded usage and cost and command idempotency", {
 	timeout: 20000,
 }, async (t) => {
-	const h = await harness();
+	const h = await harness({}, { lanes: false });
 	t.after(h.close);
 	const events: Event[] = [],
 		disconnect = h.hub.connect(undefined, (event) => events.push(event));
@@ -144,7 +148,7 @@ test("workspace and session routes stream one complete turn with recorded usage 
 test("permission rejection never executes and remote session admission codes remain upstream_acp problems", {
 	timeout: 20000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "permission" });
+	const h = await harness({}, { scenario: "permission", lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
@@ -162,7 +166,7 @@ test("permission rejection never executes and remote session admission codes rem
 	const log = await readFile(join(h.home.path, "acp.jsonl"), "utf8");
 	assert.match(log, /"toolExecuted":false/);
 	for (const code of ["session_limit", "session_cwd_mismatch"]) {
-		const other = await harness({}, { scenario: code });
+		const other = await harness({}, { scenario: code, lanes: false });
 		try {
 			const workspace = await other.workspaces.open(other.home.path);
 			const response = await other.post(`/api/workspaces/${workspace.id}/sessions`);
@@ -179,7 +183,7 @@ test("permission rejection never executes and remote session admission codes rem
 test("open sessions are not limited: a fifth and a sixth ACP child start beside the first four", {
 	timeout: 15000,
 }, async (t) => {
-	const h = await harness();
+	const h = await harness({}, { lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path);
 	const replies = await Promise.all(Array.from({ length: 6 }, () => h.post(`/api/workspaces/${workspace.id}/sessions`)));
@@ -192,7 +196,7 @@ test("open sessions are not limited: a fifth and a sixth ACP child start beside 
 test("a request carries text files to the agent as ACP embedded resources, only when it accepts them", {
 	timeout: 20000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "markdown" });
+	const h = await harness({}, { scenario: "markdown", lanes: false });
 	t.after(h.close);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
 	const session = await json(
@@ -211,10 +215,10 @@ test("a request carries text files to the agent as ACP embedded resources, only 
 	);
 	assert.equal(turn.status, 202);
 	let log = "";
-	for (let i = 0; i < 200 && !log.includes('"session/prompt"'); i++) {
-		await setTimeout(25);
+	await waitUntil(async () => {
 		log = await readFile(join(h.home.path, "acp.jsonl"), "utf8").catch(() => "");
-	}
+		return log.includes('"session/prompt"');
+	});
 	const prompt = log
 		.split("\n")
 		.filter(Boolean)
@@ -242,7 +246,7 @@ test("a request carries text files to the agent as ACP embedded resources, only 
 });
 
 test("an agent that did not announce embedded context is never sent a file", { timeout: 20000 }, async (t) => {
-	const h = await harness();
+	const h = await harness({}, { lanes: false });
 	t.after(h.close);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
 	const session = await json(
@@ -260,7 +264,7 @@ test("an agent that did not announce embedded context is never sent a file", { t
 test("a request carries images to the agent as ACP image blocks, within the one-line bound", {
 	timeout: 20000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "markdown" });
+	const h = await harness({}, { scenario: "markdown", lanes: false });
 	t.after(h.close);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
 	const session = await json(
@@ -281,10 +285,10 @@ test("a request carries images to the agent as ACP image blocks, within the one-
 	);
 	assert.equal(turn.status, 202);
 	let log = "";
-	for (let i = 0; i < 200 && !log.includes('"session/prompt"'); i++) {
-		await setTimeout(25);
+	await waitUntil(async () => {
 		log = await readFile(join(h.home.path, "acp.jsonl"), "utf8").catch(() => "");
-	}
+		return log.includes('"session/prompt"');
+	});
 	const prompt = log
 		.split("\n")
 		.filter(Boolean)
