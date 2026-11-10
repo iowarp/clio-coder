@@ -497,7 +497,10 @@ test("a project may tighten any safety or fleet limit and switch review on, neve
 
 	// With the operator's ceiling and review off, a project may still switch both on.
 	writeFileSync(join(home.dir, "config", "settings.yaml"), "version: 2\nsafety:\n  limits:\n    sessionCostUsd: 0\n");
-	writeFileSync(join(projectDir, "settings.yaml"), "safety:\n  limits:\n    sessionCostUsd: 3\n  review:\n    enabled: true\n");
+	writeFileSync(
+		join(projectDir, "settings.yaml"),
+		"safety:\n  limits:\n    sessionCostUsd: 3\n  review:\n    enabled: true\n",
+	);
 	const next = captureProjectSurface(workspace, "settings");
 	if (!next.contentHash) throw new Error("missing project settings hash");
 	recordProjectSurfaceTrust(workspace, "settings", next.contentHash);
