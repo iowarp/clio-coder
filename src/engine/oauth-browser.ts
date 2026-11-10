@@ -316,12 +316,14 @@ async function exchangeAnthropicCode(
 async function loginAnthropicBrowser(interaction: ProviderAuthInteraction): Promise<OAuthCredentials> {
 	const verifier = randomBytes(32).toString("base64url");
 	const challenge = createHash("sha256").update(verifier).digest("base64url");
+	// pi reuses the verifier as state; a separate value keeps the verifier out of the redirect.
+	const state = randomBytes(32).toString("base64url");
 	const start = (port: number): Promise<OAuthCallback> =>
 		startOAuthCallback({
 			providerName: "Anthropic",
 			port,
 			path: ANTHROPIC_CALLBACK_PATH,
-			expectedState: () => verifier,
+			expectedState: () => state,
 			signal: interaction.signal,
 		});
 	// Anthropic accepts any loopback port; the preferred one can be forwarded into containers or over SSH.
@@ -338,7 +340,7 @@ async function loginAnthropicBrowser(interaction: ProviderAuthInteraction): Prom
 			scope: ANTHROPIC_SCOPES,
 			code_challenge: challenge,
 			code_challenge_method: "S256",
-			state: verifier,
+			state,
 		});
 		interaction.notify({
 			type: "auth_url",
@@ -352,10 +354,10 @@ async function loginAnthropicBrowser(interaction: ProviderAuthInteraction): Prom
 			placeholder: redirectUri,
 		});
 		const parsed = parseAuthorizationInput(input);
-		if (parsed.state && parsed.state !== verifier) throw new Error("OAuth state mismatch");
+		if (parsed.state && parsed.state !== state) throw new Error("OAuth state mismatch");
 		if (!parsed.code) throw new Error("Missing authorization code");
 		interaction.notify({ type: "progress", message: "Exchanging authorization code for tokens..." });
-		return await exchangeAnthropicCode(parsed.code, parsed.state ?? verifier, verifier, redirectUri, interaction.signal);
+		return await exchangeAnthropicCode(parsed.code, parsed.state ?? state, verifier, redirectUri, interaction.signal);
 	} finally {
 		callback?.close();
 	}
