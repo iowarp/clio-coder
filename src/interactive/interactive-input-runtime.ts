@@ -99,6 +99,8 @@ export interface InteractiveInputRuntimeDeps {
 		getState(): OverlayState;
 		closeOverlay(): void;
 		confirmPermission(): void;
+		/** The live card opened within the settle window, so Enter does not allow yet. */
+		isPermissionSettling?(): boolean;
 		cancelPermission?(): void;
 		retryPendingPermission?(): boolean;
 		stopTurnFromPermission(): void;
@@ -533,6 +535,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,
+					isPermissionSettling: () => deps.overlay.isPermissionSettling?.() ?? false,
 					editComposer: (data) => {
 						deps.editor.handleInput?.(data);
 						deps.requestRender();

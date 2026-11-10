@@ -82,6 +82,8 @@ function interopProposalsFor(
 
 export interface OverlayLifecycleRuntimeDeps {
 	onOverlayClosed?: () => void;
+	/** Monotonic milliseconds; stamps each permission card's open time. Defaults to `performance.now`. */
+	now?: () => number;
 	app: OverlayLifecycleApplicationDeps;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	tui: import("../engine/tui.js").TUI;
@@ -203,6 +205,8 @@ export interface OverlayLifecycleController {
 	toggleDispatchBoardOverlay(): void;
 	openQueueNavigatorState(): void;
 	confirmPermission(): void;
+	/** The live card opened less than `PERMISSION_SETTLE_MS` ago, so Enter does not allow it yet. */
+	isPermissionSettling(): boolean;
 	cancelPermission(): void;
 	/** Re-present a parked call before composer input can submit through a mount gap. */
 	retryPendingPermission(): boolean;
@@ -225,7 +229,12 @@ export interface OverlayLifecycleController {
 	dispose(): void;
 }
 
+/** How long a fresh permission card ignores Enter, so a key already in flight cannot allow it unread. */
+const PERMISSION_SETTLE_MS = 400;
+
 export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): OverlayLifecycleController {
+	const now = deps.now ?? (() => performance.now());
+	let permissionOpenedAt = Number.NEGATIVE_INFINITY;
 	const {
 		tui,
 		footer,
@@ -338,6 +347,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				workerWindow,
 			);
 			permissionBody = body;
+			permissionOpenedAt = now();
 			const handle = showOverlayFrame(tui, body, {
 				// The card takes the editor's rails and keeps the draft editable under
 				// it: a steer typed while the call is parked is what the CONFIRM rail
@@ -686,6 +696,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,
 		toggleDispatchBoardOverlay,
 		openQueueNavigatorState,
+		isPermissionSettling: () =>
+			overlayTransitions.state === "permission-confirm" && now() - permissionOpenedAt < PERMISSION_SETTLE_MS,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
 			footer.refresh();

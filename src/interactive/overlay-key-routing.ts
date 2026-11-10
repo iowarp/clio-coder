@@ -53,6 +53,13 @@ export interface PermissionOverlayKeyDeps {
 	 */
 	composerHasDraft?: () => boolean;
 	/**
+	 * Whether the card opened too recently for Enter to be an answer to it. A
+	 * key already on its way (a double tap, two Enters in one read, an Enter
+	 * meant for the overlay the card interrupted) must not allow a call the
+	 * operator has not seen. Deny and stop still act at once.
+	 */
+	isPermissionSettling?: () => boolean;
+	/**
 	 * Deliver a draft-editing key to the composer while the prompt owns input,
 	 * so the draft that makes Enter inert can be cleared without first denying
 	 * the call. Only the deletion keys in `isDraftEditKey` arrive here.
@@ -157,7 +164,7 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		// Consumed either way: with a draft the press changes nothing, and the
 		// composer rail says what clears it. Letting it fall through would hand
 		// Enter to the editor, which is the send path this guard exists to block.
-		if (!(deps.composerHasDraft?.() ?? false)) deps.confirmPermission();
+		if (!(deps.composerHasDraft?.() ?? false) && !(deps.isPermissionSettling?.() ?? false)) deps.confirmPermission();
 		return true;
 	}
 	const edit = DRAFT_EDITS.find(([key]) => matchesKey(data, key));
