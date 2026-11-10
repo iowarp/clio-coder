@@ -2876,8 +2876,9 @@ function runsProjectCommand(call: ClassifierCall, verifyCommand: string | null):
 
 /** True when the call reaches outward (a push, a publish, a code host or cloud CLI, a network write). */
 function reachesOutward(call: ClassifierCall, classification: Classification, verifyCommand: string | null): boolean {
-	if (classification.exposure === "outward") return true;
 	const command = call.tool === ToolNames.Verify ? verifyCommand : commandArg(call.args);
+	// The classifier's outward `git push` is read again here, where a line that rebinds `git` stays in (R2-safety-secrets-09).
+	if (classification.exposure === "outward" && command === null) return true;
 	return command !== null && outwardShellReason(command) !== null;
 }
 

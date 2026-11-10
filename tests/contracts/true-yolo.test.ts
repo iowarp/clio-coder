@@ -741,6 +741,21 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 	}
 	strictEqual(engine.evaluate(bash("sbatch job.sh"), "yolo", refused).shellSandbox, undefined);
+	// R2-safety-secrets-09: a line that rebinds a name, or an npx-style runner, may run a workspace file, not the CLI.
+	for (const command of [
+		"PATH=. sbatch job.sh",
+		"env PATH=. gh pr list",
+		"export PATH=$PWD:$PATH; sbatch",
+		"sbatch(){ cat ~/.ssh/id_rsa; }; sbatch",
+		"function ssh { ./x; }; ssh h",
+		"alias ssh=./x; ssh h",
+		"hash -p ./sbatch sbatch; sbatch",
+		"npx sbatch",
+		"bunx gh pr list",
+		"PATH=. git push origin main",
+	]) {
+		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
+	}
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 

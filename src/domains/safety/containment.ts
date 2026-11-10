@@ -1,5 +1,5 @@
 import { normalizedGitCommands } from "./git-command-normalization.js";
-import { isRelativeCommandPath, shellCommandSteps } from "./protected-artifacts.js";
+import { isRelativeCommandPath, type ShellCommandStep, shellCommandSteps } from "./protected-artifacts.js";
 
 /**
  * Containment at autonomy default: containment first, judgment second, asking
@@ -108,19 +108,16 @@ const PUBLISHERS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["podman", ["push", "login"]],
 ]);
 
-/** Words that run the command after them: the outward check reads through them. */
-const WRAPPERS: ReadonlySet<string> = new Set([
-	"timeout",
-	"nohup",
-	"nice",
-	"time",
-	"stdbuf",
-	"ionice",
-	"npx",
-	"pnpx",
-	"bunx",
-	"xargs",
-]);
+/**
+ * Words that run the command after them: the outward check reads through them.
+ * `npx`, `pnpx` and `bunx` are not among them: they run the workspace's
+ * `node_modules/.bin` entry or a registry package of that name first, never the
+ * CLI on PATH (R2-safety-secrets-09).
+ */
+const WRAPPERS: ReadonlySet<string> = new Set(["timeout", "nohup", "nice", "time", "stdbuf", "ionice", "xargs"]);
+
+/** Assigns PATH: bare, through `env`, or with `export`, `declare` and the like. */
+const PATH_ASSIGNMENT = /(?:^|[\s;&|(){}`"'])PATH\+?=/u;
 
 /** curl options that send a body or upload a file. */
 const CURL_BODY = /^(?:-[A-Za-z]*[dFT]|--(?:data(?:-\w+)?|form(?:-string)?|upload-file|json)(?:=.*)?)$/u;
@@ -162,7 +159,11 @@ function curlSends(args: ReadonlyArray<string>): boolean {
 	return false;
 }
 
-function stepOutwardReason(words: ReadonlyArray<string>, relativeHead: boolean): string | null {
+function stepOutwardReason(
+	words: ReadonlyArray<string>,
+	relativeHead: boolean,
+	rebound: (name: string) => boolean,
+): string | null {
 	const command = unwrapped(words);
 	const [head, ...args] = command;
 	if (head === undefined) return null;
@@ -170,6 +171,12 @@ function stepOutwardReason(words: ReadonlyArray<string>, relativeHead: boolean):
 	// R1-safety-secrets-04: `./sbatch` or `bin/ssh` runs a workspace file, which stays sandboxed under `required`.
 	const workspaceFile = command === words ? relativeHead : isRelativeCommandPath(head);
 	if (workspaceFile && (CREDENTIALED_CLIS.has(name) || SCHEDULER_CLIS.has(name))) return null;
+	const reason = nameOutwardReason(name, args);
+	return reason !== null && rebound(name) ? null : reason;
+}
+
+/** Why the CLI `name` on PATH, given `args`, reaches outward. `name` is one of the fixed lists above. */
+function nameOutwardReason(name: string, args: ReadonlyArray<string>): string | null {
 	if (CREDENTIALED_CLIS.has(name)) {
 		const [noun, verb] = args.filter((arg) => !arg.startsWith("-"));
 		const reads = FORGE_CLIS.has(name) && noun !== "api" && verb !== undefined && FORGE_READ_VERBS.has(verb);
@@ -197,21 +204,48 @@ function stepOutwardReason(words: ReadonlyArray<string>, relativeHead: boolean):
 }
 
 /**
+ * R2-safety-secrets-09: a predicate for names this line may have pointed at
+ * something other than the CLI on PATH. A PATH assignment, a sourced file or a
+ * `command_not_found_handle` can rebind every name; a function, an alias or a
+ * hash entry rebinds the name it defines. Such a name is not read as that CLI,
+ * so under `safety.sandbox: required` the line stays sandboxed.
+ */
+function reboundNames(command: string, steps: ReadonlyArray<ShellCommandStep>): (name: string) => boolean {
+	if (
+		PATH_ASSIGNMENT.test(command) ||
+		/\bcommand_not_found_handle\b/u.test(command) ||
+		steps.some((step) => step.executable === "source" || step.executable === ".")
+	) {
+		return () => true;
+	}
+	return (name) =>
+		new RegExp(`(?:^|[\\s;&|(){}\`"'])(?:function\\s+${name}(?![\\w.:-])|${name}\\s*\\(\\s*\\))`, "u").test(command) ||
+		steps.some(
+			(step) =>
+				(step.executable === "alias" && step.args.some((arg) => arg.startsWith(`${name}=`))) ||
+				(step.executable === "hash" && step.args.includes(name)),
+		);
+}
+
+/**
  * Why a shell command reaches outward and so leaves the main-session sandbox,
  * or null when it stays inside. `git push` is read the way the classifier
  * marks it outward; the rest by the executable each step runs. A false match
  * only sends the call through the safety judge.
  */
 export function outwardShellReason(command: string): string | null {
+	const steps = shellCommandSteps(command);
+	const rebound = reboundNames(command, steps);
 	if (
+		!rebound("git") &&
 		normalizedGitCommands(command).some(
 			(candidate) => /^git push(?:\s|$)/u.test(candidate) && !/(?:^|\s)--dry-run(?:\s|$)/u.test(candidate),
 		)
 	) {
 		return "git push publishes commits";
 	}
-	for (const step of shellCommandSteps(command)) {
-		const reason = stepOutwardReason([step.executable, ...step.args], step.relativePath === true);
+	for (const step of steps) {
+		const reason = stepOutwardReason([step.executable, ...step.args], step.relativePath === true, rebound);
 		if (reason !== null) return reason;
 	}
 	return null;
