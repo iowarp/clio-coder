@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { buildDescriptor, DEFAULT_PORTS } from "../../src/cli/configure-target.js";
 import { classifyDefaultTarget } from "../../src/cli/default-target.js";
-import { detectChatRoutes, useDetectedChatRoute } from "../../src/cli/detect-chat-routes.js";
+import { detectChatRoutes, headlessChatRoute, useDetectedChatRoute } from "../../src/cli/detect-chat-routes.js";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
 import { initializeClioHome } from "../../src/core/init.js";
 import { COPILOT_SDK_PACKAGE, COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
@@ -109,4 +109,29 @@ test("a detected chat route saves configure's descriptor only when no chat choic
 		assert.equal(fallback.settings.chat.target, "openai");
 		assert.equal(readFileSync(settingsPath(), "utf8"), before);
 	}
+});
+
+test("headless borrowing counts model-less keys and takes --model for the only one", async (t) => {
+	const home = await isolateClioEnv("clio-route-headless-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const registry = getRuntimeRegistry();
+	registerBuiltinRuntimes(registry);
+	for (const runtime of registry.list()) if (runtime.credentialsEnvVar) delete process.env[runtime.credentialsEnvVar];
+	const before = readFileSync(settingsPath(), "utf8");
+	process.env.OPENAI_API_KEY = "fake-key";
+	process.env.ANTHROPIC_API_KEY = "fake-key";
+	const several = await headlessChatRoute(readSettings());
+	assert.equal(several.kind, "several");
+	assert.deepEqual(several.kind === "several" ? several.routes.map((route) => route.target.id).sort() : [], [
+		"anthropic",
+		"openai",
+	]);
+	const picked = await headlessChatRoute(readSettings(), "openai");
+	assert.equal(picked.kind === "one" ? picked.route.model : picked.kind, "gpt-6-luna");
+	delete process.env.OPENAI_API_KEY;
+	assert.equal((await headlessChatRoute(readSettings())).kind, "needs-model");
+	const withModel = await headlessChatRoute(readSettings(), undefined, "claude-haiku-5-5");
+	assert.equal(withModel.kind === "one" ? withModel.settings.chat.model : withModel.kind, "claude-haiku-5-5");
+	assert.equal(readFileSync(settingsPath(), "utf8"), before);
 });

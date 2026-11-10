@@ -332,32 +332,37 @@ export async function adoptDetectedChatRoute(
 export type HeadlessChatRoute =
 	| { kind: "none" }
 	| { kind: "one"; route: DetectedChatRoute & { model: string }; settings: ClioSettings }
-	| { kind: "several"; routes: Array<DetectedChatRoute & { model: string }> };
+	| { kind: "needs-model"; route: DetectedChatRoute }
+	| { kind: "several"; routes: DetectedChatRoute[] };
 
 /**
  * The route a headless run with no saved chat route uses for this run only, from credentialed
  * targets, stored logins and environment keys. Nothing is written and no loopback port is probed;
  * several candidates are never chosen between silently. `targetId` picks one candidate by id.
+ * A candidate whose runtime has no curated model still counts and runs with the run's `model`.
  */
 export async function headlessChatRoute(
 	settings: Readonly<ClioSettings>,
 	targetId?: string,
+	model?: string,
 ): Promise<HeadlessChatRoute> {
 	const memoryTarget = settings.context.memory.target;
-	const routes: Array<DetectedChatRoute & { model: string }> = [];
+	const routes: DetectedChatRoute[] = [];
 	for (const candidate of await detectChatRoutes(settings, readLoopbackJson, { headless: true })) {
-		if (!candidate.model || candidate.target.id === memoryTarget) continue;
+		if (candidate.target.id === memoryTarget) continue;
 		const fromSettings = candidate.source.startsWith("settings (");
 		// An environment key or stored login for a runtime already offered stands for the same choice.
 		if (!fromSettings && routes.some((route) => route.runtime.id === candidate.runtime.id)) continue;
-		routes.push({ ...candidate, model: candidate.model });
+		routes.push(candidate);
 	}
 	const chosen = targetId === undefined ? routes : routes.filter((route) => route.target.id === targetId);
 	const route = chosen[0];
 	if (!route) return { kind: "none" };
 	if (chosen.length > 1) return { kind: "several", routes: chosen };
+	const chosenModel = model ?? route.model;
+	if (!chosenModel) return { kind: "needs-model", route };
 	const session = structuredClone(settings) as ClioSettings;
 	applyTarget(session, route.target);
-	setOrchestratorPointer(session, route.target, route.model);
-	return { kind: "one", route, settings: session };
+	setOrchestratorPointer(session, route.target, chosenModel);
+	return { kind: "one", route: { ...route, model: chosenModel }, settings: session };
 }

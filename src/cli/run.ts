@@ -152,17 +152,24 @@ async function borrowHeadlessRoute(
 	if (classifyDefaultTarget(settings).kind !== "no-target") return null;
 	if (targetId !== undefined && settings.targets.some((target) => target.id === targetId)) return null;
 	const { headlessChatRoute } = await import("./detect-chat-routes.js");
-	const found = await headlessChatRoute(settings, targetId);
+	const found = await headlessChatRoute(settings, targetId, model);
 	if (found.kind === "none") return null;
 	if (found.kind === "several") {
 		const list = found.routes.map((route) => `${route.target.id} from ${route.source}`).join(", ");
 		writeRunDiagnostic(`clio-coder run: several routes are usable (${list}); choose one with --target <id>\n`);
 		return 2;
 	}
+	if (found.kind === "needs-model") {
+		const { route } = found;
+		writeRunDiagnostic(
+			`clio-coder run: using ${route.target.id} from ${route.source} needs --model <id> (no default model for ${route.runtime.id})\n`,
+		);
+		return 2;
+	}
 	const { route } = found;
 	return {
 		settings: found.settings,
-		notice: `no chat route is saved; using ${route.target.id} / ${model ?? route.model} from ${route.source} for this run`,
+		notice: `no chat route is saved; using ${route.target.id} / ${route.model} from ${route.source} for this run`,
 	};
 }
 
