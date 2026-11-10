@@ -394,13 +394,14 @@ export interface RunRecordSweepResult {
 }
 
 /**
- * Completion time, null for a missing manifest, or undefined for an unsafe
- * entry to skip. Oversized, changed, or malformed regular files use mtime.
+ * Bounded read of a run manifest: null for a missing manifest, undefined for
+ * an unsafe entry to skip, else the regular file's mtime and its text, or
+ * null text when it is oversized or changed while read.
  * O_NONBLOCK prevents a swapped-in FIFO from blocking open; O_NOFOLLOW
  * rejects final-component symlinks where supported. fstat checks the actual
  * opened object before any bounded read, including its identity.
  */
-function manifestCompletionMs(manifestPath: string): number | null | undefined {
+function readManifestBounded(manifestPath: string): { mtimeMs: number; text: string | null } | null | undefined {
 	let before: ReturnType<typeof lstatSync>;
 	try {
 		before = lstatSync(manifestPath);
@@ -413,7 +414,7 @@ function manifestCompletionMs(manifestPath: string): number | null | undefined {
 		fd = openSync(manifestPath, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
 		const stat = fstatSync(fd);
 		if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) return undefined;
-		if (stat.size > RUN_SWEEP_MANIFEST_MAX_BYTES) return stat.mtimeMs;
+		if (stat.size > RUN_SWEEP_MANIFEST_MAX_BYTES) return { mtimeMs: stat.mtimeMs, text: null };
 		const buffer = Buffer.alloc(stat.size);
 		let offset = 0;
 		while (offset < buffer.length) {
@@ -422,27 +423,58 @@ function manifestCompletionMs(manifestPath: string): number | null | undefined {
 			offset += count;
 		}
 		const after = fstatSync(fd);
-		if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || offset !== stat.size) return stat.mtimeMs;
-		try {
-			const parsed: unknown = JSON.parse(buffer.toString("utf8"));
-			if (
-				parsed !== null &&
-				typeof parsed === "object" &&
-				"finishedAt" in parsed &&
-				typeof parsed.finishedAt === "string"
-			) {
-				const finished = Date.parse(parsed.finishedAt);
-				if (Number.isFinite(finished)) return finished;
-			}
-		} catch {
-			// Malformed metadata uses the opened regular file's mtime.
+		if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || offset !== stat.size) {
+			return { mtimeMs: stat.mtimeMs, text: null };
 		}
-		return stat.mtimeMs;
+		return { mtimeMs: stat.mtimeMs, text: buffer.toString("utf8") };
 	} catch {
 		return undefined;
 	} finally {
 		if (fd !== undefined) closeSync(fd);
 	}
+}
+
+/** A completed run's manifest through the bounded read, or null when it is missing, unsafe, oversized or malformed. */
+export function readRunManifest(workspaceRoot: string, runId: string): RunManifest | null {
+	if (!isRunId(runId) || !landRunRecordsRoot(workspaceRoot).inside) return null;
+	const read = readManifestBounded(path.join(runRecordsDir(workspaceRoot), runId, RUN_MANIFEST_FILENAME));
+	if (read === null || read === undefined || read.text === null) return null;
+	try {
+		const parsed: unknown = JSON.parse(read.text);
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		const manifest = parsed as Partial<RunManifest>;
+		if (manifest.tool !== "run_script" || !Array.isArray(manifest.outputs) || !Array.isArray(manifest.inputs)) {
+			return null;
+		}
+		return parsed as RunManifest;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Completion time, null for a missing manifest, or undefined for an unsafe
+ * entry to skip. Oversized, changed, or malformed regular files use mtime.
+ */
+function manifestCompletionMs(manifestPath: string): number | null | undefined {
+	const read = readManifestBounded(manifestPath);
+	if (read === null || read === undefined) return read;
+	if (read.text === null) return read.mtimeMs;
+	try {
+		const parsed: unknown = JSON.parse(read.text);
+		if (
+			parsed !== null &&
+			typeof parsed === "object" &&
+			"finishedAt" in parsed &&
+			typeof parsed.finishedAt === "string"
+		) {
+			const finished = Date.parse(parsed.finishedAt);
+			if (Number.isFinite(finished)) return finished;
+		}
+	} catch {
+		// Malformed metadata uses the opened regular file's mtime.
+	}
+	return read.mtimeMs;
 }
 
 /**
