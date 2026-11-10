@@ -1464,6 +1464,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openExtensions: () => openExtensionsOverlayState(),
 		openInterop: () => openInteropOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
+		openThinkingLevel: (choices, current, onPick) => openThinkingLevelOverlayState(choices, current, onPick),
 		setEditorText: (text) => editor.setText(text),
 		restoreRefusedDraft: (text) => {
 			if (editor.getText().trim().length === 0) editor.setLiteralText(text);
@@ -1673,6 +1674,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		startFleetRunState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
+		openThinkingLevelOverlayState,
 		openTasksOverlayState,
 		openDecisionsOverlayState,
 		openResearchOverlayState,

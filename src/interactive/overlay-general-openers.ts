@@ -72,6 +72,7 @@ import {
 	type RewindListHandle,
 } from "./overlays/rewind.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
+import { openThinkingLevelOverlay, type ThinkingLevelChoice } from "./overlays/thinking-level.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
 import { abbreviateModelId } from "./theme/labels.js";
 import { openUsageOverlay } from "./usage-overlay.js";
@@ -208,6 +209,12 @@ export interface OverlayGeneralOpeners {
 	openUsage(tab?: UsageTab): void;
 	openContextView(): void;
 	openContextReset(): void;
+	/** `/thinking` with no level: pick one from the levels the current model takes. */
+	openThinkingLevel(
+		choices: ReadonlyArray<ThinkingLevelChoice>,
+		current: string | undefined,
+		onPick: (level: string) => void,
+	): void;
 	toggleFooter(): void;
 	openTasks(): void;
 	openDecisions(): void;
@@ -309,6 +316,21 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				deps.closeOverlay();
 				deps.notify("info", "context reset cancelled; no files changed", "context-reset:outcome");
 			},
+		});
+		deps.requestRender();
+	};
+
+	const openThinkingLevel: OverlayGeneralOpeners["openThinkingLevel"] = (choices, current, onPick) => {
+		if (deps.transitions.state !== "closed") return;
+		deps.transitions.state = "thinking-level";
+		deps.transitions.handle = openThinkingLevelOverlay(deps.tui, {
+			choices,
+			...(current !== undefined ? { current } : {}),
+			onPick: (level) => {
+				deps.closeOverlay();
+				onPick(level);
+			},
+			onCancel: deps.closeOverlay,
 		});
 		deps.requestRender();
 	};
@@ -910,6 +932,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openUsage,
 		openContextView,
 		openContextReset,
+		openThinkingLevel,
 		toggleFooter,
 		openTasks,
 		openDecisions,

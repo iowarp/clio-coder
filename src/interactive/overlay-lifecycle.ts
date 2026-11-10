@@ -6,7 +6,7 @@ import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
-import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
+import { createOverlayGeneralOpeners, type OverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import type { OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
 import { createOverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
@@ -172,6 +172,7 @@ export interface OverlayLifecycleController {
 	openUsageOverlayState(tab?: import("../session-control/slash-commands.js").UsageTab): void;
 	openContextViewOverlayState(): void;
 	openContextResetOverlayState(): void;
+	openThinkingLevelOverlayState: OverlayGeneralOpeners["openThinkingLevel"];
 	toggleFooterDashboardState(): void;
 	openTasksOverlayState(): void;
 	openDecisionsOverlayState(): void;
@@ -657,6 +658,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openUsageOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
+		openThinkingLevelOverlayState: overlayGeneralOpeners.openThinkingLevel,
 		toggleFooterDashboardState,
 		openTasksOverlayState,
 		openDecisionsOverlayState,

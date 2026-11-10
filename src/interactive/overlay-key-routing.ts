@@ -16,6 +16,7 @@ export type OverlayState =
 	| "usage"
 	| "context-view"
 	| "context-reset"
+	| "thinking-level"
 	| "tasks"
 	| "decisions"
 	| "research"
@@ -380,6 +381,7 @@ export function routeOverlayKey(
 	// The queue navigator owns its arrows, letters, Enter and Esc.
 	if (overlayState === "queue-navigator") return false;
 	if (overlayState === "context-reset") return false;
+	if (overlayState === "thinking-level") return false;
 	if (overlayState === "tasks") return false;
 	if (overlayState === "decisions") return false;
 	if (overlayState === "research") return false;

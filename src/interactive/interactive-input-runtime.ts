@@ -673,6 +673,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		usage: "Usage",
 		"context-view": "Context",
 		"context-reset": "Context reset",
+		"thinking-level": "Thinking level",
 		tasks: "Tasks",
 		decisions: "Decisions",
 		research: "Research",

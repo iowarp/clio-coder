@@ -56,6 +56,7 @@ import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferen
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
+import type { ThinkingLevelChoice } from "./overlays/thinking-level.js";
 import type { SubmitPhase } from "./render-trace.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
 import { renameCurrentSession } from "./session-rename.js";
@@ -240,6 +241,12 @@ export interface InteractiveSlashRuntimeDeps {
 	openExtensions: () => void;
 	openInterop?: () => void;
 	openContextReset: () => void;
+	/** `/thinking` with no level: the plain level list. */
+	openThinkingLevel?: (
+		choices: ReadonlyArray<ThinkingLevelChoice>,
+		current: string | undefined,
+		onPick: (level: string) => void,
+	) => void;
 	setEditorText: (text: string) => void;
 	/** Puts a refused submission back into the editor when the editor is still empty. */
 	restoreRefusedDraft?: (text: string) => void;
@@ -707,18 +714,31 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				appendCommandNotice("error", "thinking level cannot be set right now");
 				return;
 			}
+			const pick = (level: string): void => {
+				dispatchSlashCommand({ kind: "thinking-set", level }, context);
+			};
+			if (deps.openThinkingLevel) {
+				const settings = deps.getSettings?.();
+				// The level that runs, so a setting the model cannot carry (`low` on an off-only model) still marks a row.
+				const current = settings
+					? (resolveThinkingCapability(deps.providers, settings)?.effectiveLevel ?? settings.chat.thinkingLevel)
+					: undefined;
+				deps.openThinkingLevel(choices, current, pick);
+				return;
+			}
 			void deps
 				.openAskUser([
 					{
 						question: "Choose the thinking level for this chat.",
 						header: "Thinking",
 						options: choices.map(({ label }) => ({ label })),
+						fixedChoices: true,
 					},
 				])
 				.then((result) => {
 					const answer = result.cancelled ? undefined : result.answers[0]?.answer;
 					const selected = choices.find(({ label }) => label === answer);
-					if (selected) dispatchSlashCommand({ kind: "thinking-set", level: selected.value }, context);
+					if (selected) pick(selected.value);
 				});
 		},
 		openModel: deps.openModel,
