@@ -13,7 +13,6 @@ import {
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { liveSessionOwner } from "../domains/session/live-owner.js";
 import { resolveSessionTarget } from "../domains/session/names.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
@@ -91,8 +90,7 @@ export interface OverlaySessionLifecycle {
 	/** Resume `target` (an id, unique id prefix or exact name) directly, or open the picker. */
 	openResume(target?: string): void;
 	openTree(): void;
-	openMessagePicker(): void;
-	startBranch(name?: string): void;
+	openMessagePicker(name?: string): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff(goal: string): void;
 }
@@ -303,7 +301,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.requestRender();
 	}
 
-	function openMessagePickerState(): void {
+	function openMessagePickerState(name?: string): void {
 		if (deps.transitions.state !== "closed") return;
 		if (!deps.session) {
 			emitCommandNotice(deps.getSlashNotice(), "error", "fork", "session contract unavailable");
@@ -326,20 +324,14 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			onFork: async (parentTurnId) => {
 				const settlement = settleChatBeforeSessionSwitch(deps.chat);
 				if (settlement) await settlement;
-				forkSession(session, preForkSessionId, parentTurnId, "fork");
+				forkSession(session, preForkSessionId, parentTurnId, name?.trim());
 			},
 			onClose: deps.transitions.close,
 		});
 		deps.requestRender();
 	}
 
-	function forkSession(
-		session: SessionContract,
-		preForkSessionId: string,
-		parentTurnId: string,
-		command: "fork" | "branch",
-		name?: string,
-	): void {
+	function forkSession(session: SessionContract, preForkSessionId: string, parentTurnId: string, name?: string): void {
 		try {
 			if (deps.onForkSession) deps.onForkSession(parentTurnId);
 			else session.fork(parentTurnId);
@@ -347,7 +339,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			// The host logs and swallows fork errors. A new identity is required
 			// before replay can replace the parent's transcript (#93, #444).
 			if (forkedSessionId === null || forkedSessionId === preForkSessionId) {
-				emitCommandNotice(deps.getSlashNotice(), "error", command, `fork failed; staying on ${preForkSessionId}`);
+				emitCommandNotice(deps.getSlashNotice(), "error", "fork", `fork failed; staying on ${preForkSessionId}`);
 				return;
 			}
 			deps.resetTranscript();
@@ -359,8 +351,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					emitCommandNotice(
 						deps.getSlashNotice(),
 						"error",
-						command,
-						`Branch created, but its name could not be saved: ${error instanceof Error ? error.message : String(error)}`,
+						"fork",
+						`Fork created, but its name could not be saved: ${error instanceof Error ? error.message : String(error)}`,
 					);
 				}
 			}
@@ -374,60 +366,12 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			emitCommandNotice(
 				deps.getSlashNotice(),
 				"error",
-				command,
+				"fork",
 				`fork failed: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		} finally {
 			deps.refreshFooter();
 			deps.requestRender();
-		}
-	}
-
-	let branching = false;
-	async function startBranch(name?: string): Promise<void> {
-		if (deps.transitions.state !== "closed" || branching) return;
-		const session = deps.session;
-		if (!session) {
-			emitCommandNotice(deps.getSlashNotice(), "error", "branch", "session contract unavailable");
-			return;
-		}
-		const preForkSessionId = session.current()?.id;
-		if (!preForkSessionId) {
-			emitCommandNotice(
-				deps.getSlashNotice(),
-				"warn",
-				"branch",
-				"no current session to branch from; start one with /new or /resume first",
-			);
-			return;
-		}
-		branching = true;
-		try {
-			const settlement = settleChatBeforeSessionSwitch(deps.chat);
-			if (settlement) await settlement;
-			if (session.current()?.id !== preForkSessionId) {
-				emitCommandNotice(deps.getSlashNotice(), "warn", "branch", "session changed while settling; branch cancelled");
-				return;
-			}
-			// Settlement can append an interrupted assistant turn. Select only now,
-			// and honor /tree's active leaf instead of the newest sibling (#444).
-			const leafId = session.leafId();
-			const active = filterEntriesToActivePath(session.readEntries(), leafId ?? undefined);
-			const parent = active.reverse().find((entry) => entry.kind === "message" && entry.role === "assistant");
-			if (!parent) {
-				emitCommandNotice(deps.getSlashNotice(), "warn", "branch", "no assistant turns to branch from on the current path");
-				return;
-			}
-			forkSession(session, preForkSessionId, parent.turnId, "branch", name?.trim());
-		} catch (error) {
-			emitCommandNotice(
-				deps.getSlashNotice(),
-				"error",
-				"branch",
-				`branch failed: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		} finally {
-			branching = false;
 		}
 	}
 
@@ -604,5 +548,5 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.requestRender();
 	}
 
-	return { openResume, openTree, openMessagePicker: openMessagePickerState, startBranch, startHandoff };
+	return { openResume, openTree, openMessagePicker: openMessagePickerState, startHandoff };
 }

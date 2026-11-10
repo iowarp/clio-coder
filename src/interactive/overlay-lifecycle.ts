@@ -198,8 +198,7 @@ export interface OverlayLifecycleController {
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(target?: string): void;
 	openTreeOverlayState(): void;
-	openMessagePickerOverlayState(): void;
-	startBranchState(name?: string): void;
+	openMessagePickerOverlayState(name?: string): void;
 	openHelpOverlayState(query?: string): void;
 	openSkillsHubState(request?: LibraryOpenRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
@@ -690,7 +689,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openResumeOverlayState,
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
-		startBranchState: overlaySessions.startBranch,
 		openHelpOverlayState: overlayResourceOpeners.openHelpOverlayState,
 		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
 		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,

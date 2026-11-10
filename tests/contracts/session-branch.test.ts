@@ -14,7 +14,7 @@ import type { SlashCommandContext } from "../../src/session-control/slash-comman
 import { dispatchSlashCommand, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-describe("/branch session isolation", () => {
+describe("/fork session isolation", () => {
 	let scratch: IsolatedClioEnv;
 	let session: SessionContract;
 
@@ -35,6 +35,7 @@ describe("/branch session isolation", () => {
 	function harness(overrides: Partial<OverlaySessionLifecycleDeps> = {}) {
 		const notices: string[] = [];
 		const forks: string[] = [];
+		const picker: { onFork: ((parentTurnId: string) => Promise<void> | void) | null } = { onFork: null };
 		let replayLeaf: string | null = null;
 		const lifecycle = createOverlaySessionLifecycle({
 			tui: {} as TUI,
@@ -66,16 +67,24 @@ describe("/branch session isolation", () => {
 				throw new Error(text);
 			},
 			notify() {},
-			openMessagePickerOverlay: () => {
-				throw new Error("/branch must skip the picker");
+			openMessagePickerOverlay: (_tui, deps) => {
+				picker.onFork = deps.onFork;
+				return { hide() {}, setHidden() {}, isHidden: () => false } as unknown as ReturnType<
+					NonNullable<OverlaySessionLifecycleDeps["openMessagePickerOverlay"]>
+				>;
 			},
 			...overrides,
 		});
-		return { lifecycle, notices, forks, replayLeaf: () => replayLeaf };
+		/** `/fork [name]`, then Enter on `turnId` in the picker. */
+		const fork = async (turnId: string, name?: string) => {
+			lifecycle.openMessagePicker(name);
+			await picker.onFork?.(turnId);
+		};
+		return { lifecycle, notices, forks, fork, pick: () => picker.onFork, replayLeaf: () => replayLeaf };
 	}
 
 	for (const name of [undefined, "alternate approach"]) {
-		it(`branches ${name ? "with a saved name" : "without a name"} and keeps the parent transcript resumable and unchanged`, async () => {
+		it(`forks ${name ? "with a saved name" : "without a name"} and keeps the parent transcript resumable and unchanged`, async () => {
 			const parent = session.create({ cwd: scratch.dir, model: "model", target: "target" });
 			append("u1", null, "user");
 			append("a1", "u1", "assistant");
@@ -84,10 +93,13 @@ describe("/branch session isolation", () => {
 			const workspaceFile = join(scratch.dir, "work.txt");
 			writeFileSync(workspaceFile, "existing edits");
 			const h = harness();
-			const parsed = parseSlashCommand(name ? `/branch "${name}"` : "/branch");
-			deepStrictEqual(parsed, name ? { kind: "branch", name } : { kind: "branch" });
-			if (name) deepStrictEqual(parseSlashCommand(`/branch ${name}`), parsed);
-			dispatchSlashCommand(parsed, { startBranch: h.lifecycle.startBranch } as SlashCommandContext);
+			const parsed = parseSlashCommand(name ? `/fork "${name}"` : "/fork");
+			deepStrictEqual(parsed, name ? { kind: "fork", name } : { kind: "fork" });
+			if (name) deepStrictEqual(parseSlashCommand(`/fork ${name}`), parsed);
+			dispatchSlashCommand(parsed, {
+				openMessagePicker: h.lifecycle.openMessagePicker,
+			} as unknown as SlashCommandContext);
+			await h.pick()?.("a1");
 			const child = session.current();
 			ok(child);
 			notStrictEqual(child.id, parent.id);
@@ -117,25 +129,7 @@ describe("/branch session isolation", () => {
 		});
 	}
 
-	for (const leaf of ["u2", "a2"]) {
-		it(`honors the active /tree path pinned at ${leaf}`, async () => {
-			session.create({ cwd: scratch.dir });
-			append("u1", null, "user");
-			append("a1", "u1", "assistant");
-			append("u2", "a1", "user");
-			append("a2", "u2", "assistant");
-			session.switchTurn("a1");
-			append("sibling-u", "a1", "user");
-			append("sibling-a", "sibling-u", "assistant");
-			session.switchTurn(leaf);
-			const h = harness();
-			await h.lifecycle.startBranch();
-			deepStrictEqual(h.forks, [leaf === "u2" ? "a1" : "a2"]);
-			ok(!session.readEntries().some((entry) => entry.turnId === "sibling-a"));
-		});
-	}
-
-	it("settles the running turn into its parent before selecting the interrupted assistant", async () => {
+	it("settles the running turn into its parent before forking", async () => {
 		const parent = session.create({ cwd: scratch.dir });
 		append("u1", null, "user");
 		append("a1", "u1", "assistant");
@@ -162,27 +156,25 @@ describe("/branch session isolation", () => {
 				extractHandoff: async () => ({ status: "aborted", text: "" }),
 			},
 		});
-		const pending = h.lifecycle.startBranch();
+		const pending = h.fork("a1");
 		ok(cancelled);
 		deepStrictEqual(h.forks, []);
 		strictEqual(session.current()?.id, parent.id);
 		release();
 		await pending;
-		deepStrictEqual(h.forks, ["partial-a"]);
-		append("child-u", "partial-a", "user");
+		deepStrictEqual(h.forks, ["a1"]);
+		append("child-u", "a1", "user");
 		strictEqual(readFileSync(sessionPaths(parent).current, "utf8"), parentTranscript);
 	});
 
-	it("reports missing sessions, empty paths, and host fork failures without replacing the transcript", async () => {
+	it("reports missing sessions and host fork failures without replacing the transcript", async () => {
 		const h = harness({ onForkSession() {} });
-		await h.lifecycle.startBranch();
+		await h.fork("a1");
 		match(h.notices.pop() ?? "", /no current session/);
 		const parent = session.create({ cwd: scratch.dir });
 		append("u1", null, "user");
-		await h.lifecycle.startBranch();
-		match(h.notices.pop() ?? "", /no assistant turns/);
 		append("a1", "u1", "assistant");
-		await h.lifecycle.startBranch("child");
+		await h.fork("a1", "child");
 		match(h.notices.pop() ?? "", /fork failed/);
 		strictEqual(session.current()?.id, parent.id);
 		strictEqual(h.replayLeaf(), null);

@@ -1,6 +1,7 @@
 import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
+import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
 import { type Component, matchesKey, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
@@ -84,6 +85,7 @@ function createMessagePickerContent(
 	rows: ReadonlyArray<MessagePickerRow>,
 	onFork: (parentTurnId: string) => void,
 	onClose: () => void,
+	selectedTurnId?: string,
 ): Component {
 	if (rows.length === 0) {
 		const empty = emptyState(clioTheme(), "No assistant turns to fork.", MESSAGE_PICKER_OVERLAY_WIDTH - 4, {
@@ -98,6 +100,12 @@ function createMessagePickerContent(
 	// The list is the overlay's own child so the frame hands it the dock's
 	// rows and it windows itself.
 	const list = new ChoiceList(rowsToItems(rows));
+	list.setSelectedIndex(
+		Math.max(
+			0,
+			rows.findIndex((row) => row.turnId === selectedTurnId),
+		),
+	);
 	list.onSelect = (item: ChoiceItem): void => {
 		onFork(item.value);
 		onClose();
@@ -117,10 +125,16 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	const entries = reader ? collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current) : [];
 	const messages = entries.filter((entry): entry is MessageEntry => entry.kind === "message");
 	const rows = buildMessagePickerRows(messages);
+	// Enter on open forks after the newest reply on the active /tree path, not a
+	// newer abandoned sibling, as the retired /branch did (#444).
+	const newest = filterEntriesToActivePath(entries, deps.session.leafId() ?? undefined)
+		.reverse()
+		.find((entry) => entry.kind === "message" && entry.role === "assistant");
 	const box = createMessagePickerContent(
 		rows,
 		(parentTurnId) => deps.onFork(parentTurnId),
 		() => deps.onClose(),
+		newest?.turnId,
 	);
 	return showClioOverlayFrame(tui, box, {
 		anchor: "center",

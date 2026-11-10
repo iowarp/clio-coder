@@ -256,8 +256,7 @@ type SlashCommandVariant =
 	| { kind: "tree" }
 	/** `/rewind`: restore workspace files from a snapshot; `/tree` rewinds the conversation. */
 	| { kind: "rewind" }
-	| { kind: "fork" }
-	| { kind: "branch"; name?: string }
+	| { kind: "fork"; name?: string }
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
@@ -1249,8 +1248,8 @@ export interface SessionCommandContext {
 	openTree?: () => void;
 	/** Open `/rewind`, the workspace snapshot list. Absent on a host with no overlay layer. */
 	openRewind?: () => void;
-	openMessagePicker?: () => void;
-	startBranch?: (name?: string) => void;
+	/** Open the `/fork` picker; `name` names the new session when a turn is picked. */
+	openMessagePicker?: (name?: string) => void;
 	openHelp?: (query?: string) => void;
 	openExtensions?: () => void;
 	openInterop?: () => void;
@@ -3291,31 +3290,19 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "branch",
-		acp: false,
-		description: "Branch at the current conversation point without a picker; optionally name the new session",
-		group: "Session",
-		kinds: ["branch"],
-		args: { positionals: [{ name: "name", required: false, rest: true }] },
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "branch", reason: parsed.error };
-			const name = sessionNameArgument(parsed.rest ?? "");
-			return name ? { kind: "branch", name } : { kind: "branch" };
-		},
-		handle(command, ctx) {
-			if (command.kind === "branch") ctx.startBranch?.(command.name);
-		},
-	},
-	{
 		name: "fork",
 		acp: false,
-		description: "Fork from an assistant turn",
+		description: "Fork from an assistant turn into a new session; optionally name it",
 		group: "Session",
 		kinds: ["fork"],
-		args: {},
-		fromArgs: fromArgsOrUsage("fork", { kind: "fork" }),
-		handle(_command, ctx) {
-			ctx.openMessagePicker?.();
+		args: { positionals: [{ name: "name", required: false, rest: true }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "fork", reason: parsed.error };
+			const name = sessionNameArgument(parsed.rest ?? "");
+			return name ? { kind: "fork", name } : { kind: "fork" };
+		},
+		handle(command, ctx) {
+			if (command.kind === "fork") ctx.openMessagePicker?.(command.name);
 		},
 	},
 	{
@@ -3643,7 +3630,6 @@ const COMMAND_ORDER = [
 	"resume",
 	"rename",
 	"handoff",
-	"branch",
 	"fork",
 	"tree",
 	"rewind",
