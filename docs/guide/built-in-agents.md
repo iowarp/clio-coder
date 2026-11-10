@@ -50,7 +50,7 @@ User-facing agents visible in `clio-coder agents`. All declare `projectContextTi
 | Agent ID | Required tools | Optional tools | Purpose | Capability | Latency | Budget | Result contract |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `architect` | artifact, context | read, grep, find, ls, code_nav, git, ledger, limitation | Designs changes across domain boundaries, including contracts, migrations, and validation gates, and cuts an existing plan into a dependency-ordered sprint through the bound `sprint-plan` skill. | `artifact-write` | `deep` | 32/5, maximum 150/16 | `architect-plan` at `.clio-coder/artifacts/PLAN.md` |
-| `coder` | read, any of write or edit, context | grep, find, ls, web_fetch, git, verify, code_nav, bash, ledger, limitation | Implements bounded code changes, repairs, and refactors, behavior-preserving by default. | `workspace-edit` | `balanced` | 50/5 | `mutation-report` |
+| `coder` | read, any of write or edit, context | grep, find, ls, web_fetch, git, verify, code_nav, bash, ledger, limitation, store, data | Implements bounded code changes, repairs, and refactors, behavior-preserving by default. | `workspace-edit` | `balanced` | 50/5 | `mutation-report` |
 | `debugger` | verify | read, grep, find, ls, git, code_nav, ledger | Diagnoses failing code, tests, or runs without editing, reading run records, logs, and runtime behavior. | `verification` | `balanced` | 24/4 | `debugger-report` |
 | `documenter` | read, any of write or edit | grep, find, ls, git, verify, code_nav, context, ledger, limitation | Writes docs and examples from source. It has no shell, and verification uses declared checks. | `workspace-edit` | `balanced` | 120/8 | `mutation-report` |
 | `git-master` | read, any of write or edit, context, git | bash, grep, find, ls, code_nav, ledger, limitation | Runs bounded git operations end to end: history, commits, worktrees, integration merges with per-merge validation, and pull-request preparation. | `workspace-edit` | `balanced` | 40/5 | `mutation-report` |
@@ -66,8 +66,8 @@ Internal orchestration helpers and internal process agents. They are hidden from
 
 | Agent ID | Audience | Required tools | Optional tools | Purpose | Latency | Budget | Result contract |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `scout` | shadow | read | grep, find, ls, context, code_nav, git, ledger | Broad repository reconnaissance with cited findings: orientation, structure and entry-point mapping, multi-file symbol hunting. | `fast` | 18/4 | `scout-report` |
-| `researcher` | shadow | read | web_fetch, context, ledger, git | Extracts and compares concrete supplied URLs, standards, release notes, and papers through Clio Coder-observed reads and URL retrieval. | `deep` | 24/4 | `research-report` |
+| `scout` | shadow | read | grep, find, ls, context, code_nav, git, ledger, store, data | Broad repository reconnaissance with cited findings: orientation, structure and entry-point mapping, multi-file symbol hunting. | `fast` | 18/4 | `scout-report` |
+| `researcher` | shadow | read | web_fetch, context, ledger, git, store, data | Extracts and compares concrete supplied URLs, standards, release notes, and papers through Clio Coder-observed reads and URL retrieval. | `deep` | 24/4 | `research-report` |
 | `world-knowledge` | shadow | none | web_fetch, read, context, ledger | Current open-world discovery, ecosystem comparison, broad external context, and an advisory second opinion; reports when discovery is unavailable. | `deep` | 20/3 | `world-knowledge-report` |
 | `provenance` | shadow | evidence | read, grep, find, ls, git, ledger | Reads run records, diffs, and telemetry for evidence-backed handoffs. | `balanced` | 16/4 | `provenance-report` |
 | `oracle` | shadow | read | grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `deep` | 14/3 | `oracle-report` |
@@ -112,7 +112,7 @@ The run is an ordinary singular dispatch with `requestOrigin: "internal"` and
 to it exactly as they apply to `/run`. Its `oracle-report` contract carries the
 answer shape: a verdict line, the strongest challenge the advisor can mount, the
 evidence that would change its verdict, and the decisions it cited. The rendered
-answer reaches the main agent the way `/share` puts a worker result there, as an
+answer reaches the main agent the way `/fleet share` puts a worker result there, as an
 operator-authored note on the ordinary user-turn path. `/oracle` during an
 in-flight turn is refused rather than queued.
 

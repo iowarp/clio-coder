@@ -1072,7 +1072,7 @@ Run records do not record ledger contributions.
 `detach: true` validates, admits, and spawns every task, then returns. It applies to
 parallel mode only and is refused together with a review gate or `timeout_ms`. The
 reported id is the logical assignment id (also the first attempt's run id).
-For an in-flight attached dispatch, using `Ctrl+G`, then `s`, or `/background` converts
+For an in-flight attached dispatch, `Ctrl+G`, then `d`, converts
 the running attached dispatch into a detached batch. A sequential call moved to the
 background leaves the finished and undispatched steps out of the batch and says so.
 Backgrounding checks against a refusal table: it refuses Scout dependency plans driving
@@ -1793,16 +1793,16 @@ hard block.
 - Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail: Minimal identity/outcome, Default short summary, Detailed bounded activity and a larger summary, and a settled Detailed card keeps its answer and failure. A run waiting on an approval says so at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
 - Sharing: nothing an operator-started run (`/run`, `/delegate`) produced enters
   the main model's context unless `--share` was passed or the operator runs
-  `/share [runId]`; runs the model started return through the dispatch tool result as
+  `/fleet share [runId]`; runs the model started return through the dispatch tool result as
   usual. What enters is a bounded note of the shape
   `[worker result] <agent> · run <id> · <outcome> · shared by the operator`
   followed by the bounded answer text, capped at 8,192 bytes, traveling the ordinary
   user-turn path. The coordinator prompt tells the main agent that such notes are
   steering and that it should verify relevant claims as it would any other evidence.
-  `/share` on a council synthesis run shares every labelled member answer with the synthesis.
-  Bare `/share` picks the newest finished run the operator started themselves
-  (never a model-asked `◆` run); `/share <runId>` may name a model-asked run
-  explicitly. `/new`, `/resume`, `/tree`, `/fork` and `/handoff` reset the pool bare `/share`
+  `/fleet share` on a council synthesis run shares every labelled member answer with the synthesis.
+  Bare `/fleet share` picks the newest finished run the operator started themselves
+  (never a model-asked `◆` run); `/fleet share <runId>` may name a model-asked run
+  explicitly. `/new`, `/resume`, `/tree`, `/fork` and `/handoff` reset the pool bare `/fleet share`
   draws from, so a run from another session cannot be shared into the current one.
 - Replay: `/resume` replays worker blocks from their sealed run records; the session file's
   `workerRun` entries carry ids, origin, runtime and task without worker prose; the
@@ -1888,7 +1888,7 @@ hard block.
   history.
 - The compact Fleet Runs island shows a council as one card naming the group, how
   many members are seated, and which round they are on. The grid belongs to the
-  board, where there is width to read an answer in. `/share` is what moves a
+  board, where there is width to read an answer in. `/fleet share` is what moves a
   council answer into the main agent's context; the card moves nothing.
 - Board rows a fleet plan dispatched carry a phase column naming the step's
   wave index and step id (`w2 build`). A run that is not a fleet step renders

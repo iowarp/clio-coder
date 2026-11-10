@@ -223,7 +223,7 @@ Shutdown drains admitted research traces even while their session writer is stil
 | --- | --- |
 | `clio-coder telemetry inspect\|calls\|cost\|cache\|timeline\|why-stopped\|explain` | Session and run DTOs; `--json` prints the DTO the TUI, ACP and GUI serve. |
 | `clio-coder usage report` | One repository window, 30 days by default ([usage-window.ts](../../src/domains/telemetry/usage-window.ts)). |
-| TUI | The footer, each turn's receipt line, `/usage`, `/context`, `/health`, the exit card, the dispatch board, and `/view`. |
+| TUI | The footer, each turn's receipt line, `/usage` (including its Health tab), `/context`, the exit card, the dispatch board, and `/view`. |
 | `clio-coder fleet view\|verify\|code-steps` | Run DTOs with their seal verdicts, run timelines and `code_step.settled` records. |
 | ACP | `usage_update` frames and the `_clio-coder/telemetry/*` methods: `session`, `calls`, `cost`, `cache`, `timeline`, `why_stopped`, `explain`, `run`, `runs`, `health`, `quota` and `update` ([ACP](acp.md)). |
 | GUI | Its telemetry, usage, session and fleet routes, whose server renders every display string. |

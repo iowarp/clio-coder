@@ -2,7 +2,7 @@
 
 `loadSkills` in [loader.ts](../../src/domains/resources/skills/loader.ts) selects runtime skills. The [library architecture](../architecture/library.md) explains package integrity.
 
-Skills are one kind of [library package](resource-library.md). `/skills` opens the Library on its Skills tab, while `/library` opens the full overlay (skills, agents, prompts, playbooks, plugins, and extensions). `/skill <name> [task]` invokes a skill, `/skill off` clears the session's skill tool-surface narrowing without erasing instructions already loaded in the transcript, and bare `/skill` returns a usage error pointing to `/skills`. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package. The SKILL.md format, discovery roots, collision order and trust rules are in [extensions-and-sharing.md](extensions-and-sharing.md#skills).
+Skills are one kind of [library package](resource-library.md). `/library skills` opens the Library on its Skills tab, while `/library` opens the full overlay (skills, agents, prompts, playbooks, plugins, and extensions). `/skill <name> [task]` invokes a skill, `/skill off` clears the session's skill tool-surface narrowing without erasing instructions already loaded in the transcript, and bare `/skill` opens the Library on its Skills tab. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package. The SKILL.md format, discovery roots, collision order and trust rules are in [extensions-and-sharing.md](extensions-and-sharing.md#skills).
 
 ```bash
 clio-coder library search interview --kind skill

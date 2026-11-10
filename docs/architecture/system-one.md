@@ -126,4 +126,4 @@ The screen and triage are the only harness uses. Nothing else in the turn path r
 | Doctor rows | [doctor.ts](../../src/domains/lifecycle/doctor.ts) | `systemOneFindings`, `systemOneEngineFindings` |
 | Opt-in | [selection.ts](../../src/domains/system-one/selection.ts) | `routeNames`, `resolveChoice`, `effectiveSystemOne` |
 | Consult tool | [consult.ts](../../src/tools/consult.ts) | `createConsultTool`, `CONSULT_LIMITS` |
-| CLI and status | [system-one.ts](../../src/cli/system-one.ts), [status.ts](../../src/domains/system-one/status.ts), [system-one-control.ts](../../src/entry/system-one-control.ts) | `systemone status`, `use`, `off`, `check`, `describeStatus`, `/systemone` |
+| CLI and status | [system-one.ts](../../src/cli/system-one.ts), [status.ts](../../src/domains/system-one/status.ts), [system-one-control.ts](../../src/entry/system-one-control.ts) | `systemone status`, `use`, `off`, `check`, `describeStatus`, `/usage health` |

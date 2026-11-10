@@ -129,6 +129,10 @@ bash policy and then follows the command rows of the
 [autonomy table](../architecture/safety-model.md). In `mcp.yaml`,
 `toolActionClasses` (up to 128 entries) classifies named tools individually.
 
+Without the MCP server, the agent can run `squeue`, `sbatch` and the other
+scheduler clients through `bash`. They run outside the shell sandbox with the
+same approval as `ssh`; see [HPC clusters](hpc-clusters.md#scheduler-clients).
+
 ## The skill
 
 `clio-coder library install skill:slurm-jobs --project`, then

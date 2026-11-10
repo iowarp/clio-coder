@@ -6,7 +6,7 @@ Music is an interactive-session feature. Headless runs, `clio-coder acp` session
 
 ## Requirements
 
-Music plays only when all three of these hold. `/music` reports each one that is missing in a single line of the form `music is unavailable: <reason>; <reason>`.
+Music plays only when all three of these hold. `/music` reports each one that is missing in a single line of the form `music is unavailable: <reason>; <reason>`. While music is disabled or the session has no music operations, `/music` leaves the command palette and `/help`, and the `Ctrl+G` menu and the `?` card drop the Music row; typed in full, `/music` and `Alt+A` still give the explanation.
 
 | Requirement | How to satisfy it | Reason `/music` reports when missing |
 | --- | --- | --- |

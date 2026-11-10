@@ -77,7 +77,7 @@ Return:
 Use in the TUI:
 
 ```text
-/prompts
+/library prompts
 /bugfix src/parser.ts empty input crashes
 ```
 
@@ -155,11 +155,11 @@ When asked to review scientific array output:
 Use in the TUI:
 
 ```text
-/skills
+/library skills
 /skill hdf5-review review the output validation path
 ```
 
-Bare `/skill` returns a usage error that points to `/skills`, which opens the Library on its Skills tab. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. `/skill off` clears the session's skill tool surface (see [skills-marketplace.md](skills-marketplace.md)). The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
+Bare `/skill` opens the Library on its Skills tab, as `/library skills` does. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. `/skill off` clears the session's skill tool surface (see [skills-marketplace.md](skills-marketplace.md)). The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
 Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata and prompt diagnostics, and a dispatched run's `run.settled` record lists the skills it loaded and who asked for each. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
@@ -290,7 +290,7 @@ clio-coder export --out project.clio-coder-share.json
 clio-coder import project.clio-coder-share.json --dry-run
 ```
 
-In a session, `/archive export <path>` writes a project-scope archive with every resource class, and `/archive import <path> [--dry-run] [--force]` imports one. `/share` shares a worker result with the main agent and is unrelated to archives. `/share export` and `/share import` are retired and refuse with a pointer to `/archive`.
+In a session, `/archive export <path>` writes a project-scope archive with every resource class, and `/archive import <path> [--dry-run] [--force]` imports one. `/fleet share` shares a worker result with the main agent and is unrelated to archives.
 
 ---
 

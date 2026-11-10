@@ -210,7 +210,7 @@ Private index repositories may opt into Git synchronization. Set `integrations.l
 
 ## Interactive library
 
-**Alt+L** (`clio-coder.library.toggle`) or `/library` opens the fullscreen Library, and Alt+L inside it closes it and returns to the composer draft. `/skills`, `/agents`, and `/prompts` open the same browser on their category; `/library` opens on Plugins. The six tabs cover Skills, Agents, Prompts, Playbooks, Plugins, and Extensions. A typed reference such as `/library install extension:materio` opens the matching tab. Keybinding overrides and modal ownership are in [commands-and-modes.md](commands-and-modes.md).
+**Alt+L** (`clio-coder.library.toggle`) or `/library` opens the fullscreen Library, and Alt+L inside it closes it and returns to the composer draft. `/library skills`, `/library agents` and `/library prompts` (also `playbooks`, `plugins` and `extensions`) open the same browser on that category; bare `/library` opens on Plugins. The six tabs cover Skills, Agents, Prompts, Playbooks, Plugins, and Extensions. A typed reference such as `/library install extension:materio` opens the matching tab. Keybinding overrides and modal ownership are in [commands-and-modes.md](commands-and-modes.md).
 
 | Key | Action |
 | --- | --- |
@@ -258,5 +258,6 @@ Clio Coder reads the same inventory through `gateway(op="call", capability="clio
 
 ## Retired surfaces
 
-- `/plugins` and `/resources` slash commands: a usage error pointing to `/library` to browse and install plugins and extensions and `/extensions` to control the running ones.
-- `/library extensions` and `/library extensions reload`: `/library` has no such subcommand; use `/extensions` and `/extensions reload`.
+- `/plugins` and `/resources` slash commands: no longer recognized. Use `/library plugins` or `/library extensions` to browse and install, and `/extensions` to control the running ones.
+- `/skills`, `/prompts`, `/agents` and `/interop`: retired in 0.7.1 in favor of `/library skills|prompts|agents|interop`; they answer with a notice until 0.7.2.
+- `/library reload` and `/extensions reload`: retired in 0.7.1 in favor of `/reload library` and `/reload extensions`.

@@ -51,7 +51,7 @@ advertises neither attended opt-in keeps the unattended behavior, where
 ([attended clients](../architecture/acp.md#attended-clients)).
 
 Install and authenticate the peer's own CLI first. Run
-`clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured
+`clio-coder interop inspect --json` or open `/library interop` to see the installed binary, configured
 target, ACP adapter, and available commands. `clio-coder configure --interop`
 can add an ACP peer recipe; a headless mode needs a Clio Coder target using the runtime
 in the table. For example, these entries in `~/.config/clio-coder/settings.yaml`
@@ -84,7 +84,7 @@ default.
 ```text
 /run --target opencode-local --worktree coder Fix the parser test and report the checks.
 /delegate opencode Review the proposed parser change and its edge cases.
-/peer --cwd /path/to/project codex Investigate the failing build.
+/panes peer --cwd /path/to/project codex Investigate the failing build.
 ```
 
 `/run --worktree` preserves the peer's Git task branch for review and records
@@ -94,7 +94,7 @@ separates Git changes but does not confine the peer's own filesystem, shell, or
 network tools. Clio can mediate ACP permission requests a peer reports, but a
 peer may write without requesting permission; run records mark this enforcement
 limit. Use the existing Git workflow to inspect and merge a
-preserved branch, and use `/share` when the main agent should read a managed
+preserved branch, and use `/fleet share` when the main agent should read a managed
 result.
 
 Clio Coder-managed peer dispatches run at default permissions, even when the main
@@ -119,20 +119,20 @@ peer's own model requests are not admitted by Clio Coder; see
 
 ### Peer modes and their status
 
-`interop inspect` and `/interop` list each peer's modes with a status, a reason,
+`interop inspect` and `/library interop` list each peer's modes with a status, a reason,
 and the next setup action. The `acp` row appears for a peer with a built-in
 recipe or an operator-configured ACP entry, the `headless` row for a peer with a
 managed runtime, and the `pane` row for a peer that has both a binary name and a
 managed runtime. Statuses are `ready`, `experimental`, and `unavailable`. A
 configured ACP or headless mode is never better than `experimental`, because
 authentication, permission behavior, and the selected model are only proven by a
-live task and its run record. `ready` belongs to a pane, and only when `/interop`
+live task and its run record. `ready` belongs to a pane, and only when `/library interop`
 sees a live Herdr pane host. `interop inspect` cannot observe a pane host, so it
 reports a pane with an installed binary as `experimental`. A mode is
 `unavailable` when the CLI is missing, no target uses the runtime, no ACP entry is
 configured, or the pane host is known to be absent.
 
-Connecting a detected peer (`a` in `/interop`, or `clio-coder configure --interop`)
+Connecting a detected peer (`a` in `/library interop`, or `clio-coder configure --interop`)
 appends an entry to `integrations.externalAgents.entries` with the registry id,
 command and args, `connectTimeoutMs`, `turnTimeoutMs`, and
 `toolGovernance: clio-coder-policy`. `projectContext` is omitted so it keeps its
@@ -435,11 +435,11 @@ in `default`, and `--dry-run` never asks.
 
 ## Terminal flow
 
-Open `/interop` to inspect inventory or connect an external delegation peer.
+Open `/library interop` to inspect inventory or connect an external delegation peer.
 Inventory detail folds behind Enter and wraps in the scrolling detail pane.
 Select a host, press `p` for a project destination or `u` for user, and press `c`
 to cycle the kind filter. Press `i` to review the full adoption plan, then `y`
 to approve it or `b` to return without installing. Escape closes the overlay.
 Connection remains a separate action: `a` connects a proposed peer and `d`
-declines it. `/agents` browses the library's own agents and is a separate
+declines it. `/library agents` browses the library's own agents and is a separate
 surface from this one.

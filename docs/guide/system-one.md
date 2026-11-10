@@ -154,9 +154,9 @@ clio-coder systemone off
 clio-coder systemone check <engine> --live
 ```
 
-`status` says whether System One is on, what each route reaches, what a bound route sends and why a route cannot run. `/systemone` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
+`status` says whether System One is on, what each route reaches, what a bound route sends and why a route cannot run. `/usage health` in a session shows the same lines and changes nothing. `use` and `off` write to user settings by default, and a project write goes to `.clio-coder/settings.local.yaml` under the usual trust rules. `run --systemone <route>[,<route>...]` sets one run, and `run --systemone off` turns it off for that run. `check --live` sends one content-free decision and reports the build that answered. `clio-coder systemone --help` prints the usage and exits 0.
 
-`clio-coder doctor` never asks a decision. Its rows are listed in [Doctor](doctor.md). `/health` shows engine breakers.
+`clio-coder doctor` never asks a decision. Its rows are listed in [Doctor](doctor.md). `/usage health` shows engine breakers.
 
 ## Privacy
 
@@ -172,7 +172,7 @@ These keys are ignored when they load, reported by `clio-coder doctor` under `se
 
 ## Failure behavior
 
-A failed ask returns nothing, and the caller behaves as if System One were absent. Three consecutive timeouts on one engine configuration open a breaker for five minutes, then one call probes it. A server that refuses a model by name is not asked again in that process. To see why nothing answers, read `clio-coder systemone status`, the `system one (experimental)` doctor rows and `/health`.
+A failed ask returns nothing, and the caller behaves as if System One were absent. Three consecutive timeouts on one engine configuration open a breaker for five minutes, then one call probes it. A server that refuses a model by name is not asked again in that process. To see why nothing answers, read `clio-coder systemone status`, the `system one (experimental)` doctor rows and `/usage health`.
 
 ## Related
 

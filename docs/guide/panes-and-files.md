@@ -32,7 +32,7 @@ closes its docks and leaves utility panes open:
   written most recently, with `tail -n 200 -F`.
 - **The shell pane.** `/panes open shell` opens a login `bash` in the
   workspace.
-- **Coding peer handoff.** `/peer [--cwd <workspace>] <peer> [brief]` opens
+- **Coding peer handoff.** `/panes peer [--cwd <workspace>] <peer> [brief]` opens
   a second Clio Coder, Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a Clio Coder-owned pane.
   The brief is limited to 8,192 UTF-8 bytes and `--cwd` must name an existing directory.
   A second Clio Coder takes no brief on its command line; open it without one and give it its task afterwards.
@@ -127,7 +127,7 @@ working. `clio-coder --with-panes` instead joins the herdr you are in as a guest
 
 A launch stays in the plain terminal for `run`, `acp`, a non-terminal stdin or
 stdout, `TERM=dumb`, a session already inside tmux, zellij or screen, and a
-launch from a pane of Clio Coder's own host. A plain session loads no pane code.
+launch from a pane of Clio Coder's own host. A plain session loads no pane code. Its command palette lists `/panes` dimmed with `needs a pane host; this session has none`.
 The files pane is a separate switch, off by default:
 
 ```yaml
@@ -217,7 +217,7 @@ regeneration succeeds or the operator resets the profile.
 | `/panes show <run-or-agent>` | Take the workers dock over for a live (running or retrying) run, matched by agent id substring first and run id prefix second, newest first. The dock behavior is in [Fleet Dispatch](fleet-dispatch.md). |
 | `/panes zoom [target]` | Toggle zoom on a Clio Coder-owned pane (default: the watch pane). |
 | `/panes close [target\|all]` | Close one Clio Coder-owned pane, or all of them (the default). A target matches a pane id exactly, then a label substring, then a purpose, newest first. |
-| `/peer [--cwd <workspace>] <peer> [brief]` | Open `clio`, `claude-code`, `codex`, `opencode`, `antigravity` or `pi` (binaries `clio-coder`, `claude`, `codex`, `opencode`, `agy`, `pi`) in an owned pane. `clio` refuses a brief. |
+| `/panes peer [--cwd <workspace>] <peer> [brief]` | Open `clio`, `claude-code`, `codex`, `opencode`, `antigravity` or `pi` (binaries `clio-coder`, `claude`, `codex`, `opencode`, `agy`, `pi`) in an owned pane. `clio` refuses a brief. |
 | `Alt+A` | The music pane's single tap (`clio-coder.music.toggle`; `Ctrl+G` then `a`). Two taps within 400 ms close it. See [Music](music.md). |
 | `/music [on\|off\|pause\|next\|status\|station <name or url>]` | Drive the music pane. Bare `/music` does what `Alt+A` does. The contract is in [Music](music.md). |
 

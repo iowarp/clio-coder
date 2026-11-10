@@ -100,6 +100,10 @@ The core rows read as follows.
 | `settings.yaml repair`, `settings.yaml repair skipped` | What `--fix` rewrote, and `WARN` for values it could not rewrite safely because of aliases, anchors or tags. |
 | `credentials` | `!!` when `credentials.yaml` is missing, unreadable, or not `0600` on POSIX. On Windows only its content is checked. |
 | `state metadata` | `!!` when the state `home.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
+| `state metadata` (newer home) | `!!` when a newer Clio Coder last used this home: the row names that version, this binary's version and path, and every `clio-coder` on `PATH`, and asks you to run the newer one. The older binary leaves the home's recorded version alone; `CLIO_CODER_ALLOW_OLDER=1` lets a headless run or ACP session start anyway. |
+| `state dir mode`, `data dir mode` | `WARN` when the state or data root is open to group or other users, who could read session transcripts. `--fix` tightens a root that passes the same ownership test `reset` uses, and the row then reads `tightened to 700`; otherwise `chmod 700` it yourself when the directory is Clio Coder's alone. |
+| `proxy` | Present when `HTTPS_PROXY`, `HTTP_PROXY` or their lowercase forms are set: the proxy model requests use and the `NO_PROXY` hosts that go direct. |
+| `scheduler commands` | Present when the shell sandbox is active and a Slurm, PBS, LSF or Flux client is on `PATH`: those commands run outside the sandbox with approval. See [HPC clusters](hpc-clusters.md#scheduler-clients). |
 | `lifecycle migrations` | See the migration paragraph above. |
 | `installation files` | For a source checkout, or a release package that records its build, whether the build outputs are present. `!!` names the missing files and the remedy: `pnpm --dir <checkout> run build` for a checkout, which `--fix` runs, or `clio-coder upgrade` for a package. |
 | `running <surface> <pid>` | `WARN` for a live Clio process whose loaded build is no longer the activated one, with the command to restart it once its work is done. |

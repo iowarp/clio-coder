@@ -75,6 +75,33 @@ export http_proxy="$https_proxy"
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
 ```
 
+Clio Coder reads the same variables at run time. `HTTPS_PROXY`, `HTTP_PROXY`
+and their lowercase forms apply to model requests, discovery probes, OAuth
+refreshes and web fetches, and `clio-coder doctor` shows the proxy in effect.
+`localhost`, `127.0.0.1` and `[::1]` always go direct. A `NO_PROXY` entry
+matches a host by exact name or as a domain suffix (`example.com`,
+`.example.com` and `*.example.com` all cover `api.example.com`), optionally
+with `:port`, and `NO_PROXY=*` turns the proxy off. CIDR ranges such as
+`192.168.0.0/16` and wildcards such as `192.168.*` are ignored without a
+warning, so a model server on a cluster or LAN address goes through the proxy
+unless `NO_PROXY` names its host or IP address exactly:
+
+```bash
+export NO_PROXY=localhost,gpu-node-07,10.1.4.22
+```
+
+## Scheduler clients
+
+Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch`, `qstat`, `bsub`,
+`flux` and the rest) run outside the shell sandbox behind the same approval as
+`ssh`: an ask at the default autonomy level, the safety judge at yolo. A script
+that calls `sbatch` itself stays inside the sandbox and fails there, so submit
+from the command line the agent runs rather than from a wrapper script.
+`/loop --command` and job poll commands get the environment `bash` gets, with
+credentials scrubbed and `safety.sandboxPassEnv` honored, and a failing poll
+shows its first stderr line. With the sandbox active, `clio-coder doctor` adds a
+`scheduler commands` row when a scheduler client is on `PATH`.
+
 ## Airgapped and mirrored sites
 
 Point the installer at mirrors laid out like the upstream directories. A
