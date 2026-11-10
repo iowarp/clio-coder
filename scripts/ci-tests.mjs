@@ -31,6 +31,7 @@ export const coreTests = [
 	"safety-gates",
 	"default-containment",
 	"setup-status",
+	"key-prefix",
 	"contained-secrets",
 	"true-yolo",
 	"contained-yolo",

@@ -550,11 +550,17 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 
 	it("backs out of new-user setup without creating settings or credentials", async () => {
 		const home = makeScratchHome("clio-coder-configure-tty-");
-		const tty = terminal(home);
+		// A provider key in the developer's environment would be offered first; this walk starts from nothing found.
+		const registry = getRuntimeRegistry();
+		registerBuiltinRuntimes(registry);
+		const noKeys = Object.fromEntries(
+			registry.list().flatMap((runtime) => (runtime.credentialsEnvVar ? [[runtime.credentialsEnvVar, ""]] : [])),
+		);
+		const tty = terminal(home, [], noKeys);
 		try {
 			await tty.expect("❯ Guided setup");
 			tty.send(ENTER);
-			await tty.expect("Where does your model come from?");
+			await tty.expect("What do you have?");
 			tty.send(BACK);
 			await tty.finish(130);
 			strictEqual(existsSync(join(home.dir, "config/settings.yaml")), false);

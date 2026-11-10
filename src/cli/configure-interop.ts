@@ -81,7 +81,7 @@ export interface InteropReviewOutcome {
  * every time, so it is stated once above the list and the row carries what is
  * actually different: the command Clio would run.
  */
-export async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropReviewOutcome> {
+async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropReviewOutcome> {
 	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: true });
 	const proposals = interopProposals(report, readSettings());
 	const unoffered = interopUnofferedReasons(report, readSettings());

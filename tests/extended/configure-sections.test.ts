@@ -9,13 +9,13 @@ import { describe, it } from "node:test";
 import { parse } from "yaml";
 import { runConfigureCommand } from "../../src/cli/configure.js";
 import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
-import { runtimesForCategory } from "../../src/cli/configure-target.js";
 import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { COPILOT_SDK_VERSION } from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
+import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 
 function isolatedEnv(): {
 	root: string;
@@ -231,11 +231,13 @@ export class CopilotClient {
 }
 
 /** An OpenAI-compatible endpoint with two models, so the model step has a real list. */
-async function modelServer(): Promise<{ url: string; close: () => Promise<void> }> {
+async function modelServer(
+	models: ReadonlyArray<string> = ["alpha-1", "beta-2"],
+): Promise<{ url: string; close: () => Promise<void> }> {
 	const server: Server = createServer((req, res) => {
 		if (req.url?.endsWith("/v1/models")) {
 			res.writeHead(200, { "content-type": "application/json" });
-			res.end(JSON.stringify({ object: "list", data: [{ id: "alpha-1" }, { id: "beta-2" }] }));
+			res.end(JSON.stringify({ object: "list", data: models.map((id) => ({ id })) }));
 			return;
 		}
 		res.writeHead(404).end();
@@ -427,16 +429,13 @@ async function runWizard(
 	}
 }
 
-/** Arrow presses from the top of the runtime list to one runtime, by id. */
-function stepsDownToRuntime(runtimeId: string): string[] {
+/** The LiteLLM runtime, for the tests that start the wizard on it the way `configure --runtime litellm` does. */
+function litellmRuntime(): RuntimeDescriptor {
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const entries = runtimesForCategory(listProviderSupportEntries(registry.list()), "local-server");
-	const index = entries.findIndex((entry) => entry.runtimeId === runtimeId);
-	ok(index >= 0, `${runtimeId} is not in the local HTTP category`);
-	const featured = entries.findIndex((entry) => entry.featured);
-	const initial = Math.max(0, featured);
-	return Array.from({ length: (index - initial + entries.length) % entries.length }, () => DOWN);
+	const runtime = registry.get("litellm");
+	ok(runtime);
+	return runtime;
 }
 
 /** Everything the terminal drew, with the cursor and color escapes taken out. */
@@ -460,25 +459,6 @@ function fakeAgentOnPath(root: string, binary: string): string {
 	return binDir;
 }
 
-/** A non-generating Antigravity fixture with the official JSON catalog shape. */
-function fakeAntigravityOnPath(root: string): string {
-	const binDir = join(root, "fake-agy-bin");
-	mkdirSync(binDir, { recursive: true });
-	const file = join(binDir, "agy");
-	writeFileSync(
-		file,
-		`#!/bin/sh
-if [ "$*" = "--output-format json models" ]; then
-  printf '%s\\n' '{"status":"SUCCESS","command":{"name":"models","data":{"models":[{"id":"agy-alpha","label":"Agy Alpha"},{"id":"agy-beta","label":"Agy Beta"}]}}}'
-  exit 0
-fi
-printf '%s\\n' 'agy 1.2.3'
-`,
-		{ encoding: "utf8", mode: 0o755 },
-	);
-	return binDir;
-}
-
 /** A signed-in Codex CLI fixture: it answers the version and login probes only. */
 function fakeCodexOnPath(root: string): string {
 	const binDir = join(root, "fake-codex-bin");
@@ -488,18 +468,15 @@ function fakeCodexOnPath(root: string): string {
 }
 
 describe("contracts/configure-onboarding", () => {
-	it("takes a fresh home through guided setup with listed choices and writes what it says it wrote", async () => {
+	it("takes a fresh home through the model-server path and writes what it says it wrote", async () => {
 		const testEnv = unconfiguredEnv();
 		const server = await modelServer();
 		try {
 			const result = await runWizard(testEnv.env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
+				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [DOWN, ENTER] },
 				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
-				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 			strictEqual(readFileSync(join(testEnv.root, "copilot-probe"), "utf8"), "no login");
@@ -507,7 +484,7 @@ describe("contracts/configure-onboarding", () => {
 			const screen = plainText(result.transcript());
 			for (const expected of [
 				"Welcome to Clio Coder",
-				"Where does your model come from?",
+				"What do you have?",
 				"↑↓ move",
 				"reachable, 2 models",
 				"target openai-compat saved",
@@ -522,7 +499,10 @@ describe("contracts/configure-onboarding", () => {
 			// The whole point: not one readline prompt survives on this path.
 			ok(!/Selection \[/u.test(screen), `a numbered prompt is still here:\n${screen}`);
 			ok(!/\[y\/N\]|\[Y\/n\]/u.test(screen), `a yes/no prompt is still here:\n${screen}`);
-			ok(!/\[env\|stored\|keep\|skip\]/u.test(screen), `the credential paragraph is still here:\n${screen}`);
+			// A server that answers without a key is not asked about one, and the source taxonomy is gone.
+			ok(!screen.includes("How should Clio get the API key?"), screen);
+			ok(!screen.includes("Where does your model come from?"), screen);
+			ok(!screen.includes("Which provider or app do you use?"), screen);
 
 			ok(existsSync(testEnv.settingsFile), "the wizard must write settings.yaml");
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
@@ -544,92 +524,110 @@ describe("contracts/configure-onboarding", () => {
 		strictEqual(existsSync(testEnv.root), false, "the discovery fixture's home must be removed");
 	});
 
-	it("offers the detected delegation peers as one list instead of a y/N each", async () => {
+	it("takes the only model a server lists, and offers no coding agent along the way", async () => {
 		const testEnv = unconfiguredEnv();
-		const server = await modelServer();
-		const env = { ...testEnv.env, PATH: fakeAgentOnPath(testEnv.root, "opencode") };
+		const server = await modelServer(["alpha-1"]);
+		// Installed coding agents used to add a delegate list and a research-colleague offer to the first run.
+		const env = {
+			...testEnv.env,
+			PATH: `${fakeAgentOnPath(testEnv.root, "opencode")}:${fakeCodexOnPath(testEnv.root)}`,
+		};
 		try {
 			const result = await runWizard(env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-				{ waitFor: "Which model?", keys: [ENTER] },
-				// Space ticks the row, enter confirms the whole list at once.
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
+				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
 				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
-				{ waitFor: "Delegate to any of these?", keys: [" ", ENTER] },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
-
 			const screen = plainText(result.transcript());
-			ok(screen.includes("Space toggle"), `the list must say how to tick a row:\n${screen}`);
-			ok(screen.includes("OpenCode"), `the detected agent is missing:\n${screen}`);
-			ok(!/\[y\/N\]/u.test(screen), `a per-agent yes/no question survived:\n${screen}`);
-			// The paragraph each proposal used to carry said the same two facts every
-			// time. They are stated once above the list now, and the row carries what
-			// actually differs.
-			ok(
-				!screen.includes("is installed and not configured as a delegation agent"),
-				`the per-agent paragraph survived:\n${screen}`,
-			);
-			ok(screen.includes("opencode"), `the wired peer is not in the results:\n${screen}`);
-
+			ok(!screen.includes("Which model?"), `a single listed model is taken without a screen:\n${screen}`);
+			ok(screen.includes("alpha-1  (the only one listed)"), screen);
+			for (const absent of ["Delegate to any of these?", "research colleague", "coding agent", "OpenCode", "Codex"])
+				ok(!screen.includes(absent), `${absent} is on a first-run screen:\n${screen}`);
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /id: opencode/u);
-			match(settings, /toolGovernance: clio-coder-policy/u);
+			match(settings, /defaultModel: alpha-1/u);
+			ok(!/opencode|codex-cli|world-knowledge-external/u.test(settings), settings);
 		} finally {
 			await server.close();
 			testEnv.cleanup();
 		}
 	});
 
-	it("binds world-knowledge only to a colleague runtime that read-only admission accepts", async () => {
+	it("names the provider from a known key prefix and uses its recommended model", async () => {
 		const testEnv = unconfiguredEnv();
-		const server = await modelServer();
-		// Both are installed; only codex has the OS read-only sandbox admission requires.
-		const env = {
-			...testEnv.env,
-			PATH: `${fakeAntigravityOnPath(testEnv.root)}:${fakeCodexOnPath(testEnv.root)}`,
-		};
+		const key = "sk-ant-api03-clio-test-key";
 		try {
-			const result = await runWizard(env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("openai-compat"), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Add a local read-only research colleague?", keys: [DOWN, ENTER] },
-				{ waitFor: "Codex CLI (managed headless) research model", keys: [ENTER] },
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "What do you have?", keys: [ENTER] },
+				{ waitFor: "Paste your API key", keys: [...key.split(""), ENTER] },
+				// "Choose a different model" opens the list the flow skipped, recommended row first.
+				{ waitFor: "Review what Clio could verify", keys: [DOWN, ENTER] },
+				{ waitFor: "Which model?", keys: [ESCAPE] },
 				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
-				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
-
 			const screen = plainText(result.transcript());
-			ok(screen.includes("optional, experimental, dispatch-only"), screen);
-			ok(screen.includes("Add Codex CLI"), screen);
-			ok(!/Add Antigravity/u.test(screen), `a runtime admission refuses read-only work was offered:\n${screen}`);
-			ok(screen.includes("world-knowledge bound read-only to codex-cli/codex-cli-default"), screen);
+			ok(!screen.includes(key), "the pasted key is masked");
+			ok(screen.includes("Anthropic  (from the key)"), screen);
+			ok(screen.includes("claude-sonnet-5-5 (recommended)"), screen);
+			for (const absent of ["Which provider or app do you use?", "How should Clio get the API key?"])
+				ok(!screen.includes(absent), `${absent} was asked:\n${screen}`);
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
-			match(settings, /chat:[\s\S]*target: openai-compat/u);
-			match(settings, /runtime: codex-cli/u);
-			match(settings, /world-knowledge-external:[\s\S]*target: codex-cli/u);
-			match(settings, /world-knowledge: world-knowledge-external/u);
-			ok(!/antigravity-code/u.test(settings), settings);
+			match(settings, /runtime: anthropic/u);
+			match(settings, /defaultModel: claude-sonnet-5-5/u);
+			match(readFileSync(join(testEnv.settingsFile, "..", "credentials.yaml"), "utf8"), new RegExp(key, "u"));
 		} finally {
-			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("shows the providers that take a key when the prefix names none", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "What do you have?", keys: [ENTER] },
+				{ waitFor: "Paste your API key", keys: [..."sk-shared-prefix-key".split(""), ENTER] },
+				{ waitFor: "Which provider or app do you use?", keys: [CTRL_C] },
+			]);
+			strictEqual(result.code, 130);
+			const screen = plainText(result.transcript());
+			const list = screen.slice(screen.lastIndexOf("Which provider or app do you use?"));
+			ok(list.includes("Anthropic"), list);
+			for (const absent of ["LM Studio", "ChatGPT", "Copilot"])
+				ok(!list.includes(absent), `${absent} takes no key:\n${list}`);
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
+	it("proposes the key found in the environment, preselected, so setup is one decision", async () => {
+		const testEnv = unconfiguredEnv();
+		try {
+			const result = await runWizard({ ...testEnv.env, ANTHROPIC_API_KEY: "sk-ant-env-key" }, [
+				{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			const screen = plainText(result.transcript());
+			match(screen, /❯ Anthropic, with the key in ANTHROPIC_API_KEY\s+model claude-sonnet-5-5 \(recommended\)/u);
+			ok(screen.includes("Set up something else"), screen);
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /apiKeyEnvVar: ANTHROPIC_API_KEY/u);
+			match(settings, /defaultModel: claude-sonnet-5-5/u);
+		} finally {
 			testEnv.cleanup();
 		}
 	});
 
 	it("goes back from the third step without losing the first two", async () => {
 		const testEnv = unconfiguredEnv();
+		const server = await modelServer();
 		try {
 			const result = await runWizard(testEnv.env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("llamacpp"), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ESCAPE] },
-				// The runtime list is back, drawing the same words it drew before, so
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
+				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [ESCAPE] },
+				// The address screen is back, drawing the same words it drew before, so
 				// these two wait on the redraw rather than on text. The wait is longer
 				// than readline's 500ms escape-sequence timeout: a lone Escape is only
 				// delivered once that has passed, and two sent inside one window arrive
@@ -640,22 +638,16 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(result.code, 130, "backing out of the first step leaves Clio unconfigured");
 
 			const screen = plainText(result.transcript());
-			const credentialAt = screen.lastIndexOf("How should Clio get the API key?");
-			const reopened = screen.indexOf("Which provider or app do you use?", credentialAt);
+			const modelAt = screen.lastIndexOf("Which model?");
+			const reopened = screen.indexOf("What is the server's address?", modelAt);
 			ok(reopened > 0, `escape on step 3 did not reopen step 2:\n${screen}`);
-			// Reopened on the runtime that was already chosen, which is what "without
-			// losing the earlier answers" has to mean for a list step.
-			ok(
-				/❯ llama\.cpp/u.test(screen.slice(reopened)),
-				`step 2 reopened at the top of the list instead of on its answer:\n${screen.slice(reopened)}`,
-			);
-			// Step 1's answer was on the rail the whole time, and step 3 left no row
-			// behind when it was abandoned.
-			ok(screen.slice(0, reopened).includes("A model server"), `step 1's answer was lost:\n${screen}`);
-			ok(!/Target id\s{4,}\S/u.test(screen), "the abandoned step must not leave an answer row behind");
+			ok(screen.slice(reopened).includes(server.url), `step 2 reopened without its answer:\n${screen.slice(reopened)}`);
+			ok(screen.slice(0, reopened).includes("A model server or gateway"), `step 1's answer was lost:\n${screen}`);
+			ok(/❯ A model server or gateway/u.test(screen.slice(reopened)), `step 1 reopened off its answer:\n${screen}`);
 			ok(screen.includes("Cancelled; nothing was saved"), `no closing line:\n${screen}`);
 			strictEqual(existsSync(testEnv.settingsFile), false, "a cancelled wizard creates no settings file");
 		} finally {
+			await server.close();
 			testEnv.cleanup();
 		}
 	});
@@ -663,7 +655,7 @@ describe("contracts/configure-onboarding", () => {
 	it("exits 130 when the very first step is cancelled, because nothing is configured", async () => {
 		const testEnv = unconfiguredEnv();
 		try {
-			const result = await runWizard(testEnv.env, [{ waitFor: "Where does your model come from?", keys: [ESCAPE] }]);
+			const result = await runWizard(testEnv.env, [{ waitFor: "What do you have?", keys: [ESCAPE] }]);
 			strictEqual(result.code, 130);
 			// A user cancel is said once, on the rail, and is not an error.
 			strictEqual(result.stderr, "");
@@ -774,17 +766,18 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		const server = await litellmServer(token);
 		const env = { ...testEnv.env, [envVar]: token };
 		try {
-			const result = await runWizard(env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
-				// LiteLLM defaults to storing a key; UP selects an environment variable.
-				{ waitFor: "How should Clio get the API key?", keys: ["\x1b[A", ENTER] },
-				{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
-				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
-			]);
+			const result = await runWizard(
+				env,
+				[
+					// LiteLLM defaults to storing a key; UP selects an environment variable.
+					{ waitFor: "How should Clio get the API key?", keys: ["\x1b[A", ENTER] },
+					{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
+					{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+					{ waitFor: "Which model?", keys: [ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				],
+				{ mode: "first", runtime: litellmRuntime() },
+			);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 
 			const screen = plainText(result.transcript());
@@ -811,19 +804,20 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		const testEnv = unconfiguredEnv();
 		const server = await litellmServer("sk-a-key-this-run-never-sends");
 		try {
-			const result = await runWizard(testEnv.env, [
-				{ waitFor: "Where does your model come from?", keys: [DOWN, ENTER] },
-				{ waitFor: "Which provider or app do you use?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
-				// Deliberately skip the default stored-key choice.
-				{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
-				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
-				{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
-				{ waitFor: "Where is the server?", keys: [ENTER] },
-				{ waitFor: "Which model?", keys: [ENTER] },
-				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
-				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
-			]);
+			const result = await runWizard(
+				testEnv.env,
+				[
+					// Deliberately skip the default stored-key choice.
+					{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
+					{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
+					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+					{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
+					{ waitFor: "Where is the server?", keys: [ENTER] },
+					{ waitFor: "Which model?", keys: [ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				],
+				{ mode: "first", runtime: litellmRuntime() },
+			);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 
 			const screen = plainText(result.transcript());

@@ -81,7 +81,7 @@ export class CopilotClient {
 			"http://127.0.0.1:1234",
 		],
 	);
-	assert.equal(routes.find((route) => route.runtime.id === "anthropic")?.model, undefined);
+	assert.equal(routes.find((route) => route.runtime.id === "anthropic")?.model, "claude-sonnet-5-5");
 	assert.equal(routes.at(-1)?.model, "first-served");
 	assert.equal(routes.find((route) => route.source === "OPENAI_API_KEY")?.model, "gpt-6-luna");
 	assert.ok(signals.length > 1 && signals.every((signal) => signal.aborted));
@@ -135,13 +135,24 @@ test("headless borrowing counts model-less keys and takes --model for the only o
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
 	for (const runtime of registry.list()) if (runtime.credentialsEnvVar) delete process.env[runtime.credentialsEnvVar];
+	// Every built-in key provider has a curated model, so the model-less one is a copy of anthropic without one.
+	const anthropic = registry.get("anthropic");
+	assert.ok(anthropic);
+	registry.register({ ...anthropic, id: "modelless", displayName: "Modelless", credentialsEnvVar: "MODELLESS_API_KEY" });
+	t.after(() => {
+		registry.clear();
+		registerBuiltinRuntimes(registry);
+	});
 	const before = readFileSync(settingsPath(), "utf8");
 	process.env.OPENAI_API_KEY = "fake-key";
-	process.env.ANTHROPIC_API_KEY = "fake-key";
+	process.env.MODELLESS_API_KEY = "fake-key";
+	t.after(() => {
+		delete process.env.MODELLESS_API_KEY;
+	});
 	const several = await headlessChatRoute(readSettings());
 	assert.equal(several.kind, "several");
 	assert.deepEqual(several.kind === "several" ? several.routes.map((route) => route.target.id).sort() : [], [
-		"anthropic",
+		"modelless",
 		"openai",
 	]);
 	const picked = await headlessChatRoute(readSettings(), "openai");

@@ -25,7 +25,6 @@ import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
 import type { ClioSettings } from "../core/config.js";
 import {
-	bindAgentProfileInSettings,
 	readSettings,
 	SettingsValidationError,
 	settingsPath,
@@ -35,8 +34,8 @@ import {
 import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
-import { resolveOnPath } from "../domains/interop/detect.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
+import type { Candidate } from "../domains/lifecycle/setup-status.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import type { ProviderSupportEntry } from "../domains/providers/index.js";
@@ -46,7 +45,6 @@ import {
 	listProviderSupportEntries,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
-	runtimeAdmitsReadOnlyWork,
 	runtimeListsModelsLive,
 } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
@@ -56,7 +54,6 @@ import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { observeHostCapacityFacts, resolveLocalConcurrency } from "../domains/scheduling/local-capacity.js";
 import type { ConfigureWizardHost } from "./configure-host.js";
-import { reviewInteropAgents } from "./configure-interop.js";
 import type { ConfigureCategory } from "./configure-layout.js";
 import { CONFIGURE_CATEGORY_CHOICES } from "./configure-layout.js";
 import { loginOAuthRuntime } from "./configure-oauth.js";
@@ -87,12 +84,12 @@ import {
 	runtimesForCategory,
 	setOrchestratorPointer,
 	setWorkerDefaultPointer,
-	setWorkerProfilePointer,
 	targetApiKeyRef,
 	targetUrlProblem,
 } from "./configure-target.js";
 import { offerCopilotSignIn } from "./copilot-sign-in.js";
 import type { DetectedChatRoute } from "./detect-chat-routes.js";
+import { inferKeyProvider } from "./key-prefix.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
@@ -123,7 +120,17 @@ type CredentialSource = "env" | "stored" | "keep" | "skip" | "oauth-connect" | "
 // that depended on the one being changed by assigning undefined to them.
 interface Answers {
 	mode: "first" | "add" | "edit";
+	/** Routes Clio found before the first question, best first; only the first-run flow offers them. */
+	offered: ReadonlyArray<OfferedRoute>;
 	detectedChatRoute?: DetectedChatRoute | undefined;
+	/** The first-run flow's "What do you have?" answer. */
+	have?: Have | undefined;
+	/** The key screen supplied the credential, so the credential screens are not asked. */
+	keyGiven?: boolean | undefined;
+	/** The provider the key itself named, by its prefix or its variable, so the provider list is not asked. */
+	keyProvider?: string | undefined;
+	/** The review's "Choose a different model" asked for the list the flow otherwise skips. */
+	chooseModel?: boolean | undefined;
 	fixedRuntime?: boolean;
 	existing?: TargetDescriptor | undefined;
 	contextWindow?: number | undefined;
@@ -146,16 +153,28 @@ interface Answers {
 	probe?: ProbeResult | null | undefined;
 	/** The address step's failure, when it already told the operator why the model list will not come. */
 	unreachable?: string | undefined;
-	/** A runtime read-only admission accepts, bound to the read-only world-knowledge agent. */
-	colleague?: { runtimeId: string; targetId: string; model: string } | undefined;
 	/** The sign-in was put off or failed, so the wizard ends with nothing saved and names the login command. */
 	signInLater?: string | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected";
+type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model";
+
+type Have = "key" | "subscription" | "server";
+
+/** A route `collectSetupCandidates` found, with the runtime it runs on. */
+interface OfferedRoute extends DetectedChatRoute {
+	kind: Candidate<TargetDescriptor>["source"];
+	owner?: string;
+}
+
+/** `configure` with no runtime on a home with no target: the flow that asks what the user has. */
+function firstRunFlow(answers: Answers): boolean {
+	return answers.mode === "first" && !answers.fixedRuntime;
+}
 
 interface Wizard {
-	detectedRoutes: ReadonlyArray<DetectedChatRoute>;
+	/** The loop is stepping back, so a step that would answer itself hands the cursor on instead. */
+	goingBack: boolean;
 	select: ConfigureWizardHost["select"];
 	text: ConfigureWizardHost["text"];
 	host?: ConfigureWizardHost;
@@ -257,38 +276,68 @@ function draftDescriptor(answers: Answers, runtime: RuntimeDescriptor, withModel
 	return descriptor;
 }
 
-const CATEGORY_STEP: Step = {
-	id: "category",
-	applies: (answers) => answers.mode !== "edit" && !answers.fixedRuntime,
+/** Rows of the first-run list, saying where each route came from in the user's words. */
+function offeredRow(route: OfferedRoute): { label: string; hint: string } {
+	const name = route.runtime.displayName;
+	const label =
+		route.kind === "env-key"
+			? `${name}, with the key in ${route.source}`
+			: route.kind === "stored-login"
+				? `${name}, ${route.runtime.auth === "oauth" ? "signed in" : "stored key"}`
+				: route.kind === "configured-target"
+					? `${name}, saved in your settings`
+					: route.kind === "project"
+						? `${name}, from this project's settings`
+						: `A model server at ${route.target.url ?? route.source} (${name})`;
+	const model =
+		route.model === undefined
+			? "choose a model next"
+			: route.model === supportFor(route.runtime).defaultModel
+				? `model ${route.model} (recommended)`
+				: `model ${route.model}`;
+	return { label, hint: route.owner ? `${model}, run by user ${route.owner}` : model };
+}
+
+/** Forget every connection answer, for a first-run choice that starts a different path. */
+function clearConnection(answers: Answers): void {
+	answers.detectedChatRoute = undefined;
+	answers.category = undefined;
+	answers.runtime = undefined;
+	answers.targetId = undefined;
+	answers.url = undefined;
+	answers.detected = undefined;
+	answers.credential = undefined;
+	answers.keyRequested = undefined;
+	answers.keyGiven = undefined;
+	answers.keyProvider = undefined;
+	answers.apiKeyEnv = undefined;
+	answers.apiKeyLiteral = undefined;
+	answers.model = undefined;
+	answers.chooseModel = undefined;
+	answers.thinking = undefined;
+	answers.contextWindow = undefined;
+	answers.probe = undefined;
+	answers.inventory = undefined;
+	answers.inventoryKey = undefined;
+	answers.unreachable = undefined;
+}
+
+/** Screen 1 when Clio found something: each route it found, best first, and a way out to the rest. */
+const OFFERED_STEP: Step = {
+	id: "offered",
+	applies: (answers) => firstRunFlow(answers) && answers.offered.length > 0,
 	run: async (wizard, answers) => {
-		const registry = getRuntimeRegistry();
-		const eligible = allEntries().filter((entry) => {
-			const runtime = registry.get(entry.runtimeId);
-			return runtime !== null && (answers.mode !== "first" || isOrchestratorEligibleRuntime(runtime));
-		});
-		const available = CONFIGURE_CATEGORY_CHOICES.filter(
-			(choice) => runtimesForCategory(eligible, choice.category).length > 0,
-		);
-		const current = available.findIndex((choice) => choice.category === answers.category);
-		const result = await wizard.select<ConfigureCategory | DetectedChatRoute>({
-			heading: [
-				"",
-				chalk.bold("Where does your model come from?"),
-				chalk.dim("Choose the description you recognize; Clio shows the exact providers next."),
-			],
+		const chosen = answers.detectedChatRoute;
+		const previous = chosen ? answers.offered.findIndex((route) => route.target === chosen.target) : -1;
+		const result = await wizard.select<OfferedRoute | "other">({
+			heading: ["", chalk.bold("Clio found a way to reach a model:")],
 			choices: [
-				...wizard.detectedRoutes.map((route) => ({
-					value: route,
-					label: `Use ${route.runtime.id} / ${route.model ?? "choose model"}`,
-					hint: `from ${route.source}`,
-				})),
-				...available.map((choice) => ({
-					value: choice.category,
-					label: choice.label,
-					hint: choice.summary,
-				})),
+				...answers.offered.map((route) => ({ value: route, ...offeredRow(route) })),
+				{ value: "other" as const, label: "Set up something else", hint: "an API key, a subscription, or a server" },
 			],
-			initialIndex: current >= 0 ? current + wizard.detectedRoutes.length : 0,
+			// The row says where the route came from in full; the hint is only the model.
+			maxLabelWidth: 56,
+			initialIndex: previous >= 0 ? previous : answers.detectedChatRoute || answers.have ? answers.offered.length : 0,
 			railPrefix: wizard.rail,
 			backLabel: "cancel",
 			clearOnExit: true,
@@ -297,34 +346,177 @@ const CATEGORY_STEP: Step = {
 		});
 		if (result.kind === "quit") return "quit";
 		if (result.kind === "back") return "back";
-		if (typeof result.value !== "string") {
-			const route = result.value;
-			answers.detectedChatRoute = route;
-			answers.runtime = route.runtime;
-			answers.targetId = route.target.id;
-			answers.url = route.target.url;
-			answers.model = route.model;
-			answers.apiKeyEnv = route.target.auth?.apiKeyEnvVar;
-			answers.credential = answers.apiKeyEnv ? "env" : route.target.auth?.apiKeyRef ? "keep" : undefined;
-			answers.apiKeyLiteral = undefined;
-			answers.thinking = undefined;
-			answers.contextWindow = route.target.capabilities?.contextWindow;
-			answers.probe = route.source.startsWith("http://127.0.0.1:")
-				? { ok: true, models: route.model ? [route.model] : [] }
-				: undefined;
-			answers.inventory = { models: route.model ? [route.model] : [], source: answers.probe ? "probe" : "catalog" };
-			answers.inventoryKey = undefined;
-			wizard.answer("Source", route.source);
-			wizard.answer("Provider", route.runtime.id);
-			// A detected Copilot login is re-read here, so the line naming the account it uses is shown.
-			if (route.runtime.id === "copilot-sdk") {
-				const ready = await COPILOT_STEP.run(wizard, answers);
-				if (ready !== "next") return ready;
-			}
-			return "detected";
+		if (result.value === "other") {
+			if (answers.detectedChatRoute) clearConnection(answers);
+			return "next";
 		}
-		if (answers.detectedChatRoute) answers.runtime = undefined;
-		answers.detectedChatRoute = undefined;
+		const route = result.value;
+		clearConnection(answers);
+		answers.have = undefined;
+		answers.detectedChatRoute = route;
+		answers.runtime = route.runtime;
+		answers.targetId = route.target.id;
+		answers.url = route.target.url;
+		answers.model = route.model;
+		answers.apiKeyEnv = route.target.auth?.apiKeyEnvVar;
+		answers.credential = answers.apiKeyEnv ? "env" : route.target.auth?.apiKeyRef ? "keep" : undefined;
+		answers.contextWindow = route.target.capabilities?.contextWindow;
+		answers.probe = route.kind === "local-server" ? { ok: true, models: route.model ? [route.model] : [] } : undefined;
+		answers.inventory = { models: route.model ? [route.model] : [], source: answers.probe ? "probe" : "catalog" };
+		wizard.answer("Using", offeredRow(route).label);
+		// A detected Copilot login is re-read here, so the line naming the account it uses is shown.
+		if (route.runtime.id === "copilot-sdk") {
+			const ready = await COPILOT_STEP.run(wizard, answers);
+			if (ready !== "next") return ready;
+		}
+		return "detected";
+	},
+};
+
+const HAVE_CHOICES: ReadonlyArray<{ value: Have; label: string; hint: string }> = [
+	{
+		value: "key",
+		label: "An API key",
+		hint: "Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, DeepSeek, and others",
+	},
+	{ value: "subscription", label: "A subscription", hint: "ChatGPT Plus or Pro, Claude Pro or Max, GitHub Copilot" },
+	{
+		value: "server",
+		label: "A model server or gateway",
+		hint: "Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or any OpenAI-compatible address",
+	},
+];
+
+/** Screen 1 when Clio found nothing, or the user wants something else: what they have, in their words. */
+const HAVE_STEP: Step = {
+	id: "have",
+	applies: (answers) => firstRunFlow(answers) && answers.detectedChatRoute === undefined,
+	run: async (wizard, answers) => {
+		const previous = HAVE_CHOICES.findIndex((choice) => choice.value === answers.have);
+		const result = await wizard.select<Have>({
+			heading: ["", chalk.bold("What do you have?")],
+			choices: HAVE_CHOICES.map((choice) => ({ ...choice })),
+			initialIndex: Math.max(0, previous),
+			railPrefix: wizard.rail,
+			backLabel: answers.offered.length > 0 ? "back" : "cancel",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (result.kind === "quit") return "quit";
+		if (result.kind === "back") return "back";
+		if (answers.have !== result.value) {
+			clearConnection(answers);
+			answers.have = result.value;
+		}
+		const registry = getRuntimeRegistry();
+		if (result.value === "subscription") answers.category = "subscription";
+		if (result.value === "server") {
+			const runtime = registry.get("openai-compat") ?? undefined;
+			if (runtime && answers.runtime === undefined) {
+				answers.runtime = runtime;
+				answers.targetId = deriveTargetId(runtime.id, readSettings().targets);
+			}
+		}
+		wizard.answer("You have", HAVE_CHOICES.find((choice) => choice.value === result.value)?.label ?? result.value);
+		return "next";
+	},
+};
+
+const ENV_REFERENCE = /^\$([A-Za-z_][A-Za-z0-9_]*)$/u;
+
+/** The API-key path: one masked field; a known prefix names the provider, `$NAME` reads an environment variable. */
+const KEY_STEP: Step = {
+	id: "key",
+	applies: (answers) => firstRunFlow(answers) && answers.have === "key",
+	run: async (wizard, answers) => {
+		const result = await wizard.text({
+			heading: [
+				"",
+				chalk.bold("Paste your API key"),
+				chalk.dim(`Saved to ${shortenPath(authStoragePath())} (mode 0600, not encrypted) when you save.`),
+			],
+			initial: answers.apiKeyEnv !== undefined ? `$${answers.apiKeyEnv}` : "",
+			hint: "or type $NAME to read the key from that environment variable instead",
+			mask: true,
+			validate: (value) =>
+				value.trim().length === 0
+					? "Paste a key, or type $NAME to use an environment variable."
+					: value.startsWith("$") && !ENV_REFERENCE.test(value.trim())
+						? "After $, an environment variable name holds only letters, digits and underscores."
+						: null,
+			railPrefix: wizard.rail,
+			backLabel: "back",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (result.kind === "quit") return "quit";
+		if (result.kind === "back") return "back";
+		const value = result.value.trim();
+		const variable = ENV_REFERENCE.exec(value)?.[1];
+		const registry = getRuntimeRegistry();
+		let provider: string | undefined;
+		if (variable !== undefined) {
+			answers.credential = "env";
+			answers.apiKeyEnv = variable;
+			answers.apiKeyLiteral = undefined;
+			provider =
+				inferKeyProvider(process.env[variable] ?? "") ??
+				registry.list().find((runtime) => runtime.auth === "api-key" && runtime.credentialsEnvVar === variable)?.id;
+			wizard.answer("Key", `$${variable}${process.env[variable] ? "" : chalk.dim("  (not set in this shell)")}`);
+		} else {
+			answers.credential = "stored";
+			answers.apiKeyEnv = undefined;
+			answers.apiKeyLiteral = value;
+			provider = inferKeyProvider(value);
+			wizard.answer("Key", "pasted, written on Save");
+		}
+		answers.keyGiven = true;
+		answers.inventoryKey = undefined;
+		const runtime = provider !== undefined ? (registry.get(provider) ?? undefined) : undefined;
+		if (runtime && answers.runtime?.id !== runtime.id) {
+			answers.model = undefined;
+			answers.probe = undefined;
+			answers.inventory = undefined;
+		}
+		answers.runtime = runtime;
+		answers.keyProvider = runtime?.id;
+		answers.targetId = runtime ? deriveTargetId(runtime.id, readSettings().targets) : undefined;
+		if (runtime) wizard.answer("Provider", `${runtime.displayName}  ${chalk.dim("(from the key)")}`);
+		return "next";
+	},
+};
+
+/** `configure --add` without a runtime: the source categories, then the providers in the one chosen. */
+const CATEGORY_STEP: Step = {
+	id: "category",
+	applies: (answers) => answers.mode === "add" && !answers.fixedRuntime,
+	run: async (wizard, answers) => {
+		const available = CONFIGURE_CATEGORY_CHOICES.filter(
+			(choice) => runtimesForCategory(allEntries(), choice.category).length > 0,
+		);
+		const current = available.findIndex((choice) => choice.category === answers.category);
+		const result = await wizard.select<ConfigureCategory>({
+			heading: [
+				"",
+				chalk.bold("Where does your model come from?"),
+				chalk.dim("Choose the description you recognize; Clio shows the exact providers next."),
+			],
+			choices: available.map((choice) => ({
+				value: choice.category,
+				label: choice.label,
+				hint: choice.summary,
+			})),
+			initialIndex: Math.max(0, current),
+			railPrefix: wizard.rail,
+			backLabel: "cancel",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (result.kind === "quit") return "quit";
+		if (result.kind === "back") return "back";
 		if (answers.category !== result.value) {
 			answers.runtime = undefined;
 			answers.detected = undefined;
@@ -338,14 +530,25 @@ const CATEGORY_STEP: Step = {
 
 const RUNTIME_STEP: Step = {
 	id: "runtime",
-	applies: (answers) => !answers.fixedRuntime,
+	applies: (answers) =>
+		!answers.fixedRuntime &&
+		!(
+			firstRunFlow(answers) &&
+			(answers.have === "server" || (answers.have === "key" && answers.keyProvider !== undefined))
+		),
 	run: async (wizard, answers) => {
 		const registry = getRuntimeRegistry();
 		const chatEntries = allEntries().filter((entry) => {
 			const runtime = registry.get(entry.runtimeId);
 			return runtime !== null && (answers.mode !== "first" || isOrchestratorEligibleRuntime(runtime));
 		});
-		const entries = answers.category ? runtimesForCategory(chatEntries, answers.category) : chatEntries;
+		// A key the prefix table did not place: the providers that take one.
+		const entries =
+			firstRunFlow(answers) && answers.have === "key"
+				? runtimesForCategory(chatEntries, "cloud-api").filter((entry) => registry.get(entry.runtimeId)?.auth === "api-key")
+				: answers.category
+					? runtimesForCategory(chatEntries, answers.category)
+					: chatEntries;
 		const usable = entries.length > 0 ? entries : chatEntries;
 		const previous = usable.findIndex((entry) => entry.runtimeId === answers.runtime?.id);
 		const featured = usable.findIndex((entry) => entry.featured);
@@ -375,10 +578,13 @@ const RUNTIME_STEP: Step = {
 				answers.mode === "edit" ? answers.existing?.id : deriveTargetId(runtime.id, readSettings().targets);
 			answers.url = undefined;
 			answers.detected = undefined;
-			answers.credential = undefined;
-			answers.keyRequested = undefined;
-			answers.apiKeyEnv = undefined;
-			answers.apiKeyLiteral = undefined;
+			// A key pasted on the first-run key screen belongs to whichever provider is picked for it.
+			if (!answers.keyGiven) {
+				answers.credential = undefined;
+				answers.keyRequested = undefined;
+				answers.apiKeyEnv = undefined;
+				answers.apiKeyLiteral = undefined;
+			}
 			answers.model = undefined;
 			answers.thinking = undefined;
 			answers.contextWindow = undefined;
@@ -464,16 +670,26 @@ const URL_STEP: Step = {
 	id: "url",
 	applies: (answers) => answers.runtime !== undefined && supportFor(answers.runtime).supportsCustomUrl,
 	run: async (wizard, answers) => {
+		const serverPath = firstRunFlow(answers) && answers.have === "server";
+		// The first-run server path asks on the generic runtime and moves to the native one the address turns out to be.
+		if (serverPath && answers.runtime?.id !== "openai-compat") {
+			answers.runtime = getRuntimeRegistry().get("openai-compat") ?? answers.runtime;
+			answers.detected = undefined;
+		}
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
 		const local = supportFor(runtime).group === "local-http";
 		const gateway = runtime.gatewayUrl;
-		const offered = offeredUrlFor(runtime);
+		const offered = serverPath ? undefined : offeredUrlFor(runtime);
+		const found = serverPath ? answers.offered.filter((route) => route.kind === "local-server") : [];
 		const result = await wizard.text({
 			heading: [
 				"",
-				chalk.bold(gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
-				...gatewayUrlGuidance(runtime).map((line) => chalk.dim(line)),
+				chalk.bold(
+					serverPath ? "What is the server's address?" : (gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
+				),
+				...(serverPath ? [] : gatewayUrlGuidance(runtime).map((line) => chalk.dim(line))),
+				...found.map((route) => chalk.dim(`found: ${route.target.url ?? route.source} (${route.runtime.displayName})`)),
 			],
 			// An offered address is a placeholder, so a typed one replaces it instead of being appended to it.
 			...(answers.url !== undefined
@@ -596,6 +812,14 @@ const DETECTED_RUNTIME_STEP: Step = {
 		if (!detected || !runtime) return "next";
 		const native = getRuntimeRegistry().get(detected.runtimeId);
 		if (!native) return "next";
+		// The first-run server path takes what the address is serving; the generic runtime stays a configure choice.
+		if (firstRunFlow(answers)) {
+			if (wizard.goingBack) return "back";
+			answers.runtime = native;
+			answers.inventoryKey = undefined;
+			wizard.answer("Server", detected.displayName);
+			return "next";
+		}
 		const result = await wizard.select<boolean>({
 			heading: ["", chalk.bold(`That URL is serving ${detected.displayName}.`)],
 			choices: [
@@ -692,7 +916,7 @@ function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boole
 	return (
 		answers.mode !== "edit" &&
 		runtime.auth === "api-key" &&
-		LOCAL_APP_RUNTIME_IDS.has(runtime.id) &&
+		(LOCAL_APP_RUNTIME_IDS.has(runtime.id) || (firstRunFlow(answers) && answers.have === "server")) &&
 		answers.keyRequested !== true
 	);
 }
@@ -700,7 +924,7 @@ function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boole
 const CREDENTIAL_STEP: Step = {
 	id: "credential",
 	applies: (answers) =>
-		(answers.runtime?.auth === "api-key" && !keyWaitsForRefusal(answers, answers.runtime)) ||
+		(answers.runtime?.auth === "api-key" && !answers.keyGiven && !keyWaitsForRefusal(answers, answers.runtime)) ||
 		answers.runtime?.auth === "oauth",
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
@@ -806,7 +1030,7 @@ const CREDENTIAL_STEP: Step = {
 
 const CREDENTIAL_VALUE_STEP: Step = {
 	id: "credential-value",
-	applies: (answers) => answers.credential === "env" || answers.credential === "stored",
+	applies: (answers) => !answers.keyGiven && (answers.credential === "env" || answers.credential === "stored"),
 	run: async (wizard, answers) => {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
@@ -983,6 +1207,24 @@ const MODEL_STEP: Step = {
 			recommended !== undefined
 				? [recommended, ...inventory.models.filter((model) => model !== recommended)]
 				: inventory.models;
+		// The first run takes the recommended model, or the only one a server lists; the review offers the list.
+		const automatic =
+			firstRunFlow(answers) && !answers.chooseModel
+				? (recommended ?? (inventory.models.length === 1 ? inventory.models[0] : undefined))
+				: undefined;
+		if (
+			automatic !== undefined &&
+			modelChoiceRefusal(runtime, { id: answers.targetId ?? runtime.id, url: answers.url }, automatic, inventory) === null
+		) {
+			if (wizard.goingBack) return "back";
+			answers.model = automatic;
+			wizard.answer(
+				"Model",
+				`${automatic}  ${chalk.dim(automatic === recommended ? "(recommended)" : "(the only one listed)")}`,
+			);
+			await readModelCapabilities(answers, runtime);
+			return "next";
+		}
 		const selected = models.indexOf(preferred ?? "");
 		const result = await wizard.select<string>({
 			heading: [
@@ -1093,98 +1335,6 @@ const THINKING_STEP: Step = {
 	},
 };
 
-/**
- * External CLI runtimes on PATH that read-only admission accepts, so the
- * read-only world-knowledge agent bound to one can actually run there.
- */
-function readOnlyColleagueRuntimes(): RuntimeDescriptor[] {
-	const configured = new Set(readSettings().targets.map((target) => target.runtime));
-	return getRuntimeRegistry()
-		.list()
-		.filter(
-			(runtime) =>
-				runtime.kind === "subprocess" &&
-				runtime.binaryName !== undefined &&
-				!configured.has(runtime.id) &&
-				runtimeAdmitsReadOnlyWork(runtime) &&
-				resolveOnPath([runtime.binaryName]).presence === "present",
-		);
-}
-
-const READ_ONLY_COLLEAGUE_STEP: Step = {
-	id: "read-only-colleague",
-	applies: (answers) =>
-		answers.mode === "first" &&
-		answers.runtime !== undefined &&
-		isOrchestratorEligibleRuntime(answers.runtime) &&
-		readOnlyColleagueRuntimes().length > 0,
-	run: async (wizard, answers) => {
-		const candidates = readOnlyColleagueRuntimes();
-		if (candidates.length === 0) return "next";
-		const previous = candidates.findIndex((runtime) => runtime.id === answers.colleague?.runtimeId);
-		const choice = await wizard.select<string>({
-			heading: [
-				"",
-				chalk.bold("Add a local read-only research colleague?"),
-				chalk.dim("optional, experimental, dispatch-only; Clio does not authenticate or inspect its session"),
-			],
-			choices: [
-				{ value: "", label: "Not now", hint: "your primary Clio target is unchanged" },
-				...candidates.map((runtime) => ({
-					value: runtime.id,
-					label: `Add ${runtime.displayName}`,
-					hint: "runs world-knowledge read-only",
-				})),
-			],
-			initialIndex: previous + 1,
-			railPrefix: wizard.rail,
-			backLabel: "back",
-			clearOnExit: true,
-			input: wizard.input,
-			output: wizard.output,
-		});
-		if (choice.kind === "quit") return "quit";
-		if (choice.kind === "back") return "back";
-		const runtime = candidates.find((entry) => entry.id === choice.value);
-		if (!runtime) {
-			answers.colleague = undefined;
-			wizard.answer("Colleague", "not added");
-			return "next";
-		}
-		const targetId = deriveTargetId(runtime.id, readSettings().targets);
-		const descriptor = buildDescriptor(runtime, targetId, {});
-		const probe = await runtimeProbe(runtime, descriptor);
-		if (!probe?.ok || !probe.models || probe.models.length === 0) {
-			answers.colleague = undefined;
-			wizard.presenter.warn(
-				probe?.error ??
-					`${runtime.displayName} did not answer its probe. Run \`${runtime.binaryName}\` yourself, complete sign-in, then add it from Configure → Targets.`,
-			);
-			wizard.answer("Colleague", `not added; sign in with ${runtime.binaryName} first`);
-			return "next";
-		}
-		const labels = probe.modelLabels;
-		const picked = await wizard.select<string>({
-			heading: ["", chalk.bold(`${runtime.displayName} research model`), chalk.dim("reported by its probe")],
-			choices: probe.models.map((model) => ({
-				value: model,
-				label: labels?.[model] ? `${model} — ${labels[model]}` : model,
-			})),
-			initialIndex: 0,
-			railPrefix: wizard.rail,
-			backLabel: "back",
-			clearOnExit: true,
-			input: wizard.input,
-			output: wizard.output,
-		});
-		if (picked.kind === "quit") return "quit";
-		if (picked.kind === "back") return "back";
-		answers.colleague = { runtimeId: runtime.id, targetId, model: picked.value };
-		wizard.answer("Colleague", `${targetId}/${picked.value} → world-knowledge`);
-		return "next";
-	},
-};
-
 const CONTEXT_STEP: Step = {
 	id: "context-window",
 	applies: (answers) => answers.mode === "edit",
@@ -1256,6 +1406,7 @@ const REVIEW_STEP: Step = {
 				],
 				choices: [
 					{ value: "save", label: "Save target" },
+					...(firstRunFlow(answers) ? [{ value: "model", label: "Choose a different model" }] : []),
 					{ value: "details", label: "Connection and machine details" },
 					{ value: "back", label: "Back" },
 					{ value: "cancel", label: "Cancel setup" },
@@ -1267,6 +1418,7 @@ const REVIEW_STEP: Step = {
 				output: wizard.output,
 			});
 			if (result.kind !== "selected") return result.kind;
+			if (result.value === "model") return "model";
 			if (result.value !== "details")
 				return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
 			const detailPages = [
@@ -1338,6 +1490,9 @@ const REVIEW_STEP: Step = {
 // with no credential at all skips both credential steps and keeps this order
 // exactly as it was.
 const STEPS: ReadonlyArray<Step> = [
+	OFFERED_STEP,
+	HAVE_STEP,
+	KEY_STEP,
 	CATEGORY_STEP,
 	RUNTIME_STEP,
 	SDK_STEP,
@@ -1349,7 +1504,6 @@ const STEPS: ReadonlyArray<Step> = [
 	MODEL_STEP,
 	THINKING_STEP,
 	CONTEXT_STEP,
-	READ_ONLY_COLLEAGUE_STEP,
 	REVIEW_STEP,
 ];
 
@@ -1378,17 +1532,6 @@ function applyAnswers(
 		settings.chat.thinkingLevel = answers.thinking;
 		settings.fleet.default.thinkingLevel = answers.thinking;
 	}
-	if (answers.colleague !== undefined) {
-		const { runtimeId, targetId, model } = answers.colleague;
-		const colleagueRuntime = getRuntimeRegistry().get(runtimeId);
-		if (!colleagueRuntime) throw new Error(`Runtime '${runtimeId}' disappeared before settings were written`);
-		if (!runtimeAdmitsReadOnlyWork(colleagueRuntime))
-			throw new Error(`Runtime '${runtimeId}' cannot run read-only work, so world-knowledge cannot be bound to it`);
-		const external = buildDescriptor(colleagueRuntime, targetId, { model });
-		applyTarget(settings, external);
-		setWorkerProfilePointer(settings, "world-knowledge-external", external, model);
-		bindAgentProfileInSettings(settings, "world-knowledge", "world-knowledge-external");
-	}
 }
 
 export async function runOnboardingWizard(
@@ -1407,7 +1550,7 @@ export async function runOnboardingWizard(
 	const rail = railPrefix(presenter.isPlain());
 	const columns = (streams.out as { columns?: number }).columns ?? 80;
 	const wizard: Wizard = {
-		detectedRoutes: [],
+		goingBack: false,
 		select: host?.select.bind(host) ?? promptSelect,
 		text: host?.text.bind(host) ?? promptText,
 		...(host ? { host } : {}),
@@ -1445,16 +1588,30 @@ export async function runOnboardingWizard(
 		);
 
 	const existing = options.mode === "edit" ? options.target : undefined;
+	const offered: OfferedRoute[] = [];
 	if (options.mode === "first" && !options.runtime) {
 		const settings = readSettings();
 		const { classifyDefaultTarget } = await import("./default-target.js");
 		if (classifyDefaultTarget(settings).kind !== "usable") {
-			const { detectChatRoutes } = await import("./detect-chat-routes.js");
-			wizard.detectedRoutes = await detectChatRoutes(settings);
+			const { collectSetupCandidates } = await import("./detect-chat-routes.js");
+			const registry = getRuntimeRegistry();
+			for (const candidate of await collectSetupCandidates(settings)) {
+				const runtime = registry.get(candidate.target.runtime);
+				if (!runtime) continue;
+				offered.push({
+					kind: candidate.source,
+					source: candidate.label,
+					runtime,
+					target: candidate.target,
+					...(candidate.model !== undefined ? { model: candidate.model } : {}),
+					...(candidate.owner !== undefined ? { owner: candidate.owner } : {}),
+				});
+			}
 		}
 	}
 	const answers: Answers = {
 		mode: options.mode,
+		offered,
 		existing,
 		runtime: existing
 			? (getRuntimeRegistry().get(existing.runtime) ?? undefined)
@@ -1480,6 +1637,7 @@ export async function runOnboardingWizard(
 	}
 	const stop = (quit = false): number => cancel(presenter, answers, { quit, advise: host === undefined });
 	const marks = new Array<number>(STEPS.length).fill(writer.mark());
+	const asked = new Set<number>();
 	let cursor = 0;
 	let direction = 1;
 
@@ -1493,8 +1651,19 @@ export async function runOnboardingWizard(
 			continue;
 		}
 		marks[cursor] = writer.mark();
+		asked.add(cursor);
+		wizard.goingBack = direction < 0;
 		const outcome = await step.run(wizard, answers);
 		if (outcome === "quit" || outcome === "cancel") return stop(outcome === "quit");
+		if (outcome === "model") {
+			const modelStep = STEPS.indexOf(MODEL_STEP);
+			answers.chooseModel = true;
+			// The model row is replaced in place when the flow drew one; a found route went straight to the review.
+			if (asked.has(modelStep)) writer.rewindTo(marks[modelStep] ?? writer.mark());
+			direction = 1;
+			cursor = modelStep;
+			continue;
+		}
 		if (outcome === "detected" || (answers.detectedChatRoute && step === MODEL_STEP && outcome === "next")) {
 			direction = 1;
 			cursor = STEPS.indexOf(answers.model ? REVIEW_STEP : MODEL_STEP);
@@ -1503,6 +1672,13 @@ export async function runOnboardingWizard(
 		if (outcome === "credential") {
 			direction = 1;
 			cursor = STEPS.indexOf(CREDENTIAL_STEP);
+			continue;
+		}
+		// Leaving the list "Choose a different model" opened returns to the review with the model unchanged.
+		if (outcome === "back" && step === MODEL_STEP && answers.chooseModel && firstRunFlow(answers)) {
+			answers.chooseModel = undefined;
+			if (answers.model !== undefined) wizard.answer("Model", answers.model);
+			cursor = STEPS.indexOf(REVIEW_STEP);
 			continue;
 		}
 		if (outcome === "back") {
@@ -1525,17 +1701,7 @@ export async function runOnboardingWizard(
 	}
 
 	if (host?.cancelled()) return stop(true);
-	// A hosted run has no terminal to ask on, and the review's non-terminal branch writes to this process's
-	// stdout, which is the host's line transport. The review runs before "Done" so the rail closes on the last thing asked.
-	const peerReview =
-		answers.mode === "first" && !host
-			? async (): Promise<void> => {
-					const review = await reviewInteropAgents({ rl: null, streams, presenter, rail, quiet: true });
-					// The review leaves the rows to a caller that owns a rail, so an accepted peer would otherwise get no answer.
-					for (const id of review.wired) presenter.completedStep(`delegation agent ${id} added; use /delegate ${id} <task>`);
-				}
-			: undefined;
-	return finish(wizard, answers, peerReview);
+	return finish(wizard, answers);
 }
 
 function cancel(
@@ -1564,7 +1730,7 @@ function cancel(
 	return answers.mode === "first" || options.quit === true ? 130 : 0;
 }
 
-async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promise<void>): Promise<number> {
+async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 	const runtime = answers.runtime;
 	// The id was derived when the runtime was chosen; another window can have taken it since.
 	if (answers.mode !== "edit" && answers.runtime && answers.targetId !== undefined) {
@@ -1635,11 +1801,6 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 	else presenter.note("Use Settings → Chat, Fleet, or Context & Memory to change model defaults.");
 	if (answers.mode === "first" && answers.thinking !== undefined)
 		presenter.completedStep(`thinking level ${answers.thinking}`);
-	if (answers.colleague !== undefined) {
-		presenter.completedStep(
-			`world-knowledge bound read-only to ${answers.colleague.targetId}/${answers.colleague.model}`,
-		);
-	}
 	presenter.completedStep(`settings written to ${shortenPath(settingsPath())}`);
 
 	if (contextWindowUndiscovered(descriptor, answers.probe ?? null)) {
@@ -1654,7 +1815,6 @@ async function finish(wizard: Wizard, answers: Answers, peerReview?: () => Promi
 		if (!wizard.startsChat) presenter.commandAdvice("Start Clio:", "clio-coder");
 		presenter.commandAdvice("Change any of this later:", "clio-coder configure");
 	}
-	await peerReview?.();
 	presenter.done("Done");
 	return 0;
 }

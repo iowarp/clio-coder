@@ -154,12 +154,31 @@ export function describeRuntimeModels(entry: ProviderSupportEntry, sample: numbe
 	return entry.modelHints.slice(0, sample).join(", ");
 }
 
+/**
+ * The chat model setup proposes for a provider whose runtime names none. One table so a stale id is one edit; an id
+ * the provider's catalog no longer lists is dropped, so a stale entry falls back to the model list rather than to a
+ * model that does not exist.
+ */
+const CURATED_DEFAULT_MODELS: Readonly<Record<string, string>> = {
+	anthropic: "claude-sonnet-5-5",
+	"anthropic-max": "claude-sonnet-5-5",
+	deepseek: "deepseek-v4-pro",
+	google: "gemini-3.8-flash",
+	groq: "openai/gpt-oss-120b",
+	mistral: "devstral-latest",
+	openrouter: "anthropic/claude-sonnet-5.5",
+};
+
 export function buildProviderSupportEntry(runtime: RuntimeDescriptor): ProviderSupportEntry {
 	// The descriptor in hand, not a registry lookup of its id: an entry built for
 	// a runtime that is not in the global registry used to report no models at all.
 	const modelHints = knownModelsFor(runtime.id, runtime);
 	const modelSource = runtimeModelListSource(runtime);
-	const defaultModel = runtime.defaultModel ?? (modelSource === "catalog" ? undefined : modelHints[0]);
+	const curated = CURATED_DEFAULT_MODELS[runtime.id];
+	const defaultModel =
+		runtime.defaultModel ??
+		(curated !== undefined && modelHints.includes(curated) ? curated : undefined) ??
+		(modelSource === "catalog" ? undefined : modelHints[0]);
 	return {
 		runtimeId: runtime.id,
 		label: runtime.displayName,
