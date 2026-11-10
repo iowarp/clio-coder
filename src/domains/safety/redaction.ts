@@ -117,6 +117,23 @@ export function urlUserinfoHoldsSecret(secret: string): boolean {
 function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
 	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]`;
 }
+// A credential's own shape, wherever it sits: a git host token, and the value an Authorization header or a bearer scheme
+// names. A bare `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset. Each
+// pattern starts only at a word start and consumes its run, so the scan stays linear. Evidence redaction knows the same
+// shapes.
+const TOKEN_SHAPE_RES: readonly RegExp[] = [
+	/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/gu,
+	/\bglpat-[A-Za-z0-9_-]{20,}/gu,
+];
+const AUTHORIZATION_VALUE_RE =
+	/\b(authorization\s*["']?\s*[:=]\s*["']?(?:bearer|basic|token)\s+|bearer\s+(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/giu;
+
+function redactTokenShapes(value: string): string {
+	let out = value.replace(AUTHORIZATION_VALUE_RE, (_match, lead: string) => `${lead}[redacted]`);
+	for (const shape of TOKEN_SHAPE_RES) out = out.replace(shape, "[redacted]");
+	return out;
+}
+
 // `auth` stops short of `author` and `authority`, so prose such as "operator-authority ask" keeps its next word.
 const SECRET_FLAG_NAME_RE =
 	/(?=(api[-_]?key|access[-_]?token|auth(?:orization)?(?!or)|credential|password|secret|token))/giu;
@@ -294,8 +311,9 @@ const QUOTED_SECRET_CHARS = 1024;
 const QUOTED_HEADER_HEAD = String.raw`\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?`;
 // A lead starts only at the start of a run of name characters and is scanned once per run, so a long dash or `a-` run
 // scans linearly. A flag may follow a word inside a run that ends in whitespace, so a header name such as
-// `Proxy-Authorization "Basic a b"` still leads its value, while `api-key="a b"` stays a key; no name length is capped.
-const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_]+(?=-[A-Za-z0-9_-]*\s))?--?([A-Za-z0-9_-]+)(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)\s*[=:]\s*`;
+// `Proxy-Authorization "Basic a b"` still leads its value, while `api-key="a b"` stays a key; no name length is capped. A
+// name may close its own quote, as a JSON or dict key does in `{"token": "a b"}`.
+const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])(?:[A-Za-z0-9_]+(?=-[A-Za-z0-9_-]*\s))?--?([A-Za-z0-9_-]+)(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)["']?\s*[=:]\s*`;
 // The value never starts with whitespace, so a long space run after the colon is not rescanned once per space.
 const QUOTED_HEADER_RE = new RegExp(
 	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?!\s)(?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
@@ -307,7 +325,7 @@ const QUOTED_VALUE_RE = new RegExp(
 );
 const QUOTED_HEADER_LEAD_RE = new RegExp(`(["'])${QUOTED_HEADER_HEAD}`, "giu");
 const QUOTED_VALUE_OPEN_RE = new RegExp(`(?:${QUOTED_VALUE_LEAD})(["'])`, "gu");
-const AWAITING_QUOTED_VALUE_RE = /(?:--?([A-Za-z0-9_-]+)\s+|\b([A-Za-z0-9_.-]+)\s*[=:]\s*)$/u;
+const AWAITING_QUOTED_VALUE_RE = /(?:--?([A-Za-z0-9_-]+)\s+|\b([A-Za-z0-9_.-]+)["']?\s*[=:]\s*)$/u;
 // Every secret name holds one of these, so other text skips both scans, which a whitespace-free token pays on every frame.
 const QUOTED_SECRET_WORD_RE = /pass|pwd|secret|token|key|auth|credential/iu;
 // `.` in the patterns above stops at these, so a quoted value never spans them.
@@ -325,7 +343,13 @@ export function redactQuotedSecrets(
 	return headers.replace(
 		QUOTED_VALUE_RE,
 		(match, lead: string, flag: string | undefined, key: string | undefined, quote: string, value: string) => {
-			if (!isSecretName(flag ?? key ?? "") || value.length === 0 || value === "[redacted]") return match;
+			if (value.length === 0 || value === "[redacted]") return match;
+			// An ordinary value can carry a keyed secret, as `curl -d '{"token":"x"}'` does. It cannot hold its own quote, so
+			// the rescan nests at most twice.
+			if (!isSecretName(flag ?? key ?? "")) {
+				const inner = redactQuotedSecrets(value, isSecretName);
+				return inner === value ? match : `${lead}${quote}${inner}${quote}`;
+			}
 			return isEnvReference(`${quote}${value}${quote}`) ? match : `${lead}${quote}[redacted]${quote}`;
 		},
 	);
@@ -383,10 +407,12 @@ function quotedSecretLeadStart(text: string): number | null {
 }
 
 function redactPlainSecretString(value: string): string {
-	return redactSecretFlags(
-		redactUrlCredentials(redactQuotedSecrets(value)).replace(
-			SECRET_ASSIGNMENT_RE,
-			(match, prefix: string, secret: string) => redactUnlessEnvReference(match, prefix, secret),
+	return redactTokenShapes(
+		redactSecretFlags(
+			redactUrlCredentials(redactQuotedSecrets(value)).replace(
+				SECRET_ASSIGNMENT_RE,
+				(match, prefix: string, secret: string) => redactUnlessEnvReference(match, prefix, secret),
+			),
 		),
 	);
 }

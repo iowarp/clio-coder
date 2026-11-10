@@ -125,4 +125,21 @@ describe("approval card arguments of an uncurated tool", () => {
 	it("masks an adjacent quoted assignment whole in the display redactor", () => {
 		ok(!redactSecretString("API_KEY=\"\"'opaque-session-12345' run").includes("opaque-session"));
 	});
+
+	it("masks JSON-keyed values, Authorization and bearer values and bare git host tokens in the display redactor", () => {
+		// Joined at runtime so secret scanners do not read these fixtures as leaks.
+		const gitToken = ["ghp", "FAKEfakeFAKEfakeFAKE1234"].join("_");
+		const shown = [
+			`curl -d '{"token":"opaque-session-12345"}' https://h.example`,
+			`{"apiKey": "opaque-session-12345"}`,
+			"{'password': 'opaque-session-12345'}",
+			"Authorization: Basic opaque-session-12345",
+			"Authorization: Bearer opaque-session-12345",
+			"bearer opaque-session-12345",
+			`export GH=${gitToken}`,
+		].map(redactSecretString);
+		for (const line of shown) ok(!line.includes("opaque-session") && !line.includes(gitToken), line);
+		strictEqual(redactSecretString('{"author":"Jane Doe","max_tokens":42}'), '{"author":"Jane Doe","max_tokens":42}');
+		strictEqual(redactSecretString("the bearer of bad news"), "the bearer of bad news");
+	});
 });
