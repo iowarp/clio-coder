@@ -1,7 +1,7 @@
 /**
  * The agent's `report` tool (R-12). The agent writes what happened; the host fills the environment and what Clio
  * observed, keeps the offer budget, scrubs the text and saves the draft. Nothing here sends: the operator does, from
- * the review overlay or `clio-coder report send`.
+ * `/report send` or `clio-coder report send` in a terminal.
  */
 
 import {
@@ -35,7 +35,6 @@ import { reportToolSurface } from "./report-surface.js";
 export const REPORT_OFFER_REFUSED = "Do not offer or mention reporting again in this session.";
 /** No send command reaches the model: the agent drafts, the operator sends (R2b-report-04). */
 const REPORT_NOT_YOURS = "You cannot send it; do not run gh or clio-coder for this.";
-export const REPORT_REVIEW_OPEN = `The draft is open for the operator to review. ${REPORT_NOT_YOURS}`;
 /** Unsent agent drafts an install keeps before the tool stops writing new ones. */
 export const AGENT_DRAFT_LIMIT = 3;
 
@@ -61,7 +60,7 @@ export interface ReportToolDeps {
 	askUser?: AskUserHandler;
 	/** The operator is there to answer now: attended, and not away at yolo. */
 	attended: () => boolean;
-	/** Opens a saved draft in the review overlay; null when no surface can show one. */
+	/** Tells the operator a draft was saved, without opening anything; null when no surface can show a notice. */
 	openReview: () => ((draftId: string) => void) | null;
 	identitySettings?: () => IdentitySettings;
 	identity?: (cwd: string) => Promise<LocalIdentity>;
@@ -228,15 +227,12 @@ export function createReportTool(deps: ReportToolDeps): ToolSpec {
 		saveReportDraft(deps.stateDir, saved);
 		updateOutbox(deps.stateDir, saved.id, { kind: saved.kind, title: saved.title, state: "draft" });
 		if (sessionId !== null) sessionDrafts.set(sessionId, saved.id);
-		const open = deps.attended() ? deps.openReview() : null;
-		if (open !== null) {
-			open(saved.id);
-			return ok(REPORT_REVIEW_OPEN, { draftId: saved.id, created: true, review: true });
-		}
+		const notice = deps.openReview();
+		notice?.(saved.id);
 		return ok(`Saved as ${saved.id} for the operator to review. ${REPORT_NOT_YOURS}`, {
 			draftId: saved.id,
 			created: true,
-			review: false,
+			notified: notice !== null,
 		});
 	};
 

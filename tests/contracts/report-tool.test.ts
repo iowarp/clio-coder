@@ -12,12 +12,7 @@ import { recordAnswer } from "../../src/domains/report/offers.js";
 import type { LocalIdentity } from "../../src/domains/report/scrub.js";
 import type { AskUserHandler } from "../../src/tools/ask-user.js";
 import { CLIO_REPORT_NUDGE, clioIssueNudge } from "../../src/tools/bash.js";
-import {
-	createReportTool,
-	REPORT_OFFER_REFUSED,
-	REPORT_REVIEW_OPEN,
-	type ReportToolDeps,
-} from "../../src/tools/report.js";
+import { createReportTool, REPORT_OFFER_REFUSED, type ReportToolDeps } from "../../src/tools/report.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const IDENTITY = async (): Promise<LocalIdentity> => ({
@@ -72,15 +67,15 @@ describe("report tool", () => {
 		strictEqual(Object.keys(readOutbox(stateDir)).length, 1);
 	});
 
-	it("opens the review overlay when the operator is there", async () => {
+	it("raises a notice for the operator and opens nothing", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "report-tool-"));
-		const opened: string[] = [];
+		const noticed: string[] = [];
 		const tool = createReportTool(
-			deps(stateDir, { surface: "tui", attended: () => true, openReview: () => (id) => opened.push(id) }),
+			deps(stateDir, { surface: "tui", attended: () => true, openReview: () => (id) => noticed.push(id) }),
 		);
 		const result = await tool.run(DRAFT, {});
-		strictEqual(result.kind === "ok" ? result.output : "", REPORT_REVIEW_OPEN);
-		strictEqual(opened.length, 1);
+		ok(result.kind === "ok" && result.output.includes("for the operator to review"));
+		strictEqual(noticed.length, 1);
 	});
 
 	it("refuses an offer the host budget forbids without asking, and records a no", async () => {

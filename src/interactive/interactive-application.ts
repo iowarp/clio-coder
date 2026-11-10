@@ -292,7 +292,10 @@ export interface InteractiveDeps {
 	getSessionId?: () => string | null;
 	/** Install the TUI-backed ask_user handler for this interactive process. */
 	registerAskUserHandler?: (handler: AskUserHandler) => () => void;
-	/** Install the opener the `report` tool uses to put an agent's draft in front of the operator for review (R-12). */
+	/**
+	 * Install the notice the `report` tool raises for an agent's saved draft (R-12). Only a notice: the review starts on
+	 * the operator's own `/report send`, never mid-turn under keys typed for something else (R2b-report-05).
+	 */
 	registerReportReviewOpener?: (open: (draftId: string) => void) => () => void;
 	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
@@ -2406,9 +2409,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (!adopted) void applicationController.shutdown();
 	}
 
-	const unregisterReportReview = deps.registerReportReviewOpener?.((draftId) =>
-		overlayLifecycle.openReportState({ kind: "draft", draftId }),
-	);
+	const unregisterReportReview = deps.registerReportReviewOpener?.((draftId) => {
+		notifications.add({ level: "info", text: `Clio drafted a report; /report send ${draftId} reviews it` });
+		tui.requestRender();
+	});
 	if (unregisterReportReview) getTerminationCoordinator().onDrain(unregisterReportReview);
 	void import("../domains/report/extension.js")
 		.then(({ startReportOfferWatcher }) => {
