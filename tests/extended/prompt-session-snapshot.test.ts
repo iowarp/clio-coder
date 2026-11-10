@@ -1,4 +1,5 @@
 import { match, rejects, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import os, { hostname, tmpdir, userInfo } from "node:os";
@@ -356,6 +357,8 @@ describe("explicit context operations refresh the running prompt", { concurrency
 	it("refreshes inherited handbooks in descendant sessions without thawing sibling workspaces", async () => {
 		const f = await contextPromptFixture();
 		try {
+			// Handbooks reach a descendant session only inside a repository (52adde1cd, S-10).
+			execFileSync("git", ["init", "-q"], { cwd: f.cwd });
 			const child = join(f.cwd, "src");
 			const sibling = `${f.cwd}-sibling`;
 			mkdirSync(sibling);
