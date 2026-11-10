@@ -574,6 +574,16 @@ export function createProvidersBundle(
 				notes: [`Serving window unknown: ${probeResult.error ?? "the provider reported no window metadata"}.`],
 			};
 		}
+		// The capability rows describe the model the chat role runs on this target, not just its default.
+		const selectedModelId = probeResult.ok ? probeCandidateModelId(target) : null;
+		const selectedCapabilities = selectedModelId ? probeResult.modelCapabilities?.[selectedModelId] : undefined;
+		if (selectedModelId && selectedCapabilities && probeResult.capabilityModelId !== selectedModelId) {
+			probeResult = {
+				...probeResult,
+				capabilityModelId: selectedModelId,
+				discoveredCapabilities: selectedCapabilities,
+			};
+		}
 		options?.signal?.throwIfAborted();
 		if (!currentProbeTarget(target)) return null;
 		if (probeResult.ok && typeof desc.probeModels === "function" && !probeResult.models) {
