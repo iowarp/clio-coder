@@ -48,18 +48,39 @@ function modelsUrl(target: TargetDescriptor): string {
 function probeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
 	const headers: Record<string, string> = { ...OPENROUTER_HEADERS, ...(target.auth?.headers ?? {}) };
 	const envName = target.auth?.apiKeyEnvVar ?? "OPENROUTER_API_KEY";
-	if (ctx.credentialsPresent.has(envName)) {
-		const key = process.env[envName]?.trim();
-		if (key) headers.authorization = `Bearer ${key}`;
-	}
+	const key = ctx.authToken ?? (ctx.credentialsPresent.has(envName) ? process.env[envName]?.trim() : undefined);
+	if (key) headers.authorization = `Bearer ${key}`;
 	return headers;
 }
 
+/**
+ * `/models` is public, so it says nothing about the key. `/key` describes the
+ * calling key and refuses one that is invalid or expired.
+ */
+async function checkKey(target: TargetDescriptor, ctx: ProbeContext, headers: Record<string, string>) {
+	const opts = { url: `${targetBaseUrl(target)}/key`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
+	const result = await (ctx.signal ? probeJson({ ...opts, signal: ctx.signal }) : probeJson(opts));
+	if (result.ok || (result.status !== 401 && result.status !== 403)) return null;
+	const out: ProbeResult = {
+		ok: false,
+		authFailed: true,
+		failureKind: "authentication",
+		error: `OpenRouter refused the API key (${result.error})`,
+	};
+	if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
+	return out;
+}
+
 async function fetchModels(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
+	const headers = probeHeaders(target, ctx);
+	if (headers.authorization) {
+		const refused = await checkKey(target, ctx, headers);
+		if (refused) return refused;
+	}
 	const opts = {
 		url: modelsUrl(target),
 		timeoutMs: ctx.httpTimeoutMs,
-		headers: probeHeaders(target, ctx),
+		headers,
 	} as const;
 	const result = await (ctx.signal
 		? probeJson<OpenRouterModelsResponse>({ ...opts, signal: ctx.signal })
