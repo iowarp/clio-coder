@@ -1,10 +1,12 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { storeWriteTarget } from "../../src/core/store-paths.js";
+import { storeProjectDir, storeWriteTarget } from "../../src/core/store-paths.js";
+import { withStoreLock } from "../../src/domains/store/index.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { prepareStoreAdmissionArguments, prepareStoreArguments } from "../../src/tools/store/surface.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -129,4 +131,16 @@ describe("store tool", () => {
 			"sim:c",
 		]);
 	});
+
+	it("breaks a store lock whose holder died", () =>
+		withWorkspace(async (root) => {
+			const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+			const key = "blob\0results\0x.bin";
+			const digest = createHash("sha256").update(key).digest("hex").slice(0, 32);
+			const file = join(storeProjectDir(root), "locks", `${digest}.lock`);
+			mkdirSync(dirname(file), { recursive: true });
+			writeFileSync(file, JSON.stringify({ pid: dead, host: hostname(), token: "old", at: Date.now() }));
+			strictEqual(await withStoreLock(root, key, async () => "ran"), "ran");
+			strictEqual(existsSync(file), false);
+		}));
 });
