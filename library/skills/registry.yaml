@@ -36,8 +36,8 @@ skills:
     sha256: d70c692342cc84e225c2ebd983440567b47be64dfbb99811c830832f676c1d30
   - name: file-ticket
     path: git/file-ticket
-    version: 0.3.2
-    sha256: a5bbda49d90222ed0a28d99929a999b53b94d42a8e245af3b8afa73a09c08344
+    version: 0.3.3
+    sha256: b829a4beeed2446c76cef6cd598328a37cf7c08b315b03164259f82d568c4f70
   - name: fix-issue
     path: git/fix-issue
     version: 0.3.2
@@ -61,8 +61,8 @@ skills:
   # ── meta ──
   - name: clio-coder-dev
     path: meta/clio-coder-dev
-    version: 0.6.0
-    sha256: 0ad16bd330fca14952e7f584f5eb2ed9609405bb6c29ae375decfd87d6eb8b0e
+    version: 0.7.0
+    sha256: b121ee33f164b5624b2804a37928178dd1b01cd82beebb8bc0f340a27a0a2c70
   - name: clio-coder-test
     path: meta/clio-coder-test
     version: 0.5.0

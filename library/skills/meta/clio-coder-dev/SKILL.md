@@ -7,7 +7,7 @@ triggers:
   - change Clio context or session lifecycle
   - edit Clio skills tools or prompts
   - work a Clio lane brief or spec
-version: 0.6.0
+version: 0.7.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -86,6 +86,14 @@ the repository handbook are enforced by `pnpm run lint`.
   `undefined`; relative imports end in `.js`; type imports use `import type`.
 - Library edits: bump the version in `SKILL.md` and `plugin.json`, then
   `pnpm run skills:pin` and `pnpm run library:pin`.
+
+## Flywheel
+
+When choosing, scoping, prioritising or triaging Clio work, run
+`clio-coder dev flywheel --json` and cite the backlog row you acted on
+(rank, key, evidence) in the issue or PR. A `has-bundle` issue carries an
+encrypted share that only a maintainer can pull with `--pull`; never pull or
+decrypt one unless the maintainer asks.
 
 ## Git in a shared repository
 

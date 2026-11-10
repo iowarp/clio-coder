@@ -7,7 +7,7 @@ triggers:
   - log this bug
   - ticket this behavior
   - create a tracker issue
-version: 0.3.2
+version: 0.3.3
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue operations), POSIX-compatible shell
 allowed-tools:
@@ -78,7 +78,7 @@ Complete when every bullet above is either filled or explicitly marked unknown.
 
 ## Step 2 — Resolve Repository and Dedup
 
-When the repository is `iowarp/clio-coder` and the session is Clio Coder, stop and use the `report` capability instead.
+When the repository is `iowarp/clio-coder` and the session is Clio Coder, stop and use the `report` capability instead. The operator may also attach an encrypted share (`clio-coder report --bundle --share`), readable only by the maintainers and deletable with `report forget`; that is the operator's decision, so never pass `--share` yourself.
 
 1. Determine `--repo <owner/repo>` (provided flag or detected via `gh repo view`).
 2. Search for existing issues:

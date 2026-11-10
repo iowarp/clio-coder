@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "clio-coder-dev",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "Develop Clio Coder inside its own repository: orient on the running build versus the workspace, trace owners, avoid the checks that fail landings, apply each edit the right way and hand the work back. Use before changing Clio source, prompts, tools or library; pair with clio-coder-test for validation.",
 	"license": "Apache-2.0",
 	"extensions": {

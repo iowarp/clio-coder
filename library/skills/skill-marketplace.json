@@ -117,7 +117,7 @@
 				"create a tracker issue"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"audit": "pass",
 			"category": "git"
 		},
@@ -205,7 +205,7 @@
 				"work a Clio lane brief or spec"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev",
-			"version": "0.6.0",
+			"version": "0.7.0",
 			"audit": "pass",
 			"category": "meta"
 		},

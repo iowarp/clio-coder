@@ -137,9 +137,9 @@ entries:
       - change Clio context or session lifecycle
       - edit Clio skills tools or prompts
       - work a Clio lane brief or spec
-    version: 0.6.0
+    version: 0.7.0
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: 18ba54fe2a37019467fa960beca2514ed8e8d35102fd317dbe38ffbbb02676ec
+    sha256: 9301a7b03e4c6c8ac072bdd11988615263279d107623df440d9d2cab69484f23
     provides:
       - kind: skill
         name: clio-coder-dev
@@ -352,9 +352,9 @@ entries:
       - log this bug
       - ticket this behavior
       - create a tracker issue
-    version: 0.3.2
+    version: 0.3.3
     sourceUrl: skills/git/file-ticket
-    sha256: 599e43b9501ef61526c169ef3dd2a1c07685766b13ec4b4c76596dce10d9bdcc
+    sha256: 05e2de7638f70c678841adfdcc6de8981e7519813c586113bcc244ccad1ad289
     provides:
       - kind: skill
         name: file-ticket
