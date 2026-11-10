@@ -594,7 +594,7 @@ test("a canary in a member, or no consent, builds no bundle; selftest says which
 	}
 });
 
-test("report --bundle mechanics attaches a bundle that send keeps, show prints and forget deletes (R-17 wiring)", async () => {
+test("report --bundle mechanics shows its consent text, keeps the bundle only on send, and forget deletes it (R-17, R2b-report-02)", async () => {
 	const root = mkdtempSync(join(tmpdir(), "report-bundle-cli-"));
 	try {
 		const stateDir = join(root, "state");
@@ -634,14 +634,26 @@ test("report --bundle mechanics attaches a bundle that send keeps, show prints a
 			runReport(["bug", "--title", "fix: x fails on y", "--body-file", bodyFile, "--session", "ses_cli", ...extra], deps);
 		const idIn = (text: string) => /bundles\/(rpt_[0-9A-Z]{26})\.tar\.gz/u.exec(text)?.[1] ?? "";
 
-		strictEqual(await report("--bundle", "mechanics", "--transcript", "--dry-run"), 0);
+		// No silent default: a kept bundle records consent, so the scope is the reporter's to name.
+		strictEqual(await report("--bundle", "mechanics", "--dry-run"), 2);
+		ok(err.includes("--bundle mechanics needs --consent debug"), err);
+		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--transcript", "--dry-run"), 0);
 		ok(out.includes("Transcript: the last 2 of 2 turns, tool arguments and output left out"), out);
-		ok(out.includes("Not saved: nothing was written."));
+		ok(out.includes("By sending the bundle you agree to:\n  The maintainers of Clio Coder may read this bundle"), out);
+		ok(
+			out.includes("  The bundle includes the last turns of this conversation") && !out.includes("cannot be recalled"),
+			out,
+		);
+		ok(
+			out.includes("Not saved: nothing was written.") && out.includes("The diagnostic bundle stays on this machine"),
+			out,
+		);
 		ok(!existsSync(join(stateDir, "reports", "bundles")));
 
 		out = "";
 		strictEqual(await report("--bundle", "mechanics", "--consent", "dataset", "--yes"), 0);
 		const sent = idIn(out);
+		ok(out.includes("A published dataset cannot be recalled"), out);
 		ok(out.includes("The diagnostic bundle stays on this machine; sending does not upload it."), out);
 		const entry = outboxEntry(stateDir, sent);
 		strictEqual(entry?.state, "sent");
@@ -650,15 +662,25 @@ test("report --bundle mechanics attaches a bundle that send keeps, show prints a
 		strictEqual(await runReport(["show", sent, "--bundle"], deps), 0);
 		ok(out.startsWith(`${sent}  sent  `) && out.includes(`\nbundle sha256 ${entry?.bundle?.sha256}, `), out);
 
+		// Refused for want of --yes: nothing is kept, so no bundle or outbox row is left without its draft.
 		out = "";
-		strictEqual(await report("--bundle", "mechanics"), 2);
+		strictEqual(await report("--bundle", "mechanics", "--consent", "debug"), 2);
 		const draft = idIn(out);
-		ok(existsSync(reportBundlePath(stateDir, draft)));
-		strictEqual(await runReport(["forget", draft], deps), 0);
-		ok(!existsSync(reportBundlePath(stateDir, draft)));
+		ok(!existsSync(reportBundlePath(stateDir, draft)) && outboxEntry(stateDir, draft) === null);
+
+		// forget deletes the local bundle of a sent report, as the consent text and help promise; the issue stays.
+		out = "";
+		ok(existsSync(reportBundlePath(stateDir, sent)));
+		strictEqual(await runReport(["forget", sent], deps), 0);
+		ok(!existsSync(reportBundlePath(stateDir, sent)) && out.includes("Clio cannot withdraw it"), out);
+		strictEqual(outboxEntry(stateDir, sent)?.state, "sent");
+		strictEqual(await runReport(["forget", sent], deps), 1);
 
 		err = "";
-		strictEqual(await runReport(["bug", "--body-file", bodyFile, "--bundle", "mechanics"], deps), 2);
+		strictEqual(
+			await runReport(["bug", "--body-file", bodyFile, "--bundle", "mechanics", "--consent", "debug"], deps),
+			2,
+		);
 		ok(err.includes("--bundle mechanics bundles a session: pass --last or --session <id>"));
 		strictEqual(await report("--transcript", "4"), 2);
 		ok(err.includes("--transcript applies only with --bundle mechanics"));

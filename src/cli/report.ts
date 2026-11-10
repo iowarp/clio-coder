@@ -4,6 +4,7 @@ import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	applyReportEdit,
+	type BuiltBundle,
 	checkLastAttempt,
 	composeReportDraft,
 	type DuplicateChoice,
@@ -27,10 +28,12 @@ import {
 	readReportDraft,
 	refreshReportStatus,
 	relatedLine,
+	reportBundlePath,
 	reportEditTemplate,
 	reportRows,
 	routeFor,
 	runReportSend,
+	saveBuiltBundle,
 	saveReportDraft,
 	sentLine,
 	sweepReportBundles,
@@ -40,6 +43,7 @@ import {
 	attachBundle,
 	type BundleRequest,
 	bundleRequest,
+	consentSentences,
 	formatBundleSummary,
 	printReportBundle,
 	type ReportBundleIo,
@@ -71,11 +75,14 @@ on someone's issue or files a regression). --reply-check lets an attended sessio
 check the filed issue once a day for a maintainer's reply (off unless asked).
 status asks GitHub, through your gh, where each open report stands.
 Security problems go to a private advisory: clio-coder report security.
---bundle mechanics builds a diagnostic bundle of the session's telemetry, with the
-consent given by --consent (debug by default; dataset adds use in evaluation data).
+--bundle mechanics builds a diagnostic bundle of the session's telemetry and needs
+--consent: debug lets the maintainers read it to fix this report; dataset also lets
+its mechanics go into public datasets. The consent text prints with the bundle, and
+the bundle is kept only once you send or save the report.
 --transcript adds the last N turns (3, at most 10) scrubbed and without thinking;
 tool arguments and output stay out unless --with-tool-output. The bundle stays on
-this machine: show <id> --bundle prints every byte of it and forget deletes it.
+this machine: show <id> --bundle prints every byte of it and forget deletes it,
+also after the report was sent.
 selftest builds that bundle for the newest session here, writes nothing, and
 says whether any of this machine's identifiers survived into it.
 Exit codes: 0 sent, opened, written or previewed; 1 on a send failure or a refused
@@ -182,13 +189,15 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		} else positionals.push(arg);
 	}
 	const bundle = values.get("--bundle");
-	const request = (bundleFlag: string | undefined) =>
+	// selftest writes nothing and keeps no consent, so only a kept bundle needs --consent named.
+	const request = (bundleFlag: string | undefined, requireConsent = bundleFlag !== undefined) =>
 		bundleRequest({
 			bundle: bundleFlag,
 			consent: values.get("--consent"),
 			transcript: values.get("--transcript"),
 			withToolOutput: flags.has("--with-tool-output"),
 			anonymizeModels: flags.has("--anonymize-models"),
+			requireConsent,
 		});
 	const onDuplicateValue = values.get("--on-duplicate");
 	if (onDuplicateValue !== undefined && !(DUPLICATE_CHOICES as ReadonlyArray<string>).includes(onDuplicateValue))
@@ -247,7 +256,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 				"--anonymize-models",
 			]);
 			if (used !== null) return used;
-			const selftest = request("mechanics");
+			const selftest = request("mechanics", false);
 			if (typeof selftest === "string") return selftest;
 			return { verb: "selftest", session: values.get("--session") ?? null, request: selftest as BundleRequest };
 		}
@@ -389,7 +398,15 @@ function saveDraft(io: Io, draft: ReportDraft, title: string): void {
 async function confirmAndSend(
 	initial: ReportDraft,
 	io: Io,
-	options: { dryRun: boolean; yes: boolean; json: boolean; onDuplicate: DuplicateChoice | null; replyCheck: boolean },
+	options: {
+		dryRun: boolean;
+		yes: boolean;
+		json: boolean;
+		onDuplicate: DuplicateChoice | null;
+		replyCheck: boolean;
+		/** A bundle built for this report and not yet kept. */
+		bundle?: BuiltBundle | null;
+	},
 ): Promise<number> {
 	// R-12 promises the agent drafts but never sends: a bash call has no terminal, and --yes skips the review the
 	// footer claims, so an agent's draft goes only through the interactive review. Refused before gh is asked anything.
@@ -405,6 +422,10 @@ async function confirmAndSend(
 		io.err("nothing sent: --yes is refused in a command a Clio session started; send it from your own terminal\n");
 		return 2;
 	}
+	const pending = options.bundle ?? null;
+	const keepBundle = () => {
+		if (pending !== null) saveBuiltBundle(io.stateDir, draft, pending, io.deps.now?.() ?? new Date());
+	};
 	const identity = await identityFor(io);
 	let transport: ReportTransport | null = null;
 	let planTransport: ReportPlanTransport;
@@ -445,12 +466,19 @@ async function confirmAndSend(
 	const emit = (result?: unknown) =>
 		io.out(
 			`${JSON.stringify(
-				{ draft, rendered: plan.rendered, transport: planTransport, plan, ...(result !== undefined ? { result } : {}) },
+				{
+					draft,
+					rendered: plan.rendered,
+					transport: planTransport,
+					plan,
+					...(pending !== null ? { bundle: bundleJson(pending) } : {}),
+					...(result !== undefined ? { result } : {}),
+				},
 				null,
 				2,
 			)}\n`,
 		);
-	const bundled = Boolean(outboxEntry(io.stateDir, draft.id)?.bundle);
+	const bundled = pending !== null || Boolean(outboxEntry(io.stateDir, draft.id)?.bundle);
 	if (!options.json) io.out(formatReportPreview(plan, bundled));
 	if (options.dryRun) {
 		if (options.json) emit();
@@ -497,12 +525,14 @@ async function confirmAndSend(
 				}
 				continue;
 			}
+			keepBundle();
 			saveDraft(io, draft, plan.rendered.title);
 			io.out(`nothing sent; saved as draft ${draft.id}. clio-coder report send ${draft.id} sends it later.\n`);
 			return 0;
 		}
 	}
 	if (transport === null) return 2;
+	keepBundle();
 	if (plan.rateWarning !== null && !options.json) io.err(`${plan.rateWarning}\n`);
 	const outcome = await runReportSend(draft, plan.rendered, {
 		stateDir: io.stateDir,
@@ -597,15 +627,31 @@ async function compose(args: ComposeArgs, io: Io): Promise<number> {
 		}
 		draft = edited;
 	}
+	let bundle: BuiltBundle | null = null;
 	if (args.bundle !== null) {
-		const built = await attachBundle(bundleIo(io), draft, args.bundle, { write: !args.dryRun });
+		// Built in memory: it is written, and its consent recorded, only once the reporter sends or saves the report.
+		const built = await attachBundle(bundleIo(io), draft, args.bundle, { write: false });
 		if (typeof built === "string") {
 			fail(io, `no bundle was built: ${built}`);
 			return 1;
 		}
-		(args.json ? io.err : io.out)(`${formatBundleSummary(built)}\n`);
+		(args.json ? io.err : io.out)(
+			`${formatBundleSummary(built, args.dryRun ? null : reportBundlePath(io.stateDir, draft.id))}\n`,
+		);
+		bundle = built;
 	}
-	return confirmAndSend(draft, io, args);
+	return confirmAndSend(draft, io, { ...args, bundle });
+}
+
+/** The bundle in `--json`: what it holds and the consent text the reporter agreed to, sentence by sentence. */
+function bundleJson(built: BuiltBundle) {
+	return {
+		sha256: built.sha256,
+		bytes: built.summary.bytes,
+		scopes: built.summary.scopesGranted,
+		content: built.summary.content,
+		consent: { textVersion: built.envelope.consent.textVersion, sentences: consentSentences(built) },
+	};
 }
 
 function bundleIo(io: Io): ReportBundleIo {
@@ -698,7 +744,7 @@ function forget(io: Io, id: string): number {
 		fail(io, `${result.reason}${result.reason.startsWith("no report") ? "; clio-coder report status lists them" : ""}`);
 		return 1;
 	}
-	io.out(`forgot ${id}; its local draft is deleted\n`);
+	io.out(`${result.message}\n`);
 	return 0;
 }
 
@@ -738,8 +784,8 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 		cwd: deps.cwd ?? process.cwd(),
 		deps,
 	};
-	sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
 	try {
+		sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
 		switch (args.verb) {
 			case "compose":
 				return await compose(args, io);

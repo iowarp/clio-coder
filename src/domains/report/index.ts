@@ -21,6 +21,7 @@ export {
 	renderBundlePreview,
 	reportBundlePath,
 	reportBundlesDirectory,
+	saveBuiltBundle,
 	sweepReportBundles,
 	TRANSCRIPT_TURNS_DEFAULT,
 	TRANSCRIPT_TURNS_MAX,

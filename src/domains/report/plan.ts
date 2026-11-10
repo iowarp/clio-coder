@@ -490,24 +490,34 @@ export function reportRows(stateDir: string): ReportRow[] {
 }
 
 /**
- * Delete a local draft. A posted report is refused: Clio cannot withdraw a public post. One whose last create may have
- * been filed waits until `report send` checks GitHub and finds nothing.
+ * Delete what this machine keeps of a report: a draft and its bundle, or, for a posted report, its diagnostic bundle.
+ * The public issue itself is refused: Clio cannot withdraw a public post. One whose last create may have been filed
+ * waits until `report send` checks GitHub and finds nothing.
  */
-export function forgetReport(stateDir: string, id: string): { ok: true } | { ok: false; reason: string } {
+export function forgetReport(
+	stateDir: string,
+	id: string,
+): { ok: true; message: string } | { ok: false; reason: string } {
 	const entry = outboxEntry(stateDir, id);
-	if (entry?.state === "sent")
+	if (entry?.state === "sent") {
+		const left = `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}`;
+		if (entry.bundle === null)
+			return { ok: false, reason: `${left}. Clio cannot withdraw a public report; edit or close it on GitHub.` };
+		deleteReportBundle(stateDir, id);
 		return {
-			ok: false,
-			reason: `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}. Clio cannot withdraw a public report; edit or close it on GitHub.`,
+			ok: true,
+			message: `deleted the diagnostic bundle of ${id} from this machine. The report itself ${left.slice(id.length + 1)}; Clio cannot withdraw it, so edit or close it on GitHub`,
 		};
+	}
 	if (entry?.state === "sending")
 		return {
 			ok: false,
 			reason: `the last attempt to send ${id} may have been filed; run clio-coder report send ${id} in a terminal to check (it asks before sending), then forget it`,
 		};
 	if (entry === null && readReportDraft(stateDir, id) === null) return { ok: false, reason: `no report ${id}` };
+	const bundled = (entry?.bundle ?? null) !== null;
 	deleteReportBundle(stateDir, id);
 	deleteReportDraft(stateDir, id);
 	if (entry !== null) updateOutbox(stateDir, id, { kind: entry.kind, title: entry.title, state: "withdrawn" });
-	return { ok: true };
+	return { ok: true, message: `forgot ${id}; its local draft${bundled ? " and diagnostic bundle are" : " is"} deleted` };
 }

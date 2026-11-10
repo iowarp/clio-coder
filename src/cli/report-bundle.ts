@@ -3,6 +3,7 @@ import {
 	buildBundle,
 	type ConsentScopes,
 	composeReportDraft,
+	consentText,
 	type LocalIdentity,
 	observeSession,
 	previewBundle,
@@ -45,6 +46,8 @@ export function bundleRequest(input: {
 	transcript?: string | undefined;
 	withToolOutput: boolean;
 	anonymizeModels: boolean;
+	/** A bundle that is kept records consent, so it needs `--consent`; selftest writes nothing and needs none. */
+	requireConsent?: boolean;
 }): BundleRequest | null | string {
 	if (input.bundle !== undefined && input.bundle !== "none" && input.bundle !== "mechanics")
 		return `--bundle takes none or mechanics, not ${input.bundle || "nothing"}`;
@@ -66,6 +69,8 @@ export function bundleRequest(input: {
 			return `--transcript takes 1 to ${TRANSCRIPT_TURNS_MAX} turns, not ${input.transcript}`;
 	}
 	if (input.withToolOutput && input.transcript === undefined) return "--with-tool-output applies only with --transcript";
+	if (input.requireConsent === true && input.consent === undefined)
+		return "--bundle mechanics needs --consent debug (the maintainers may read it to fix this report) or --consent dataset (its mechanics may also go into public datasets); the full text prints with the bundle";
 	return {
 		scopes: input.consent === "dataset" ? ["debug", "dataset"] : ["debug"],
 		transcript: input.transcript !== undefined ? { turns, toolOutput: input.withToolOutput } : null,
@@ -77,8 +82,17 @@ function listOrNone(values: ReadonlyArray<string>): string {
 	return values.length > 0 ? values.join(", ") : "none";
 }
 
+/** The shipped consent text for every scope the bundle grants and its transcript. */
+export function consentSentences(built: Pick<BuiltBundle, "summary">): string[] {
+	const text = consentText();
+	return [
+		...built.summary.scopesGranted.map((scope) => text[scope]),
+		...(built.summary.transcript !== null ? [text.transcript] : []),
+	];
+}
+
 /** The attach step's lines: size, records, what is kept and never kept, what stayed readable, the ticks. */
-export function formatBundleSummary(built: BuiltBundle): string {
+export function formatBundleSummary(built: BuiltBundle, keepAt: string | null = null): string {
 	const { summary } = built;
 	const anonymized = Object.entries(summary.anonymized)
 		.map(([kind, count]) => `${kind} ${count}`)
@@ -95,13 +109,16 @@ export function formatBundleSummary(built: BuiltBundle): string {
 		`  tools: ${listOrNone(summary.readable.tool)}`,
 		`  tokens: ${listOrNone(summary.readable.token)}`,
 		`Anonymized: ${anonymized || "none"}; withheld: ${summary.withheld}`,
-		`Consent: ${summary.scopesGranted.join(" and ")}`,
+		`Consent: ${summary.scopesGranted.join(" and ")}, text version ${built.envelope.consent.textVersion}. By sending the bundle you agree to:`,
+		...consentSentences(built).map((sentence) => `  ${sentence}`),
 		summary.transcript
 			? `Transcript: the last ${summary.transcript.turns} of ${summary.transcript.of} turns, tool arguments and output ${summary.transcript.toolOutput ? "included" : "left out"}`
 			: "Transcript: not included",
 		built.path !== null
 			? `Saved at ${built.path}. It stays on this machine; clio-coder report show ${built.envelope.reportId} --bundle prints every byte of it.`
-			: "Not saved: nothing was written.",
+			: keepAt !== null
+				? `Kept at ${keepAt} only once you send or save the report. It stays on this machine; clio-coder report show ${built.envelope.reportId} --bundle then prints every byte of it.`
+				: "Not saved: nothing was written.",
 	];
 	return `${lines.join("\n")}\n`;
 }

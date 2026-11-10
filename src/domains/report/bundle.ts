@@ -394,11 +394,8 @@ function envelopeProblem(envelope: unknown): string | null {
 export async function buildBundle(draft: ReportDraft, options: BundleOptions): Promise<BuiltBundle> {
 	const scopesGranted = consentScopes((options.consent as { scopes?: unknown } | undefined)?.scopes);
 	const write = options.write !== false;
+	if (write) deleteReportBundle(options.stateDir, draft.id);
 	const now = options.now ?? new Date();
-	if (write) {
-		sweepReportBundles(options.stateDir, now);
-		deleteReportBundle(options.stateDir, draft.id);
-	}
 	if (draft.sessionId === null) throw new Error("the bundle was not built: the report names no session");
 	await options.flush?.();
 	const resolved = resolveShareScopes(options.stateDir, {
@@ -509,18 +506,8 @@ export async function buildBundle(draft: ReportDraft, options: BundleOptions): P
 
 	const bytes = packTelemetryArchive(members, Math.floor(now.getTime() / 1000));
 	const hash = sha256(bytes);
-	let path: string | null = null;
-	if (write) {
-		path = reportBundlePath(options.stateDir, draft.id);
-		safeResourceWrite(path, bytes, { mode: 0o600 });
-		updateOutbox(options.stateDir, draft.id, {
-			kind: draft.kind,
-			title: draft.title,
-			bundle: { sha256: hash, scopes: scopesGranted, content: envelope.consent.content },
-		});
-	}
-	return {
-		path,
+	const built: BuiltBundle = {
+		path: null,
 		sha256: hash,
 		bytes,
 		members,
@@ -541,6 +528,31 @@ export async function buildBundle(draft: ReportDraft, options: BundleOptions): P
 			neverKept: BUNDLE_NEVER_KEPT,
 		},
 	};
+	return write ? saveBuiltBundle(options.stateDir, draft, built, now) : built;
+}
+
+/**
+ * Keep a bundle built without writing it: the file at 0600 and its sha256, scopes and content in the outbox. A surface
+ * calls this only once the reporter has seen the bundle's summary and consent text and chosen to send or save.
+ */
+export function saveBuiltBundle(
+	stateDir: string,
+	draft: Pick<ReportDraft, "id" | "kind" | "title">,
+	built: BuiltBundle,
+	now: Date = new Date(),
+): BuiltBundle {
+	if (built.envelope.reportId !== draft.id)
+		throw new Error(`the bundle is for ${built.envelope.reportId}, not ${draft.id}`);
+	sweepReportBundles(stateDir, now);
+	deleteReportBundle(stateDir, draft.id);
+	const path = reportBundlePath(stateDir, draft.id);
+	safeResourceWrite(path, built.bytes, { mode: 0o600 });
+	updateOutbox(stateDir, draft.id, {
+		kind: draft.kind,
+		title: draft.title,
+		bundle: { sha256: built.sha256, scopes: built.summary.scopesGranted, content: built.envelope.consent.content },
+	});
+	return { ...built, path };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

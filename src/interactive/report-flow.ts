@@ -298,7 +298,7 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 
 	function forget(id: string): void {
 		const result = forgetReport(deps.stateDir, id);
-		if (result.ok) deps.notify("success", `report: forgot ${id}; its local draft is deleted`);
+		if (result.ok) deps.notify("success", `report: ${result.message}`);
 		else
 			deps.notify(
 				"warning",
