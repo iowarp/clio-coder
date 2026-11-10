@@ -29,6 +29,7 @@ import {
 	validateBlobName,
 	validateTagName,
 } from "../../../core/store-paths.js";
+import { clioDataDir } from "../../../core/xdg.js";
 import { withFileMutationQueue } from "../../../tools/file-mutation-queue.js";
 import type { StoreBackend } from "../backend.js";
 import { type StoreBackendFacts, type StoreBlobStat, StoreRefusal } from "../types.js";
@@ -128,10 +129,10 @@ async function fsyncFile(filePath: string): Promise<void> {
  * the real name, and link's EEXIST picks one winner as open("wx") would.
  */
 async function createExclusive(target: string, data: Uint8Array | string): Promise<boolean> {
-	await mkdir(path.dirname(target), { recursive: true });
+	await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
 	const temp = tempSibling(target);
 	try {
-		const handle = await open(temp, "wx");
+		const handle = await open(temp, "wx", 0o600);
 		try {
 			await handle.writeFile(data);
 			await handle.sync();
@@ -214,7 +215,10 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 		checkTag(tag);
 		const dir = storeTagDir(cwd, tag);
 		await assertUnderProject(dir);
-		await mkdir(path.join(dir, "blobs"), { recursive: true });
+		// Blobs and records hold workspace bytes, argv and session ids, so the store is owner-only like
+		// transcripts; clioDataDir gives a missing data root its 0700 mode and root marker first.
+		clioDataDir();
+		await mkdir(path.join(dir, "blobs"), { recursive: true, mode: 0o700 });
 		await assertUnderProject(path.join(dir, "blobs"));
 		const createdAt = new Date().toISOString();
 		await createExclusive(
@@ -311,7 +315,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				await withFileMutationQueue(file, async () => {
 					const current = await readTagFile(tag);
 					current.xattrs = { ...current.xattrs, [key]: value };
-					await safeResourceWriteAsync(file, `${JSON.stringify(current)}\n`);
+					await safeResourceWriteAsync(file, `${JSON.stringify(current)}\n`, { mode: 0o600 });
 				});
 			}),
 
@@ -330,14 +334,14 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				}
 				if (!sourceInfo.isFile()) throw new StoreRefusal("not-a-file", `${source} is not a regular file.`);
 				if (signal?.aborted) throw new StoreRefusal("io", `The put of ${blob} into ${tag} was aborted.`);
-				await mkdir(path.dirname(target), { recursive: true });
+				await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
 				// A link may have been planted between the check and mkdir; judge the path again.
 				await blobTarget(tag, blob);
 				const temp = tempSibling(target);
 				try {
 					await pipeline(
 						createReadStream(source),
-						createWriteStream(temp, { flags: "wx" }),
+						createWriteStream(temp, { flags: "wx", mode: 0o600 }),
 						...(signal !== undefined ? [{ signal }] : []),
 					);
 					await fsyncFile(temp);
