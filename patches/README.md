@@ -3,8 +3,10 @@
 ## Pi TUI 1.5.2: why the patch remains
 
 `@earendil-works__pi-tui@1.5.2.patch` is the sole Pi dependency patch, applied
-by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch has seventeen hunks in ten `dist/` files and applies to the
+by pnpm's exact `patchedDependencies` entry.
+**pi-ai and pi-agent-core are unpatched.** The
+[Anthropic thread idle limit](#pi-ai-152-anthropic-thread-idle-limit) lives in Clio's engine.
+The pi-tui patch has seventeen hunks in ten `dist/` files and applies to the
 published, unmodified 1.5.2 package. It carries the semantic edit and search
 operations that stock 1.5.2 keeps private, the regular-screen render memo and the
 kept-rows hook that lets that memo skip rows Clio vouches for.
@@ -176,10 +178,54 @@ workload in both modes. A keystroke frame no longer grows with the transcript. A
 because three layers of Clio's chat panel each copy the reply's rows into a new array per frame (the settled split, the
 gutter and the panel's tail), which the panel's promise never to mutate a returned array requires.
 
+## Pi AI 1.5.2: Anthropic thread idle limit
+
+This is an engine adaptation, not a dependency patch.
+`src/engine/apis/anthropic-response.ts` uses Pi's public `onPayload`, `fetch`
+and session-cleanup hooks, so npm and from-source installs run the same guard
+against stock pi-ai. The earlier three-hunk pnpm patch was removed because it
+did not reach npm consumers.
+
+Measured with `claude-haiku-5-5` on `anthropic-max` on 2026-11-10:
+with long retention and keepalive off, idle gaps of 240 s and 285 s continued,
+while 300 s and 330 s returned HTTP 404 `thread_not_found`. The 330 s failure
+also occurred at short retention and with keepalive on. Continuations 111 s
+apart still worked 7 min 24 s after creation. Stock Pi retries in full as a
+new thread, costing a rejected round trip of 150 to 700 ms.
+
+Clio records each successful threaded reply's id and monotonic time. Beyond
+270 s it replaces an attempted continuation with a new thread before fetch.
+It restores only `messages`, `system` and `tools` from the final payload,
+preserving the SDK's other serialized fields and headers, including its beta
+header. The `thread` field stays last, and any content-length header is removed
+so fetch computes it again. A wall-clock delta additionally detects suspend
+on hosts whose monotonic clock stops; a backward clock adjustment cannot
+extend a thread's lifetime. The 30 s margin is conservative policy for both
+Anthropic runtimes, not a measured API-key lifetime. A needless create costs
+a full upload without deliberately changing the cacheable prefix.
+
+Pi consumes the old continuation state before sending and records the new
+reply normally. Clio never clears unrelated session resources or changes
+Pi's `"off"` state. Keepalive and prewarm requests have `disableContinuation`
+set and neither consume nor refresh the reply stamp. The stamp map is capped
+at 10,000 sessions; an unknown or mismatched reply id also starts fresh.
+Retries retain their restart decision. If the payload shape no longer permits
+a complete reconstruction, Clio records `anthropic_thread_restart_skipped`
+and leaves recovery to Pi; a restart records `anthropic_thread_restart`.
+
+`tests/contracts/anthropic-thread-idle.test.ts` drives Clio's real stream
+adapter with injected SSE and controlled monotonic and wall clocks. It checks
+wire behavior, including equivalence to Pi's own new-thread request.
+Remove the guard when stock Pi ages threads itself. Do not bundle pi-ai and
+pi-agent-core solely for this fix: that would broaden dependency/license
+vendoring and split the runtime-plugin `pi-ai/compat` registry from its
+installed package unless the bridge were redesigned.
+
 ## Distribution, verification and removal
 
-The build bundles the patched JavaScript. npm consumers do not need pnpm to
-reapply a patch; the pinned dependency also supplies native helper assets.
+The build bundles the patched pi-tui JavaScript. npm consumers do not need pnpm
+to reapply that patch; the pinned dependency also supplies native helper assets.
+The Anthropic idle guard ships as Clio engine code and needs no pi-ai patch.
 `NOTICE` and `dist/assets/tui-notices/` preserve the relevant licenses.
 
 On each Pi upgrade, check stock APIs and dry-run the patch against the published
@@ -200,6 +246,6 @@ compare frame time and garbage per frame with the figures above. Patch applicabi
 successful installation alone is not behavioral verification.
 
 Remove each patch seam when stock Pi offers equivalent semantics and Clio's
-consumers use that public API. Remove the final patched dependency entry only
+consumers use that public API. Remove the patched dependency entry only
 when those tests pass against the unmodified package. Until then this is a
 Clio-maintained compatibility patch, with no claim of upstream support.
