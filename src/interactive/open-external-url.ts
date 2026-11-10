@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { isOpenableUrl, windowsUrlOpener } from "../core/open-browser.js";
+import { openableUrl, windowsUrlOpener } from "../core/open-browser.js";
 
 /**
  * Provider runtimes supply OAuth authorize, device-code, and management-console
@@ -7,10 +7,11 @@ import { isOpenableUrl, windowsUrlOpener } from "../core/open-browser.js";
  * opens, and Windows never goes through cmd.exe (R1-safety-secrets-07).
  */
 export const maybeOpenExternalUrl = (url: string): void => {
-	if (!isOpenableUrl(url)) return;
+	const href = openableUrl(url);
+	if (href === null) return;
 	const platform = process.platform;
 	const opener: [string, string[]] | null =
-		platform === "darwin" ? ["open", [url]] : platform === "win32" ? windowsUrlOpener(url) : ["xdg-open", [url]];
+		platform === "darwin" ? ["open", [href]] : platform === "win32" ? windowsUrlOpener(href) : ["xdg-open", [href]];
 	if (!opener) return;
 	try {
 		const child = spawn(opener[0], opener[1], { stdio: "ignore", detached: true });

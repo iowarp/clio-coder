@@ -38,18 +38,25 @@ export function canOpenBrowser(
  * Only https: and loopback http: URLs reach a platform opener. Provider and
  * device-code servers supply some of these links, so a `file:`, custom-scheme
  * or remote plain-http link is printed, never opened (R1-safety-secrets-07).
+ * The opener gets the parsed URL with shell-active characters percent-encoded,
+ * never the raw string: `wslview` ends in a double-quoted PowerShell `Start`,
+ * where `$(...)` would run (R2-safety-secrets-18). Null means refused.
  */
-export function isOpenableUrl(url: string): boolean {
+export function openableUrl(url: string): string | null {
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
 	} catch {
-		return false;
+		return null;
 	}
-	if (parsed.protocol === "https:") return true;
-	if (parsed.protocol !== "http:") return false;
-	const host = parsed.hostname.toLowerCase();
-	return host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/u.test(host);
+	if (parsed.protocol === "http:") {
+		const host = parsed.hostname.toLowerCase();
+		if (!(host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/u.test(host))) return null;
+	} else if (parsed.protocol !== "https:") return null;
+	return parsed.href.replace(
+		/[$`"'();\s]/gu,
+		(char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
+	);
 }
 
 /**
@@ -65,16 +72,17 @@ export function windowsUrlOpener(url: string, env: NodeJS.ProcessEnv = process.e
 
 /** Launches the platform opener for `url`. Returns false when this session has no local browser or the URL is refused. */
 export function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
-	if (!canOpenBrowser(env) || !isOpenableUrl(url)) return false;
+	const href = openableUrl(url);
+	if (!canOpenBrowser(env) || href === null) return false;
 	const platform = process.platform;
 	const opener: [string, string[]] | null =
 		platform === "darwin"
-			? ["open", [url]]
+			? ["open", [href]]
 			: platform === "win32"
-				? windowsUrlOpener(url, env)
+				? windowsUrlOpener(href, env)
 				: !env.DISPLAY && !env.WAYLAND_DISPLAY && isWsl(env)
-					? ["wslview", [url]]
-					: ["xdg-open", [url]];
+					? ["wslview", [href]]
+					: ["xdg-open", [href]];
 	if (!opener) return false;
 	const [command, args] = opener;
 	try {
