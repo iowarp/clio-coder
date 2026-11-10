@@ -337,7 +337,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		credits: { display: "withhold", usedPct: "keep" },
 		targetId: "model-id",
 		message: "withhold",
-		account: "user",
+		// Already an opaque digest whose pattern an anonymous id cannot satisfy; the field is optional, so it goes.
+		account: "drop",
 	},
 	"budget.crossed": keep("level", "spendUsd", "projectedUsd", "ceilingUsd", "contextTokens"),
 	"budget.held": keep(
