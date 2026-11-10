@@ -180,41 +180,23 @@ it("queue recovery prefixes both queue kinds exactly once and keeps literal bang
 	f.controller.restoreQueuedFollowUpsToEditor();
 	assert.equal(f.editor.getText(), "prior steer\n\nprior follow-up\n\n!draft");
 });
-it("four command bridges reuse owners once and reject correctable arguments", () => {
-	const calls: unknown[] = [];
+it("retired key commands name their key and run nothing", () => {
+	const notices: string[] = [];
 	const context = {
-		keyboardActions: {
-			background: () => calls.push("background"),
-			editor: (text: string) => {
-				calls.push(["editor", text]);
-				return true;
-			},
-			interrupt: (text: string) => calls.push(["interrupt", text]),
-			dismiss: (all: boolean) => calls.push(["dismiss", all]),
-			outputLabel: () => "alt+p / ctrl+g o",
-		},
-		notice: noop,
+		keyboardActions: { menuLabel: (letter: string) => `Ctrl+G ${letter.toUpperCase()}` },
+		notice: (_level: string, text: string) => notices.push(text),
 		render: noop,
 	} as unknown as SlashCommandContext;
-	for (const line of [
-		"/background",
-		"/editor",
-		"/editor !literal",
-		"/interrupt correct text",
-		"/notifications dismiss",
-		"/notifications dismiss all",
-	])
-		assert.equal(dispatchSlashCommand(parseSlashCommand(line), context), "accepted");
-	assert.deepEqual(calls, [
-		"background",
-		["editor", ""],
-		["editor", "!literal"],
-		["interrupt", "correct text"],
-		["dismiss", false],
-		["dismiss", true],
-	]);
-	for (const line of ["/background extra", "/interrupt", "/notifications dismiss typo"])
+	for (const line of ["/background", "/editor", "/interrupt correct text", "/notifications dismiss"])
 		assert.equal(dispatchSlashCommand(parseSlashCommand(line), context), "rejected");
+	assert.deepEqual(notices, [
+		"/background is now a key: Ctrl+G D.",
+		"/editor is now a key: Ctrl+G G.",
+		"/interrupt is now a key: Ctrl+G S.",
+		"/notifications is now a key: Ctrl+G X.",
+	]);
+	const retired = parseSlashCommand("/interrupt correct text");
+	assert.equal(retired.kind === "retired" ? retired.rest : undefined, "correct text");
 });
 it("clearing pasted input lets a newly typed bang become an intentional command", () => {
 	const f = fixture();

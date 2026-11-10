@@ -1246,11 +1246,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		recordFeature,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		keyboardActions: {
-			background: () => backgroundActiveDispatch(),
-			editor: (text) => editorSubmit.openExternalEditorForInput(text),
-			interrupt: (text) => editorSubmit.interruptFromEditor(text),
-			dismiss: (all) => applicationController.dismissNotifications(all),
-			outputLabel: () => keybindings.actionLabel("clio-coder.output.cycle"),
+			menuLabel: (letter) => {
+				const target = keybindings.leaderTargets().find((candidate) => candidate.key === letter);
+				return target
+					? `${keybindings.actionLabel(target.id)} (${keybindings.getLabel(target.id)})`
+					: `Ctrl+G ${letter.toUpperCase()}`;
+			},
 		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
 		...(devSession ? { extensionDev: devSession.command } : {}),

@@ -1332,6 +1332,23 @@ function checkDocsSource(): void {
 	}
 }
 
+// retired-commands: a retired slash-command name answers for exactly one
+// release (D-TUI 4.1). An entry whose `since` is not the release this tree
+// builds must be deleted, so the next dev tree cannot carry it forward.
+async function checkRetiredCommands(): Promise<void> {
+	const { version } = JSON.parse(readRoot("package.json")) as { version: string };
+	const release = version.replace(/-(?:dev|rc\.\d+)$/u, "");
+	const { BUILTIN_SLASH_COMMANDS, RETIRED_COMMANDS } = await import("../src/session-control/slash-commands.js");
+	for (const entry of RETIRED_COMMANDS) {
+		if (entry.since !== release)
+			fail("retired-commands", `/${entry.name} was retired in ${entry.since}; delete its RETIRED_COMMANDS entry`);
+	}
+	for (const entry of BUILTIN_SLASH_COMMANDS) {
+		if (entry.retiredSince !== undefined && entry.retiredSince !== release)
+			fail("retired-commands", `/${entry.name} was retired in ${entry.retiredSince}; delete its hidden registry entry`);
+	}
+}
+
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["documentation-links", checkDocumentationLinks],
 	["product-namespace", checkProductNamespace],
@@ -1351,6 +1368,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["tracked-ignored", checkTrackedIgnored],
 	["prompts", checkPromptsDocLinks],
 	["docs-source", checkDocsSource],
+	["retired-commands", checkRetiredCommands],
 ];
 
 const startedAt = performance.now();

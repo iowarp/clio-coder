@@ -567,7 +567,7 @@ export function formatNotificationPanel(
 	if (entries.length === 0 && ended.length === 0) return [];
 	const theme = options.theme ?? clioTheme();
 	const maxRows = Math.max(1, options.maxRows ?? 4);
-	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
+	const dismiss = options.dismissKeyLabel ?? "Ctrl+G X";
 	const meta = [
 		entries.length > 0 ? `${entries.length} ${entries.length === 1 ? "notice" : "notices"}` : "",
 		ended.length > 0 ? `${ended.length} earlier` : "",
@@ -601,8 +601,6 @@ export function formatNotificationPanel(
 	}
 	const overflow = entries.length - maxRows;
 	const hint = overflow > 0 ? `+${overflow} more · ${dismiss} dismiss` : `${dismiss} dismiss`;
-	lines.push(
-		fitFooterText(theme.fg("keyboardHint", entries.length > 0 ? hint : "/notifications dismiss all clears"), width),
-	);
+	if (entries.length > 0) lines.push(fitFooterText(theme.fg("keyboardHint", hint), width));
 	return lines;
 }

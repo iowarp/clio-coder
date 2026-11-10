@@ -634,10 +634,10 @@ Three rules cover every key:
 | `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
 | `Alt+E` | `e` | Show or hide the files pane (first tap), close it (second tap within 400 ms); bound inside Yazi too | `/files` |
 | `Alt+A` | `a` | Show or hide the music pane (first tap), close it (second tap within 400 ms); bound inside cliamp too | `/music` |
-| `Alt+S` | `s` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | `/interrupt` |
+| `Alt+S` | `s` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | |
 | `Alt+Q` | `q` | Open the queue navigator over the queued messages | |
 | `Alt+G` | `g` | Edit the expanded draft in `$VISUAL`/`$EDITOR` | |
-| — | `d` | Move the newest attached dispatch to the background | `/background` |
+| — | `d` | Move the newest attached dispatch to the background | |
 | — | `x` | Dismiss one notification | |
 | — | `y` | Toggle default and yolo autonomy for this session (the first switch to yolo shows its acceptance card) | |
 <!-- keyboard-model:end -->

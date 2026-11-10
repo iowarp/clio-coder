@@ -273,10 +273,64 @@ type SlashCommandVariant =
 export type SlashCommand =
 	| SlashCommandVariant
 	| { kind: "eggs"; action: "status" | "off"; id?: string }
-	| { kind: "background" }
-	| { kind: "editor"; text: string }
-	| { kind: "interrupt"; text: string }
-	| { kind: "notifications-dismiss"; all: boolean };
+	| { kind: "retired"; name: string; rest: string; entry: RetiredCommand };
+
+/**
+ * A command name that answers for exactly one release after it is retired
+ * (D-TUI 4.1). `to.command` runs its replacement with the old arguments
+ * appended; `to.menuLetter` names the Ctrl+G letter of the key that replaced
+ * it. The `retired-commands` hygiene check fails once `since` is no longer the
+ * current release, so every entry is deleted in the next dev tree.
+ */
+export interface RetiredCommand {
+	/** One word, or two for a retired subcommand such as `library reload`. */
+	name: string;
+	since: string;
+	to: { command: string } | { menuLetter: string; action: string };
+	/** The old arguments were the draft itself; they go back to the composer. */
+	keepsText?: true;
+}
+
+export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
+	{ name: "background", since: "0.7.1", to: { menuLetter: "d", action: "clio-coder.dispatch.background" } },
+	{ name: "editor", since: "0.7.1", to: { menuLetter: "g", action: "clio-coder.editor.external" }, keepsText: true },
+	{
+		name: "interrupt",
+		since: "0.7.1",
+		to: { menuLetter: "s", action: "clio-coder.message.interrupt" },
+		keepsText: true,
+	},
+	{ name: "notifications", since: "0.7.1", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
+];
+
+function matchRetiredCommand(trimmed: string): SlashCommand | null {
+	if (!trimmed.startsWith("/")) return null;
+	const [first = "", second = ""] = trimmed.slice(1).split(/\s+/u);
+	const twoWord = second ? RETIRED_COMMANDS.find((entry) => entry.name === `${first} ${second}`) : undefined;
+	const entry = twoWord ?? RETIRED_COMMANDS.find((candidate) => candidate.name === first);
+	if (!entry) return null;
+	const rest = trimmed
+		.slice(1)
+		.replace(twoWord ? /^\S+\s+\S+/u : /^\S+/u, "")
+		.trim();
+	return { kind: "retired", name: entry.name, rest, entry };
+}
+
+function dispatchRetiredCommand(
+	command: Extract<SlashCommand, { kind: "retired" }>,
+	ctx: SlashCommandContext,
+): SlashCommandDispatchResult {
+	const { to } = command.entry;
+	if ("command" in to) {
+		const line = command.rest ? `${to.command} ${command.rest}` : to.command;
+		ctx.notice("info", `/${command.name} is now ${to.command}; ran it.`);
+		return dispatchSlashCommand(parseSlashCommand(line), ctx);
+	}
+	const label = ctx.keyboardActions?.menuLabel(to.menuLetter) ?? "a terminal key";
+	ctx.notice("info", `/${command.name} is now a key: ${label}.`);
+	ctx.render?.();
+	return "rejected";
+}
 
 export type SlashCommandKind = SlashCommand["kind"];
 
@@ -915,11 +969,8 @@ export interface FleetRunStartOptions {
 export interface SessionCommandContext {
 	eggsCommand?: (action: "status" | "off", id?: string) => string;
 	keyboardActions?: {
-		background(): void;
-		editor(text: string): boolean;
-		interrupt(text: string): void;
-		dismiss(all: boolean): void;
-		outputLabel(): string;
+		/** The key, and its Ctrl+G letter, for the action behind a menu letter. */
+		menuLabel(letter: string): string;
 	};
 	operatorExtensions?: OperatorExtensions;
 	/** The terminal's dev scope: `/extensions dev [folder]`, `mute <id>`, `unmute <id>`. */
@@ -1265,6 +1316,11 @@ export interface BuiltinSlashCommand {
 	group: SlashCommandGroup;
 	/** Excluded from /help, autocomplete, and the docs command table. */
 	hidden?: boolean;
+	/**
+	 * Release that retired this name. A hidden entry kept only so ACP clients can
+	 * still call an old name; the `retired-commands` hygiene check expires it.
+	 */
+	retiredSince?: string;
 	args?: CommandArgsSpec;
 	/** Stable copy shown beside first-token subcommand completions. */
 	subcommandDescriptions?: Readonly<Record<string, string>>;
@@ -1371,70 +1427,11 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 
 const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
-		name: "background",
-		acp: false,
-		description: "Detach the newest eligible attached dispatch",
-		group: "Work",
-		kinds: ["background"],
-		args: {},
-		fromArgs: fromArgsOrUsage("background", { kind: "background" }),
-		handle(_command, ctx) {
-			if (!ctx.keyboardActions) {
-				ctx.notice("warn", "Background action requires an interactive session");
-				return "rejected";
-			}
-			ctx.keyboardActions.background();
-		},
-	},
-	{
-		name: "editor",
-		acp: false,
-		description: "Edit explicit text (or an empty buffer) externally",
-		group: "Work",
-		kinds: ["editor"],
-		args: { positionals: [{ name: "text", required: false, rest: true }] },
-		match(text) {
-			const match = /^\/editor(?:\s+([\s\S]*))?$/u.exec(text);
-			return match ? { kind: "editor", text: match[1] ?? "" } : null;
-		},
-		handle(command, ctx) {
-			if (command.kind !== "editor") return;
-			if (!ctx.keyboardActions) {
-				ctx.notice("warn", "External editing requires an interactive session");
-				return "rejected";
-			}
-			if (!ctx.keyboardActions.editor(command.text)) return "rejected";
-		},
-	},
-	{
-		name: "interrupt",
-		acp: false,
-		description: "Interrupt the active run and send this text",
-		group: "Work",
-		kinds: ["interrupt"],
-		args: { positionals: [{ name: "text", required: true, rest: true }] },
-		match(text) {
-			const match = /^\/interrupt(?:\s+([\s\S]*))?$/u.exec(text);
-			return match
-				? match[1]?.trim()
-					? { kind: "interrupt", text: match[1] }
-					: { kind: "usage-error", command: "interrupt", reason: "Text is required" }
-				: null;
-		},
-		handle(command, ctx) {
-			if (command.kind !== "interrupt") return;
-			if (!ctx.keyboardActions) {
-				ctx.notice("warn", "Interrupt requires an interactive session");
-				return "rejected";
-			}
-			ctx.keyboardActions.interrupt(command.text);
-		},
-	},
-	{
 		name: "eggs",
 		acp: { reads: ["", "status"], sessionOnly: ["off"] },
 		description: "Show active conversation eggs or turn them off",
 		group: "Inspect",
+		hidden: true,
 		kinds: ["eggs"],
 		args: { subcommands: { status: {}, off: { positionals: [{ name: "id", required: false }] } } },
 		match(text) {
@@ -1446,29 +1443,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "eggs") ctx.notice("info", ctx.eggsCommand?.(command.action, command.id) ?? "No active eggs.");
-		},
-	},
-	{
-		name: "notifications",
-		acp: false,
-		description: "Dismiss the oldest notification or explicitly dismiss all",
-		group: "Inspect",
-		kinds: ["notifications-dismiss"],
-		args: { subcommands: { dismiss: { positionals: [{ name: "all", required: false }] } } },
-		match(text) {
-			if (!/^\/notifications(?:\s|$)/u.test(text)) return null;
-			const match = /^\/notifications\s+dismiss(?:\s+(all))?$/u.exec(text);
-			return match
-				? { kind: "notifications-dismiss", all: match[1] === "all" }
-				: { kind: "usage-error", command: "notifications", reason: "Use /notifications dismiss [all]" };
-		},
-		handle(command, ctx) {
-			if (command.kind !== "notifications-dismiss") return;
-			if (!ctx.keyboardActions) {
-				ctx.notice("warn", "Notifications require an interactive session");
-				return "rejected";
-			}
-			ctx.keyboardActions.dismiss(command.all);
 		},
 	},
 	{
@@ -1886,14 +1860,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		kinds: ["share"],
 		args: { positionals: [{ name: "run-id", required: false }] },
 		fromArgs(parsed) {
-			const retiredArchiveVerb = parsed.positionals[0];
-			if (retiredArchiveVerb === "export" || retiredArchiveVerb === "import") {
-				return {
-					kind: "usage-error",
-					command: "share",
-					reason: `/share ${retiredArchiveVerb} is retired and did not run; use /archive ${retiredArchiveVerb}`,
-				};
-			}
 			if (parsed.error) return { kind: "usage-error", command: "share", reason: parsed.error };
 			return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}) };
 		},
@@ -1906,6 +1872,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: {},
 		description: "Export or import a full Clio archive",
 		group: "Session",
+		hidden: true,
 		kinds: ["archive-export", "archive-import", "archive-usage"],
 		subcommandDescriptions: { export: "Export a full Clio archive", import: "Import a full Clio archive" },
 		args: {
@@ -3607,27 +3574,13 @@ export function parseSlashCommand(input: string): SlashCommand {
 	}
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
-	const retiredLibrary = /^\/(resources|plugins)(?:\s|$)/u.exec(trimmed);
-	if (retiredLibrary) {
-		return {
-			kind: "usage-error",
-			command: retiredLibrary[1] ?? "library",
-			reason: "Use /library to browse and install plugins and extensions; use /extensions to control the running ones",
-		};
-	}
-	if (/^\/output(?:\s|$)/u.test(trimmed)) {
-		return {
-			kind: "usage-error",
-			command: "output",
-			reason:
-				"Use /help for the output-detail shortcut, or /settings interface to save a default. Use /view for full details",
-		};
-	}
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(trimmed) : matchFromSpec(entry, trimmed);
 		if (match) return match;
 	}
+	const retired = matchRetiredCommand(trimmed);
+	if (retired) return retired;
 	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
 		if (COMMAND_SHAPED_TOKEN.test(token) || isExtensionCommandToken(token))
@@ -3748,14 +3701,11 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 	if (command.kind === "usage-error") {
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
 		const usage = entry ? ` ${usageNotice(entry)}` : "";
-		const reason =
-			command.command === "output" && ctx.keyboardActions
-				? `Use ${ctx.keyboardActions.outputLabel()} to cycle output detail, or /settings interface to save a default; /view shows full details`
-				: command.reason;
-		ctx.notice("error", `${reason}.${usage}`);
+		ctx.notice("error", `${command.reason}.${usage}`);
 		ctx.render?.();
 		return "rejected";
 	}
+	if (command.kind === "retired") return dispatchRetiredCommand(command, ctx);
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return "rejected";
 	return entry.handle(command, ctx) === "rejected" ? "rejected" : "accepted";
@@ -3821,8 +3771,9 @@ const COMMAND_ORDER = [
 ] as const;
 const COMMAND_ORDER_INDEX = new Map<string, number>(COMMAND_ORDER.map((name, index) => [name, index]));
 
-export function commandReference(): ReadonlyArray<CommandReferenceEntry> {
-	return BUILTIN_SLASH_COMMANDS.filter((entry) => entry.hidden !== true)
+/** `includeHidden` is for ACP, which still admits hidden commands such as `/archive` and `/eggs`. */
+export function commandReference(options: { includeHidden?: boolean } = {}): ReadonlyArray<CommandReferenceEntry> {
+	return BUILTIN_SLASH_COMMANDS.filter((entry) => options.includeHidden === true || entry.hidden !== true)
 		.slice()
 		.sort((a, b) => (COMMAND_ORDER_INDEX.get(a.name) ?? 99) - (COMMAND_ORDER_INDEX.get(b.name) ?? 99))
 		.map((entry) => {

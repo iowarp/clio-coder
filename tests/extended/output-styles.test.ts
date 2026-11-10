@@ -188,15 +188,13 @@ test("legacy preferences normalize without changing other settings or the input"
 	strictEqual(DEFAULT_SETTINGS.interface.outputDetail, "standard");
 });
 
-test("Alt+O has one preset action and retired /output gives migration guidance", () => {
+test("Alt+O has one preset action and retired /output is no longer a command", () => {
 	strictEqual(CLIO_APP_KEYBINDINGS["clio-coder.output.cycle"].defaultKeys, "alt+o");
 	const ids = Object.keys(CLIO_APP_KEYBINDINGS);
 	ok(!ids.some((id) => /(?:tool\.(?:expand|liveOutput)|thinking\.expand)/u.test(id)));
 	strictEqual(nextOutputStyle("standard"), "detailed");
 	strictEqual(nextOutputStyle(nextOutputStyle(nextOutputStyle("standard"))), "standard");
-	const retired = parseSlashCommand("/output verbose");
-	strictEqual(retired.kind, "usage-error");
-	if (retired.kind === "usage-error") match(retired.reason, /\/help.*output-detail shortcut.*\/settings.*\/view/u);
+	strictEqual(parseSlashCommand("/output verbose").kind, "unknown-command");
 });
 
 test("a long unbroken reasoning paragraph is bounded after wrapping and freezes its tail", async () => {

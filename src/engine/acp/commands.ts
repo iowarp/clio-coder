@@ -258,7 +258,7 @@ function projectArgs(spec: CommandArgsSpec | undefined, admitted?: ReadonlyArray
  * copy of 13 grammars drifts on the first flag anyone adds.
  */
 export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
-	const reference = new Map(commandReference().map((entry) => [entry.name, entry]));
+	const reference = new Map(commandReference({ includeHidden: true }).map((entry) => [entry.name, entry]));
 	const commands: AcpCommandDescriptor[] = [];
 	for (const rule of availableRules(host)) {
 		const entry = reference.get(rule.name);
@@ -810,7 +810,7 @@ function screenAcpPromptLine(text: string, host: AcpCommandHost): AcpPromptLineV
 	if (parsed.kind === "empty") return { kind: "send", text };
 	const token = /^\/(\S+)/u.exec(trimmed)?.[1] ?? "";
 	if (parsed.kind === "usage-error" && !BUILTIN_SLASH_COMMANDS.some((entry) => entry.name === token)) {
-		// A retired spelling (`/resources`, `/output`) says where its job went.
+		// A usage error for a name the registry does not own says where its job went.
 		return { kind: "refuse", code: "command_unavailable", message: `${parsed.reason}.` };
 	}
 	if (parsed.kind !== "unknown-command") {
