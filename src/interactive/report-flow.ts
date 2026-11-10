@@ -84,7 +84,9 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 
 	const keepDraft = (draft: ReportDraft, title: string): void => {
 		saveReportDraft(deps.stateDir, draft);
-		updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title, state: "draft" });
+		// A `sending` entry stays so: its last create may have filed, and the next send checks for it first.
+		const state = outboxEntry(deps.stateDir, draft.id)?.state === "sending" ? "sending" : "draft";
+		updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title, state });
 	};
 
 	const edit = (draft: ReportDraft): ReportDraft | null => {

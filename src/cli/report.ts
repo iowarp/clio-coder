@@ -377,7 +377,9 @@ function editDraft(draft: ReportDraft, io: Io): ReportDraft | string {
 
 function saveDraft(io: Io, draft: ReportDraft, title: string): void {
 	saveReportDraft(io.stateDir, draft);
-	updateOutbox(io.stateDir, draft.id, { kind: draft.kind, title, state: "draft" });
+	// A `sending` entry stays so: its last create may have filed, and the next send checks for it first.
+	const state = outboxEntry(io.stateDir, draft.id)?.state === "sending" ? "sending" : "draft";
+	updateOutbox(io.stateDir, draft.id, { kind: draft.kind, title, state });
 }
 
 async function confirmAndSend(

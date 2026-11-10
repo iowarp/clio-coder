@@ -15,7 +15,14 @@ import type { ReportObservation } from "./observe.js";
 import { outboxEntry, readOutbox, recentSends, updateOutbox } from "./outbox.js";
 import type { LocalIdentity, MaskKind, ReportMask } from "./scrub.js";
 import { deleteReportDraft, listReportDrafts, readReportDraft, saveReportDraft, writeReportMarkdown } from "./store.js";
-import { type ReportTransport, routeFor, type SendDeps, type SendResult, sendReport } from "./transport.js";
+import {
+	checkLastAttempt,
+	type ReportTransport,
+	routeFor,
+	type SendDeps,
+	type SendResult,
+	sendReport,
+} from "./transport.js";
 import { REPORT_HEADINGS, REPORT_REPOSITORY, type ReportKind, type ReportSurface } from "./vocabulary.js";
 
 /**
@@ -345,6 +352,18 @@ export async function runReportSend(
 			rendered,
 			verdict: { kind: "create", upgradeHint: null },
 		};
+	}
+	// A create that may have filed is checked before the search, which could find that very issue and stop as a duplicate.
+	if (deps.transport.kind === "gh") {
+		const last = await checkLastAttempt(draft.id, deps.transport, deps);
+		if (last.status !== "unfiled") {
+			const path = writeReportMarkdown(deps.stateDir, draft.id, rendered.body);
+			const result: SendResult =
+				last.status === "filed"
+					? { status: "sent", url: last.url, number: last.number, adopted: true }
+					: { status: "failed", reason: last.reason, path };
+			return { kind: "sent", result, draft, rendered, verdict: { kind: "create", upgradeHint: null } };
+		}
 	}
 	const related = await findRelated(draft, rendered, deps.transport, {
 		...deps.related,
