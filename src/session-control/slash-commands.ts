@@ -125,8 +125,12 @@ import type { WorkerEntryState } from "./worker-stream.js";
  * measurement it protects.
  */
 
-/** Put a finished worker run's answer into the main agent's context. Bare `/share` takes the newest one. */
-type ShareCommandVariant = { kind: "share"; runId?: string };
+/**
+ * Put a finished worker run's answer into the main agent's context. Bare
+ * `/fleet share` takes the newest one. `oldName` marks the retired `/share`
+ * spelling, kept one release for ACP clients.
+ */
+type ShareCommandVariant = { kind: "share"; runId?: string; oldName?: true };
 type ArchiveCommandVariant =
 	| { kind: "archive-export"; path: string }
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
@@ -952,7 +956,7 @@ function shareWorkerRun(runId: string | undefined, ctx: SlashCommandContext): vo
 		ctx.notice(
 			"error",
 			runId === undefined
-				? "no finished /run or /delegate result to share yet"
+				? "no finished /run or /delegate result for /fleet share yet"
 				: `no finished run ${runId} in this session`,
 		);
 		return;
@@ -1834,17 +1838,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "share",
 		acp: { injectsUserTurn: true },
-		description: "Share a worker result with the main agent",
+		description: "Share a worker result with the main agent (now /fleet share)",
 		group: "Work",
-		kinds: ["share"],
+		// Kept one release so ACP clients that call `share` keep working; /fleet owns the kind.
+		hidden: true,
+		kinds: [],
 		args: { positionals: [{ name: "run-id", required: false }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "share", reason: parsed.error };
-			return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}) };
+			return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}), oldName: true };
 		},
-		handle(command, ctx) {
-			if (command.kind === "share") shareWorkerRun(command.runId, ctx);
-		},
+		handle() {},
 	},
 	{
 		name: "archive",
@@ -2439,13 +2443,18 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "fleet",
-		acp: false,
-		description: "Show live fleet runs, or preview and run a playbook",
+		// Only `share` crosses ACP; bare /fleet and /fleet run stay TUI-only.
+		acp: { subcommands: ["share"], injectsUserTurn: true },
+		description: "Show live fleet runs, share a worker result, or preview and run a playbook",
 		group: "Work",
-		kinds: ["fleet", "fleet-run", "fleet-run-usage"],
-		subcommandDescriptions: { run: "Preview and run a repo-owned playbook" },
+		kinds: ["fleet", "fleet-run", "fleet-run-usage", "share"],
+		subcommandDescriptions: {
+			run: "Preview and run a repo-owned playbook",
+			share: "Share a finished worker result with the main agent",
+		},
 		args: {
 			subcommands: {
+				share: { positionals: [{ name: "run-id", required: false }] },
 				run: {
 					flags: [
 						{ name: "--var", takesValue: true, repeatable: true, valueName: "key=value" },
@@ -2456,6 +2465,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		fromArgs(parsed) {
+			if (parsed.subcommand === "share") {
+				if (parsed.error) return { kind: "usage-error", command: "fleet", reason: parsed.error };
+				return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}) };
+			}
 			if (parsed.subcommand !== "run") {
 				return parsed.error ? { kind: "usage-error", command: "fleet", reason: parsed.error } : { kind: "fleet" };
 			}
@@ -2476,6 +2489,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "fleet-run", name, vars, ...(resume !== undefined ? { resume } : {}) };
 		},
 		handle(command, ctx) {
+			if (command.kind === "share") {
+				if (command.oldName && ctx.keyboardActions) ctx.notice("info", "/share is now /fleet share");
+				shareWorkerRun(command.runId, ctx);
+				return;
+			}
 			if (command.kind === "fleet") {
 				if (ctx.openFleetRuns) ctx.openFleetRuns();
 				else ctx.notice("error", "Fleet Runs is not wired in this session");
@@ -3596,7 +3614,6 @@ const COMMAND_ORDER = [
 	"oracle",
 	"btw",
 	"draft",
-	"share",
 	"skill",
 	"tasks",
 	"context",

@@ -146,6 +146,7 @@ const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> 
 	eggs: ["eggsCommand"],
 	doctor: ["runDoctor"],
 	share: ["listWorkerRuns", "submitOperatorNote"],
+	fleet: ["listWorkerRuns", "submitOperatorNote"],
 	archive: ["exportShareArchive", "importShareArchive"],
 	oracle: ["oracleBriefing", "submitOperatorNote"],
 	council: ["runCouncilDispatch", "getWorkerRosters"],
@@ -466,9 +467,12 @@ function parseLoopRequest(argv: ReadonlyArray<string>): SlashCommand {
 }
 
 /** The parse must land on a kind the allowlisted entry itself declares, or on that entry's usage error. */
+/** A name kept one release for ACP clients owns no kind; it parses only to the kind of the command that replaced it. */
+const KEPT_NAME_KINDS: Readonly<Record<string, ReadonlyArray<SlashCommandKind>>> = { share: ["share"] };
+
 function parsedBelongsTo(parsed: SlashCommand, name: string, kinds: ReadonlyArray<SlashCommandKind>): boolean {
 	if (parsed.kind === "usage-error") return parsed.command === name;
-	return kinds.includes(parsed.kind);
+	return kinds.includes(parsed.kind) || (KEPT_NAME_KINDS[name]?.includes(parsed.kind) ?? false);
 }
 
 /**

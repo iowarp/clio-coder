@@ -54,12 +54,12 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all fifteen allowlisted commands", async () => {
+test("the catalog projects all sixteen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
-	assert.equal(ACP_COMMAND_RULES.length, 15);
-	assert.equal(catalog.commands.length, 15);
-	assert.equal(ACP_COMMANDS_CAPABILITY.count, 15);
+	assert.equal(ACP_COMMAND_RULES.length, 16);
+	assert.equal(catalog.commands.length, 16);
+	assert.equal(ACP_COMMANDS_CAPABILITY.count, 16);
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
 		[
@@ -75,6 +75,7 @@ test("the catalog projects all fifteen allowlisted commands", async () => {
 			"council",
 			"loop",
 			"context",
+			"fleet",
 			"tasks",
 			"memory",
 			"export",
@@ -149,14 +150,14 @@ test("streams and injectsUserTurn mark exactly the commands that earn them", asy
 	);
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.injectsUserTurn === true).map((command) => command.name),
-		["skill", "share", "oracle", "loop", "tasks"],
+		["skill", "share", "oracle", "loop", "fleet", "tasks"],
 	);
 	assert.equal(descriptor("export").streams, undefined);
 	assert.equal(descriptor("export").injectsUserTurn, undefined);
 });
 
 test("a command outside the allowlist is refused before anything is parsed", async () => {
-	for (const name of ["quit", "help", "settings", "library", "fleet", "btw", "not-a-command", ""]) {
+	for (const name of ["quit", "help", "settings", "library", "btw", "not-a-command", ""]) {
 		assert.equal(
 			refusalReason(() => invokeAcpCommand({ command: name, argv: [] }, host())),
 			"command_not_exposed",
@@ -278,7 +279,7 @@ test("a command that is wired reports its own outcome instead of a started line"
 		host({ listWorkerRuns: () => [], submitOperatorNote: () => assert.fail("nothing to share") }),
 	);
 	assert.equal(shared.level, "error");
-	assert.match(shared.lines.join("\n"), /no finished \/run or \/delegate result to share yet/u);
+	assert.match(shared.lines.join("\n"), /no finished \/run or \/delegate result for \/fleet share yet/u);
 
 	const seeded = await invokeAcpCommand(
 		{ command: "memory", argv: ["seed"] },
@@ -330,7 +331,7 @@ test("the announced capability names the two methods a client calls", async () =
 			version: 1,
 			list: "_clio-coder/commands/list",
 			invoke: "_clio-coder/commands/invoke",
-			count: 15,
+			count: 16,
 		},
 	);
 });

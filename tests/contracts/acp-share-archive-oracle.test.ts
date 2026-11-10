@@ -44,7 +44,7 @@ test("share hands the most recent finished operator run to the model, from the r
 	assert.ok(names(control).includes("share"), "share is offered once its host members are wired");
 	const empty = await control.invoke({ command: "share", argv: [] });
 	assert.equal(empty.level, "error");
-	assert.match(empty.lines.join("\n"), /no finished \/run or \/delegate result to share yet/);
+	assert.match(empty.lines.join("\n"), /no finished \/run or \/delegate result for \/fleet share yet/);
 	bus.emit("run.started", {
 		runId: "run-1",
 		assignmentId: "run-1",
