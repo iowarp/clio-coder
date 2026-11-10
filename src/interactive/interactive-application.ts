@@ -1186,7 +1186,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
 			devSession?.poke();
 		},
-		refreshLiveWorkspaceGit,
+		refreshLiveWorkspaceGit: (force) => void refreshLiveWorkspaceGit(force),
 		refreshFooter: () => {
 			presentation.announceSettingChanges();
 			footer.refresh();
@@ -1476,7 +1476,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			openSettingsOverlayState(area);
 		},
 		openResume: (target) => openResumeOverlayState(target),
-		startNewSession: () => startNewSession(),
+		startNewSession: () => void startNewSession(),
 		openTree: () => openTreeOverlayState(),
 		openRewind: () => openRewindOverlayState(),
 		openMessagePicker: (name) => openMessagePickerOverlayState(name),

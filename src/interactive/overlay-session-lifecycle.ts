@@ -237,7 +237,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		deps.transitions.handle = openResumeOverlay(deps.tui, {
 			session,
 			...(target !== undefined ? { initialQuery: target } : {}),
-			onResume: (sessionId) => resumeSession(session, sessionId, preResumeSessionId),
+			onResume: (sessionId) => void resumeSession(session, sessionId, preResumeSessionId),
 			onClose: () => {
 				deps.transitions.close();
 				queueMicrotask(() => probeResumedCwd(session, preResumeSessionId));

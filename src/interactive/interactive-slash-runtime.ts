@@ -992,7 +992,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// The user-turn path, minus expansion. A worker's answer is literal text:
 		// running it through the prompt, skill, and @file expanders would let a
 		// worker's output name a file the operator never mentioned.
-		submitOperatorNote: (text) => submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
+		submitOperatorNote: (text) =>
+			void submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
 		submitChat: (text) => {
 			const draft = activeDraft;
 			activeDraft = undefined;

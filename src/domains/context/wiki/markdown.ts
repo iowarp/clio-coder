@@ -21,10 +21,10 @@ export function inspectWikiMarkdown(body: string): WikiMarkdown {
 	const citationContext = new Map<Tokens.Codespan, string>();
 	const links: WikiMarkdown["links"] = [];
 	const definitions = new Map<string, Tokens.Def>();
-	markdown.walkTokens(tokens, (token) => {
+	void markdown.walkTokens(tokens, (token) => {
 		if (token.type === "def" && !definitions.has(token.tag)) definitions.set(token.tag, token as Tokens.Def);
 	});
-	markdown.walkTokens(tokens, (token) => {
+	void markdown.walkTokens(tokens, (token) => {
 		if (token.type === "codespan") citations.push(token as Tokens.Codespan);
 		// Walk order visits a parent before its children, so the context is known when the codespan is reached.
 		const children = "tokens" in token && Array.isArray(token.tokens) ? (token.tokens as Token[]) : [];

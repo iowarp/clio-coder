@@ -1345,7 +1345,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let footerTicker = scheduleInterval(tickPresentation, tickerInterval);
 	footerTicker.unref?.();
 	const workspaceTicker = scheduleInterval(() => {
-		refreshLiveWorkspaceGit(true);
+		void refreshLiveWorkspaceGit(true);
 		footer.refresh();
 		requestRender();
 	}, 5_000);
