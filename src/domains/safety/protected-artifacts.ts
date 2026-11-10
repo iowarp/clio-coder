@@ -1682,6 +1682,7 @@ function groundingMatch(executable: string, args: ReadonlyArray<string>): string
 	if (executable === "node") {
 		if (args.includes("--test")) return "node --test";
 		if (args.includes("-e") || args.includes("--eval")) return "node -e";
+		if (args.includes("--check") || args.includes("-c")) return "node --check";
 		return null;
 	}
 	if (executable === "tsc") return typescriptCheckMatch(args);

@@ -422,3 +422,21 @@ it("the review gate reads a verifier report that closes prose containing braces,
 	strictEqual(parseVerifierResult(`${prose} ${report} That was wrong.`), null);
 	strictEqual(parseVerifierResult(`${prose} ${report.replace("pass", "fail")} Quoting: ${report}`), null);
 });
+it("a run that executed node --check grounds its node --check claim, also behind cd", () => {
+	const grounded = (command: string, claim: string) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		recorder.start("bash", "bash", { command });
+		recorder.finish("bash", false);
+		const effects = recorder.snapshot();
+		return groundClaimedValidations({
+			contractKind: "mutation-report",
+			output: JSON.stringify({ mutatedPaths: ["src/a.ts"], validations: [{ name: claim, passed: true }] }),
+			executedCommands: effects.verificationCommands,
+			executedCheckingCalls: 1,
+		})?.grounded;
+	};
+	strictEqual(grounded("node --check src/a.ts", "node --check"), 1);
+	strictEqual(grounded("cd /tmp/wt && node --check src/a.ts", "node --check"), 1);
+	strictEqual(grounded("cd /tmp/wt && node --check src/a.ts", "node --check syntax check"), 1);
+	strictEqual(grounded("node src/a.mjs", "node --check"), 0);
+});
