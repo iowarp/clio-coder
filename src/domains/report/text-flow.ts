@@ -96,6 +96,9 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 		const browser = deps.browserAvailable ?? (await import("../../core/open-browser.js")).canOpenBrowser;
 		return browser(env) ? { kind: "browser" } : { kind: "file" };
 	};
+	// Drafts whose plan this host has returned. A draft saved elsewhere (the agent's report tool, a shell) is shown here
+	// before any send, so an ACP send always follows a preview of that exact text.
+	const shown = new Set<string>();
 
 	return {
 		async plan(input) {
@@ -124,6 +127,7 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 			const plan = planReport(draft, { identity: await identity(), transport: await offline(), stateDir: deps.stateDir });
 			saveReportDraft(deps.stateDir, draft);
 			updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title: plan.rendered.title, state: "draft" });
+			shown.add(draft.id);
 			return {
 				level: plan.gates.length > 0 ? "warn" : "info",
 				text: formatReportPlanText(plan, draft.id),
@@ -153,6 +157,15 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 					].join("\n"),
 					report: { draftId, state: "draft" },
 				};
+			if (!shown.has(draftId)) {
+				shown.add(draftId);
+				const preview = planReport(draft, { identity: who, transport: await offline(), stateDir: deps.stateDir });
+				return {
+					level: "info",
+					text: `${draftId} was not shown here before, so here it is first.\n${formatReportPlanText(preview, draftId)}`,
+					report: { draftId, state: "draft" },
+				};
+			}
 			const gh = await findGh();
 			const transport = await (deps.detect ?? ((e) => detectTransport(e, { findGh: () => gh })))(env).catch(
 				(): ReportTransport => ({ kind: "file" }),
