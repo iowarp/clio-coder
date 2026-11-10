@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -6,6 +6,10 @@ import { storeBlobPath, storeProjectDir } from "../../src/core/store-paths.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
+import { createRegistry } from "../../src/tools/registry.js";
+import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("store safety admission", () => {
@@ -76,5 +80,18 @@ describe("store safety admission", () => {
 			cd(other).some((reason) => reason.startsWith("bash-cd-outside-workspace")),
 			cd(other).join("; "),
 		);
+	});
+
+	it("gateway describe states the store's authority per op, not the read class for all of them", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "default" });
+		registry.register(createStoreTool({ getCwd: () => cwd, writable: true }));
+		registry.register(createGatewayTool({ registry }));
+		const verdict = await registry.invoke({ tool: "gateway", args: { op: "describe", capability: "store" } });
+		ok(verdict.kind === "ok" && verdict.result.kind === "ok");
+		const authority = (JSON.parse(verdict.result.output) as { authority: string[] }).authority.join(" ");
+		doesNotMatch(authority, /Read class: runs at every autonomy level/u);
+		match(authority, /create, put and note are write class/u);
+		match(authority, /remove[^.;]*destructive/u);
+		match(authority, /worker's store is read-only/u);
 	});
 });
