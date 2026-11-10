@@ -3,6 +3,7 @@
  * preview is one command's text and sending is a second, deliberate command. Nothing here sends during a preview.
  */
 
+import { createHash } from "node:crypto";
 import { rememberIdentity } from "./body.js";
 import type { ReportCommandRunner } from "./command.js";
 import type { ReportSessionFacts } from "./environment.js";
@@ -97,9 +98,12 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 		const browser = deps.browserAvailable ?? (await import("../../core/open-browser.js")).canOpenBrowser;
 		return browser(env) ? { kind: "browser" } : { kind: "file" };
 	};
-	// Drafts whose plan this host has returned. A draft saved elsewhere (the agent's report tool, a shell) is shown here
-	// before any send, so an ACP send always follows a preview of that exact text.
-	const shown = new Set<string>();
+	// The exact text this host last showed per draft. A draft saved elsewhere (the agent's report tool, a shell), or
+	// rewritten on disk after its preview, is shown here again before any send, so an ACP send always follows a
+	// preview of that exact text.
+	const shown = new Map<string, string>();
+	const digest = (rendered: { title: string; body: string }): string =>
+		createHash("sha256").update(`${rendered.title}\0${rendered.body}`).digest("hex");
 
 	return {
 		async plan(input) {
@@ -132,7 +136,7 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 			const plan = planReport(draft, { identity: who, transport: await offline(), stateDir: deps.stateDir });
 			saveReportDraft(deps.stateDir, draft);
 			updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title: plan.rendered.title, state: "draft" });
-			shown.add(draft.id);
+			shown.set(draft.id, digest(plan.rendered));
 			return {
 				level: plan.gates.length > 0 ? "warn" : "info",
 				text: formatReportPlanText(plan, draft.id),
@@ -169,12 +173,17 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 					].join("\n"),
 					report: { draftId, state: "draft" },
 				};
-			if (!shown.has(draftId)) {
-				shown.add(draftId);
+			const seen = shown.get(draftId);
+			if (seen !== digest(plan.rendered)) {
+				shown.set(draftId, digest(plan.rendered));
 				const preview = planReport(draft, { identity: who, transport: await offline(), stateDir: deps.stateDir });
+				const lead =
+					seen === undefined
+						? `${draftId} was not shown here before, so here it is first.`
+						: `Nothing was sent. ${draftId} changed since it was shown here, so here it is again.`;
 				return {
 					level: "info",
-					text: `${draftId} was not shown here before, so here it is first.\n${formatReportPlanText(preview, draftId)}`,
+					text: `${lead}\n${formatReportPlanText(preview, draftId)}`,
 					report: { draftId, state: "draft" },
 				};
 			}
