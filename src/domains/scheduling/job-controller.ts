@@ -51,7 +51,14 @@ const POLL_MS = 250;
  * for_ms bounds polling and when a follow-up may start. A follow-up turn already running has its own clock;
  * cancelling it at the deadline stopped the work it was doing and relabelled a met condition as a deadline (#450).
  */
-const deadlineMayEnd = (job: JobRecord): boolean => job.delivery?.state !== "running";
+/**
+ * A met condition's follow-up that stopped (tool budget, failure) queues its continuation as pending; it is the
+ * same follow-up and the deadline must not drop it and relabel the job.
+ */
+const conditionContinuationPending = (job: JobRecord): boolean =>
+	job.reason === "condition" && job.delivery?.state === "pending" && job.delivery.continuation !== undefined;
+const deadlineMayEnd = (job: JobRecord): boolean =>
+	job.delivery?.state !== "running" && !conditionContinuationPending(job);
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -336,7 +343,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			// The deadline's own wake starts after it by definition (#450).
 			(job.spec.deadlineAt === null ||
 				now() < job.spec.deadlineAt ||
-				(execution.kind === "delivery" && job.delivery?.continuation === "job_deadline")) &&
+				(execution.kind === "delivery" &&
+					(job.delivery?.continuation === "job_deadline" || conditionContinuationPending(job)))) &&
 			(execution.kind === "delivery"
 				? job.state !== "paused" && job.delivery?.state === "pending"
 				: job.state === "active" && job.pending !== null)
