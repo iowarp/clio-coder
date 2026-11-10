@@ -47,6 +47,8 @@ export interface TaskLandPlan {
 	uncommitted: number;
 	/** Files the run's commit left out and that have not changed since, with their stamps: they do not land. */
 	leftOut: ReadonlyMap<string, string>;
+	/** Authored files ignore rules kept out of the run's commit: they never land and keep the worktree. */
+	ignored: ReadonlyArray<string>;
 	tip: string;
 	/** Tree of the branch tip plus any uncommitted work: what the task contributes. */
 	sourceTree: string;
@@ -255,6 +257,7 @@ export function planTaskLand(input: {
 		worktree,
 		uncommitted,
 		leftOut,
+		ignored: loaded?.kind === "kept" ? (loaded.accounted?.ignored ?? []) : [],
 		tip,
 		sourceTree,
 		base,
@@ -315,7 +318,7 @@ export function executeTaskLand(
 			authoredPaths: landedUntrackedPaths(plan.worktree.path, plan.leftOut),
 		});
 		source = git(plan.root, ["rev-parse", "--verify", "--end-of-options", `refs/heads/${plan.branch}^{commit}`]);
-		recordTaskWorktreeAccounted(plan.worktree, { commit: source, untracked: plan.leftOut });
+		recordTaskWorktreeAccounted(plan.worktree, { commit: source, untracked: plan.leftOut, ignored: plan.ignored });
 		if (git(plan.root, ["rev-parse", `${source}^{tree}`]) !== plan.sourceTree)
 			throw new Error(
 				`the worktree changed since it was planned; its work is now committed on ${plan.branch} and nothing landed`,
@@ -360,7 +363,11 @@ export function executeTaskLand(
 	}
 	if (plan.worktree !== null) {
 		// The landed commit and the files the plan said stay out permit removal; nothing else does.
-		const drift = cleanupAccountedTaskWorktree(plan.worktree, { commit: source, untracked: plan.leftOut });
+		const drift = cleanupAccountedTaskWorktree(plan.worktree, {
+			commit: source,
+			untracked: plan.leftOut,
+			ignored: plan.ignored,
+		});
 		if (drift !== null) return { landed, cleaned: false, detail: keptTaskWorktreeDetail(plan.worktree, source, drift) };
 	} else git(plan.root, ["branch", "-D", plan.branch]);
 	return {

@@ -107,8 +107,9 @@ export interface TaskWorktreeReceipt {
 	detail?: string;
 	/**
 	 * New files the host commit left out because no mutation call of the run
-	 * wrote them and the worker did not stage them. `paths` holds at most
-	 * `LEFT_UNCOMMITTED_LIST_LIMIT` of the `count`.
+	 * wrote them and the worker did not stage them, or because the repository's
+	 * ignore rules match them. `paths` holds at most `LEFT_UNCOMMITTED_LIST_LIMIT`
+	 * of the `count`.
 	 */
 	leftUncommitted?: { count: number; paths: string[] };
 	/**
@@ -252,6 +253,8 @@ export interface WorktreeCommit {
 	committed: boolean;
 	/** Files still untracked after the host commit, top-relative and sorted, excluding runtime state. */
 	leftUncommitted: string[];
+	/** Authored files the repository's ignore rules kept out of the commit; see `ignoredAuthoredPaths`. */
+	ignoredAuthored: string[];
 	/** The commit and stamps from that same post-commit listing, for guarded cleanup. */
 	accounted: TaskWorktreePreview;
 }
@@ -263,6 +266,37 @@ const GIT_PATHSPEC_BATCH = 256;
 
 function untrackedPaths(path: string): string[] {
 	return nullDelimitedPaths(gitBytes(path, ["ls-files", "--others", "--exclude-standard", "-z"]));
+}
+
+/**
+ * Files a run authored that the repository's ignore rules keep out of every
+ * host commit. They are never forced into history and never copied into the
+ * checkout, so they live only in the worktree, which must outlive the landing.
+ * With no write record, every ignored path counts (collapsed per directory).
+ */
+function ignoredAuthoredPaths(
+	path: string,
+	authoredPaths: Iterable<string> | null,
+	excludedPaths: ReadonlyArray<string> = [],
+): string[] {
+	const listing = ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"];
+	const excluded = new Set(excludedPaths);
+	if (authoredPaths === null) {
+		return nullDelimitedPaths(gitBytes(path, [...listing, "--directory"]))
+			.map((entry) => entry.replace(/\/$/u, ""))
+			.filter((entry) => !excluded.has(entry))
+			.sort();
+	}
+	const authored = [...worktreeRelativePaths(path, authoredPaths)].filter((entry) => !excluded.has(entry));
+	const ignored = new Set<string>();
+	for (let index = 0; index < authored.length; index += GIT_PATHSPEC_BATCH) {
+		const batch = authored.slice(index, index + GIT_PATHSPEC_BATCH);
+		for (const entry of nullDelimitedPaths(
+			gitBytes(path, [...listing, "--", ...batch.map((entry) => `:(top,literal)${entry}`)]),
+		))
+			ignored.add(entry);
+	}
+	return [...ignored].sort();
 }
 
 /** Top-relative POSIX spellings of the absolute `paths` that sit inside the worktree at `path`. */
@@ -331,11 +365,17 @@ export function commitWorktreePath(
 		);
 	}
 	const leftUncommitted = untrackedPaths(path).filter((entry) => !excluded.has(entry));
+	const ignoredAuthored = ignoredAuthoredPaths(path, scope.authoredPaths, excludedPaths);
 	const { stamps } = untrackedState(path, leftUncommitted);
 	return {
 		committed,
 		leftUncommitted,
-		accounted: { commit: git(path, ["rev-parse", "HEAD"]), untracked: stamps },
+		ignoredAuthored,
+		accounted: {
+			commit: git(path, ["rev-parse", "HEAD"]),
+			untracked: stamps,
+			...(ignoredAuthored.length > 0 ? { ignored: ignoredAuthored } : {}),
+		},
 	};
 }
 
@@ -936,6 +976,8 @@ function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWor
 export interface TaskWorktreePreview {
 	commit: string;
 	untracked: ReadonlyMap<string, string>;
+	/** Authored files ignore rules kept out of the commit; the worktree is kept while any of them exists. */
+	ignored?: ReadonlyArray<string>;
 }
 
 /** What a worktree holds beyond what was accounted for: `detail` finishes "the worktree ...". */
@@ -997,12 +1039,14 @@ function heldDrift(
 	const changed = [...stamps]
 		.filter(([entry, stamp]) => stamp !== GONE_STAMP && accounted.untracked.get(entry) !== stamp)
 		.map(([entry]) => entry);
-	const paths = [...new Set([...tracked, ...directories, ...changed])].sort();
+	const ignored = (accounted.ignored ?? []).filter((entry) => existsSync(join(worktree.path, entry)));
+	const paths = [...new Set([...tracked, ...directories, ...changed, ...ignored])].sort();
 	if (tracked.length > 0) return { detail: "has uncommitted changes", paths };
 	const directory = directories[0];
 	if (directory !== undefined)
 		return { detail: `has untracked directory ${directory}; destructive cleanup refused`, paths };
-	return changed.length > 0 ? { detail: "has new or changed untracked files", paths } : null;
+	if (changed.length > 0) return { detail: "has new or changed untracked files", paths };
+	return ignored.length > 0 ? { detail: "holds authored files the repository ignores", paths } : null;
 }
 
 /**
@@ -1135,6 +1179,7 @@ export function applyTaskWorktree(input: {
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
 	let commit: string;
 	let leftUncommitted: string[];
+	let ignoredAuthored: string[];
 	let accounted: TaskWorktreePreview;
 	if (input.preview !== undefined) {
 		commit = input.preview.commit;
@@ -1150,7 +1195,8 @@ export function applyTaskWorktree(input: {
 				detail: drift,
 			};
 		}
-		accounted = input.preview;
+		ignoredAuthored = ignoredAuthoredPaths(worktree.path, input.authoredPaths);
+		accounted = ignoredAuthored.length > 0 ? { ...input.preview, ignored: ignoredAuthored } : input.preview;
 	} else {
 		const taskLine = `Clio Coder task ${worktree.runId}`;
 		// The validated message is already stripped; this is the sink, and only
@@ -1166,6 +1212,7 @@ export function applyTaskWorktree(input: {
 			{ authoredPaths: input.authoredPaths },
 		);
 		leftUncommitted = committed.leftUncommitted;
+		ignoredAuthored = committed.ignoredAuthored;
 		// Pin the commit the snapshot produced. Everything after this reads and
 		// merges that immutable id, so a branch moved later cannot swap it (F5).
 		const pinned = checkTaskWorktreeHead(worktree);
@@ -1176,7 +1223,10 @@ export function applyTaskWorktree(input: {
 		accounted = committed.accounted;
 	}
 	input.onAccounted?.(accounted);
-	const receipt = { ...committedReceipt(worktree, commit, input.apply), ...leftUncommittedField(leftUncommitted) };
+	const receipt = {
+		...committedReceipt(worktree, commit, input.apply),
+		...leftUncommittedField([...new Set([...leftUncommitted, ...ignoredAuthored])].sort()),
+	};
 	if (input.apply === "preserve") return receipt;
 	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
 	if (protectedChanges.length > 0) return { ...receipt, reason: "protected_artifact_changed" };
@@ -1213,7 +1263,15 @@ export function applyTaskWorktree(input: {
 		// Merging a branch at its base moves nothing, so the destination's own head is not this run's landing.
 		return { ...receipt, applied: true, detail: "nothing merged: the task branch holds no change beyond its base" };
 	}
-	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
+	const ignoredNote =
+		ignoredAuthored.length === 0
+			? ""
+			: `; ${ignoredAuthored.length} authored ${ignoredAuthored.length === 1 ? "file is" : "files are"} ignored by .gitignore and stay${ignoredAuthored.length === 1 ? "s" : ""} in the worktree`;
+	return {
+		...receipt,
+		applied: true,
+		detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}${ignoredNote}`,
+	};
 }
 
 /**
@@ -1392,8 +1450,16 @@ export function settleTaskWorktree(worktree: TaskWorktree, accounted?: TaskWorkt
 	});
 }
 
-function accountedField(accounted: TaskWorktreePreview): { accounted: { commit: string; untracked: object } } {
-	return { accounted: { commit: accounted.commit, untracked: Object.fromEntries(accounted.untracked) } };
+function accountedField(accounted: TaskWorktreePreview): {
+	accounted: { commit: string; untracked: object; ignored?: ReadonlyArray<string> };
+} {
+	return {
+		accounted: {
+			commit: accounted.commit,
+			untracked: Object.fromEntries(accounted.untracked),
+			...(accounted.ignored !== undefined && accounted.ignored.length > 0 ? { ignored: accounted.ignored } : {}),
+		},
+	};
 }
 
 /**
@@ -1413,11 +1479,12 @@ export function recordTaskWorktreeAccounted(worktree: TaskWorktree, accounted: T
 function claimAccounted(marker: Record<string, unknown>): TaskWorktreePreview | undefined {
 	const accounted = marker.accounted;
 	if (typeof accounted !== "object" || accounted === null) return undefined;
-	const { commit, untracked } = accounted as { commit?: unknown; untracked?: unknown };
+	const { commit, untracked, ignored } = accounted as { commit?: unknown; untracked?: unknown; ignored?: unknown };
 	if (typeof commit !== "string" || typeof untracked !== "object" || untracked === null) return undefined;
 	const entries = Object.entries(untracked);
 	if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) return undefined;
-	return { commit, untracked: new Map(entries) };
+	const held = Array.isArray(ignored) ? ignored.filter((entry): entry is string => typeof entry === "string") : [];
+	return { commit, untracked: new Map(entries), ...(held.length > 0 ? { ignored: held } : {}) };
 }
 
 /**
