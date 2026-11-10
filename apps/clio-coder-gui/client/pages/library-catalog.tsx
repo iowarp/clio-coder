@@ -205,7 +205,7 @@ function RefreshNote({ refresh }: { refresh: Applied["refresh"] }) {
 					{refresh.failedSessions} of {refresh.sessions} open {refresh.sessions === 1 ? "conversation" : "conversations"} did
 					not reload.
 				</strong>{" "}
-				{refresh.error}. The change is installed; run <code>/library reload</code> there, or start a new conversation, to
+				{refresh.error}. The change is installed; run <code>/reload library</code> there, or start a new conversation, to
 				use it.
 			</p>
 		);
