@@ -755,7 +755,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			authority.splice(
 				base < 0 ? authority.length : base,
 				base < 0 ? 0 : 1,
-				"Per op: tags, list, stat and get are read class and run at every autonomy level; create, put and note are write class and denied for read-only runs; remove, and a put over an existing blob, are destructive and ask in default. A worker's store is read-only, so the dispatching session puts results.",
+				"Per op: tags, list, stat and get are read class and run at every autonomy level; create, put and note are write class and denied for read-only runs; remove, and a put over an existing blob, are destructive and ask in default. A worker may put and note only into the tags its dispatch grants (tags); otherwise its store is read-only and the dispatching session puts results.",
 			);
 		}
 		if (kind === "extension") {
