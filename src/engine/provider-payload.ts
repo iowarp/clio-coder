@@ -160,7 +160,8 @@ function singleCall(api: string, payload: Payload): Payload {
 
 /**
  * A locked round has no tool declarations, so the body carries neither `tools`
- * nor `tool_choice`. Pi adds `tools: []` beside tool history on completions and
+ * nor `tool_choice`. Since Pi 1.5.2 completions send `tools: []` beside tool
+ * history only when the model's compat sets `requiresToolsWithToolHistory`, and
  * Codex always sends `tool_choice: "auto"`; both would change the body a
  * llama.cpp or LM Studio server sees from the one #78 was fixed with.
  */
@@ -187,8 +188,10 @@ function hasToolHistory(messages: Context["messages"]): boolean {
  */
 function lockableContext(model: EngineModel, context: Context): Context | undefined {
 	const resolved = resolvedRequestContext(context);
-	// Pi adds `tools: []` beside tool history on completions, a surface Clio has
-	// always locked; every other API serializes a tool surface only when tools
+	// Completions with tool history stay lockable even with no tools declared: a
+	// compat with `requiresToolsWithToolHistory` still sends `tools: []` there
+	// (Pi 1.5.2 omits it otherwise), and the round keeps the `tool_choice: "none"`
+	// Clio has always sent. Every other API carries a tool surface only when tools
 	// are declared.
 	const hasSurface =
 		(resolved.tools?.length ?? 0) > 0 || (model.api === "openai-completions" && hasToolHistory(resolved.messages));

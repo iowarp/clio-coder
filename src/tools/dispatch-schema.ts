@@ -175,9 +175,10 @@ const DispatchVerificationSchema = Type.Array(
 	},
 );
 
-// Keep nested schemas self-contained. Pi's non-strict Anthropic adapter carries
-// root properties/required but drops root $defs, leaving references unresolved.
-// Inline objects cost more prompt tokens but preserve the actual provider contract.
+// Keep nested schemas self-contained. Pi 1.5.2 keeps root $defs in Anthropic
+// non-strict schemas, but Google's legacy `parameters` path strips $defs and
+// strict sampling refuses $ref, so a reference would still break there.
+// Inline objects cost more prompt tokens but hold on every provider.
 const DispatchIntentSchema = Type.Object(
 	{
 		read_roots: Type.Optional(

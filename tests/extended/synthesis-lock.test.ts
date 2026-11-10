@@ -164,8 +164,7 @@ describe("worker synthesis lock", () => {
 		const stripped = await roundWire(model, [{ kind: "tools-removed" }]);
 		strictEqual("tools" in stripped, false);
 		strictEqual("tool_choice" in stripped, false);
-		// Pi adds `tools: []` beside tool history on completions; the lock still
-		// sends no tools key there.
+		// Beside tool history on completions the lock still sends no tools key.
 		const withHistory = await roundWire(model, [{ kind: "tools-removed" }], readHistory);
 		strictEqual("tools" in withHistory, false);
 		strictEqual("tool_choice" in withHistory, false);
