@@ -15,3 +15,4 @@ export async function openStoreBackend(cwd: string): Promise<StoreBackend> {
 	const { createLocalStoreBackend } = await import("./backends/local.js");
 	return createLocalStoreBackend(cwd);
 }
+export { withStoreLock } from "./lock.js";

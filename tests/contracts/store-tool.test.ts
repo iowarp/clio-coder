@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import { storeWriteTarget } from "../../src/core/store-paths.js";
@@ -80,5 +81,20 @@ describe("store tool", () => {
 				(body(await tool.run({ op: "list", tag: "results" })).blobs as Array<{ blob: string }>).map((b) => b.blob),
 				[predicted],
 			);
+		}));
+	it("records exactly the stored bytes when puts to one blob race", () =>
+		withWorkspace(async (root) => {
+			const tool = createStoreTool({ getCwd: () => root, writable: true });
+			body(await tool.run({ op: "create", tag: "results" }));
+			const files = Array.from({ length: 6 }, (_, i) => {
+				mkdirSync(join(root, `w${i}`));
+				writeFileSync(join(root, `w${i}`, "x.bin"), `writer ${i} `.repeat(4096 * (i + 1)));
+				return `w${i}/x.bin`;
+			});
+			await Promise.all(files.map((file) => tool.run({ op: "put", tag: "results", path: file })));
+			const stat = body(await tool.run({ op: "stat", ref: "results:x.bin" }));
+			const live = readFileSync(String(body(await tool.run({ op: "get", ref: "results:x.bin" })).path));
+			strictEqual(stat.drift, "none");
+			strictEqual((stat.identity as { sha256: string }).sha256, createHash("sha256").update(live).digest("hex"));
 		}));
 });

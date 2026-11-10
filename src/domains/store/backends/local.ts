@@ -32,6 +32,7 @@ import {
 import { clioDataDir } from "../../../core/xdg.js";
 import { withFileMutationQueue } from "../../../tools/file-mutation-queue.js";
 import type { StoreBackend } from "../backend.js";
+import { withStoreLock } from "../lock.js";
 import { type StoreBackendFacts, type StoreBlobStat, StoreRefusal } from "../types.js";
 
 const XATTR_KEY_MAX_BYTES = 255;
@@ -315,11 +316,14 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 					throw new StoreRefusal("invalid-name", `A tag attribute value must be at most ${XATTR_VALUE_MAX_BYTES} bytes.`);
 				}
 				const file = path.join(await requireTag(tag), "tag.json");
-				await withFileMutationQueue(file, async () => {
-					const current = await readTagFile(tag);
-					current.xattrs = { ...current.xattrs, [key]: value };
-					await safeResourceWriteAsync(file, `${JSON.stringify(current)}\n`, { mode: 0o600 });
-				});
+				// The queue orders writers in this process; the store lock orders them across processes.
+				await withFileMutationQueue(file, () =>
+					withStoreLock(cwd, `tag.json\0${tag}`, async () => {
+						const current = await readTagFile(tag);
+						current.xattrs = { ...current.xattrs, [key]: value };
+						await safeResourceWriteAsync(file, `${JSON.stringify(current)}\n`, { mode: 0o600 });
+					}),
+				);
 			}),
 
 		getTagXattrs: (tag) => guarded(async () => ({ ...(await readTagFile(tag)).xattrs })),

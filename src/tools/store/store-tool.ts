@@ -2,7 +2,13 @@ import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { observeFileHash } from "../../core/run-records.js";
 import { isRecordsTag, validateBlobName, validateTagName } from "../../core/store-paths.js";
-import { openStoreBackend, type StoreBackend, type StoreBlobStat, StoreRefusal } from "../../domains/store/index.js";
+import {
+	openStoreBackend,
+	type StoreBackend,
+	type StoreBlobStat,
+	StoreRefusal,
+	withStoreLock,
+} from "../../domains/store/index.js";
 import { buildPutRecord } from "../../domains/store/provenance.js";
 import {
 	appendRecord,
@@ -50,6 +56,11 @@ const READ_ONLY_REFUSAL =
 	"store: this session can read the store but not write to it; the dispatching session puts results";
 const LIST_DEFAULT_LIMIT = 100;
 const LIST_MAX_LIMIT = 500;
+
+/** One lock per blob, held across its bytes and the record that describes them. */
+function blobLockKey(tag: string, blob: string): string {
+	return `blob\0${tag}\0${blob}`;
+}
 
 interface OpResult {
 	payload: unknown;
@@ -217,14 +228,21 @@ async function runOp(
 	}
 	const tag = checkTag(requireString(args, "tag", op));
 	if (op === "create") {
-		const { created } = await backend.getOrCreateTag(tag);
-		if (created) {
-			const description = typeof args.description === "string" ? args.description : "";
-			const tagClass = typeof args.class === "string" ? args.class : "output";
-			await backend.setTagXattr(tag, "clio.description", description);
-			await backend.setTagXattr(tag, "clio.class", tagClass);
-			await backend.setTagXattr(tag, "clio.createdAt", new Date().toISOString());
-		}
+		const tagClass = typeof args.class === "string" ? args.class : "output";
+		const created = await withStoreLock(cwd, `tag\0${tag}`, async () => {
+			const result = await backend.getOrCreateTag(tag);
+			// A create that crashed after the tag existed left it without attributes; the next create completes it.
+			const present = result.created ? {} : await backend.getTagXattrs(tag);
+			if (present["clio.description"] === undefined) {
+				const description = typeof args.description === "string" ? args.description : "";
+				await backend.setTagXattr(tag, "clio.description", description);
+			}
+			if (present["clio.class"] === undefined) await backend.setTagXattr(tag, "clio.class", tagClass);
+			if (present["clio.createdAt"] === undefined) {
+				await backend.setTagXattr(tag, "clio.createdAt", new Date().toISOString());
+			}
+			return result.created;
+		});
 		return {
 			payload: { tag, created, xattrs: await backend.getTagXattrs(tag) },
 			unit: "results",
@@ -262,32 +280,38 @@ async function runOp(
 		const blob = checkBlob(typeof args.blob === "string" && args.blob.length > 0 ? args.blob : source.name);
 		await requireTag(backend, tag);
 		const derived = await derivedRefs(backend, stringList(args.derived_from));
-		const replaced = (await backend.statBlob(tag, blob)) !== null;
-		const stored = await backend.putBlobFromFile(tag, blob, source.abs, signal);
-		try {
-			const { path: storedPath } = await backend.getBlobAsPath(tag, blob, signal);
-			const hash = await observeFileHash(storedPath, stored.bytes, signal);
-			const record = await buildPutRecord({
-				backend,
-				cwd,
-				tag,
-				blob,
-				sourceAbs: source.abs,
-				stat: stored,
-				hash,
-				receipt: { backend: backend.kind, key: storedPath, version: stored.version },
-				actor: "main",
-				ids,
-				...(typeof args.note === "string" ? { note: args.note } : {}),
-				derivedFrom: derived,
-			});
-			await appendRecord(backend, record);
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			throw new StoreToolError(
-				`store: put stored ${tag}:${blob} but could not record it (${reason}); stat will show drift "unrecorded".`,
-			);
-		}
+		let replaced = false;
+		const stored = await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
+			replaced = (await backend.statBlob(tag, blob)) !== null;
+			const written = await backend.putBlobFromFile(tag, blob, source.abs, signal);
+			try {
+				const { path: storedPath } = await backend.getBlobAsPath(tag, blob, signal);
+				const hash = await observeFileHash(storedPath, written.bytes, signal);
+				const record = await buildPutRecord({
+					backend,
+					cwd,
+					tag,
+					blob,
+					sourceAbs: source.abs,
+					stat: written,
+					hash,
+					receipt: { backend: backend.kind, key: storedPath, version: written.version },
+					actor: "main",
+					ids,
+					...(typeof args.note === "string" ? { note: args.note } : {}),
+					derivedFrom: derived,
+				});
+				await appendRecord(backend, record);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				throw new StoreToolError(
+					`store: put stored the bytes of ${source.rel} as ${tag}:${blob} but could not record them (${reason}). ` +
+						`The blob is in the store without a record, so stat shows drift "unrecorded"; ` +
+						`put the same file again to record it, or remove ${tag}:${blob} to drop it.`,
+				);
+			}
+			return written;
+		});
 		return {
 			payload: {
 				...(await statShape(backend, tag, blob, stored)),
@@ -333,16 +357,20 @@ async function runOp(
 		});
 		return { payload: { ref: `${tag}:${blob}`, noted: record }, unit: "results", shown: 1, total: 1 };
 	}
-	const last = currentState((await readBlobHistory(backend, tag, blob)).records).put;
-	if (!(await backend.delBlob(tag, blob))) {
-		throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store.`);
-	}
-	await appendRecord(backend, {
-		kind: "remove",
-		tag,
-		blob,
-		producedBy,
-		...(last?.identity !== undefined ? { identity: last.identity } : {}),
+	// Under the blob lock no put lands between the unlink and its record. A crash between the two leaves
+	// the last put record over a missing blob, which stat reports as drift "missing".
+	await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
+		const last = currentState((await readBlobHistory(backend, tag, blob)).records).put;
+		if (!(await backend.delBlob(tag, blob))) {
+			throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store.`);
+		}
+		await appendRecord(backend, {
+			kind: "remove",
+			tag,
+			blob,
+			producedBy,
+			...(last?.identity !== undefined ? { identity: last.identity } : {}),
+		});
 	});
 	return { payload: { ref: `${tag}:${blob}`, removed: true }, unit: "results", shown: 1, total: 1 };
 }
