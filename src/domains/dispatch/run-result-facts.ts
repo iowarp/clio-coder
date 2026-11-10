@@ -23,6 +23,7 @@ import { readRunRecord } from "../telemetry/index.js";
 import { TOOL_GUARD_REASON_CODE } from "./failure-headline.js";
 import { readRunFeed } from "./run-feed.js";
 import { OBSERVED_COMMAND_PREFIX } from "./run-findings.js";
+import { landedMergeText } from "./workspace-mutation.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -128,7 +129,9 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 		quality === null ? undefined : quality.resultContract === null ? "unmeasured" : quality.resultContract.conformance;
 	const contractKind = contractKindOf(quality?.resultContract?.sourceId);
 	const worktree = result?.worktree ?? null;
-	const mergeDetail = settled.worktree?.applied === true ? worktree?.detail : undefined;
+	// Only a commit that landed earns the line; an empty merge's "nothing merged" is not news to the operator.
+	const mergeDetail =
+		landedMergeText(settled.worktree?.applied, worktree?.detail) !== undefined ? worktree?.detail : undefined;
 	const changedPaths = worktree?.changedPaths ?? result?.checkoutChanges?.changedPaths;
 	const external = settled.route.runtimeKind === "subprocess" || settled.route.runtimeKind === "acp-delegation";
 	const placement = !external

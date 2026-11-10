@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { dispatchMergeNotices } from "../../src/domains/dispatch/workspace-mutation.js";
 import { dispatchBatchSummary, formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft, measuredSpend } from "../harness/receipt.js";
 import { writeSettledRun } from "../harness/settled-run.js";
@@ -54,6 +55,27 @@ test("the coordinator receives the landing fact for automatic and operator merge
 		const output = formatDispatchOutput("parallel", [{ ...run("run-merged", 0, "target-rates", 1), receipt }], 16384);
 		match(output, /merged abc1234 onto main/);
 	}
+});
+
+test("the operator gets one merge notice per worker that landed a commit, and none for an unlanded merge", () => {
+	const worktree = (detail: string, applied = true, apply = "merge") => ({
+		mode: "worktree",
+		apply,
+		applied,
+		detail,
+	});
+	deepStrictEqual(
+		dispatchMergeNotices({
+			runs: [
+				{ runId: "run-1", agentId: "coder", placement: worktree("merged abc1234 onto main; 1 authored file is ignored") },
+				{ runId: "run-2", agentId: "coder", placement: worktree("nothing merged: the task branch holds no change") },
+				{ runId: "run-3", agentId: "coder", placement: worktree("merge conflict in a.ts", false) },
+				{ runId: "run-4", agentId: "coder", placement: worktree("merged abc1234 onto main", false, "preserve") },
+				{ runId: "run-5", agentId: "scout", placement: { mode: "current", cwd: "/w" } },
+			],
+		}),
+		["coder run-1 merged abc1234 onto main"],
+	);
 });
 
 test("dispatch batch shows sealed tool calls and provenance-aware cost without inventing external tool counts", () => {
