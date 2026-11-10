@@ -4,7 +4,7 @@
  * defaults when absent. Idempotent.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import {
 	legacyMigrationManifestPath,
@@ -39,6 +39,8 @@ export interface NewerHome {
 const CONFIG_SUBDIRS = ["agents"] as const;
 const DATA_SUBDIRS = ["memory"] as const;
 const STATE_SUBDIRS = ["sessions", "interviews", "scratch"] as const;
+// State directories that are only ever Clio's and hold transcripts, tool output or run records.
+const PRIVATE_STATE_SUBDIRS = [...STATE_SUBDIRS, "telemetry", "live", "runs", "fleet-runs"] as const;
 
 interface InstallMetadata {
 	version: string;
@@ -76,6 +78,23 @@ interface InstallMetadata {
 	nodeVersion: string;
 }
 
+/**
+ * Close Clio's own state directories an older build left group or world readable. Not recursive: a closed
+ * parent hides everything below it. The roots are left alone; an operator may share one with other tools.
+ */
+function tightenPrivateStateDirs(stateDir: string): void {
+	if (process.platform === "win32") return;
+	for (const sub of PRIVATE_STATE_SUBDIRS) {
+		const full = join(stateDir, sub);
+		try {
+			const stat = lstatSync(full);
+			if (stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) !== 0) chmodSync(full, 0o700);
+		} catch {
+			// Missing or unreadable: nothing to tighten.
+		}
+	}
+}
+
 export function initializeClioHome(): InitReport {
 	enforceHomePrefixGuard();
 
@@ -99,7 +118,7 @@ export function initializeClioHome(): InitReport {
 
 	for (const dir of [configDir, dataDir, stateDir, cacheDir]) {
 		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
+			mkdirSync(dir, { recursive: true, mode: 0o700 });
 			created.push(dir);
 		}
 	}
@@ -113,11 +132,12 @@ export function initializeClioHome(): InitReport {
 		for (const sub of subs) {
 			const full = join(root, sub);
 			if (!existsSync(full)) {
-				mkdirSync(full, { recursive: true });
+				mkdirSync(full, { recursive: true, mode: 0o700 });
 				created.push(full);
 			}
 		}
 	}
+	tightenPrivateStateDirs(stateDir);
 
 	// Structure only: an existing settings.yaml is never read, validated, or
 	// rewritten here. Content validation belongs to readSettings/doctor.

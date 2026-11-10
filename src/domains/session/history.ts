@@ -7,6 +7,7 @@ import {
 	type ClioSessionOwner,
 	cwdHash,
 	readSessionFileEntries,
+	SESSION_FILE_MODE,
 	sessionPaths,
 } from "../../engine/session.js";
 import { collectSessionEntries } from "./compaction/session-entries.js";
@@ -158,7 +159,7 @@ export function endAbandonedSession(cwd: string, sessionId: string, owner: ClioS
 			// A session that never wrote a transcript is dated by its own creation.
 			endedAt = meta.createdAt;
 		}
-		atomicWrite(metaPath, JSON.stringify({ ...meta, endedAt }, null, 2));
+		atomicWrite(metaPath, JSON.stringify({ ...meta, endedAt }, null, 2), SESSION_FILE_MODE);
 		return true;
 	});
 }
@@ -474,5 +475,5 @@ function readMtimeIso(path: string): string | null {
 export function enrichForkMeta(meta: SessionMeta, parentSessionId: string, parentTurnId: string): void {
 	Object.assign(meta, { parentSessionId, parentTurnId });
 	const paths = sessionPaths(meta);
-	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));
+	atomicWrite(paths.meta, JSON.stringify(meta, null, 2), SESSION_FILE_MODE);
 }

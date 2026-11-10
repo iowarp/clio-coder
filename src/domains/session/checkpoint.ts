@@ -1,5 +1,5 @@
 import { stateRootRemoved } from "../../core/xdg.js";
-import { atomicWrite, sessionPaths } from "../../engine/session.js";
+import { atomicWrite, SESSION_FILE_MODE, sessionPaths } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
 import type { SessionManagerState } from "./manager.js";
 
@@ -33,6 +33,6 @@ export async function performCheckpoint(state: SessionManagerState, reason?: str
 		lastCheckpointAt: at,
 		lastCheckpointReason: reason ?? null,
 	};
-	atomicWrite(paths.meta, JSON.stringify(enriched, null, 2));
+	atomicWrite(paths.meta, JSON.stringify(enriched, null, 2), SESSION_FILE_MODE);
 	Object.assign(state.meta, enriched);
 }

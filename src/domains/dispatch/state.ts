@@ -419,6 +419,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 					let skipped = false;
 					try {
 						await safeResourceWriteAsync(target, contents, {
+							mode: 0o600,
 							// The awaited fsync is a window an uninstall can land in (#428).
 							withRename: (commit) => {
 								if (stateRootRemoved()) skipped = true;

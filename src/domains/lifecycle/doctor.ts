@@ -10,7 +10,7 @@ import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { CacheReportV1 } from "../../core/telemetry/dto.js";
-import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
+import { clioDirLayoutProblems, removableClioRootProblem, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import {
 	collectHarnessInput,
@@ -91,6 +91,29 @@ function describeNodeType(stats: Stats): string {
  * differs by failure: `--fix` creates a missing root but cannot move a file out
  * of the way or widen a mode, so the row says which one is needed.
  */
+// Roots holding transcripts, tool output and memory; config and cache are covered elsewhere or hold nothing private.
+const PRIVATE_ROOT_ROLES = ["state", "data"] as const;
+
+function privateRootFinding(name: string, path: string, tightened: ReadonlyArray<string>): DoctorFinding | null {
+	if (process.platform === "win32") return null;
+	if (tightened.includes(name)) return { ok: true, name: `${name} mode`, detail: "tightened to 700" };
+	let mode: number;
+	try {
+		const stat = statSync(path);
+		if (!stat.isDirectory()) return null;
+		mode = stat.mode & 0o777;
+	} catch {
+		return null;
+	}
+	if ((mode & 0o077) === 0) return null;
+	return {
+		ok: true,
+		level: "warn",
+		name: `${name} mode`,
+		detail: `${path} is ${mode.toString(8)}: group or other users can enter it and read session transcripts (run \`clio-coder doctor --fix\`, or \`chmod 700\` it when the directory is not Clio's alone)`,
+	};
+}
+
 function directoryFinding(name: string, path: string): DoctorFinding {
 	let stats: Stats;
 	try {
@@ -426,6 +449,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	let settingsRepair: SettingsRepairResult | null = null;
 	let settingsTightenedFrom: number | null = null;
+	const rootsTightened: string[] = [];
 	if (options.fix) {
 		// A repair that throws used to take the whole report with it, so the one
 		// command that explains the damage printed nothing. Record it and carry on;
@@ -441,6 +465,18 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				}
 			}
 			initializeClioHome();
+			// After init, so a root it just stamped as Clio's passes the same test reset uses.
+			if (process.platform !== "win32" && clioDirLayoutProblems(roots).length === 0) {
+				for (const role of PRIVATE_ROOT_ROLES) {
+					const path = roots[role];
+					if (!existsSync(path) || removableClioRootProblem(role, path) !== null) continue;
+					const stat = statSync(path);
+					if (stat.isDirectory() && stat.uid === process.getuid?.() && (stat.mode & 0o077) !== 0) {
+						chmodSync(path, 0o700);
+						rootsTightened.push(`${role} dir`);
+					}
+				}
+			}
 			settingsRepair = repairSettingsCoercions();
 			settingsTightenedFrom = tightenToOwnerOnly(join(resolveClioDirs().config, "settings.yaml"));
 			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
@@ -498,6 +534,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	findings.push(directoryFinding("data dir", dirs.data));
 	findings.push(directoryFinding("state dir", dirs.state));
 	findings.push(directoryFinding("cache dir", dirs.cache));
+	for (const role of PRIVATE_ROOT_ROLES) {
+		const finding = privateRootFinding(`${role} dir`, dirs[role], rootsTightened);
+		if (finding) findings.push(finding);
+	}
 
 	// The settings row runs the loader's own read: anything readSettings would
 	// refuse to start on shows up here read-only, with the exact key paths and

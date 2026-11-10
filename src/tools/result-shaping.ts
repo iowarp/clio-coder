@@ -194,8 +194,8 @@ export function writeToolOffload(
 		const sessionId = safePathSegment(context?.sessionId ?? "no-session");
 		const dir = join(clioStateDir(), "scratch", sessionId);
 		const path = join(dir, `${digest}.txt`);
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(path, offloadBody(text, bytes, maxBytes), "utf8");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(path, offloadBody(text, bytes, maxBytes), { encoding: "utf8", mode: 0o600 });
 		return path;
 	} catch {
 		return null;

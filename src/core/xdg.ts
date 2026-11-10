@@ -246,7 +246,7 @@ function platformDefaults(): ClioDirs {
 function ensureDir(dir: string, marker?: ClioDirRole): string {
 	const created = marker !== undefined && !existsSync(dir);
 	try {
-		mkdirSync(dir, { recursive: true });
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
 	} catch (err) {
 		const e = err as NodeJS.ErrnoException;
 		if (e.code !== "EEXIST") throw err;

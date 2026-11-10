@@ -11,6 +11,7 @@ import {
 	resumeSession as engineResumeSession,
 	openSession,
 	readSessionMeta,
+	SESSION_FILE_MODE,
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
@@ -85,7 +86,7 @@ export function persistSessionMeta(state: SessionManagerState): void {
 	// the shutdown checkpoint did. See core/xdg.ts stateRootRemoved().
 	// A fenced writer lost the session to a forced release (#439); its meta is no longer ours to write.
 	if (stateRootRemoved() || state.writer.fenced) return;
-	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2));
+	atomicWrite(sessionPaths(state.meta).meta, JSON.stringify(state.meta, null, 2), SESSION_FILE_MODE);
 }
 
 export function resumeSessionState(sessionId: string): {

@@ -190,9 +190,12 @@ export interface ClioSessionReader {
 
 export { cwdHash };
 
+export const SESSION_FILE_MODE = 0o600;
+
 export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 	const dir = join(clioStateDir(), "sessions", meta.cwdHash, meta.id);
-	mkdirSync(dir, { recursive: true });
+	// Transcripts hold every prompt and tool result: owner-only, like credentials.
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	return {
 		current: join(dir, "current.jsonl"),
 		tree: join(dir, "tree.json"),
@@ -203,8 +206,8 @@ export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 // meta.json and tree.json rewrites delegate to the canonical writer. Neither
 // file is recovered from a leftover temp, so the randomized hidden temp name is
 // safe here (unlike current.jsonl, which promotes a deterministic `.tmp`).
-export function atomicWrite(targetPath: string, contents: string | Uint8Array): void {
-	safeResourceWrite(targetPath, contents);
+export function atomicWrite(targetPath: string, contents: string | Uint8Array, mode?: number): void {
+	safeResourceWrite(targetPath, contents, mode === undefined ? {} : { mode });
 }
 
 export interface SessionJsonlWarning {
@@ -291,10 +294,10 @@ function writeJsonlFileAtomic(
 	options: SessionJsonlWriteOptions = {},
 ): void {
 	const dir = dirname(targetPath);
-	mkdirSync(dir, { recursive: true });
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const body = serializeJsonl(entries);
 	const tmp = `${targetPath}.tmp`;
-	const fd = openSync(tmp, "w");
+	const fd = openSync(tmp, "w", SESSION_FILE_MODE);
 	try {
 		try {
 			writeAll(fd, Buffer.from(body, "utf8"));
@@ -835,7 +838,7 @@ function createWriter(
 				// Restore the canonical tree if its persisted artifact disappeared.
 			}
 		}
-		atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
+		atomicWrite(paths.tree, JSON.stringify(tree, null, 2), SESSION_FILE_MODE);
 		treeStat = statSync(paths.tree, { bigint: true });
 		treeDirty = false;
 	}
@@ -854,7 +857,7 @@ function createWriter(
 			closeAppendFd({ flush: true });
 		}
 		const tornTail = !endsWithNewline(paths.current);
-		appendFd = openSync(paths.current, "a");
+		appendFd = openSync(paths.current, "a", SESSION_FILE_MODE);
 		// Terminating the fragment keeps the reader's torn-tail behavior:
 		// it skips exactly one invalid line with a warning.
 		if (tornTail) {
@@ -1016,7 +1019,7 @@ function createWriter(
 			if (fencedAtClose || stateRootRemoved()) return;
 			persistPendingTree();
 			const ended: ClioSessionMeta = { ...meta, endedAt: new Date().toISOString() };
-			atomicWrite(paths.meta, JSON.stringify(ended, null, 2));
+			atomicWrite(paths.meta, JSON.stringify(ended, null, 2), SESSION_FILE_MODE);
 			meta.endedAt = ended.endedAt;
 		},
 		fence(): void {
@@ -1045,14 +1048,14 @@ export function createSession(input: {
 } {
 	const meta = buildMeta(input);
 	const paths = sessionPaths(meta);
-	atomicWrite(paths.meta, JSON.stringify(meta, null, 2));
+	atomicWrite(paths.meta, JSON.stringify(meta, null, 2), SESSION_FILE_MODE);
 	const headerOptions: { parentSession?: string; parentTurnId?: string } = {};
 	if (input.parentSession !== undefined) headerOptions.parentSession = input.parentSession;
 	if (input.parentTurnId !== undefined) headerOptions.parentTurnId = input.parentTurnId;
 	const initialEntries = ensureSessionHeader(meta, input.initialEntries ?? [], headerOptions);
 	const initialTree = [...(input.initialTree ?? [])];
 	writeJsonlFileAtomic(paths.current, initialEntries);
-	atomicWrite(paths.tree, JSON.stringify(initialTree, null, 2));
+	atomicWrite(paths.tree, JSON.stringify(initialTree, null, 2), SESSION_FILE_MODE);
 	const writer = createWriter(meta, initialTree, initialEntries, headerOptions);
 	return { meta, writer };
 }
@@ -1109,7 +1112,7 @@ export function resumeSession(
 	const restamped = restamp !== undefined && meta.sessionFormatVersion !== restamp;
 	const owner = currentOwner();
 	const reopened = { ...meta, endedAt: null, owner, ...(restamped ? { sessionFormatVersion: restamp } : {}) };
-	atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
+	atomicWrite(metaPath, JSON.stringify(reopened, null, 2), SESSION_FILE_MODE);
 	meta.endedAt = null;
 	meta.owner = owner;
 	if (restamped) meta.sessionFormatVersion = restamp;
