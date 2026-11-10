@@ -145,14 +145,8 @@ function checkProductNamespace(): void {
 	const legacyProjectPath = /(?:^|[\s"'`/\\])\.clio(?:-(?!coder\b)|(?=$|[\s/\\"'`.,;:)\]}]))/iu;
 	for (const file of new Set(files)) {
 		if (!/\.(?:[cm]?[jt]sx?|md|json|ya?ml|toml|sh|html|txt)$/u.test(file)) continue;
-		// History quotes the old names, and the tracked handbook states the rule by naming the form it bans.
-		if (
-			file === "CHANGELOG.md" ||
-			file === "CLIO-CODER.md" ||
-			file.startsWith("docs/history/") ||
-			file.startsWith(".github/releases/")
-		)
-			continue;
+		// History quotes the old names.
+		if (file === "CHANGELOG.md" || file.startsWith("docs/history/") || file.startsWith(".github/releases/")) continue;
 		if (!existsSync(join(root, file))) continue;
 		if (legacyProjectPath.test(file)) {
 			fail("product-namespace", `${file}: project state directories must use the clio-coder namespace`);

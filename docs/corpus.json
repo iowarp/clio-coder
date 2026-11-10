@@ -3,7 +3,7 @@
 	"product": {
 		"label": "Authored product, operator, and current architecture documentation",
 		"roots": ["README.md", "architecture/", "guide/"],
-		"supporting": ["../README.md", "../CHANGELOG.md", "../CLIO-CODER.md"],
+		"supporting": ["../README.md", "../CHANGELOG.md"],
 		"excludes": ["html/**", "wiki/**"],
 		"enforcedBy": {
 			"html/**": "src/tools/context/docs-engine.ts skips docs/html when it indexes",

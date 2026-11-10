@@ -363,7 +363,7 @@ function candidateDocFiles(root: string): string[] {
 		}
 	};
 	walk(docsDir);
-	for (const name of ["README.md", "CHANGELOG.md", "CLIO-CODER.md"]) {
+	for (const name of ["README.md", "CHANGELOG.md"]) {
 		if (existsSync(join(root, name))) files.push(name);
 	}
 	return files;
