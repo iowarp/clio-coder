@@ -83,7 +83,7 @@ Settings YAML paths shown in the inventory below are canonical. Use [Configurati
 
 ## Strict validation and lifecycle repair
 
-Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio Coder ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Workspace trust gates four more project surfaces the same way (`safety`, `hooks`, `extensions` and `plugins`); project extensions and library packages load only after `clio-coder config trust extensions` or `plugins` approves their install state, as described in [Commands and modes](commands-and-modes.md). Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) in project layers are dropped with a diagnostic. A project `safety.autonomy` is kept only when it is no looser than the user's level, so it can tighten `yolo` to `default` and never the reverse; a looser value is dropped with a diagnostic.
+Settings use one strict version-2 schema. Unknown keys and invalid values stop startup with a path-specific diagnostic. Objects merge by key; arrays and scalars replace the lower layer. Project layers are read only after the workspace's project settings are trusted; until then Clio Coder ignores them and prints a notice, and `clio-coder config trust settings` shows the captured files and how to approve exactly those bytes. Workspace trust gates four more project surfaces the same way (`safety`, `hooks`, `extensions` and `plugins`); project extensions and library packages load only after `clio-coder config trust extensions` or `plugins` approves their install state, as described in [Commands and modes](commands-and-modes.md). Credential-bearing keys (`auth`, `apiKey`, `token`, `secret`, `password`) in project layers are dropped with a diagnostic. A project `safety.autonomy` is kept only when it is no looser than the user's level, so it can tighten `yolo` to `default` and never the reverse; a looser value is dropped with a diagnostic. `safety.sandbox`, `safety.sandboxNetwork`, `safety.snapshots` and `fleet.permissions.mode` follow the same rule, and `integrations.runtimePlugins` and `integrations.projectResources.trustProjectImports` are read from user settings only.
 
 `clio-coder upgrade` runs the registered version-1 migration and preserves the original as `settings.yaml.v1.bak`. `clio-coder doctor --fix` repairs selected installation state. It also rewrites a retired enum value, such as `safety.autonomy: auto-edit`, to the replacement the validation error names, and YAML 1.1 `on`/`off` booleans, preserving comments and formatting. It removes retired keys from the user `settings.yaml`, as [retired keys and values](configuration-reference.md#retired-keys-and-values) describes. Plain `doctor` lists those repairs without writing them. `doctor --fix` does not run migrations. See [settings validation and migration](../../src/core/config.ts).
 
@@ -140,7 +140,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.retry.baseDelayMs` | `2000` | next turn |
 | `chat.retry.maxDelayMs` | `60000` | next turn |
 | `chat.retry.streamStallMs` | `180000` | next turn |
-| `chat.retry.firstTokenStallMs` | `600000` | next turn |
+| `chat.retry.firstTokenStallMs` | `600000` | next turn; local and self-hosted endpoints only, because a hosted (cloud or subscription) route aborts a call with no first token after `chat.retry.streamStallMs` |
 | `chat.steering.triage.enabled` | `false` | next turn |
 | `chat.steering.triage.target` | `null` | next turn |
 | `chat.steering.triage.model` | `null` | next turn |
@@ -175,7 +175,7 @@ explains worker route selection.
 | `fleet.adaptiveRouting.roles` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | next dispatch |
 | `fleet.adaptiveRouting.agentRoles` | `[]` | next dispatch |
-| `fleet.permissions.mode` | `judge` | next dispatch; `judge` hands a native local worker's ordinary ask to the main session's safety judge at autonomy `default` and runs as `deny` elsewhere |
+| `fleet.permissions.mode` | `judge` | next dispatch; `judge` hands a native local worker's ordinary ask to the main session's safety judge at autonomy `default` and runs as `deny` elsewhere; a project layer can only tighten it |
 | `fleet.permissions.escalation.timeoutMs` | `120000` | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | next dispatch |
 | `fleet.concurrency` | `auto` | restart |
@@ -258,12 +258,12 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.review.enabled` | `false` | immediately |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately |
-| `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash, run_script and command-running verify checks at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo commands; `off` never sandboxes |
-| `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get |
+| `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash, run_script and command-running verify checks at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo commands; `off` never sandboxes; a project layer can only tighten it |
+| `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get; a project layer can only set `false` |
 | `safety.scratchRoots` | `[]` | immediately; user layer only; extra directories the main session's sandboxed commands and typed `write` and `edit` calls may write at autonomy `default` without asking, where its deletes run as they do in the workspace |
 | `safety.sandboxPassEnv` | `[]` | immediately for the main session, next dispatch for workers; user layer only; environment variable names a sandboxed command keeps although they look like credentials, which the sandbox otherwise removes before the command starts; arena contenders also keep these names from your environment |
 | `safety.sandboxUnixSockets` | `block` | immediately for the main session, next dispatch for workers; user layer only; `block` makes creating a Unix-domain socket fail inside the OS sandbox (a seccomp filter under bubblewrap, profile rules under the unverified seatbelt), because a socket a contained command reaches, such as tmux, an X11 display or a daemon's control socket, runs commands outside it; `allow` leaves every socket reachable |
-| `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none |
+| `safety.snapshots` | `auto` | immediately; `auto` snapshots a Git work tree before each turn's first mutating call and before every destructive call, `off` takes none; a project layer can only set `auto` |
 | `safety.unattendedAfterSeconds` | `300` | immediately; user layer only; seconds an attended permission card or ask_user round waits before Clio denies the call or picks the recommended option; `0` waits forever |
 | `safety.yoloAccepted` | `false` | immediately; user layer only; set by the one-time card that turns yolo on interactively, and `false` shows the card again |
 | `safety.yoloConfinement` | `contained` | immediately; user layer only; `contained` keeps default's sandbox, snapshots and safety judge at yolo and refuses what would wait for you, `unconfined` is the skip-permissions yolo and takes effect only with `safety.yoloUnconfinedAccepted` |
@@ -305,13 +305,13 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `integrations.projectResources.trustProjectImports` | `false` | next turn |
+| `integrations.projectResources.trustProjectImports` | `false` | next turn; user layer only |
 | `integrations.externalAgents.entries` | `[]` | next dispatch |
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | next dispatch |
 | `integrations.externalAgents.defaults.turnTimeoutMs` | `0` | next dispatch |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | next dispatch |
 | `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | next dispatch |
-| `integrations.runtimePlugins` | `[]` | restart |
+| `integrations.runtimePlugins` | `[]` | restart; user layer only; a bare npm package name or an absolute path under the config `runtimes/` directory, and relative paths are refused |
 | `integrations.library.catalog` | `null` | next turn |
 | `integrations.library.remote` | `null` | next turn |
 | `integrations.library.confirmedRemote` | `null` | next turn |
@@ -525,7 +525,7 @@ Cost appears in these places, and every one renders the journaled facts through 
 
 The pricing rule also decides what the cost ceiling sees. `safety.limits.sessionCostUsd` gates chat requests only on routes priced by target rates or the catalog, and gates dispatched routes that have a nonzero rate. Free and unpriced routes are not counted, so work on an unpriced LiteLLM target spends outside the ceiling until the target declares `pricing`. A dispatch routing intent that sets `maxCostUsd` prices a route with no rates at a fixed admission estimate of 1 USD.
 
-`safety.limits.sessionCostUsd` accepts any finite number of at least 0, fractions included. `0` means no session ceiling. The session gate admits every paid request, and an interactive session never waits on a raise. A dispatch plan and a Scout continuation carry a ceiling of 0 that enforces nothing, and a fleet preview skips its remaining-budget check. A negative value fails settings validation with `safety.limits.sessionCostUsd: expected a number >= 0, got <value>`. `clio-coder configure` shows a ceiling of 0 as `none` and a positive one as `$<amount> USD` on its `Session cost limit` row, and its prompt accepts 0 to remove the ceiling. A positive ceiling still refuses a paid request once priced spend reaches it, and `clio-coder run` then exits 4 with `budget_ceiling` ([exit codes](exit-codes-and-output.md)).
+`safety.limits.sessionCostUsd` accepts any finite number of at least 0, fractions included. `0` means no session ceiling. The session gate admits every paid request, and an interactive session never waits on a raise. A dispatch plan and a Scout continuation carry a ceiling of 0 that enforces nothing, and a fleet preview skips its remaining-budget check. A negative value fails settings validation with `safety.limits.sessionCostUsd: expected a number >= 0, got <value>`. `clio-coder configure` shows a ceiling of 0 as `none` and a positive one as `$<amount> USD` on its `Session cost limit` row, and its prompt accepts 0 to remove the ceiling. A positive ceiling still refuses a paid request once priced spend reaches it, and `clio-coder run` then exits 4 with `budget_ceiling` ([exit codes](exit-codes-and-output.md)). In every mode it also stops running workers at their next metered call once session spend reaches it.
 
 ## Local model settings
 
