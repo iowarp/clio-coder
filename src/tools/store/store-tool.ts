@@ -7,6 +7,7 @@ import {
 	type StoreBackend,
 	type StoreBlobStat,
 	StoreRefusal,
+	type StoreTagClass,
 	withStoreLock,
 } from "../../domains/store/index.js";
 import { buildPutRecord } from "../../domains/store/provenance.js";
@@ -56,6 +57,7 @@ const READ_ONLY_REFUSAL =
 	"store: this session can read the store but not write to it; the dispatching session puts results";
 const LIST_DEFAULT_LIMIT = 100;
 const LIST_MAX_LIMIT = 500;
+const TAG_CLASSES: ReadonlySet<string> = new Set<StoreTagClass>(["input", "output", "cache", "archive"]);
 
 /** One lock per blob, held across its bytes and the record that describes them. */
 function blobLockKey(tag: string, blob: string): string {
@@ -164,9 +166,24 @@ async function backendSummary(backend: StoreBackend): Promise<{ kind: string; ti
 }
 
 /** The `stat` shape: what Clio recorded and whether the bytes still match it. No path: `get` produces one. */
-async function statShape(backend: StoreBackend, tag: string, blob: string, stat: StoreBlobStat | null) {
+async function statShape(
+	backend: StoreBackend,
+	tag: string,
+	blob: string,
+	stat: StoreBlobStat | null,
+	options: { verifyHash?: boolean; signal?: AbortSignal | undefined } = {},
+) {
 	const state = currentState((await readBlobHistory(backend, tag, blob)).records);
 	const put = state.put;
+	let drift = driftOf(put, stat);
+	// Size and mtime can match bytes that changed (an mtime restored by touch -r or a copy tool),
+	// so a recorded hash is checked too when the blob is small enough to hash.
+	const recorded = put?.identity?.sha256 ?? null;
+	if (options.verifyHash === true && drift === "none" && stat !== null && recorded !== null) {
+		const { path: livePath } = await backend.getBlobAsPath(tag, blob, options.signal);
+		const live = await observeFileHash(livePath, stat.bytes, options.signal);
+		if (live.sha256 !== null && live.sha256 !== recorded) drift = "changed";
+	}
 	if (stat === null && put === null) {
 		const removed = state.removed ? "; it was removed and its records remain" : "";
 		throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store${removed}.`);
@@ -175,7 +192,7 @@ async function statShape(backend: StoreBackend, tag: string, blob: string, stat:
 		ref: `${tag}:${blob}`,
 		bytes: stat?.bytes ?? null,
 		modified: stat === null ? null : new Date(stat.modifiedMs).toISOString(),
-		drift: driftOf(put, stat),
+		drift,
 		identity: put?.identity ?? null,
 		generatedBy: put?.generatedBy ?? "no producing run on record",
 		used: put?.used ?? [],
@@ -228,7 +245,10 @@ async function runOp(
 	}
 	const tag = checkTag(requireString(args, "tag", op));
 	if (op === "create") {
-		const tagClass = typeof args.class === "string" ? args.class : "output";
+		const tagClass = args.class === undefined ? "output" : args.class;
+		if (typeof tagClass !== "string" || !TAG_CLASSES.has(tagClass)) {
+			throw new StoreRefusal("invalid-name", `class must be one of ${[...TAG_CLASSES].join(", ")}.`);
+		}
 		const created = await withStoreLock(cwd, `tag\0${tag}`, async () => {
 			const result = await backend.getOrCreateTag(tag);
 			// A create that crashed after the tag existed left it without attributes; the next create completes it.
@@ -326,7 +346,7 @@ async function runOp(
 	const blob = checkBlob(requireString(args, "blob", op));
 	if (op === "stat") {
 		return {
-			payload: await statShape(backend, tag, blob, await backend.statBlob(tag, blob)),
+			payload: await statShape(backend, tag, blob, await backend.statBlob(tag, blob), { verifyHash: true, signal }),
 			unit: "results",
 			shown: 1,
 			total: 1,

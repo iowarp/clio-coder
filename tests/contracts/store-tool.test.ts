@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -64,6 +65,7 @@ describe("store tool", () => {
 			}
 			strictEqual((await tool.run({ op: "tags" })).kind, "ok");
 		}));
+
 	it("stores a put under the name admission predicted when a link changes after admission", () =>
 		withWorkspace(async (root) => {
 			writeFileSync(join(root, "out", "b.dat"), "bytes\n");
@@ -82,6 +84,7 @@ describe("store tool", () => {
 				[predicted],
 			);
 		}));
+
 	it("records exactly the stored bytes when puts to one blob race", () =>
 		withWorkspace(async (root) => {
 			const tool = createStoreTool({ getCwd: () => root, writable: true });
@@ -96,5 +99,27 @@ describe("store tool", () => {
 			const live = readFileSync(String(body(await tool.run({ op: "get", ref: "results:x.bin" })).path));
 			strictEqual(stat.drift, "none");
 			strictEqual((stat.identity as { sha256: string }).sha256, createHash("sha256").update(live).digest("hex"));
+		}));
+
+	it("reports drift when bytes change under the same size and mtime", () =>
+		withWorkspace(async (root) => {
+			const tool = createStoreTool({ getCwd: () => root, writable: true });
+			body(await tool.run({ op: "create", tag: "results" }));
+			body(await tool.run({ op: "put", tag: "results", path: "out/summary.csv" }));
+			const live = String(body(await tool.run({ op: "get", ref: "results:summary.csv" })).path);
+			// touch -r copies the full-precision mtime, as a copy tool that preserves timestamps would.
+			const stamp = join(root, "stamp");
+			execFileSync("touch", ["-r", live, stamp]);
+			writeFileSync(live, "x,y\n3,4\n");
+			execFileSync("touch", ["-r", stamp, live]);
+			strictEqual(body(await tool.run({ op: "stat", ref: "results:summary.csv" })).drift, "changed");
+		}));
+
+	it("refuses an unknown tag class", () =>
+		withWorkspace(async (root) => {
+			const tool = createStoreTool({ getCwd: () => root, writable: true });
+			const result = await tool.run({ op: "create", tag: "results", class: "scratch" });
+			strictEqual(result.kind, "error");
+			match(String(result.message), /class must be one of/);
 		}));
 });
