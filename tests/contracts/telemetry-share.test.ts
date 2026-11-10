@@ -24,6 +24,7 @@ import {
 } from "../../src/domains/telemetry/paths.js";
 import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import {
+	freshShareSource,
 	importShareArchive,
 	planShare,
 	resolveShareScopes,
@@ -436,6 +437,134 @@ test("a live process scope shares by snapshot and imports under process/ (R-15)"
 			[{ kind: "process", id: processId, directory: placed }],
 		);
 		strictEqual(verifyTelemetryScope(await readTelemetryScopeFiles(placed)).status, "verified");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+/** A live process scope that pre-warmed three targets serving two models. */
+async function prewarmedProcess(stateDir: string) {
+	const processId = newProcessId();
+	await liveJournal(
+		telemetryProcessDirectory(stateDir, processId),
+		{ sessionId: null, processId, agent: { role: "main", id: processId } },
+		[
+			["hostname-vllm", "qwen3.8-27b"],
+			["site-b-sglang", "qwen3.8-27b"],
+			["lab-c-litellm", "claude-opus-5-5"],
+		].map(([targetId, model]) => ({ kind: "prewarm.decided", data: { round: "prompt", ran: true, targetId, model } })),
+	);
+	return resolveShareScopes(stateDir, {
+		sessions: [],
+		runs: [],
+		processes: [processId],
+		repo: null,
+		since: null,
+		until: null,
+		live: "snapshot",
+	});
+}
+
+test("a report share anonymizes target ids, verifies, and rejects a target id edited back (R-16)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-report-"));
+	try {
+		const stateDir = join(root, "operator");
+		const { scopes, skipped } = await prewarmedProcess(stateDir);
+		const structuralPath = join(root, "structural.tar.gz");
+		await writeShare(
+			planShare({ scopes, skipped, profile: "structural", source: telemetryShareSource(stateDir), writer }),
+			structuralPath,
+		);
+		ok(gunzipSync(await readFile(structuralPath)).includes("hostname-vllm"));
+		const report = planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer });
+		const reportPath = join(root, "report.tar.gz");
+		await writeShare(report, reportPath);
+		const archive = await readFile(reportPath);
+		ok(!gunzipSync(archive).includes("hostname-vllm"));
+		strictEqual(verifyShareArchive(archive).failure, null);
+
+		const scope = report.scopes[0];
+		ok(scope);
+		const rows = scanTelemetrySegment(scope.journal).rows;
+		const closing = rows.at(-2);
+		const seal = rows.at(-1);
+		ok(closing?.kind === "header" && seal?.kind === "record");
+		const lines = rows.slice(0, -2).map((row) => {
+			ok(row.kind === "header" || row.kind === "record");
+			if (row.kind === "header") return row.header;
+			const data = row.record.data as EventPayload<"prewarm.decided">;
+			return row.record.k === "prewarm.decided"
+				? { ...row.record, data: { ...data, targetId: "hostname-vllm" } }
+				: row.record;
+		});
+		const resealed = sealSharedScope({
+			scope: { kind: scope.kind, id: scope.id },
+			lines: lines as Parameters<typeof sealSharedScope>[0]["lines"],
+			objects: scope.objects,
+			profile: "report",
+			installId: report.installId,
+			writer,
+			header: closing.header,
+			ctx: seal.record.ctx,
+			now: new Date(),
+		});
+		const tamperedPath = join(root, "tampered.tar.gz");
+		await writeShare({ ...report, scopes: [{ ...scope, ...resealed }] }, tamperedPath);
+		match(
+			verifyShareArchive(await readFile(tamperedPath)).failure ?? "",
+			/prewarm\.decided with fields beyond the report projection/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("two report shares of one scope have different install ids and no anonymous id in common (R-16)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-unlinkable-"));
+	try {
+		const { scopes, skipped } = await prewarmedProcess(join(root, "operator"));
+		const [first, second] = [0, 1].map(() =>
+			planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer }),
+		);
+		ok(first && second);
+		ok(first.installId !== second.installId);
+		const anonymous = (plan: typeof first) =>
+			new Set(plan.scopes.flatMap((scope) => scope.journal.toString("utf8").match(/anon_[0-9a-f]{16}/gu) ?? []));
+		const ids = anonymous(first);
+		ok(ids.size >= 3);
+		deepStrictEqual(
+			[...anonymous(second)].filter((id) => ids.has(id)),
+			[],
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a report plan's inventory lists the readable model ids and no target id (R-16)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-inventory-"));
+	try {
+		const { scopes, skipped } = await prewarmedProcess(join(root, "operator"));
+		const plan = planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer, inventory: true });
+		deepStrictEqual(plan.inventory?.readable.model, ["claude-opus-5-5", "qwen3.8-27b"]);
+		const readable = Object.values(plan.inventory?.readable ?? {}).flat();
+		for (const target of ["hostname-vllm", "site-b-sglang", "lab-c-litellm"]) ok(!readable.includes(target));
+		ok((plan.inventory?.anonymized.name ?? 0) >= 3);
+		const anonymized = planShare({
+			scopes,
+			skipped,
+			profile: "report",
+			source: freshShareSource(),
+			writer,
+			inventory: true,
+			models: "anonymize",
+		});
+		deepStrictEqual(anonymized.inventory?.readable.model, []);
+		const out = join(root, "anonymized.tar.gz");
+		await writeShare(anonymized, out);
+		const archive = await readFile(out);
+		ok(!gunzipSync(archive).includes("qwen3.8-27b"));
+		strictEqual(verifyShareArchive(archive).failure, null);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

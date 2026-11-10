@@ -6,6 +6,7 @@ import type { SegmentHeader } from "../core/telemetry/envelope.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { SharePlan, ShareProfile, ShareScopeKind, ShareSelection } from "../domains/telemetry/share.js";
 import {
+	freshShareSource,
 	importShareArchive,
 	isShareProfile,
 	listShareCandidates,
@@ -22,7 +23,7 @@ import { printError } from "./shared.js";
 
 export const SHARE_HELP = `clio-coder telemetry share [--session <id>]... [--run <id>]... [--process <id>]... [--repo <path>]
                            [--since <iso>] [--until <iso>] [--live]
-                           [--profile content-free|structural|research] [--out <file>] [--dry-run]
+                           [--profile content-free|report|structural|research] [--out <file>] [--dry-run]
 clio-coder telemetry import <archive>
 
 share packs sealed telemetry scopes into one tar.gz for the maintainer; nothing is
@@ -31,16 +32,19 @@ session brings the runs it references, and a scope that is live or fails
 verification is skipped and named. --live shares a named scope that is still
 live as a snapshot of what is on disk, without sealing or touching it; a
 process scope (boot, health, domain loads, exit) is reachable by --process,
-and the running process's own only with --live. In a terminal with no scope flags it asks
-which scopes and which profile. Profiles:
+and the running process's own only with --live. In a terminal with no scope
+flags it asks which scopes and which profile. Profiles:
   content-free  ${SHARE_PROFILES["content-free"].summary} (default)
+  report        ${SHARE_PROFILES.report.summary}
   structural    ${SHARE_PROFILES.structural.summary}
   research      ${SHARE_PROFILES.research.summary}
 Every profile redacts secrets again in every record and object it keeps. Each
 scope is resealed with share.sealed over exactly what the archive carries, and
 the archive's manifest names the profile, this installation's random install id
-and the Clio version, never a hostname or path. It previews scope, record and
-object counts and what the profile drops before writing; --dry-run stops there.
+and the Clio version, never a hostname or path; a report archive gets an install
+id and anonymization key of its own, so it links to no other share. It previews
+scope, record and object counts and what the profile drops before writing, and
+for report every name left readable; --dry-run stops there.
 --out defaults to a timestamped file in the current directory and is never
 overwritten.
 
@@ -105,6 +109,24 @@ function preview(plan: SharePlan): string {
 	);
 	if (downgraded.length > 0)
 		lines.push(`captured without research consent, so shared as structural: ${downgraded.join(", ")}`);
+	if (plan.inventory) {
+		const { readable, anonymized, withheld } = plan.inventory;
+		const named = (
+			[
+				["models", readable.model],
+				["runtimes", readable.runtime],
+				["tools", readable.tool],
+				["tokens", readable.token],
+			] as const
+		)
+			.filter(([, values]) => values.length > 0)
+			.map(([label, values]) => `${label} ${values.join(", ")}`);
+		lines.push(`readable names: ${named.length === 0 ? "none" : named.join("; ")}`);
+		const counts = Object.entries(anonymized)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([kind, count]) => `${count} ${kind}${count === 1 ? "" : "s"}`);
+		lines.push(`anonymized: ${counts.length === 0 ? "none" : counts.join(", ")}; withheld: ${withheld} string(s)`);
+	}
 	return `${lines.join("\n")}\n`;
 }
 
@@ -256,8 +278,10 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 			scopes,
 			skipped,
 			profile,
-			source: telemetryShareSource(stateDir),
+			// A report archive links to no other share; every other profile names this installation (R-16).
+			source: profile === "report" ? freshShareSource() : telemetryShareSource(stateDir),
 			writer: packageWriter(),
+			...(profile === "report" ? { inventory: true as const } : {}),
 		});
 		process.stdout.write(preview(plan));
 		if (args.dryRun) {

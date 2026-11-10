@@ -53,8 +53,14 @@ import {
 	telemetryArchiveSize,
 	unpackTelemetryArchive,
 } from "./share-archive.js";
-import type { AnonKind } from "./share-projection.js";
-import { conformingAnonymous, projectSharedObject, projectSharedPayload } from "./share-projection.js";
+import type { AnonKind, ProjectionTally, ReadableKind, ShareProjection } from "./share-projection.js";
+import {
+	conformingAnonymous,
+	createProjectionTally,
+	projectionFor,
+	projectSharedObject,
+	projectSharedPayload,
+} from "./share-projection.js";
 
 /**
  * `telemetry share` and `telemetry import` (#434). A share filters sealed scope bundles, or a live scope's validated
@@ -85,6 +91,12 @@ export const SHARE_PROFILES: Readonly<Record<ShareProfile, ShareProfileDefinitio
 		classes: ["content-free", "structural"],
 		objects: "none",
 	},
+	report: {
+		summary: "structural, with target ids anonymized too: for an archive linked from a public issue",
+		tiers: ["accountability", "operational"],
+		classes: ["content-free", "structural"],
+		objects: "structure",
+	},
 	structural: {
 		summary: "adds the objects that hold structure, such as prompt and tool-schema manifests",
 		tiers: ["accountability", "operational"],
@@ -99,7 +111,13 @@ export const SHARE_PROFILES: Readonly<Record<ShareProfile, ShareProfileDefinitio
 	},
 };
 export const SHARE_PROFILE_NAMES = Object.keys(SHARE_PROFILES) as ShareProfile[];
-const PROFILE_RANK: Readonly<Record<ShareProfile, number>> = { "content-free": 0, structural: 1, research: 2 };
+/** Strictness order: a scope's profile may not rank above its archive's. */
+const PROFILE_RANK: Readonly<Record<ShareProfile, number>> = {
+	"content-free": 0,
+	report: 1,
+	structural: 2,
+	research: 3,
+};
 
 export function isShareProfile(value: string): value is ShareProfile {
 	return Object.hasOwn(SHARE_PROFILES, value);
@@ -159,6 +177,14 @@ export function telemetryShareSource(stateDir: string): ShareSource {
 	};
 	safeResourceWrite(path, `${JSON.stringify(file, null, "\t")}\n`, { mode: 0o600 });
 	return { installId: file.installId, anonymizationKey: file.anonymizationKey };
+}
+
+/**
+ * A source minted for one archive and never written (R-16): a `report` share's ids are stable within its bundle and
+ * unlinkable to any other share, this installation's included.
+ */
+export function freshShareSource(): ShareSource {
+	return { installId: `inst_${randomBytes(16).toString("hex")}`, anonymizationKey: randomBytes(32).toString("hex") };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -390,6 +416,16 @@ export interface ShareScopePlan {
 	dropped: ShareDropped;
 }
 
+/**
+ * What a share's projection left readable, anonymized and withheld across every scope (R-16): the strings a reporter
+ * checks before an archive is linked in public. `anonymized` counts distinct values per kind.
+ */
+export interface ShareInventory {
+	readable: Record<ReadableKind, string[]>;
+	anonymized: Partial<Record<AnonKind, number>>;
+	withheld: number;
+}
+
 export interface SharePlan {
 	profile: ShareProfile;
 	installId: string;
@@ -399,6 +435,8 @@ export interface SharePlan {
 	skipped: ShareSkip[];
 	/** The archive's uncompressed tar size, within what an import accepts. */
 	archiveBytes: number;
+	/** Set when the plan was asked for one. */
+	inventory?: ShareInventory;
 }
 
 /** A header as a share carries it: the source host becomes the install id, and the rotation chain head is gone. */
@@ -417,10 +455,23 @@ function anonymousId(source: ShareSource, kind: AnonKind, value: string): string
  * allowlist in share-projection.ts: only the fields that table names survive, free text is withheld, and identities
  * and paths become anonymous ids. Null when the table does not admit the event.
  */
-function projectRecord(record: TelemetryRecord, profile: ShareProfile, source: ShareSource): TelemetryRecord | null {
+function projectRecord(
+	record: TelemetryRecord,
+	profile: ShareProfile,
+	projection: ShareProjection,
+	anonymize: (kind: AnonKind, value: string) => string,
+	tally?: ProjectionTally,
+): TelemetryRecord | null {
 	if (profile === "research") return record;
-	const data = projectSharedPayload(record.k, record.data, (kind, value) => anonymousId(source, kind, value));
+	const data = projectSharedPayload(record.k, record.data, anonymize, projection, tally);
 	return data === null ? null : ({ ...record, data } as TelemetryRecord);
+}
+
+/** How a plan projects beyond its profile, and what it collects while it does (R-16). */
+interface ShareProjectionOptions {
+	models: "keep" | "anonymize";
+	tally?: ProjectionTally;
+	anonymized?: Map<AnonKind, Set<string>>;
 }
 
 function admits(profile: ShareProfileDefinition, record: { tier: Tier; cc: ContentClass }): "tier" | "class" | null {
@@ -498,6 +549,7 @@ function filterScope(
 	shareSource: ShareSource,
 	writer: SegmentHeader["writer"],
 	now: Date,
+	options: ShareProjectionOptions = { models: "keep" },
 ): ShareScopePlan {
 	const headers: SegmentHeader[] = [];
 	const rows: Array<{ kind: "header"; header: SegmentHeader } | { kind: "record"; record: TelemetryRecord }> = [];
@@ -535,6 +587,15 @@ function filterScope(
 	const consented = headers.some((header) => header.capture.content);
 	const profile: ShareProfile = requested === "research" && !consented ? "structural" : requested;
 	const definition = SHARE_PROFILES[profile];
+	const projection = projectionFor(profile, options.models);
+	const anonymize = (kind: AnonKind, value: string) => {
+		if (options.anonymized) {
+			const values = options.anonymized.get(kind) ?? new Set<string>();
+			values.add(value);
+			options.anonymized.set(kind, values);
+		}
+		return anonymousId(shareSource, kind, value);
+	};
 	const tally = createRedactionTally();
 	const kept: Array<SegmentHeader | TelemetryRecord> = [];
 	let previousHeader = "";
@@ -557,7 +618,7 @@ function filterScope(
 			// redacting it would count a secret that was never there on every worker record.
 			const local = row.record.origin ? { ...row.record, origin: { ...row.record.origin, birthToken: null } } : row.record;
 			const redacted = redactTelemetryValue(local, tally, true);
-			const record = projectRecord(redacted, profile, shareSource);
+			const record = projectRecord(redacted, profile, projection, anonymize, options.tally);
 			if (record === null) {
 				dropped.unlisted += 1;
 				continue;
@@ -571,7 +632,6 @@ function filterScope(
 	const present = new Map(source.files.objects.map((object) => [object.name, object.bytes]));
 	const renamed = new Map<string, string>();
 	const shared = new Map<string, Buffer>();
-	const anonymize = (kind: AnonKind, value: string) => anonymousId(shareSource, kind, value);
 	for (const [id, subject] of [...refs].sort(([a], [b]) => a.localeCompare(b))) {
 		if (definition.objects === "none" || (definition.objects === "structure" && CONTENT_SUBJECTS.has(subject))) {
 			dropped.objects += 1;
@@ -585,7 +645,8 @@ function filterScope(
 		const redacted = redactTelemetryValue(JSON.parse(bytes.toString("utf8")) as unknown, tally, subject === "config");
 		// Below research a structural object passes the same allowlist as a record before its id is computed, so no
 		// absolute path, username or prose reaches the archive through an object (#434).
-		const projected = profile === "research" ? redacted : projectSharedObject(subject, redacted, anonymize);
+		const projected =
+			profile === "research" ? redacted : projectSharedObject(subject, redacted, anonymize, projection, options.tally);
 		if (projected === null) {
 			dropped.objects += 1;
 			continue;
@@ -671,17 +732,38 @@ export function planShare(input: {
 	source: ShareSource;
 	writer: SegmentHeader["writer"];
 	now?: Date;
+	/** `anonymize` turns every model id into an anonymous id as well; only the `report` profile honours it (R-16). */
+	models?: "keep" | "anonymize";
+	/** Collect what the projection left readable, anonymized and withheld into `plan.inventory`. */
+	inventory?: true;
 }): SharePlan {
 	const now = input.now ?? new Date();
+	const options: ShareProjectionOptions = {
+		models: input.models ?? "keep",
+		...(input.inventory ? { tally: createProjectionTally(), anonymized: new Map<AnonKind, Set<string>>() } : {}),
+	};
 	const plan: SharePlan = {
 		profile: input.profile,
 		installId: input.source.installId,
 		clioCoderVersion: input.writer.clioCoderVersion,
 		createdAt: now.toISOString(),
-		scopes: input.scopes.map((scope) => filterScope(scope, input.profile, input.source, input.writer, now)),
+		scopes: input.scopes.map((scope) => filterScope(scope, input.profile, input.source, input.writer, now, options)),
 		skipped: [...input.skipped],
 		archiveBytes: 0,
 	};
+	if (options.tally && options.anonymized) {
+		const readable = (kind: ReadableKind) => [...(options.tally?.readable.get(kind) ?? [])].sort();
+		plan.inventory = {
+			readable: {
+				model: readable("model"),
+				runtime: readable("runtime"),
+				tool: readable("tool"),
+				token: readable("token"),
+			},
+			anonymized: Object.fromEntries([...options.anonymized].map(([kind, values]) => [kind, values.size])),
+			withheld: options.tally.withheld,
+		};
+	}
 	// Refuse at preview what `telemetry verify` and `telemetry import` would refuse to unpack (#434).
 	plan.archiveBytes = telemetryArchiveSize(shareArchiveEntries(plan));
 	if (plan.archiveBytes > MAX_SHARE_ARCHIVE_BYTES)
@@ -785,6 +867,8 @@ const MEMBER_KIND: Readonly<Record<string, ShareScopeKind>> = { sessions: "sessi
 function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, installId: string): string | null {
 	const definition = SHARE_PROFILES[profile];
 	const projected = profile !== "research";
+	// The verifier cannot know whether model ids were anonymized; an anonymous id is a fixed point of `model-id` too.
+	const projection = projectionFor(profile);
 	const refs = new Map<string, string>();
 	for (const segment of files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
@@ -800,7 +884,7 @@ function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, ins
 			if (admits(definition, record) !== null)
 				return `holds ${record.k} (${record.tier}, ${record.cc}) above the ${profile} profile`;
 			if (projected) {
-				const expected = projectSharedPayload(record.k, record.data, conformingAnonymous);
+				const expected = projectSharedPayload(record.k, record.data, conformingAnonymous, projection);
 				if (expected === null) return `holds ${record.k}, which the ${profile} projection does not admit`;
 				if (canonicalJson(expected) !== canonicalJson(record.data))
 					return `holds ${record.k} with fields beyond the ${profile} projection`;
@@ -820,7 +904,7 @@ function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, ins
 		} catch {
 			return `holds ${object.name}, which is not JSON`;
 		}
-		const expected = projectSharedObject(subject, value, conformingAnonymous);
+		const expected = projectSharedObject(subject, value, conformingAnonymous, projection);
 		if (expected === null)
 			return `holds ${subject} object ${object.name}, which the ${profile} projection does not admit`;
 		if (canonicalJson(expected) !== object.bytes.toString("utf8"))

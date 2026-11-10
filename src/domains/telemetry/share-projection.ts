@@ -825,48 +825,142 @@ function projectJsonSchema(value: unknown, anonymize: Anonymize): unknown {
 	return out;
 }
 
-function projectField(value: unknown, projection: FieldProjection, anonymize: Anonymize): unknown {
+/** The kinds of string a projection can leave readable without `keep`: what a report's preview lists. */
+export type ReadableKind = "model" | "runtime" | "tool" | "token";
+
+/**
+ * What a projection left readable and what it withheld, for a share's inventory (R-16). Strings under `keep` are
+ * vocabulary members and minted ids by the soundness lint's guarantee, so they are not listed.
+ */
+export interface ProjectionTally {
+	readonly readable: Map<ReadableKind, Set<string>>;
+	withheld: number;
+}
+
+export function createProjectionTally(): ProjectionTally {
+	return { readable: new Map(), withheld: 0 };
+}
+
+function projectField(
+	value: unknown,
+	projection: FieldProjection,
+	anonymize: Anonymize,
+	tally?: ProjectionTally,
+): unknown {
+	const readable = (kind: ReadableKind, text: string): string => {
+		if (tally) {
+			const values = tally.readable.get(kind) ?? new Set<string>();
+			values.add(text);
+			tally.readable.set(kind, values);
+		}
+		return text;
+	};
+	const withheld = (): string => {
+		if (tally) tally.withheld += 1;
+		return WITHHELD;
+	};
 	if (projection === "keep") return value;
 	if (projection === "drop") return DROP;
-	if (projection === "withhold") return mapStrings(value, () => WITHHELD);
+	if (projection === "withhold") return mapStrings(value, withheld);
 	if (projection === "model-id")
-		return mapStrings(value, (text) => (carriesPath(text) ? anonymize("model", text) : text));
+		return mapStrings(value, (text) => (carriesPath(text) ? anonymize("model", text) : readable("model", text)));
 	if (projection === "json-schema") return projectJsonSchema(value, anonymize);
 	if (projection === "settings") return mapStringsAndKeys(value, (text) => anonymize("config", text), isSettingsField);
 	if (projection === "settings-path") return mapStrings(value, (text) => projectSettingsPath(text, anonymize));
 	if (projection === "id") return mapStrings(value, (text) => (MINTED_ID.test(text) ? text : anonymize("id", text)));
-	if (projection === "token") return mapStrings(value, (text) => (TOKEN.test(text) ? text : anonymize("name", text)));
+	if (projection === "token")
+		return mapStrings(value, (text) => (TOKEN.test(text) ? readable("token", text) : anonymize("name", text)));
 	if (projection === "tool")
-		return mapStrings(value, (text) => (TOOL_VOCABULARY.has(text) ? text : anonymize("name", text)));
+		return mapStrings(value, (text) => (TOOL_VOCABULARY.has(text) ? readable("tool", text) : anonymize("name", text)));
 	if (projection === "runtime")
-		return mapStrings(value, (text) => (RUNTIME_VOCABULARY.has(text) ? text : anonymize("name", text)));
+		return mapStrings(value, (text) =>
+			RUNTIME_VOCABULARY.has(text) ? readable("runtime", text) : anonymize("name", text),
+		);
 	if (projection === "token-keys") {
 		if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
 		return Object.fromEntries(
-			Object.entries(value).map(([key, item]) => [TOKEN.test(key) ? key : anonymize("name", key), item]),
+			Object.entries(value).map(([key, item]) => [
+				TOKEN.test(key) ? readable("token", key) : anonymize("name", key),
+				item,
+			]),
 		);
 	}
 	if (typeof projection === "string") return mapStrings(value, (text) => anonymize(projection, text));
-	if (Array.isArray(value)) return value.map((item) => projectField(item, projection, anonymize));
-	if (typeof value === "string") return WITHHELD;
+	if (Array.isArray(value)) return value.map((item) => projectField(item, projection, anonymize, tally));
+	if (typeof value === "string") return withheld();
 	if (value === null || typeof value !== "object") return value;
 	const out: Record<string, unknown> = {};
 	for (const [key, item] of Object.entries(value)) {
 		if (!Object.hasOwn(projection, key)) continue;
-		const projected = projectField(item, projection[key] as FieldProjection, anonymize);
+		const projected = projectField(item, projection[key] as FieldProjection, anonymize, tally);
 		if (projected !== DROP) out[key] = projected;
 	}
 	return out;
 }
 
+/** The event and object tables one profile projects through. */
+export interface ShareProjection {
+	readonly events: Readonly<Record<string, FieldProjection>>;
+	readonly objects: Readonly<Record<string, FieldProjection>>;
+}
+
+const BASE_PROJECTION: ShareProjection = { events: SHARE_EVENT_PROJECTIONS, objects: SHARE_OBJECT_PROJECTIONS };
+
+/**
+ * The `report` overrides (R-16). A target id is a name the operator typed into settings, often a machine's or a site's,
+ * so under `report` every target id becomes a `name` id. With `anonymizeModels` every other model identity becomes a
+ * `model` id too. Both only tighten: neither `name` nor `model` keeps a value.
+ */
+function reportOverride(projection: FieldProjection, anonymizeModels: boolean, field?: string): FieldProjection {
+	if (projection === "model-id") {
+		if (field === "targetId" || field === "target") return "name";
+		return anonymizeModels ? "model" : projection;
+	}
+	if (typeof projection === "string") return projection;
+	return Object.fromEntries(
+		Object.entries(projection).map(([key, inner]) => [key, reportOverride(inner, anonymizeModels, key)]),
+	);
+}
+
+const reportProjections = new Map<boolean, ShareProjection>();
+
+/**
+ * The tables a profile projects through: `report` applies {@link reportOverride} to the shared tables, every other
+ * profile uses them as they are. `models: "anonymize"` applies only to `report`.
+ */
+export function projectionFor(profile: string, models: "keep" | "anonymize" = "keep"): ShareProjection {
+	if (profile !== "report") return BASE_PROJECTION;
+	const anonymizeModels = models === "anonymize";
+	let projection = reportProjections.get(anonymizeModels);
+	if (!projection) {
+		const table = (source: Readonly<Record<string, FieldProjection>>) =>
+			Object.fromEntries(Object.entries(source).map(([key, inner]) => [key, reportOverride(inner, anonymizeModels)]));
+		projection = { events: table(SHARE_EVENT_PROJECTIONS), objects: table(SHARE_OBJECT_PROJECTIONS) };
+		reportProjections.set(anonymizeModels, projection);
+	}
+	return projection;
+}
+
 /** A shareable record's payload as a share below research carries it; null for an event the table does not admit. */
-export function projectSharedPayload(kind: string, data: unknown, anonymize: Anonymize): unknown | null {
-	if (!Object.hasOwn(SHARE_EVENT_PROJECTIONS, kind)) return null;
-	return projectField(data, SHARE_EVENT_PROJECTIONS[kind as ShareableEventName], anonymize);
+export function projectSharedPayload(
+	kind: string,
+	data: unknown,
+	anonymize: Anonymize,
+	projection: ShareProjection = BASE_PROJECTION,
+	tally?: ProjectionTally,
+): unknown | null {
+	if (!Object.hasOwn(projection.events, kind)) return null;
+	return projectField(data, projection.events[kind] as FieldProjection, anonymize, tally);
 }
 
 /** A structural object as a share below research carries it; null for a subject the table does not admit. */
-export function projectSharedObject(subject: string, value: unknown, anonymize: Anonymize): unknown | null {
-	if (!Object.hasOwn(SHARE_OBJECT_PROJECTIONS, subject)) return null;
-	return projectField(value, SHARE_OBJECT_PROJECTIONS[subject] as FieldProjection, anonymize);
+export function projectSharedObject(
+	subject: string,
+	value: unknown,
+	anonymize: Anonymize,
+	projection: ShareProjection = BASE_PROJECTION,
+	tally?: ProjectionTally,
+): unknown | null {
+	if (!Object.hasOwn(projection.objects, subject)) return null;
+	return projectField(value, projection.objects[subject] as FieldProjection, anonymize, tally);
 }

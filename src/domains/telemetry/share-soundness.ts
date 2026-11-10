@@ -2,7 +2,7 @@ import type { JournalEventName } from "../../core/telemetry/events.js";
 import { journalDefinition } from "../../core/telemetry/events.js";
 import { PromptStructureObjectSchema } from "./objects.js";
 import type { FieldProjection } from "./share-projection.js";
-import { SHARE_EVENT_PROJECTIONS, SHARE_OBJECT_PROJECTIONS } from "./share-projection.js";
+import { projectionFor } from "./share-projection.js";
 
 /**
  * Whether the share allowlist is sound by construction (#434). A `keep` copies a value verbatim, so it is safe only
@@ -128,20 +128,27 @@ const OBJECT_SCHEMAS: Readonly<Record<string, Schema>> = {
 	"prompt-structure": PromptStructureObjectSchema as unknown as Schema,
 };
 
-/** Every unsound entry in the share allowlist, as `<event or object>.<field path>: <why>`; empty when sound. */
+/**
+ * Every unsound entry in the share allowlist, as `<profile>: <event or object>.<field path>: <why>`; empty when sound.
+ * Each distinct table a profile projects through is checked, so a `report` override that loosened a field fails too.
+ */
 export function shareProjectionErrors(): string[] {
 	const errors: string[] = [];
-	for (const [name, projection] of Object.entries(SHARE_EVENT_PROJECTIONS))
-		projectionErrors(
-			journalDefinition(name as JournalEventName).schema as Schema,
-			projection as FieldProjection,
-			name,
-			errors,
-		);
-	for (const [subject, schema] of Object.entries(OBJECT_SCHEMAS)) {
-		const projection = SHARE_OBJECT_PROJECTIONS[subject];
-		if (projection === undefined) errors.push(`${subject}: a structural object the share projection does not admit`);
-		else projectionErrors(schema, projection, subject, errors);
+	const tables = [
+		{ label: "content-free and structural", projection: projectionFor("structural") },
+		{ label: "report", projection: projectionFor("report") },
+		{ label: "report (models anonymized)", projection: projectionFor("report", "anonymize") },
+	];
+	for (const { label, projection: table } of tables) {
+		const found: string[] = [];
+		for (const [name, projection] of Object.entries(table.events))
+			projectionErrors(journalDefinition(name as JournalEventName).schema as Schema, projection, name, found);
+		for (const [subject, schema] of Object.entries(OBJECT_SCHEMAS)) {
+			const projection = table.objects[subject];
+			if (projection === undefined) found.push(`${subject}: a structural object the share projection does not admit`);
+			else projectionErrors(schema, projection, subject, found);
+		}
+		errors.push(...found.map((error) => `${label}: ${error}`));
 	}
 	return errors;
 }
