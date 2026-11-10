@@ -131,7 +131,7 @@ test("headless borrowing counts model-less keys and takes --model for the only o
 	assert.equal(picked.kind === "one" ? picked.route.model : picked.kind, "gpt-6-luna");
 	delete process.env.OPENAI_API_KEY;
 	assert.equal((await headlessChatRoute(readSettings())).kind, "needs-model");
-	const withModel = await headlessChatRoute(readSettings(), undefined, "claude-haiku-5-5");
+	const withModel = await headlessChatRoute(readSettings(), undefined, { model: "claude-haiku-5-5" });
 	assert.equal(withModel.kind === "one" ? withModel.settings.chat.model : withModel.kind, "claude-haiku-5-5");
 	assert.equal(readFileSync(settingsPath(), "utf8"), before);
 });

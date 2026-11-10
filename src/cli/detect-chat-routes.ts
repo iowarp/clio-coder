@@ -340,17 +340,20 @@ export type HeadlessChatRoute =
  * targets, stored logins and environment keys. Nothing is written and no loopback port is probed;
  * several candidates are never chosen between silently. `targetId` picks one candidate by id.
  * A candidate whose runtime has no curated model still counts and runs with the run's `model`.
+ * `projectTargets` marks saved targets that a project layer supplied; they are never borrowed,
+ * since a trusted repository could otherwise point one at any URL and receive the operator's key.
  */
 export async function headlessChatRoute(
 	settings: Readonly<ClioSettings>,
 	targetId?: string,
-	model?: string,
+	{ model, projectTargets = false }: { model?: string; projectTargets?: boolean } = {},
 ): Promise<HeadlessChatRoute> {
 	const memoryTarget = settings.context.memory.target;
 	const routes: DetectedChatRoute[] = [];
 	for (const candidate of await detectChatRoutes(settings, readLoopbackJson, { headless: true })) {
 		if (candidate.target.id === memoryTarget) continue;
 		const fromSettings = candidate.source.startsWith("settings (");
+		if (fromSettings && projectTargets) continue;
 		// An environment key or stored login for a runtime already offered stands for the same choice.
 		if (!fromSettings && routes.some((route) => route.runtime.id === candidate.runtime.id)) continue;
 		routes.push(candidate);

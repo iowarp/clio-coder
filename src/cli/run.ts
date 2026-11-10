@@ -8,7 +8,7 @@ import { FileReferenceError, readFileArgsAsync } from "../core/file-references.j
 import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
 import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
-import { readStrictLayeredSettings } from "../core/settings-layers.js";
+import { readStrictLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
@@ -143,8 +143,12 @@ async function borrowHeadlessRoute(
 	model: string | undefined,
 ): Promise<{ settings: ClioSettings; notice: string } | number | null> {
 	let settings: ClioSettings;
+	let projectTargets: boolean;
 	try {
-		settings = readStrictLayeredSettings(process.cwd()).settings;
+		const layered = readStrictLayeredSettings(process.cwd());
+		settings = layered.settings;
+		// `targets` replaces wholesale across layers, so a project origin means every saved target is the project's.
+		projectTargets = settingsSourceFor(layered.sources, "targets").startsWith("project");
 	} catch {
 		// The boot path reports unreadable settings with its own diagnostic.
 		return null;
@@ -152,7 +156,10 @@ async function borrowHeadlessRoute(
 	if (classifyDefaultTarget(settings).kind !== "no-target") return null;
 	if (targetId !== undefined && settings.targets.some((target) => target.id === targetId)) return null;
 	const { headlessChatRoute } = await import("./detect-chat-routes.js");
-	const found = await headlessChatRoute(settings, targetId, model);
+	const found = await headlessChatRoute(settings, targetId, {
+		...(model !== undefined ? { model } : {}),
+		projectTargets,
+	});
 	if (found.kind === "none") return null;
 	if (found.kind === "several") {
 		const list = found.routes.map((route) => `${route.target.id} from ${route.source}`).join(", ");
