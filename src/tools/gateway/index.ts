@@ -749,6 +749,15 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		if (spec.name === ToolNames.Artifact) {
 			authority.push("Terminal: writing the artifact completes the turn, so close the task board before calling it.");
 		}
+		if (spec.name === ToolNames.Store) {
+			// The admission class is per op (classifyStore), so the surface's read base class must not speak for every op.
+			const base = authority.indexOf(autonomyNote(spec.baseActionClass));
+			authority.splice(
+				base < 0 ? authority.length : base,
+				base < 0 ? 0 : 1,
+				"Per op: tags, list, stat and get are read class and run at every autonomy level; create, put and note are write class and denied for read-only runs; remove is destructive and asks in default. A worker's store is read-only, so the dispatching session puts results.",
+			);
+		}
 		if (kind === "extension") {
 			const digest = spec.sourceInfo?.extension ? ` ${spec.sourceInfo.extension.contentDigest.slice(0, 12)}` : "";
 			authority.push(
