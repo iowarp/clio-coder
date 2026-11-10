@@ -154,14 +154,15 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-const SEG = "[\\p{L}\\p{N}._~@%+=-]+";
+const SEG_CHARS = "[\\p{L}\\p{N}._~@%+=-]";
+const SEG = `${SEG_CHARS}+`;
 /** What may follow a path's last segment: nothing that could continue it. */
 const SEG_END = "(?![\\p{L}\\p{N}._~@%+=-])";
 /**
  * Under a known path, a directory whose name holds spaces: words that start with a letter or digit, up to the next
  * separator, so `/home/me/My Project/x` is masked whole instead of leaving ` Project/x` behind.
  */
-const SPACED_DIR = `${SEG}(?: [\\p{L}\\p{N}]${SEG.replace("+", "*")}){1,8}(?=[/\\\\])`;
+const SPACED_DIR = `${SEG}(?: [\\p{L}\\p{N}]${SEG_CHARS}*){1,8}(?=[/\\\\])`;
 /**
  * A path, URL or address starts at the text's start or after a space, opening punctuation or a marker such as `<`, `>`
  * or `#`, or right after a one-letter flag such as `-I`; never mid-word.

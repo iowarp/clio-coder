@@ -90,6 +90,7 @@ test("names beside . _ - and escapes, spaced and non-ASCII path tails, flagged p
 	const cases: Array<[string, string]> = [
 		["host lab-node7.local and alice.pem", "host <host>.local and <user>.pem"],
 		["/home/alice/My Secret Project/plan.md is gone", "<path> is gone"],
+		["/home/alice/Plan B/src/x.ts:3 broke", "<path>:3 broke"],
 		["acme-app_test and id_alice", "<project>_test and id_<user>"],
 		['{"log":"user\\nalice\\tok"}', '{"log":"user\\n<user>\\tok"}'],
 		["see %2Fsrv%2Falice%2Fwork", "see %2Fsrv%2F<user>%2Fwork"],
