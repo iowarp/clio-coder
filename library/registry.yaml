@@ -678,7 +678,7 @@ entries:
       advisory guardrails.
     version: 0.2.4
     sourceUrl: extensions/materio
-    sha256: 952b5d3940b70c855f3950473e1c472a3e630e693a816bbb02e27549b3effd82
+    sha256: 585100eca0b76a7d246fd7c640f9097c09560dafc1fd4285241067f3c0b25cf8
     plugin: materio
     provides:
       - kind: extension

@@ -761,6 +761,8 @@ test("forms refuse changed files, missing answers and a second open form", async
 test("passive events stay silent outside a Materio project until the operator enters the lab", async () => {
 	assert.ok(process.env.TMPDIR, "Tests need a task-owned TMPDIR.");
 	const plain = mkdtempSync(path.join(process.env.TMPDIR, "materio-plain-"));
+	// The host creates the declared `.research` write root before the runtime starts.
+	mkdirSync(path.join(plain, ".research"));
 	const outside = await createExtensionTestHost(ROOT, { workspace: plain, plugin: null });
 	const research = project();
 	const inside = await createExtensionTestHost(ROOT, { workspace: research, plugin: null });
@@ -768,7 +770,7 @@ test("passive events stay silent outside a Materio project until the operator en
 		const opened = await outside.observe({ event: "session_open" });
 		assert.equal(opened?.band ?? null, null);
 		assert.equal(opened?.status ?? null, null);
-		assert.equal(readdirSync(plain).length, 0);
+		assert.deepEqual(readdirSync(path.join(plain, ".research")), []);
 		const entered = await outside.command("lab");
 		assert.deepEqual(entered.workspace, { enter: "lab" });
 		assert.ok(entered.band);

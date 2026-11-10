@@ -1696,11 +1696,16 @@ async function observe(event: ExtensionObservationV2, ctx: ExtensionContextV2): 
 	return bench(ctx, "");
 }
 /**
- * Passive events draw nothing outside a Materio project (no `.research/`) unless the operator has entered the
- * lab bench; bookkeeping and toasts still pass through.
+ * Passive events draw nothing outside a Materio project unless the operator has entered the lab bench;
+ * bookkeeping and toasts still pass through. The host creates the declared `.research` write root before the
+ * runtime starts, so only a non-empty `.research/` marks a project.
  */
+function inProject(workspace: string): boolean {
+	const root = researchPath(workspace);
+	return existsSync(root) && lstatSync(root).isDirectory() && readdirSync(root).length > 0;
+}
 function quiet(ctx: ExtensionContextV2, output: ExtensionOutputV2 | undefined): ExtensionOutputV2 | undefined {
-	if (!output || ctx.snapshot.activeWorkspace || existsSync(researchPath(ctx.snapshot.workspace))) return output;
+	if (!output || ctx.snapshot.activeWorkspace || inProject(ctx.snapshot.workspace)) return output;
 	const { band: _band, status: _status, islands: _islands, dock: _dock, regions: _regions, ...rest } = output;
 	return { ...rest, band: null, status: null, islands: null };
 }
