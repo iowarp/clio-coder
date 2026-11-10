@@ -1205,7 +1205,10 @@ export async function runDoctorModelChecks(
 					credentialAvailable = !requiredCredential;
 					credentialDetail = `stored sign-in expired; operator sign-in required: run \`clio-coder auth login ${target.id}\``;
 				} else if (status.available && status.source !== "not-required")
-					credentialDetail = `credential available from ${status.source}`;
+					credentialDetail =
+						status.source === "stored-api-key" && status.detail && status.detail !== status.providerId
+							? `credential available from ${status.source} (${status.detail})`
+							: `credential available from ${status.source}`;
 			} catch (error) {
 				credentialAvailable = false;
 				credentialDetail = `credential status unreadable: ${error instanceof Error ? error.message : String(error)}`;

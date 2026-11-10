@@ -109,6 +109,8 @@ export interface AuthTarget {
 	 */
 	targetId?: string;
 	explicitEnvVar?: string;
+	/** Variable the target itself names (`auth.apiKeyEnvVar`); when set it outranks the runtime-wide stored key. */
+	targetEnvVar?: string;
 	runtimeAuth: RuntimeAuth;
 }
 
@@ -284,6 +286,16 @@ export type RuntimeAuthMetadata = Pick<
 	"id" | "auth" | "tier" | "credentialsEnvVar" | "oauthProviderId"
 >;
 
+function targetEnvApiKey(envVar: string | undefined): { envVar: string; apiKey: string } | null {
+	if (!envVar) return null;
+	const apiKey = process.env[envVar]?.trim();
+	return apiKey ? { envVar, apiKey } : null;
+}
+
+function storedKeyDetail(providerId: string, targetEnvVar: string | undefined): string {
+	return targetEnvVar ? `${targetEnvVar} is not set; using the stored ${providerId} key` : providerId;
+}
+
 /** A resolved key or token is masked in captured shell output from here on (env-scrub.ts). */
 function remembered(resolution: AuthResolution): AuthResolution {
 	rememberResolvedSecret(resolution.apiKey);
@@ -301,6 +313,8 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 	};
 	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
 	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
+	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : target.auth?.apiKeyEnvVar?.trim();
+	if (targetEnvVar) authTarget.targetEnvVar = targetEnvVar;
 	return authTarget;
 }
 
@@ -461,7 +475,7 @@ export class AuthStorage {
 
 	status(
 		providerId: string,
-		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean },
+		opts?: { targetId?: string; explicitEnvVar?: string; targetEnvVar?: string; includeFallback?: boolean },
 	): AuthStatus {
 		if (providerId === RETIRED_GITHUB_COPILOT_PROVIDER_ID) return retiredCopilotStatus(providerId);
 		this.reload();
@@ -475,6 +489,17 @@ export class AuthStorage {
 			};
 		}
 
+		const targetEnv = targetEnvApiKey(opts?.targetEnvVar);
+		if (targetEnv) {
+			return {
+				providerId,
+				available: true,
+				credentialType: "api_key",
+				source: "environment",
+				detail: targetEnv.envVar,
+			};
+		}
+
 		const stored = this.data[providerId];
 		if (stored?.type === "api_key") {
 			return {
@@ -482,7 +507,7 @@ export class AuthStorage {
 				available: true,
 				credentialType: "api_key",
 				source: "stored-api-key",
-				detail: providerId,
+				detail: storedKeyDetail(providerId, opts?.targetEnvVar),
 			};
 		}
 		if (stored?.type === "oauth") {
@@ -532,9 +557,10 @@ export class AuthStorage {
 	}
 
 	statusForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): AuthStatus {
-		const args: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean } = {};
+		const args: { targetId?: string; explicitEnvVar?: string; targetEnvVar?: string; includeFallback?: boolean } = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
+		if (target.targetEnvVar) args.targetEnvVar = target.targetEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
 		return this.forAuthTarget(target, this.status(target.providerId, args));
 	}
@@ -701,14 +727,26 @@ export class AuthStorage {
 
 	async resolveApiKey(
 		providerId: string,
-		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
+		opts?: {
+			targetId?: string;
+			explicitEnvVar?: string;
+			targetEnvVar?: string;
+			includeFallback?: boolean;
+			signal?: AbortSignal;
+		},
 	): Promise<AuthResolution> {
 		return remembered(await this.resolveApiKeyUnremembered(providerId, opts));
 	}
 
 	private async resolveApiKeyUnremembered(
 		providerId: string,
-		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
+		opts?: {
+			targetId?: string;
+			explicitEnvVar?: string;
+			targetEnvVar?: string;
+			includeFallback?: boolean;
+			signal?: AbortSignal;
+		},
 	): Promise<AuthResolution> {
 		if (providerId === RETIRED_GITHUB_COPILOT_PROVIDER_ID) return retiredCopilotStatus(providerId);
 		this.reload();
@@ -726,6 +764,18 @@ export class AuthStorage {
 			}
 		}
 
+		const targetEnv = targetEnvApiKey(opts?.targetEnvVar);
+		if (targetEnv) {
+			return {
+				providerId,
+				available: true,
+				credentialType: "api_key",
+				source: "environment",
+				detail: targetEnv.envVar,
+				apiKey: targetEnv.apiKey,
+			};
+		}
+
 		const stored = this.data[providerId];
 		if (stored?.type === "api_key") {
 			const apiKey = resolveStoredApiKey(stored.key, providerId);
@@ -734,7 +784,7 @@ export class AuthStorage {
 				available: true,
 				credentialType: "api_key",
 				source: "stored-api-key",
-				detail: providerId,
+				detail: storedKeyDetail(providerId, opts?.targetEnvVar),
 				...(apiKey ? { apiKey } : {}),
 			};
 		}
@@ -854,12 +904,14 @@ export class AuthStorage {
 		const args: {
 			targetId?: string;
 			explicitEnvVar?: string;
+			targetEnvVar?: string;
 			includeFallback?: boolean;
 			signal?: AbortSignal;
 		} = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (opts?.signal !== undefined) args.signal = opts.signal;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
+		if (target.targetEnvVar) args.targetEnvVar = target.targetEnvVar;
 		if (target.targetId) args.targetId = target.targetId;
 		return this.forAuthTarget(target, await this.resolveApiKey(target.providerId, args));
 	}
