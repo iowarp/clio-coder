@@ -5,7 +5,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parse, stringify } from "yaml";
 import { closeServer, readRequestBody, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
@@ -203,12 +202,6 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 				`http://127.0.0.1:${(server.address() as AddressInfo).port}`,
 				"yolo",
 			);
-			// Contained yolo refuses a plan-scale dispatch such as this pipeline, as default would ask for it.
-			const settingsPath = join(scratch.dir, "config", "settings.yaml");
-			const settings = parse(readFileSync(settingsPath, "utf8"));
-			settings.safety.yoloConfinement = "unconfined";
-			settings.safety.yoloUnconfinedAccepted = true;
-			writeFileSync(settingsPath, stringify(settings));
 			const result = await run(
 				[
 					"run",
