@@ -220,7 +220,8 @@ describe("contracts/panes files surface", () => {
 			const result = await tool.run({ action: "handoff", peer: "codex", brief: "Fix parser", cwd: root }, {});
 			strictEqual(result.kind, "ok");
 			match(result.output, /no managed run record/u);
-			deepStrictEqual(requests[0]?.argv, ["/usr/bin/codex", "Fix parser"]);
+			deepStrictEqual(requests[0]?.argv, ["/usr/bin/codex"]);
+			strictEqual(requests[0]?.textArg, "Fix parser");
 			strictEqual(requests[0]?.cwd, root);
 			strictEqual(classify({ tool: "panes", args: { action: "handoff", peer: "codex" } }).actionClass, "dispatch");
 			strictEqual(classify({ tool: "panes", args: { action: "list" } }).actionClass, "read");

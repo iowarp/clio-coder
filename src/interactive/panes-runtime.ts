@@ -498,16 +498,17 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 							"a second Clio takes no brief on its command line: open it without one, then give it its task with action=send",
 					};
 				}
-				if (request.peer === "antigravity") argv.push("--prompt-interactive", brief);
-				else if (request.peer === "opencode") argv.push("--prompt", brief);
-				else if (request.peer === "pi") argv.push("--", brief);
-				else argv.push(brief);
+				// The brief is free text: it rides as `textArg`, out of band of the pane's shell.
+				if (request.peer === "antigravity") argv.push("--prompt-interactive");
+				else if (request.peer === "opencode") argv.push("--prompt");
+				else if (request.peer === "pi") argv.push("--");
 			}
 			const label = `${request.peer}${PANE_HANDOFF_LABEL_SUFFIX}`;
 			const pendingId = beginPendingOpen(label);
 			try {
 				const ref = await deps.mux.openUtilityPane({
 					argv,
+					...(brief ? { textArg: brief } : {}),
 					cwd,
 					label,
 					title: label,

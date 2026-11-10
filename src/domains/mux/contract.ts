@@ -87,6 +87,12 @@ export interface MuxOpenUtilityPaneRequest {
 	direction?: "right" | "down";
 	env?: Readonly<Record<string, string>>;
 	/**
+	 * Free text appended as the last argument. It travels in the pane's
+	 * environment, never typed through the shell's line editor, so it may hold
+	 * newlines and control characters.
+	 */
+	textArg?: string;
+	/**
 	 * Absolute path the pane's stdout is redirected into. Full-screen programs
 	 * such as Yazi reopen `/dev/tty` (`CONOUT$` on Windows) for their interface
 	 * when stdout is not a tty.
@@ -255,9 +261,28 @@ export interface MuxRuntime {
 	registry: MuxPaneRegistry;
 }
 
-/** POSIX single-quoting, so an argv element with spaces or quotes survives the shell. */
+/**
+ * Single-quoting that reads the same under POSIX shells and fish: `'` and `\`
+ * are escaped outside the quotes, since fish treats `\` as an escape inside them.
+ */
 function shellQuote(argv: ReadonlyArray<string>): string {
-	return argv.map((arg) => `'${arg.replaceAll("'", `'\\''`)}'`).join(" ");
+	return argv.map((arg) => `'${arg.replace(/['\\]/gu, (char) => `'\\${char}'`)}'`).join(" ");
+}
+
+/** The pane variable carrying `textArg`; it must not end in PATH, which fish splits on colons. */
+const PANE_TEXT_ARG = "CLIO_PANE_ARG";
+
+/**
+ * Text typed into a pane shell goes through its line editor first, which acts
+ * on control characters (Ctrl+U erases the line, a newline submits it) before
+ * any quoting applies.
+ */
+function refuseControlBytes(values: ReadonlyArray<string>): void {
+	for (const value of values) {
+		if ([...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)) {
+			throw new Error(`pane argument contains a control character: ${JSON.stringify(value)}`);
+		}
+	}
 }
 
 function token(value: string | undefined | null): string | null {
@@ -451,8 +476,20 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 					}
 					// herdr's pane shell on Windows is PowerShell, which has no `exec`;
 					// the command rides in the new pane's environment instead.
-					const win32Launch = process.platform === "win32" ? win32PaneLaunch(request.argv, request.stdoutPath) : null;
-					const env = win32Launch ? { ...request.env, ...win32Launch.env } : request.env;
+					const win32Launch =
+						process.platform === "win32"
+							? win32PaneLaunch(
+									request.textArg === undefined ? request.argv : [...request.argv, request.textArg],
+									request.stdoutPath,
+								)
+							: null;
+					if (!win32Launch) refuseControlBytes([...request.argv, ...(request.stdoutPath ? [request.stdoutPath] : [])]);
+					const textEnv = !win32Launch && request.textArg !== undefined ? { [PANE_TEXT_ARG]: request.textArg } : null;
+					const env = win32Launch
+						? { ...request.env, ...win32Launch.env }
+						: textEnv
+							? { ...request.env, ...textEnv }
+							: request.env;
 					let ref: MuxPaneRef;
 					if (request.dock && docks) {
 						const placed = await docks.open(request.dock.slot, {
@@ -519,7 +556,9 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 							// The leading space keeps the line out of the operator's shell history
 							// under fish, and under bash and zsh with ignorespace.
 							const redirect = request.stdoutPath ? ` > ${shellQuote([request.stdoutPath])}` : "";
-							await live.paneSendText(ref.paneId, ` exec ${shellQuote(request.argv)}${redirect}\n`);
+							// `"$VAR"` expands to one word, unparsed, in POSIX shells and fish alike.
+							const text = textEnv ? ` "$${PANE_TEXT_ARG}"` : "";
+							await live.paneSendText(ref.paneId, ` exec ${shellQuote(request.argv)}${text}${redirect}\n`);
 						}
 						return ref;
 					} catch (error) {
