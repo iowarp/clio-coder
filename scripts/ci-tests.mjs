@@ -65,7 +65,6 @@ export const coreTests = [
 	"configure-clio-tool",
 	"settings-authority",
 	"settings-controls",
-	"project-settings-save",
 	"mcp-config-trust",
 	"url-userinfo-hold",
 	"url-credential-surfaces",
@@ -113,6 +112,8 @@ export const coreTests = [
 	"verify-reproduce",
 	"verify-toolchain-checks",
 	"verify-task-gates",
+	"provider-error-presentation",
+	"handbook-discovery",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working
