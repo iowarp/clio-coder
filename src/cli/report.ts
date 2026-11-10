@@ -433,7 +433,7 @@ async function confirmAndSend(
 		io.err("nothing sent: add --yes to send this report\n");
 		return 2;
 	}
-	if (plan.gates.length > 0 && !interactive) {
+	if (plan.gates.length > 0 && (options.yes || !interactive)) {
 		if (options.json) emit();
 		io.err('nothing sent: fix what the preview lists under "Cannot send yet"\n');
 		return 2;

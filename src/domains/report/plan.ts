@@ -14,7 +14,7 @@ import { reportFingerprint } from "./fingerprint.js";
 import type { ReportObservation } from "./observe.js";
 import { outboxEntry, readOutbox, recentSends, updateOutbox } from "./outbox.js";
 import type { LocalIdentity, MaskKind, ReportMask } from "./scrub.js";
-import { deleteReportDraft, listReportDrafts, readReportDraft, saveReportDraft } from "./store.js";
+import { deleteReportDraft, listReportDrafts, readReportDraft, saveReportDraft, writeReportMarkdown } from "./store.js";
 import { type ReportTransport, routeFor, type SendDeps, type SendResult, sendReport } from "./transport.js";
 import { REPORT_HEADINGS, REPORT_REPOSITORY, type ReportKind, type ReportSurface } from "./vocabulary.js";
 
@@ -323,6 +323,24 @@ export async function runReportSend(
 	rendered: RenderedReport,
 	deps: ReportFlowDeps,
 ): Promise<ReportFlowOutcome> {
+	// Every surface checks the gates before it offers send; this keeps a caller that skipped them from posting.
+	const gates = validateDraft(draft, rendered);
+	if (!isFixedPoint(rendered, deps.identity, draft.unmasked)) gates.push("scrubbing the report again would change it");
+	if (gates.length > 0) {
+		saveReportDraft(deps.stateDir, draft);
+		const path = writeReportMarkdown(deps.stateDir, draft.id, rendered.body);
+		return {
+			kind: "sent",
+			result: {
+				status: "failed",
+				reason: `cannot send yet: ${gates.map((gate) => gate.replace(/\.$/, "")).join("; ")}`,
+				path,
+			},
+			draft,
+			rendered,
+			verdict: { kind: "create", upgradeHint: null },
+		};
+	}
 	const related = await findRelated(draft, rendered, deps.transport, {
 		...deps.related,
 		...(deps.run !== undefined ? { run: deps.run } : {}),
