@@ -6201,7 +6201,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		try {
 			options.session.deleteSession(id);
-		} catch {
+		} catch (error) {
+			// The delete re-checks under the claim lock; a resume that won the race reopened it.
+			if (error instanceof Error && error.message.includes("may still be open")) {
+				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
+			}
 			throw new AcpRequestError(-32603, "session could not be deleted", { code: "internal_error" });
 		}
 		return {};

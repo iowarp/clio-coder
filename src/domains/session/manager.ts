@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { v7 as uuidv7 } from "uuid";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { stateRootRemoved } from "../../core/xdg.js";
@@ -94,6 +95,8 @@ export function resumeSessionState(sessionId: string): {
 	const metaPath = sessionPaths(readSessionMeta(sessionId)).meta;
 	// Checking ownership and publishing the new owner must be one cross-process claim.
 	return withStateFileLockSync(metaPath, () => {
+		// A delete that held the lock first has already taken the record away.
+		if (!existsSync(metaPath)) throw new Error(`session not found: ${sessionId}`);
 		const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
 		// Refuse before migration or reopening can write another process's ledger (#420).
 		const owner = liveSessionOwner(persistedMeta);

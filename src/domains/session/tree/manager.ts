@@ -1,6 +1,7 @@
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scheduleProviderCheckpointPrune } from "../../../core/provider-checkpoint.js";
+import { withStateFileLockSync } from "../../../core/state-file-lock.js";
 import {
 	appendSessionFileEntry,
 	openSession,
@@ -11,6 +12,7 @@ import {
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import type { SessionMeta } from "../contract.js";
 import type { SessionEntry, SessionInfoEntry } from "../entries.js";
+import { liveSessionOwner } from "../live-owner.js";
 
 /**
  * Domain-level tree-file helpers. Operates directly on the on-disk artifacts
@@ -108,10 +110,9 @@ export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry)
  * Used by deleteSession when `keepFiles` is not requested.
  */
 export function removeSessionDirectory(sessionId: string): void {
-	const meta = readSessionMeta(sessionId);
-	const paths = sessionPaths(meta);
-	const dir = dirname(paths.meta);
-	rmSync(dir, { recursive: true, force: true });
+	const dir = tombstoneSession(sessionId);
+	// The record is already gone under the claim lock; removal needs no lock.
+	rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
 	scheduleProviderCheckpointPrune();
 }
 
@@ -120,11 +121,18 @@ export function removeSessionDirectory(sessionId: string): void {
  * `listSessionsForCwd` (which filters on existence of meta.json) drops
  * the session from history without touching the transcript files.
  * Resume can still target the session id directly via manual recovery.
+ * Runs under the same meta lock resume claims ownership with, and refuses
+ * a session that never ended, so a concurrent resume cannot lose its ledger.
+ * Returns the session directory.
  */
-export function tombstoneSession(sessionId: string): void {
-	const meta = readSessionMeta(sessionId);
-	const paths = sessionPaths(meta);
-	if (!existsSync(paths.meta)) return;
-	const tombstone = join(dirname(paths.meta), "meta.deleted.json");
-	renameSync(paths.meta, tombstone);
+export function tombstoneSession(sessionId: string): string {
+	const metaPath = sessionPaths(readSessionMeta(sessionId)).meta;
+	return withStateFileLockSync(metaPath, () => {
+		const meta = readSessionMeta(sessionId);
+		if (meta.endedAt !== null && liveSessionOwner(meta) === null) {
+			renameSync(metaPath, join(dirname(metaPath), "meta.deleted.json"));
+			return dirname(metaPath);
+		}
+		throw new Error(`session.deleteSession: session ${sessionId} may still be open`);
+	});
 }
