@@ -17,6 +17,15 @@ clio-coder mcp trust parquet
 clio-coder mcp trust pandas
 ```
 
+## Datasets and results in the store
+
+The skill starts from the `store`: it lists tags, takes a dataset's path with
+`get` rather than searching the working tree, and reports when a blob changed
+since it was recorded or was never recorded. Results worth keeping are made
+with `run_script`, declaring inputs and outputs, then put into an `output` tag
+with a note, so each one names the run and inputs that produced it. Seed a tag
+from the shell with `clio-coder store put <tag> <file>`.
+
 ## Read-only by default
 
 `mcp.json` gives every tool an action class (`toolActionClasses`).
@@ -37,8 +46,9 @@ headless run denies what the judge does not allow. Trust a server without
 `--action-class`: the per-tool map already classifies every tool it ships, and
 a tool a later clio-kit release adds stays `unknown`, which asks.
 
-The pack needs Clio Coder 0.7.0 or later, the first release whose plugin
-`mcp.json` accepts `toolActionClasses`.
+The pack needs Clio Coder 0.7.1 or later, the first release with the `store`
+capability. 0.7.0 was the first whose plugin `mcp.json` accepts
+`toolActionClasses`.
 
 ## HDF5: an operator entry, not a pack declaration
 

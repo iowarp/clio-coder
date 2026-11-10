@@ -232,8 +232,8 @@
 		{
 			"name": "science-data",
 			"source": "./library/plugins/science-data",
-			"description": "Science data pack: a skill that reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Read tools run without asking; file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
-			"version": "0.1.1",
+			"description": "Science data pack: a skill that finds datasets and keeps results in the store, reads HDF5, NetCDF, Parquet and CSV with Clio's data tool first, and declares the clio-kit parquet and pandas MCP servers with per-tool action classes for analysis beyond it. Read tools run without asking; file-writing tools ask first; each server needs one online launch to build its environment before it runs offline.",
+			"version": "0.2.0",
 			"license": "Apache-2.0",
 			"author": {
 				"name": "IOWarp"

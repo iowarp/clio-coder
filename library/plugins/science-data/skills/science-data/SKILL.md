@@ -1,6 +1,6 @@
 ---
 name: science-data
-description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, correlations and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for writing or converting data files."
+description: "Finds and explores scientific data: where is the data, which dataset a store tag holds, and how to keep results with provenance. Reads HDF5, NetCDF, Parquet and CSV read-only with Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, correlations and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for converting data files."
 ---
 
 # Scientific data, one tool at a time
@@ -9,6 +9,29 @@ Answer questions about a data file without changing it, and use the lightest
 tool that can answer. Each step down this list costs more: a server launch, an
 approval, or a Python environment. Never write to a data file to answer a
 question about it. Pass absolute file paths.
+
+## Where data lives: the store
+
+The `store` capability holds this project's datasets and results outside the
+working tree, as tags of named blobs, and records how each blob was made.
+Call it with `gateway(op="call", capability="store", args={...})`.
+
+- Start with `op="tags"`. If a tag's description names the dataset, list it,
+  `op="get"` the blob and pass the returned path unchanged to the tools below.
+  Do not search the working tree for data a tag already holds.
+- Read `drift` and the producing run in `op="stat"`. When `drift` is not
+  `none`, or the blob has no producing run on record, say so in the answer.
+- Make anything worth keeping with `run_script`, declaring its `inputs` and
+  `outputs`, then `op="put"` the output with a one-line `note`. A file made
+  with `bash` has no producing run on record.
+- Keep intermediates in a tag of class `cache` and results in a tag of class
+  `output` (`op="create"` with `class` and a `description`).
+- When dispatching workers on data, name each blob as `<tag>:<blob>` in the
+  task text. Workers read the store; the dispatching session puts results.
+- Never `op="remove"` a blob to make room unless the user asked. Say what is
+  large instead.
+- With no tags, say so, and name `op="create"` and `clio-coder store put` as
+  the ways to add data.
 
 ## 1. The `data` tool first
 

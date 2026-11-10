@@ -808,21 +808,22 @@ entries:
           branches; use worktree-merge.
   - kind: plugin
     name: science-data
-    description: "Science data pack: a skill that reads HDF5, NetCDF, Parquet and
-      CSV with Clio's data tool first, and declares the clio-kit parquet and
-      pandas MCP servers with per-tool action classes for analysis beyond it.
-      Read tools run without asking; file-writing tools ask first; each server
-      needs one online launch to build its environment before it runs offline."
-    version: 0.1.1
+    description: "Science data pack: a skill that finds datasets and keeps results
+      in the store, reads HDF5, NetCDF, Parquet and CSV with Clio's data tool
+      first, and declares the clio-kit parquet and pandas MCP servers with
+      per-tool action classes for analysis beyond it. Read tools run without
+      asking; file-writing tools ask first; each server needs one online launch
+      to build its environment before it runs offline."
+    version: 0.2.0
     sourceUrl: plugins/science-data
-    sha256: bfc3eff937d7738d07d2b79ef1b2a3043794baa17841cd0c21664fc939f4501c
+    sha256: 208d0786501d07725ae91fdc6499e5757d0494186b2e580cecbaa7aa60d1afa0
     provides:
       - kind: skill
         name: science-data
-        description: "Explores HDF5, NetCDF, Parquet and CSV data read-only: Clio's data
-          tool for structure, slices and summary statistics, then the clio-kit
-          parquet and pandas servers for aggregation, correlations and
-          statistical tests, and the hdf5 server or h5py only for wha"
+        description: "Finds and explores scientific data: where is the data, which
+          dataset a store tag holds, and how to keep results with provenance.
+          Reads HDF5, NetCDF, Parquet and CSV read-only with Clio's data tool
+          for structure, slices and summary statistics, then the clio"
   - kind: skill
     name: scientific-debugging
     description: Diagnoses stalled or cross-system failures and wrong, NaN,
