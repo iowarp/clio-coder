@@ -1,4 +1,5 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
@@ -8,6 +9,8 @@ import type { DispatchContract, DispatchRequest } from "../../src/domains/dispat
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { dispatchCouncilThroughRegistry } from "../../src/interactive/council-dispatch.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { COUNCIL_DEFAULT_AGENT_ID } from "../../src/tools/dispatch-arguments.js";
+import { applyToolProfile } from "../../src/tools/profiles.js";
 import { createRegistry } from "../../src/tools/registry.js";
 
 /**
@@ -94,4 +97,12 @@ test("council members run as their roster agent, else the council agent", async 
 	);
 	strictEqual(refused.kind, "error");
 	match(refused.kind === "error" ? refused.message : "", /council_member_agent_unknown: x: 'nope'/u);
+});
+
+test("the default council member agent can search code under the council profile", async () => {
+	const recipe = readFileSync(`src/domains/agents/builtins/${COUNCIL_DEFAULT_AGENT_ID}.md`, "utf8");
+	const tools = /^tools:\n {2}required: \[(.*)\]\n {2}optional: \[(.*)\]/mu.exec(recipe);
+	const declared = `${tools?.[1]}, ${tools?.[2]}`.split(", ");
+	const kept = applyToolProfile(declared as never, "council-read-only");
+	for (const tool of [ToolNames.Grep, ToolNames.Find, ToolNames.Ls, ToolNames.CodeNav]) ok(kept.includes(tool), tool);
 });

@@ -1162,7 +1162,7 @@ read-only profile stays the ceiling whatever the recipe: a required recipe tool 
 refused, and the recipe's own result contract does not apply to the member slot (a `vote` council still asks for a ballot),
 so a `coder` or `architect` member reads and argues but never writes. An unknown member agent is refused before approval
 (`council_member_agent_unknown`).
-Members default to the `researcher` recipe. An operator starts a council with
+Members default to the `scout` recipe, which keeps `grep`, `find`, `ls` and `code_nav` under the council profile. An operator starts a council with
 `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] [--agent <id>] <task>`, where `--agent` seats
 members that name no agent of their own; without
 `--roster` the roster named `default` is used. With no `--roster` and no `default` roster, `/council` prints

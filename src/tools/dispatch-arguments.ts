@@ -23,9 +23,11 @@ const DEFAULT_AGENT_ID = "coder";
  * The agent a council seats when the caller names none. Council admission pins
  * every member to the `council-read-only` tool profile, and `coder` requires a
  * write tool, so the ordinary default would fail admission for every member.
- * `researcher` is the builtin read-only answerer.
+ * `scout` is the builtin read-only recipe that keeps grep, find, ls and
+ * code_nav under that profile, so a member can search the code it is asked
+ * about; `researcher` keeps only read under it.
  */
-const COUNCIL_DEFAULT_AGENT_ID = "researcher";
+export const COUNCIL_DEFAULT_AGENT_ID = "scout";
 
 /**
  * Baseline recipe per task shape for `agent:"auto"`.
