@@ -210,7 +210,7 @@ describe("contracts/panes files surface", () => {
 				getCwd: () => root,
 				resolveBinaryPath: (name) => (name === "codex" ? "/usr/bin/codex" : null),
 			});
-			deepStrictEqual(parseSlashCommand(`/peer --cwd ${root} codex Fix parser`), {
+			deepStrictEqual(parseSlashCommand(`/panes peer --cwd ${root} codex Fix parser`), {
 				kind: "peer-pane",
 				peer: "codex",
 				cwd: root,

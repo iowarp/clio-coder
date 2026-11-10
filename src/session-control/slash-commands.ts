@@ -232,11 +232,10 @@ type SlashCommandVariant =
 	/** A preset the model may also ask for, or operator-only argv. Never both. */
 	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string>; once?: boolean }
 	| { kind: "peer-pane"; peer: PanePeerId; brief?: string; cwd?: string }
-	| { kind: "peer-pane-usage"; reason?: string; listing?: boolean }
 	/** Toggle zoom on a Clio-owned pane; the bare form targets the watch pane. */
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
-	| { kind: "panes-usage"; reason?: string }
+	| { kind: "panes-usage"; reason?: string; subcommand?: "peer"; listing?: boolean }
 	/** `/files`: toggle the files pane; `hide` parks it with Yazi running; `close` ends it; `pick` borrows it for one selection. */
 	| { kind: "files"; action: "toggle" | "open" | "hide" | "close" | "pick" }
 	| { kind: "files-usage"; reason: string }
@@ -1380,6 +1379,36 @@ const RECALL_POSITIONALS: ReadonlyArray<CommandPositionalSpec> = [{ name: "ref",
  */
 function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedArgs) => SlashCommand {
 	return (parsed) => (parsed.error ? { kind: "usage-error", command: name, reason: parsed.error } : command);
+}
+
+/** `/panes peer <peer> [brief] [--cwd <path>]`; a bare verb lists the peers this machine can open. */
+function panesPeerFromArgs(parsed: ParsedArgs): SlashCommand {
+	if (parsed.error)
+		return {
+			kind: "panes-usage",
+			subcommand: "peer",
+			...(parsed.positionals.length === 0 ? { listing: true } : {}),
+			// The one required argument is the peer, so name the choices rather than the parser's field.
+			reason:
+				parsed.positionals.length === 0
+					? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt.`
+					: parsed.error,
+		};
+	const peer = parsed.positionals[0] ?? "";
+	if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
+		return {
+			kind: "panes-usage",
+			subcommand: "peer",
+			reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}.`,
+		};
+	}
+	const cwd = parsed.flags.get("--cwd");
+	return {
+		kind: "peer-pane",
+		peer: peer as PanePeerId,
+		...(parsed.rest?.trim() ? { brief: parsed.rest.trim() } : {}),
+		...(typeof cwd === "string" ? { cwd } : {}),
+	};
 }
 
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
@@ -2672,105 +2701,21 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "peer",
-		acp: false,
-		description: "Open a coding peer in a Clio-owned interactive pane",
-		group: "Work",
-		kinds: ["peer-pane", "peer-pane-usage"],
-		args: {
-			parseFlagsBeforeRest: true,
-			flags: [{ name: "--cwd", takesValue: true, valueName: "path" }],
-			positionals: [
-				{ name: "peer", required: true },
-				{ name: "brief", required: false, rest: true },
-			],
-		},
-		fromArgs(parsed) {
-			if (parsed.error)
-				return {
-					kind: "peer-pane-usage",
-					...(parsed.positionals.length === 0 ? { listing: true } : {}),
-					// The one required argument is the peer, so name the choices rather than the parser's field.
-					reason:
-						parsed.positionals.length === 0
-							? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt.`
-							: parsed.error,
-				};
-			const peer = parsed.positionals[0] ?? "";
-			if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
-				return {
-					kind: "peer-pane-usage",
-					reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}.`,
-				};
-			}
-			const cwd = parsed.flags.get("--cwd");
-			return {
-				kind: "peer-pane",
-				peer: peer as PanePeerId,
-				...(parsed.rest?.trim() ? { brief: parsed.rest.trim() } : {}),
-				...(typeof cwd === "string" ? { cwd } : {}),
-			};
-		},
-		handle(command, ctx) {
-			if (command.kind === "peer-pane-usage") {
-				const listing = command.listing ? ctx.panes?.peers?.() : undefined;
-				if (listing && ctx.panes) {
-					// The bare command answers "which agents would open here?" with what is on this machine.
-					const status = ctx.panes.status();
-					const width = Math.max(...listing.map((row) => row.peer.length));
-					const lines = [
-						status.available
-							? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
-							: `Peers: none can open now. ${status.reason}`,
-						...listing.map(
-							(row) =>
-								`  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
-						),
-						`  ${"Open one".padEnd(width)}  /peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
-					];
-					// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
-					ctx.io.stdout(`${lines.join("\n")}\n`);
-					ctx.render?.();
-					return;
-				}
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "peer");
-				if (entry) ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
-				return;
-			}
-			if (command.kind !== "peer-pane") return;
-			if (!ctx.panes) {
-				ctx.notice("warn", "pane layer unavailable; start Clio in Herdr with clio-coder --with-panes");
-				return;
-			}
-			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
-			runLocal(async () => {
-				const result = await ctx.panes?.handoff({
-					peer: command.peer,
-					...(command.brief ? { brief: command.brief } : {}),
-					...(command.cwd ? { cwd: command.cwd } : {}),
-				});
-				if (!result) return;
-				if (result.status === "opened") {
-					ctx.notice(
-						"success",
-						`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: Clio keeps no run record of it and does not review its changes.`,
-					);
-				} else if (result.status === "missing-binary") {
-					ctx.notice("warn", result.detail);
-				} else {
-					ctx.notice("warn", result.reason);
-				}
-			});
-		},
-	},
-	{
 		name: "panes",
 		acp: false,
-		description: "Show pane status, watch a run in a pane, or open a utility pane",
+		description: "Show pane status, watch a run, open a utility pane or a coding peer",
 		group: "Inspect",
-		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage"],
+		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage", "peer-pane"],
 		args: {
 			subcommands: {
+				peer: {
+					parseFlagsBeforeRest: true,
+					flags: [{ name: "--cwd", takesValue: true, valueName: "path" }],
+					positionals: [
+						{ name: "peer", required: true },
+						{ name: "brief", required: false, rest: true },
+					],
+				},
 				show: { positionals: [{ name: "run-or-agent", required: true }] },
 				// A rest positional, so an argv pane keeps its own flags: the parser
 				// would otherwise refuse `--follow` as an unknown flag of `/panes`.
@@ -2780,12 +2725,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			},
 		},
 		subcommandDescriptions: {
+			peer: "Open a coding peer in a Clio-owned interactive pane",
 			show: "Watch a live run or agent in the watch pane",
 			open: `Open a utility pane (${PANES_PRESET_IDS.join(", ")}, \`files --once\` for one pick, or a command)`,
 			zoom: "Toggle zoom on a Clio-owned pane (default: the watch pane)",
 			close: "Close a Clio-owned pane, or all of them",
 		},
 		fromArgs(parsed) {
+			if (parsed.subcommand === "peer") return panesPeerFromArgs(parsed);
 			if (parsed.error) return { kind: "panes-usage", reason: parsed.error };
 			if (parsed.subcommand === "show") {
 				return { kind: "panes-show", target: parsed.positionals[0] ?? "" };
@@ -2818,10 +2765,33 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
 			if (command.kind === "panes-usage") {
+				const listing = command.listing ? ctx.panes?.peers?.() : undefined;
+				if (listing && ctx.panes) {
+					// The bare verb answers "which agents would open here?" with what is on this machine.
+					const status = ctx.panes.status();
+					const width = Math.max(...listing.map((row) => row.peer.length));
+					const lines = [
+						status.available
+							? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
+							: `Peers: none can open now. ${status.reason}`,
+						...listing.map(
+							(row) =>
+								`  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
+						),
+						`  ${"Open one".padEnd(width)}  /panes peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
+					];
+					// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
+					ctx.io.stdout(`${lines.join("\n")}\n`);
+					ctx.render?.();
+					return;
+				}
 				// usageNotice trims the leading newline usageLine carries, so the reason
 				// and the usage line need their own separator or they run together as
 				// `Missing required argument: run-or-agentusage: /panes show ...`.
-				if (entry) ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
+				if (entry) {
+					const usage = usageNotice(entry, command.subcommand);
+					ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
+				}
 				return;
 			}
 			const panes = ctx.panes;
@@ -2835,6 +2805,26 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
+			if (command.kind === "peer-pane") {
+				runLocal(async () => {
+					const result = await panes.handoff({
+						peer: command.peer,
+						...(command.brief ? { brief: command.brief } : {}),
+						...(command.cwd ? { cwd: command.cwd } : {}),
+					});
+					if (result.status === "opened") {
+						ctx.notice(
+							"success",
+							`Opened ${command.peer} in a pane beside this one, working in ${result.cwd}. It runs on its own: Clio keeps no run record of it and does not review its changes.`,
+						);
+					} else if (result.status === "missing-binary") {
+						ctx.notice("warn", result.detail);
+					} else {
+						ctx.notice("warn", result.reason);
+					}
+				});
+				return;
+			}
 			if (command.kind === "panes") {
 				runLocal(async () => {
 					ctx.io.stdout(`${formatPanesStatus(panes.status()).join("\n")}\n`);
