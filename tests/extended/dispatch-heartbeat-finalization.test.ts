@@ -87,7 +87,10 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 	const workers = [controlledWorker(), controlledWorker()];
 	let spawned = 0;
 	let monotonic = 0;
-	const bundle = makeDispatchBundle(dispatchStubContext(), {
+	// These workers stream nothing until the batch returns, so a shared-prefix hold would wait out its cap.
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.staggerSharedPrefix = false;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 		spawnWorker: () => {
 			const controlled = workers[spawned++];
 			ok(controlled);

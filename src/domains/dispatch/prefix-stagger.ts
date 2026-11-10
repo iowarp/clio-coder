@@ -31,8 +31,8 @@ export async function holdForSharedPrefix(
 				resolve();
 			};
 		});
+		// Kept referenced: a waiting follower is live work, and its batch releases every group when it returns.
 		const timer = setTimeout(release, PREFIX_HOLD_CAP_MS);
-		timer.unref?.();
 		const group: DispatchPrefixGroup = { leaderRunId: runId, released, release, isReleased: () => isReleased };
 		groups.set(key, group);
 		return { role: "leader", group };

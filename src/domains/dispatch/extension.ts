@@ -10417,10 +10417,11 @@ export function createDispatchBundle(
 				? createBatchVerificationGate()
 				: undefined;
 		// C-04: workers that share a prompt prefix start after the first one streams, so they read its cache entry.
-		const staggered =
+		const prefixGroups =
 			reqs.length > 1 && getEffectiveSettings()?.fleet.staggerSharedPrefix !== false
-				? { ...preparation, prefixGroups: new Map<string, DispatchPrefixGroup>() }
-				: preparation;
+				? new Map<string, DispatchPrefixGroup>()
+				: undefined;
+		const staggered = prefixGroups === undefined ? preparation : { ...preparation, prefixGroups };
 		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
 		try {
 			for (const req of reqs) {
@@ -10436,6 +10437,9 @@ export function createDispatchBundle(
 				}
 			}
 			throw err;
+		} finally {
+			// Only this loop's runs can hold, so no group's cap timer outlives the batch's admission.
+			for (const group of prefixGroups?.values() ?? []) group.release();
 		}
 		const batchRef = { current: createBatch(handles.map((handle) => handle.runId)) };
 		const finalPromise = Promise.all(
