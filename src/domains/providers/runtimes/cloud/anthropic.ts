@@ -40,8 +40,6 @@ const anthropicRuntime: RuntimeDescriptor = {
 			// re-writes the whole prefix at 1.25x input. A 1-hour write costs 2x on new tokens only, so one such pause
 			// after the prompt reaches 5/8 of its final size pays for a session's 1-hour writes. Workers stay at 5 minutes.
 			mainThreadCacheRetention: "long",
-			// Pi 1.5.1 message threads reshape every Anthropic request and are not driven live yet; enable after a live check.
-			compat: { supportsMessageThreads: false },
 		});
 	},
 };
