@@ -1581,9 +1581,14 @@ test("a quoted secret that holds spaces stays hidden one-shot, in every frame an
 	strictEqual(redactSecretString('token: "$GITHUB_TOKEN"'), 'token: "$GITHUB_TOKEN"');
 });
 
-test("the quoted-secret pass stays linear on a 64 KB run of name characters", () => {
-	// Quadratic before the lead bound: about 8 s here. The generous bound keeps a loaded host from flaking.
-	for (const text of [`password="x" ${"-".repeat(65_536)}`, `'token' ${"a-".repeat(32_768)}`]) {
+test("the quoted-secret pass stays linear on 64 KB runs of name characters and spaces", () => {
+	// Quadratic before the bounds: about 8 s for the name runs and 1.5 s for the space run. The generous bound keeps a
+	// loaded host from flaking.
+	for (const text of [
+		`password="x" ${"-".repeat(65_536)}`,
+		`'token' ${"a-".repeat(32_768)}`,
+		`"key:${" ".repeat(262_144)}`,
+	]) {
 		const started = performance.now();
 		redactSecretString(text);
 		ok(performance.now() - started < 1_000, text.slice(0, 16));

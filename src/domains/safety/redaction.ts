@@ -294,8 +294,9 @@ const QUOTED_SECRET_CHARS = 1024;
 const QUOTED_HEADER_HEAD = String.raw`\s*([A-Za-z0-9_-]+)\s*:\s*(?:(?:bearer|basic|token)\s+)?`;
 // A lead never starts inside a run of name characters and names stay bounded, so a long dash or `a-` run scans linearly.
 const QUOTED_VALUE_LEAD = String.raw`(?<![A-Za-z0-9_-])--?([A-Za-z0-9_-]{1,64})(?:=|\s+)|(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]{1,64})\s*[=:]\s*`;
+// The value never starts with whitespace, so a long space run after the colon is not rescanned once per space.
 const QUOTED_HEADER_RE = new RegExp(
-	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
+	String.raw`(["'])(${QUOTED_HEADER_HEAD})((?!\s)(?:(?!\1).){0,${QUOTED_SECRET_CHARS}})\1`,
 	"giu",
 );
 const QUOTED_VALUE_RE = new RegExp(
