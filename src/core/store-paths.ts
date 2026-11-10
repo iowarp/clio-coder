@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { clioProjectRoot } from "./project-root.js";
-import { clioDataPath } from "./xdg.js";
+import { clioCachePath, clioDataPath } from "./xdg.js";
 
 export const STORE_TAG_MAX_BYTES = 200;
 export const STORE_BLOB_MAX_BYTES = 480;
@@ -147,9 +147,17 @@ export function isStorePath(candidate: string): boolean {
 	return candidate === root || candidate.startsWith(`${root}/`);
 }
 
-/** Trees outside the workspace the model may read: this project's store directory. */
+/** Where the clio-core backend materializes this project's blobs for `get` (M-36). */
+function storeCacheDir(cwd: string): string {
+	return join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd)));
+}
+
+/**
+ * Trees outside the workspace the model may read: this project's store
+ * directory and the clio-core cache whose copies `store get` hands back.
+ */
 export function storeReadRoots(cwd: string): string[] {
-	return [storeProjectDir(cwd)];
+	return [storeProjectDir(cwd), storeCacheDir(cwd)];
 }
 
 /** Where a store write lands, from tool arguments alone; null for read ops and malformed calls. */
