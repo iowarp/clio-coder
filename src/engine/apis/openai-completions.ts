@@ -41,6 +41,7 @@ import {
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../domains/providers/types/local-model-quirks.js";
 import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import { isProviderContentFilter, providerContentFilterMessage } from "../ai.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
@@ -138,6 +139,8 @@ interface ResponseModelIdCapture {
 	finishReasonObserved: boolean;
 	buffer: string;
 	decoder: TextDecoder | null;
+	/** A 2xx answer to a streaming request whose body is not an event stream (captive portal, JSON error, plain completion). */
+	nonStreamBody: { status: number; contentType: string; excerpt: string } | null;
 }
 
 function nonnegativeFiniteNumber(value: unknown): number | null {
@@ -246,15 +249,98 @@ function observeErrorFrameBytes(chunk: Uint8Array | undefined, capture: Response
 	if (flush) capture.decoder = null;
 }
 
-function captureResponseModelId(response: Response, capture: ResponseModelIdCapture, model: Model<Api>): Response {
+const NON_STREAM_EXCERPT_BYTES = 2048;
+/** A body that opens with an SSE field is a stream whatever its content type says. */
+const SSE_BODY_START = /^\uFEFF?\s*(?:data|event):/u;
+
+function isStreamingRequest(init: RequestInit | undefined): boolean {
+	return typeof init?.body === "string" && /"stream"\s*:\s*true/u.test(init.body);
+}
+
+/**
+ * A 2xx streaming answer without an event-stream content type. A body that opens with SSE frames goes on as a stream;
+ * anything else keeps a short excerpt and reaches the SDK empty, so the stream ends and is reported as this body.
+ */
+async function sniffNonEventStreamBody(response: Response, capture: ResponseModelIdCapture): Promise<Response> {
+	const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+	const head: Uint8Array[] = [];
+	const decoder = new TextDecoder();
+	let text = "";
+	let bytes = 0;
+	let done = false;
+	// Decide on the first non-blank characters so a headerless SSE stream is not held back.
+	while (!done && bytes < NON_STREAM_EXCERPT_BYTES && text.trimStart().replace(/^\uFEFF/u, "").length < 6) {
+		const next = await reader.read();
+		if (next.done) done = true;
+		else {
+			head.push(next.value);
+			bytes += next.value.byteLength;
+			text += decoder.decode(next.value, { stream: true });
+		}
+	}
+	const init = { status: response.status, statusText: response.statusText, headers: response.headers };
+	if (SSE_BODY_START.test(text)) {
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const chunk of head) controller.enqueue(chunk);
+				if (done) controller.close();
+			},
+			async pull(controller) {
+				const next = await reader.read();
+				if (next.done) controller.close();
+				else controller.enqueue(next.value);
+			},
+			cancel(reason) {
+				return reader.cancel(reason);
+			},
+		});
+		return observeEventStream(new Response(body, init), capture);
+	}
+	while (!done && bytes < NON_STREAM_EXCERPT_BYTES) {
+		const next = await reader.read();
+		if (next.done) done = true;
+		else {
+			bytes += next.value.byteLength;
+			text += decoder.decode(next.value, { stream: true });
+		}
+	}
+	if (!done) await reader.cancel().catch(() => {});
+	const excerpt = (text + decoder.decode()).slice(0, NON_STREAM_EXCERPT_BYTES).replace(/\s+/gu, " ").trim();
+	capture.nonStreamBody = {
+		status: response.status,
+		contentType: response.headers.get("content-type")?.trim() || "no content type",
+		excerpt: redactSecretString(excerpt),
+	};
+	return new Response(null, init);
+}
+
+function nonStreamBodyMessage(body: NonNullable<ResponseModelIdCapture["nonStreamBody"]>): string {
+	return (
+		`Provider answered HTTP ${body.status} (${body.contentType}) instead of an event stream` +
+		(body.excerpt ? `: ${body.excerpt}` : " with an empty body")
+	);
+}
+
+async function captureResponseModelId(
+	response: Response,
+	capture: ResponseModelIdCapture,
+	model: Model<Api>,
+	streaming: boolean,
+): Promise<Response> {
 	if (runtimeMetadata(model)?.runtimeId === "litellm") {
 		capture.gatewayRouting = liteLLMGatewayRoutingFromHeaders(response.headers);
 	}
+	capture.nonStreamBody = null;
 	if (!response.ok) capture.errorBody = captureErrorBody(response);
-	if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
-		return response;
+	if (!response.body) return response;
+	if (!response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+		return response.ok && streaming ? sniffNonEventStreamBody(response, capture) : response;
 	}
-	const body = response.body.pipeThrough(
+	return observeEventStream(response, capture);
+}
+
+function observeEventStream(response: Response, capture: ResponseModelIdCapture): Response {
+	const body = (response.body as ReadableStream<Uint8Array>).pipeThrough(
 		new TransformStream<Uint8Array, Uint8Array>({
 			transform(chunk, controller) {
 				capture.observed = true;
@@ -300,12 +386,14 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		finishReasonObserved: false,
 		buffer: "",
 		decoder: new TextDecoder(),
+		nonStreamBody: null,
 	};
 	const fetchImpl: NonNullable<StreamOptions["fetch"]> =
 		options.fetch ?? ((input, init) => globalThis.fetch(input, init));
 	const capturedOptions = {
 		...options,
-		fetch: async (input, init) => captureResponseModelId(await fetchImpl(input, init), capture, model),
+		fetch: async (input, init) =>
+			captureResponseModelId(await fetchImpl(input, init), capture, model, isStreamingRequest(init)),
 		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
 			observeProviderChunk(data, capture);
 			await options.onProviderStreamEvent?.(data, eventModel);
@@ -327,6 +415,12 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					event.message.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
+					if (capture.nonStreamBody !== null) {
+						event.message.stopReason = "error";
+						event.message.errorMessage = nonStreamBodyMessage(capture.nonStreamBody);
+						annotated.push({ type: "error", reason: "error", error: event.message });
+						continue;
+					}
 					// Pi defaults an EOF without a provider finish reason to a successful stop.
 					// Keep the partial response, but never certify an interrupted stream as complete.
 					if (capture.observed && !capture.finishReasonObserved) {
@@ -337,6 +431,9 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 						continue;
 					}
 				} else if (event.type === "error") {
+					if (capture.nonStreamBody !== null && event.error.stopReason === "error") {
+						event.error.errorMessage = nonStreamBodyMessage(capture.nonStreamBody);
+					}
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
 					}
