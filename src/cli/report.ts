@@ -64,10 +64,11 @@ sent until you choose send in a terminal or pass --yes.
 $EDITOR opens a template. --last uses the newest session in this directory and
 --session a named one, to add what Clio observed. --dry-run stops after the
 preview and makes no network call. When the search finds an open report of the
-same problem, a terminal asks; with --yes, --on-duplicate decides (default stop:
-an unattended script never comments on someone's issue). --reply-check lets an
-attended session check the filed issue once a day for a maintainer's reply (off
-unless asked). status asks GitHub, through your gh, where each open report stands.
+same problem, or a fixed one this would be a regression of, a terminal asks; with
+--yes, --on-duplicate decides (default stop: an unattended script never comments
+on someone's issue or files a regression). --reply-check lets an attended session
+check the filed issue once a day for a maintainer's reply (off unless asked).
+status asks GitHub, through your gh, where each open report stands.
 Security problems go to a private advisory: clio-coder report security.
 --bundle mechanics builds a diagnostic bundle of the session's telemetry, with the
 consent given by --consent (debug by default; dataset adds use in evaluation data).

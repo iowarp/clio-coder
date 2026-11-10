@@ -288,6 +288,11 @@ export function duplicateOptions(verdict: RelatedVerdict): Array<{ value: Duplic
 			{ value: "stop", label: `Upgrade first: ${verdict.latest} is out and #${verdict.issue.number} was closed` },
 			{ value: "new", label: `Report anyway, linking #${verdict.issue.number}` },
 		];
+	if (verdict.kind === "regression")
+		return [
+			{ value: "new", label: `File it as a regression of #${verdict.issue.number} (the title gains "regression:")` },
+			{ value: "stop", label: "Cancel" },
+		];
 	return null;
 }
 
@@ -303,7 +308,7 @@ export interface ReportFlowDeps extends SendDeps {
 	related?: RelatedDeps;
 	/** The reporter ticked the daily reply check for this report (R-14); off unless asked. */
 	replyCheck?: boolean;
-	/** Asked only when the search found an open match or a fix in a newer version. */
+	/** Asked only when the search found an open match, a fixed closed match or a fix in a newer version. */
 	chooseDuplicate: (
 		verdict: RelatedVerdict,
 		options: Array<{ value: DuplicateChoice; label: string }>,
