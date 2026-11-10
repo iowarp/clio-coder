@@ -8,12 +8,6 @@ export const TOOL_PROFILE_NAMES: ReadonlyArray<Exclude<ToolProfileName, "council
 	"full-agent",
 ];
 const ALL_TOOL_PROFILE_NAMES: ReadonlyArray<ToolProfileName> = [...TOOL_PROFILE_NAMES, "council-read-only"];
-const CODEWIKI_TOOL_NAMES: ReadonlyArray<BuiltinToolName> = [ToolNames.CodeNav];
-
-export interface ToolProfileContext {
-	agentId?: string;
-	task?: string;
-}
 
 const MINIMAL_LOCAL_TOOLS: ReadonlyArray<BuiltinToolName> = [
 	ToolNames.Read,
@@ -77,17 +71,11 @@ export function assertToolProfileEnforceable(profile: ToolProfileName | undefine
 export function applyToolProfile(
 	tools: ReadonlyArray<ToolName>,
 	profile: ToolProfileName | undefined,
-	context?: ToolProfileContext,
 ): ReadonlyArray<ToolName> {
 	const unique = uniquePreservingOrder(tools);
-	let profiled: ReadonlyArray<ToolName>;
-	if (profile === undefined || profile === "full-agent") {
-		profiled = unique;
-	} else {
-		const allowed = NARROW_TOOL_PROFILES[profile];
-		profiled = unique.filter((tool): tool is BuiltinToolName => isBuiltinToolName(tool) && allowed.has(tool));
-	}
-	return profile === "council-read-only" ? profiled : applyCodewikiWorkerPolicy(profiled, context);
+	if (profile === undefined || profile === "full-agent") return unique;
+	const allowed = NARROW_TOOL_PROFILES[profile];
+	return unique.filter((tool): tool is BuiltinToolName => isBuiltinToolName(tool) && allowed.has(tool));
 }
 
 function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {
@@ -99,25 +87,4 @@ function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {
 		unique.push(tool);
 	}
 	return unique;
-}
-
-function isCodewikiTool(tool: ToolName): boolean {
-	return (CODEWIKI_TOOL_NAMES as ReadonlyArray<ToolName>).includes(tool);
-}
-
-function isNavigationHeavyTask(task: string | undefined): boolean {
-	if (!task) return false;
-	return /\b(?:codemap|codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?|cmd|pkg|lib)\/|\.(?:[cm]?[tj]sx?|py|pyw|go|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|java|rb)\b/i.test(
-		task,
-	);
-}
-
-function applyCodewikiWorkerPolicy(
-	tools: ReadonlyArray<ToolName>,
-	context: ToolProfileContext | undefined,
-): ReadonlyArray<ToolName> {
-	if (!context?.agentId) return tools;
-	if (context.agentId === "scout") return tools;
-	if (isNavigationHeavyTask(context.task)) return tools;
-	return tools.filter((tool) => !isCodewikiTool(tool));
 }

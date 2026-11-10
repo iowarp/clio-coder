@@ -1096,7 +1096,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		telemetry,
 		allowedTools: activeWorkerTools,
 		agentId: input.agentId,
-		task: input.task,
 		includeInteractiveTools: false,
 		invokeOptions: (toolCallId) => ({
 			...observedToolCallOrigin(agent.state.messages, toolCallId),

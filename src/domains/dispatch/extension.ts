@@ -2862,7 +2862,7 @@ function resolveDispatchAdmissionStage(
 ): DispatchAdmissionStage {
 	const recipeTools = recipe.tools;
 	const candidateTools = recipeTools && recipeTools.length > 0 ? (Array.from(recipeTools) as ToolName[]) : [];
-	const allowedTools = applyToolProfile(candidateTools, req.toolProfile, { agentId: req.agentId, task: req.task });
+	const allowedTools = applyToolProfile(candidateTools, req.toolProfile);
 	assertAgentSpecPolicy(normalizeAgentSpec(recipe));
 	const unavailableTools = allowedTools.filter((tool) => isBuiltinToolName(tool) && !candidateTools.includes(tool));
 	if (unavailableTools.length > 0) {

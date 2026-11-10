@@ -120,7 +120,6 @@ function clioBridgeToolDefinitions(input: ClioToolBridgeInput): BridgedToolDefin
 		includeInteractiveTools: false,
 		attachCapabilitiesDirectly: true,
 		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-		...(input.task !== undefined ? { task: input.task } : {}),
 		telemetry: {
 			onStart: (event) => input.emit({ type: "clio_coder_tool_start", payload: event }),
 			onFinish: (event) => input.emit({ type: "clio_coder_tool_finish", payload: event }),

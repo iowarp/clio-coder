@@ -203,7 +203,6 @@ export interface ResolveAgentToolsInput {
 	allowedTools?: ReadonlyArray<ToolName>;
 	toolProfile?: ToolProfileName;
 	agentId?: string;
-	task?: string;
 	telemetry?: ToolTelemetry;
 	invokeOptions?: (toolCallId?: string) => Partial<ToolInvokeOptions>;
 	includeInteractiveTools?: boolean;
@@ -721,10 +720,6 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
  * on every call it makes on the run's behalf.
  */
 export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetry" | "invokeOptions">): ToolName[] {
-	const profileContext = {
-		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
-		...(input.task !== undefined ? { task: input.task } : {}),
-	};
 	const gatewayNames = input.registry.listGateway().map((spec) => spec.name);
 	// An MCP capability registers only once its server connects, which a worker
 	// does on its first call. Its admitted name still belongs to the surface the
@@ -732,7 +727,7 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 	const admittedMcp =
 		input.registry.get(ToolNames.Gateway) === undefined ? [] : (input.allowedTools?.filter(isMcpToolName) ?? []);
 	const registered = [...input.registry.listRegistered(), ...gatewayNames, ...admittedMcp];
-	const toolIds = applyToolProfile(registered, input.toolProfile, profileContext);
+	const toolIds = applyToolProfile(registered, input.toolProfile);
 	const allowed = input.allowedTools ? new Set<string>(input.allowedTools) : null;
 	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const names: ToolName[] = [];
