@@ -84,7 +84,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Branches and Releases
 
-Development happens on the version branch, currently `v064`. Keep local
+Development happens on the version branch, currently `v071`. Keep local
 and remote version branches synchronized with ordinary pushes. `main` moves
 only by fast-forward when a stable release completes. Published tags and npm
 versions are immutable. The completed stable release deletes its version branch;
@@ -119,7 +119,8 @@ Release with one resumable command in a visible terminal:
 ```bash
 pnpm run release:next status      # read-only: where the release stands
 pnpm run release:next --rehearse  # full non-public rehearsal, about 20 minutes
-pnpm run release:next             # the release, about 30 minutes from a qualified candidate
+pnpm run release:next             # the release, about 4 minutes from a commit with a green ci.yml run
+pnpm run release:next --local     # also qualify on local Node 22 and 24 before the push
 ```
 
 Each run reads git, GitHub and npm, prints every position with what proves it
@@ -140,9 +141,14 @@ To cut a release:
    source-install command. Commit the candidate on the version branch. The
    command refuses a dirty tree or inconsistent versions; it does not invent
    release notes or silently bump versions.
-2. The command qualifies the exact commit locally on Node 22 and 24 at once,
-   each in its own detached worktree, so no checkout's `dist/` is replaced.
-   A passed Node major is reused. Qualification uses `nvm`'s newest install of
+2. CI qualifies the exact commit. The command reuses any green `ci.yml` run of
+   that commit, a rehearsal's included, whose `prepare`, `ci (22)` and
+   `ci (24)` jobs passed and whose artifacts are still live; it then skips
+   straight to the release. Without one it dispatches its own run, about
+   8 minutes. Local qualification is opt-in: `--local` qualifies on Node 22
+   and 24 at once before the push, each in its own detached worktree, so no
+   checkout's `dist/` is replaced, and is skipped when CI is already green. A
+   passed Node major is reused. Qualification uses `nvm`'s newest install of
    each major unless `release-candidate.mjs qualify` gets `--node22`/`--node24`.
 3. Rehearse. `--rehearse` pushes a temporary `rehearse/*` branch and dispatches
    one `ci.yml` run with the publisher's rehearsal and the macOS boot (add
