@@ -397,10 +397,11 @@ export function agentSpecPolicyErrors(spec: AgentSpec): string[] {
 	) {
 		errors.push(`orchestration agent '${spec.id}' must require dispatch when it is declared`);
 	}
-	const toolList = spec.tools.join(", ");
 	if (spec.capabilityClass === "read-only") {
 		for (const action of actions) {
-			if (action !== "read") errors.push(`read-only agent '${spec.id}' requests ${action} tools (${toolList})`);
+			if (action === "read") continue;
+			const offending = spec.tools.filter((tool) => classify({ tool }).actionClass === action).join(", ");
+			errors.push(`read-only agent '${spec.id}' requests ${action} tools (${offending})`);
 		}
 	}
 	if (spec.capabilityClass === "artifact-write") {
