@@ -3227,7 +3227,7 @@ function installPermissionBridge(input: {
 			const sessionId = input.activeSessionId();
 			const noSessionReason = "ACP permission requested with no active session";
 			if (!sessionId) {
-				resolve({ status: "denied", decidedBy: "error", reason: noSessionReason }, "stop", () => {
+				void resolve({ status: "denied", decidedBy: "error", reason: noSessionReason }, "stop", () => {
 					emitQueuedErrorResolutions(meta.requestId, noSessionReason);
 					queuedRequestIds.clear();
 					queuedRequestDetails.clear();
@@ -3257,7 +3257,7 @@ function installPermissionBridge(input: {
 			const snapshot = toolCallId === null ? null : input.toolCallSnapshot(toolCallId);
 			if (toolCallId === null || snapshot === null) {
 				const unbindableReason = "permission request has no bindable tool call";
-				resolve({ status: "denied", decidedBy: "error", reason: unbindableReason });
+				void resolve({ status: "denied", decidedBy: "error", reason: unbindableReason });
 				queuedRequestIds.delete(meta.requestId);
 				queuedRequestDetails.delete(meta.requestId);
 				return;
@@ -3337,7 +3337,7 @@ function installPermissionBridge(input: {
 					);
 				const outcome = await Promise.race([answered, cancelled]);
 				if (outcome.kind === "cancelled") {
-					resolve({ status: "denied", decidedBy: "cancelled", reason: outcome.reason });
+					void resolve({ status: "denied", decidedBy: "cancelled", reason: outcome.reason });
 					return;
 				}
 				if (outcome.kind === "response") {
@@ -3360,7 +3360,7 @@ function installPermissionBridge(input: {
 						// Abort before releasing the parked tools so their results cannot
 						// start another model request while session/cancel is in flight.
 						input.cancelActivePrompt(reason);
-						resolve({ status: "denied", decidedBy: "cancelled", reason }, "stop", () => {
+						void resolve({ status: "denied", decidedBy: "cancelled", reason }, "stop", () => {
 							queuedRequestIds.clear();
 							queuedRequestDetails.clear();
 						});
@@ -3375,7 +3375,7 @@ function installPermissionBridge(input: {
 					if (answer.outcome === "selected" && answer.optionId === "reject-and-stop") {
 						const reason = "ACP client denied this tool call and stopped the run";
 						input.cancelActivePrompt(reason);
-						resolve({ status: "denied", decidedBy: "acp-client", reason }, "stop", () => {
+						void resolve({ status: "denied", decidedBy: "acp-client", reason }, "stop", () => {
 							queuedRequestIds.clear();
 							queuedRequestDetails.clear();
 						});
@@ -3385,13 +3385,13 @@ function installPermissionBridge(input: {
 						await resolve({ status: "granted", decidedBy: "acp-client" }, "grant");
 						return;
 					}
-					resolve({ status: "denied", decidedBy: "acp-client", reason: "ACP client denied this tool call" });
+					void resolve({ status: "denied", decidedBy: "acp-client", reason: "ACP client denied this tool call" });
 					return;
 				}
 				const err = outcome.err;
 				const message = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
 				if (err instanceof AcpTimeoutError) {
-					resolve({ status: "expired", decidedBy: "timeout", reason: "permission approval expired" }, "expire", () => {
+					void resolve({ status: "expired", decidedBy: "timeout", reason: "permission approval expired" }, "expire", () => {
 						emitQueuedExpiryResolutions(meta.requestId);
 						queuedRequestIds.clear();
 						queuedRequestDetails.clear();
@@ -3399,7 +3399,7 @@ function installPermissionBridge(input: {
 					});
 					return;
 				}
-				resolve({ status: "denied", decidedBy: "error", reason: message }, "stop", () => {
+				void resolve({ status: "denied", decidedBy: "error", reason: message }, "stop", () => {
 					emitQueuedErrorResolutions(meta.requestId, message);
 					queuedRequestIds.clear();
 					queuedRequestDetails.clear();

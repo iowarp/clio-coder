@@ -4309,7 +4309,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			);
 		}
 		const unsubscribeHeadlessPermission = toolRegistry.onPermissionRequired((call, decision, meta) => {
-			resolvePermission(
+			void resolvePermission(
 				{ bus, registry: toolRegistry },
 				{
 					action: "stop",

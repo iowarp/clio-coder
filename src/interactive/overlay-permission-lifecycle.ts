@@ -332,7 +332,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	 */
 	const denyUnattended = (requestId: string, entry: UnattendedPark): void => {
 		if (deps.toolRegistry?.isParked(requestId) !== true) return;
-		resolvePermission(
+		void resolvePermission(
 			{ bus: deps.bus, registry: deps.toolRegistry },
 			{
 				action: "deny",
@@ -711,7 +711,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			const cancellationReason = stopping
 				? "User stopped the turn at this call's approval card. It did not run, and the turn is over."
 				: "User denied this call at the permission prompt. It will not run; no approval is pending.";
-			resolvePermission(
+			void resolvePermission(
 				{ bus: deps.bus, ...(deps.toolRegistry ? { registry: deps.toolRegistry } : {}) },
 				{
 					action: stopping ? "stop" : "deny",
