@@ -5,6 +5,7 @@ import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
 import { sandboxAvailability, sandboxNetworkIsolation } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
+import { withMountAliases } from "./mount-aliases.js";
 import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
@@ -213,6 +214,10 @@ export function composeWorkerSandboxInvocation(
 		{ workspaceRoots: [cwd, ...policy.readableRoots, ...writableRoots], privateTmp: true },
 		maskedPaths,
 	);
+	const masks = [...maskedPaths, ...sockets.masks];
+	const aliased = availability.backend === "bwrap" ? withMountAliases(masks) : masks;
+	if (aliased instanceof Error)
+		throw new Error(`sandbox: no worker sandbox is available (${aliased.message}); the command was not run`);
 	const spec: SandboxInvocationSpec = {
 		command,
 		cwd: physicalSandboxPath(cwd),
@@ -221,7 +226,7 @@ export function composeWorkerSandboxInvocation(
 		gitWritablePaths: policy.gitWritablePaths.map(physicalSandboxPath),
 		readableRoots: policy.readableRoots.map(physicalSandboxPath),
 		network: policy.network,
-		maskedPaths: [...maskedPaths, ...sockets.masks],
+		maskedPaths: aliased,
 		...sockets.fields,
 		// Agent sockets are masked; a dangling variable only produces confusing
 		// connection errors in tools that honor it.

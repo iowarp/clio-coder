@@ -6,6 +6,7 @@ import { canonicalizePath } from "../path-canonical.js";
 import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioStatePath } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
+import { withMountAliases } from "./mount-aliases.js";
 import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
@@ -692,12 +693,16 @@ export function planMainSandboxSpawn(
 		},
 		[...baseMasks, ...secretMasks],
 	);
+	const masks = [...baseMasks, ...secretMasks, ...sockets.masks];
+	const aliased = availability.backend === "bwrap" ? withMountAliases(masks) : masks;
+	if (aliased instanceof Error) {
+		return {
+			kind: "refused",
+			message: `sandbox: the main-session sandbox is unavailable (${aliased.message}); the command was not run`,
+		};
+	}
 	const spec = {
-		...mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), [
-			...baseMasks,
-			...secretMasks,
-			...sockets.masks,
-		]),
+		...mainSandboxInvocationSpec(physicalPolicy, command, physicalSandboxPath(cwd), aliased),
 		...sockets.fields,
 	};
 	const invocation = buildSandboxInvocation(spec, availability.backend, availability.executable);
