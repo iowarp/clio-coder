@@ -84,6 +84,16 @@ const PLAIN_FAILURES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) =
 		/result contract failed after \d+ bounded repair rounds?: .*(?:tool-call lockout|tool-call markup)/iu,
 		() => "it gave no usable answer: it kept calling tools after they were turned off",
 	],
+	// A scout answer whose shape parsed but whose citation did not ground: the format was right, the location was not.
+	// A small local scout once cited "tests/contracts directory" through both repair rounds; another model is the fix.
+	[
+		/result contract failed after \d+ bounded repair rounds?: Scout citation cannot be read: (.+?)(?:; |$)/iu,
+		(match) => `its answer cited ${match[1]}, which is not a file or folder here; try another scout model`,
+	],
+	[
+		/result contract failed after \d+ bounded repair rounds?: Scout citation /iu,
+		() => "its answer cited source it could not back up; try another scout model",
+	],
 	[
 		/result contract failed after \d+ bounded repair rounds?: /iu,
 		() => "its answer was not in the format Clio asked for",

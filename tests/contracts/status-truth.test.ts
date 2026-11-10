@@ -2054,6 +2054,14 @@ test("a worker failure's primary words name what happened to the task, never the
 			/^its answer was not in the format Clio asked for$/u,
 		],
 		[
+			"exit code 1; result contract failed after 2 bounded repair rounds: Scout citation cannot be read: tests/contracts directory",
+			/^its answer cited tests\/contracts directory, which is not a file or folder here; try another scout model$/u,
+		],
+		[
+			"exit code 1; result contract failed after 2 bounded repair rounds: Scout citation is not grounded in a live read: src/a.ts:9 (this run never read that file)",
+			/^its answer cited source it could not back up; try another scout model$/u,
+		],
+		[
 			"the operator denied the worker's permission request, so it changed nothing and the assignment was not done",
 			/^you denied its permission request, so it changed nothing$/u,
 		],
