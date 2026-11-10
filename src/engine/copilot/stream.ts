@@ -629,8 +629,8 @@ class Step {
 		const outputTokens = count(data.outputTokens);
 		const cacheRead = count(data.cacheReadTokens);
 		const cacheWrite = count(data.cacheWriteTokens);
-		// Copilot's inputTokens counts the whole prompt, cached part included, as OpenAI's prompt_tokens does.
-		if (inputTokens !== undefined) usage.input += Math.max(0, inputTokens - (cacheRead ?? 0));
+		// Copilot's inputTokens counts the whole prompt, cache reads and cache writes included.
+		if (inputTokens !== undefined) usage.input += Math.max(0, inputTokens - (cacheRead ?? 0) - (cacheWrite ?? 0));
 		usage.output += outputTokens ?? 0;
 		usage.cacheRead += cacheRead ?? 0;
 		usage.cacheWrite += cacheWrite ?? 0;
