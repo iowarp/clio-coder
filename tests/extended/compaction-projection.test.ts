@@ -726,11 +726,26 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(calls.length, 1);
 	});
 
-	for (const oversized of ["conversation", "system", "instructions", "previous"] as const) {
+	it("clips an oversized conversation message for the summarizer and leaves the ledger whole", async () => {
+		// S-22 (dbb8edd9c): one huge user or assistant message must not block every compaction.
+		const huge = "PRESERVE_EXACT_CONSTRAINT ".repeat(10000);
+		const entries = chain([
+			message("old", "user", { text: huge }),
+			message("middle", "user", { text: "New work" }),
+			message("new", "user", { text: "Continue" }),
+		]);
+		const original = structuredClone(entries);
+		await compact({ entries, model: model(), keepRecentTokens: 100000 });
+		strictEqual(calls.length, 1);
+		match(calls[0]?.text ?? "", /characters omitted from this message; the full text is in the session ledger/);
+		deepStrictEqual(entries, original);
+	});
+
+	for (const oversized of ["system", "instructions", "previous"] as const) {
 		it(`rejects an oversized ${oversized} before invoking or accounting for a provider`, async () => {
 			const huge = "PRESERVE_EXACT_CONSTRAINT ".repeat(10000);
 			const entries = chain([
-				message("old", "user", { text: oversized === "conversation" ? huge : "Old work" }),
+				message("old", "user", { text: "Old work" }),
 				...(oversized === "previous"
 					? [
 							{
