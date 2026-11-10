@@ -68,7 +68,7 @@ The bundled index carries four science plugins. Like every other package, none i
 | --- | --- | --- | --- |
 | `plugin:hpc` (0.2.0) | `hpc-sweep`, `hpc-modules`, `hpc-parallel-io`, `hpc-darshan`, `hpc-chronolog`; requires `skill:slurm-jobs` | none | `clio-kit` for the Slurm server, which the operator declares; the cluster's Slurm, Lmod or Spack, Darshan, parallel HDF5 and MPI builds; Python 3.10+ for the bundled scripts |
 | `plugin:science-data` (0.1.1) | `science-data` | `parquet`, `pandas` (clio-kit), each with per-tool action classes | `clio-kit` on `PATH`; Clio Coder 0.7.0 or later |
-| `plugin:literature` (0.2.0) | `citation-check`, `hypothesis-workflow`; requires `skill:arxiv-literature` | `cite-nexus` (`cite-nexus-mcp` 0.2.3 through `uvx`), every tool classed `read` | `uvx` on `PATH`; network for every lookup; Clio Coder 0.7.0 or later |
+| `plugin:literature` (0.2.1) | `citation-check`, `hypothesis-workflow`; requires `skill:arxiv-literature` | `cite-nexus` (`cite-nexus-mcp` 0.2.2 through `uvx`), every tool classed `read` | `uvx` on `PATH`; network for every lookup; Clio Coder 0.7.0 or later |
 | `plugin:life-science` (0.1.0) | `pdb-structures`, `uniprot-proteins`, `pubchem-compounds` | none; the skills use `web_fetch` against the public, key-free RCSB PDB, UniProt and PubChem REST APIs | network for every lookup |
 
 ```bash

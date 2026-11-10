@@ -6,7 +6,7 @@ user asks whether a cited arXiv ID or DOI is real.
 ## With the CiteNexus server
 
 The `literature` pack declares the `cite-nexus` MCP server (cite-nexus-mcp
-0.2.3). Check with `gateway(op="find", query="cite-nexus")`.
+0.2.2). Check with `gateway(op="find", query="cite-nexus")`.
 
 - Export: `mcp_cite-nexus__get-citation` with `identifier` `arxiv:<id>` (or a
   DOI) and `format` `bibtex`, `ris` or `csl-json`. The entry is built from

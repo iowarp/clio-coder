@@ -3,7 +3,7 @@
 		"cite-nexus": {
 			"type": "stdio",
 			"command": "uvx",
-			"args": ["--from", "cite-nexus-mcp==0.2.3", "cite-nexus-mcp", "--no-env-file"],
+			"args": ["--from", "cite-nexus-mcp==0.2.2", "cite-nexus-mcp", "--no-env-file"],
 			"timeoutMs": 120000,
 			"toolActionClasses": {
 				"batch-citations": "read",

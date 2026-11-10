@@ -378,7 +378,7 @@
 				"bibtex for this arxiv paper"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/arxiv-literature",
-			"version": "0.6.0",
+			"version": "0.6.1",
 			"audit": "pass",
 			"category": "research"
 		},

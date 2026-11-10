@@ -1,7 +1,7 @@
 # Literature pack
 
 Checks citations and turns paper identifiers into citation-ready entries. The
-pack declares the CiteNexus MCP server (`cite-nexus-mcp` 0.2.3) and adds the
+pack declares the CiteNexus MCP server (`cite-nexus-mcp` 0.2.2) and adds the
 `citation-check` skill, plus an offline extractor for BibTeX and Markdown, and
 the `hypothesis-workflow` skill with its offline slate checker. It
 requires the `arxiv-literature` skill package, which uses the same server for
@@ -40,7 +40,7 @@ review every tool call.
 
 ## The server
 
-`mcp.json` launches `uvx --from cite-nexus-mcp==0.2.3 cite-nexus-mcp --no-env-file`.
+`mcp.json` launches `uvx --from cite-nexus-mcp==0.2.2 cite-nexus-mcp --no-env-file`.
 The package version is pinned. On first launch, uv resolves and installs its
 dependencies into uv's cache, and later launches reuse that environment. Every
 tool CiteNexus ships is declared `read`, so lookups run without asking: the

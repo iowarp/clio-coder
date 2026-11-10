@@ -8,7 +8,7 @@ triggers:
   - find recent research papers
   - build a literature survey
   - bibtex for this arxiv paper
-version: 0.6.0
+version: 0.6.1
 license: Apache-2.0
 allowed-tools:
   - web_fetch

@@ -42,9 +42,9 @@ entries:
       - find recent research papers
       - build a literature survey
       - bibtex for this arxiv paper
-    version: 0.6.0
+    version: 0.6.1
     sourceUrl: skills/research/arxiv-literature
-    sha256: c692e5be9049383357811a33a3d95690eba33ec334ecebb147a8f496c5871b5c
+    sha256: 9a88d45cbd6bfe13ad6448c8748ea4c729d94bf1cd43ec115fdaa286058725c7
     provides:
       - kind: skill
         name: arxiv-literature
@@ -480,16 +480,16 @@ entries:
   - kind: plugin
     name: literature
     description: "Literature pack: verifies citations and resolves DOIs and arXiv
-      IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free
+      IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.2, key-free
       Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for
       BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow:
       cited grounding, independent council proposals, a testability ranking and
       the smallest experiment per hypothesis, ending at the operator's own
       choice. Extends arxiv-literature. Needs network for every lookup; the
       server needs one online launch to install."
-    version: 0.2.0
+    version: 0.2.1
     sourceUrl: plugins/literature
-    sha256: 55e53994cf236d3637ae3e615b13277db2af8111cdfdaad0c4d01b1649366644
+    sha256: 725df8a31c8cb71d07f4040dfa280401d853cfe68bbe54060adce9c33cab1383
     requires:
       - skill:arxiv-literature
     provides:

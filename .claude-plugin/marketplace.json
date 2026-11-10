@@ -18,7 +18,7 @@
 			"name": "arxiv-literature",
 			"source": "./library/skills/research/arxiv-literature",
 			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards, with BibTeX export and ID verification through the CiteNexus server when the literature pack is installed. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
-			"version": "0.6.0",
+			"version": "0.6.1",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
@@ -165,8 +165,8 @@
 		{
 			"name": "literature",
 			"source": "./library/plugins/literature",
-			"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.3, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow: cited grounding, independent council proposals, a testability ranking and the smallest experiment per hypothesis, ending at the operator's own choice. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
-			"version": "0.2.0",
+			"description": "Literature pack: verifies citations and resolves DOIs and arXiv IDs through the CiteNexus MCP server (cite-nexus-mcp 0.2.2, key-free Crossref, DataCite, Europe PMC and arXiv), with an offline extractor for BibTeX and Markdown and a web_fetch fallback. Adds a hypothesis workflow: cited grounding, independent council proposals, a testability ranking and the smallest experiment per hypothesis, ending at the operator's own choice. Extends arxiv-literature. Needs network for every lookup; the server needs one online launch to install.",
+			"version": "0.2.1",
 			"license": "Apache-2.0",
 			"author": {
 				"name": "IOWarp"
