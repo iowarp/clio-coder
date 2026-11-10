@@ -106,6 +106,7 @@
 		"build": "node --import tsx scripts/build.ts && node --import tsx scripts/build-source-pack.ts && node --import tsx scripts/build-codewiki-asset.ts",
 		"dev": "node --import tsx scripts/build.ts --watch",
 		"clean": "rm -rf dist",
+		"check": "node scripts/check.mjs",
 		"typecheck": "node scripts/typecheck.mjs",
 		"typecheck:tsc": "tsc -p tsconfig.tests.json",
 		"typecheck:compare": "node scripts/typecheck-compare.mjs",

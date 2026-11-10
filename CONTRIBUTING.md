@@ -29,7 +29,8 @@ pnpm run test
 | Command | Purpose |
 | --- | --- |
 | `pnpm run test:file -- tests/contracts/<test>.test.ts` | Run a focused source regression with the isolated state harness. |
-| `pnpm run typecheck` | Check TypeScript across source and tests with `tsrs --fast`, the Rust port of the TypeScript 7 checker. |
+| `pnpm run check` | Fast loop (a few seconds): `typecheck` and Biome errors at once. Run `lint` as well before you report. |
+| `pnpm run typecheck` | Check TypeScript across source and tests with `tsrs --fast`, the Rust port of the TypeScript 7 checker; falls back to `tsc` where tsrs cannot run. See [Typechecking](#typechecking). |
 | `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Check with TypeScript's own `tsc` as the reference, or run both and fail if their diagnostics differ. Use them when `typecheck` reports something surprising or stays silent about a type error you expect. |
 | `pnpm run lint` | Check formatting, source boundaries, local catalog pins and package hygiene. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
@@ -40,6 +41,27 @@ pnpm run test
 | `pnpm run release:readiness` | Read-only package, website/docs provenance, and media readiness check; use `-- --release` only for an immutable candidate. |
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
+
+## Typechecking
+
+`pnpm run typecheck` runs [tsrs](https://github.com/oxc-project/tsrs), a Rust port of the TypeScript 7 checker, in `--fast` mode: about a second where `tsc` takes several. tsrs is a development dependency only and is not in the published package. Where tsrs cannot run, such as on win32-arm64 (no native package), after an install without optional dependencies, or when it crashes, the command prints `typecheck: using tsc, the slower reference compiler, because ...` and checks with `tsc` instead. `CLIO_CODER_TYPECHECK=tsc` forces that path. The exit code is the checker's: tsrs exits 2 and `tsc` exits 1 or 2 on type errors.
+
+`tsc` stays authoritative:
+
+- Release preparation (`pnpm run ci` and the `prepare` job) runs `pnpm run typecheck:compare`, so the gate is `tsc`'s verdict, and it also fails when tsrs reports anything different.
+- `tests/contracts/typecheck-corpus.test.ts` (core tier) holds `tsc`, tsrs and `tsrs --fast` to the diagnostics recorded in `tests/fixtures/typecheck-corpus/expected.txt`. The corpus injects errors under the options Clio relies on: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noImplicitOverride`, NodeNext `.js` specifiers, `paths` aliases, JSON modules, `isolatedModules`, TSX and declaration emit. It also covers the `file(line,col): error TSnnnn:` output agents parse, and the fallback.
+- The GUI keeps its own `tsc` in `pnpm run check:gui`.
+
+**Version pairing.** The root's reference compiler, `@typescript/native`, is the TypeScript release that tsrs ports: `tsrs.typescriptVersion` in `node_modules/tsrs/package.json`. The corpus test fails when they differ. Bump both in one commit, refresh the record with `TYPECHECK_CORPUS_WRITE=1 pnpm run test:file -- tests/contracts/typecheck-corpus.test.ts`, review the `expected.txt` diff, then run `pnpm run typecheck:compare`.
+
+**When tsrs and tsc differ, `tsc` is right** until proven otherwise:
+
+1. The change is judged by `tsc`'s diagnostics.
+2. Reduce the difference to a minimal case and file it at [oxc-project/tsrs](https://github.com/oxc-project/tsrs/issues). The project takes issues, not pull requests.
+3. If only `--fast` differs, drop `--fast` in `scripts/typecheck.mjs`. Otherwise set `typecheck` back to `tsc -p tsconfig.tests.json`, which leaves the `--fast` speed behind but changes nothing else.
+4. Add the case to the corpus in the commit that moves to a tsrs release that fixes it.
+
+**Trial.** tsrs is on trial as the default until 0.7.2 ships. It stays the default only if no qualification in that period reports a difference that the rule above did not resolve. `tsc` remains the release gate after the trial.
 
 ## GUI development
 

@@ -7,7 +7,7 @@
 //
 //   node scripts/typecheck.mjs [extra compiler flags; -p <project> replaces tsconfig.tests.json]
 //
-// CLIO_TYPECHECK=tsc forces the reference compiler. The exit code is the
+// CLIO_CODER_TYPECHECK=tsc forces the reference compiler. The exit code is the
 // checker's: 0 clean; tsrs exits 2 and tsc exits 1 on type errors.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -57,7 +57,7 @@ async function main() {
 		? []
 		: ["-p", join(root, "tsconfig.tests.json")];
 	let reason;
-	if (process.env.CLIO_TYPECHECK === "tsc") reason = "CLIO_TYPECHECK=tsc";
+	if (process.env.CLIO_CODER_TYPECHECK === "tsc") reason = "CLIO_CODER_TYPECHECK=tsc";
 	else {
 		const tsrs = await resolveTsrs();
 		if (tsrs.path) {
