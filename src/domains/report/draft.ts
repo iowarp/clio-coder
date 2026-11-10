@@ -72,9 +72,14 @@ export const REPORT_BODY_MAX = 60_000;
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: escape sequences are what this removes.
 const ESCAPE_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|[\]P_^X][\s\S]*?(?:\u0007|\u001b\\|$)|[ -/]*[0-~])?/gu;
-/** C0 but tab and newline, DEL, C1, zero-width and bidi controls: a terminal hides them, a send posts them. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this finds.
-const HIDDEN_CHARACTER = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/gu;
+/**
+ * C0 but tab and newline, DEL, C1, zero-width, bidi controls and marks, blank fillers, line separators, variation
+ * selectors, interlinear annotations and tag characters: a terminal hides them, a send posts them.
+ */
+const HIDDEN_CHARACTER =
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what this finds.
+	// biome-ignore lint/suspicious/noMisleadingCharacterClass: lone variation selectors are what this finds; the `u` flag matches each one.
+	/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2069\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb\u{e0000}-\u{e0fff}]/gu;
 
 /** Text the model wrote, without escape sequences or hidden characters, so the review shows all that is sent. */
 export function stripHiddenText(text: string): string {
