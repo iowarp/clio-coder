@@ -25,6 +25,7 @@ import {
 	diagnosticInvocation,
 	type SimpleInvocation,
 	simpleInvocation,
+	trivialInvocation,
 } from "./command-evidence.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 
@@ -51,7 +52,8 @@ export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInpu
 		entry.evidenceCommand !== undefined &&
 		input.succeededCommands.has(entry.evidenceCommand) &&
 		// A compound, commented or background command exits 0 without proving
-		// the program it names finished, and a help call exercises nothing.
+		// the program it names finished, a help call exercises nothing, and
+		// `echo ok` could not have failed.
 		simpleEvidenceCommand(entry.evidenceCommand) &&
 		// The text has to make the same claim the evidence supports: the exact
 		// command, delimited, so `node a.mjs --quick` does not vouch for `--full`.
@@ -73,7 +75,7 @@ export function lessonEvidence(entry: TaskMemoryEntry, input: LessonEvidenceInpu
 
 function simpleEvidenceCommand(command: string): boolean {
 	const invocation = simpleInvocation(command);
-	return invocation !== null && !diagnosticInvocation(invocation);
+	return invocation !== null && !diagnosticInvocation(invocation) && !trivialInvocation(invocation);
 }
 
 /**

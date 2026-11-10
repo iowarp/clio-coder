@@ -97,7 +97,12 @@ export function asKeptLesson(lesson: { id: string; text: string } & Partial<Kept
 /** How a reminder names who stands behind a lesson. */
 export function keptLessonLabel(lesson: KeptLesson): string {
 	if (lesson.approval === "operator") return "operator-approved";
-	return lesson.evidenceRefs.length > 0 ? "retained automatically from execution evidence" : "retained automatically";
+	if (lesson.evidenceRefs.length === 0) return "retained automatically";
+	// A file quote alone never vouches for a claim, so a lesson the gate kept on
+	// one before that rule is labelled as the unreviewed quote it is.
+	return lesson.evidenceRefs.some((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
+		? "retained automatically from execution evidence"
+		: "unreviewed, quoted from a repository file";
 }
 
 /** One reminder line: the claim with its provenance and the conditions stored beside it. */

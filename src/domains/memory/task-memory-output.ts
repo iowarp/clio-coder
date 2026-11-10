@@ -36,6 +36,8 @@ const BOUNDARY_CONTROL_TOKENS = new RegExp(
 	"giu",
 );
 const ENVELOPE_TAG_SHAPE = /<\/?(?:operations|context_for_action|no_intervention)\b[^>]*>/iu;
+/** Shapes the host uses to frame its own messages; stored text that carries one could impersonate the host. */
+const HOST_FRAMING_SHAPE = /<\/?system-reminder\b|^\s*\[middleware:/imu;
 
 function containsControlToken(text: string): boolean {
 	return CONTROL_TOKEN.test(text);
@@ -136,6 +138,7 @@ export function rejectReminder(raw: string, text: string, reference: string): st
  */
 export function rejectStoredContent(content: string, reference: string): string | null {
 	if (containsControlToken(content)) return "a chat-template control token";
+	if (HOST_FRAMING_SHAPE.test(content)) return "host framing tags";
 	if (FORMAT_DELIBERATION.some((phrase) => phrase.test(content))) return "reasoning about the answer format";
 	if (introducesForeignScript(content, reference)) return "a script that appears nowhere in the session";
 	return null;

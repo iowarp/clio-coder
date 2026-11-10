@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { shellLikeChain, shellLikeInvocation } from "../../core/shell-argv.js";
 
 export interface SimpleInvocation {
@@ -174,6 +174,36 @@ const DIAGNOSTIC_SUBCOMMANDS: ReadonlySet<string> = new Set(["help", "version"])
 export function diagnosticInvocation(invocation: SimpleInvocation): boolean {
 	const args = invocation.argv.slice(1);
 	return args.some((arg) => DIAGNOSTIC_FLAGS.has(arg)) || DIAGNOSTIC_SUBCOMMANDS.has(args[0] ?? "");
+}
+
+/** Programs that exit 0 whatever the repository holds, so their success proves nothing a lesson could claim. */
+const TRIVIAL_PROGRAMS: ReadonlySet<string> = new Set([
+	"echo",
+	"printf",
+	"true",
+	":",
+	"ls",
+	"cat",
+	"pwd",
+	"cd",
+	"which",
+	"type",
+	"date",
+	"sleep",
+]);
+/** `test` operators whose result depends on a file. */
+const TEST_FILE_OPERATORS: ReadonlySet<string> = new Set(["-e", "-f", "-d", "-r", "-w", "-x", "-s", "-L", "-h"]);
+
+/** A command whose exit 0 could not have been a failure, so it cannot be evidence. */
+export function trivialInvocation(invocation: SimpleInvocation): boolean {
+	const program = basename(invocation.argv[0] ?? "");
+	const args = invocation.argv.slice(1);
+	if (TRIVIAL_PROGRAMS.has(program)) return true;
+	if (program === "env") return args.every((arg) => arg.startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg));
+	if (program === "test" || program === "[") {
+		return !args.some((arg, index) => TEST_FILE_OPERATORS.has(arg) && (args[index + 1] ?? "]") !== "]");
+	}
+	return false;
 }
 
 /** Whitespace-collapsed identity; lessons store commands with collapsed whitespace. */

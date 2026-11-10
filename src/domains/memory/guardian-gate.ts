@@ -76,7 +76,19 @@ export function evaluateMemoryGate(record: MemoryRecord, store: ReadonlyArray<Me
 	if (contradicted > 0) return "hold";
 	if (record.provenance.sourceEntryKind !== "knowledge") return "hold";
 	if (held < MEMORY_GATE_HELD_SESSIONS) return "hold";
+	// A quote from a repository file is provenance, not proof: the file can
+	// vouch for any sentence it contains, so only a command that could have
+	// failed lets the gate approve without the operator.
+	if (sourceOnlyEvidence(record)) return "hold";
 	return commandAlreadyClaimed(record, store) ? "hold" : "approve";
+}
+
+/** Backed by a `source:` quote and by no `command:` the host saw succeed. */
+function sourceOnlyEvidence(record: Pick<MemoryRecord, "evidenceRefs">): boolean {
+	return (
+		record.evidenceRefs.some((ref) => ref.startsWith("source:")) &&
+		!record.evidenceRefs.some((ref) => ref.startsWith("command:"))
+	);
 }
 
 /**
