@@ -302,7 +302,9 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   this process holds. In the TUI `e` edits the text in `$EDITOR` and masks the edit
   again, `m` masks or unmasks a value, Enter moves on, and Esc closes and keeps
   a draft.
-- **Send.** In the TUI only `s` on the send step sends; Enter never does. A
+- **Send.** In the TUI only `s` on the send step starts a send; Enter does
+  not. If the search then finds a matching report, Enter confirms the
+  highlighted choice. A
   shell sends after you choose send at the prompt, or with `--yes`; keys typed
   before the prompt are ignored, outside a terminal without `--yes` it exits 2,
   and `--dry-run` stops after the preview without a network call. With a signed-in `gh`, Clio Coder first searches
@@ -330,8 +332,8 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   set. When an upgrade's changelog fixes an issue you reported, Clio Coder says
   so once and thanks you, and `clio-coder doctor` shows how many reports you
   sent and which a release fixed.
-- **Identifier check.** The review looks for this machine's names, paths,
-  remotes and install ids in the text again with every mask on, and refuses to
+- **Identifier check.** The review looks for this machine's names, paths
+  and remotes in the text again with every mask on, and refuses to
   send while one slipped past the masks or the text holds control or hidden
   characters a terminal does not show. It says so in the preview, before the
   duplicate search, and `--yes` sends nothing then. A value you unmasked with
