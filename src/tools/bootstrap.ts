@@ -53,11 +53,11 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	getAutonomy?: () => AutonomyLevel;
 	/**
-	 * The level admission runs at, where contained yolo reads as default.
-	 * Dispatch (plan provenance, compete winner handling) and the main agent's
-	 * grant of a worker ask follow it, so contained yolo never authorizes what
-	 * default would not. Absent reads `getAutonomy`; ask_user and
-	 * configure_clio keep the operator's level.
+	 * The level admission runs at, where contained yolo reads as default. The
+	 * main agent's grant of a worker ask follows it, so contained yolo never
+	 * grants a worker what default would not. Absent reads `getAutonomy`.
+	 * Dispatch, ask_user and configure_clio keep the operator's level, so
+	 * either yolo runs a dispatch plan without the plan stop.
 	 */
 	getAdmissionAutonomy?: () => AutonomyLevel;
 	getCostCeilingUsd?: () => number;
@@ -197,7 +197,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 			...(deps.bus ? { bus: deps.bus } : {}),
 			...(deps.getAgentCatalog ? { getAgentCatalog: deps.getAgentCatalog } : {}),
 			...(deps.getAgentRoleFacts ? { getAgentRoleFacts: deps.getAgentRoleFacts } : {}),
-			...(admissionAutonomy ? { getAutonomy: admissionAutonomy } : {}),
+			...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
 			...(deps.getCostCeilingUsd ? { getCostCeilingUsd: deps.getCostCeilingUsd } : {}),
 			...(deps.getWorkerRosters ? { getWorkerRosters: deps.getWorkerRosters } : {}),
 			...(deps.getDispatchSchemaComposition ? { getSchemaComposition: deps.getDispatchSchemaComposition } : {}),

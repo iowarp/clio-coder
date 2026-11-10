@@ -2655,10 +2655,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
 		...(agents ? { getAgentSpecs: () => agents.listSpecs() } : {}),
 		...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
-		// ask_user and configure_clio read the operator's level; dispatch and
-		// steer read the level admission runs at, so plan provenance, compete
-		// winner handling and the main agent's grants agree with the approval
-		// surface (contained yolo reads as default there).
+		// ask_user, configure_clio and dispatch read the operator's level, so
+		// either yolo runs a dispatch plan without the plan stop; steer reads the
+		// level admission runs at, so the main agent's grants to workers agree
+		// with the approval surface (contained yolo reads as default there).
 		getAutonomy: resolveEffectiveAutonomy,
 		getAdmissionAutonomy: resolveAdmissionAutonomy,
 		...(interactive ? { dispatchBackground } : {}),

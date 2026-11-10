@@ -1698,7 +1698,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(deps.git !== undefined ? { git: deps.git } : {}),
 			autonomyExtra: {
 				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
-				...(planScale ? { dispatchPlanScale: true } : {}),
+				// The plan stop only waits for the operator, so the operator's contained
+				// yolo runs a plan as unconfined yolo does. Its workers still meet their
+				// own permits, routes and sandbox.
+				...(planScale && !(deps.principal !== "worker" && deps.unattendedAsks?.() === true)
+					? { dispatchPlanScale: true }
+					: {}),
 			},
 			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
 			...(deps.hookDrift !== undefined && (deps.principal ?? "main") === "main" ? { hookDrift: deps.hookDrift } : {}),

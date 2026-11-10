@@ -213,6 +213,29 @@ test("contained yolo refuses an operator-only ask without the judge or a card", 
 	deepStrictEqual([ran, parks.length, judged()], [[], 0, 0]);
 });
 
+test("contained yolo runs a plan-scale dispatch without the judge or a card", async () => {
+	const { registry, parks, judged } = containedRegistry(() => "unused");
+	const runs: string[] = [];
+	registry.register({
+		name: ToolNames.Dispatch,
+		description: "stub dispatch",
+		parameters: {} as ToolSpec["parameters"],
+		baseActionClass: "dispatch",
+		async run() {
+			runs.push("dispatched");
+			return { kind: "ok", output: "dispatched" };
+		},
+	});
+	const plan = {
+		tasks: [
+			{ agent: "scout", task: "Survey the soil samples" },
+			{ agent: "writer", task: "Draft the comparison report" },
+		],
+	};
+	strictEqual((await registry.invoke({ tool: ToolNames.Dispatch, args: plan })).kind, "ok");
+	deepStrictEqual([runs, parks.length, judged()], [["dispatched"], 0, 0]);
+});
+
 test("the unconfined prompt body appears only at effective unconfined yolo", () => {
 	const table = loadFragments();
 	const contained = renderSessionPostureUpdate(table, "yolo", { coordinatorCapabilities: [] });
