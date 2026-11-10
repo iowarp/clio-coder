@@ -156,15 +156,17 @@ export async function createClioCoreStoreBackend(
 		return (await host.call("statBlob", { tag: tagName, blob })).stat;
 	}
 
-	async function materialize(tag: string, blob: string, signal?: AbortSignal): Promise<string> {
+	const cacheTagDir = (tag: string): string => path.join(cacheRoot, projectKey, encodeTagSegment(tag));
+
+	async function materialize(tag: string, blob: string, signal?: AbortSignal, refetch = false): Promise<string> {
 		const info = await statBlob(tag, blob);
 		if (info === null) throw new StoreRefusal("not-found", `Tag ${tag} has no blob named ${blob}.`);
-		const tagDir = path.join(cacheRoot, projectKey, encodeTagSegment(tag));
+		const tagDir = cacheTagDir(tag);
 		// The copy keeps the blob's own name (and extension) at a stable path; a replace refreshes it in place.
 		const target = path.join(tagDir, blob);
 		try {
 			const cached = await stat(target);
-			if (cached.isFile() && cacheIsCurrent(cached, info)) {
+			if (!refetch && cached.isFile() && cacheIsCurrent(cached, info)) {
 				await utimes(target, new Date(), cached.mtime);
 				return target;
 			}
@@ -195,6 +197,22 @@ export async function createClioCoreStoreBackend(
 		}
 		await pruneCache(cacheRoot, cacheMaxBytes, target);
 		return target;
+	}
+
+	/**
+	 * A put through this backend refetches a copy getBlobAsPath already handed
+	 * out, so that path reads the new bytes as it would on the local backend; a
+	 * same-size replace within one millisecond would otherwise look current.
+	 */
+	async function refreshCached(tag: string, blob: string, signal?: AbortSignal): Promise<void> {
+		const target = path.join(cacheTagDir(tag), blob);
+		if (!(await lstat(target).catch(() => null))?.isFile()) return;
+		try {
+			await materialize(tag, blob, signal, true);
+		} catch {
+			// The put itself succeeded; dropping the copy is enough to never serve the old bytes.
+			await rm(target, { force: true });
+		}
 	}
 
 	return {
@@ -271,11 +289,13 @@ export async function createClioCoreStoreBackend(
 				if (signal?.aborted) throw new StoreRefusal("io", `The put of ${blob} into ${tag} was aborted.`);
 				if (!(await host.call("tagExists", { tag: tagName })).exists)
 					throw new StoreRefusal("not-found", `The store has no tag named ${tag}.`);
-				return await host.call(
+				const put = await host.call(
 					"putBlobFromFile",
 					{ tag: tagName, blob, source: path.resolve(source) },
 					{ bytes: info.size, ...(signal !== undefined ? { signal } : {}) },
 				);
+				if (options.mount === undefined) await refreshCached(tag, blob, signal);
+				return put;
 			}),
 
 		getBlobAsPath: (tag, blob, signal) =>
