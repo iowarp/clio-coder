@@ -73,6 +73,8 @@ export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	) => EngineToolBatchRejection | undefined | Promise<EngineToolBatchRejection | undefined>;
 	/** Final admission before invoking the model; an interactive budget gate may wait for the operator. */
 	beforeStreamRequest?: (request: EngineStreamRequest) => EngineStreamAdmission | Promise<EngineStreamAdmission>;
+	/** `getApiKey` resolves through Clio's own auth (env included), so the engine adds no env key of its own. */
+	authResolvedByHost?: boolean;
 };
 
 export interface EngineAgentHandle {
@@ -223,6 +225,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		onStreamInvocation,
 		beforeToolBatch,
 		beforeStreamRequest,
+		authResolvedByHost,
 		...agentOptions
 	} = options;
 	const correlations = new WeakMap<AgentMessage, string>();
@@ -234,6 +237,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 			clioProviderCheckpointObserved: (handle: ProviderCheckpointHandle, tokens: number) =>
 				providerCheckpointObservers.get(agent)?.(handle, tokens),
 			clioProviderCompaction: () => providerCompactionPolicies.get(agent)?.() === true,
+			...(authResolvedByHost ? { clioAuthResolved: true } : {}),
 		} as typeof streamOptions;
 		const configuration = codexConfigurations.get(agent);
 		if (configuration) streamOptions = { ...streamOptions, codexConfiguration: configuration } as typeof streamOptions;

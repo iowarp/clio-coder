@@ -1302,6 +1302,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				apiCallFirstDeltaAt = null;
 				modelCall?.stage("send", "start");
 			},
+			authResolvedByHost: true,
 			getApiKey: async () => {
 				// Pi converts the conversation between turn_start and this call; that is the transform stage (#434).
 				const call = modelCall;
@@ -1322,6 +1323,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					refreshed = resolved.refreshed;
 					if (!currentRun() || signal?.aborted) throw new Error("Request ownership changed while resolving authentication.");
 					localRuntime.lastAuthResolution = resolved;
+					// A refusal is not "no credential": Pi's "No API key" error would hide why, and the engine's env fallback must not run.
+					if (resolved.refused)
+						throw new Error(resolved.detail ?? `Clio refuses to send a credential to target '${localRuntime.targetId}'.`);
 					// A failed OAuth refresh carries its remedy in detail; Pi's own "No API key" error would drop it.
 					if (
 						resolved.apiKey === undefined &&

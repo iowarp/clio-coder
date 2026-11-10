@@ -225,6 +225,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const descriptor = deps.providers.getRuntime(target.runtime);
 		if (!descriptor) return { ran: false, reason: "unresolved" };
 		const auth = await deps.providers.auth.resolveForTarget(target, descriptor, { signal: controller.signal });
+		if (auth.refused) return { ran: false, reason: "unresolved", detail: "credential-refused" };
 		const observeOptions = { signal: controller.signal, ...(auth.apiKey ? { gatewayApiKey: auth.apiKey } : {}) };
 		const selectedModel = deps.getSettings().chat.model ?? target.defaultModel ?? "";
 		const stillSelected = () =>

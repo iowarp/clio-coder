@@ -108,6 +108,8 @@ function withEnvApiKey<T extends StreamOptions | SimpleStreamOptions>(
 	options: T | undefined,
 ): T | undefined {
 	if (typeof options?.apiKey === "string" && options.apiKey.trim().length > 0) return options;
+	// Clio's own auth already ran for this call and checked the environment; a refusal or a miss there is final.
+	if ((options as { clioAuthResolved?: boolean } | undefined)?.clioAuthResolved === true) return options;
 	const apiKey = getEngineEnvApiKey(model.provider, options?.env);
 	if (!apiKey || apiKey === "<authenticated>") return options;
 	return { ...options, apiKey } as T;

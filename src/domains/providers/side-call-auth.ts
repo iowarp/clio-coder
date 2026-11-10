@@ -23,6 +23,8 @@ export async function resolveSideCallAuth(
 ): Promise<SideCallAuth> {
 	if (!targetRequiresAuth(target, runtime)) return { apiKey: fallback };
 	const resolved = await auth.resolveForTarget(target, runtime, signal ? { signal } : undefined);
+	// Streaming on with no key would let the engine's env fallback send the refused credential.
+	if (resolved.refused) throw new Error(resolved.detail ?? `credential refused for target '${target.id}'`);
 	return {
 		...(!resolved.available || resolved.apiKey === undefined ? {} : { apiKey: resolved.apiKey }),
 		...(!resolved.available || resolved.source !== "stored-oauth" || resolved.apiKey === undefined

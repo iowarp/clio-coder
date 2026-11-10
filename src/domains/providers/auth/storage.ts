@@ -123,6 +123,8 @@ export interface AuthStatus {
 	credentialType: AuthCredential["type"] | null;
 	source: "runtime-override" | "stored-api-key" | "stored-oauth" | "environment" | "fallback" | "not-required" | "none";
 	detail: string | null;
+	/** Clio refuses every stored and environment credential for this target; `detail` says why. Never "no credential". */
+	refused?: true;
 }
 
 export interface AuthResolution extends AuthStatus {
@@ -572,6 +574,7 @@ export class AuthStorage {
 			credentialType: null,
 			source: "none",
 			detail: target.credentialRefusal,
+			refused: true,
 		};
 	}
 

@@ -235,6 +235,7 @@ export function createVisionSidecar(input: {
 			const credential = targetRequiresAuth(route.target, route.runtime)
 				? await input.providers.auth.resolveForTarget(route.target, route.runtime, signal ? { signal } : undefined)
 				: null;
+			if (credential?.refused) throw new Error(credential.detail ?? `credential refused for target '${route.targetId}'`);
 			const binding: VisionBinding = {
 				targetId: route.targetId,
 				model: route.wireModelId,

@@ -525,19 +525,24 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				errorMessage: `Refreshing OAuth authentication for target '${target.id}' and retrying once.`,
 			});
 			pruneFailedAssistantFromContext(agentRuntime.agent);
+			let refusal: string | null = null;
 			try {
 				const refreshed = await deps.auth.resolveForTarget(target, runtime, {
 					rejectedApiKey: rejected.apiKey,
 					...(signal ? { signal } : {}),
 				});
 				if (cancelled()) return true;
-				if (!refreshed.available || refreshed.apiKey === undefined) {
+				if (refreshed.refused) refusal = refreshed.detail ?? `credential refused for target '${target.id}'`;
+				if (refusal !== null || !refreshed.available || refreshed.apiKey === undefined) {
 					throw new Error(refreshed.detail ?? "OAuth credential could not be refreshed.");
 				}
 			} catch {
 				if (cancelled()) return true;
 				// Reuse the CLI login syntax, and keep refresh-provider diagnostics out of the remedy (#427).
-				const errorMessage = `OAuth credential for target '${target.id}' could not be refreshed. Run clio-coder auth login ${rejected.providerId} again.`;
+				// A refusal is not fixed by logging in, so it keeps its own reason.
+				const errorMessage =
+					refusal ??
+					`OAuth credential for target '${target.id}' could not be refreshed. Run clio-coder auth login ${rejected.providerId} again.`;
 				persistFailure(errorMessage);
 				return true;
 			}

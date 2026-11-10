@@ -428,6 +428,7 @@ export function createProvidersBundle(
 			}
 		}
 		const envHint = authTarget.explicitEnvVar ? `${authTarget.explicitEnvVar} or ` : "";
+		if (status.refused && status.detail) return { available: false, reason: status.detail };
 		return { available: false, reason: `missing auth (${envHint}store:${authTarget.providerId})` };
 	}
 
