@@ -17,11 +17,16 @@ import { printError } from "./shared.js";
 export const FLYWHEEL_HELP = `clio-coder dev flywheel [--json] [--limit N]
 clio-coder dev flywheel --pull <shareId|all> [--key <pem>] [--out <dir>]
 
-Prints the maintainers' ranked backlog, data/flywheel/backlog.csv on the data
-branch of iowarp/clio-metrics, read through your gh: failure clusters,
-regressions, feature requests, latent demand and friction, each with the
-evidence that ranks it. --limit keeps the first N rows (default 20); --json
-prints every kept row as JSON. The repository is private to the maintainers.
+Prints a Usage block for Clio Coder from data/summary.json (npm downloads,
+install-script requests, GitHub views and clones over 7 days, stars, forks,
+open reports, shares on file, the latest release and its share of downloads,
+stale data sources, the latest weekly digest issue), then the maintainers'
+ranked backlog, data/flywheel/backlog.csv, both on the data branch of
+iowarp/clio-metrics and read through your gh: failure clusters, regressions,
+feature requests, latent demand and friction, each with the evidence that
+ranks it. --limit keeps the first N rows (default 20); --json prints
+{usage, backlog} for agents and scripts. The repository is private to the
+maintainers.
 
 --pull is for maintainers: it finds the share pointers in iowarp/clio-coder's
 has-bundle issues and recent discussions, fetches each named gist, opens it with
@@ -120,6 +125,178 @@ function firstLine(result: { stdout: string; stderr: string; timedOut: boolean }
 	return result.timedOut ? "timed out" : ((result.stderr.trim() || result.stdout.trim()).split("\n")[0] ?? "");
 }
 
+interface ChangeCount {
+	current: number | null;
+	changePct: number | null;
+}
+
+/** The headline numbers for Clio Coder from summary.json; a field the summary lacks is null. */
+interface FlywheelUsage {
+	asOf: string | null;
+	npmDownloads7d: ChangeCount | null;
+	installScriptRequests7d: number | null;
+	githubViews7d: ChangeCount | null;
+	githubClones7d: ChangeCount | null;
+	stars: number | null;
+	forks: number | null;
+	openReports: number | null;
+	sharesOnFile: number | null;
+	latestRelease: {
+		version: string;
+		date: string | null;
+		adoption: { share: number; window: string } | null;
+	} | null;
+	staleSources: string[];
+	digest: { number: number; title: string; url: string } | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function at(value: unknown, ...path: string[]): unknown {
+	let here = value;
+	for (const key of path) here = isRecord(here) ? here[key] : undefined;
+	return here;
+}
+
+function num(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function str(value: unknown): string | null {
+	return typeof value === "string" && value !== "" ? value : null;
+}
+
+function change(trend: unknown): ChangeCount | null {
+	const current = num(at(trend, "current"));
+	return current === null ? null : { current, changePct: num(at(trend, "changePct")) };
+}
+
+/** The latest release's share of the release downloads in the shortest window that has any, else all time. */
+function adoptionOf(entries: unknown, version: string): { share: number; window: string } | null {
+	if (!Array.isArray(entries)) return null;
+	const rows = entries.filter(isRecord);
+	const mine = rows.find((row) => row.version === version);
+	if (mine === undefined) return null;
+	const given = num(mine.share) ?? num(mine.adoptionShare);
+	if (given !== null) return { share: given > 1 ? given / 100 : given, window: str(mine.window) ?? "30d" };
+	for (const [field, window] of [
+		["downloads7d", "7d"],
+		["downloads30d", "30d"],
+		["downloads90d", "90d"],
+		["downloadsTotal", "all time"],
+	] as const) {
+		const total = rows.reduce((sum, row) => sum + (num(row[field]) ?? 0), 0);
+		const own = num(mine[field]);
+		if (total > 0 && own !== null) return { share: own / total, window };
+	}
+	return null;
+}
+
+/** Sources the summary names as stale: `health` when it lists them, else every source whose last run failed. */
+function staleSources(summary: unknown, project: unknown): string[] {
+	for (const health of [at(project, "health"), at(summary, "health")]) {
+		for (const key of ["staleSources", "stale"]) {
+			const list = at(health, key);
+			if (Array.isArray(list))
+				return list
+					.map((item) => str(item) ?? str(at(item, "name")) ?? str(at(item, "source")))
+					.filter((name): name is string => name !== null);
+		}
+	}
+	const sources = at(summary, "sources");
+	if (!isRecord(sources)) return [];
+	return Object.entries(sources)
+		.filter(([, source]) => ["error", "partial"].includes(String(at(source, "status"))))
+		.map(([name, source]) => `${name} (${String(at(source, "status"))})`);
+}
+
+function usageFrom(summary: unknown): FlywheelUsage {
+	const project = at(summary, "projects", "coder");
+	const repo = at(project, "repos", CODER_REPOSITORY);
+	const week = at(project, "trends", "7d");
+	const version = str(at(repo, "latestRelease"));
+	return {
+		asOf: str(at(summary, "asOf")),
+		npmDownloads7d: change(at(week, "npmDownloads")),
+		installScriptRequests7d: num(at(week, "installScriptRequests", "current")),
+		githubViews7d: change(at(week, "githubViews")),
+		githubClones7d: change(at(week, "githubClones")),
+		stars: num(at(repo, "stars")) ?? num(at(project, "totals", "stars")),
+		forks: num(at(repo, "forks")) ?? num(at(project, "totals", "forks")),
+		openReports: num(at(project, "reports", "open")),
+		sharesOnFile: num(at(project, "shares", "total")),
+		latestRelease:
+			version === null
+				? null
+				: {
+						version,
+						date: str(at(repo, "latestReleaseDate")),
+						adoption: adoptionOf(at(project, "releaseAdoption"), version) ?? adoptionOf(at(repo, "releaseAdoption"), version),
+					},
+		staleSources: staleSources(summary, project),
+		digest: null,
+	};
+}
+
+function signed(pct: number | null): string {
+	return pct === null ? "" : ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
+}
+
+function count(value: number | null): string {
+	return value === null ? "-" : String(value);
+}
+
+function formatUsage(usage: FlywheelUsage): string {
+	const line = (label: string, value: string) => `  ${label.padEnd(18)}${value}\n`;
+	const trend = (value: ChangeCount | null) => (value === null ? "-" : `${value.current}${signed(value.changePct)}`);
+	let text = `Usage, Clio Coder${usage.asOf !== null ? ` (7 days to ${usage.asOf})` : ""}\n`;
+	text += line("npm downloads", trend(usage.npmDownloads7d));
+	text += line("install script", count(usage.installScriptRequests7d));
+	text += line("GitHub", `${trend(usage.githubViews7d)} views, ${trend(usage.githubClones7d)} clones`);
+	text += line("stars / forks", `${count(usage.stars)} / ${count(usage.forks)}`);
+	text += line("open reports", `${count(usage.openReports)}, shares on file ${count(usage.sharesOnFile)}`);
+	const release = usage.latestRelease;
+	if (release !== null)
+		text += line(
+			"latest release",
+			`${release.version}${release.date !== null ? ` (${release.date})` : ""}${
+				release.adoption !== null
+					? `, ${Math.round(release.adoption.share * 100)}% of release downloads (${release.adoption.window})`
+					: ""
+			}`,
+		);
+	if (usage.staleSources.length > 0) text += line("stale sources", usage.staleSources.join(", "));
+	if (usage.digest !== null)
+		text += line("weekly digest", `#${usage.digest.number} ${usage.digest.title} ${usage.digest.url}`);
+	return text;
+}
+
+async function readUsage(gh: Gh): Promise<FlywheelUsage | null> {
+	const result = await gh.run([
+		"-H",
+		"Accept: application/vnd.github.raw+json",
+		`repos/${METRICS_REPOSITORY}/contents/data/summary.json?ref=data`,
+	]);
+	if (result.exitCode !== 0) return null;
+	let usage: FlywheelUsage;
+	try {
+		usage = usageFrom(JSON.parse(result.stdout));
+	} catch {
+		return null;
+	}
+	const digest = await gh.run([
+		`repos/${METRICS_REPOSITORY}/issues?labels=digest&state=all&per_page=1`,
+		"--jq",
+		".[0] | [.number, .title, .html_url] | @tsv",
+	]);
+	const [number, title, url] = digest.exitCode === 0 ? digest.stdout.trim().split("\t") : [];
+	if (number !== undefined && /^[0-9]+$/u.test(number) && title !== undefined && url !== undefined)
+		usage.digest = { number: Number(number), title, url };
+	return usage;
+}
+
 async function printBacklog(gh: Gh, json: boolean, limit: number, out: (text: string) => void): Promise<number> {
 	const result = await gh.run([
 		"-H",
@@ -130,16 +307,18 @@ async function printBacklog(gh: Gh, json: boolean, limit: number, out: (text: st
 		const reason = firstLine(result);
 		throw new Error(
 			/HTTP 40[34]/u.test(reason)
-				? `cannot read the flywheel backlog: ${METRICS_REPOSITORY} is private to the Clio maintainers, or it has no backlog yet (gh: ${reason})`
+				? `dev flywheel is for the Clio maintainers: ${METRICS_REPOSITORY} is private to the Clio maintainers, or it has no backlog yet (gh: ${reason})`
 				: `cannot read the flywheel backlog: ${reason}`,
 		);
 	}
 	const rows = backlogRows(result.stdout).slice(0, limit);
+	const usage = await readUsage(gh);
 	if (json) {
-		const typed = rows.map((row) => ({ ...row, rank: Number(row.rank), score: Number(row.score) }));
-		out(`${JSON.stringify(typed, null, 2)}\n`);
+		const backlog = rows.map((row) => ({ ...row, rank: Number(row.rank), score: Number(row.score) }));
+		out(`${JSON.stringify({ usage, backlog }, null, 2)}\n`);
 		return 0;
 	}
+	out(usage !== null ? `${formatUsage(usage)}\n` : `Usage: ${METRICS_REPOSITORY} has no readable summary.json\n\n`);
 	if (rows.length === 0) {
 		out("the flywheel backlog is empty\n");
 		return 0;

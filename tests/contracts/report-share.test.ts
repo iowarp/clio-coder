@@ -248,10 +248,46 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			},
 			{ recipient: { publicKey: vector.recipient.publicKey } },
 		);
+		const summary = {
+			schemaVersion: 1,
+			asOf: "2026-11-09",
+			projects: {
+				coder: {
+					totals: { stars: 10, forks: 6 },
+					trends: {
+						"7d": {
+							npmDownloads: { current: 841, previous: 757, changePct: 11.1 },
+							installScriptRequests: { current: 147, previous: 0, changePct: null },
+							githubViews: { current: 219, previous: 288, changePct: -24 },
+							githubClones: { current: 2112, previous: 949, changePct: 122.6 },
+						},
+					},
+					repos: {
+						"iowarp/clio-coder": {
+							stars: 10,
+							forks: 6,
+							latestRelease: "v0.7.0",
+							latestReleaseDate: "2026-11-09",
+							releaseAdoption: [
+								{ version: "v0.7.0", downloadsTotal: 300, downloads7d: 30 },
+								{ version: "v0.6.9", downloadsTotal: 100, downloads7d: 10 },
+							],
+						},
+					},
+					reports: { open: 2 },
+					shares: { total: 3 },
+					unknownSection: { later: true },
+				},
+			},
+			sources: { npm: { status: "ok" }, gsc: { status: "error" } },
+		};
 		let access = true;
 		const run: ReportCommandRunner = async (_file, args) => {
 			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
 			const joined = args.join(" ");
+			if (joined.includes("summary.json?ref=data")) return reply(JSON.stringify(summary));
+			if (joined.includes("labels=digest"))
+				return reply("41\tWeekly digest 2026-W45\thttps://github.com/iowarp/clio-metrics/issues/41\n");
 			if (joined.includes("backlog.csv?ref=data"))
 				return access ? reply(csv) : { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
 			if (joined.includes("labels=has-bundle"))
@@ -281,9 +317,25 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 
 		strictEqual(await flywheel(), 0);
 		ok(out.includes("bash times out, then retries") && out.includes("#512") && out.includes("split panes"), out);
+		ok(out.indexOf("Usage, Clio Coder (7 days to 2026-11-09)") < out.indexOf("bash times out"), out);
+		match(out, /npm downloads +841 \(\+11\.1%\)/u);
+		match(out, /GitHub +219 \(-24\.0%\) views, 2112 \(\+122\.6%\) clones/u);
+		match(out, /latest release +v0\.7\.0 \(2026-11-09\), 75% of release downloads \(7d\)/u);
+		match(out, /open reports +2, shares on file 3/u);
+		match(out, /stale sources +gsc \(error\)/u);
+		ok(out.includes("#41 Weekly digest 2026-W45 https://github.com/iowarp/clio-metrics/issues/41"), out);
 		out = "";
 		strictEqual(await flywheel("--json", "--limit", "1"), 0);
-		const rows = JSON.parse(out) as Array<Record<string, unknown>>;
+		const parsed = JSON.parse(out) as { usage: Record<string, unknown>; backlog: Array<Record<string, unknown>> };
+		deepStrictEqual(parsed.usage.npmDownloads7d, { current: 841, changePct: 11.1 });
+		strictEqual(parsed.usage.installScriptRequests7d, 147);
+		deepStrictEqual(parsed.usage.latestRelease, {
+			version: "v0.7.0",
+			date: "2026-11-09",
+			adoption: { share: 0.75, window: "7d" },
+		});
+		strictEqual((parsed.usage.digest as { number: number }).number, 41);
+		const rows = parsed.backlog;
 		strictEqual(rows.length, 1);
 		deepStrictEqual(
 			{ rank: rows[0]?.rank, score: rows[0]?.score, evidence: rows[0]?.evidence, versions: rows[0]?.versions },
