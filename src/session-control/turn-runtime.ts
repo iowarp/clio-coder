@@ -1622,6 +1622,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				return;
 			}
 			if (event.type === "turn_start") {
+				// The last request's facts say nothing about this turn's until its own request goes out.
+				state.modelRequest = null;
 				await abandonModelCall();
 				settledAttempts = [];
 				attemptRequest = undefined;
