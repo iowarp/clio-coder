@@ -1,4 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { projectRemoteTargetUrl } from "../../../core/project-target-urls.js";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import { telemetryHub } from "../../../core/telemetry/hub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
@@ -112,6 +113,8 @@ export interface AuthTarget {
 	/** Variable the target itself names (`auth.apiKeyEnvVar`); when set it outranks the runtime-wide stored key. */
 	targetEnvVar?: string;
 	runtimeAuth: RuntimeAuth;
+	/** Why no stored or environment credential may be sent for this target; only a per-target `--api-key` still applies. */
+	credentialRefusal?: string;
 }
 
 export interface AuthStatus {
@@ -315,6 +318,10 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
 	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : target.auth?.apiKeyEnvVar?.trim();
 	if (targetEnvVar) authTarget.targetEnvVar = targetEnvVar;
+	const projectUrl = projectRemoteTargetUrl(target);
+	if (projectUrl) {
+		authTarget.credentialRefusal = `project settings point target ${target.id} at ${projectUrl}; Clio does not send your stored or environment ${providerId} credential to a URL a project chose. Define this target in your user settings to use it.`;
+	}
 	return authTarget;
 }
 
@@ -556,7 +563,21 @@ export class AuthStorage {
 		};
 	}
 
+	private refusedFor(target: AuthTarget): AuthStatus | null {
+		if (!target.credentialRefusal) return null;
+		if (target.targetId && this.runtimeOverrides.has(target.targetId)) return null;
+		return {
+			providerId: target.providerId,
+			available: false,
+			credentialType: null,
+			source: "none",
+			detail: target.credentialRefusal,
+		};
+	}
+
 	statusForTarget(target: AuthTarget, opts?: { includeFallback?: boolean }): AuthStatus {
+		const refused = this.refusedFor(target);
+		if (refused) return refused;
 		const args: { targetId?: string; explicitEnvVar?: string; targetEnvVar?: string; includeFallback?: boolean } = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
@@ -895,6 +916,8 @@ export class AuthStorage {
 		target: AuthTarget,
 		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string },
 	): Promise<AuthResolution> {
+		const refused = this.refusedFor(target);
+		if (refused) return refused;
 		if (opts?.rejectedApiKey !== undefined) {
 			return this.forAuthTarget(
 				target,

@@ -42,6 +42,7 @@ import {
 } from "./config.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
 import { clioProjectRoot } from "./project-root.js";
+import { noteProjectTargets } from "./project-target-urls.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import {
@@ -680,6 +681,10 @@ function validateLayerStack(
 ): { settings: ClioSettings; sources: Record<string, SettingsOrigin> } {
 	const { merged, sources } = mergeLayersWithSources([user, prepared.project, prepared.local]);
 	const validation = validateSettings(merged);
+	// Arrays replace wholesale, so a project layer that sets `targets` supplied every entry.
+	if (sources.targets === "project" || sources.targets === "project.local") {
+		noteProjectTargets(validation.settings.targets);
+	}
 	for (const issue of validation.issues) {
 		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
 	}
