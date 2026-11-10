@@ -17,12 +17,14 @@ import { printError } from "./shared.js";
 export const FLYWHEEL_HELP = `clio-coder dev flywheel [--json] [--kind <kind>[,<kind>]] [--top N]
 clio-coder dev flywheel --pull <shareId|all> [--key <pem>] [--out <dir>]
 
-Prints a Usage block for Clio Coder from data/summary.json (npm downloads,
+Prints a Usage block for Clio Coder from data/projects/coder/summary.json (npm downloads,
 install-script requests, GitHub views and clones over 7 days, stars, forks,
 open reports, shares on file, the latest release and its share of downloads,
 stale data sources, the latest weekly digest issue), then the maintainers'
-ranked backlog, data/flywheel/backlog.csv, both on the data branch of
-iowarp/clio-metrics and read through your gh: failure clusters, regressions,
+ranked backlog, data/projects/coder/backlog.csv, both on the data branch of
+iowarp/clio-metrics (the brand-wide metrics hub; docs/CONSUMERS.md there) and
+read through your gh. When the per-product files are missing it falls back to
+data/summary.json and data/flywheel/backlog.csv, keeping only Clio Coder's rows: failure clusters, regressions,
 feature requests, latent demand and friction, each with the evidence that
 ranks it. --kind keeps the rows of those kinds (failure, regression,
 friction, feature, demand, file-me and any kind clio-metrics adds); --top N
@@ -42,6 +44,8 @@ its sender deleted is skipped.
 `;
 
 const METRICS_REPOSITORY = "iowarp/clio-metrics";
+/** This product's id in clio-metrics; a backlog row with no project column is coder's. */
+const PROJECT_ID = "coder";
 const CODER_REPOSITORY = "iowarp/clio-coder";
 const BACKLOG_COLUMNS = [
 	"rank",
@@ -218,8 +222,9 @@ function staleSources(summary: unknown): string[] {
 		.map(([name, source]) => `${name} (${String(at(source, "status"))})`);
 }
 
+/** Reads a per-product summary (its project fields at the top) or the brand summary (under projects.coder). */
 function usageFrom(summary: unknown): FlywheelUsage {
-	const project = at(summary, "projects", "coder");
+	const project = at(summary, "project") === PROJECT_ID ? summary : at(summary, "projects", PROJECT_ID);
 	const repo = at(project, "repos", CODER_REPOSITORY);
 	const week = at(project, "trends", "7d");
 	const version = str(at(repo, "latestRelease"));
@@ -279,12 +284,22 @@ function formatUsage(usage: FlywheelUsage): string {
 	return text;
 }
 
-async function readUsage(gh: Gh): Promise<FlywheelUsage | null> {
-	const result = await gh.run([
+function readMetricsFile(gh: Gh, path: string) {
+	return gh.run([
 		"-H",
 		"Accept: application/vnd.github.raw+json",
-		`repos/${METRICS_REPOSITORY}/contents/data/summary.json?ref=data`,
+		`repos/${METRICS_REPOSITORY}/contents/${path}?ref=data`,
 	]);
+}
+
+/** The per-product file, else the brand-wide one it was split from. */
+async function readMetricsFallback(gh: Gh, own: string, shared: string) {
+	const result = await readMetricsFile(gh, own);
+	return result.exitCode === 0 ? result : readMetricsFile(gh, shared);
+}
+
+async function readUsage(gh: Gh): Promise<FlywheelUsage | null> {
+	const result = await readMetricsFallback(gh, `data/projects/${PROJECT_ID}/summary.json`, "data/summary.json");
 	if (result.exitCode !== 0) return null;
 	let usage: FlywheelUsage;
 	try {
@@ -336,11 +351,7 @@ function formatBacklog(rows: ReadonlyArray<BacklogRow>): string {
 }
 
 async function printBacklog(gh: Gh, view: BacklogView, out: (text: string) => void): Promise<number> {
-	const result = await gh.run([
-		"-H",
-		"Accept: application/vnd.github.raw+json",
-		`repos/${METRICS_REPOSITORY}/contents/data/flywheel/backlog.csv?ref=data`,
-	]);
+	const result = await readMetricsFallback(gh, `data/projects/${PROJECT_ID}/backlog.csv`, "data/flywheel/backlog.csv");
 	if (result.exitCode !== 0) {
 		const reason = firstLine(result);
 		throw new Error(
@@ -351,6 +362,7 @@ async function printBacklog(gh: Gh, view: BacklogView, out: (text: string) => vo
 	}
 	const kinds = view.kinds;
 	const rows = backlogRows(result.stdout)
+		.filter((row) => (row.project ?? "") === "" || row.project === PROJECT_ID)
 		.filter((row) => kinds === null || kinds.includes(row.kind))
 		.slice(0, view.limit);
 	const usage = await readUsage(gh);

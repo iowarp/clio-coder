@@ -283,11 +283,31 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			},
 			sources: { npm: { status: "ok" }, gsc: { status: "error" } },
 		};
+		// The brand-wide union carries every product's rows; only coder's (or unlabelled) ones belong here.
+		const union = [
+			"rank,kind,key,title,score,evidence,issue,firstSeen,lastSeen,versions,why,project",
+			"1,bug,#9,core-only crash,8,2 comments,iowarp/clio-core#9,2026-01-01,2026-01-02,,,core",
+			"1,bug,#7,coder union bug,5,1 comment,#7,2026-01-01,2026-01-02,,,coder",
+			"2,feature,#8,unlabelled coder feature,3,0 upvotes,#8,2026-01-01,2026-01-02,,,",
+		].join("\n");
+		const health = (from: object) =>
+			"health" in from ? { health: from.health } : { sources: Reflect.get(from, "sources") };
 		let access = true;
+		let perProduct = true;
+		const fetched: string[] = [];
 		const issuePages: number[] = [];
 		const run: ReportCommandRunner = async (_file, args) => {
 			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
 			const joined = args.join(" ");
+			if (joined.includes("?ref=data")) fetched.push(joined);
+			if (joined.includes("data/projects/coder/") && !perProduct)
+				return { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
+			if (joined.includes("data/flywheel/backlog.csv?ref=data"))
+				return access ? reply(union) : { exitCode: 1, stdout: "", stderr: "HTTP 404: Not Found", timedOut: false };
+			if (joined.includes("data/projects/coder/summary.json"))
+				return reply(
+					JSON.stringify({ ...summary.projects.coder, asOf: summary.asOf, project: "coder", ...health(summary) }),
+				);
 			if (joined.includes("summary.json?ref=data")) return reply(JSON.stringify(summary));
 			if (joined.includes("labels=digest"))
 				return reply("41\tWeekly digest 2026-W45\thttps://github.com/iowarp/clio-metrics/issues/41\n");
@@ -340,6 +360,11 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 
 		strictEqual(await flywheel(), 0);
 		ok(out.includes("bash times out, then retries") && out.includes("#512") && out.includes("split panes"), out);
+		ok(
+			fetched.some((call) => call.includes("data/projects/coder/backlog.csv")),
+			fetched.join("\n"),
+		);
+		ok(!fetched.some((call) => call.includes("data/flywheel/backlog.csv")), fetched.join("\n"));
 		ok(out.indexOf("Usage, Clio Coder (7 days to 2026-11-09)") < out.indexOf("bash times out"), out);
 		match(out, /npm downloads +841 \(\+11\.1%\)/u);
 		match(out, /GitHub +219 \(-24\.0%\) views, 2112 \(\+122\.6%\) clones/u);
@@ -392,6 +417,13 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 			{ rank: 1, score: 42.5, evidence: "7 shares, 3 versions", versions: "0.7.0;0.7.1" },
 		);
 		strictEqual(rows[0]?.why, "three releases in a row");
+		perProduct = false;
+		out = "";
+		strictEqual(await flywheel(), 0);
+		ok(out.includes("coder union bug") && out.includes("unlabelled coder feature"), out);
+		ok(!out.includes("core-only crash"), out);
+		match(out, /npm downloads +841/u);
+		perProduct = true;
 		access = false;
 		strictEqual(await flywheel(), 1);
 		ok(err.includes("private to the Clio maintainers"), err);
