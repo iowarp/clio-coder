@@ -578,10 +578,12 @@ export function createProvidersBundle(
 		const selectedModelId = probeResult.ok ? probeCandidateModelId(target) : null;
 		const selectedCapabilities = selectedModelId ? probeResult.modelCapabilities?.[selectedModelId] : undefined;
 		if (selectedModelId && selectedCapabilities && probeResult.capabilityModelId !== selectedModelId) {
+			// Serving slots belong to the endpoint, not the model; per-model rows never carry them.
+			const slots = probeResult.discoveredCapabilities?.parallelSlots;
 			probeResult = {
 				...probeResult,
 				capabilityModelId: selectedModelId,
-				discoveredCapabilities: selectedCapabilities,
+				discoveredCapabilities: { ...(slots !== undefined ? { parallelSlots: slots } : {}), ...selectedCapabilities },
 			};
 		}
 		options?.signal?.throwIfAborted();
