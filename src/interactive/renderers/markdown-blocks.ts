@@ -12,7 +12,9 @@ import { holdInlineMath, mathFenceAfter } from "./inline-math.js";
  * - the line after the blank run is complete, so its indent and marker are known, which is what decides whether a
  *   list or indented code block above continues across the blank run;
  * - the text before it holds no reference definition, which resolves links anywhere in the text;
- * - the inline-math transform has no fence open there, since its fence state runs across the whole text.
+ * - the inline-math transform has no fence open there, since its fence state runs across the whole text;
+ * - neither block beside the blank run holds only HTML comments, since pi-tui 1.5.1 and later draw no row for such
+ *   a block and drop one blank run beside it, and which run goes depends on the blocks around it.
  *
  * The lex runs on the text the way Pi's Markdown sees it: inline math set, tabs as three spaces, and Pi's display
  * math block extension, which can join blocks across blank lines. Every cut keeps its line, so a cut in the lexed
@@ -21,7 +23,7 @@ import { holdInlineMath, mathFenceAfter } from "./inline-math.js";
 
 const plainLexer = new Marked();
 
-// A replica of pi-tui 1.5.0's block LaTeX tokenizer (`tokenizeBlockLatex` in dist/components/markdown.js), which Pi
+// A replica of pi-tui 1.5.2's block LaTeX tokenizer (`tokenizeBlockLatex` in dist/components/markdown.js), which Pi
 // does not export. Only its block extent matters here, and it must move with the pi-tui pin.
 const TABLE_DELIMITER_ROW_REGEX = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
 function containsTableStart(source: string): boolean {
@@ -66,6 +68,13 @@ const latexLexer = new Marked().use({
 	],
 });
 
+// pi-tui's own test for a block it hides (`removeHtmlCommentBlocks` in dist/components/markdown.js), which Pi does
+// not export: an unclosed comment runs to the end of its block.
+const HTML_COMMENT_REGEX = /<!--[\s\S]*?(?:-->|$)/g;
+function isHiddenCommentBlock(token: Tokens.Generic | undefined): boolean {
+	return token?.type === "html" && token.raw.replace(HTML_COMMENT_REGEX, "").trim() === "";
+}
+
 /**
  * The length of the longest head of `source` that renders apart from the rest exactly as within the whole, at most
  * `limit`; 0 when there is none yet. Null when the text holds a reference definition or a carriage return, so it
@@ -101,6 +110,7 @@ export function settledMarkdownHead(source: string, hold: string, limit: number)
 		offset += raw.length;
 		for (let at = raw.indexOf("\n"); at >= 0; at = raw.indexOf("\n", at + 1)) line += 1;
 		if (tokens[index]?.type !== "space" || index === 0 || index + 1 === tokens.length) continue;
+		if (isHiddenCommentBlock(tokens[index - 1]) || isHiddenCommentBlock(tokens[index + 1])) continue;
 		if (text[offset - 1] !== "\n" || text.indexOf("\n", offset) < 0 || fenceOpen[line] !== false) continue;
 		const at = lineStart[line] ?? Number.POSITIVE_INFINITY;
 		if (at <= limit) cut = at;
