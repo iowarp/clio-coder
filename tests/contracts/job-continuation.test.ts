@@ -341,6 +341,25 @@ describe("job continuation at yolo (#445)", () => {
 		strictEqual(final?.delivery?.state, "delivered");
 	});
 
+	it("runs the continuation of a deadline wake that stopped on the tool budget", async () => {
+		const delivered: string[] = [];
+		const host = make({
+			...polls([{ state: "pending" }], delivered),
+			deliver: async (context) => {
+				context.start();
+				delivered.push(context.job.delivery?.continuation ?? "match");
+				return delivered.length === 1 ? BUDGET : DONE;
+			},
+		});
+		const { count: _count, ...unbounded } = pollJob;
+		const job = await host.create({ ...unbounded, deadlineAt: clock + 2500 }, owner);
+		for (let i = 0; i < 8; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["job_deadline", "tool_budget"]);
+		const final = host.get(job.id, owner);
+		strictEqual(final?.reason, "deadline");
+		strictEqual(final?.delivery?.state, "delivered");
+	});
+
 	it("wakes it too when every poll failed, which is when the turn most needs to know", async () => {
 		const delivered: string[] = [];
 		const host = make(polls([null], delivered));

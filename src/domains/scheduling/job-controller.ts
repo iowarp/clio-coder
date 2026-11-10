@@ -52,13 +52,21 @@ const POLL_MS = 250;
  * cancelling it at the deadline stopped the work it was doing and relabelled a met condition as a deadline (#450).
  */
 /**
- * A met condition's follow-up that stopped (tool budget, failure) queues its continuation as pending; it is the
- * same follow-up and the deadline must not drop it and relabel the job.
+ * A met condition's follow-up, or the deadline's own wake, that stopped (tool budget, failure) queues its
+ * continuation as pending; it is the same follow-up and the deadline must neither drop it and relabel the job
+ * nor refuse to start it.
  */
-const conditionContinuationPending = (job: JobRecord): boolean =>
-	job.reason === "condition" && job.delivery?.state === "pending" && job.delivery.continuation !== undefined;
+const followUpContinuationPending = (job: JobRecord): boolean =>
+	(job.reason === "condition" || job.reason === "deadline") &&
+	job.delivery?.state === "pending" &&
+	job.delivery.continuation !== undefined;
 const deadlineMayEnd = (job: JobRecord): boolean =>
-	job.delivery?.state !== "running" && !conditionContinuationPending(job);
+	job.delivery?.state !== "running" && !followUpContinuationPending(job);
+// The deadline's own wake starts after it by definition (#450).
+const deadlineAdmits = (job: JobRecord, kind: "run" | "delivery", nowMs: number): boolean =>
+	job.spec.deadlineAt === null ||
+	nowMs < job.spec.deadlineAt ||
+	(kind === "delivery" && followUpContinuationPending(job));
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -340,11 +348,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			job.persistenceError === null &&
 			job.generation === execution.generation &&
 			options.ports.isCurrent(job.owner) &&
-			// The deadline's own wake starts after it by definition (#450).
-			(job.spec.deadlineAt === null ||
-				now() < job.spec.deadlineAt ||
-				(execution.kind === "delivery" &&
-					(job.delivery?.continuation === "job_deadline" || conditionContinuationPending(job)))) &&
+			deadlineAdmits(job, execution.kind, now()) &&
 			(execution.kind === "delivery"
 				? job.state !== "paused" && job.delivery?.state === "pending"
 				: job.state === "active" && job.pending !== null)
@@ -605,7 +609,18 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			let result: JobRunResult | null = null;
 			try {
 				const admission = await options.ports.admit({ job: copy(job), phase: kind, signal: execution.abort.signal });
-				if (!canStart(current(id), execution)) {
+				const latest = current(id);
+				if (!canStart(latest, execution)) {
+					// Past the deadline nothing makes this delivery admissible again; retrying it re-ran admission every poll.
+					if (
+						kind === "delivery" &&
+						latest.persistenceError === null &&
+						latest.delivery?.state === "pending" &&
+						!deadlineAdmits(latest, kind, now())
+					) {
+						commit(latest, (draft) => dropDelivery(draft, "deadline"));
+						return;
+					}
 					result = { outcome: "deferred", summary: "scope unavailable after admission" };
 					return;
 				}
