@@ -9,7 +9,7 @@ import {
 	type RelatedVerdict,
 	renderComment,
 } from "./dedup.js";
-import { newReportId, type ReportDraft, validateDraft } from "./draft.js";
+import { newReportId, type ReportDraft, stripHiddenText, validateDraft } from "./draft.js";
 import { type ReportEnvironment, type ReportSessionFacts, reportEnvironment } from "./environment.js";
 import { reportFingerprint } from "./fingerprint.js";
 import type { ReportObservation } from "./observe.js";
@@ -196,7 +196,10 @@ export function composeReportDraft(input: ComposeReportInput): ReportDraft {
 			values: { name: crash.name, frames: crash.frames.map((frame) => `${frame.fn}@${frame.module}`) },
 		});
 	// The crash message is raw text from the record, so it goes where the operator's words go and is scrubbed with them.
-	const happened = input.happened?.trim() || (crash ? `Clio Coder crashed: ${crash.name}: ${crash.message}`.trim() : "");
+	// Its escapes and hidden characters are stripped, or the gate refuses text the review cannot show.
+	const happened =
+		input.happened?.trim() ||
+		(crash ? `Clio Coder crashed: ${crash.name}: ${stripHiddenText(crash.message)}`.trim() : "");
 	return {
 		id: newReportId(now.getTime()),
 		createdAt: now.toISOString(),
