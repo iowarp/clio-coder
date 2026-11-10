@@ -1247,10 +1247,20 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
+	} else if (result.endedQuietly && !result.sawTerminatingToolResult) {
+		// The classifier saw an empty closing message, so any text still held is narration written beside a tool call
+		// ("Let me read notes.txt first"), not the answer. It goes to stderr for a reader of the log, never stdout.
+		const failureMessage =
+			"clio-coder run: the turn's tools ran but the model wrote no closing message, so there is no answer to print";
+		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
+		const narration = Array.from(settledAnswer(result.text));
+		stderrMessage =
+			narration.length > 0
+				? `${failureMessage}\nclio-coder run: last text before the tools ran: ${narration.length > 400 ? `${narration.slice(0, 399).join("")}…` : narration.join("")}`
+				: failureMessage;
+		result = { ...result, text: "", citationCheckedAnswer: null };
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
-		const failureMessage = result.endedQuietly
-			? "clio-coder run: the turn's tools ran but the model wrote no closing message, so there is no answer to print"
-			: "clio-coder run: provider stream ended without an assistant response or terminal tool result";
+		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else {
