@@ -8,10 +8,20 @@ export interface BoundaryCheckResult {
 	violations: string[];
 }
 
+// The per-file rules run back to back on one file; they share its read-only
+// syntax tree instead of each parsing it again.
+let lastParsed: { file: string; source: string; tree: ts.SourceFile } | undefined;
+function parseTree(file: string, source: string): ts.SourceFile {
+	if (lastParsed?.file === file && lastParsed.source === source) return lastParsed.tree;
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	lastParsed = { file, source, tree };
+	return tree;
+}
+
 /** Provider usage in messages/ledger payloads is immutable outside engine adapters (#434). */
 export function checkLedgerUsageMutation(file: string, source: string): string[] {
 	if (file.startsWith("src/engine/")) return [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const aliases = new Set<string>();
 	const wholeAliases = new Set<string>();
 	const unwrap = (node: ts.Expression): ts.Expression => {
@@ -141,7 +151,7 @@ const LEDGER_PAYLOAD_ROOTS = ["src/session-control/", "src/domains/session/"];
 /** The ledger is the conversation record and the journal owns usage, so no payload gains a usage-shaped key (#434 §5.1, §5.3). */
 export function checkLedgerUsageKeys(file: string, source: string): string[] {
 	if (!LEDGER_PAYLOAD_ROOTS.some((root) => file.startsWith(root))) return [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const payloadLike = (node: ts.Node) => /payload/i.test(node.getText(tree));
 	const keyOf = (name: ts.Node): string | undefined =>
 		ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
@@ -247,7 +257,7 @@ const OWNER_CAPABILITY_HOLDERS: ReadonlyMap<string, string> = new Map([
  * from DomainContractMap, never from the caller (rule17).
  */
 export function checkDomainContractAccess(file: string, source: string, usedHolders?: Set<string>): string[] {
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const violations: string[] = [];
 	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 	const visit = (node: ts.Node): void => {
@@ -278,7 +288,7 @@ export function checkDomainContractAccess(file: string, source: string, usedHold
 
 /** Applied to the producer's complete local value-import closure, including helper modules (#434). */
 export function checkTelemetryProducer(file: string, source: string): string[] {
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const violations: string[] = [];
 	const visit = (node: ts.Node): void => {
 		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -327,7 +337,7 @@ const PATH_WRITES = new Map<string, number[]>([
 /** Only the telemetry domain writes under the telemetry root; every other module goes through its writers (#434 §5.1). */
 export function checkTelemetryWrites(file: string, source: string): string[] {
 	if (file.startsWith("src/domains/telemetry/")) return [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	// A path is usually built a step or two before the write, so a name expands to what this file assigns it.
 	const definitions = new Map<string, ts.Node[]>();
 	const define = (name: string, node: ts.Node) => definitions.set(name, [...(definitions.get(name) ?? []), node]);
@@ -394,7 +404,7 @@ export function checkTelemetryWrites(file: string, source: string): string[] {
 /** Guard monetary presentation without confusing token/duration precision or shell dollars (#434). */
 export function checkCostRendering(file: string, source: string): string[] {
 	if (file === "src/core/telemetry/render.ts") return [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const violations: string[] = [];
 	const monetary = /cost|usd|price|spend|amount|dollars|ceiling|budget/i;
 	const visit = (node: ts.Node) => {
@@ -481,7 +491,7 @@ const TOTAL_NAME = /^(?:tokens|tokenCount|usd)$|(?:Tokens|TokenCount|Usd)$/;
  */
 export function checkSurfaceTotals(file: string, source: string, used?: Set<string>): string[] {
 	if (!SURFACE_TOTAL_ROOTS.some((root) => file.startsWith(root))) return [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const violations: string[] = [];
 	const unwrap = (node: ts.Expression): ts.Expression => {
 		while (
@@ -701,7 +711,7 @@ export const COMPOSITION_ROOT_LINE_CEILING = 4800;
  */
 export function checkCompositionRoot(file: string, source: string): string[] {
 	const violations: string[] = [];
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const lineOf = (node: ts.Node): number => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 	for (const statement of tree.statements) {
 		if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
@@ -840,8 +850,17 @@ function extractSpecifiers(source: string): ExtractedSpecifier[] {
 	return specifiers;
 }
 
+const resolvedImports = new Map<string, string>();
 function resolveRelativeImport(fromFile: string, specifier: string): string {
 	const candidate = path.resolve(path.dirname(fromFile), specifier);
+	const known = resolvedImports.get(candidate);
+	if (known !== undefined) return known;
+	const resolved = resolveCandidate(candidate);
+	resolvedImports.set(candidate, resolved);
+	return resolved;
+}
+
+function resolveCandidate(candidate: string): string {
 	const tsRewrites: string[] = [];
 	if (jsSuffixRegex.test(candidate)) {
 		const stripped = candidate.replace(jsSuffixRegex, "");
@@ -859,7 +878,7 @@ function resolveRelativeImport(fromFile: string, specifier: string): string {
 	];
 	for (const item of candidates) {
 		try {
-			if (statSync(item).isFile()) return item;
+			if (statSync(item, { throwIfNoEntry: false })?.isFile()) return item;
 		} catch {
 			// skip
 		}
@@ -1182,7 +1201,7 @@ const CONTINUATION_FIELDS = new Set([
 export function checkTurnStateOwnership(file: string, source: string): string[] {
 	if (!file.startsWith("src/") || file === TURN_STATE_OWNER) return [];
 	const inSessionControl = file.startsWith("src/session-control/");
-	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const tree = parseTree(file, source);
 	const violations: string[] = [];
 	const line = (node: ts.Node) => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 	const writtenField = (target: ts.Expression): string | undefined => {

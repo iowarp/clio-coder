@@ -53,6 +53,7 @@
 			"!social-campaigns",
 			"!**/*.html",
 			"!tests/fixtures/telemetry/golden",
+			"!tests/fixtures/typecheck-corpus",
 			"!tmp"
 		]
 	},

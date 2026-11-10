@@ -1,0 +1,46 @@
+## node
+node/src/enums.ts(10,8): error TS6133: 'stale' is declared but its value is never read.
+node/src/enums.ts(6,14): error TS2322: Type '3' is not assignable to type 'Level'.
+node/src/enums.ts(8,10): error TS1205: Re-exporting a type when 'isolatedModules' is enabled requires using 'export type'.
+node/src/enums.ts(9,38): error TS6133: 'dropped' is declared but its value is never read.
+node/src/indexed.ts(3,2): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+node/src/indexed.ts(7,9): error TS18048: 'value' is possibly 'undefined'.
+node/src/modules.ts(10,14): error TS2322: Type 'string' is not assignable to type 'number'.
+node/src/modules.ts(3,31): error TS2305: Module '"@corpus/lib"' has no exported member 'missingExport'.
+node/src/modules.ts(4,23): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean './indexed.js'?
+node/src/modules.ts(5,24): error TS2307: Cannot find module './absent.js' or its corresponding type declarations.
+node/src/modules.ts(8,14): error TS2322: Type '"slow"' is not assignable to type 'Mode'.
+node/src/optional.ts(4,14): error TS2375: Type '{ label: undefined; retries: number; }' is not assignable to type 'Options' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'label' are incompatible.
+    Type 'undefined' is not assignable to type 'string'.
+node/src/optional.ts(7,14): error TS2375: Type '{ retries: number; label: string | undefined; }' is not assignable to type 'Options' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'label' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+node/src/override.ts(17,11): error TS4113: This member cannot have an 'override' modifier because it is not declared in the base class 'Base'.
+node/src/override.ts(9,2): error TS4114: This member must have an 'override' modifier because it overrides a member in the base class 'Base'.
+node/src/strict.ts(10,2): error TS2322: Type 'string' is not assignable to type 'number'.
+node/src/strict.ts(14,2): error TS2322: Type 'number' is not assignable to type 'string'.
+node/src/strict.ts(17,14): error TS2322: Type '"home"' is not assignable to type '`/${string}`'.
+node/src/strict.ts(2,26): error TS7006: Parameter 'value' implicitly has an 'any' type.
+node/src/strict.ts(6,9): error TS18047: 'text' is possibly 'null'.
+node/src/strict.ts(8,25): error TS2322: Type 'string' is not assignable to type 'number'.
+
+## tsx
+tsx/src/components.tsx(10,31): error TS2375: Type '{ label: string; tone: undefined; }' is not assignable to type 'BadgeProps' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'tone' are incompatible.
+    Type 'undefined' is not assignable to type '"info" | "warn"'.
+tsx/src/components.tsx(11,27): error TS2339: Property 'span' does not exist on type 'JSX.IntrinsicElements'.
+tsx/src/components.tsx(11,37): error TS2339: Property 'span' does not exist on type 'JSX.IntrinsicElements'.
+tsx/src/components.tsx(12,35): error TS2322: Type '(event: KeyboardEvent) => string' is not assignable to type '(event: MouseEvent) => void'.
+  Types of parameters 'event' and 'event' are incompatible.
+    Type 'MouseEvent' is missing the following properties from type 'KeyboardEvent': charCode, code, isComposing, key, and 8 more.
+tsx/src/components.tsx(8,29): error TS2741: Property 'label' is missing in type '{}' but required in type 'BadgeProps'.
+tsx/src/components.tsx(9,44): error TS2322: Type '"error"' is not assignable to type '"info" | "warn"'.
+
+## declaration
+declaration/src/public-api.ts(10,14): error TS4023: Exported variable 'made' has or is using name 'Hidden' from external module "<corpus>/declaration/src/internal" but cannot be named.
+declaration/src/public-api.ts(11,17): error TS4094: Property '#count' of exported anonymous class type may not be private or protected.
+declaration/src/public-api.ts(11,17): error TS4094: Property 'bump' of exported anonymous class type may not be private or protected.
+declaration/src/public-api.ts(4,14): error TS4094: Property 'hidden' of exported anonymous class type may not be private or protected.

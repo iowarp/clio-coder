@@ -22,13 +22,13 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { Worker } from "node:worker_threads";
 import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js";
 import { resolvePackageRoot } from "../src/core/package-root.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
-import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
 
 const root = resolvePackageRoot(import.meta.url);
@@ -234,9 +234,22 @@ function checkExportHygiene(): void {
 // ---------------------------------------------------------------------------
 // Check the architecture rules against the actual source tree.
 // ---------------------------------------------------------------------------
-function checkBoundaries(): void {
-	const { violations } = runBoundaryCheck(root);
-	if (violations.length > 0) fail("boundaries", `violations across src/:\n  ${violations.join("\n  ")}`);
+function checkBoundaries(): Promise<void> {
+	return new Promise((resolvePromise, reject) => {
+		const worker = new Worker(new URL("../tests/boundaries/check-boundaries-worker.ts", import.meta.url), {
+			workerData: root,
+		});
+		let violations: string[] | undefined;
+		worker.once("message", (message: string[]) => {
+			violations = message;
+		});
+		worker.once("error", reject);
+		worker.once("exit", (code) => {
+			if (violations === undefined) return reject(new Error(`boundary check worker exited ${code} without a result`));
+			if (violations.length > 0) fail("boundaries", `violations across src/:\n  ${violations.join("\n  ")}`);
+			resolvePromise();
+		});
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -1343,20 +1356,22 @@ async function checkRetiredCommands(): Promise<void> {
 	}
 }
 
+// Checks that wait on a worker or a child process come first: they start, then
+// overlap the synchronous checks after them.
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
+	["boundaries", checkBoundaries],
+	["library-pin", checkLibraryPin],
+	["readme-install-block", checkReadmeInstallBlock],
 	["documentation-links", checkDocumentationLinks],
 	["product-namespace", checkProductNamespace],
 	["case-portable-paths", checkCasePortablePaths],
 	["export-hygiene", checkExportHygiene],
-	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
-	["library-pin", checkLibraryPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
 	["state-root-inventory", checkStateRootInventory],
 	["theme-discipline", checkThemeDiscipline],
-	["readme-install-block", checkReadmeInstallBlock],
 	["packaging", checkPackaging],
 	["gitignored-reference", checkGitignoredReference],
 	["tracked-ignored", checkTrackedIgnored],
@@ -1366,17 +1381,23 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 ];
 
 const startedAt = performance.now();
+const settled: Promise<void>[] = [];
 for (const [name, check] of checks) {
 	const t0 = performance.now();
+	const report = () => {
+		if (process.env.CHECK_HYGIENE_PROFILE) console.error(`${name}: ${(performance.now() - t0).toFixed(0)}ms`);
+	};
+	const failed = (error: unknown) => fail(name, error instanceof Error ? error.message : String(error));
 	try {
-		await check();
+		const pending = check();
+		if (pending instanceof Promise) settled.push(pending.catch(failed).finally(report));
+		else report();
 	} catch (error) {
-		fail(name, error instanceof Error ? error.message : String(error));
-	}
-	if (process.env.CHECK_HYGIENE_PROFILE) {
-		console.error(`${name}: ${(performance.now() - t0).toFixed(0)}ms`);
+		failed(error);
+		report();
 	}
 }
+await Promise.all(settled);
 const elapsedMs = performance.now() - startedAt;
 
 if (errors.length > 0) {

@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"lib": ["ES2022"],
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"exactOptionalPropertyTypes": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"rootDir": ".",
+		"forceConsistentCasingInFileNames": true,
+		"isolatedModules": true,
+		"types": ["node"],
+		"paths": {
+			"@corpus/lib": ["./src/lib/public-api.ts"]
+		}
+	},
+	"include": ["src/**/*"]
+}

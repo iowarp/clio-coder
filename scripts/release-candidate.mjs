@@ -114,7 +114,7 @@ export async function prepare(directory) {
 	mkdirSync(directory, { recursive: true });
 	rmSync(join(directory, "candidate.json"), { force: true });
 	const checks = await Promise.allSettled(
-		["typecheck", "lint", "check:gui"].map(
+		["typecheck:compare", "lint", "check:gui"].map(
 			(step) =>
 				new Promise((resolve, reject) => {
 					const child = spawn("pnpm", ["run", step], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
