@@ -89,6 +89,15 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 		strictEqual(prepare([review("scout"), review("scout")]), undefined);
 		match(String(prepare([writer(["src/"]), writer(["src/nested/"])])), /parallel_writer_conflict/);
 		strictEqual(prepare([writer(["src/"]), writer(["docs/"])]), undefined);
+		// M-40 F13: writers that only hold a store grant are confined to it rather than refused.
+		strictEqual(
+			prepare([
+				{ ...writer(), tags: ["fleet"] },
+				{ ...writer(), tags: ["fleet"] },
+			]),
+			undefined,
+		);
+		match(String(prepare([{ ...writer(), tags: ["fleet"] }, writer()])), /parallel_writer_conflict/);
 		strictEqual(prepare([writer(), { agent: "scout", task: "Inspect sources" }]), undefined);
 		strictEqual(prepare([writer(), writer()], { writers: 1 }), undefined);
 		match(String(prepare([writer(), writer()], { writers: 1, detach: true })), /cannot combine with detach: true/);

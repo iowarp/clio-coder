@@ -263,6 +263,20 @@ export function narrowDispatchIntentToReadOnly(intent: DispatchIntent): Dispatch
 	};
 }
 
+/** The same declaration with `writeRoots` replaced and its path provenance resealed. */
+export function withDispatchIntentWriteRoots(intent: DispatchIntent, roots: ReadonlyArray<string>): DispatchIntent {
+	const writeRoots = [...new Set(roots)].sort(compareCodepoints);
+	return {
+		...intent,
+		writeRoots,
+		pathProvenance: declaredIntentPathProvenance({
+			readRoots: intent.readRoots,
+			writeRoots,
+			relevantPaths: intent.relevantPaths,
+		}),
+	};
+}
+
 export function normalizeDispatchIntent(
 	raw: unknown,
 	checks: ReadonlyMap<string, DispatchIntentCheckBound>,

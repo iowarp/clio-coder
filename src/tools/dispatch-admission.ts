@@ -18,7 +18,7 @@ import {
 } from "../domains/dispatch/gate-role-prompts.js";
 import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
-import { parallelWriterConflict } from "../domains/dispatch/parallel-writers.js";
+import { confineGrantOnlyWriters, parallelWriterConflict } from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
@@ -692,8 +692,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			);
 		}
 		if (mode === "parallel" && args.writers !== 1) {
-			const conflict = parallelWriterConflict(parsed.requests, deps.getAgentSpecs());
-			if (conflict !== null) return shapeRejection(args, conflict);
+			const specs = deps.getAgentSpecs();
+			const conflict = parallelWriterConflict(parsed.requests, specs);
+			if (conflict !== null && !confineGrantOnlyWriters(parsed.requests, specs)) return shapeRejection(args, conflict);
 		}
 		const parentCheckout = gitCheckoutRoot(process.cwd());
 		for (const request of parsed.requests) {

@@ -1,9 +1,11 @@
-import { match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storeGrantBoundaries, storeProjectDir } from "../../src/core/store-paths.js";
-import { writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
+import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { isDispatchIntent, normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
+import { confineGrantOnlyWriters, writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -60,5 +62,22 @@ describe("store tag grants", () => {
 			const store = storeGrantBoundaries(root, ["results"]);
 			strictEqual(writeRootsOverlap([`${join(root, "a")}/`, ...store], [`${join(root, "b")}/`, ...store]), false);
 			strictEqual(writeRootsOverlap([`${join(root, "a")}/`], [`${join(root, "a", "x")}/`]), true);
+		}));
+
+	it("parallel writers holding only a grant are confined to their store directories (M-40 F13)", () =>
+		withWorkspace(async (root) => {
+			const specs = [{ id: "coder", capabilityClass: "workspace-edit" }] as never;
+			const normalized = normalizeDispatchIntent({ read_roots: ["src/"] }, new Map());
+			ok(normalized.ok);
+			const base = { agentId: "coder", task: "put results", cwd: root, storeTags: ["results"] };
+			const requests = [{ ...base }, { ...base, intent: normalized.intent }] as unknown as DispatchRequest[];
+			strictEqual(confineGrantOnlyWriters(requests, specs), true);
+			const store = storeGrantBoundaries(root, ["results"]);
+			deepStrictEqual(requests[0]?.writeRoots, store);
+			deepStrictEqual(requests[1]?.intent?.writeRoots, [...store].sort());
+			strictEqual(isDispatchIntent(requests[1]?.intent), true);
+			const mixed = [{ ...base }, { agentId: "coder", task: "edit", cwd: root }] as unknown as DispatchRequest[];
+			strictEqual(confineGrantOnlyWriters(mixed, specs), false);
+			strictEqual(mixed[0]?.writeRoots, undefined);
 		}));
 });
