@@ -189,10 +189,14 @@ async function sessionMetas(stateDir: string): Promise<Map<string, string>> {
 	return metas;
 }
 
+/** The daily sweep's plan ran out of its budget; it gives up until the next day. */
+class PlanStopped extends Error {}
+
 async function readSessionTelemetry(
 	directory: string,
 	sessionId: string,
 	meta: string | null,
+	stopped?: () => boolean,
 ): Promise<SessionTelemetry | null> {
 	const journalStamp = sessionJournalStamp(directory);
 	const entries = await names(directory);
@@ -221,6 +225,11 @@ async function readSessionTelemetry(
 		partial: journalStamp === null,
 	};
 	for (const name of segmentNames) {
+		if (stopped) {
+			// Each segment scan is synchronous, so the sweep yields between them to keep the host responsive.
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			if (stopped()) throw new PlanStopped();
+		}
 		const file = await info(join(directory, name));
 		if (!file) continue;
 		session.segments.push(file);
@@ -305,6 +314,7 @@ export async function planTelemetryPrune(
 	stateDir: string,
 	policy: PrunePolicy,
 	nowMs = Date.now(),
+	options: { stopped?: () => boolean } = {},
 ): Promise<PrunePlan> {
 	const plan: PrunePlan = { stateDir: resolve(stateDir), remove: [], held: [], standardBytes: 0, researchBytes: 0 };
 	const sessions: SessionTelemetry[] = [];
@@ -317,7 +327,7 @@ export async function planTelemetryPrune(
 			plan.held.push({ path: directory, reason: "symlink" });
 			continue;
 		}
-		const session = await readSessionTelemetry(directory, sessionId, metas.get(sessionId) ?? null);
+		const session = await readSessionTelemetry(directory, sessionId, metas.get(sessionId) ?? null, options.stopped);
 		if (session) sessions.push(session);
 	}
 	const scopes = async (root: string): Promise<ScopeTelemetry[]> => {
@@ -532,8 +542,9 @@ const SWEEP_BUDGET_MS = 2_000;
 
 /**
  * The automatic retention sweep: at most once a day per state root, claimed by a stamp under a non-waiting lock so
- * concurrent processes do not all sweep. Removal stops after its time budget; the rest goes on a later day. Null when
- * the sweep was not due or another process holds the claim.
+ * concurrent processes do not all sweep. Planning and removal share one time budget; removal stops when it ends and
+ * the rest goes on a later day. Null when the sweep was not due, another process holds the claim, or the budget ran
+ * out while planning.
  */
 export async function sweepTelemetryDaily(
 	stateDir: string,
@@ -555,9 +566,14 @@ export async function sweepTelemetryDaily(
 		return true;
 	});
 	if (!claim.held || !claim.value) return null;
-	const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY, nowMs);
 	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
-	return await applyTelemetryPrune(plan, {
-		stopped: () => performance.now() > deadline || options.stopped?.() === true,
-	});
+	const stopped = () => performance.now() > deadline || options.stopped?.() === true;
+	let plan: PrunePlan;
+	try {
+		plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY, nowMs, { stopped });
+	} catch (error) {
+		if (error instanceof PlanStopped) return null;
+		throw error;
+	}
+	return await applyTelemetryPrune(plan, { stopped });
 }
