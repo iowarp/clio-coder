@@ -106,6 +106,7 @@ Usage:
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
   clio-coder mcp list|test|trust|untrust  list, test and trust declared MCP servers
+  clio-coder store tags|ls|stat|history|verify|put|get|rm-tag|adopt|where  inspect, verify and manage this project's store
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
@@ -390,6 +391,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],
+	["store", async (subArgs) => (await import("./store.js")).runStoreCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["gui", async (subArgs) => (await import("./gui.js")).runGuiCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
