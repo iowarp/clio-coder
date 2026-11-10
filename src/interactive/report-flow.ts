@@ -24,6 +24,7 @@ import {
 	type ReportTransport,
 	readReportDraft,
 	refreshReportStatus,
+	rememberIdentity,
 	reportEditTemplate,
 	reportRows,
 	routeFor,
@@ -112,8 +113,9 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 		else deps.notify(outcome.result.status === "failed" ? "warning" : "success", `report: ${sentLine(outcome.result)}`);
 	};
 
-	async function review(draft: ReportDraft): Promise<void> {
+	async function review(composed: ReportDraft): Promise<void> {
 		const identity: LocalIdentity = await localIdentity(cwd(), deps.identitySettings?.() ?? {}, { env });
+		const draft = rememberIdentity(composed, identity);
 		// Opened against what is on this machine; who gh is signed in as arrives a moment later and the plan follows.
 		const gh = await findGh();
 		let shown: ReportPlanTransport =

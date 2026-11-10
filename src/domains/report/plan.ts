@@ -1,4 +1,4 @@
-import { isFixedPoint, type RenderedReport, renderReport } from "./body.js";
+import { draftIdentity, isFixedPoint, type RenderedReport, renderReport } from "./body.js";
 import { deleteReportBundle } from "./bundle.js";
 import { issueCanaryFinding, issueCanaryGate } from "./canary.js";
 import {
@@ -127,11 +127,12 @@ export function maskSummary(masks: ReadonlyArray<ReportMask>): string {
 }
 
 export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan {
-	const rendered = renderReport(draft, options.identity);
+	const identity = draftIdentity(draft, options.identity);
+	const rendered = renderReport(draft, identity);
 	const gates = validateDraft(draft, rendered);
-	if (!isFixedPoint(rendered, options.identity, draft.unmasked))
+	if (!isFixedPoint(rendered, identity, draft.unmasked))
 		gates.push("Scrubbing the report again would change it; edit the text so every masked value is gone.");
-	const left = issueCanaryFinding(rendered, options.identity);
+	const left = issueCanaryFinding(rendered, identity);
 	if (left !== null) gates.push(issueCanaryGate(left));
 	let rateWarning: string | null = null;
 	if (options.stateDir !== undefined) {
@@ -391,7 +392,10 @@ export async function runReportSend(
 		choice === "comment" && verdict.kind === "comment"
 			? { kind: "comment" as const, number: verdict.issue.number, body: renderComment(finalRendered, final) }
 			: { kind: "create" as const };
-	const result = await sendReport(finalRendered, route, deps.transport, action, deps);
+	const result = await sendReport(finalRendered, route, deps.transport, action, {
+		...deps,
+		identity: draftIdentity(final, deps.identity),
+	});
 	const filed = result.status === "sent" || result.status === "commented" || result.status === "reacted";
 	const facts = {
 		kind: final.kind,

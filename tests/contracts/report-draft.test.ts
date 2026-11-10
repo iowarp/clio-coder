@@ -6,7 +6,9 @@ import {
 	maskSummary,
 	newReportId,
 	parseReportBlock,
+	planReport,
 	type ReportDraft,
+	rememberIdentity,
 	renderReport,
 	scrubText,
 } from "../../src/domains/report/index.js";
@@ -97,6 +99,22 @@ test("names beside . _ - and escapes, spaced and non-ASCII path tails, flagged p
 		["fe80::1ff:fe23:4567:890a and 2001:db8::7, not ::1 or 10:30:00", "<ip> and <ip>, not ::1 or 10:30:00"],
 	];
 	for (const [raw, expected] of cases) strictEqual(scrubText(raw, identity).text, expected, raw);
+});
+
+test("a draft resumed elsewhere still masks the machine it was composed on (R2-safety-secrets-11)", () => {
+	const elsewhere: LocalIdentity = {
+		packageRoot: null,
+		paths: ["/home/alice", "/home/alice/other"],
+		remotes: [],
+		names: [{ kind: "project", value: "other-repo" }],
+	};
+	const composed = rememberIdentity(draft("acme-app at /home/alice/work/acme-app/src/x.ts stopped"), identity);
+	const saved: ReportDraft = JSON.parse(JSON.stringify(composed));
+	const plan = planReport(saved, { identity: elsewhere, transport: { kind: "file" } });
+	strictEqual(plan.rendered.title, "fix(dispatch): the loop stopped early on <host>");
+	ok(plan.rendered.body.includes("<project> at <path> stopped"), plan.rendered.body);
+	deepStrictEqual(plan.gates, []);
+	strictEqual(renderReport(draft("acme-app"), elsewhere).body.includes("acme-app"), true);
 });
 
 test("a rendered report is a fixed point of the scrubber, hostile prose included", () => {

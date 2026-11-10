@@ -78,12 +78,34 @@ export function parseReportBlock(body: string): Record<string, string> | null {
 	return null;
 }
 
+/** The identity a draft renders under: this machine's now, plus whatever the draft recorded where it was composed. */
+export function draftIdentity(draft: Pick<ReportDraft, "identity">, current: LocalIdentity): LocalIdentity {
+	const saved = draft.identity;
+	if (saved === undefined) return current;
+	const names = [...current.names];
+	for (const name of saved.names)
+		if (!names.some((known) => known.value === name.value && known.kind === name.kind)) names.push(name);
+	return {
+		packageRoot: current.packageRoot,
+		paths: [...new Set([...current.paths, ...saved.paths])],
+		remotes: [...new Set([...current.remotes, ...saved.remotes])],
+		names,
+	};
+}
+
+/** The draft with this machine's identity recorded, so a later resume elsewhere still masks it. */
+export function rememberIdentity(draft: ReportDraft, current: LocalIdentity): ReportDraft {
+	const { paths, remotes, names } = draftIdentity(draft, current);
+	return { ...draft, identity: { paths, remotes, names } };
+}
+
 /**
  * Render a draft into the fixed sections: what happened, the operator's words, expected, steps, what Clio observed,
  * what is not known, the environment, the report block and the footer. Every free-text field is scrubbed; the
  * scaffold and the block hold only fixed words and vocabulary values, which the scrubber never replaces.
  */
-export function renderReport(draft: ReportDraft, identity: LocalIdentity): RenderedReport {
+export function renderReport(draft: ReportDraft, current: LocalIdentity): RenderedReport {
+	const identity = draftIdentity(draft, current);
 	const lists: ReportMask[][] = [];
 	const scrub = (text: string) => {
 		const result = scrubText(text, identity, draft.unmasked);

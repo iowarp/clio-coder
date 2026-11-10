@@ -22,6 +22,7 @@ import {
 	readReportDraft,
 	recordAnswer,
 	recordOfferShown,
+	rememberIdentity,
 	reportFingerprint,
 	saveReportDraft,
 	scrubText,
@@ -211,20 +212,23 @@ export function createReportTool(deps: ReportToolDeps): ToolSpec {
 						},
 			now: now(),
 		});
-		const saved: ReportDraft = {
-			...composed,
-			origin: "agent",
-			trigger: "agent",
-			fingerprint: null,
-			area: args.area,
-			sections: {
-				...composed.sections,
-				operatorWords: scrub(args.operatorWords),
-				expected: scrub(args.expected),
-				reproduce: scrub(args.reproduce),
-				notKnown: args.notKnown.map(scrub),
+		const saved: ReportDraft = rememberIdentity(
+			{
+				...composed,
+				origin: "agent",
+				trigger: "agent",
+				fingerprint: null,
+				area: args.area,
+				sections: {
+					...composed.sections,
+					operatorWords: scrub(args.operatorWords),
+					expected: scrub(args.expected),
+					reproduce: scrub(args.reproduce),
+					notKnown: args.notKnown.map(scrub),
+				},
 			},
-		};
+			identity,
+		);
 		saveReportDraft(deps.stateDir, saved);
 		updateOutbox(deps.stateDir, saved.id, { kind: saved.kind, title: saved.title, state: "draft" });
 		if (sessionId !== null) sessionDrafts.set(sessionId, saved.id);

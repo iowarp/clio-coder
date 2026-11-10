@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ReportEnvironment } from "./environment.js";
 import type { ReportObservation } from "./observe.js";
+import type { LocalIdentity } from "./scrub.js";
 import type { ReportArea, ReportKind, ReportTrigger } from "./vocabulary.js";
 
 /**
@@ -40,6 +41,11 @@ export interface ReportDraft {
 	regression?: boolean;
 	/** The reporter asked to be credited in the release notes; off unless ticked. */
 	credit?: boolean;
+	/**
+	 * The machine's paths, remotes and names from where the draft was composed and reviewed. Every later render masks
+	 * them as well, so resuming the draft from another directory or branch keeps the masks the reporter saw.
+	 */
+	identity?: Pick<LocalIdentity, "paths" | "remotes" | "names">;
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

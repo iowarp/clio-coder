@@ -28,8 +28,10 @@ import {
 	readReportDraft,
 	refreshReportStatus,
 	relatedLine,
+	rememberIdentity,
 	reportBundlePath,
 	reportEditTemplate,
+	reportMarkdownPath,
 	reportRows,
 	routeFor,
 	runReportSend,
@@ -461,7 +463,7 @@ async function confirmAndSend(
 		if (!options.json) io.out(`GitHub has nothing from the last attempt to send ${initial.id}; it is a draft again.\n`);
 	}
 	const interactive = io.interactive && !options.json;
-	let draft = initial;
+	let draft = rememberIdentity(initial, identity);
 	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir });
 	const emit = (result?: unknown) =>
 		io.out(
@@ -696,6 +698,16 @@ async function status(io: Io, json: boolean): Promise<number> {
 	return 0;
 }
 
+/** The body file written when the report went out; null when it is gone. */
+function readSentBody(stateDir: string, id: string): string | null {
+	try {
+		return readFileSync(reportMarkdownPath(stateDir, id), "utf8");
+	} catch {
+		// Without the file, show renders the draft and does not call it the body as sent.
+		return null;
+	}
+}
+
 async function show(io: Io, id: string, bundle: boolean): Promise<number> {
 	const entry = outboxEntry(io.stateDir, id);
 	const draft = readReportDraft(io.stateDir, id);
@@ -705,11 +717,14 @@ async function show(io: Io, id: string, bundle: boolean): Promise<number> {
 	}
 	if (entry !== null) io.out(`${id}  ${entry.state}${entry.url !== null ? `  ${entry.url}` : ""}\n`);
 	if (bundle) return printReportBundle(bundleIo(io), id);
+	const sentBody = entry !== null && entry.state === "sent" ? readSentBody(io.stateDir, id) : null;
+	if (entry !== null && sentBody !== null) {
+		io.out(`${RULE("title")}${entry.title}\n${RULE("body as sent")}${sentBody}${RULE("end of body")}`);
+		return 0;
+	}
 	if (draft !== null) {
 		const rendered = planReport(draft, { identity: await identityFor(io), transport: { kind: "file" } }).rendered;
-		io.out(
-			`${RULE("title")}${rendered.title}\n${RULE(entry?.state === "sent" ? "body as sent" : "body")}${rendered.body}${RULE("end of body")}`,
-		);
+		io.out(`${RULE("title")}${rendered.title}\n${RULE("body")}${rendered.body}${RULE("end of body")}`);
 	}
 	return 0;
 }

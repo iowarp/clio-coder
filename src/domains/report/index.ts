@@ -1,4 +1,12 @@
-export { isFixedPoint, parseReportBlock, type RenderedReport, renderReport, renderReportBlock } from "./body.js";
+export {
+	draftIdentity,
+	isFixedPoint,
+	parseReportBlock,
+	type RenderedReport,
+	rememberIdentity,
+	renderReport,
+	renderReportBlock,
+} from "./body.js";
 export {
 	BUNDLE_KEPT,
 	BUNDLE_NEVER_KEPT,

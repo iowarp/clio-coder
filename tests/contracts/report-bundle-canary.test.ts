@@ -25,6 +25,7 @@ import {
 	type ReportCommandRunner,
 	type ReportDraft,
 	reportBundlePath,
+	reportMarkdownPath,
 	routeFor,
 	scrubText,
 	sendReport,
@@ -687,6 +688,14 @@ test("report --bundle mechanics shows its consent text, keeps the bundle only on
 		out = "";
 		strictEqual(await runReport(["show", sent, "--bundle"], deps), 0);
 		ok(out.startsWith(`${sent}  sent  `) && out.includes(`\nbundle sha256 ${entry?.bundle?.sha256}, `), out);
+		// The body as sent is the file that went out, not the draft rendered again here (R2-safety-secrets-11).
+		out = "";
+		writeFileSync(reportMarkdownPath(stateDir, sent), "the body that went out\n");
+		strictEqual(await runReport(["show", sent], deps), 0);
+		ok(
+			out.includes(`fix: x fails on y\n`) && out.includes("body as sent") && out.includes("the body that went out\n"),
+			out,
+		);
 
 		// Refused for want of --yes: nothing is kept, so no bundle or outbox row is left without its draft.
 		out = "";
