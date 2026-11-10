@@ -51,6 +51,7 @@ import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
 import { homeStorageFinding, installRootFinding, stateStorageFinding } from "./doctor-state-size.js";
+import { storeFindings } from "./doctor-store.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { pdfAttachmentFinding, toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
@@ -495,6 +496,10 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	// clio-kit spawns; the mcp.yaml lookup is skipped on an untouched home.
 	const sbatchFinding = hpcChecks.find((finding) => finding.name === "toolchain sbatch");
 	const slurmChecks = await slurmMcpFindings({ workspaceRoot, untouched, ...(sbatchFinding ? { sbatchFinding } : {}) });
+	// The store: backend, store root and free space, and the clio-core probe
+	// when it is selected. It reads backend.json and statfs; it creates nothing
+	// and never starts the daemon, so it runs on an untouched home too.
+	const storeChecks = await storeFindings();
 	// The pane sweep pings a socket and reads PATH; it creates nothing except the
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
@@ -528,6 +533,7 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		...toolChecks,
 		...hpcChecks,
 		...slurmChecks,
+		...storeChecks,
 		...paneChecks,
 		...namingChecks,
 		...contractChecks,

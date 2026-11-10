@@ -74,6 +74,8 @@ export interface CoreHostHello {
 	coreVersion: string;
 	pool: string;
 	transport: string;
+	/** Bindings the host's wheel lacks; their ops answer `unavailable`. */
+	missing?: string[];
 }
 
 export type CoreHostInbound =
@@ -166,6 +168,9 @@ export function parseCoreHostInbound(value: unknown): CoreHostInbound {
 				coreVersion: hello.coreVersion,
 				pool: hello.pool,
 				transport: hello.transport,
+				...(Array.isArray(hello.missing) && hello.missing.every((name) => typeof name === "string")
+					? { missing: hello.missing as string[] }
+					: {}),
 			},
 		};
 	}

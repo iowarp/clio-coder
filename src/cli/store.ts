@@ -4,6 +4,7 @@ import path from "node:path";
 import { hashFile, observeFileHash } from "../core/run-records.js";
 import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
 import {
+	isRecordsTag,
 	recordsTag,
 	storeProjectDir,
 	storeProjectKey,
@@ -22,6 +23,17 @@ import {
 	type StoreRecord,
 	summarizeRecords,
 } from "../domains/store/records.js";
+import {
+	attachClioCore,
+	type ClioCoreSelection,
+	onPath,
+	openClioCoreBackend,
+	readStoreBackendSelection,
+	removeStoreBackendRecord,
+	type StoreBackendRecord,
+	type StoreProbeRow,
+	writeStoreBackendRecord,
+} from "../domains/store/selection.js";
 import { formatColumns, printError } from "./shared.js";
 
 const HELP = `clio-coder store <command>
@@ -40,6 +52,10 @@ Commands:
   clio-coder store rm-tag <tag> --yes [--json]
   clio-coder store adopt [<projectKey>] [--json]
   clio-coder store where [--json]
+  clio-coder store backend [--json]
+  clio-coder store backend clio-core [--python <interpreter>] [--config <yaml>]
+                                     [--pool <M.m>] [--mount <dir>] [--stop-if-last] [--json]
+  clio-coder store backend local [--json]
 
 pattern is a regular expression matched against the whole blob name.
 verify compares each recorded blob's size and mtime with its record, and its
@@ -50,6 +66,10 @@ rm-tag without --yes deletes nothing and prints what it would delete.
 adopt without a key lists store directories whose project root no longer
 exists; with a key it moves that store to this project, refusing when this
 project already has one.
+backend prints the backend in use and, for clio-core, the probe. backend
+clio-core probes the interpreter, the daemon, its version, the host and
+durability, and selects clio-core only when every row passes. backend local
+removes the selection. Switching never moves data.
 Exit codes: 0 success; 1 operational failure or verify not ok; 2 invalid usage.
 `;
 
@@ -436,14 +456,22 @@ interface ParsedArgs {
 	json: boolean;
 	yes: boolean;
 	hashLarge: boolean;
+	stopIfLast: boolean;
 	values: Map<string, string>;
 }
 
-const VALUE_FLAGS = new Set(["--blob", "--note", "--to"]);
-const BOOL_FLAGS = new Set(["--json", "--yes", "--hash-large"]);
+const VALUE_FLAGS = new Set(["--blob", "--note", "--to", "--python", "--config", "--pool", "--mount"]);
+const BOOL_FLAGS = new Set(["--json", "--yes", "--hash-large", "--stop-if-last"]);
 
 function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
-	const parsed: ParsedArgs = { positional: [], json: false, yes: false, hashLarge: false, values: new Map() };
+	const parsed: ParsedArgs = {
+		positional: [],
+		json: false,
+		yes: false,
+		hashLarge: false,
+		stopIfLast: false,
+		values: new Map(),
+	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i] as string;
 		if (VALUE_FLAGS.has(arg)) {
@@ -454,6 +482,7 @@ function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
 		} else if (BOOL_FLAGS.has(arg)) {
 			if (arg === "--json") parsed.json = true;
 			else if (arg === "--yes") parsed.yes = true;
+			else if (arg === "--stop-if-last") parsed.stopIfLast = true;
 			else parsed.hashLarge = true;
 		} else if (arg.startsWith("-") && arg.length > 1) {
 			throw new UsageError(`unknown option ${arg}`);
@@ -483,6 +512,121 @@ function recordLine(record: StoreRecord): string {
 }
 
 type Output = { code: number; data: unknown; text: string };
+
+function probeLines(rows: ReadonlyArray<StoreProbeRow>): string[] {
+	const width = Math.max(0, ...rows.map((row) => row.name.length));
+	return rows.map(
+		(row) => `  ${row.ok ? (row.info ? "info" : "ok  ") : "FAIL"}  ${row.name.padEnd(width)}  ${row.detail}`,
+	);
+}
+
+async function tagCount(backend: StoreBackend): Promise<number> {
+	return (await backend.listTags()).filter((tag) => !isRecordsTag(tag)).length;
+}
+
+async function otherBackendLine(
+	cwd: string,
+	other: StoreBackendRecord | null,
+): Promise<{ tags: number | null; line: string }> {
+	let tags: number | null = null;
+	let why = "";
+	try {
+		if (other?.backend === "clio-core") tags = await tagCount(await openClioCoreBackend(cwd, other));
+		else tags = await tagCount((await import("../domains/store/backends/local.js")).createLocalStoreBackend(cwd));
+	} catch (error) {
+		why = error instanceof Error ? error.message : String(error);
+	}
+	const kind = other?.backend === "clio-core" ? "clio-core" : "local";
+	const count = tags === null ? `an unknown number of tags (${why})` : `${tags} tag(s)`;
+	return {
+		tags,
+		line: `The ${kind} backend holds ${count} for this project; nothing was moved. Moving data between backends is \`store migrate\`, not yet available.`,
+	};
+}
+
+function pathArg(args: ParsedArgs, name: string): string | undefined {
+	const value = args.values.get(name);
+	return value === undefined ? undefined : path.resolve(value);
+}
+
+async function storeBackendCommand(cwd: string, choice: string | undefined, args: ParsedArgs): Promise<Output> {
+	const current = readStoreBackendSelection();
+	if (choice === undefined) {
+		const kind = current.record?.backend ?? "local";
+		const attach =
+			current.record?.backend === "clio-core"
+				? await attachClioCore(current.record, { checkWheel: true, startDaemon: false })
+				: null;
+		await attach?.host?.close();
+		const failed = attach?.rows.some((row) => !row.ok) === true;
+		const lines = [
+			`backend: ${kind}`,
+			current.record === null ? `no selection at ${current.path}; local is the default` : `selected in ${current.path}`,
+			...(current.problem !== null ? [`note: ${current.problem}`] : []),
+			...(attach !== null ? ["probe:", ...probeLines(attach.rows)] : []),
+		];
+		return {
+			code: failed ? 1 : 0,
+			data: {
+				backend: kind,
+				path: current.path,
+				record: current.record,
+				problem: current.problem,
+				probe: attach?.rows ?? null,
+			},
+			text: lines.join("\n"),
+		};
+	}
+	if (choice === "local") {
+		const other = await otherBackendLine(cwd, current.record?.backend === "clio-core" ? current.record : null);
+		await removeStoreBackendRecord();
+		return {
+			code: 0,
+			data: { backend: "local", path: current.path, otherTags: other.tags },
+			text: [`backend: local (no selection at ${current.path})`, other.line].join("\n"),
+		};
+	}
+	if (choice !== "clio-core") throw new UsageError(`unknown backend '${choice}' (local or clio-core)`);
+	const pool = args.values.get("pool");
+	if (pool !== undefined && !/^\d+\.\d+$/u.test(pool))
+		throw new UsageError(`--pool takes <major>.<minor>, not '${pool}'`);
+	const python = args.values.get("python");
+	const resolvedPython =
+		python === undefined ? undefined : python.includes(path.sep) ? path.resolve(python) : (onPath(python) ?? python);
+	const config = pathArg(args, "config");
+	const mount = pathArg(args, "mount");
+	const selection: ClioCoreSelection = {
+		...(resolvedPython !== undefined ? { python: resolvedPython } : {}),
+		...(config !== undefined ? { config } : {}),
+		...(pool !== undefined ? { pool } : {}),
+		...(mount !== undefined ? { mount } : {}),
+		...(args.stopIfLast ? { stopIfLast: true } : {}),
+	};
+	const attach = await attachClioCore(selection, { checkWheel: true });
+	await attach.host?.close();
+	const ok = attach.host !== null && attach.rows.every((row) => row.ok);
+	if (!ok) {
+		return {
+			code: 1,
+			data: { backend: current.record?.backend ?? "local", selected: false, probe: attach.rows },
+			text: [
+				"probe:",
+				...probeLines(attach.rows),
+				`Nothing written; the backend stays ${current.record?.backend ?? "local"}.`,
+			].join("\n"),
+		};
+	}
+	const record: StoreBackendRecord = { v: 1, backend: "clio-core", ...selection };
+	await writeStoreBackendRecord(record);
+	const other = await otherBackendLine(cwd, null);
+	return {
+		code: 0,
+		data: { backend: "clio-core", selected: true, path: current.path, record, probe: attach.rows, otherTags: other.tags },
+		text: ["probe:", ...probeLines(attach.rows), `backend: clio-core (selected in ${current.path})`, other.line].join(
+			"\n",
+		),
+	};
+}
 
 async function execute(sub: string, args: ParsedArgs, cwd: string, signal: AbortSignal): Promise<Output> {
 	const [first, second] = args.positional.slice(1);
@@ -613,6 +757,8 @@ async function execute(sub: string, args: ParsedArgs, cwd: string, signal: Abort
 			].join("\n");
 			return { code: 0, data, text };
 		}
+		case "backend":
+			return storeBackendCommand(cwd, first, args);
 		default:
 			throw new UsageError(`unknown store command '${sub}'`);
 	}
