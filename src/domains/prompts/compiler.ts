@@ -204,10 +204,19 @@ export interface CompiledSessionPrompt {
 	 */
 	projectHandbookFiles?: string[];
 	/**
-	 * The prior-session line exactly as this prompt carries it, or null when none
-	 * rendered. Set by the prompts extension, which owns the workspace facts.
+	 * The prior-session line exactly as this session's context block carries it,
+	 * or null when none rendered. Set by the prompts extension, which owns the
+	 * workspace facts.
 	 */
 	priorSessionFact?: string | null;
+	/**
+	 * The `<session-context>` block (git state, last commit, last recorded
+	 * session, orientation snapshot time) that rides in the session's first user
+	 * message instead of the system prompt, so two sessions in one workspace
+	 * share the whole system prompt as a cache prefix. Set by the prompts
+	 * extension; empty when no fact rendered.
+	 */
+	sessionContext?: string;
 	/**
 	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
 	 * load order. Set only by `compileWorkerPrompt`, which owns rule
@@ -824,15 +833,16 @@ function estimatePromptTokens(text: string): number {
 
 /**
  * Layer order: immutable identity/constitution, conditional role/capabilities,
- * harness paths, turn retrieval hints, captured project context, memory and runtime, then
- * customization. The current task scope is not compiled; it rides in the
- * turn's reminder (#422). Only identity/constitution are
- * guaranteed stable across every runtime input; stablePrefix measures that
+ * harness paths, turn retrieval hints, captured project context and runtime,
+ * then customization, and memory last. The current task scope is not
+ * compiled; it rides in the turn's reminder (#422). Only identity/constitution
+ * are guaranteed stable across every runtime input; stablePrefix measures that
  * exact UTF-8 prefix. Everything through harness-awareness depends only on the
  * install, autonomy and tool surface, so two projects on one install share it
- * as a cache prefix (`PROMPT_SECTION_LAYER`). Memory/window changes preserve
- * all preceding layers. Changing a tool surface or role instruction
- * invalidates from its first changed byte, as intended.
+ * as a cache prefix (`PROMPT_SECTION_LAYER`). Memory can change between turns,
+ * so it renders after the additional fragments and a memory change resends
+ * only itself. Changing a tool surface or role instruction invalidates from
+ * its first changed byte, as intended.
  */
 export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"identity",
@@ -844,8 +854,8 @@ export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"harness-awareness",
 	"retrieval-hints",
 	"project-context",
-	"memory",
 	"runtime",
+	"memory",
 ];
 
 /**
@@ -1058,6 +1068,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	]);
 	let pinnedChars = 0;
 	for (const id of SESSION_PROMPT_SECTION_ORDER) {
+		if (id === "memory") continue;
 		push(id, rendered.get(id) ?? "");
 		if (id === "harness-awareness") pinnedChars = parts.join("\n\n").length;
 	}
@@ -1065,6 +1076,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		push(fragment.id, fragment.body);
 	}
 	push("context-operation-update", session.contextOperationUpdate ?? "");
+	push("memory", rendered.get("memory") ?? "");
 
 	const systemPrompt = parts.join("\n\n");
 	// Include the separator only when a session tail exists (#423).

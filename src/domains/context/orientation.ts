@@ -286,7 +286,9 @@ export function renderProjectOrientation(
 		return "<project-orientation>snapshot unavailable for current manifests/workspace; use code_nav mode=project</project-orientation>";
 	const lines = [
 		"<project-orientation>",
-		`Recorded source snapshot ${orientation.observedAt}; current source/status must be checked with tools.`,
+		// The capture time varies per session on an unchanged tree, so it rides in the session's first
+		// message (`orientationObservedAt`) and the prompt keeps a byte-stable sentence (S-85).
+		"Recorded source snapshot; current source/status must be checked with tools.",
 	];
 	const knownSource = (source: string) => /^[a-f0-9]{64}$/.test(orientation.inputs[source.split("#")[0] ?? ""] ?? "");
 	const unknownInputs = INPUTS.filter((path) => orientation.inputs[path] === "unknown");

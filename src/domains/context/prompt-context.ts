@@ -51,6 +51,7 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		supportFragments.push(fragment);
 	};
 	const warnings: string[] = [];
+	let orientationObservedAt: string | undefined;
 	const loadedClioMd = loadProjectClioMd(cwd);
 	const clioMd: ParsedClioMd | null = loadedClioMd.value;
 	for (const file of loadedClioMd.files) pieces.push(renderProjectContextFragment(file.source, file.path));
@@ -66,8 +67,11 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	// hash on the prompt/dispatch path. Presence does not certify parseability.
 	if (codewikiArtifactPresent(cwd)) {
 		addSupport("<codemap>available snapshot; freshness checked on retrieval; use code_nav</codemap>");
-		if (state?.orientation) addSupport(renderProjectOrientation(cwd, state.orientation, state.fingerprint));
-		else
+		if (state?.orientation) {
+			const orientation = renderProjectOrientation(cwd, state.orientation, state.fingerprint);
+			addSupport(orientation);
+			if (!orientation.includes("snapshot unavailable")) orientationObservedAt = state.orientation.observedAt;
+		} else
 			addSupport(
 				"<project-orientation>not recorded; use code_nav mode=project for project facts and current status</project-orientation>",
 			);
@@ -98,5 +102,6 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		handbookFiles: loadedClioMd.files.map((file) => file.path),
 		handbookSources: loadedClioMd.files.map(({ path, source }) => ({ path, source })),
 		supportFragments,
+		...(orientationObservedAt !== undefined ? { orientationObservedAt } : {}),
 	};
 }

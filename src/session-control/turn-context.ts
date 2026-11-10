@@ -58,7 +58,7 @@ import type {
 } from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, firstChangedSection, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import { hostFramedTexts } from "../core/reminder-framing.js";
+import { hostFramedTexts, neutralizeFraming } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
@@ -2958,6 +2958,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					sessionInputs: inputs,
 					attachedToolSchemas,
 				});
+			// S-85: per-session facts ride in the first user message, not the system
+			// prompt; they go again only once no message in context carries them,
+			// as after a compaction that summarized the first turn away.
+			const sessionContextDelta = (compiled: CompiledSessionPrompt | null): string => {
+				const block = compiled?.sessionContext ?? "";
+				if (block.length === 0) return "";
+				const framedBlock = neutralizeFraming(block);
+				return hostFramedTexts(agentRuntime.agent.state.messages).some((text) => text.includes(framedBlock)) ? "" : block;
+			};
+			const promptDelta = (compiled: CompiledSessionPrompt | null, memory: string): string =>
+				[sessionContextDelta(compiled), memoryDelta(memory)].filter((part) => part.length > 0).join("\n\n");
 			const memoryDelta = (compiled: string): string => {
 				if (!memoryOn) return "";
 				const framed = hostFramedTexts(agentRuntime.agent.state.messages);
@@ -3022,7 +3033,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			if (sessionPrompt && !sessionPromptInvalidated && sessionPromptKey === key) {
 				lastSystemPromptReused = true;
-				sessionPromptDelta = memoryDelta(frozenMemory);
+				sessionPromptDelta = promptDelta(sessionPrompt, frozenMemory);
 				preparePosture();
 				noteCacheReuse?.(false);
 				return sessionPrompt;
@@ -3115,7 +3126,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// Back on, the section selects afresh instead of holding the empty one compiled while off.
 				frozenMemorySection = memoryOn ? compiledMemory : null;
 				frozenMemorySessionId = sessionId;
-				sessionPromptDelta = memoryDelta(compiledMemory);
+				sessionPromptDelta = promptDelta(result, compiledMemory);
 				preparePosture();
 				return result;
 			} catch (err) {

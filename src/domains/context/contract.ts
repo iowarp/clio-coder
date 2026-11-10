@@ -18,6 +18,8 @@ export interface ProjectPromptContext {
 	handbookSources: ReadonlyArray<{ path: string; source: string }>;
 	/** Trusted renderer products, kept separate from authored Markdown. */
 	supportFragments: readonly string[];
+	/** When the rendered `<project-orientation>` snapshot was recorded; absent when none rendered. */
+	orientationObservedAt?: string;
 }
 
 /**

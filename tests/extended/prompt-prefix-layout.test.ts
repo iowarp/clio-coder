@@ -92,11 +92,13 @@ describe("compiled main prompt: section layout", () => {
 		const tailIds = (inputs.additionalFragments ?? []).map((fragment) => fragment.id);
 
 		// With every input present, every compiled section renders, in exactly
-		// the declared order, and the tail fragments follow in their own order.
-		deepStrictEqual(ids, [...SESSION_PROMPT_SECTION_ORDER, ...tailIds]);
+		// the declared order, with the tail fragments ahead of memory, which
+		// rewrites mid-session and so closes the prompt.
+		const beforeMemory = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "memory");
+		deepStrictEqual(ids, [...beforeMemory, ...tailIds, "memory"]);
 	});
 
-	it("keeps the volatility rule: identity through tool contract ahead of project context, memory, and runtime", () => {
+	it("keeps the volatility rule: identity through tool contract ahead of project context, runtime, and memory", () => {
 		const order = [...SESSION_PROMPT_SECTION_ORDER];
 		const at = (id: string): number => {
 			const index = order.indexOf(id);
@@ -111,12 +113,12 @@ describe("compiled main prompt: section layout", () => {
 		ok(at("skills") < at("safety"));
 		ok(at("safety") < at("tool-contract"));
 		// Everything that reads a mutable store or a probe comes after everything
-		// that does not: project context is session-stable, memory rewrites
-		// mid-session, and the runtime block's context window can move.
+		// that does not: project context is session-stable, the runtime block's
+		// context window can move, and memory rewrites mid-session.
 		ok(at("tool-contract") < at("project-context"));
-		ok(at("project-context") < at("memory"));
-		ok(at("memory") < at("runtime"));
-		strictEqual(order[order.length - 1], "runtime", "runtime is the last compiled section");
+		ok(at("project-context") < at("runtime"));
+		ok(at("runtime") < at("memory"));
+		strictEqual(order[order.length - 1], "memory", "memory is the last compiled section");
 	});
 
 	it("renders section text in the same order as the section list", () => {
@@ -132,10 +134,10 @@ describe("compiled main prompt: section layout", () => {
 			["safety", "Autonomy: default."],
 			["tool-contract", "Direct tools:"],
 			["project-context", "<project-type>typescript</project-type>"],
-			["memory", "- stable fact"],
 			["runtime", "Provider: local"],
 			["context.workspace-root", "Absolute workspace root: /workspace"],
 			["context.project-rules", "Keep imports sorted."],
+			["memory", "- stable fact"],
 		];
 		let cursor = -1;
 		for (const [id, marker] of markers) {
@@ -197,7 +199,7 @@ describe("compiled main prompt: surface-gated sections", () => {
 		);
 		const ids = withoutDispatch.sections.map((section) => section.id);
 		ok(!ids.includes("delegation"), "delegation renders only with dispatch");
-		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "delegation");
+		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "delegation" && id !== "memory");
 		deepStrictEqual(ids.slice(0, expected.length), [...expected]);
 	});
 
@@ -216,7 +218,7 @@ describe("compiled main prompt: surface-gated sections", () => {
 		ok(!ids.includes("delegation"));
 		ok(!ids.includes("skills"));
 		ok(ids.includes("tool-contract"), "a tool-free target still gets a tool contract saying so");
-		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => !["delegation", "skills"].includes(id));
+		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => !["delegation", "skills", "memory"].includes(id));
 		deepStrictEqual(ids.slice(0, expected.length), [...expected]);
 	});
 

@@ -510,7 +510,8 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 		} as unknown as AgentRuntime;
 		try {
 			const first = (await turn.ensureSessionPrompt(agentRuntime))?.systemPrompt ?? "";
-			ok(first.includes("Session context:"), first);
+			ok(!first.includes("Derive conversation history"), first);
+			ok(turn.sessionPromptDelta().includes("<session-context>"), turn.sessionPromptDelta());
 			t.mock.timers.tick(5 * 60_000);
 			bus.emit("config.hot_reloaded", {
 				source: "file",
