@@ -162,13 +162,23 @@ export function cacheKeepalivePromptTokens(message: CacheKeepaliveReply): number
 	return (usage?.input ?? 0) + (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0);
 }
 
-/** The replayed request's options: the route's output cap, no retries and the keepalive's own signal. */
+/**
+ * The replayed request's options: the route's output cap, no retries and the keepalive's own signal. The replay
+ * repeats the turn's last request, so it must not use or replace the conversation's server-side continuation state
+ * (Anthropic message threads since Pi 1.5.1), or the next real request could not continue from the real reply.
+ */
 export function cacheKeepaliveOptions(
 	request: CacheKeepaliveRequest,
 	outputTokens: number,
 	signal: AbortSignal,
 ): SimpleStreamOptions {
-	const options: SimpleStreamOptions = { ...request.options, maxTokens: outputTokens, maxRetries: 0, signal };
+	const options: SimpleStreamOptions = {
+		...request.options,
+		maxTokens: outputTokens,
+		disableContinuation: true,
+		maxRetries: 0,
+		signal,
+	};
 	if (request.model.api !== "openai-codex-responses") return options;
 	// Pi's Codex adapter ignores maxTokens; the cap goes on the body after the turn's own payload edits.
 	const onPayload = request.options?.onPayload;

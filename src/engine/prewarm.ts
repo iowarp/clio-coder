@@ -148,7 +148,9 @@ async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Pr
 	// pi-agent-core maps `thinkingLevel: "off"` onto an absent `reasoning`; the
 	// pre-warm has to make the same mapping or the thinking composition resolves
 	// against a different level and the rendered template moves.
-	const options: Record<string, unknown> = { maxTokens: PREWARM_MAX_TOKENS };
+	// The warm carries the session id but is not a turn of the conversation, so it leaves the provider's server-side
+	// continuation state (Anthropic message threads since Pi 1.5.1) to the real requests.
+	const options: Record<string, unknown> = { maxTokens: PREWARM_MAX_TOKENS, disableContinuation: true };
 	// Narrow residency authority without changing prompt rendering. A warm may
 	// not inherit the foreground turn's implicit load/unload authorization.
 	const metadata = (input.model as EngineModel & { clioCoder?: Record<string, unknown> }).clioCoder;
