@@ -927,6 +927,13 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 				(receipt) => receipt.reportId === dies && receipt.deletedAt === null,
 			),
 		);
+		// A retry must not upload a second gist that forget would never delete.
+		postThrows = false;
+		const gistsBefore = gists.length;
+		err = "";
+		strictEqual(await runReport(["send", dies, "--share", "--yes", "--on-duplicate", "new"], deps), 2);
+		strictEqual(gists.length, gistsBefore);
+		ok(err.includes(`report forget ${dies}`), err);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

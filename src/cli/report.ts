@@ -883,6 +883,14 @@ async function sendSaved(
 			fail(io, `${args.id}'s bundle is already shared as gist ${entry.share.gistId}; send it without --share`);
 			return 2;
 		}
+		const live = reportShare(io.stateDir, args.id);
+		if (live !== null) {
+			fail(
+				io,
+				`${args.id}'s bundle is already in gist ${live.receipt.gistId}; send it without --share, or run clio-coder report forget ${args.id} first`,
+			);
+			return 2;
+		}
 		let kept: ReturnType<typeof readSavedBundle>;
 		try {
 			kept = readSavedBundle(io.stateDir, args.id);
