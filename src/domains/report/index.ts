@@ -1,4 +1,15 @@
 export { isFixedPoint, parseReportBlock, type RenderedReport, renderReport, renderReportBlock } from "./body.js";
+export {
+	CANARY_MIN_LENGTH,
+	type CanaryHit,
+	type CanaryKind,
+	type CanaryMember,
+	canaryLocation,
+	canaryRefusal,
+	canaryScan,
+	identityCanaries,
+	issueCanaryHits,
+} from "./canary.js";
 export type { ReportCommandResult, ReportCommandRunner } from "./command.js";
 export {
 	applyVerdict,

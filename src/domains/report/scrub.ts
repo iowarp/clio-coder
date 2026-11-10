@@ -174,8 +174,13 @@ function isPublicIp(raw: string): boolean {
 	return octets[0] === 127 || octets.every((octet) => octet === 0);
 }
 
+/** Whether a name is on the stop list a scrub or a canary scan never treats as an identifier. */
+export function isReservedName(value: string): boolean {
+	return RESERVED_WORDS.has(value.toLowerCase());
+}
+
 function usableName(value: string): boolean {
-	return value.length >= 3 && !RESERVED_WORDS.has(value.toLowerCase());
+	return value.length >= 3 && !isReservedName(value);
 }
 
 function scrubOnce(

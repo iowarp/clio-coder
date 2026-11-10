@@ -1,8 +1,10 @@
 import { canOpenBrowser, openBrowser } from "../../core/open-browser.js";
 import { resolveToolBinary } from "../toolchain/index.js";
 import type { RenderedReport } from "./body.js";
+import { canaryRefusal, issueCanaryHits } from "./canary.js";
 import { type ReportCommandRunner, runReportCommand } from "./command.js";
 import { type OutboxEntry, outboxEntry, updateOutbox } from "./outbox.js";
+import type { LocalIdentity } from "./scrub.js";
 import { writeReportMarkdown } from "./store.js";
 import { REPORT_REPOSITORY, type ReportKind } from "./vocabulary.js";
 
@@ -207,6 +209,8 @@ export interface SendDeps {
 	/** Opens a link; false when nothing could be shown. */
 	open?: (url: string) => boolean;
 	now?: () => Date;
+	/** When given, Send refuses before anything is written if the issue still carries one of its identifiers (R-19). */
+	identity?: LocalIdentity;
 }
 
 const ISSUE_URL = new RegExp(`https://github\\.com/${REPORT_REPOSITORY.replace("/", "\\/")}/issues/(\\d+)`, "u");
@@ -237,6 +241,10 @@ export async function sendReport(
 	deps: SendDeps,
 ): Promise<SendResult> {
 	const { stateDir } = deps;
+	if (deps.identity !== undefined) {
+		const hits = issueCanaryHits(rendered, deps.identity);
+		if (hits.length > 0) throw new Error(canaryRefusal(hits, "the report was not sent"));
+	}
 	const run = deps.run ?? runReportCommand;
 	const env = deps.env ?? process.env;
 	const now = deps.now ?? (() => new Date());
