@@ -31,15 +31,26 @@ import {
 	runReportSend,
 	saveReportDraft,
 	sentLine,
+	sweepReportBundles,
 	updateOutbox,
 } from "../domains/report/index.js";
+import {
+	attachBundle,
+	type BundleRequest,
+	bundleRequest,
+	formatBundleSummary,
+	printReportBundle,
+	type ReportBundleIo,
+	runReportSelftest,
+} from "./report-bundle.js";
 import { canSelect, promptSelect } from "./select.js";
 
 export const REPORT_HELP = `clio-coder report [bug|feature|question] [--title <t>] [--body-file <f> | -] [--session <id> | --last]
-                  [--bundle none|mechanics] [--consent debug|dataset] [--credit] [--dry-run] [--yes] [--json]
-                  [--on-duplicate comment|new|stop]
+                  [--bundle none|mechanics [--consent debug|dataset] [--transcript [N]] [--with-tool-output]
+                  [--anonymize-models]] [--credit] [--dry-run] [--yes] [--json] [--on-duplicate comment|new|stop]
 clio-coder report status [--json]          clio-coder report show <id> [--bundle]
 clio-coder report send <id> [--yes]        clio-coder report forget <id>
+clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
 
 report files a bug, a feature request or a question with Clio Coder's maintainers
@@ -51,11 +62,17 @@ $EDITOR opens a template. --last uses the newest session in this directory and
 --session a named one, to add what Clio observed. --dry-run stops after the
 preview and makes no network call. When the search finds an open report of the
 same problem, a terminal asks; with --yes, --on-duplicate decides (default stop:
-an unattended script never comments on someone's issue). --bundle accepts only
-none until diagnostic bundles ship. Security problems go to a private advisory:
-clio-coder report security.
-Exit codes: 0 sent, opened, written or previewed; 1 on a send failure; 2 on a usage
-error or a call outside a terminal without --yes.
+an unattended script never comments on someone's issue). Security problems go to a
+private advisory: clio-coder report security.
+--bundle mechanics builds a diagnostic bundle of the session's telemetry, with the
+consent given by --consent (debug by default; dataset adds use in evaluation data).
+--transcript adds the last N turns (3, at most 10) scrubbed and without thinking;
+tool arguments and output stay out unless --with-tool-output. The bundle stays on
+this machine: show <id> --bundle prints every byte of it and forget deletes it.
+selftest builds that bundle for the newest session here, writes nothing, and
+says whether any of this machine's identifiers survived into it.
+Exit codes: 0 sent, opened, written or previewed; 1 on a send failure or a refused
+bundle; 2 on a usage error or a call outside a terminal without --yes.
 `;
 
 /** Everything that reaches outside the process, injectable so a test never runs `gh` or opens a browser. */
@@ -88,6 +105,7 @@ interface ComposeArgs {
 	yes: boolean;
 	json: boolean;
 	onDuplicate: DuplicateChoice | null;
+	bundle: BundleRequest | null;
 }
 
 type ReportArgs =
@@ -96,12 +114,27 @@ type ReportArgs =
 	| { verb: "show"; id: string; bundle: boolean }
 	| { verb: "send"; id: string; yes: boolean; dryRun: boolean; json: boolean; onDuplicate: DuplicateChoice | null }
 	| { verb: "forget"; id: string }
+	| { verb: "selftest"; session: string | null; request: BundleRequest }
 	| { verb: "security" }
 	| { verb: "help" };
 
 const KINDS: ReadonlyArray<ReportKind> = ["bug", "feature", "question"];
 const DUPLICATE_CHOICES: ReadonlyArray<DuplicateChoice> = ["comment", "new", "stop"];
 const VALUE_FLAGS = new Set(["--title", "--body-file", "--session", "--bundle", "--consent", "--on-duplicate"]);
+/** Flags whose value may be left out: `show <id> --bundle` and a bare `--transcript` (3 turns). */
+const OPTIONAL_VALUE = new Map([
+	["--bundle", (next: string) => !next.startsWith("-")],
+	["--transcript", (next: string) => /^[0-9]+$/u.test(next)],
+]);
+const BOOLEAN_FLAGS = [
+	"--last",
+	"--credit",
+	"--dry-run",
+	"--yes",
+	"--json",
+	"--with-tool-output",
+	"--anonymize-models",
+];
 
 function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 	if (argv.includes("--help") || argv.includes("-h")) return { verb: "help" };
@@ -116,25 +149,29 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		} else if (arg.startsWith("--")) {
 			const eq = arg.indexOf("=");
 			const name = eq > 0 ? arg.slice(0, eq) : arg;
-			if (VALUE_FLAGS.has(name)) {
+			const optional = OPTIONAL_VALUE.get(name);
+			if (optional !== undefined && eq < 0) {
+				const next = argv[i + 1];
+				if (values.has(name)) return `${name} was given twice`;
+				values.set(name, next !== undefined && optional(next) ? (argv[++i] ?? "") : "");
+			} else if (VALUE_FLAGS.has(name) || optional !== undefined) {
 				const value = eq > 0 ? arg.slice(eq + 1) : argv[++i];
 				if (value === undefined || value === "") return `${name} needs a value`;
 				if (values.has(name)) return `${name} was given twice`;
 				values.set(name, value);
-			} else if (["--last", "--credit", "--dry-run", "--yes", "--json"].includes(name) && eq < 0) flags.add(name);
+			} else if (BOOLEAN_FLAGS.includes(name) && eq < 0) flags.add(name);
 			else return `unknown option ${arg}`;
 		} else positionals.push(arg);
 	}
 	const bundle = values.get("--bundle");
-	if (bundle !== undefined && bundle !== "none") {
-		if (bundle === "mechanics") return "--bundle accepts only none until diagnostic bundles ship";
-		return `--bundle takes none or mechanics, not ${bundle}`;
-	}
-	const consent = values.get("--consent");
-	if (consent !== undefined) {
-		if (consent !== "debug" && consent !== "dataset") return `--consent takes debug or dataset, not ${consent}`;
-		return "--consent applies to a diagnostic bundle, and none can be attached yet";
-	}
+	const request = (bundleFlag: string | undefined) =>
+		bundleRequest({
+			bundle: bundleFlag,
+			consent: values.get("--consent"),
+			transcript: values.get("--transcript"),
+			withToolOutput: flags.has("--with-tool-output"),
+			anonymizeModels: flags.has("--anonymize-models"),
+		});
 	const onDuplicateValue = values.get("--on-duplicate");
 	if (onDuplicateValue !== undefined && !(DUPLICATE_CHOICES as ReadonlyArray<string>).includes(onDuplicateValue))
 		return `--on-duplicate takes comment, new or stop, not ${onDuplicateValue}`;
@@ -158,6 +195,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		case "show": {
 			const id = idOf("show");
 			if (typeof id !== "string") return id.error;
+			if (bundle !== undefined && bundle !== "") return "report show takes a bare --bundle";
 			return allow("show", []) ?? { verb: "show", id, bundle: bundle !== undefined };
 		}
 		case "send": {
@@ -179,6 +217,21 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 			if (typeof id !== "string") return id.error;
 			return allow("forget", []) ?? { verb: "forget", id };
 		}
+		case "selftest": {
+			if (rest.length > 0) return "usage: clio-coder report selftest [--session <id>]";
+			if (bundle !== undefined) return "--bundle does not apply to report selftest; it always builds one";
+			const used = allow("selftest", [
+				"--session",
+				"--consent",
+				"--transcript",
+				"--with-tool-output",
+				"--anonymize-models",
+			]);
+			if (used !== null) return used;
+			const selftest = request("mechanics");
+			if (typeof selftest === "string") return selftest;
+			return { verb: "selftest", session: values.get("--session") ?? null, request: selftest as BundleRequest };
+		}
 		case "security":
 			if (rest.length > 0) return "usage: clio-coder report security";
 			return allow("security", []) ?? { verb: "security" };
@@ -187,6 +240,10 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		return `unknown report kind or verb: ${verb}`;
 	if (rest.length > 0) return `unexpected argument: ${rest[0]} (quote the title and pass it with --title)`;
 	if (values.has("--session") && flags.has("--last")) return "--session and --last cannot be combined";
+	const attach = request(bundle);
+	if (typeof attach === "string") return attach;
+	if (attach !== null && !values.has("--session") && !flags.has("--last"))
+		return "--bundle mechanics bundles a session: pass --last or --session <id>";
 	return {
 		verb: "compose",
 		kind: (verb ?? "bug") as ReportKind,
@@ -199,6 +256,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		yes: flags.has("--yes"),
 		json: flags.has("--json"),
 		onDuplicate,
+		bundle: attach,
 	};
 }
 
@@ -219,7 +277,7 @@ function fail(io: Io, message: string): void {
 const RULE = (label: string) => `----- ${label} -----\n`;
 
 /** The plain preview: destination, title, the body byte for byte between two rules, masks, actions and gates. */
-function formatReportPreview(plan: ReportPlan): string {
+function formatReportPreview(plan: ReportPlan, bundled: boolean): string {
 	const lines = [
 		`${planHeadline(plan)}; nothing sent yet`,
 		"",
@@ -230,7 +288,9 @@ function formatReportPreview(plan: ReportPlan): string {
 	const after = [
 		RULE("end of body"),
 		plan.maskSummary,
-		"No diagnostic bundle is attached.",
+		bundled
+			? "The diagnostic bundle stays on this machine; sending does not upload it."
+			: "No diagnostic bundle is attached.",
 		...(plan.credit ? ["Credit: the report block asks for credit in the release notes (credit: yes)."] : []),
 		"",
 		"Sending will, in this order:",
@@ -330,7 +390,8 @@ async function confirmAndSend(
 				2,
 			)}\n`,
 		);
-	if (!options.json) io.out(formatReportPreview(plan));
+	const bundled = Boolean(outboxEntry(io.stateDir, draft.id)?.bundle);
+	if (!options.json) io.out(formatReportPreview(plan, bundled));
 	if (options.dryRun) {
 		if (options.json) emit();
 		else io.out("dry run: nothing sent\n");
@@ -369,7 +430,7 @@ async function confirmAndSend(
 					const before = plan.masks.reduce((sum, mask) => sum + mask.count, 0);
 					draft = edited;
 					plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir });
-					io.out(formatReportPreview(plan));
+					io.out(formatReportPreview(plan, bundled));
 					const added = plan.masks.reduce((sum, mask) => sum + mask.count, 0) - before;
 					if (added > 0) io.out(`Clio masked ${added} more value${added === 1 ? "" : "s"} in your edit.\n`);
 				}
@@ -473,7 +534,26 @@ async function compose(args: ComposeArgs, io: Io): Promise<number> {
 		}
 		draft = edited;
 	}
+	if (args.bundle !== null) {
+		const built = await attachBundle(bundleIo(io), draft, args.bundle, { write: !args.dryRun });
+		if (typeof built === "string") {
+			fail(io, `no bundle was built: ${built}`);
+			return 1;
+		}
+		(args.json ? io.err : io.out)(`${formatBundleSummary(built)}\n`);
+	}
 	return confirmAndSend(draft, io, args);
+}
+
+function bundleIo(io: Io): ReportBundleIo {
+	return {
+		out: io.out,
+		err: io.err,
+		stateDir: io.stateDir,
+		cwd: io.cwd,
+		identity: () => identityFor(io),
+		...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
+	};
 }
 
 function status(io: Io, json: boolean): number {
@@ -499,7 +579,7 @@ async function show(io: Io, id: string, bundle: boolean): Promise<number> {
 		return 1;
 	}
 	if (entry !== null) io.out(`${id}  ${entry.state}${entry.url !== null ? `  ${entry.url}` : ""}\n`);
-	if (bundle) io.out("No diagnostic bundle is attached to this report.\n");
+	if (bundle) return printReportBundle(bundleIo(io), id);
 	if (draft !== null) {
 		const rendered = planReport(draft, { identity: await identityFor(io), transport: { kind: "file" } }).rendered;
 		io.out(
@@ -569,6 +649,7 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 		cwd: deps.cwd ?? process.cwd(),
 		deps,
 	};
+	sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
 	try {
 		switch (args.verb) {
 			case "compose":
@@ -581,6 +662,8 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 				return await sendSaved(io, args);
 			case "forget":
 				return forget(io, args.id);
+			case "selftest":
+				return await runReportSelftest(bundleIo(io), args);
 			case "security":
 				return security(io);
 		}

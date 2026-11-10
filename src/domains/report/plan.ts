@@ -1,4 +1,5 @@
 import { isFixedPoint, type RenderedReport, renderReport } from "./body.js";
+import { deleteReportBundle } from "./bundle.js";
 import {
 	applyVerdict,
 	findRelated,
@@ -37,7 +38,7 @@ export interface ReportPlan {
 	maskSummary: string;
 	/** The network actions sending takes, in order, as sentences. */
 	actions: string[];
-	/** No diagnostic bundle until R-17. */
+	/** The issue never carries a bundle: a bundle stays on this machine until R-18 uploads one. */
 	bundle: null;
 	consent: "none";
 	credit: boolean;
@@ -325,7 +326,6 @@ export async function runReportSend(
 		kind: final.kind,
 		title: finalRendered.title,
 		consent: "none",
-		bundle: null,
 		credit: final.credit === true,
 	};
 	if (result.status === "commented" || result.status === "reacted")
@@ -412,6 +412,7 @@ export function forgetReport(stateDir: string, id: string): { ok: true } | { ok:
 			reason: `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}. Clio cannot withdraw a public report; edit or close it on GitHub.`,
 		};
 	if (entry === null && readReportDraft(stateDir, id) === null) return { ok: false, reason: `no report ${id}` };
+	deleteReportBundle(stateDir, id);
 	deleteReportDraft(stateDir, id);
 	if (entry !== null) updateOutbox(stateDir, id, { kind: entry.kind, title: entry.title, state: "withdrawn" });
 	return { ok: true };

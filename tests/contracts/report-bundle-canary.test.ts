@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Value } from "typebox/value";
+import { type ReportCliDeps, runReport } from "../../src/cli/report.js";
 import { printReportBundle, runReportSelftest } from "../../src/cli/report-bundle.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { JournalEventName } from "../../src/core/telemetry/events.js";
@@ -19,6 +20,7 @@ import {
 	outboxEntry,
 	REPORT_BUNDLE_ENVELOPE_SCHEMA,
 	type ReportBundleEnvelope,
+	type ReportCommandRunner,
 	type ReportDraft,
 	reportBundlePath,
 	scrubText,
@@ -549,6 +551,84 @@ test("a canary in a member, or no consent, builds no bundle; selftest says which
 			/^0 identifiers found in \d+ bytes \(report\.json, telemetry\.tar\.gz; \d+ telemetry records\)\n$/u,
 		);
 		ok(!existsSync(join(clean, "reports", "bundles")));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("report --bundle mechanics attaches a bundle that send keeps, show prints and forget deletes (R-17 wiring)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-bundle-cli-"));
+	try {
+		const stateDir = join(root, "state");
+		await liveSession(stateDir, "ses_cli");
+		const bodyFile = join(root, "body.md");
+		writeFileSync(bodyFile, "The footer flickered on every keystroke while a long turn streamed tool output.");
+		let out = "";
+		let err = "";
+		const run: ReportCommandRunner = async (file, args) => {
+			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
+			if (file === "git") return { exitCode: 1, stdout: "", stderr: "not a repository", timedOut: false };
+			if (args[0] === "auth") return reply("");
+			if (args.includes("user")) return reply("octo\n");
+			if (args.includes("search/issues")) return reply("[]");
+			if (args.some((arg) => arg.endsWith("releases/latest"))) return reply("v0.0.1\n");
+			if (args[0] === "issue" && args[1] === "create") return reply("https://github.com/iowarp/clio-coder/issues/452\n");
+			return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+		};
+		const deps: ReportCliDeps = {
+			run,
+			findGh: () => "/usr/bin/gh",
+			browserAvailable: () => false,
+			env: {},
+			interactive: false,
+			stdout: (text) => {
+				out += text;
+			},
+			stderr: (text) => {
+				err += text;
+			},
+			cwd: root,
+			stateDir,
+			identitySettings: {},
+			changelog: null,
+		};
+		const report = (...extra: string[]) =>
+			runReport(["bug", "--title", "fix: x fails on y", "--body-file", bodyFile, "--session", "ses_cli", ...extra], deps);
+		const idIn = (text: string) => /bundles\/(rpt_[0-9A-Z]{26})\.tar\.gz/u.exec(text)?.[1] ?? "";
+
+		strictEqual(await report("--bundle", "mechanics", "--transcript", "--dry-run"), 0);
+		ok(out.includes("Transcript: the last 2 of 2 turns, tool arguments and output left out"), out);
+		ok(out.includes("Not saved: nothing was written."));
+		ok(!existsSync(join(stateDir, "reports", "bundles")));
+
+		out = "";
+		strictEqual(await report("--bundle", "mechanics", "--consent", "dataset", "--yes"), 0);
+		const sent = idIn(out);
+		ok(out.includes("The diagnostic bundle stays on this machine; sending does not upload it."), out);
+		const entry = outboxEntry(stateDir, sent);
+		strictEqual(entry?.state, "sent");
+		deepStrictEqual(entry?.bundle?.scopes, ["debug", "dataset"]);
+		out = "";
+		strictEqual(await runReport(["show", sent, "--bundle"], deps), 0);
+		ok(out.startsWith(`${sent}  sent  `) && out.includes(`\nbundle sha256 ${entry?.bundle?.sha256}, `), out);
+
+		out = "";
+		strictEqual(await report("--bundle", "mechanics"), 2);
+		const draft = idIn(out);
+		ok(existsSync(reportBundlePath(stateDir, draft)));
+		strictEqual(await runReport(["forget", draft], deps), 0);
+		ok(!existsSync(reportBundlePath(stateDir, draft)));
+
+		err = "";
+		strictEqual(await runReport(["bug", "--body-file", bodyFile, "--bundle", "mechanics"], deps), 2);
+		ok(err.includes("--bundle mechanics bundles a session: pass --last or --session <id>"));
+		strictEqual(await report("--transcript", "4"), 2);
+		ok(err.includes("--transcript applies only with --bundle mechanics"));
+		strictEqual(await runReport(["selftest", "--session", "ses_cli", "--transcript", "11"], deps), 2);
+		ok(err.includes("--transcript takes 1 to 10 turns, not 11"));
+		out = "";
+		strictEqual(await runReport(["selftest", "--session", "ses_cli", "--anonymize-models"], deps), 0);
+		match(out, /^0 identifiers found in \d+ bytes/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
