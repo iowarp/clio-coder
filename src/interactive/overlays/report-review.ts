@@ -56,8 +56,16 @@ export interface ReportReviewOptions {
 	edit(draft: ReportDraft): ReportDraft | null;
 	/** False while the host is still learning how the report would go; `s` waits for it. Absent means ready. */
 	ready?(): boolean;
-	/** Send exactly the reviewed text. Only `s` on the send step calls it, and only once. */
-	send(draft: ReportDraft, plan: ReportPlan, choose: ChooseDuplicate): Promise<ReportFlowOutcome>;
+	/**
+	 * Send exactly the reviewed text. Only `s` on the send step calls it, and only once. `replyCheck` is the send
+	 * step's tick: check the filed issue for a maintainer's reply once a day. Off unless ticked.
+	 */
+	send(
+		draft: ReportDraft,
+		plan: ReportPlan,
+		choose: ChooseDuplicate,
+		choices: { replyCheck: boolean },
+	): Promise<ReportFlowOutcome>;
 	/** Esc on review: the host keeps the draft and closes the review. */
 	onCancel(draft: ReportDraft, plan: ReportPlan): void;
 	/** The send settled: the host closes the review and leaves a line in the transcript. */
@@ -111,6 +119,7 @@ const HINTS: Readonly<Record<ReportReviewStep, ReadonlyArray<HintEntry>>> = {
 	send: [
 		{ key: "s", verb: "send", critical: true },
 		{ key: "c", verb: "credit me", short: "credit" },
+		{ key: "r", verb: "check for replies daily", short: "replies" },
 		{ key: "Esc", verb: "back", critical: true },
 	],
 	sending: [],
@@ -163,6 +172,9 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 	} | null = null;
 	let finished: ReportReviewDone | null = null;
 	let sent = false;
+	let replyCheck = false;
+	// The check reads the filed issue through the reporter's gh; a browser, a file or a discussion has nothing to read.
+	const canCheckReplies = (): boolean => plan.postedAs.startsWith("posted") && draft.kind !== "question";
 	// Every mask seen in this review, so one the operator let through stays listed and can be masked again.
 	const known = new Map<string, ReportMask>();
 	const remember = (): void => {
@@ -197,7 +209,7 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 			go("done");
 		};
 		Promise.resolve()
-			.then(() => options.send(draft, plan, choose))
+			.then(() => options.send(draft, plan, choose, { replyCheck: replyCheck && canCheckReplies() }))
 			.then(
 				(outcome) => settle({ kind: "outcome", outcome }),
 				(error: unknown) =>
@@ -273,6 +285,9 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 				if (matchesKey(data, "s")) startSend();
 				else if (matchesKey(data, "c")) {
 					replan({ ...draft, credit: draft.credit !== true });
+					options.requestRender();
+				} else if (matchesKey(data, "r")) {
+					if (canCheckReplies()) replyCheck = !replyCheck;
 					options.requestRender();
 				} else if (matchesKey(data, "escape")) go("attach");
 				return;
@@ -373,6 +388,12 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 					...plan.actions.flatMap((action, index) => wrapTextWithAnsi(`  ${index + 1}. ${action}`, w)),
 					"",
 					...wrapTextWithAnsi(`  [${plan.credit ? "x" : " "}] Credit ${login} in the release notes when this is fixed`, w),
+					...(canCheckReplies()
+						? wrapTextWithAnsi(
+								`  [${replyCheck ? "x" : " "}] Check this issue once a day for a maintainer's reply, using your gh`,
+								w,
+							)
+						: []),
 					...(plan.rateWarning !== null ? warn(plan.rateWarning) : []),
 					...(step === "send" && !ready() ? note(`Checking how this report would be sent${GLYPH.ellipsis}`) : []),
 				];
@@ -432,7 +453,8 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 		hints: () => {
 			if (step === "review" && plan.gates.length > 0) return HINTS.review.filter((hint) => hint.key !== "Enter");
 			if (step === "review" && known.size === 0) return HINTS.review.filter((hint) => hint.key !== "m");
-			if (step === "send" && !ready()) return HINTS.send.filter((hint) => hint.key !== "s");
+			if (step === "send")
+				return HINTS.send.filter((hint) => (hint.key !== "s" || ready()) && (hint.key !== "r" || canCheckReplies()));
 			return [...HINTS[step]];
 		},
 		render,

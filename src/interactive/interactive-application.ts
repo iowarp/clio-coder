@@ -2574,6 +2574,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			const runningVersion = readClioVersion();
 			updateTimer = setTimeout(() => {
 				if (updateAbort.signal.aborted) return;
+				// The reply check reads only reports whose reporter ticked it, at most once a day (R-14).
+				void import("../domains/report/index.js")
+					.then(({ runReplyCheck }) => runReplyCheck(deps.stateDir))
+					.then((lines) => {
+						if (updateAbort.signal.aborted) return;
+						for (const [index, text] of lines.entries())
+							notifications.add({ level: "info", key: `report:reply:${index}`, text });
+					})
+					.catch(() => {});
 				void import("./update-monitor.js")
 					.then(({ startUpdateMonitor }) => {
 						if (updateAbort.signal.aborted) return;

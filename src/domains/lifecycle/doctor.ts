@@ -24,6 +24,7 @@ import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
+import { readPackagedChangelog, reportsDoctorDetail } from "../report/index.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { loadSessionTelemetrySource } from "../session/telemetry-source.js";
 import { workspaceTelemetryCapture } from "../telemetry/consent.js";
@@ -743,8 +744,25 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	const cacheTelemetry = latestSessionCacheFinding(dirs.state);
 	if (cacheTelemetry !== null) findings.push(cacheTelemetry);
 	findings.push(telemetryModeFinding(dirs.state, process.cwd()));
+	const reports = reportsFinding(dirs.state);
+	if (reports !== null) findings.push(reports);
 
 	return findings;
+}
+
+/** INFO only, never a failure: what this machine reported and which of it a release fixed, read from disk (R-14). */
+function reportsFinding(stateDir: string): DoctorFinding | null {
+	try {
+		const detail = reportsDoctorDetail(stateDir, readPackagedChangelog());
+		return detail === null ? null : { ok: true, level: "info", name: "reports", detail };
+	} catch (error) {
+		return {
+			ok: true,
+			level: "info",
+			name: "reports",
+			detail: `outbox unreadable: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
 }
 
 /** The mode, the capture it yields here, and this workspace's consent, as a session in this directory sees them (#434). */

@@ -1131,7 +1131,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Once per version, interactive only: headless and ACP have no operator at
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
-	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
+	if (upgrade !== null) {
+		initialNotices.push(describeUpgradeNotice(upgrade));
+		// No network: the packaged changelog says whether this upgrade fixes something the operator reported (R-14).
+		const { takeFixedReportNotices } = await import("../domains/report/index.js");
+		initialNotices.push(...takeFixedReportNotices(clioStateDir(), upgrade));
+	}
 	if (interactive) initialNotices.push(...takePendingMigrationNotices());
 	// One notice per conversion; a surface with no operator at the keyboard gets it on stderr.
 	for (const conversion of bootConversions) {

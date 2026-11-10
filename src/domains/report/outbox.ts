@@ -115,6 +115,15 @@ export function updateOutbox(
 		const document = readDocument(path) ?? { version: 1, reports: {} };
 		const entry: OutboxEntry = { ...defaults(patch.kind, patch.title), ...document.reports[id], ...patch };
 		document.reports[id] = entry;
+		// A report closed and sent over a year ago has nothing left to follow; it is dropped on the next write.
+		const cutoff = Date.now() - 365 * DAY_MS;
+		for (const [key, other] of Object.entries(document.reports))
+			if (
+				other.lastSeen?.state.toUpperCase().startsWith("CLOSED") &&
+				other.sentAt !== null &&
+				Date.parse(other.sentAt) < cutoff
+			)
+				delete document.reports[key];
 		safeResourceWrite(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
 		return entry;
 	});

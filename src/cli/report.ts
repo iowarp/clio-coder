@@ -24,6 +24,7 @@ import {
 	type ReportPlanTransport,
 	type ReportTransport,
 	readReportDraft,
+	refreshReportStatus,
 	relatedLine,
 	reportEditTemplate,
 	reportRows,
@@ -48,8 +49,10 @@ import { canSelect, promptSelect } from "./select.js";
 export const REPORT_HELP = `clio-coder report [bug|feature|question] [--title <t>] [--body-file <f> | -] [--session <id> | --last]
                   [--bundle none|mechanics [--consent debug|dataset] [--transcript [N]] [--with-tool-output]
                   [--anonymize-models]] [--credit] [--dry-run] [--yes] [--json] [--on-duplicate comment|new|stop]
+                  [--reply-check]
 clio-coder report status [--json]          clio-coder report show <id> [--bundle]
-clio-coder report send <id> [--yes]        clio-coder report forget <id>
+clio-coder report send <id> [--yes] [--reply-check]
+clio-coder report forget <id>
 clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
 
@@ -62,8 +65,10 @@ $EDITOR opens a template. --last uses the newest session in this directory and
 --session a named one, to add what Clio observed. --dry-run stops after the
 preview and makes no network call. When the search finds an open report of the
 same problem, a terminal asks; with --yes, --on-duplicate decides (default stop:
-an unattended script never comments on someone's issue). Security problems go to a
-private advisory: clio-coder report security.
+an unattended script never comments on someone's issue). --reply-check lets an
+attended session check the filed issue once a day for a maintainer's reply (off
+unless asked). status asks GitHub, through your gh, where each open report stands.
+Security problems go to a private advisory: clio-coder report security.
 --bundle mechanics builds a diagnostic bundle of the session's telemetry, with the
 consent given by --consent (debug by default; dataset adds use in evaluation data).
 --transcript adds the last N turns (3, at most 10) scrubbed and without thinking;
@@ -106,13 +111,22 @@ interface ComposeArgs {
 	json: boolean;
 	onDuplicate: DuplicateChoice | null;
 	bundle: BundleRequest | null;
+	replyCheck: boolean;
 }
 
 type ReportArgs =
 	| ComposeArgs
 	| { verb: "status"; json: boolean }
 	| { verb: "show"; id: string; bundle: boolean }
-	| { verb: "send"; id: string; yes: boolean; dryRun: boolean; json: boolean; onDuplicate: DuplicateChoice | null }
+	| {
+			verb: "send";
+			id: string;
+			yes: boolean;
+			dryRun: boolean;
+			json: boolean;
+			onDuplicate: DuplicateChoice | null;
+			replyCheck: boolean;
+	  }
 	| { verb: "forget"; id: string }
 	| { verb: "selftest"; session: string | null; request: BundleRequest }
 	| { verb: "security" }
@@ -134,6 +148,7 @@ const BOOLEAN_FLAGS = [
 	"--json",
 	"--with-tool-output",
 	"--anonymize-models",
+	"--reply-check",
 ];
 
 function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
@@ -202,13 +217,14 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 			const id = idOf("send");
 			if (typeof id !== "string") return id.error;
 			return (
-				allow("send", ["--yes", "--dry-run", "--json", "--on-duplicate"]) ?? {
+				allow("send", ["--yes", "--dry-run", "--json", "--on-duplicate", "--reply-check"]) ?? {
 					verb: "send",
 					id,
 					yes: flags.has("--yes"),
 					dryRun: flags.has("--dry-run"),
 					json: flags.has("--json"),
 					onDuplicate,
+					replyCheck: flags.has("--reply-check"),
 				}
 			);
 		}
@@ -257,6 +273,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		json: flags.has("--json"),
 		onDuplicate,
 		bundle: attach,
+		replyCheck: flags.has("--reply-check"),
 	};
 }
 
@@ -364,7 +381,7 @@ function saveDraft(io: Io, draft: ReportDraft, title: string): void {
 async function confirmAndSend(
 	initial: ReportDraft,
 	io: Io,
-	options: { dryRun: boolean; yes: boolean; json: boolean; onDuplicate: DuplicateChoice | null },
+	options: { dryRun: boolean; yes: boolean; json: boolean; onDuplicate: DuplicateChoice | null; replyCheck: boolean },
 ): Promise<number> {
 	const identity = await identityFor(io);
 	let transport: ReportTransport | null = null;
@@ -451,6 +468,7 @@ async function confirmAndSend(
 		env: io.env,
 		...(io.deps.open !== undefined ? { open: io.deps.open } : {}),
 		...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
+		replyCheck: options.replyCheck,
 		related: {
 			...(io.deps.changelog !== undefined ? { changelog: io.deps.changelog } : {}),
 			...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
@@ -556,8 +574,14 @@ function bundleIo(io: Io): ReportBundleIo {
 	};
 }
 
-function status(io: Io, json: boolean): number {
-	const rows = reportRows(io.stateDir).map(({ id, kind, title, state, url }) => ({ id, kind, title, state, url }));
+async function status(io: Io, json: boolean): Promise<number> {
+	const gh = await refreshReportStatus(io.stateDir, {
+		findGh: await loadFindGh(io.deps),
+		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+		env: io.env,
+		...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
+	});
+	const rows = reportRows(io.stateDir);
 	if (json) {
 		io.out(`${JSON.stringify({ reports: rows }, null, 2)}\n`);
 		return 0;
@@ -566,8 +590,18 @@ function status(io: Io, json: boolean): number {
 		io.out("no reports yet; clio-coder report bug starts one\n");
 		return 0;
 	}
-	for (const row of rows)
+	for (const row of rows) {
 		io.out(`${row.id}  ${row.state.padEnd(9)}  ${row.kind.padEnd(8)}  ${row.title}${row.url ? `  ${row.url}` : ""}\n`);
+		const facts = [
+			row.bundle ? `bundle, consent ${row.consent}` : "no bundle",
+			`credit ${row.credit ? "yes" : "no"}`,
+			...(row.state === "sent" ? [`reply check ${row.replyCheck ? "on" : "off"}`] : []),
+			...(row.lastSeen !== null ? [`GitHub: ${row.lastSeen}`] : []),
+		];
+		io.out(`    ${facts.join(" · ")}\n`);
+	}
+	if (!gh && rows.some((row) => row.state === "sent"))
+		io.out("gh is not on this machine, so this is the state stored when each report was sent.\n");
 	return 0;
 }
 
@@ -591,7 +625,14 @@ async function show(io: Io, id: string, bundle: boolean): Promise<number> {
 
 async function sendSaved(
 	io: Io,
-	args: { id: string; yes: boolean; dryRun: boolean; json: boolean; onDuplicate: DuplicateChoice | null },
+	args: {
+		id: string;
+		yes: boolean;
+		dryRun: boolean;
+		json: boolean;
+		onDuplicate: DuplicateChoice | null;
+		replyCheck: boolean;
+	},
 ): Promise<number> {
 	const entry = outboxEntry(io.stateDir, args.id);
 	if (entry !== null && (entry.state === "sent" || entry.state === "withdrawn")) {
@@ -655,7 +696,7 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 			case "compose":
 				return await compose(args, io);
 			case "status":
-				return status(io, args.json);
+				return await status(io, args.json);
 			case "show":
 				return await show(io, args.id, args.bundle);
 			case "send":

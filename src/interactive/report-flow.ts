@@ -23,12 +23,14 @@ import {
 	type ReportSessionFacts,
 	type ReportTransport,
 	readReportDraft,
+	refreshReportStatus,
 	reportEditTemplate,
 	reportRows,
 	routeFor,
 	runReportSend,
 	saveReportDraft,
 	sentLine,
+	setReplyCheck,
 	updateOutbox,
 } from "../domains/report/index.js";
 import type { TUI } from "../engine/tui.js";
@@ -132,13 +134,14 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			plan: (current) => planReport(current, { identity, transport: shown, stateDir: deps.stateDir }),
 			ready: () => detected !== null,
 			edit,
-			send: (current, plan, choose) => {
+			send: (current, plan, choose, choices) => {
 				if (detected === null) throw new Error("still checking how to send");
 				return runReportSend(current, plan.rendered, {
 					stateDir: deps.stateDir,
 					identity,
 					transport: detected,
 					env,
+					replyCheck: choices.replyCheck,
 					chooseDuplicate: choose,
 				});
 			},
@@ -213,7 +216,7 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 		start(() => review(draft));
 	}
 
-	function status(): void {
+	function status(options: { refresh?: boolean } = {}): void {
 		const refused = refusal(deps.transitions);
 		if (refused !== null) {
 			deps.notify("warning", `report: ${refused}`, "report:refused");
@@ -221,7 +224,7 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 		}
 		const rows = reportRows(deps.stateDir);
 		deps.transitions.state = "report-status";
-		deps.transitions.handle = openListOverlay(deps.tui, {
+		const handle = openListOverlay(deps.tui, {
 			markerId: "report-status",
 			title: "Your reports",
 			unit: "reports",
@@ -238,19 +241,48 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 					...(row.url !== null ? [`url: ${row.url}`] : []),
 					`consented to: ${row.consent === "none" ? "the public text only; no bundle" : row.consent}`,
 					`credit: ${row.credit ? "yes" : "no"}`,
+					...(row.state === "sent" ? [`reply check: ${row.replyCheck ? "on, once a day" : "off"}`] : []),
+					...(row.lastSeen !== null ? [`GitHub: ${row.lastSeen}`] : []),
 					`id: ${row.id}`,
 					...(row.state === "draft" ? ["", "Enter reviews it; /report forget <id> deletes it."] : []),
+					...(row.replyCheck ? ["", "r turns the daily reply check off."] : []),
 				],
 				detailFormat: "rows" as const,
 			})),
-			hints: (selected) =>
-				selected?.meta === "draft" ? [{ key: "Enter", verb: "review and send", short: "review", critical: true }] : [],
+			hints: (selected) => [
+				...(selected?.meta === "draft" ? [{ key: "Enter", verb: "review and send", short: "review", critical: true }] : []),
+				...(selected !== undefined && rows.find((row) => row.id === selected.id)?.replyCheck
+					? [{ key: "r", verb: "stop checking for replies", short: "no replies" }]
+					: []),
+			],
+			actions: {
+				r: (item) => {
+					if (!rows.find((row) => row.id === item.id)?.replyCheck) return;
+					setReplyCheck(deps.stateDir, item.id, false);
+					deps.notify("info", `report: no more reply checks for ${item.id}`, "report:reply-check");
+					deps.transitions.close();
+					status({ refresh: false });
+				},
+			},
 			onSelect: (item) => {
 				if (item.meta !== "draft") return;
 				deps.transitions.close();
 				open({ kind: "draft", draftId: item.id });
 			},
 			onClose: () => deps.transitions.close(),
+		});
+		deps.transitions.handle = handle;
+		if (options.refresh === false) return;
+		// The operator asked, so this reads GitHub with no further consent; the list reopens with what it said.
+		void (async () => {
+			const gh = await findGh();
+			if (gh === null || !rows.some((row) => row.state === "sent")) return;
+			await refreshReportStatus(deps.stateDir, { findGh: () => gh, env });
+			if (deps.transitions.handle !== handle) return;
+			deps.transitions.close();
+			status({ refresh: false });
+		})().catch(() => {
+			// The stored state is already on screen; a failed read leaves it there.
 		});
 	}
 
@@ -264,5 +296,5 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			);
 	}
 
-	return { open, status, forget };
+	return { open, status: () => status(), forget };
 }

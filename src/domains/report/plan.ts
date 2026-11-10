@@ -301,6 +301,8 @@ export interface ReportFlowDeps extends SendDeps {
 	identity: LocalIdentity;
 	transport: ReportTransport;
 	related?: RelatedDeps;
+	/** The reporter ticked the daily reply check for this report (R-14); off unless asked. */
+	replyCheck?: boolean;
 	/** Asked only when the search found an open match or a fix in a newer version. */
 	chooseDuplicate: (
 		verdict: RelatedVerdict,
@@ -345,11 +347,13 @@ export async function runReportSend(
 			? { kind: "comment" as const, number: verdict.issue.number, body: renderComment(finalRendered, final) }
 			: { kind: "create" as const };
 	const result = await sendReport(finalRendered, route, deps.transport, action, deps);
+	const filed = result.status === "sent" || result.status === "commented" || result.status === "reacted";
 	const facts = {
 		kind: final.kind,
 		title: finalRendered.title,
 		consent: "none",
 		credit: final.credit === true,
+		...(deps.replyCheck === true && filed ? { replyCheck: (deps.now ?? (() => new Date()))().toISOString() } : {}),
 	};
 	if (result.status === "commented" || result.status === "reacted")
 		updateOutbox(deps.stateDir, final.id, {
@@ -395,6 +399,11 @@ export interface ReportRow {
 	url: string | null;
 	consent: string;
 	credit: boolean;
+	bundle: boolean;
+	/** On when the reporter asked Clio to check for replies once a day. */
+	replyCheck: boolean;
+	/** What GitHub last said about it: "OPEN, 2 comments, checked <time>". */
+	lastSeen: string | null;
 }
 
 /** Every report on this machine, newest first. */
@@ -408,6 +417,12 @@ export function reportRows(stateDir: string): ReportRow[] {
 		url: entry.url,
 		consent: entry.consent,
 		credit: entry.credit,
+		bundle: entry.bundle !== null,
+		replyCheck: Boolean(entry.replyCheck),
+		lastSeen:
+			entry.lastSeen !== null
+				? `${entry.lastSeen.state}, ${entry.lastSeen.comments} comment${entry.lastSeen.comments === 1 ? "" : "s"}, checked ${entry.lastSeen.at}`
+				: null,
 	}));
 	for (const id of listReportDrafts(stateDir)) {
 		if (outbox[id] !== undefined) continue;
@@ -421,6 +436,9 @@ export function reportRows(stateDir: string): ReportRow[] {
 				url: null,
 				consent: "none",
 				credit: draft.credit === true,
+				bundle: false,
+				replyCheck: false,
+				lastSeen: null,
 			});
 	}
 	return rows.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));

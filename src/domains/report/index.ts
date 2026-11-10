@@ -75,6 +75,20 @@ export {
 	startReportOfferWatcher,
 } from "./extension.js";
 export { crashFrames, minorVersion, reportFingerprint } from "./fingerprint.js";
+export {
+	type FixedReport,
+	type FollowUpDeps,
+	fixedReports,
+	followUpDisabled,
+	type IssueStatus,
+	readIssueStatus,
+	readPackagedChangelog,
+	refreshReportStatus,
+	reportsDoctorDetail,
+	runReplyCheck,
+	setReplyCheck,
+	takeFixedReportNotices,
+} from "./follow-up.js";
 export { observeSession, type ReportObservation, renderObservation } from "./observe.js";
 export {
 	createOfferTriggers,
