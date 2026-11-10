@@ -21,6 +21,7 @@ import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { releaseStateLocksOwnedBy, type StateLockOwner } from "../core/state-file-lock.js";
 import { clioStateDir } from "../core/xdg.js";
 import { releaseCapacityLeasesOwnedBy } from "../domains/dispatch/capacity-lease.js";
+import { expireDispatchReservationsOwnedBy } from "../domains/dispatch/reservation-store.js";
 import {
 	currentRequester,
 	formatAge,
@@ -266,7 +267,7 @@ async function runTerminate(args: ReadonlyArray<string>): Promise<number> {
 		}
 		const why = owner === "gone" ? "pid gone" : `stale heartbeat ${age}`;
 		const released = await releaseSession(view, why);
-		const freed = `freed ${released.capacityLeases} capacity lease(s), ${released.stateLocks.length} state lock(s), ${released.fleetLocks.length} fleet lock(s), ${released.checkoutLeases.length} checkout lease(s)`;
+		const freed = `freed ${released.capacityLeases} capacity lease(s), ${released.reservations} reservation(s), ${released.stateLocks.length} state lock(s), ${released.fleetLocks.length} fleet lock(s), ${released.checkoutLeases.length} checkout lease(s)`;
 		if (released.refused !== undefined) {
 			return emit({ ...base, action: "refused", message: released.refused, released }, json, 2);
 		}
@@ -356,6 +357,7 @@ async function waitForRecordGone(id: string, pid: number): Promise<boolean> {
 
 interface ReleaseResult {
 	capacityLeases: number;
+	reservations: number;
 	stateLocks: string[];
 	fleetLocks: string[];
 	checkoutLeases: string[];
@@ -376,6 +378,7 @@ async function releaseSession(view: LiveSessionView, reason: string): Promise<Re
 	const owner: StateLockOwner = { host: record.host, pid: record.pid, birth: record.birth };
 	const result: ReleaseResult = {
 		capacityLeases: 0,
+		reservations: 0,
 		stateLocks: [],
 		fleetLocks: [],
 		checkoutLeases: [],
@@ -430,6 +433,9 @@ async function releaseSession(view: LiveSessionView, reason: string): Promise<Re
 	});
 	await step("capacity leases", async () => {
 		result.capacityLeases = await releaseCapacityLeasesOwnedBy(owner);
+	});
+	await step("reservations", () => {
+		result.reservations = expireDispatchReservationsOwnedBy(owner);
 	});
 	await step("fleet locks", () => {
 		result.fleetLocks = removeOwnedRecords(join(stateDir, "fleet-locks"), (value) => {

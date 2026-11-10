@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { hostname } from "node:os";
+import { processBirthToken, processIdentityAlive } from "../../core/process-identity.js";
 import { withStateFileLockSection, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { AcquireCapacityLeaseInput } from "./capacity-lease.js";
@@ -20,6 +22,12 @@ import { COUNCIL_MIN_MEMBERS } from "./gate-role-prompts.js";
 
 const MAX_RESERVATION_RECORDS = 500;
 export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
+/**
+ * A reservation owned on another host cannot be probed from here, so it is
+ * reclaimed only once it is this far past its expiry. The owner refreshes the
+ * expiry as it consumes members, so only a lost node's plan gets this old.
+ */
+const FOREIGN_RESERVATION_GRACE_MS = 15 * 60_000;
 
 /**
  * `council` is carried rather than flattened into `parallel` because it is the
@@ -65,6 +73,10 @@ export interface DispatchReservationRecord {
 	ownerId: string;
 	/** Process that owns execution; startup cleanup preserves live sibling processes. */
 	ownerPid: number;
+	/** Owner host. Absent only on records written before the field existed; those are read as this host. */
+	host?: string;
+	/** Owner birth token. Absent only on records written before the field existed. */
+	processBirthToken?: string;
 	topology: ReservationTopology;
 	status: ReservationStatus;
 	createdAt: string;
@@ -118,6 +130,8 @@ function validRecord(value: unknown): value is DispatchReservationRecord {
 		typeof record.ownerPid === "number" &&
 		Number.isInteger(record.ownerPid) &&
 		record.ownerPid > 0 &&
+		(record.host === undefined || typeof record.host === "string") &&
+		(record.processBirthToken === undefined || typeof record.processBirthToken === "string") &&
 		(record.topology === "parallel" ||
 			record.topology === "detached" ||
 			record.topology === "sequential" ||
@@ -286,9 +300,12 @@ export function createDispatchReservation(input: {
 			);
 		}
 		const createdAt = new Date(nowMs).toISOString();
+		const birthToken = processBirthToken();
 		const record: DispatchReservationRecord = {
 			ownerId: `plan-${nowMs.toString(36)}-${randomBytes(6).toString("hex")}`,
 			ownerPid: process.pid,
+			host: hostname(),
+			...(birthToken !== null ? { processBirthToken: birthToken } : {}),
 			topology: input.topology,
 			status: "active",
 			createdAt,
@@ -341,6 +358,9 @@ function reservationTransferLease(input: ReservationTransferInput): AcquireCapac
 			if (member?.status !== "held") throw new Error(`dispatch: reservation member '${input.memberId}' is not held`);
 			member.status = "consumed";
 			member.consumedAt = new Date(nowMs).toISOString();
+			// Hosts that cannot probe this owner judge it by its expiry; a live plan keeps it current.
+			const refreshed = nowMs + DEFAULT_RESERVATION_TTL_MS;
+			if (refreshed > Date.parse(record.expiresAt)) record.expiresAt = new Date(refreshed).toISOString();
 			state.reservations = records.map(copyRecord);
 		},
 	};
@@ -538,14 +558,23 @@ export function rollbackUnconsumedDispatchReservation(
 	return rollbackDispatchReservation(ownerId, nowMs);
 }
 
-function reservationOwnerAlive(ownerPid: number | undefined): boolean {
-	if (ownerPid === undefined) return false;
-	try {
-		process.kill(ownerPid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
+/** True or false for an owner on this host, null for one on another host. */
+function reservationOwnerAlive(record: DispatchReservationRecord): boolean | null {
+	return processIdentityAlive({
+		host: record.host ?? hostname(),
+		pid: record.ownerPid,
+		birthToken: record.processBirthToken ?? null,
+	});
+}
+
+function expireRecord(record: DispatchReservationRecord, settledAt: string): void {
+	for (const member of record.members) {
+		if (member.status === "released") continue;
+		member.status = "released";
+		member.releasedAt = settledAt;
 	}
+	record.status = "expired";
+	record.settledAt = settledAt;
 }
 
 function expireRecords(
@@ -556,21 +585,48 @@ function expireRecords(
 	const settledAt = new Date(nowMs).toISOString();
 	for (const record of records) {
 		if (record.status !== "active") continue;
-		// A healthy collective may outlive its planning estimate. Reclaim only orphaned owners.
-		if (
-			(reservationOwnerAlive(record.ownerPid) && !(startup && record.ownerPid === process.pid)) ||
+		const alive = reservationOwnerAlive(record);
+		// On a shared state dir a local pid probe would inspect the wrong process, so neither it nor the
+		// startup sweep may judge another host's plan; only an expiry well past its estimate does.
+		if (alive === null) {
+			if (Date.parse(record.expiresAt) + FOREIGN_RESERVATION_GRACE_MS > nowMs) continue;
+		} else if (
+			// A healthy collective may outlive its planning estimate. Reclaim only orphaned owners.
+			(alive && !(startup && record.ownerPid === process.pid)) ||
 			(!startup && Date.parse(record.expiresAt) > nowMs)
 		)
 			continue;
-		for (const member of record.members) {
-			if (member.status === "released") continue;
-			member.status = "released";
-			member.releasedAt = settledAt;
-		}
-		record.status = "expired";
-		record.settledAt = settledAt;
+		expireRecord(record, settledAt);
 	}
 	return records;
+}
+
+/**
+ * Expire every active reservation owned by exactly `owner`. Another host's
+ * plan is never reclaimed early by the sweep, so `clio-coder session terminate
+ * --force` calls this, as it calls `releaseCapacityLeasesOwnedBy`, once that
+ * owner's session is known dead. A legacy record without a host reads as this host.
+ */
+export function expireDispatchReservationsOwnedBy(owner: { host: string; pid: number; birth: string | null }): number {
+	return withStateFileLockSync(capacityStateLockPath(), () => {
+		if (owner.birth === null) return 0;
+		const records = readStore();
+		const settledAt = new Date().toISOString();
+		let expired = 0;
+		for (const record of records) {
+			if (
+				record.status !== "active" ||
+				(record.host ?? hostname()) !== owner.host ||
+				record.ownerPid !== owner.pid ||
+				record.processBirthToken !== owner.birth
+			)
+				continue;
+			expireRecord(record, settledAt);
+			expired += 1;
+		}
+		if (expired > 0) writeStore(records);
+		return expired;
+	});
 }
 
 export function cleanupDispatchReservations(options?: { startup?: boolean; nowMs?: number }): number {
