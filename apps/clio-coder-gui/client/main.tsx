@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider, useRouteError } from "react-router
 import { machinePrefix } from "../contracts/pages.js";
 import { ApiProblem, createClient } from "./api/client.js";
 import { createCredentials } from "./api/credentials.js";
-import { launchToken, listenForForget } from "./api/token.js";
+import { launchSecret, listenForForget } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
@@ -17,11 +17,12 @@ import "./render/markdown.css";
 // Under /m/<id> every call goes to that node's own GUI through the app on this machine. The switcher
 // and Machines keep talking to this machine's app, so the window can always come back or move on.
 const prefix = machinePrefix(location.pathname)?.prefix ?? "";
-const token = launchToken();
+const launch = launchSecret();
+const token = launch.token ?? "";
 // One client identity per window: both clients below speak for it, and the event stream's ticket
 // comes from this machine's app even while the window drives a node.
 const credentials = createCredentials(
-	token,
+	launch,
 	fetch,
 	matchMedia("(display-mode: standalone)").matches ? "Installed app window" : "Browser window",
 );

@@ -79,11 +79,8 @@ test("background setup preserves its stable identity, starts explicitly, and rem
 	assert.equal(state.ready, true);
 	assert.equal(state.desktop, "installed");
 	assert.ok(!JSON.stringify(state).includes(config.token));
-	assert.equal(await startBackground(directory, control, ready), `http://127.0.0.1:4317/#token=${config.token}`);
-	assert.equal(
-		await tryStartBackground(directory, config.packageRoot, control, ready),
-		`http://127.0.0.1:4317/#token=${config.token}`,
-	);
+	assert.equal(await startBackground(directory, control, ready), `http://127.0.0.1:4317/`);
+	assert.equal(await tryStartBackground(directory, config.packageRoot, control, ready), `http://127.0.0.1:4317/`);
 	const beforeForeign = calls.length;
 	await assert.rejects(tryStartBackground(directory, root, control, ready), /another installation/);
 	assert.equal(calls.length, beforeForeign);
@@ -317,7 +314,7 @@ test("a bare launch reuses only this installation's verified background app and 
 	await installBackground(directory, config, control, ready);
 	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready), {
 		kind: "open",
-		url: `http://127.0.0.1:4317/#token=${config.token}`,
+		url: `http://127.0.0.1:4317/`,
 		running: "0.0.1-running",
 	});
 	assert.equal(calls.at(-1), "start");
@@ -404,7 +401,7 @@ test("a bare launch restarts this installation's idle background app when it run
 	const upgraded = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
 	assert.deepEqual(upgraded, {
 		kind: "open",
-		url: `http://127.0.0.1:4318/#token=${config.token}`,
+		url: `http://127.0.0.1:4318/`,
 		running: "0.5.7",
 		restartedFrom: "0.5.6",
 	});
@@ -413,7 +410,7 @@ test("a bare launch restarts this installation's idle background app when it run
 	running = "0.5.6";
 	idle = false;
 	const busy = await preferBackground(directory, config.packageRoot, restartTo("0.5.7"), ready, "linux", "0.5.7");
-	assert.deepEqual(busy, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.6" });
+	assert.deepEqual(busy, { kind: "open", url: `http://127.0.0.1:4318/`, running: "0.5.6" });
 	assert.notEqual(calls.at(-1), "restart");
 	// An older app that does not report idleness is treated as in use.
 	idle = undefined;
@@ -424,7 +421,7 @@ test("a bare launch restarts this installation's idle background app when it run
 	idle = true;
 	running = "0.5.7";
 	const same = await preferBackground(directory, config.packageRoot, restartTo("0.5.8"), ready, "linux", "0.5.7");
-	assert.deepEqual(same, { kind: "open", url: `http://127.0.0.1:4318/#token=${config.token}`, running: "0.5.7" });
+	assert.deepEqual(same, { kind: "open", url: `http://127.0.0.1:4318/`, running: "0.5.7" });
 	assert.notEqual(calls.at(-1), "restart");
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
@@ -463,10 +460,10 @@ test("restart --if-idle restarts only an idle background app and says why it lef
 		running: "0.5.6",
 	});
 	assert.equal(calls.at(-1), "restart");
-	// A stopped app has nothing open in it; restarting would start it, so it is left stopped.
+	// An active service whose app cannot prove the launch token (one from before 0.7.1) is never stopped unproven.
 	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, async () => null), {
 		status: "left",
-		reason: "stopped",
+		reason: "unproven",
 		running: null,
 	});
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");

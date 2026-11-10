@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { backgroundCapability } from "../../contracts/launch-capability.js";
 import { getVersionInfo, resolveClioDirs } from "../clio/http-shims.js";
-import { findLocalServer, type LocalServerMeta, waitForLocalServer } from "../local-server.js";
+import { findLocalServer, type LocalServerMeta, launchTicket, showPage, waitForLocalServer } from "../local-server.js";
 import { controlService, openApp } from "../process-policy.js";
 import {
 	type BackgroundConfig,
@@ -325,9 +325,25 @@ async function startOwned(state: Installed, control: Control, ready: Ready, acti
 	await control(action, state.files.unit, state.files.unitFile);
 	const report = serverReport(await ready(state.config.port, state.config.token));
 	return {
-		url: `http://127.0.0.1:${report.port ?? state.config.port}/#token=${state.config.token}`,
+		url: `http://127.0.0.1:${report.port ?? state.config.port}/`,
 		...report,
 	};
+}
+/**
+ * The app's address with a fresh single-use launch ticket for the browser to open. The launch token
+ * never goes into a URL: an opener's argv is readable by every local user, and the page would keep it.
+ */
+export async function ticketUrl(directory: string, url: string, mint = launchTicket) {
+	const state = await owned(directory);
+	const next = new URL(url);
+	const ticket = state.status === "installed" ? await mint(Number(next.port), state.config.token) : null;
+	if (ticket) next.hash = `ticket=${ticket}`;
+	return next.href;
+}
+/** Ask the background app's open window to show `path`. */
+export async function showBackgroundPage(directory: string, port: number, path: string) {
+	const state = await owned(directory);
+	return state.status === "installed" && showPage(port, state.config.token, path);
 }
 const publicStart = ({ url, running }: Awaited<ReturnType<typeof startOwned>>) => ({ url, running });
 export async function startBackground(
@@ -411,7 +427,11 @@ export async function restartBackgroundIfIdle(
 	let state = await owned(directory);
 	if (state.status === "absent") return { status: "absent" as const };
 	const report = serverReport(await probe(state.config.port, state.config.token));
-	if (report.running === null) return { status: "left" as const, reason: "stopped" as const, running: null };
+	if (report.running === null) {
+		// An app from before 0.7.1 cannot answer this launcher's proof; it is never stopped unproven.
+		const active = (await serviceState(state.files, control)).ActiveState === "active";
+		return { status: "left" as const, reason: active ? ("unproven" as const) : ("stopped" as const), running: null };
+	}
 	if (report.idle !== true)
 		return {
 			status: "left" as const,
@@ -598,7 +618,9 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 							? "Clio Coder background app was left running because it is busy."
 							: result.reason === "unknown"
 								? "Clio Coder background app was left running because it does not report whether it is idle."
-								: "Clio Coder background app was left stopped.";
+								: result.reason === "unproven"
+									? "Clio Coder background app is running an older version that this one cannot verify, so it was left running. Run: clio-coder gui background restart"
+									: "Clio Coder background app was left stopped.";
 			console.log(line);
 			return;
 		}
@@ -606,7 +628,8 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 		console.log(`Clio Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
 		return;
 	}
-	const { url } = await startCurrentBackground(directory, launch);
+	const { url: origin } = await startCurrentBackground(directory, launch);
+	const url = command === "open" ? await ticketUrl(directory, origin) : origin;
 	if (command === "start") {
 		console.log(`Clio Coder background app is ready at ${new URL(url).origin}.`);
 		return;

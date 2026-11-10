@@ -1,28 +1,47 @@
-export function launchToken() {
-	const token = new URLSearchParams(location.hash.slice(1)).get("token");
-	if (token) {
-		history.replaceState(null, "", location.pathname + location.search);
-		if (!/^[\w-]{1,256}$/.test(token)) return "";
-		try {
-			sessionStorage.setItem("clio-coder-token", token);
-			sessionStorage.removeItem(refusedKey);
-		} catch {
-			/* The launch link still works without browser storage. */
-		}
-		return token;
-	}
-	try {
-		return sessionStorage.getItem("clio-coder-token") ?? localStorage.getItem(rememberedTokenKey) ?? "";
-	} catch {
-		return "";
-	}
+/** What a launch link carried: a single-use launch ticket, or a launch token from a link made before 0.7.1. */
+export interface LaunchSecret {
+	ticket?: string;
+	token?: string;
 }
-export const rememberedTokenKey = "clio-coder-pwa-token";
-const refusedKey = "clio-coder-token-refused";
-/** Only a successfully authenticated background endpoint may request persistence. */
-export function rememberBrowser(token: string) {
+/**
+ * Read once and cleared from the address bar. The launch token is never stored: a reloaded or reopened
+ * window reconnects with its own expiring credential (`credentials.ts`), and a stored token from an
+ * earlier version is deleted here.
+ */
+export function launchSecret(): LaunchSecret {
+	const params = new URLSearchParams(location.hash.slice(1));
+	const ticket = params.get("ticket") ?? undefined;
+	const token = params.get("token") ?? undefined;
+	for (const drop of [
+		() => localStorage.removeItem(legacyTokenKey),
+		() => sessionStorage.removeItem("clio-coder-token"),
+	])
+		try {
+			drop();
+		} catch {
+			/* Storage may be disabled; then nothing was stored either. */
+		}
+	if (ticket === undefined && token === undefined) return {};
+	history.replaceState(null, "", location.pathname + location.search);
 	try {
-		localStorage.setItem(rememberedTokenKey, token);
+		sessionStorage.removeItem(refusedKey);
+	} catch {
+		/* The fresh link still works without browser storage. */
+	}
+	if (ticket !== undefined) return /^[\w-]{43}$/.test(ticket) ? { ticket } : {};
+	if (token === undefined || !/^[\w-]{1,256}$/.test(token)) return {};
+	console.warn("Clio Coder: #token= links are deprecated; open the app with clio-coder gui.");
+	return { token };
+}
+const legacyTokenKey = "clio-coder-pwa-token";
+/** This browser's latest live credential, which lets a reopened window open its own client while it lasts. */
+export const rememberedCredentialKey = "clio-coder-credential";
+const refusedKey = "clio-coder-token-refused";
+/** Whether this browser can keep a connection across a reopened window. */
+export function storageAvailable() {
+	try {
+		localStorage.setItem(`${rememberedCredentialKey}-probe`, "1");
+		localStorage.removeItem(`${rememberedCredentialKey}-probe`);
 		return true;
 	} catch {
 		return false;
@@ -33,7 +52,7 @@ const forgetChannel = "clio-coder-forget";
 let forgetting = false;
 /**
  * Forget this browser: every window of it signs its credential out on the server first, then drops the
- * stored launch token and its drafts and reloads to ask for a fresh link. `revoke` is the window's own
+ * remembered credential and its drafts and reloads to ask for a fresh link. `revoke` is the window's own
  * sign-out; a server that cannot be reached is not asked, and the credential lapses when it expires.
  */
 export async function forgetBrowser(revoke: () => Promise<void>, others = true) {
@@ -57,12 +76,7 @@ export async function forgetBrowser(revoke: () => Promise<void>, others = true) 
 		/* Browser storage may be disabled. */
 	}
 	try {
-		localStorage.removeItem(rememberedTokenKey);
-	} catch {
-		/* Storage may be disabled. */
-	}
-	try {
-		sessionStorage.removeItem("clio-coder-token");
+		localStorage.removeItem(rememberedCredentialKey);
 	} catch {
 		/* Storage may be disabled. */
 	}
@@ -76,8 +90,7 @@ export function listenForForget(revoke: () => Promise<void>) {
 /** A refused token is dropped at once, so a reload asks for a link instead of failing the same way again. */
 export function dropStoredToken() {
 	for (const drop of [
-		() => sessionStorage.removeItem("clio-coder-token"),
-		() => localStorage.removeItem(rememberedTokenKey),
+		() => localStorage.removeItem(rememberedCredentialKey),
 		// Survives a reload, so the page still says why it is disconnected rather than "no token yet".
 		() => sessionStorage.setItem(refusedKey, "1"),
 	])

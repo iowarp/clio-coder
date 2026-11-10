@@ -164,6 +164,7 @@ export const routes = {
 	openapi: { name: "openapi", method: "GET", path: "/api/openapi.json" },
 	authClients: { name: "authClients", method: "POST", path: "/api/auth/clients" },
 	authRotate: { name: "authRotate", method: "POST", path: "/api/auth/rotate" },
+	authLaunchTicket: { name: "authLaunchTicket", method: "POST", path: "/api/auth/launch-ticket" },
 	authRevoke: { name: "authRevoke", method: "POST", path: "/api/auth/revoke" },
 	eventTicket: { name: "eventTicket", method: "POST", path: "/api/events/ticket" },
 	events: { name: "events", method: "GET", path: "/api/events" },

@@ -1198,7 +1198,7 @@ export const routes = {
 		body: ClientBootstrap,
 		response: ClientCredential,
 		summary:
-			"Exchange the launch token for this client's own short-lived credential; the launch token opens nothing else",
+			"Open this client's own short-lived credential from a launcher's proof of the launch token, a launch ticket, or a live credential; the launch token opens nothing else",
 		...runtimeRoutes.authClients,
 	}),
 	authRotate: defineRoute({
@@ -1208,6 +1208,14 @@ export const routes = {
 		response: ClientCredential,
 		summary: "Replace this client's credential before it expires; the old one is honoured for a short grace",
 		...runtimeRoutes.authRotate,
+	}),
+	authLaunchTicket: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		response: EventTicket,
+		summary: "A single-use, short-lived ticket a launcher puts in the URL it opens instead of the launch token",
+		...runtimeRoutes.authLaunchTicket,
 	}),
 	authRevoke: defineRoute({
 		...post,

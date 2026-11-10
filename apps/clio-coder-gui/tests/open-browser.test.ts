@@ -104,7 +104,11 @@ test("--open uses the actual bound URL with its explicit token; invalid flags an
 		OPENER_LOG: log,
 	});
 	assert.equal(await s.exited, 0);
-	assert.equal(await readFile(log, "utf8"), s.launch.href);
+	// The opener's argv carries a single-use launch ticket, never the launch token (S-09).
+	const opened = new URL(await readFile(log, "utf8"));
+	assert.equal(`${opened.origin}${opened.pathname}`, `${s.launch.origin}${s.launch.pathname}`);
+	assert.match(opened.hash, /^#ticket=[\w-]{43}$/);
+	assert.ok(!opened.href.includes(new URLSearchParams(s.launch.hash.slice(1)).get("token") ?? "unset"));
 	assert.equal(s.launch.pathname, "/docs/architecture/safety-model.md");
 	const target = join(dir, "unrelated");
 	await writeFile(target, "keep");

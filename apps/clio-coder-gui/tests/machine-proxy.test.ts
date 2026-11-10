@@ -69,7 +69,10 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		"*",
 		auth(REMOTE_TOKEN, () => `http://127.0.0.1:${REMOTE_LISTENER_PORT}`, nodeClients),
 	);
-	authRoutes(upstream, nodeHub, nodeClients, new SessionControls(nodeClients, nodeHub));
+	authRoutes(upstream, nodeHub, nodeClients, new SessionControls(nodeClients, nodeHub), {
+		token: REMOTE_TOKEN,
+		origin: () => `http://127.0.0.1:${REMOTE_LISTENER_PORT}`,
+	});
 	upstream.all("*", async (context) => {
 		const body = context.req.method === "POST" ? await context.req.text() : "";
 		const client = requestClient(context).clientId;
@@ -108,7 +111,10 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		"*",
 		auth(LOCAL_TOKEN, () => ORIGIN, localClients),
 	);
-	authRoutes(app, hub, localClients, new SessionControls(localClients, hub));
+	authRoutes(app, hub, localClients, new SessionControls(localClients, hub), {
+		token: LOCAL_TOKEN,
+		origin: () => ORIGIN,
+	});
 	machinesRoutes(app, hub, undefined, attachments);
 	const request = (path: string, init: RequestInit = {}) => app.request(`${ORIGIN}${path}`, init);
 	const command = (path: string, bearer: string) =>

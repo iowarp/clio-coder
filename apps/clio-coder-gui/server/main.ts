@@ -18,12 +18,12 @@ import {
 } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
-import { showPage } from "./local-server.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, focusAppWindow, openApp, openBrowser } from "./process-policy.js";
 import { ArenaService } from "./services/arena.js";
 import { CliRunner } from "./services/cli-runner.js";
+import { ClientRegistry } from "./services/clients.js";
 import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
 import { FleetService } from "./services/fleet.js";
@@ -103,6 +103,10 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	const values = serverOptions(args);
+	if (values.token !== undefined)
+		console.error(
+			"[clio-coder:gui] --token puts the launch token in this process's argv, which other local users can read; use --token-stdin. --token will be removed in a later release.",
+		);
 	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
 	const openLink = (href: string) =>
 		openApp(href).catch(() => {
@@ -133,7 +137,8 @@ export async function main(args = process.argv.slice(2)) {
 						launch(),
 					);
 		if (reused.kind === "open") {
-			const url = new URL(reused.url);
+			// A fresh single-use ticket rather than the launch token, so neither the opener's argv nor the page keeps it.
+			const url = new URL(await background.ticketUrl(directory, reused.url));
 			url.pathname = values.path;
 			console.log(`[clio-coder:gui] ${url.href}`);
 			if ("restartedFrom" in reused)
@@ -149,8 +154,7 @@ export async function main(args = process.argv.slice(2)) {
 			if (open && (await focusAppWindow())) {
 				hint("Brought the open Clio Coder window forward.");
 				if (values.path !== "/") {
-					const token = new URLSearchParams(url.hash.slice(1)).get("token") ?? "";
-					if (!(await showPage(Number(url.port), token, values.path).catch(() => false)))
+					if (!(await background.showBackgroundPage(directory, Number(url.port), values.path).catch(() => false)))
 						console.error(
 							"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
 						);
@@ -245,8 +249,11 @@ export async function main(args = process.argv.slice(2)) {
 		hub,
 		env,
 	});
+	// Held here so the opener's URL carries a single-use launch ticket rather than the launch token.
+	const clients = new ClientRegistry();
 	const app = createApp({
 		token,
+		clients,
 		origin: () => origin,
 		hub,
 		operations,
@@ -312,7 +319,7 @@ export async function main(args = process.argv.slice(2)) {
 				);
 		}
 		if (open)
-			void openBrowser(launchUrl).catch(() => {
+			void openBrowser(`${origin}${values.path}#ticket=${clients.launchTicket().ticket}`).catch(() => {
 				console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 				void log.write("Could not open the browser; server remains available.").catch(fail);
 			});

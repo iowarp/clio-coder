@@ -11,6 +11,9 @@ export const ROTATE_AFTER_MS = CREDENTIAL_TTL_MS / 2;
 /** A request already in flight with the old credential when the window rotated still lands. */
 export const ROTATION_GRACE_MS = 60_000;
 export const TICKET_TTL_MS = 30_000;
+/** A launch ticket rides in the URL handed to a browser opener, so it opens one client, once, briefly. */
+export const LAUNCH_TICKET_TTL_MS = 60_000;
+const MAX_LAUNCH_TICKETS = 64;
 /** A client with no open event stream still counts as present this long after its last request. */
 export const PRESENCE_MS = 30_000;
 const MAX_CLIENTS = 256;
@@ -32,6 +35,7 @@ export class ClientRegistry {
 	private readonly clients = new Map<string, ClientRecord>();
 	private readonly byCredential = new Map<string, string>();
 	private readonly tickets = new Map<string, { clientId: string; expiresAt: number }>();
+	private readonly launchTickets = new Map<string, number>();
 	constructor(private readonly now: () => number = Date.now) {}
 
 	/** Issue a credential to a client that presented the launch token. */
@@ -109,6 +113,24 @@ export class ClientRegistry {
 		if (!record) return null;
 		record.lastSeen = now;
 		return record;
+	}
+
+	/** A single-use ticket that opens one new client, minted for a URL a launcher opens instead of the launch token. */
+	launchTicket() {
+		const now = this.now();
+		for (const [hash, expiresAt] of this.launchTickets) if (expiresAt <= now) this.launchTickets.delete(hash);
+		while (this.launchTickets.size >= MAX_LAUNCH_TICKETS)
+			this.launchTickets.delete(this.launchTickets.keys().next().value as string);
+		const ticket = secret();
+		this.launchTickets.set(digest(ticket), now + LAUNCH_TICKET_TTL_MS);
+		return { ticket, expiresIn: LAUNCH_TICKET_TTL_MS / 1000 };
+	}
+
+	redeemLaunch(ticket: string) {
+		const hash = digest(ticket);
+		const expiresAt = this.launchTickets.get(hash);
+		this.launchTickets.delete(hash);
+		return expiresAt !== undefined && expiresAt > this.now();
 	}
 
 	/** Count an open event stream as presence; the returned function ends it. `end` closes it from this side. */

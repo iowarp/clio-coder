@@ -427,7 +427,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		>
 			<WindowTitlebar />
 			<RouteFocus />
-			<PwaBoot enabled={meta.data?.pwa ?? false} token={client.token} />
+			<PwaBoot enabled={meta.data?.pwa ?? false} />
 			<a className="skip-link" href="#main">
 				Skip to content
 			</a>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { backgroundCapability } from "../../contracts/launch-capability.js";
-import { forgetBrowser, rememberBrowser, rememberedTokenKey } from "../api/token.js";
+import { forgetBrowser, storageAvailable } from "../api/token.js";
 
 type InstallPrompt = Event & { prompt(): Promise<unknown>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
@@ -29,7 +29,7 @@ const subscribe = (listener: () => void) => {
 const read = () => state;
 
 /** Mounted once by the shell: install prompt capture, token memory, offline recovery and cross-tab sign-out. */
-export function PwaBoot({ enabled, token }: { enabled: boolean; token: string }) {
+export function PwaBoot({ enabled }: { enabled: boolean }) {
 	useEffect(() => {
 		update({
 			installed:
@@ -46,35 +46,23 @@ export function PwaBoot({ enabled, token }: { enabled: boolean; token: string })
 				prompt: null,
 				message: "Clio Coder is installed. Open it from your applications whenever you need it.",
 			});
-		const changed = (event: StorageEvent) => {
-			if (event.key === rememberedTokenKey && event.newValue !== token) {
-				try {
-					sessionStorage.removeItem("clio-coder-token");
-				} catch {
-					/* Reload still drops the in-memory token. */
-				}
-				location.reload();
-			}
-		};
 		window.addEventListener("beforeinstallprompt", ready);
 		window.addEventListener("appinstalled", completed);
-		window.addEventListener("storage", changed);
 		return () => {
 			window.removeEventListener("beforeinstallprompt", ready);
 			window.removeEventListener("appinstalled", completed);
-			window.removeEventListener("storage", changed);
 		};
-	}, [token]);
+	}, []);
 	useEffect(() => {
-		if (!enabled || !token) return;
-		update({ storage: rememberBrowser(token) });
+		if (!enabled) return;
+		update({ storage: storageAvailable() });
 		if ("serviceWorker" in navigator)
 			void navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() =>
 				update({
 					message: "Offline recovery could not be prepared. The connected app is still available; try reloading this page.",
 				}),
 			);
-	}, [enabled, token]);
+	}, [enabled]);
 	return null;
 }
 
@@ -87,7 +75,7 @@ export function AppPreferencesPanel({
 	revoke,
 }: {
 	enabled: boolean;
-	/** Signs this window's credential out on the server before the browser forgets the launch token. */
+	/** Signs this window's credential out on the server before the browser forgets its remembered credential. */
 	revoke: () => Promise<void>;
 	desktopManaged?: boolean;
 	version: string | undefined;

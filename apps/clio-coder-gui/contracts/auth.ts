@@ -11,7 +11,15 @@ export type ClientIdentity = Static<typeof ClientIdentity>;
  * or a server restart; the server grants it only while no live credential holds that id.
  */
 export const ClientBootstrap = Type.Object(
-	{ label: Type.Optional(ClientLabel), resume: Type.Optional(ClientId) },
+	{
+		label: Type.Optional(ClientLabel),
+		resume: Type.Optional(ClientId),
+		/** A launcher's proof that it holds the launch token, bound to the port it dialed; the token itself is never sent. */
+		nonce: Type.Optional(Type.String({ pattern: "^[a-z0-9]{1,12}\\.[A-Za-z0-9_-]{43}$" })),
+		proof: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
+		/** A single-use launch ticket from the URL a launcher opened. */
+		ticket: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
+	},
 	{ additionalProperties: false },
 );
 export type ClientBootstrap = Static<typeof ClientBootstrap>;
@@ -25,6 +33,8 @@ export const ClientCredential = Type.Object(
 		/** Seconds until the server refuses this credential, and until the client should rotate it. */
 		expiresIn: Type.Integer({ minimum: 1 }),
 		rotateIn: Type.Integer({ minimum: 0 }),
+		/** The app's answer to a launcher's proof, which tells the launcher this listener holds the same launch token. */
+		serverProof: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })),
 	},
 	{ additionalProperties: false },
 );

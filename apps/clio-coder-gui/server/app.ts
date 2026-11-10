@@ -125,7 +125,7 @@ export function createApp(options: {
 		build: runningBuildId,
 	}));
 	register(app, hub, routes.openapi, () => openapi());
-	authRoutes(app, hub, clients, controls);
+	authRoutes(app, hub, clients, controls, { token: options.token, origin: options.origin });
 	controlRoutes(app, hub, controls, (id) => options.sessions.supervisor.get(id));
 	register(app, hub, routes.events, ({ query }, context) => {
 		const client = requestClient(context);

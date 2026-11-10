@@ -3,6 +3,7 @@ import { request } from "node:http";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { setTimeout } from "node:timers/promises";
+import { launcherNonce, launcherProof, sameSecret, serverProof } from "./launch-proof.js";
 import { listenPorts } from "./launcher/ports.js";
 
 /** What a ready background app reports about itself; `clio` is the version its process loaded. */
@@ -43,7 +44,7 @@ function exchange(
 	listenerPort: number,
 	method: "GET" | "POST",
 	path: string,
-	bearer: string,
+	bearer: string | null,
 	body?: unknown,
 ): Promise<JsonAnswer | null> {
 	const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -55,7 +56,7 @@ function exchange(
 				path,
 				method,
 				headers: {
-					Authorization: `Bearer ${bearer}`,
+					...(bearer === null ? {} : { Authorization: `Bearer ${bearer}` }),
 					Host: `127.0.0.1:${listenerPort}`,
 					...(payload === undefined
 						? {}
@@ -106,11 +107,10 @@ const held = new Map<string, Held>();
 const HELD_MAX = 512;
 
 /**
- * This process's own credential on the app at `port`, exchanged from its launch token and rotated at
- * half-life, so a probe or a proxied request never sends the launch token anywhere but the exchange.
- * An app from before per-client credentials answers the exchange with 404; its launch token is then
- * the credential, which only lets the version gate read and report it. Null when nothing answers as
- * this app with this token.
+ * This process's own credential on the app at `port`, opened with a proof of its launch token bound to
+ * `listenerPort` and rotated at half-life. The launch token itself is never sent: whatever owns the port
+ * (another user's listener included) sees only a proof the real app on any other port refuses, and a
+ * listener that cannot prove the token back is not this app. Null when nothing answers as this app.
  */
 export async function clientCredential(
 	port: number,
@@ -129,13 +129,18 @@ export async function clientCredential(
 		const next = rotated?.status === 200 ? adopt(key, rotated.value) : null;
 		if (next) return next;
 	}
-	const opened = await exchange(port, listenerPort, "POST", "/api/auth/clients", token, {
+	const nonce = launcherNonce();
+	const opened = await exchange(port, listenerPort, "POST", "/api/auth/clients", null, {
 		label,
 		...(current ? { resume: current.clientId } : {}),
+		nonce,
+		proof: launcherProof(token, nonce, listenerPort),
 	});
-	if (opened?.status === 404) return token;
 	held.delete(key);
-	return opened?.status === 200 ? adopt(key, opened.value) : null;
+	const answer = opened?.status === 200 ? opened.value?.serverProof : undefined;
+	return typeof answer === "string" && sameSecret(serverProof(token, nonce, listenerPort), answer)
+		? adopt(key, opened?.value ?? null)
+		: null;
 }
 function adopt(key: string, value: Record<string, unknown> | null) {
 	const { clientId, credential, rotateIn } = value ?? {};
@@ -160,7 +165,7 @@ async function readMeta(port: number, token: string, listenerPort = port, label 
 		if (credential === null) return null;
 		const answer = await exchange(port, listenerPort, "GET", "/api/meta", credential);
 		// A restarted app forgot the held credential; exchange the launch token once more.
-		if (answer?.status === 401 && credential !== token) {
+		if (answer?.status === 401) {
 			dropClientCredential(port, listenerPort, token);
 			continue;
 		}
@@ -273,6 +278,19 @@ export async function showPage(port: number, token: string, path: string) {
 	if (answer?.status === 401) dropClientCredential(port, port, token);
 	return answer?.status === 200;
 }
+/**
+ * A single-use, short-lived ticket for the URL a launcher opens, so the launch token never sits in an
+ * opener's argv or the page's storage. Null when the app did not issue one.
+ */
+export async function launchTicket(port: number, token: string) {
+	identity(port, token);
+	const credential = await clientCredential(port, port, token, "Launcher");
+	if (credential === null) return null;
+	const answer = await exchange(port, port, "POST", "/api/auth/launch-ticket", credential, {});
+	if (answer?.status === 401) dropClientCredential(port, port, token);
+	const ticket = answer?.status === 200 ? answer.value?.ticket : undefined;
+	return typeof ticket === "string" && /^[\w-]{43}$/.test(ticket) ? ticket : null;
+}
 export async function waitForLocalServer(port: number, token: string): Promise<LocalServerMeta> {
 	const deadline = performance.now() + 15_000;
 	while (performance.now() < deadline) {
@@ -281,6 +299,6 @@ export async function waitForLocalServer(port: number, token: string): Promise<L
 		await setTimeout(200);
 	}
 	throw new Error(
-		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. Check background status; another application may be using those ports.`,
+		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. If the background app was started by an older Clio Coder, run: clio-coder gui background restart. Otherwise check clio-coder gui background status; another application may be using those ports.`,
 	);
 }

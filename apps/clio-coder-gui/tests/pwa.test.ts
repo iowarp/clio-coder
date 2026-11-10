@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { serverProof } from "../server/launch-proof.js";
 import { localServerReady } from "../server/local-server.js";
 import { harness } from "./harness/app.js";
 
@@ -44,7 +45,7 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	const credential = "c".repeat(43);
 	const legacyToken = "b".repeat(43);
 	const launchTokenPaths: string[] = [];
-	const server = createServer((req, res) => {
+	const server = createServer(async (req, res) => {
 		if (req.headers.authorization === `Bearer ${token}`) launchTokenPaths.push(`${req.method} ${req.url}`);
 		if (req.url === "/api/auth/clients") {
 			assert.equal(req.method, "POST");
@@ -53,8 +54,20 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 				res.end("{}");
 				return;
 			}
-			assert.equal(req.headers.authorization, `Bearer ${token}`);
-			res.end(JSON.stringify({ clientId: "launcher-1", credential, rotateIn: 450, expiresIn: 900 }));
+			assert.equal(req.headers.authorization, undefined);
+			let text = "";
+			for await (const chunk of req) text += String(chunk);
+			const { nonce } = JSON.parse(text) as { nonce: string };
+			const port = (server.address() as { port: number }).port;
+			res.end(
+				JSON.stringify({
+					clientId: "launcher-1",
+					credential,
+					rotateIn: 450,
+					expiresIn: 900,
+					serverProof: serverProof(token, nonce, port),
+				}),
+			);
 			return;
 		}
 		assert.equal(req.url, "/api/meta");
@@ -73,12 +86,13 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	const address = server.address();
 	assert.ok(address && typeof address !== "string");
 	assert.equal(await localServerReady(address.port, token), true);
-	// The launch token went to the exchange alone; the probe read meta on the credential it bought.
-	assert.deepEqual(launchTokenPaths, ["POST /api/auth/clients"]);
+	// The launch token went nowhere: the exchange carried a proof and the probe read meta on the credential it bought.
+	assert.deepEqual(launchTokenPaths, []);
 	for (mode of ["redirect", "transient", "oversized"]) assert.equal(await localServerReady(address.port, token), false);
 	await assert.rejects(localServerReady(0, token));
 	await assert.rejects(localServerReady(address.port, "bad\r\nheader"));
 	// An app from before per-client credentials has no exchange; the version gate still reads it.
+	// A listener that answers the exchange with 404 is not this app, and is never handed the token.
 	mode = "legacy";
-	assert.equal(await localServerReady(address.port, legacyToken), true);
+	assert.equal(await localServerReady(address.port, legacyToken), false);
 });

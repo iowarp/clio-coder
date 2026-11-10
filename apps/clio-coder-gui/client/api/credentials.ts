@@ -2,7 +2,7 @@ import type { ClientCredential, EventTicket } from "../../contracts/auth.js";
 import type { Problem } from "../../contracts/common.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import { markTokenRejected, tokenRejected } from "./auth-state.js";
-import { dropStoredToken } from "./token.js";
+import { dropStoredToken, type LaunchSecret, rememberedCredentialKey } from "./token.js";
 
 /** Where a window keeps its client id across a reload, and its live credential only across the reload itself. */
 export const clientIdKey = "clio-coder-client";
@@ -35,7 +35,7 @@ interface Held {
 }
 
 export interface Credentials {
-	/** The launch token this document was opened with; empty when it has none. */
+	/** The launch token a link from before 0.7.1 opened this document with; empty otherwise. */
 	readonly launchToken: string;
 	/** This window's credential, exchanging the launch token or rotating first when needed. */
 	bearer(): Promise<string>;
@@ -68,17 +68,38 @@ function write(storage: () => Storage, key: string, value: string | null) {
 	}
 }
 const session = () => sessionStorage;
+const local = () => localStorage;
+/** Another window's (or this browser's last) credential while it lives; it opens this window's own client. */
+function remembered() {
+	try {
+		const value = JSON.parse(read(local, rememberedCredentialKey) ?? "null") as {
+			credential?: unknown;
+			expiresAt?: unknown;
+		};
+		return typeof value?.credential === "string" &&
+			typeof value.expiresAt === "number" &&
+			value.expiresAt - Date.now() > 5_000
+			? value.credential
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 /**
- * One per document, shared by every client in it. The launch token goes to POST /api/auth/clients
- * and nowhere else; the credential it buys lives in memory, rotates at half-life and is handed to the
- * next page only across a reload, so a duplicated tab never inherits it and gets its own client id.
+ * One per document, shared by every client in it. A launch ticket (or a legacy launch token) goes to
+ * POST /api/auth/clients and nowhere else; the credential it buys lives in memory, rotates at half-life
+ * and is handed to the next page only across a reload, so a duplicated tab never inherits it and gets
+ * its own client id. The latest credential is also remembered in this browser, never the launch token,
+ * so a window reopened while it lives opens its own client with it.
  */
 export function createCredentials(
-	launchToken: string,
+	launch: LaunchSecret | string = {},
 	fetcher: typeof fetch = fetch,
 	label = "Browser window",
 ): Credentials {
+	const { ticket: launchTicket, token: launchToken = "" } = typeof launch === "string" ? { token: launch } : launch;
+	let ticket = launchTicket;
 	let held: Held | null = null;
 	let pending: Promise<Held> | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
@@ -97,9 +118,8 @@ export function createCredentials(
 				launchToken: string;
 			};
 			const left = value.expiresAt - Date.now();
-			// A document opened from a different launch link exchanges that link: inheriting the old credential would
-			// leave an unchecked token behind it that fails only when the credential next needs replacing.
-			if (left > 30_000 && value.launchToken === launchToken)
+			// A document opened from a different launch link exchanges that link, so a link that fails says so at once.
+			if (left > 30_000 && !launchTicket && value.launchToken === launchToken)
 				held = {
 					clientId: value.clientId,
 					credential: value.credential,
@@ -130,12 +150,12 @@ export function createCredentials(
 		addEventListener("pageshow", onPageShow);
 	}
 
-	const post = async (path: string, bearer: string, body: unknown) => {
+	const post = async (path: string, bearer: string | null, body: unknown) => {
 		try {
 			return await fetcher(path, {
 				method: "POST",
 				headers: {
-					Authorization: `Bearer ${bearer}`,
+					...(bearer === null ? {} : { Authorization: `Bearer ${bearer}` }),
 					"Content-Type": "application/json",
 					"Idempotency-Key": crypto.randomUUID(),
 				},
@@ -152,6 +172,11 @@ export function createCredentials(
 			throw new CredentialProblem(unauthorizedProblem());
 		}
 		write(session, clientIdKey, value.clientId);
+		write(
+			local,
+			rememberedCredentialKey,
+			JSON.stringify({ credential: value.credential, expiresAt: Date.now() + value.expiresIn * 1000 }),
+		);
 		held = {
 			clientId: value.clientId,
 			credential: value.credential,
@@ -175,14 +200,19 @@ export function createCredentials(
 		);
 	};
 	const open = async (): Promise<Held> => {
-		if (!launchToken || tokenRejected()) throw new CredentialProblem(unauthorizedProblem());
+		// The ticket is single use, so it is spent on the first exchange whatever the answer.
+		const spend = ticket;
+		ticket = undefined;
+		const bearer = spend ? null : launchToken || remembered();
+		if ((!spend && !bearer) || tokenRejected()) throw new CredentialProblem(unauthorizedProblem());
 		const resume = held?.clientId ?? read(session, clientIdKey) ?? undefined;
-		const response = await post(routes.authClients.path, launchToken, {
+		const response = await post(routes.authClients.path, bearer, {
 			label,
 			...(resume && /^[A-Za-z0-9_-]{8,64}$/.test(resume) ? { resume } : {}),
+			...(spend ? { ticket: spend } : {}),
 		});
 		if (response.status === 401) {
-			// Only the launch token itself was refused here, so a reload with it would fail the same way.
+			// Only what opens a client was refused here, so a reload would fail the same way.
 			dropStoredToken();
 			markTokenRejected();
 			throw new CredentialProblem(unauthorizedProblem());
@@ -243,6 +273,7 @@ export function createCredentials(
 			timer = null;
 			write(session, clientIdKey, null);
 			write(session, handoffKey, null);
+			if (current && remembered() === current.credential) write(local, rememberedCredentialKey, null);
 			if (!current || current.expiresAt <= now()) return;
 			const response = await post(routes.authRevoke.path, current.credential, {});
 			// A 401 means the server already holds no such credential, which is the outcome asked for.

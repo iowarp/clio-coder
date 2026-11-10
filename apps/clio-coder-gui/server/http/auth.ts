@@ -1,7 +1,7 @@
-import { timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { machinePrefix } from "../../contracts/pages.js";
 import { routes } from "../../contracts/routes.js";
+import { sameSecret as same } from "../launch-proof.js";
 import type { ClientRecord, ClientRegistry } from "../services/clients.js";
 import { AppProblem } from "../services/problem.js";
 import { SECURITY_HEADERS } from "./security-headers.js";
@@ -23,12 +23,6 @@ function apiPath(path: string): string | null {
 	return rest === "/api" || rest.startsWith("/api/") ? rest : null;
 }
 
-function same(expected: string, supplied: string) {
-	const a = Buffer.from(expected),
-		b = Buffer.from(supplied);
-	return a.length === b.length && timingSafeEqual(a, b);
-}
-
 /** The client an authenticated API request came from. */
 export function requestClient(context: Context): ClientRecord {
 	const client = context.get("clioClient");
@@ -37,8 +31,9 @@ export function requestClient(context: Context): ClientRecord {
 }
 
 /**
- * The launch token opens exactly one request: POST /api/auth/clients on this server, which issues the
- * caller its own credential. Every other API request names its client with that credential, and the
+ * POST /api/auth/clients, which issues the caller its own credential, admits its caller itself
+ * (`routes-auth.ts`): a launcher's proof of the launch token, a launch ticket, a live credential, or
+ * the launch token as a bearer. Every other API request names its client with that credential, and the
  * event stream, which a browser cannot give a header, with a single-use ticket.
  */
 export function auth(token: string, origin: () => string, clients: ClientRegistry): MiddlewareHandler {
@@ -57,9 +52,7 @@ export function auth(token: string, origin: () => string, clients: ClientRegistr
 			context.header("Cache-Control", "no-store");
 			const authorization = context.req.header("authorization");
 			const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-			if (context.req.path === routes.authClients.path && context.req.method === "POST") {
-				if (!same(token, bearer)) throw new AppProblem("unauthorized", "A valid launch token is required.");
-			} else {
+			if (context.req.path !== routes.authClients.path || context.req.method !== "POST") {
 				const ticket = streams.some((pattern) => pattern.test(api)) ? context.req.query("ticket") : undefined;
 				const client = bearer ? clients.authenticate(bearer) : ticket ? clients.redeem(ticket) : null;
 				if (!client)
