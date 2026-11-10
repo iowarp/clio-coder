@@ -82,9 +82,12 @@ export function headlessRouteFailureText(message: string): string | null {
 	);
 }
 
-/** OpenAI SDK transport failure, distinct from an HTTP gateway/backend error, with the proxy note S-39 may add. */
+/**
+ * OpenAI SDK transport failure, distinct from an HTTP gateway/backend error, with the proxy note S-39 may add and
+ * the transport cause Pi appends since 1.5.1 (`Connection error.: connect ECONNREFUSED 127.0.0.1:4000`).
+ */
 export function isLiteLLMConnectionFailure(message: string | null | undefined): boolean {
-	return /^Connection error\.(?: \(through proxy [^)\n]*\))?$/.test(message?.trim() ?? "");
+	return /^Connection error\.(?: \(through proxy [^)\n]*\))?(?:: [^\n]+)?$/.test(message?.trim() ?? "");
 }
 
 interface HeaderReader {

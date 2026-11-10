@@ -437,9 +437,13 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
 					}
-					// A proxy refusal and an unreachable provider read the same in the SDK's wording.
-					const proxy = event.error.errorMessage?.trim() === "Connection error." ? proxyForUrl(model.baseUrl) : null;
-					if (proxy !== null) event.error.errorMessage = `Connection error. (through proxy ${proxy})`;
+					// A proxy refusal and an unreachable provider read the same in the SDK's wording. Pi appends the
+					// transport cause since 1.5.1 (`Connection error.: connect ECONNREFUSED ...`); the note goes before it.
+					const connectionCause = /^Connection error\.((?:: [^\n]+)?)$/.exec(event.error.errorMessage?.trim() ?? "");
+					const proxy = connectionCause !== null ? proxyForUrl(model.baseUrl) : null;
+					if (proxy !== null) {
+						event.error.errorMessage = `Connection error. (through proxy ${proxy})${connectionCause?.[1] ?? ""}`;
+					}
 					if (capture.contentFilter && event.error.stopReason === "error") {
 						event.error.errorMessage = providerContentFilterMessage(event.error.errorMessage ?? "");
 					}
