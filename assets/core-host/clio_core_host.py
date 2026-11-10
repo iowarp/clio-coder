@@ -37,6 +37,7 @@ PUT_IF_ABSENT = "AsyncPutBlobIfAbsent"
 DEL_TAG_BINDING = "clio_cte_core_ext.Client.AsyncDelTag"
 FS_BINDING = "clio_cfs_ext.Client"
 DURABLE_LEVELS = ("temporary", "long_term")
+VOLATILE_BDEVS = ("ram", "hbm", "pinned", "noop")
 
 # Frames get a private copy of fd 1; fd 1 itself then points at stderr, so native logging can never corrupt a frame.
 _frames_fd = os.dup(1)
@@ -128,7 +129,7 @@ def rc_of(future, what):
 
 
 def read_config(path):
-    """Durability and node count from the clio-core config; pyyaml ships with iowarp-core."""
+    """The clio_cte_core storage entries and whether the hostfile names more than one node; pyyaml ships with iowarp-core."""
     try:
         import yaml
 
@@ -136,19 +137,14 @@ def read_config(path):
             config = yaml.safe_load(handle) or {}
     except Exception as error:
         log(f"cannot read the clio-core config {path!r} ({error}); reporting the store as not durable")
-        return False, False
-    tiers = [
+        return [], False
+    devices = [
         tier
         for module in config.get("compose") or []
         if isinstance(module, dict) and module.get("mod_name") == "clio_cte_core"
         for tier in module.get("storage") or []
         if isinstance(tier, dict)
     ]
-    durable = any(
-        str(tier.get("bdev_type", "")).lower() != "ram"
-        and str(tier.get("persistence_level", "volatile")).lower() in DURABLE_LEVELS
-        for tier in tiers
-    )
     hosts = 1
     hostfile = (config.get("networking") or {}).get("hostfile")
     if hostfile:
@@ -157,7 +153,27 @@ def read_config(path):
                 hosts = sum(1 for line in handle if line.strip() and not line.strip().startswith("#"))
         except OSError as error:
             log(f"cannot read the hostfile {hostfile!r} ({error})")
-    return durable, hosts > 1
+    return devices, hosts > 1
+
+
+def target_is_durable(devices, target):
+    """Whether a target the running runtime lists is a durable tier.
+
+    The bindings report no persistence level, so this maps the target back to
+    its config entry the way clio-core's GetPersistenceLevelForTarget does: the
+    runtime names a target `<path>_node<N>`, or `storage_device_<i>`. A target
+    no entry describes is volatile, so a RAM-only runtime is never durable
+    whatever the config names (M-40 F19).
+    """
+    for index, device in enumerate(devices):
+        raw = device.get("path")
+        path = os.path.expanduser(os.path.expandvars(str(raw))) if raw else ""
+        if target == f"storage_device_{index}" or (path and (target == path or target.startswith(path + "_"))):
+            return (
+                str(device.get("bdev_type", "")).lower() not in VOLATILE_BDEVS
+                and str(device.get("persistence_level", "volatile")).lower() in DURABLE_LEVELS
+            )
+    return False
 
 
 class Core:
@@ -202,7 +218,7 @@ class Core:
         except OSError as error:
             self.fs_problem = f"it could not bind the filesystem pool ({error})"
             self.missing.append(FS_BINDING)
-        self.durable, self.multi_node = read_config(self.config)
+        self.devices, self.multi_node = read_config(self.config)
         self.tag_ids = {}
         self.tag_lock = threading.Lock()
 
@@ -265,7 +281,7 @@ class Core:
             "mapping": "a tag is a CTE tag with a filesystem-module directory; a blob is a file there; records are CTE blobs",
             "tiers": tiers,
             "multiNode": self.multi_node,
-            "durable": self.durable,
+            "durable": any(target_is_durable(self.devices, tier["name"]) for tier in tiers),
             "conditionalPut": "if-absent-and-version",
             "blobVersions": False,
             "freeBytes": int(capacity.remaining_capacity),
