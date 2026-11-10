@@ -30,6 +30,8 @@ export const TOOL_RESULT_MAX_CHARS = 2000;
 export interface SerializeConversationOptions {
 	/** Per-body char cap for tool results and bash output; defaults to TOOL_RESULT_MAX_CHARS. */
 	toolResultMaxChars?: number;
+	/** Per-message char cap for user and assistant text; unset keeps every message whole. */
+	messageMaxChars?: number;
 }
 
 export interface PreparedBranchEntries {
@@ -42,6 +44,14 @@ export interface PreparedBranchEntries {
 function truncate(text: string, max: number): string {
 	if (text.length <= max) return text;
 	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters truncated]`;
+}
+
+/** Keeps a message's head and tail around an omission marker; the ledger keeps the raw turn. */
+function clipMessage(text: string, max: number | undefined): string {
+	if (max === undefined || text.length <= max) return text;
+	const head = Math.ceil(max / 2);
+	const tail = max - head;
+	return `${text.slice(0, head)}\n\n[... ${text.length - max} characters omitted from this message; the full text is in the session ledger ...]\n\n${text.slice(text.length - tail)}`;
 }
 
 function stringifyPreview(value: unknown): string {
@@ -131,6 +141,7 @@ export function serializeConversation(
 	options: SerializeConversationOptions = {},
 ): string {
 	const bodyMax = options.toolResultMaxChars ?? TOOL_RESULT_MAX_CHARS;
+	const messageMax = options.messageMaxChars;
 	const parts: string[] = [];
 	for (const entry of entries) {
 		if (entry.kind === "message") {
@@ -138,13 +149,13 @@ export function serializeConversation(
 			switch (entry.role) {
 				case "user":
 					if (text.length === 0) break;
-					parts.push(`[User]: ${text}`);
+					parts.push(`[User]: ${clipMessage(text, messageMax)}`);
 					break;
 				case "assistant": {
 					const thinking = assistantThinkingText(entry).trim();
 					const calls = assistantToolCallsText(entry).trim();
-					if (thinking.length > 0) parts.push(`[Assistant thinking]: ${thinking}`);
-					if (text.length > 0) parts.push(`[Assistant]: ${text}`);
+					if (thinking.length > 0) parts.push(`[Assistant thinking]: ${clipMessage(thinking, messageMax)}`);
+					if (text.length > 0) parts.push(`[Assistant]: ${clipMessage(text, messageMax)}`);
 					if (calls.length > 0) parts.push(`[Assistant tool calls]: ${calls}`);
 					break;
 				}

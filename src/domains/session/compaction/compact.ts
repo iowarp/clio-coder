@@ -322,6 +322,9 @@ function hasConversation(slice: ReadonlyArray<SessionEntry>): boolean {
 	);
 }
 
+/** Floor for the per-message cap applied when a span only fits with user and assistant text clipped. */
+const MESSAGE_MIN_CHARS = 2000;
+
 const isUserMessage = (entry: SessionEntry | undefined): boolean => entry?.kind === "message" && entry.role === "user";
 
 /**
@@ -1393,8 +1396,20 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		const price = (text: string) =>
 			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(build(text))] });
 		const whole = serializeConversation(slice, { toolResultMaxChars: Number.POSITIVE_INFINITY });
-		if (whole === capped || price(whole) <= summaryInputBudget) return whole;
-		if (price(capped) >= summaryInputBudget) return capped;
+		if (price(whole) <= summaryInputBudget) return whole;
+		if (whole === capped || price(capped) >= summaryInputBudget) {
+			// Smallest tool-result cap still does not fit: one oversized user or
+			// assistant message would block every compaction, so clip message text
+			// for the summarizer only, halving down to a floor.
+			let messageMaxChars = capped.length;
+			let clipped = capped;
+			while (messageMaxChars > MESSAGE_MIN_CHARS) {
+				messageMaxChars = Math.max(MESSAGE_MIN_CHARS, Math.floor(messageMaxChars / 2));
+				clipped = serializeConversation(slice, { messageMaxChars });
+				if (price(clipped) <= summaryInputBudget) return clipped;
+			}
+			return clipped;
+		}
 		let fits = TOOL_RESULT_MAX_CHARS;
 		let over = whole.length;
 		while (over - fits > 1) {
