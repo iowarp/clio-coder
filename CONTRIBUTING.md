@@ -29,7 +29,8 @@ pnpm run test
 | Command | Purpose |
 | --- | --- |
 | `pnpm run test:file -- tests/contracts/<test>.test.ts` | Run a focused source regression with the isolated state harness. |
-| `pnpm run typecheck` | Check TypeScript across source and tests. |
+| `pnpm run typecheck` | Check TypeScript across source and tests with `tsrs --fast`, the Rust port of the TypeScript 7 checker. |
+| `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Check with TypeScript's own `tsc` as the reference, or run both and fail if their diagnostics differ. Use them when `typecheck` reports something surprising or stays silent about a type error you expect. |
 | `pnpm run lint` | Check formatting, source boundaries, local catalog pins and package hygiene. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
 | `pnpm run test` | Compact source-based behavior checks; no build required. |

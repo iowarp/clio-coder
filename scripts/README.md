@@ -15,6 +15,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm library:check` / `pnpm skills:check` | Verify local catalog content and generated projections against committed pins. |
 | `pnpm library:pin` / `pnpm skills:pin` | Refresh generated catalogs. Library pinning also fetches blessed remote packages. |
 | `pnpm pi:surface-diff` / `pnpm pi:surface-snapshot` | Review consumed Pi declarations or refresh their snapshot during dependency maintenance. |
+| `pnpm run typecheck` / `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Typecheck source, tests and scripts with the Rust port `tsrs --fast` (the default, about 1 s), with TypeScript 7's own `tsc` as the reference (about 6 s), or run both over the same project and fail if their diagnostics differ. |
 | `pnpm herdr:pin` | Fetch and verify the selected Herdr release and its schema. |
 | `node scripts/build-windows-launcher.mjs --verify-pins` / `--check` / `--write` | Check the committed native Windows launchers (installed as the git shim's `git.exe` and the installer's `clio-coder.exe`) against `assets/windows-launcher/pins.json`; rebuild them from `assets/windows-launcher/launcher.c` with the pinned zig and compare byte for byte; or rebuild them and rewrite the pins. `--check` and `--write` download zig into `TMPDIR` unless `--zig <path>` names one. |
 | `pnpm hooks:install` | Install guards against committing ignored files. |
