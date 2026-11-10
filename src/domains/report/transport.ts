@@ -296,6 +296,7 @@ export async function sendReport(
 	if (route.name === "discussion") {
 		const filed = await createDiscussion(rendered.title, path, transport.path, run, options);
 		if (filed === null) return offline();
+		if ("failed" in filed) return { status: "failed", reason: filed.failed, path };
 		record({ transport: "gh", state: "sent", url: filed.url, number: filed.number, sentAt: now().toISOString() });
 		return { status: "sent", ...filed, adopted: false };
 	}
@@ -421,7 +422,7 @@ async function createDiscussion(
 	gh: string,
 	run: ReportCommandRunner,
 	options: GhOptions,
-): Promise<{ url: string; number: number } | null> {
+): Promise<{ url: string; number: number } | { failed: string } | null> {
 	const ids = await run(
 		gh,
 		[
@@ -465,7 +466,10 @@ async function createDiscussion(
 		options,
 	);
 	const match = created.exitCode === 0 ? DISCUSSION_URL.exec(created.stdout) : null;
-	return match === null ? null : { url: match[0], number: Number(match[1]) };
+	// A mutation that did not answer cleanly may still have posted; only a failed id lookup means nothing was sent.
+	if (match === null)
+		return { failed: failure("gh api graphql createDiscussion", created.stdout, created.stderr, created.timedOut) };
+	return { url: match[0], number: Number(match[1]) };
 }
 
 async function addToIssue(
