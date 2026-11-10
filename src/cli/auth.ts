@@ -411,30 +411,88 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 
 /**
  * A terminal gets the masked field the configure wizard uses, so the key never
- * reaches scrollback; anything else is read as the first line of stdin, so a
- * script can pipe the key in without it appearing in argv. Null means the user
- * backed out of the prompt.
+ * reaches scrollback; a terminal that cannot draw it (TERM=dumb) reads the key
+ * with echo off, since the line discipline would otherwise echo every
+ * character. Anything else is read as the first line of stdin, so a script can
+ * pipe the key in without it appearing in argv. Null means the user backed out
+ * of the prompt.
  */
-async function readApiKey(label: string): Promise<string | null> {
-	if (input.isTTY && typeof input.setRawMode === "function" && process.env.TERM !== "dumb") {
-		const field = output.isTTY ? output : process.stderr;
+export async function readApiKey(
+	label: string,
+	io: { input: NodeJS.ReadStream; output: NodeJS.WriteStream } = { input, output },
+): Promise<string | null> {
+	if (io.input.isTTY) {
+		const field = io.output.isTTY ? io.output : process.stderr;
+		if (typeof io.input.setRawMode !== "function") {
+			printError(
+				"this terminal cannot hide typed input; pipe the key on stdin instead: clio-coder auth login <target> < keyfile",
+			);
+			return null;
+		}
+		if (process.env.TERM === "dumb") return readHiddenLine(io.input, field, label);
 		const result = await promptText({
 			heading: ["", label],
 			railPrefix: railPrefix(createLifecyclePresenter({ stream: field }).isPlain()),
 			mask: true,
 			backLabel: "cancel",
 			clearOnExit: true,
-			input,
+			input: io.input,
 			output: field,
 		});
 		return result.kind === "value" ? result.value.trim() : null;
 	}
-	const rl = createInterface({ input, terminal: false });
+	const rl = createInterface({ input: io.input, terminal: false });
 	try {
 		for await (const line of rl) return line.trim();
 		return "";
 	} finally {
 		rl.close();
+	}
+}
+
+/** One line read in raw mode, so nothing typed is echoed; Ctrl-C backs out, Backspace and Ctrl-U edit. */
+async function readHiddenLine(
+	stream: NodeJS.ReadStream,
+	field: NodeJS.WriteStream,
+	label: string,
+): Promise<string | null> {
+	field.write(`${label} (typing is hidden): `);
+	const wasRaw = stream.isRaw === true;
+	stream.setRawMode(true);
+	stream.resume();
+	try {
+		return await new Promise<string | null>((resolve) => {
+			let value: string[] = [];
+			const finish = (result: string | null): void => {
+				stream.off("data", onData);
+				stream.off("end", onEnd);
+				stream.off("close", onEnd);
+				resolve(result);
+			};
+			const onEnd = (): void => finish(value.join("").trim());
+			const onData = (chunk: Buffer | string): void => {
+				for (const char of chunk.toString()) {
+					if (char === "\r" || char === "\n" || char === "\u0004") {
+						finish(value.join("").trim());
+						return;
+					}
+					if (char === "\u0003") {
+						finish(null);
+						return;
+					}
+					if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
+					else if (char === "\u0015") value = [];
+					else if (char >= " ") value.push(char);
+				}
+			};
+			stream.on("data", onData);
+			stream.once("end", onEnd);
+			stream.once("close", onEnd);
+		});
+	} finally {
+		if (!wasRaw) stream.setRawMode(false);
+		stream.pause();
+		field.write("\n");
 	}
 }
 

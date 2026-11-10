@@ -8,8 +8,9 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { runAuthCommand } from "../../src/cli/auth.js";
+import { readApiKey, runAuthCommand } from "../../src/cli/auth.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const RUNTIME = "openai";
@@ -98,5 +99,43 @@ describe("contracts/auth login against an unwritable credentials store", () => {
 		ok(stderr.includes("unencrypted"), `got: ${stderr}`);
 		ok(existsSync(credentials), "the credentials file exists");
 		ok(readFileSync(credentials, "utf8").includes("sk-not-a-real-key-new"), "the key reached disk");
+	});
+});
+
+describe("contracts/auth login key prompt on a dumb terminal", () => {
+	it("reads the key with echo off and writes no character of it", async () => {
+		const input = new PassThrough() as unknown as NodeJS.ReadStream;
+		const output = new PassThrough() as unknown as NodeJS.WriteStream;
+		const rawModeCalls: boolean[] = [];
+		let rendered = "";
+		Object.assign(input, {
+			isTTY: true,
+			setRawMode: (value: boolean) => {
+				rawModeCalls.push(value);
+				return input;
+			},
+		});
+		Object.assign(output, { isTTY: true, columns: 80 });
+		output.on("data", (chunk: Buffer) => {
+			rendered += chunk.toString("utf8");
+		});
+		const term = process.env.TERM;
+		process.env.TERM = "dumb";
+		try {
+			const key = ["sk", "FAKEdumbterminal0000"].join("-");
+			const read = readApiKey("API key for OpenAI", { input, output });
+			strictEqual(rawModeCalls[0], true, "echo goes off before the first key byte arrives");
+			input.write(`${key}x\u007f\r`);
+			strictEqual(await read, key);
+			strictEqual(rawModeCalls.at(-1), false, "the terminal is restored");
+			ok(!rendered.includes(key.slice(3)), `no echo of the key; got: ${JSON.stringify(rendered)}`);
+			ok(!rendered.includes("\u001b["), "a dumb terminal gets no escape sequences");
+			const cancelled = readApiKey("API key for OpenAI", { input, output });
+			input.write("partial\u0003");
+			strictEqual(await cancelled, null);
+		} finally {
+			if (term === undefined) delete process.env.TERM;
+			else process.env.TERM = term;
+		}
 	});
 });
