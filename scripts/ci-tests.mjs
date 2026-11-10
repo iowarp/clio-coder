@@ -114,6 +114,7 @@ export const coreTests = [
 	"verify-task-gates",
 	"provider-error-presentation",
 	"handbook-discovery",
+	"report-share",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working
