@@ -8,11 +8,19 @@
  */
 
 import type { createInterface } from "node:readline/promises";
+import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
+import { proxyEnvSummary } from "../core/proxy-env.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import type { RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { ConfigureWizardHost } from "./configure-host.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
-import { promptOAuthSelection } from "./oauth-select.js";
+import {
+	chooseOAuthMethod,
+	describeOAuthError,
+	NO_LOCAL_BROWSER_LINE,
+	oauthUrlLines,
+	promptOAuthSelection,
+} from "./oauth-select.js";
 import { credentialWriteFailed, printError, printOk } from "./shared.js";
 
 export async function loginOAuthRuntime(
@@ -46,6 +54,15 @@ export async function loginOAuthRuntime(
 	// A fresh attempt starts clean: the last attempt's `Sign-in stopped` stood over the new method list and wait.
 	host?.clearMessages();
 	if (runtime.authNotice) report(`note: ${runtime.authNotice}\n`);
+	const browser = canOpenBrowser();
+	const open = (url: string): boolean => {
+		if (!browser) return false;
+		if (host?.openUrl) {
+			host.openUrl(url);
+			return true;
+		}
+		return openBrowser(url);
+	};
 	const manualCodeInput = createDelayedManualCodeInput(
 		rl,
 		"Paste verification code if browser callback does not complete automatically: ",
@@ -54,16 +71,14 @@ export async function loginOAuthRuntime(
 		await auth.login(runtime.oauthProviderId ?? runtime.id, {
 			...(signal ? { signal } : {}),
 			onAuth: ({ url, instructions }) => {
-				host?.openUrl?.(url);
-				report(`\nOpen: ${url}\n`);
-				if (instructions) report(`${instructions}\n`);
+				report(`\n${oauthUrlLines(url, instructions, open(url)).join("\n")}\n`);
 				if (host) {
 					host.waiting?.("Waiting for your browser sign-in…");
 					offerStop();
-				} else report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
+				} else if (browser) report("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
 			},
 			onDeviceCode: ({ verificationUri, userCode }) => {
-				host?.openUrl?.(verificationUri);
+				open(verificationUri);
 				report(`\nOpen: ${verificationUri}\n`);
 				report(`Enter code: ${userCode}\n`);
 				host?.waiting?.("Waiting for that code in your browser…");
@@ -74,6 +89,11 @@ export async function loginOAuthRuntime(
 				return prompt.allowEmpty ? answer : answer.trim();
 			},
 			onSelect: async (prompt) => {
+				const method = chooseOAuthMethod(prompt, browser ? "browser" : "device");
+				if (method !== undefined) {
+					if (method !== "browser") report(`${NO_LOCAL_BROWSER_LINE}\n`);
+					return method;
+				}
 				if (!host) return promptOAuthSelection(rl, prompt);
 				const result = await host.select({
 					heading: prompt.message,
@@ -100,8 +120,8 @@ export async function loginOAuthRuntime(
 		return true;
 	} catch (error) {
 		if (host && outcome?.stopped) host.report("Sign-in stopped; nothing was stored.");
-		else if (host) host.report(error instanceof Error ? error.message : String(error));
-		else printError(error instanceof Error ? error.message : String(error));
+		else if (host) host.report(describeOAuthError(error, proxyEnvSummary()));
+		else printError(describeOAuthError(error, proxyEnvSummary()));
 		return false;
 	} finally {
 		manualCodeInput.cancel();

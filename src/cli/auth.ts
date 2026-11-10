@@ -2,6 +2,8 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
 import { readSettings } from "../core/config.js";
+import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
+import { proxyEnvSummary } from "../core/proxy-env.js";
 import {
 	authNotRequiredStatus,
 	openAuthStorage,
@@ -20,7 +22,14 @@ import { railPrefix } from "./configure-target.js";
 import { offerCopilotSignIn } from "./copilot-sign-in.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
-import { promptOAuthSelection } from "./oauth-select.js";
+import {
+	chooseOAuthMethod,
+	describeOAuthError,
+	NO_LOCAL_BROWSER_LINE,
+	type OAuthMethodPreference,
+	oauthUrlLines,
+	promptOAuthSelection,
+} from "./oauth-select.js";
 import {
 	CONNECTABLE_LIST_CAPTION,
 	type ConnectableProviderRow,
@@ -40,13 +49,14 @@ import { terminalColumns, wrapPlain } from "./text-layout.js";
 
 const USAGE = `usage: clio-coder auth list
        clio-coder auth status [target-or-runtime]
-       clio-coder auth login [target-or-runtime] [--api-key <value>]
+       clio-coder auth login [target-or-runtime] [--api-key <value>] [--method browser|device]
        clio-coder auth logout [target-or-runtime]
 `;
 
 interface ParsedAuthTargetArgs {
 	target?: string;
 	apiKey?: string;
+	method?: OAuthMethodPreference;
 	help: boolean;
 }
 
@@ -63,6 +73,13 @@ function parseAuthTargetArgs(args: ReadonlyArray<string>, verb: string): ParsedA
 			const value = args[i + 1];
 			if (!value) throw new Error("--api-key requires a value");
 			parsed.apiKey = value;
+			i += 1;
+			continue;
+		}
+		if (arg === "--method") {
+			const value = args[i + 1];
+			if (value !== "browser" && value !== "device") throw new Error("--method requires browser or device");
+			parsed.method = value;
 			i += 1;
 			continue;
 		}
@@ -303,6 +320,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 	if (resolved.runtime.authNotice) process.stdout.write(`note: ${resolved.runtime.authNotice}\n`);
 	if (resolved.runtime.auth === "oauth") {
 		const rl = createInterface({ input, output });
+		const preference = parsed.method ?? (canOpenBrowser() ? "browser" : "device");
 		const manualCodeInput = createDelayedManualCodeInput(
 			rl,
 			"Paste verification code if the browser flow does not return automatically: ",
@@ -310,9 +328,10 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 		try {
 			await auth.login(resolved.authTarget.providerId, {
 				onAuth: ({ url, instructions }) => {
-					process.stdout.write(`${url}\n`);
-					if (instructions) process.stdout.write(`${instructions}\n`);
-					process.stdout.write("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
+					const opened = preference === "browser" && openBrowser(url);
+					process.stdout.write(`${oauthUrlLines(url, instructions, opened).join("\n")}\n`);
+					if (preference === "browser")
+						process.stdout.write("Waiting for the browser callback. A manual code prompt will appear if needed.\n");
 				},
 				onDeviceCode: ({ verificationUri, userCode }) => {
 					process.stdout.write(`${verificationUri}\n`);
@@ -322,7 +341,12 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 					const answer = await rl.question(`${prompt.message}${prompt.allowEmpty ? " " : ": "}`);
 					return prompt.allowEmpty ? answer : answer.trim();
 				},
-				onSelect: (prompt) => promptOAuthSelection(rl, prompt),
+				onSelect: (prompt) => {
+					const method = chooseOAuthMethod(prompt, preference);
+					if (method === undefined) return promptOAuthSelection(rl, prompt);
+					if (method !== "browser" && parsed.method === undefined) process.stdout.write(`${NO_LOCAL_BROWSER_LINE}\n`);
+					return Promise.resolve(method);
+				},
 				onManualCodeInput: manualCodeInput.onManualCodeInput,
 				onProgress: (message) => {
 					process.stderr.write(`${message}\n`);
@@ -335,7 +359,7 @@ async function runLogin(args: ReadonlyArray<string>): Promise<number> {
 			printOk(`authenticated ${resolved.authTarget.providerId}`);
 			return 0;
 		} catch (error) {
-			printError(error instanceof Error ? error.message : String(error));
+			printError(describeOAuthError(error, proxyEnvSummary()));
 			return 1;
 		} finally {
 			manualCodeInput.cancel();
