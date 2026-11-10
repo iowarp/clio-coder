@@ -229,6 +229,11 @@ class HostProcess {
 
 	#handle(frame: unknown): void {
 		const inbound = parseCoreHostInbound(frame);
+		if (inbound.kind === "hello-error") {
+			if (this.hello !== null) throw new Error("a failure hello after hello");
+			this.fail(`could not attach: ${inbound.error}`);
+			return;
+		}
 		if (inbound.kind === "hello") {
 			if (this.hello !== null) throw new Error("a second hello");
 			this.hello = inbound.hello;

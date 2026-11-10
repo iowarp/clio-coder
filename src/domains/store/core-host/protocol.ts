@@ -72,6 +72,8 @@ export interface CoreHostHello {
 
 export type CoreHostInbound =
 	| { kind: "hello"; hello: CoreHostHello }
+	/** `{ hello: null, error }`: the host could not attach and is about to exit. */
+	| { kind: "hello-error"; error: string }
 	| { kind: "result"; id: number; result: unknown }
 	| { kind: "refusal"; id: number; reason: StoreRefusalReason; message: string }
 	| { kind: "progress"; id: number; bytes: number };
@@ -140,6 +142,7 @@ export function parseCoreHostInbound(value: unknown): CoreHostInbound {
 	if (!isRecord(value)) throw new CoreHostProtocolError("frame is not a JSON object");
 	if ("hello" in value) {
 		const hello = value.hello;
+		if (hello === null && typeof value.error === "string") return { kind: "hello-error", error: value.error };
 		if (
 			!isRecord(hello) ||
 			(hello.host !== "python" && hello.host !== "node") ||
