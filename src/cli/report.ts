@@ -40,6 +40,7 @@ import {
 	rememberIdentity,
 	reportBundleDigest,
 	reportBundlePath,
+	reportDraftsDirectory,
 	reportEditTemplate,
 	reportMarkdownPath,
 	reportRows,
@@ -416,7 +417,12 @@ async function sessionFor(
 }
 
 function editDraft(draft: ReportDraft, io: Io): ReportDraft | string {
-	const edited = editTextExternally(reportEditTemplate(draft), resolveExternalEditor(io.env));
+	const edited = editTextExternally(
+		reportEditTemplate(draft),
+		resolveExternalEditor(io.env),
+		".md",
+		reportDraftsDirectory(io.stateDir),
+	);
 	if (!edited.ok || edited.text === undefined) return edited.error ?? "the editor did not return the text";
 	return applyReportEdit(draft, edited.text);
 }

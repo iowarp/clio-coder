@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { type ReportCliDeps, runReport } from "../../src/cli/report.js";
 import type { ReportCommandRunner } from "../../src/domains/report/index.js";
@@ -94,4 +94,16 @@ test("--yes with a signed-in gh files the issue once and status lists it", async
 			output().out,
 		),
 	);
+});
+
+test("the editor opens the draft inside the reports drafts directory, never the shared temp dir", async () => {
+	const { deps, output } = scratch();
+	const record = join(deps.cwd ?? "", "editor-path");
+	deps.interactive = true;
+	deps.env = { EDITOR: `f() { printf %s "$1" > '${record}'; exit 3; }; f` };
+	strictEqual(await runReport(["bug", "--title", "fix: x fails on y"], deps), 2);
+	ok(output().err.includes("external editor exited with code 3"));
+	const opened = readFileSync(record, "utf8");
+	strictEqual(dirname(opened), join(deps.stateDir ?? "", "reports", "drafts"));
+	strictEqual(existsSync(opened), false);
 });

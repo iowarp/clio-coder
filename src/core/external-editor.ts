@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shellQuote } from "./shell-quote.js";
@@ -48,9 +48,19 @@ export function resolveExternalEditor(
 	return probe(["nano", "vi"]);
 }
 
-export function editTextExternally(initialText: string, command: string | null, extension = ".md"): ExternalEditResult {
+/**
+ * Open the text in the operator's editor through a 0600 file in `directory`. Text with its own containment rule
+ * passes its directory, so a killed editor does not leave it in the shared temp dir.
+ */
+export function editTextExternally(
+	initialText: string,
+	command: string | null,
+	extension = ".md",
+	directory?: string,
+): ExternalEditResult {
 	if (!command) return { ok: false, error: "no external editor configured; set VISUAL or EDITOR" };
-	const tmpFile = join(tmpdir(), `clio-coder-editor-${process.pid}-${randomUUID()}${extension}`);
+	if (directory !== undefined) mkdirSync(directory, { recursive: true, mode: 0o700 });
+	const tmpFile = join(directory ?? tmpdir(), `clio-coder-editor-${process.pid}-${randomUUID()}${extension}`);
 	try {
 		writeFileSync(tmpFile, initialText, { encoding: "utf8", mode: 0o600, flag: "wx" });
 		const result = runEditor(command, tmpFile);

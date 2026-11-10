@@ -25,6 +25,7 @@ import {
 	readReportDraft,
 	refreshReportStatus,
 	rememberIdentity,
+	reportDraftsDirectory,
 	reportEditTemplate,
 	reportRows,
 	routeFor,
@@ -97,7 +98,9 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			return null;
 		}
 		const suspend = deps.suspendTerminal ?? (<T>(run: () => T): T => run());
-		const result = suspend(() => editTextExternally(reportEditTemplate(draft), command));
+		const result = suspend(() =>
+			editTextExternally(reportEditTemplate(draft), command, ".md", reportDraftsDirectory(deps.stateDir)),
+		);
 		if (result.ok && result.text !== undefined) return applyReportEdit(draft, result.text);
 		if (result.error) deps.notify("warning", `report: ${result.error}`, "report:editor-failed");
 		return null;
