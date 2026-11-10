@@ -75,10 +75,13 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			writeFileSync(source, "s");
 			for (const blob of ["a/b", "a-c", "b.txt", "c.txt", "d/e.txt", "keep.tmp"])
 				await backend.putBlobFromFile("t", blob, source);
-			const outside = join(scratch, "outside");
-			mkdirSync(outside);
-			writeFileSync(join(outside, "x.txt"), "x");
-			symlinkSync(outside, join(storeTagDir(cwd, "t"), "blobs", "link"));
+			// Links can be planted only in the local layout; clio-core names never resolve on a local file system.
+			if (backend.kind === "local") {
+				const outside = join(scratch, "outside");
+				mkdirSync(outside);
+				writeFileSync(join(outside, "x.txt"), "x");
+				symlinkSync(outside, join(storeTagDir(cwd, "t"), "blobs", "link"));
+			}
 			deepStrictEqual(await backend.listBlobs("t", { offset: 0, limit: 2 }), { names: ["a-c", "a/b"], hasMore: true });
 			deepStrictEqual(await backend.listBlobs("t", { offset: 2, limit: 4 }), {
 				names: ["b.txt", "c.txt", "d/e.txt", "keep.tmp"],
@@ -92,8 +95,12 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			await rejects(backend.listBlobs("t", { pattern: "(", offset: 0, limit: 1 }), refusedWith("invalid-name"));
 		}));
 
-	test(`${name}: links in a blob's parents and tags resolving outside the project are refused`, () =>
+	test(`${name}: links in a blob's parents and tags resolving outside the project are refused`, (t) =>
 		withBackend(async (backend, scratch, cwd) => {
+			if (backend.kind !== "local") {
+				t.skip("links can be planted only in the local layout");
+				return;
+			}
 			await backend.getOrCreateTag("t");
 			const source = join(scratch, "s");
 			writeFileSync(source, "s");
