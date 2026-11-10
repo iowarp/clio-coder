@@ -20,6 +20,14 @@ export function neutralizeFraming(text: string): string {
 		.replace(/^\[middleware:/gmu, "[\\middleware:");
 }
 
+/**
+ * Whether text carries a marker `neutralizeFraming` would rewrite. File text the read tool returns stays byte-exact
+ * so edit anchors and copied replacement text match the file; a read carrying a marker is flagged instead.
+ */
+export function carriesHostFraming(text: string): boolean {
+	return /<\s*\/?\s*system-reminder/iu.test(text) || /^\[middleware:/mu.test(text);
+}
+
 /** One `<system-reminder>` block holding the given messages. */
 export function systemReminderBlock(messages: readonly string[]): string {
 	return `<system-reminder>\n${messages.map(neutralizeFraming).join("\n\n")}\n</system-reminder>`;

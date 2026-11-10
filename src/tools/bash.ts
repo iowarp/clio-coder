@@ -9,7 +9,7 @@ import {
 	combineLiveBashOutput,
 	runBashCommand,
 } from "../core/bash-exec.js";
-import { TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import { neutralizeFraming, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -200,7 +200,7 @@ export function bashOutputCapResult(
 		}
 	}
 	const status = `bash: command output exceeded the ${BASH_HARD_CAP_BYTES}-byte (16 MiB) hard cap and was stopped. Observed stdout: ${result.observedStdoutBytes ?? "unavailable"} bytes, stderr: ${result.observedStderrBytes ?? "unavailable"} bytes; retained stream stdout: ${result.retainedStdoutBytes ?? "unavailable"} bytes, stderr: ${result.retainedStderrBytes ?? "unavailable"} bytes. ${retention} Use run_script to stream unbounded output to .clio-coder/runs/<runId>/ instead.`;
-	const message = preview.length > 0 ? `${preview}\n\n${status}` : status;
+	const message = preview.length > 0 ? `${neutralizeFraming(preview)}\n\n${status}` : status;
 	const disposition = normalizedBashDisposition(policy);
 	return {
 		kind: "error",
@@ -418,7 +418,10 @@ export const bashTool: ToolSpec = {
 			};
 			const { error, aborted, timedOut, outputCapped } = result;
 			const rawOutput = combineBashOutput(result);
-			const output = rawOutput.trim();
+			// Command output cannot speak in the host's voice: a `[middleware:` line or a reminder tag in it is made inert,
+			// so only the notes appended below read as host notes.
+			const shown = neutralizeFraming(rawOutput);
+			const output = shown.trim();
 			if (aborted) {
 				const abortCause = options?.abortCause?.() ?? null;
 				const status = bashAbortStatus(elapsedMs, timeout, abortCause);
@@ -456,7 +459,7 @@ export const bashTool: ToolSpec = {
 					details: bashResultDetails(result, rawOutput, "nonzero", elapsedMs, args.command),
 				};
 			}
-			const body = rawOutput.length > 0 ? rawOutput : "(no output)";
+			const body = shown.length > 0 ? shown : "(no output)";
 			return {
 				kind: "ok",
 				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}${clioIssueNudge(args.command)}`,

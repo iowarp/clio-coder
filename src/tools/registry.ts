@@ -7,6 +7,7 @@ import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
 import {
+	carriesHostFraming,
 	carriesToolResultNote,
 	recordedToolResultNotes,
 	TOOL_RESULT_HOST_NOTES_KEY,
@@ -3457,10 +3458,11 @@ function buildToolHookInput(
 	}
 	if (call.tool !== spec.name) metadata.requestedToolName = call.tool;
 	if (result !== undefined) {
-		if (hook === "after_tool" && ["web_fetch", "read", "bash", "dispatch", "monitor"].includes(spec.name))
-			metadata.untrustedInstructionMarkers = containsInstructionMarkers(
-				result.kind === "ok" ? result.output : result.kind === "error" ? result.message : "",
-			);
+		if (hook === "after_tool" && ["web_fetch", "read", "bash", "dispatch", "monitor"].includes(spec.name)) {
+			const text = result.kind === "ok" ? result.output : result.kind === "error" ? result.message : "";
+			metadata.untrustedInstructionMarkers =
+				containsInstructionMarkers(text) || (spec.name === ToolNames.Read && carriesHostFraming(text));
+		}
 		metadata.resultKind = result.kind;
 		if (result.kind === "error") metadata.errorMessage = result.message;
 		if (result.kind === "ok" && result.terminate === true) metadata.terminate = true;
