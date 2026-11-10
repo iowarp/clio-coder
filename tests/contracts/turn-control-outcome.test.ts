@@ -130,6 +130,9 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 it("turn-control boundary rejects surface imports and domain internals, including erased types", (t) => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-turn-control-boundary-"));
 	try {
+		// The checker always reads the composition root for rule15.
+		mkdirSync(join(root, "src/entry"), { recursive: true });
+		writeFileSync(join(root, "src/entry/orchestrator.ts"), "");
 		for (const [specifier, target, refused] of [
 			["../../interactive/control.js", "src/interactive/control.ts", true],
 			["../../engine/types.js", "src/engine/types.ts", true],
