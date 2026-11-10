@@ -123,7 +123,7 @@ function isInside(root: string, target: string): boolean {
 }
 
 /** The put's source: a regular file whose real path stays inside the workspace root. */
-function workspaceSource(cwd: string, given: string): { abs: string; rel: string; bytes: number } {
+function workspaceSource(cwd: string, given: string): { abs: string; rel: string; bytes: number; name: string } {
 	const resolved = path.resolve(cwd, given);
 	let real: string;
 	let root: string;
@@ -138,7 +138,9 @@ function workspaceSource(cwd: string, given: string): { abs: string; rel: string
 	}
 	const stat = statSync(real);
 	if (!stat.isFile()) throw new StoreRefusal("not-a-file", `${given} is not a regular file.`);
-	return { abs: real, rel: path.relative(root, real), bytes: stat.size };
+	// The default blob name is the basename the caller wrote, not the link target's, because admission
+	// predicts the write target from the arguments alone (storeWriteTarget).
+	return { abs: real, rel: path.relative(root, real), bytes: stat.size, name: path.basename(resolved) };
 }
 
 async function backendSummary(backend: StoreBackend): Promise<{ kind: string; tier: null; reason: string }> {
@@ -257,7 +259,7 @@ async function runOp(
 	}
 	if (op === "put") {
 		const source = workspaceSource(cwd, requireString(args, "path", op));
-		const blob = checkBlob(typeof args.blob === "string" && args.blob.length > 0 ? args.blob : path.basename(source.rel));
+		const blob = checkBlob(typeof args.blob === "string" && args.blob.length > 0 ? args.blob : source.name);
 		await requireTag(backend, tag);
 		const derived = await derivedRefs(backend, stringList(args.derived_from));
 		const replaced = (await backend.statBlob(tag, blob)) !== null;

@@ -1,9 +1,10 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
+import { storeWriteTarget } from "../../src/core/store-paths.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
-import { prepareStoreArguments } from "../../src/tools/store/surface.js";
+import { prepareStoreAdmissionArguments, prepareStoreArguments } from "../../src/tools/store/surface.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function withWorkspace(fn: (root: string) => Promise<void>): Promise<void> {
@@ -61,5 +62,23 @@ describe("store tool", () => {
 				match(String(result.message), /can read the store but not write/);
 			}
 			strictEqual((await tool.run({ op: "tags" })).kind, "ok");
+		}));
+	it("stores a put under the name admission predicted when a link changes after admission", () =>
+		withWorkspace(async (root) => {
+			writeFileSync(join(root, "out", "b.dat"), "bytes\n");
+			writeFileSync(join(root, "out", "c.bin"), "other\n");
+			symlinkSync("b.dat", join(root, "out", "a.txt"));
+			const tool = createStoreTool({ getCwd: () => root, writable: true });
+			body(await tool.run({ op: "create", tag: "results" }));
+			const admitted = prepareStoreAdmissionArguments({ op: "put", tag: "results", path: "out/a.txt" }, root);
+			const predicted = basename(String(storeWriteTarget(root, admitted)));
+			// The admitted file becomes a link to another workspace file before the tool runs.
+			rmSync(join(root, "out", "b.dat"));
+			symlinkSync("c.bin", join(root, "out", "b.dat"));
+			body(await tool.run(admitted));
+			deepStrictEqual(
+				(body(await tool.run({ op: "list", tag: "results" })).blobs as Array<{ blob: string }>).map((b) => b.blob),
+				[predicted],
+			);
 		}));
 });
