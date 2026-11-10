@@ -5,6 +5,7 @@ import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { renderCalls } from "../core/telemetry/render.js";
+import { escapeTerminalControls } from "../core/terminal-controls.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
@@ -907,8 +908,10 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: number): string[] {
 	// A frame rewrites arbitrary positions, so redaction can move what follows the settled mark. The two tones split where the
 	// redacted texts stop agreeing (#446).
-	const source = redactStreamingUrlCredentials(sanitizeAssistantProse(seg.text));
-	const settledText = redactStreamingUrlCredentials(sanitizeAssistantProse(seg.text.slice(0, settled)));
+	const source = redactStreamingUrlCredentials(escapeTerminalControls(sanitizeAssistantProse(seg.text)));
+	const settledText = redactStreamingUrlCredentials(
+		escapeTerminalControls(sanitizeAssistantProse(seg.text.slice(0, settled))),
+	);
 	let shared = 0;
 	while (shared < settledText.length && source.charCodeAt(shared) === settledText.charCodeAt(shared)) shared += 1;
 	const head = source.slice(0, shared);
@@ -1222,7 +1225,8 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	if (cached !== undefined) return cached;
 	const startedAt = seg.finalized ? 0 : performance.now();
 	seg.prose ??= new AssistantProseProjection();
-	seg.secrets ??= new RedactedStringProjection(redactUrlCredentials);
+	// A per-character map, so it composes with the projection's appends.
+	seg.secrets ??= new RedactedStringProjection((text) => redactUrlCredentials(escapeTerminalControls(text)));
 	// While text only grows, both projections take just what was appended; neither reads the whole reply (#428).
 	const added = seg.unprojected === undefined ? null : seg.prose.append(seg.text, seg.unprojected, seg.finalized);
 	if (added === null) seg.secrets.project(seg.prose.project(seg.text, seg.finalized), seg.finalized);
@@ -1628,10 +1632,9 @@ function renderThinkingRail(
 ): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
 	// Presentation only: the provider's signed reasoning stays untouched.
-	const text = stripThinkingEmphasis(redactStreamingSecretString(sanitizeAssistantProse(thinking), !open)).replace(
-		/^\s*\n|\s+$/gu,
-		"",
-	);
+	const text = stripThinkingEmphasis(
+		redactStreamingSecretString(escapeTerminalControls(sanitizeAssistantProse(thinking)), !open),
+	).replace(/^\s*\n|\s+$/gu, "");
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
 	// that says what it is, because the rail alone is the same mark a tool's output wears.

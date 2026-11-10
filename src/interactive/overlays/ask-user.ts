@@ -1,3 +1,4 @@
+import { escapeTerminalControls } from "../../core/terminal-controls.js";
 import {
 	classifyDecisionPresentation,
 	type DecisionPresentation,
@@ -252,8 +253,8 @@ function optionItems(question: AskUserQuestion, selected: ReadonlySet<number>, d
 		const isExplicitOther = index === explicitOtherIndex;
 		const label =
 			question.multi_select === true && !isExplicitOther
-				? `${selected.has(index) ? "[x]" : "[ ]"} ${option.label}`
-				: option.label;
+				? `${selected.has(index) ? "[x]" : "[ ]"} ${escapeTerminalControls(option.label)}`
+				: escapeTerminalControls(option.label);
 		const item: SelectItem = {
 			value: isExplicitOther ? "other" : `option:${index}`,
 			label,
@@ -310,7 +311,9 @@ function wrapLabeledValue(prefix: string, value: string, width: number): string[
 }
 
 function compactTitle(question: AskUserQuestion): string {
-	return (question.header ?? question.question).replace(/\s+/g, " ").trim();
+	return escapeTerminalControls(question.header ?? question.question)
+		.replace(/\s+/g, " ")
+		.trim();
 }
 
 const BOLD_SPAN = /\*\*([^*\n]+?)\*\*/gu;
@@ -334,7 +337,7 @@ export function formatAskUserQuestion(text: string, width: number): string[] {
 	const safeWidth = Math.max(4, width);
 	const lines: string[] = [];
 	let previousBlank = true;
-	for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
+	for (const raw of escapeTerminalControls(text).replace(/\r\n?/g, "\n").split("\n")) {
 		const line = raw.replace(/\t/g, "    ").trimEnd();
 		if (line.trim().length === 0) {
 			if (!previousBlank) lines.push("");
@@ -1039,7 +1042,7 @@ class AskUserOverlayView implements Component {
 			// What the question under the row already explains fits whole or gives way.
 			const optional = [
 				...(this.roundsAnswered > 0 ? [`Round ${this.roundsAnswered + 1}`] : []),
-				...(question.header ? [question.header] : []),
+				...(question.header ? [escapeTerminalControls(question.header)] : []),
 			];
 			for (const part of optional) if (fits([...parts, part])) parts.push(part);
 		}
@@ -1397,7 +1400,7 @@ class AskUserOverlayView implements Component {
 		const parts: string[] = [theme.fg("pendingAnswer", this.confirmation ? "Confirm" : "Clio asks you")];
 		// The strip above already carries the active question's name with the
 		// cursor on it; the header repeats it only when there is no strip.
-		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, question.header));
+		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, escapeTerminalControls(question.header)));
 		if (this.questions.length <= 1 && this.roundsAnswered > 0) {
 			parts.push(theme.fg("annotation", `Round ${this.roundsAnswered + 1}`));
 		}
