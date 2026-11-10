@@ -733,11 +733,14 @@ merges, cherry-picks, reverts, rebases, and cherry-pick/revert sequences.
 A detached task applies when its
 run finalizes, so `monitor(mode="collect")` returns the settled application result.
 
-A merge that lands a commit is announced to the operator, since no card asks first: the
-worker card in the TUI and the ACP run facts show `merged <sha> onto <branch>`, headless
-`run` prints, for a dispatch it waited on, `clio-coder run: <agent> <run id> merged <sha> onto <branch>` to stderr, and
-`run --json` carries the same text as a `notice` frame. A preserved, conflicted, withheld or
-refused application, and a merge whose branch held no change, produce no notice.
+A merge that lands a commit is announced to the operator, since no card asks first. When
+the run settles, attached or detached, Clio Coder raises a `worker_merged` notice reading
+`<agent> <run id> merged <sha> onto <branch>`: the TUI shows it as a Fleet row in the
+transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --json` writes a
+`dispatch_scope_notice` frame with level `info`, and ACP forwards it as
+`run.scope_notice_raised`. The worker card also keeps its `merged <sha> onto <branch>` line. A
+preserved, conflicted, withheld or refused application, and a merge whose branch held no
+change, produce no notice.
 
 Four cases withhold the merge: a worker whose own report lists a failing validation,
 a worker whose task requested validation but which executed no check, a worker that
