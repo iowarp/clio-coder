@@ -9,6 +9,12 @@ import type { ReportKind } from "./vocabulary.js";
 export const OUTBOX_STATES = ["draft", "sending", "sent", "opened", "written", "withdrawn"] as const;
 export type OutboxState = (typeof OUTBOX_STATES)[number];
 
+export interface OutboxBundle {
+	sha256: string;
+	scopes: Array<"debug" | "dataset">;
+	content: "none" | "transcript";
+}
+
 export interface OutboxEntry {
 	kind: ReportKind;
 	title: string;
@@ -19,7 +25,8 @@ export interface OutboxEntry {
 	number: number | null;
 	sentAt: string | null;
 	consent: string;
-	bundle: string | null;
+	/** The attached bundle: its file's sha256 and what the reporter agreed it may be used for (R-17). */
+	bundle: OutboxBundle | null;
 	credit: boolean;
 	replyCheck: string | null;
 	lastSeen: { state: string; comments: number; at: string } | null;

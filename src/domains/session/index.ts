@@ -107,6 +107,7 @@ export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.
 export { liveSessionOwner } from "./live-owner.js";
 export { SessionManifest } from "./manifest.js";
 export { observationCheckpoint, observationSourceUnits } from "./memory-source.js";
+export { type MessageProjection, projectMessage } from "./message-projection.js";
 export { CURRENT_SESSION_FORMAT_VERSION, runMigrations } from "./migrations/index.js";
 export {
 	protectedArtifactEntryFromArtifact,
@@ -135,6 +136,7 @@ export {
 	runTelemetryDirectoryExists,
 	runTelemetryWrittenMs,
 } from "./telemetry-source.js";
+export { filterEntriesToActivePath } from "./tree/active-path.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).

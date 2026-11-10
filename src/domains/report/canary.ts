@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { telemetryInstallPath } from "../telemetry/paths.js";
-import { unpackTelemetryArchive } from "../telemetry/share-archive.js";
+import { telemetryInstallPath, unpackTelemetryArchive } from "../telemetry/index.js";
 import type { RenderedReport } from "./body.js";
 import { type IdentityKind, isReservedName, type LocalIdentity, scrubText } from "./scrub.js";
 
@@ -184,13 +183,28 @@ export function canaryScan(
 	const hits: CanaryHit[] = [];
 	if (m.words === null && m.exact === null) return hits;
 	for (const member of members) scanMember(member, m, hits);
+	// A location is built from member names and object keys, which can be the identifier itself: mask it there too.
+	const exact = m.exact ? new RegExp(m.exact.source, "gu") : null;
+	const words = m.words ? new RegExp(m.words.source, "giu") : null;
+	const mask = (text: string): string => {
+		let out = exact ? text.replace(exact, (value) => `<${m.exactKinds.get(value) ?? "path"}>`) : text;
+		if (words) out = out.replace(words, (value) => `<${m.wordKinds.get(value.toLowerCase()) ?? "user"}>`);
+		return out;
+	};
 	const seen = new Set<string>();
-	return hits.filter((hit) => {
-		const key = `${hit.member}\0${hit.kind}\0${hit.event}\0${hit.path}`;
-		if (seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
+	return hits
+		.map((hit) => ({
+			...hit,
+			member: mask(hit.member),
+			event: hit.event === null ? null : mask(hit.event),
+			path: hit.path === null ? null : mask(hit.path),
+		}))
+		.filter((hit) => {
+			const key = `${hit.member}\0${hit.kind}\0${hit.event}\0${hit.path}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
 }
 
 /** Where a hit is, as `<event>.<path>` for a journal record and `<member>[.<path>]` otherwise. */

@@ -1,5 +1,32 @@
 export { isFixedPoint, parseReportBlock, type RenderedReport, renderReport, renderReportBlock } from "./body.js";
 export {
+	BUNDLE_KEPT,
+	BUNDLE_NEVER_KEPT,
+	BUNDLE_RETENTION_DAYS,
+	type BuiltBundle,
+	type BundleContent,
+	type BundleOptions,
+	type BundlePreview,
+	type BundleSummary,
+	buildBundle,
+	CONSENT_SCOPES,
+	type ConsentScope,
+	type ConsentScopes,
+	consentText,
+	deleteReportBundle,
+	previewBundle,
+	REPORT_BUNDLE_ENVELOPE_SCHEMA,
+	type ReportBundleEnvelope,
+	readReportBundle,
+	renderBundlePreview,
+	reportBundlePath,
+	reportBundlesDirectory,
+	sweepReportBundles,
+	TRANSCRIPT_TURNS_DEFAULT,
+	TRANSCRIPT_TURNS_MAX,
+	transcriptExcerpt,
+} from "./bundle.js";
+export {
 	CANARY_MIN_LENGTH,
 	type CanaryHit,
 	type CanaryKind,
@@ -35,6 +62,7 @@ export { type ReportEnvironment, type ReportSessionFacts, reportEnvironment } fr
 export { crashFrames, minorVersion, reportFingerprint } from "./fingerprint.js";
 export { observeSession, type ReportObservation, renderObservation } from "./observe.js";
 export {
+	type OutboxBundle,
 	type OutboxEntry,
 	type OutboxState,
 	outboxEntry,

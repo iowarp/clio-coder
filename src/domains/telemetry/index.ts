@@ -41,6 +41,7 @@ export {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryBundlePath,
 	telemetryConsentPath,
+	telemetryInstallPath,
 	telemetryJournalFiles,
 	telemetryJournalPath,
 	telemetryObjectsDirectory,
@@ -109,5 +110,15 @@ export {
 	readVerifiedRun,
 } from "./run-record.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";
+export {
+	freshShareSource,
+	packShare,
+	planShare,
+	resolveShareScopes,
+	type ShareInventory,
+	type SharePlan,
+	verifyShareArchive,
+} from "./share.js";
+export { packTelemetryArchive, type ShareArchiveEntry, unpackTelemetryArchive } from "./share-archive.js";
 export { carriesPath, isBuiltinRuntimeId } from "./share-projection.js";
 export { emptyUsageDiagnostics, explainRepoRef, isRepoRef, usageWindow } from "./usage-window.js";

@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { shareProjectionErrors } from "../../src/domains/telemetry/share-soundness.js";
+import { REPORT_BUNDLE_ENVELOPE_SCHEMA } from "../../src/domains/report/bundle.js";
+import { closedSchemaErrors, shareProjectionErrors } from "../../src/domains/telemetry/share-soundness.js";
 
 export interface BoundaryCheckResult {
 	violations: string[];
@@ -1493,5 +1494,9 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	violations.push(...checkCompositionRoot(ORCHESTRATOR, readFileSync(path.join(projectRoot, ORCHESTRATOR), "utf8")));
 	// A share keeps a field verbatim only where its schema already bounds it (#434).
 	violations.push(...shareProjectionErrors().map((error) => `share-projection: ${error}`));
+	// A report bundle's envelope leaves whole, so it is held to the same walk (R-17).
+	violations.push(
+		...closedSchemaErrors(REPORT_BUNDLE_ENVELOPE_SCHEMA, "report.json").map((error) => `report-bundle: ${error}`),
+	);
 	return { violations };
 }

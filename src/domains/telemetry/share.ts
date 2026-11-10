@@ -825,6 +825,11 @@ function shareArchiveEntries(plan: SharePlan): ShareArchiveEntry[] {
 	return entries;
 }
 
+/** The plan's archive as bytes, exactly as {@link writeShare} writes it. */
+export function packShare(plan: SharePlan): Buffer {
+	return packTelemetryArchive(shareArchiveEntries(plan), Math.floor(Date.parse(plan.createdAt) / 1000));
+}
+
 /** Write the plan's archive to `out`, which must not exist. */
 export async function writeShare(plan: SharePlan, out: string): Promise<number> {
 	if (
@@ -837,7 +842,7 @@ export async function writeShare(plan: SharePlan, out: string): Promise<number> 
 		)
 	)
 		throw new Error(`refusing to overwrite ${out}`);
-	const bytes = packTelemetryArchive(shareArchiveEntries(plan), Math.floor(Date.parse(plan.createdAt) / 1000));
+	const bytes = packShare(plan);
 	await safeResourceWriteAsync(out, bytes, { mode: 0o600 });
 	return bytes.length;
 }

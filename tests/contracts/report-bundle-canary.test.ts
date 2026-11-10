@@ -1,15 +1,36 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash, createHmac } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { Value } from "typebox/value";
+import { printReportBundle, runReportSelftest } from "../../src/cli/report-bundle.js";
+import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { JournalEventName } from "../../src/core/telemetry/events.js";
 import { journalDefinition } from "../../src/core/telemetry/events.js";
 import {
+	buildBundle,
 	type CanaryHit,
 	canaryScan,
+	composeReportDraft,
 	issueCanaryHits,
 	type LocalIdentity,
+	outboxEntry,
+	REPORT_BUNDLE_ENVELOPE_SCHEMA,
+	type ReportBundleEnvelope,
+	type ReportDraft,
+	reportBundlePath,
 	scrubText,
+	sweepReportBundles,
+	updateOutbox,
 } from "../../src/domains/report/index.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import {
+	telemetrySessionDirectory,
+	unpackTelemetryArchive,
+	verifyShareArchive,
+} from "../../src/domains/telemetry/index.js";
 import { PromptStructureObjectSchema } from "../../src/domains/telemetry/objects.js";
 import {
 	type Anonymize,
@@ -22,6 +43,7 @@ import {
 	SHARE_EVENT_PROJECTIONS,
 	type ShareProjection,
 } from "../../src/domains/telemetry/share-projection.js";
+import { closedSchemaErrors } from "../../src/domains/telemetry/share-soundness.js";
 
 // A machine whose every name is a canary: none of these may survive a projection, and the scan must find each.
 const USER = "zqxuser";
@@ -281,6 +303,17 @@ test("the runtime scan finds escaped, cased and nested canaries and nothing in c
 			{ member: "raw.txt", kind: "path", path: "note" },
 		],
 	);
+	// A location never repeats the value: a member name or key that is the identifier reads as its kind.
+	deepStrictEqual(
+		canaryScan(
+			[{ name: `sessions/${USER}/a.json`, bytes: Buffer.from(JSON.stringify({ d: { [HOST]: 1 } })) }],
+			IDENTITY,
+		).map(({ member, kind, path }) => ({ member, kind, path })),
+		[
+			{ member: "sessions/<user>/a.json", kind: "user", path: null },
+			{ member: "sessions/<user>/a.json", kind: "host", path: "d.<host>" },
+		],
+	);
 	// A canary inside a longer word is not a hit: `zqxusers` is not the user `zqxuser`.
 	deepStrictEqual(canaryScan([{ name: "a.json", bytes: Buffer.from(`["${USER}s"]`) }], IDENTITY), []);
 
@@ -291,4 +324,232 @@ test("the runtime scan finds escaped, cased and nested canaries and nothing in c
 	const body = scrubText(raw, IDENTITY, unmasked).text;
 	ok(body.includes(HOST));
 	deepStrictEqual(issueCanaryHits({ title: "t", body }, IDENTITY), []);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// R-17: the report bundle, end to end over a live session
+
+const WRITER = { clioCoderVersion: "0.7.1", piVersion: "0.0.0-test" };
+const SECRET = ["AKIA", "ZQXABCDEFGHIJKLM"].join("");
+const WORKSPACE_FILE = `/home/${USER}/${PROJECT}/src/app.ts`;
+
+function message(turnId: string, parentTurnId: string | null, role: string, payload: unknown) {
+	return { kind: "message", turnId, parentTurnId, timestamp: "2026-11-10T10:00:00.000Z", role, payload };
+}
+
+const LEDGER = [
+	message("u1", null, "user", { text: "first turn" }),
+	message("a1", "u1", "assistant", { content: [{ type: "text", text: "ok" }] }),
+	message("u2", "a1", "user", { text: `Build fails in ${WORKSPACE_FILE} with key ${SECRET}` }),
+	message("a2", "u2", "assistant", {
+		content: [
+			{ type: "thinking", thinking: "PRIVATE-REASONING", thinkingSignature: "SIG-1" },
+			{ type: "text", text: `Reading ${WORKSPACE_FILE}`, textSignature: "SIG-2" },
+			{ type: "toolCall", id: "call_1", name: "read", arguments: { path: WORKSPACE_FILE }, thoughtSignature: "SIG-3" },
+		],
+	}),
+	message("r1", "a2", "tool_result", {
+		toolCallId: "call_1",
+		toolName: "read",
+		result: { content: [{ type: "text", text: "TOOL-OUTPUT-MARKER" }] },
+		isError: false,
+	}),
+	{ kind: "custom", customType: "test.note", turnId: "c1", parentTurnId: "r1", timestamp: "2026-11-10T10:00:01.000Z" },
+];
+
+/** A session as a running Clio leaves it: a flushed, unsealed telemetry journal and a ledger. */
+async function liveSession(stateDir: string, sessionId: string): Promise<ReportDraft> {
+	const context = { sessionId, agent: { role: "main", id: sessionId } } as TelemetryContext;
+	const journal = await openCallJournal({
+		directory: telemetrySessionDirectory(stateDir, sessionId),
+		context,
+		writer: WRITER,
+	});
+	for (const { kind, data } of [
+		{ kind: "session.opened", data: {} },
+		{
+			kind: "turn.settled",
+			data: { stopReason: "stop", terminal: { cause: null, stage: null, retries: 0, callIds: [] } },
+		},
+	])
+		journal.enqueue({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() } as Parameters<
+			typeof journal.enqueue
+		>[0]);
+	await journal.flush();
+	await journal.close();
+	const ledger = join(stateDir, "sessions", "cwdhash0", sessionId);
+	mkdirSync(ledger, { recursive: true });
+	writeFileSync(join(ledger, "current.jsonl"), LEDGER.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+	return composeReportDraft({
+		kind: "bug",
+		surface: "headless",
+		title: "Bundle contract test report",
+		happened: "The bundle contract test composes this report over a live session.",
+		session: { id: sessionId, observations: [] },
+	});
+}
+
+const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+const member = (members: ReadonlyArray<{ path: string; bytes: Buffer }>, path: string) => {
+	const found = members.find((entry) => entry.path === path);
+	ok(found, `no ${path} member`);
+	return found.bytes;
+};
+
+function cliIo(stateDir: string) {
+	const out: string[] = [];
+	const err: string[] = [];
+	return {
+		io: {
+			out: (text: string) => void out.push(text),
+			err: (text: string) => void err.push(text),
+			stateDir,
+			cwd: stateDir,
+			identity: async () => IDENTITY,
+		},
+		out,
+		err,
+	};
+}
+
+test("a bundle of a live session is an envelope and a verified share archive, recorded by hash (R-17)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-bundle-"));
+	try {
+		const stateDir = join(root, "state");
+		const draft = await liveSession(stateDir, "ses_bundle");
+		const built = await buildBundle(draft, {
+			consent: { scopes: ["debug"] },
+			identity: IDENTITY,
+			stateDir,
+			writer: WRITER,
+		});
+		ok(built.path);
+		const file = readFileSync(built.path);
+		strictEqual(statSync(built.path).mode & 0o777, 0o600);
+		const members = unpackTelemetryArchive(file);
+		deepStrictEqual(
+			members.map((entry) => entry.path),
+			["report.json", "telemetry.tar.gz"],
+		);
+		const telemetry = member(members, "telemetry.tar.gz");
+		strictEqual(verifyShareArchive(telemetry).failure, null);
+		const envelope: unknown = JSON.parse(member(members, "report.json").toString("utf8"));
+		ok(Value.Check(REPORT_BUNDLE_ENVELOPE_SCHEMA, envelope), "the envelope does not match its schema");
+		deepStrictEqual(closedSchemaErrors(REPORT_BUNDLE_ENVELOPE_SCHEMA, "report.json"), []);
+		const { consent, selection, telemetrySha256, transcriptSha256 } = envelope as ReportBundleEnvelope;
+		strictEqual(telemetrySha256, sha(telemetry));
+		strictEqual(transcriptSha256, null);
+		deepStrictEqual(consent.scopes, ["debug"]);
+		strictEqual(consent.content, "none");
+		deepStrictEqual(selection, { sessions: ["ses_bundle"], runs: [], process: null, snapshot: "live" });
+
+		// Independently of the scan: no canary in any byte, outer or inner.
+		const inner = unpackTelemetryArchive(telemetry).map((entry) => entry.bytes.toString("utf8"));
+		const text = [member(members, "report.json").toString("utf8"), ...inner].join("\n").toLowerCase();
+		for (const name of CANARY_NAMES) ok(!text.includes(name), `${name} is in the bundle`);
+
+		// What the preview and `report show --bundle` print is the file whose hash the outbox holds.
+		const recorded = outboxEntry(stateDir, draft.id)?.bundle;
+		deepStrictEqual(recorded, { sha256: sha(file), scopes: ["debug"], content: "none" });
+		const shown = cliIo(stateDir);
+		strictEqual(printReportBundle(shown.io, draft.id), 0);
+		const printed = shown.out.join("");
+		ok(printed.startsWith(`bundle sha256 ${sha(file)}, ${file.length} bytes\n`));
+		ok(printed.includes("==> report.json <==") && printed.includes("==> telemetry.tar.gz/manifest.json <=="));
+		writeFileSync(built.path, Buffer.concat([file, Buffer.from("x")]));
+		strictEqual(printReportBundle(cliIo(stateDir).io, draft.id), 1);
+
+		// Thirty days after sending, the bundle leaves the reports directory.
+		updateOutbox(stateDir, draft.id, {
+			kind: draft.kind,
+			title: draft.title,
+			state: "sent",
+			sentAt: "2026-01-01T00:00:00.000Z",
+		});
+		deepStrictEqual(sweepReportBundles(stateDir, new Date("2026-01-31T00:00:01.000Z")), [draft.id]);
+		ok(!existsSync(built.path));
+		strictEqual(outboxEntry(stateDir, draft.id)?.bundle, null);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("the transcript tick adds an excerpt with thinking and signatures gone and planted values masked (R-17)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-bundle-transcript-"));
+	try {
+		const stateDir = join(root, "state");
+		const draft = await liveSession(stateDir, "ses_transcript");
+		const built = await buildBundle(draft, {
+			consent: { scopes: ["debug", "dataset"] },
+			transcript: { turns: 1 },
+			identity: IDENTITY,
+			stateDir,
+			writer: WRITER,
+		});
+		const members = unpackTelemetryArchive(readFileSync(built.path ?? ""));
+		deepStrictEqual(
+			members.map((entry) => entry.path),
+			["report.json", "telemetry.tar.gz", "transcript.jsonl"],
+		);
+		const transcript = member(members, "transcript.jsonl");
+		strictEqual(built.envelope.transcriptSha256, sha(transcript));
+		strictEqual(built.envelope.consent.content, "transcript");
+		const text = transcript.toString("utf8");
+		for (const absent of ["PRIVATE-REASONING", "Signature", "SIG-", SECRET, USER, PROJECT, "TOOL-OUTPUT-MARKER"])
+			ok(!text.includes(absent), `${absent} is in the transcript`);
+		for (const present of [
+			"[redacted:aws-access-key]",
+			"<path>",
+			'"type":"omitted","part":"thinking"',
+			'"name":"read","arguments":"[omitted: tool arguments]"',
+			'"result":"[omitted: tool output]"',
+			'{"omitted":"earlier entries","count":2}',
+			'{"omitted":"custom"}',
+			'"turns":1,"of":2,"toolOutput":false',
+		])
+			ok(text.includes(present), `${present} is missing from the transcript:\n${text}`);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a canary in a member, or no consent, builds no bundle; selftest says which (R-17, R-19)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-bundle-refused-"));
+	try {
+		// The session is named for the user, so the name reaches the envelope and the share's member paths.
+		const stateDir = join(root, "state");
+		const draft = await liveSession(stateDir, USER);
+		await rejects(
+			buildBundle(draft, { consent: { scopes: ["debug"] }, identity: IDENTITY, stateDir, writer: WRITER }),
+			(error: Error) => /: a user appears in /u.test(error.message) && !error.message.includes(USER),
+		);
+		ok(!existsSync(reportBundlePath(stateDir, draft.id)));
+		strictEqual(outboxEntry(stateDir, draft.id), null);
+		const refused = cliIo(stateDir);
+		strictEqual(await runReportSelftest(refused.io, { session: USER, request: null }), 1);
+		ok(refused.err.join("").includes("a user appears in"));
+
+		await rejects(
+			// @ts-expect-error consent is required on every call
+			buildBundle(draft, { identity: IDENTITY, stateDir }),
+			/no consent scope was given/,
+		);
+		await rejects(
+			// @ts-expect-error an empty consent is no consent
+			buildBundle(draft, { consent: { scopes: [] }, identity: IDENTITY, stateDir }),
+			/no consent scope was given/,
+		);
+
+		const clean = join(root, "clean");
+		await liveSession(clean, "ses_clean");
+		const passed = cliIo(clean);
+		strictEqual(await runReportSelftest(passed.io, { session: "ses_clean", request: null }), 0);
+		match(
+			passed.out.join(""),
+			/^0 identifiers found in \d+ bytes \(report\.json, telemetry\.tar\.gz; \d+ telemetry records\)\n$/u,
+		);
+		ok(!existsSync(join(clean, "reports", "bundles")));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });

@@ -152,3 +152,13 @@ export function shareProjectionErrors(): string[] {
 	}
 	return errors;
 }
+
+/**
+ * Every way a document kept whole could carry an unbounded string or key: the walk a `keep` gets, over a schema that
+ * leaves verbatim, such as a report bundle's envelope (R-17). Empty when every string is a vocabulary or closed pattern.
+ */
+export function closedSchemaErrors(schema: unknown, label: string): string[] {
+	const errors: string[] = [];
+	keepErrors(asSchema(schema) ?? {}, label, errors);
+	return errors;
+}
