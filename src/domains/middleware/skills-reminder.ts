@@ -1,6 +1,6 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
-import type { CapabilityMatch } from "./capability-gate.js";
+import { type CapabilityMatch, capabilityWorthNaming } from "./capability-gate.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSkillSuggestionWait, SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE } from "./stalled-turn.js";
 import { type MiddlewareEffect, metadataNumber } from "./types.js";
@@ -50,6 +50,14 @@ export interface SkillsReminderDeps {
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
 
+/** Cuts at the last word boundary within the limit, so no word is shown half. */
+function clip(text: string, limit: number): string {
+	if (text.length <= limit) return text;
+	const cut = text.slice(0, limit);
+	const space = text[limit] === " " ? limit : cut.lastIndexOf(" ");
+	return `${(space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/u, "")}…`;
+}
+
 function rankedSkillsReminder(
 	matches: ReadonlyArray<CapabilityMatch>,
 	modelActivation: boolean,
@@ -58,7 +66,7 @@ function rankedSkillsReminder(
 ): string {
 	const lines = matches
 		.slice(0, 5)
-		.map((match) => `- ${match.id}: ${match.description.replace(/\s+/gu, " ").slice(0, 150)}`);
+		.map((match) => `- ${match.id}: ${clip(match.description.replace(/\s+/gu, " ").trim(), 150)}`);
 	const load =
 		contextPlacement === "gateway"
 			? 'gateway(op="call", capability="context", args={scope:"skills",name:"<name>"})'
@@ -239,7 +247,9 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 					return NO_EFFECTS;
 				const matches = suppressed ? [] : (deps.rankSkills?.(task) ?? []);
 				const capabilities = turnAllowsTool(constraints, "gateway")
-					? (deps.rankCapabilities?.(task) ?? []).filter((match) => turnAllowsTool(constraints, match.id)).slice(0, 3)
+					? (deps.rankCapabilities?.(task) ?? [])
+							.filter((match) => turnAllowsTool(constraints, match.id) && capabilityWorthNaming(match, task))
+							.slice(0, 3)
 					: [];
 				const ids = JSON.stringify([matches.map((match) => match.id), capabilities.map((match) => match.id)]);
 				if ((matches.length === 0 && capabilities.length === 0) || ids === rankedIds) return NO_EFFECTS;

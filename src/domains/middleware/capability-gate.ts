@@ -16,11 +16,29 @@ export interface CapabilityRequest {
 
 export interface CapabilityMatch extends CapabilityCandidate {
 	readonly score: number;
+	/** Task score as a fraction of the best any candidate could reach for this query, 0..1. */
+	readonly coverage?: number;
 }
 
 export interface CapabilityGate {
 	rank(request: CapabilityRequest): ReadonlyArray<CapabilityMatch>;
 	used(kind: CapabilityKind, id: string): void;
+}
+
+// Calibrated on gateway rankings: unrelated workspace tasks top out near 0.51, a
+// Clio target question reaches 0.58 for clio_docs, a parquet summary 0.87 for data.
+const REMINDER_MIN_COVERAGE = 0.55;
+const CLIO_SCOPED_CAPABILITIES = new Set(["clio_docs", "clio_library", "configure_clio"]);
+const CLIO_SCOPE = /\b(?:clio(?:[\s-]coder)?|settings?|targets?|fleet|skills?|playbooks?)\b/iu;
+
+/**
+ * A ranked capability earns a per-turn hint only on a strong match, and Clio's own
+ * capabilities only when the message is about Clio Coder, its settings, targets,
+ * fleet, skills or playbooks; a workspace question never routes to them.
+ */
+export function capabilityWorthNaming(match: CapabilityMatch, task: string): boolean {
+	if ((match.coverage ?? 0) < REMINDER_MIN_COVERAGE) return false;
+	return !CLIO_SCOPED_CAPABILITIES.has(match.id) || CLIO_SCOPE.test(task);
 }
 
 const STOP = new Set(
@@ -60,18 +78,21 @@ function rankCapabilitiesLexically(
 	const average = docs.reduce((sum, doc) => sum + doc.words.length, 0) / Math.max(1, docs.length);
 	const idf = (term: string): number =>
 		Math.log(1 + (docs.length - (df.get(term) ?? 0) + 0.5) / ((df.get(term) ?? 0) + 0.5));
+	const scorers = docs.map(({ words, weights }) => (term: string): number => {
+		const tf = weights.get(term) ?? 0;
+		return (idf(term) * tf * 2.2) / (tf + 1.2 * (0.25 + (0.75 * words.length) / Math.max(1, average)));
+	});
+	// The best possible task score: every query term at its strongest match in any candidate.
+	const ceiling = query.reduce((sum, term) => sum + Math.max(0, ...scorers.map((bm25) => bm25(term))), 0);
 	return docs
-		.flatMap(({ candidate, words, weights }) => {
-			const bm25 = (term: string): number => {
-				const tf = weights.get(term) ?? 0;
-				return (idf(term) * tf * 2.2) / (tf + 1.2 * (0.25 + (0.75 * words.length) / Math.max(1, average)));
-			};
+		.flatMap(({ candidate }, index) => {
+			const bm25 = scorers[index] as (term: string) => number;
 			const taskScore = query.reduce((sum, term) => sum + bm25(term), 0);
 			if (taskScore <= 0) return [];
 			const workspaceScore = [...facts].reduce((sum, term) => sum + bm25(term), 0);
 			const prior = Math.min(0.1, Math.log1p(history.get(candidate.id) ?? 0) * 0.025);
 			const score = taskScore * (1 + prior) + Math.min(taskScore * 0.15, workspaceScore * 0.1);
-			return [{ ...candidate, score }];
+			return [{ ...candidate, score, coverage: taskScore / Math.max(Number.EPSILON, ceiling) }];
 		})
 		.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
