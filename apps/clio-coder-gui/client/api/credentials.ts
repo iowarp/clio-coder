@@ -37,6 +37,8 @@ interface Held {
 export interface Credentials {
 	/** The launch token a link from before 0.7.1 opened this document with; empty otherwise. */
 	readonly launchToken: string;
+	/** Whether this window holds anything that can open a client: a launch secret, a credential or a remembered one. */
+	available(): boolean;
 	/** This window's credential, exchanging the launch token or rotating first when needed. */
 	bearer(): Promise<string>;
 	/** The server refused `credential`: forget it so the next bearer() exchanges the launch token again. */
@@ -98,8 +100,14 @@ export function createCredentials(
 	fetcher: typeof fetch = fetch,
 	label = "Browser window",
 ): Credentials {
-	const { ticket: launchTicket, token: launchToken = "" } = typeof launch === "string" ? { token: launch } : launch;
+	const {
+		ticket: launchTicket,
+		token: launchToken = "",
+		legacy: legacyToken,
+	} = typeof launch === "string" ? { token: launch } : launch;
 	let ticket = launchTicket;
+	// A stored launch token from before 0.7.1 is spent on the first exchange and never kept.
+	let legacy = legacyToken;
 	let held: Held | null = null;
 	let pending: Promise<Held> | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
@@ -203,7 +211,8 @@ export function createCredentials(
 		// The ticket is single use, so it is spent on the first exchange whatever the answer.
 		const spend = ticket;
 		ticket = undefined;
-		const bearer = spend ? null : launchToken || remembered();
+		const bearer = spend ? null : launchToken || remembered() || legacy || null;
+		legacy = undefined;
 		if ((!spend && !bearer) || tokenRejected()) throw new CredentialProblem(unauthorizedProblem());
 		const resume = held?.clientId ?? read(session, clientIdKey) ?? undefined;
 		const response = await post(routes.authClients.path, bearer, {
@@ -235,6 +244,7 @@ export function createCredentials(
 
 	return {
 		launchToken,
+		available: () => !tokenRejected() && !revoked && !!(ticket || launchToken || legacy || held || remembered()),
 		async bearer() {
 			if (tokenRejected() || revoked) throw new CredentialProblem(unauthorizedProblem());
 			if (pending) return (await pending).credential;

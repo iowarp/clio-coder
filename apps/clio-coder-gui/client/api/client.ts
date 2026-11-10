@@ -25,6 +25,8 @@ export function createClient(
 	let epoch: string | undefined;
 	return {
 		token,
+		/** Whether this document opened with anything that can open a client; the launch token alone no longer says so. */
+		signedIn: credentials.available(),
 		prefix,
 		credentials,
 		/** The registered node this client addresses, or null for this machine. */

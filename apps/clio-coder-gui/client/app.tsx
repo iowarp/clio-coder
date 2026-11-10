@@ -87,7 +87,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const docked = useDocked();
 	const asideExpanded = useAsideExpanded();
 	const [asideSlot, setAsideSlot] = useState<HTMLElement | null>(null);
-	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
+	const [connection, setConnection] = useState<ConnectionState>(client.signedIn ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -99,13 +99,13 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	// A dialog or the palette claims a keyboard layer. While one is claimed, the page behind it must
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
-	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
+	const refused = useTokenRejected() || (!client.signedIn && lastTokenWasRefused());
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
 		staleTime: Number.POSITIVE_INFINITY,
 		refetchOnWindowFocus: "always",
-		enabled: !!client.token,
+		enabled: client.signedIn,
 	});
 	// The launcher brought one window forward and named a page; only that window goes there.
 	const launched = useRef<(path: string) => void>(() => {});
@@ -115,7 +115,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			if (client.prefix === "" && path !== window.location.pathname) void navigate(path);
 		});
 	useEffect(() => {
-		if (client.token)
+		if (client.signedIn)
 			return subscribe(
 				client,
 				queries,
@@ -124,8 +124,8 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 				(notice) => notify({ tone: "warning", ...notice }),
 			);
 	}, [client, queries]);
-	const setup = useSetupStatus(client, !!client.token && !refused);
-	const overview = useSessionOverview(client, !!client.token && !refused);
+	const setup = useSetupStatus(client, client.signedIn && !refused);
+	const overview = useSessionOverview(client, client.signedIn && !refused);
 	// A machine with no connection at all opens the wizard, full window. It stays until the wizard
 	// itself finishes, because saving the connection makes the status "ready" before the last step.
 	useEffect(() => {
@@ -164,7 +164,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const workspaces = useQuery({
 		queryKey: ["workspaces"],
 		queryFn: () => client.call(routes.workspaces, emptyInput),
-		enabled: !!client.token,
+		enabled: client.signedIn,
 	});
 	const routeWorkspace = /^\/workspaces\/([^/]+)/.exec(location.pathname)?.[1];
 	const [remembered] = useState(rememberedWorkspace);
@@ -392,7 +392,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		</div>
 	) : null;
 	const collapsed = sidebarCollapsed && !phone;
-	const authed = !!client.token && !refused;
+	const authed = client.signedIn && !refused;
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
 			<div className="app-setup">
@@ -478,7 +478,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 					{staleNotice}
 					{pendingNotice}
 					{authed ? <SessionControlNotice connected={connection === "Connected"} /> : null}
-					{!client.token || refused ? (
+					{!client.signedIn || refused ? (
 						<Reconnect refused={refused} />
 					) : meta.error ? (
 						<div role="alert">

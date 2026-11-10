@@ -2,16 +2,24 @@
 export interface LaunchSecret {
 	ticket?: string;
 	token?: string;
+	/** The launch token an earlier version stored in this browser, already deleted; it opens one client. */
+	legacy?: string;
 }
 /**
  * Read once and cleared from the address bar. The launch token is never stored: a reloaded or reopened
  * window reconnects with its own expiring credential (`credentials.ts`), and a stored token from an
- * earlier version is deleted here.
+ * earlier version is deleted here and handed over once, so an upgraded browser stays connected.
  */
 export function launchSecret(): LaunchSecret {
 	const params = new URLSearchParams(location.hash.slice(1));
 	const ticket = params.get("ticket") ?? undefined;
 	const token = params.get("token") ?? undefined;
+	let legacy: string | null = null;
+	try {
+		legacy = localStorage.getItem(legacyTokenKey);
+	} catch {
+		/* Storage may be disabled; then nothing was stored either. */
+	}
 	for (const drop of [
 		() => localStorage.removeItem(legacyTokenKey),
 		() => sessionStorage.removeItem("clio-coder-token"),
@@ -21,7 +29,8 @@ export function launchSecret(): LaunchSecret {
 		} catch {
 			/* Storage may be disabled; then nothing was stored either. */
 		}
-	if (ticket === undefined && token === undefined) return {};
+	if (ticket === undefined && token === undefined)
+		return legacy !== null && /^[\w-]{1,256}$/.test(legacy) ? { legacy } : {};
 	history.replaceState(null, "", location.pathname + location.search);
 	try {
 		sessionStorage.removeItem(refusedKey);

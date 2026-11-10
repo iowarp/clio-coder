@@ -15,7 +15,7 @@ export function useMachineAttach(local: Client, enabled = true) {
 	const attachments = useQuery({
 		queryKey: ["machine-attachments"],
 		queryFn: ({ signal }) => local.call(routes.machineAttachments, emptyInput, undefined, signal),
-		enabled: enabled && !!local.token,
+		enabled: enabled && local.signedIn,
 		staleTime: 5_000,
 		retry: false,
 		refetchInterval: (query) =>
