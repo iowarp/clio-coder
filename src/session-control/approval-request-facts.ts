@@ -170,13 +170,25 @@ function resolvedVerifyCommand(call: ClassifierCall): { command: string } | unde
 /** The approval view of a main-agent ask the registry parked. */
 const APPROVAL_TASK_MAX_CHARS = 240;
 
-/** The machine origin of a turn, in the card's words: `job <id>` (no execution id) or `continuation N`. */
+const APPROVAL_TASK_VIA_MAX_CHARS = 80;
+
+/**
+ * The machine origin of a turn, in the card's words: `job <id>` (no execution
+ * id), `continuation N`, or any other origin (a peer pane, a yolo resume)
+ * sanitized and bounded, so the quoted operator message is never shown as
+ * the asking turn's own task.
+ */
 function approvalTaskVia(origin: unknown): string | undefined {
 	if (typeof origin !== "string") return undefined;
 	const job = /^job (\S+)/u.exec(origin);
 	if (job) return sanitizeCallTargetText(`job ${job[1]}`);
 	const continuation = /^yolo continuation (\d+)$/u.exec(origin);
-	return continuation ? `continuation ${continuation[1]}` : undefined;
+	if (continuation) return `continuation ${continuation[1]}`;
+	const chars = Array.from(sanitizeCallTargetText(origin).trim());
+	if (chars.length === 0) return undefined;
+	return chars.length > APPROVAL_TASK_VIA_MAX_CHARS
+		? `${chars.slice(0, APPROVAL_TASK_VIA_MAX_CHARS - 1).join("")}…`
+		: chars.join("");
 }
 
 /**
@@ -212,9 +224,11 @@ function approvalTaskFact(
 		turnId === undefined
 			? undefined
 			: path.find((entry) => entry.turnId === turnId && entry.kind === "message" && entry.role === "user");
-	const via = approvalTaskVia(
-		own?.kind === "message" ? (own.payload as { origin?: unknown } | null)?.origin : undefined,
-	);
+	// An operator-authored turn keeps its origin label off the card: it is the quoted task itself.
+	const via =
+		own?.kind === "message" && !isOperatorTypedUserPayload(own.payload)
+			? approvalTaskVia((own.payload as { origin?: unknown } | null)?.origin)
+			: undefined;
 	return { text: bounded, ...(via !== undefined ? { via } : {}) };
 }
 
