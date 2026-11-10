@@ -296,67 +296,99 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   a terminal without `--body-file`, `$EDITOR` opens a template. `--last` adds
   the newest session in this directory and `--session <id>` a named one.
 - **Review.** The preview is the exact title and body that will be posted,
-  with what Clio Coder masked: local paths, URLs other than Clio Coder's own,
-  user, host, project, branch, remote and target names, e-mail and IP addresses,
-  and secrets. In the TUI `e` edits the text in `$EDITOR` and masks the edit
+  with what Clio Coder masked: local paths (also with spaces or non-ASCII
+  names), URLs other than Clio Coder's own, user, host, project, branch, remote
+  and target names, e-mail and IP addresses, and secrets, including the API keys
+  this process holds. In the TUI `e` edits the text in `$EDITOR` and masks the edit
   again, `m` masks or unmasks a value, Enter moves on, and Esc closes and keeps
   a draft.
 - **Send.** In the TUI only `s` on the send step sends; Enter never does. A
-  shell sends after you choose send at the prompt, or with `--yes`; outside a
-  terminal without `--yes` it exits 2, and `--dry-run` stops after the preview
-  without a network call. With a signed-in `gh`, Clio Coder first searches
+  shell sends after you choose send at the prompt, or with `--yes`; keys typed
+  before the prompt are ignored, outside a terminal without `--yes` it exits 2,
+  and `--dry-run` stops after the preview without a network call. With a signed-in `gh`, Clio Coder first searches
   GitHub for the same problem, then posts a public issue (bug or feature) or
   discussion (question) under your account. An open match asks whether to add
   your details to it, file a new issue that links it, or cancel; with `--yes`,
-  `--on-duplicate comment|new|stop` decides and defaults to `stop`. A closed
-  match fixed in a newer release suggests upgrading first. Without `gh` Clio
+  `--on-duplicate comment|new|stop` decides and defaults to `stop`, which saves
+  the draft and exits 3. A closed match that a release lists as fixed asks
+  before filing yours as a regression, and a closed match with a newer release
+  out suggests upgrading first. A send that was interrupted is checked on
+  GitHub before it is offered again. Without `gh` Clio
   Coder opens a prefilled form in the browser, and without a browser it writes
   the report to a file and prints the link to paste it into. `c` on the send
   step, or `--credit`, asks for credit in the release notes.
 - **Afterwards.** `/report status` and `clio-coder report status` list your
-  reports and saved drafts, `clio-coder report show <id>` prints one,
-  `send <id>` reviews and sends a saved draft, and `forget <id>` deletes a draft
-  that has not left the machine. A posted report cannot be withdrawn from Clio
-  Coder; edit or close it on GitHub.
-- **Identifier check.** Before posting, Clio Coder looks for this machine's
-  names, paths, remotes and install ids in the text again with every mask on,
-  and refuses to send when one slipped past the masks. A value you unmasked
-  with `m` never blocks it.
-- **Diagnostic bundle.** In a shell, `--bundle mechanics` with `--last` or
-  `--session <id>` builds a bundle beside the draft: the session's telemetry
+  reports and saved drafts with each sent report's GitHub state and comment
+  count, `clio-coder report show <id>` prints one, `send <id>` reviews and sends
+  a saved draft, and `forget <id>` deletes a draft that was never posted. A
+  posted report cannot be withdrawn from Clio Coder; edit or close it on GitHub.
+  `forget` on it deletes only its local bundle.
+- **Replies and fixes.** The send step can tick a check of the filed issue for
+  a maintainer's reply (`r` in the TUI, `--reply-check` in a shell). It runs at
+  most once a day through your `gh`, for open reports sent in the last 90 days,
+  and never in CI or with `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER`
+  set. When an upgrade's changelog fixes an issue you reported, Clio Coder says
+  so once and thanks you, and `clio-coder doctor` shows how many reports you
+  sent and which a release fixed.
+- **Identifier check.** The review looks for this machine's names, paths,
+  remotes and install ids in the text again with every mask on, and refuses to
+  send while one slipped past the masks or the text holds control or hidden
+  characters a terminal does not show. It says so in the preview, before the
+  duplicate search, and `--yes` sends nothing then. A value you unmasked with
+  `m` never blocks it. A report sent with `--yes` says in its footer that it
+  skipped the review screen.
+- **Diagnostic bundle.** In a shell, `--bundle mechanics --consent
+  debug|dataset` with `--last` or `--session <id>` builds a bundle: the session's telemetry
   under the report profile and, with `--transcript [N]`, its last N turns (3 by
   default, at most 10) scrubbed and without thinking; tool arguments and output
   join only with `--with-tool-output`, and `--anonymize-models` hides model ids.
-  `--consent debug` (the default) or `dataset` records what the maintainers may
-  use it for. Every byte is checked for this machine's identifiers before the
-  bundle is written at 0600 under the state directory's `reports/bundles/`; a
-  hit names the member and the kind of identifier and exits 1. The bundle stays
+  `debug` lets the maintainers read it to fix this report, `dataset` also lets
+  its mechanics go into public datasets, and the consent text prints with the
+  bundle. Every byte is checked for this machine's identifiers; a hit names the
+  member and the kind of identifier and exits 1. The bundle is kept at 0600
+  under the state directory's `reports/bundles/` only once the report is sent
+  or saved. The bundle stays
   on this machine and the issue never carries it: `report show <id> --bundle`
-  prints it, `forget` deletes it, and the bundle of a sent report is deleted
-  after 30 days. `clio-coder report selftest [--session <id>]` builds the same
+  prints it, `forget` deletes it, also after the report was sent, and the
+  bundle of a sent report is deleted after 30 days. `clio-coder report selftest [--session <id>]` builds the same
   bundle in memory, writes nothing, and exits 1 when an identifier survived.
-  The TUI review attaches no bundle.
+  `/report` in the TUI, over ACP or in the desktop app attaches no bundle.
 - **Suggestions.** After one of its own failures (an internal error, the same
   turn-ending fault again, compaction failing three times running, or a crash
   recorded by the previous process), Clio Coder may suggest `/report` in a
   notice. Typing `/report bug` answers it with a draft that carries the failure;
   dismissing it is a no, and that problem is not suggested again. It comes at
   most once a session and once a week, never in your first session, during a
-  turn, or at yolo when no key was pressed for two minutes. `report.offers: off`
+  turn, or at yolo when no key was pressed for two minutes, and a shown
+  suggestion lapses after two minutes or when the session changes. `report.offers: off`
   in [settings](configuration-and-targets.md#reports) stops suggestions. A crash
   writes a record under the state directory's `reports/crashes/`, which the next
-  session offers as a bug draft. A headless run that hit an internal fault
+  session offers as a bug draft without escape sequences or hidden characters;
+  a mistake in `settings.yaml` is not recorded
+  as a crash. A headless run that hit an internal fault
   prints `clio-coder: this looks like a Clio Coder fault; ...` once on stderr,
   except in CI, with `--json`, or with offers off.
 - **The agent.** When you tell the agent that Clio Coder itself is broken, it
   can save a draft through its `report` capability (one per session, three
-  unsent per install) and open it for your review, or ask you once whether to
-  draft one. It cannot send a report; in a headless run it names the draft and
-  `clio-coder report send <id>`.
+  unsent per install), or ask you once whether to draft one. The draft drops
+  escape sequences and hidden characters, and the TUI raises a notice instead
+  of opening the review mid-turn. The agent cannot send a report: its draft is
+  sent only from your own review (`/report send <id>` in the TUI or
+  `clio-coder report send <id>` in a terminal), never with `--yes`, over ACP or
+  from a session's `bash`. A `clio-coder report` that a Clio Coder session's
+  `bash` runs sends nothing without your review, even at yolo, and what it
+  composed is kept as the agent's draft.
+- **Over ACP and in the desktop app.** `/report bug|feature|question
+  [summary]` replies with the exact text it would post and saves the draft.
+  Nothing is sent until a second command, `/report send <id>`, which sends
+  only the text that client last showed; a draft whose text changed since, or
+  that client never showed, is shown instead. `/report status`, `/report forget <id>`
+  and `/report security` work there too.
 
 `clio-coder report` exits 0 when the report was sent, opened in the browser,
-written or previewed, 1 when sending failed or a bundle was refused, and 2 on a usage error or outside a
-terminal without `--yes`. Security problems never go to a public issue:
+written or previewed, 1 when sending failed or a bundle was refused, 2 on a
+usage error or outside a terminal without `--yes`, and 3 when a likely
+duplicate or a newer release stopped it and the draft was saved. Security problems never go to a public issue:
 `/report security` and `clio-coder report security` print the link to the
 repository's private security advisory form and open it in a terminal session
 that has a browser.
