@@ -247,7 +247,7 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 		async forget(id) {
 			const result = forgetReport(deps.stateDir, id);
 			if (!result.ok) return { level: "error", text: result.reason };
-			return { level: "success", text: `forgot ${id}; its local draft is deleted` };
+			return { level: "success", text: result.message };
 		},
 	};
 }

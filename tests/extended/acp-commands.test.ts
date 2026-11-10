@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { PendingSkillRequest } from "../../src/core/skill-activation.js";
-import { createReportTextHost, readReportDraft, saveReportDraft } from "../../src/domains/report/index.js";
+import {
+	createReportTextHost,
+	readReportDraft,
+	saveReportDraft,
+	updateOutbox,
+} from "../../src/domains/report/index.js";
 import {
 	ACP_COMMAND_RULES,
 	ACP_COMMANDS_CAPABILITY,
@@ -435,6 +440,16 @@ test("/report previews as text with no transport call, and a read-only ceiling r
 	const refused = await control.invoke({ command: "report", argv: ["send", draftId] });
 	assert.equal(refused.level, "warn");
 	assert.match(refused.lines.join("\n"), /agent's draft is reviewed in a terminal/);
+
+	updateOutbox(stateDir, draftId, {
+		kind: "bug",
+		title: "fix: the diff view is empty",
+		state: "sent",
+		url: "https://github.com/iowarp/clio-coder/issues/7",
+		bundle: { sha256: "0".repeat(64), scopes: ["debug"], content: "none" },
+	});
+	const forgot = await control.invoke({ command: "report", argv: ["forget", draftId] });
+	assert.match(forgot.lines.join("\n"), /deleted the diagnostic bundle of .*Clio cannot withdraw it/);
 	assert.deepEqual(
 		commands.filter((command) => command.startsWith(gh)),
 		[],
