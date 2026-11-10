@@ -210,7 +210,7 @@
 		},
 		{
 			"name": "clio-coder-test",
-			"description": "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage.",
+			"description": "Validate Clio Coder changes: pick checks from the diff, know what each test tier proves, keep runs isolated, verify behaviour live in a candidate build and report evidence without claiming unrun coverage. Use when developing or diagnosing Clio itself.",
 			"triggers": [
 				"validate a Clio change",
 				"test Clio context compaction or memory",
@@ -218,7 +218,7 @@
 				"choose Clio test gates"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test",
-			"version": "0.4.1",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "meta"
 		},

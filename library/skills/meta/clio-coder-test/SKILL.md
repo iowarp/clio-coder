@@ -1,12 +1,12 @@
 ---
 name: clio-coder-test
-description: "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage."
+description: "Validate Clio Coder changes: pick checks from the diff, know what each test tier proves, keep runs isolated, verify behaviour live in a candidate build and report evidence without claiming unrun coverage. Use when developing or diagnosing Clio itself."
 triggers:
   - validate a Clio change
   - test Clio context compaction or memory
   - verify Clio skill activation
   - choose Clio test gates
-version: 0.4.1
+version: 0.5.0
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -17,84 +17,101 @@ clio-coder:
 
 # Clio validation
 
-Choose tests from the changed behavior and the code actually executed. The
-canonical skill name is `clio-coder-test`. This
-skill is independently usable: do not recursively load `clio-coder-dev`. Consult
-it when implementation or repository coordination becomes part of the task.
+Choose checks from the diff and from the code that actually executes. The
+lane brief and `.clio-coder/rules/` set host rules (scratch root, locks, which
+live model); this skill sets the method. It is usable alone; `clio-coder-dev`
+covers implementation.
 
-## Start with an evidence plan
+## What each command proves
 
-Read the diff, relevant source/tests, `CONTRIBUTING.md`, and current package
-scripts. Identify the claim, the failure boundary, and the smallest test that
-can distinguish correct behavior. Existing tests may mix source imports with a
-built CLI subprocess: inspect the test before deciding a build is unnecessary.
+| Command | Runs | Needs `dist/` | Proves |
+| --- | --- | --- | --- |
+| `pnpm run typecheck` | src, tests, scripts | no | types |
+| `pnpm run lint` | biome, then `scripts/check-hygiene.ts` (formatting, export hygiene, inventories, packaging, every boundary rule) | no | static contracts |
+| `pnpm run test:file -- <files>` | the named files, from the repo root | if the file spawns the CLI | one behaviour |
+| `pnpm run test` | the curated `coreTests` list in `scripts/ci-tests.mjs`, about one file in seven | no | the default contracts only |
+| `pnpm run test:gui` | the curated `guiTests` list, including the OpenAPI contract | no | GUI API and models |
+| `pnpm run test:package` | four files against the packed build | yes, current | the installed artifact |
+| `pnpm run test:full` | every root test file | yes, built from HEAD | everything, slowly |
+| `pnpm run check:gui` | GUI types and lint | no | GUI static |
 
-For a bug, reproduce it or explain why it cannot be reproduced. Add a behavioral
-regression at the owning boundary when warranted. Assert externally meaningful
-state, provider payload, persistence, filesystem outcome, or event ordering;
-a mock-call assertion alone rarely proves the claimed fix. Do not add tests that
-merely match wording for a reversible prose edit.
+`pnpm run ci` is release qualification on a clean tree with two Node
+versions. It is not a routine check. Suites, builds and browser checks are
+heavy: run one at a time and follow the brief's lock rule.
 
-## Select the lane
+## Pick checks from the diff
 
-| Changed behavior | First useful checks |
-| --- | --- |
-| Pure policy or domain behavior | Closest `tests/contracts/` or `tests/extended/` file through `pnpm run test:file -- <file>` |
-| Types, imports, domain seams | `pnpm run typecheck`; `pnpm run lint` enforces architecture boundaries |
-| Prompt/tool/skill admission | Focused prompt-policy and tool activation tests, including restrictive modes and unavailable tools |
-| Curated skill or resource package | Validate manifest/body/references; `skills:pin`, `skills:check`, `library:pin`, `library:check` |
-| CLI, entry, ACP, child-process lifecycle | Build the candidate, then the owning smoke or extended-smoke file |
-| GUI/API | `pnpm run check:gui` and `pnpm run test:gui`; root build where ACP fixtures require it |
-| Package contents or installed behavior | `pnpm run test:package` against a current candidate build |
-| Broad integrated implementation | `pnpm run ci`; affected extended suites that routine CI omits |
-| Release candidate | Follow `docs/process/release-cut-checklist.md`; qualify the clean committed candidate before exact-artifact preflight |
+1. TypeScript changed: `pnpm run typecheck` and `pnpm run lint`.
+2. Find the tests that exercise the change, in every directory:
+   `grep -rl "<module stem>" tests apps/clio-coder-gui/tests`. Run them with
+   `test:file`. Most regressions live in `tests/extended/`, which the core
+   list never runs.
+3. A test that spawns `dist/cli/index.js` sees the last build, not your edit.
+   Build first. No test command rebuilds a stale `dist/`.
+4. Contract seams: a change to a type the GUI server exposes needs the
+   OpenAPI file regenerated and `test:gui`'s `openapi` test green.
+5. Run the affected files on Node 22 as well as Node 24 when the change
+   touches timers, `unref`, event-loop lifetime, streams, child processes or
+   signals. Node 22.19 is the supported floor and the gate runs both.
+6. A new test file must be added to `coreTests`, `guiTests` or
+   `packageTests`, or no gate runs it. `pnpm run test:list` shows what is
+   omitted.
+7. A red test is yours until you have run the same file on the lane's base
+   commit and seen it fail there. Say which commit you compared against.
+8. A run with skipped tests is missing evidence. Sandbox tests skip when the
+   OS sandbox cannot start; rerun them, do not count them.
+9. No wall-clock thresholds. A timing failure under load needs a rerun on a
+   quiet host before it is called a flake, and then evidence for the claim.
 
-Use [references/test-map.md](references/test-map.md) for source-grounded file
-families and command semantics. Use [references/harness.md](references/harness.md)
-when a test needs temporary state, providers, workers, or child processes.
+For a bug, reproduce it first or say why you could not. Assert state a user
+or caller can observe: provider payload, persisted record, filesystem
+outcome, event order, exit code. Do not write tests that match prose.
 
-## Run without contaminating the agent doing the work
+## Keep runs isolated
 
-Use the package scripts so `tests/harness/tmp-root.ts` is preloaded. Isolate Clio
-state with `scratch-env.ts`; restore process-wide environment changes in teardown.
-Use ephemeral loopback fixtures and scripted providers for deterministic checks.
-Do not use real credentials, operator sessions, shared server model loads, or
-public inference as a default test dependency.
+Run tests only through the pnpm scripts; they preload
+`tests/harness/tmp-root.ts`. A bare `node --test` writes the operator's real
+home. Export `TMPDIR` to your lane's scratch directory before tests, builds
+or `mktemp`; the harness nests its root under it. Never write system `/tmp`.
 
-Source imports through tsx see current files. A subprocess of `dist/cli/index.js`
-sees the build. Build in the assigned candidate worktree when main `dist/` backs
-the running Clio process. A watch build refreshes files, not already imported ESM
-modules; restart the separate candidate process for interactive verification.
-Configuration hot reload is a different contract owned by
-`src/domains/config/classify.ts`.
+Under `git bisect run` or any git-driven runner, unset `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` and `GIT_PREFIX` for the
+test command. Afterwards confirm the shared config:
+`git config --get core.bare` is `false` and `user.name` is the operator's.
 
-Run the narrow test first while iterating, then appropriate type/lint/integration
-gates. Repeat or broaden only after changes, failures, or unresolved risks justify
-it. Do not run expensive full/release/browser gates after every edit. Do not
-suppress, delete, or relabel a failure to obtain a green report.
+Use [references/harness.md](references/harness.md) for scratch homes,
+fixtures and process drivers, [references/test-map.md](references/test-map.md)
+to find test files, and
+[references/lifecycle-validation.md](references/lifecycle-validation.md) for
+compaction, replay, memory, tools and dispatch.
 
-## Lifecycle and context changes
+## Verify live
 
-For compaction, replay, memory, tools, or dispatch, read
-[references/lifecycle-validation.md](references/lifecycle-validation.md). Prove
-cancellation and late results, branch/session authority, request budget, exact
-history, and persistence ordering as applicable. Append visibility is not fsync
-durability. A scripted summary validates orchestration, not model understanding.
+Tests passing is not the behaviour working. Before READY, exercise what a
+user would see, in a candidate built from your workspace:
 
-## Live models and performance
+1. `pnpm run build` in the workspace.
+2. Run `node <workspace>/dist/cli/index.js`, never the installed
+   `clio-coder`, with a fresh home: set `CLIO_CODER_HOME`,
+   `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`,
+   `CLIO_CODER_CACHE_DIR` to directories under your scratch root and
+   `CLIO_CODER_INTEROP_HOME=none`.
+3. Drive the surface you changed:
+   - headless: `run --json ... -- "<task>"`; check the exit code and the
+     final frame;
+   - a recipe: `run --agent <id>`;
+   - ACP: stdio, with the client pattern in `tests/smoke/acp-boundary.test.ts`;
+   - TUI: its own pane or tab, never your own pane (see harness.md);
+   - GUI: `pnpm run check:gui`, then the page in a browser whose profile and
+     temp directory are under your scratch root;
+   - an external CLI such as `gh`: the real program against a disposable
+     target, or say it was not exercised.
+4. A loopback fixture proves machinery. A live model is used only on the
+   route the brief names, and the report names target, model and runtime.
 
-Run live models only within the task's authorization and bounded spending plan.
-Record target, model/runtime, effective context window, server capacity, sampler,
-fixture/task identity, and cold/warm conditions. Separate missing measurements
-from zero. Include failed attempts and summary/memory spending in trajectory
-costs. Report sample count and variability; a lower estimated prompt size is not
-proof of improved latency or task success.
+## Report
 
-## Report precisely
-
-List commands, outcomes/counts, candidate identity, failures/skips, and unverified
-claims. Identify source versus built versus installed versus live evidence.
-Explain any baseline failure with its reproduction; call a flake only with
-supporting evidence. Keep raw temporary logs outside tracked product paths and
-put concise evidence in the assigned sprint report. Passing checks authorize no
-extra commit, remote write, version bump, or release step beyond the task.
+List each command with its outcome and counts (pass, fail, skipped), the
+Node version, the commit tested, and whether the evidence is source, built
+process, installed package or live model. Name every check you did not run
+and why. Passing checks authorize no extra commit, push or release step.

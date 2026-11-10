@@ -1,9 +1,6 @@
 # Clio test harness reference
 
-This reference covers the harness modules that exist in the current tree:
-temporary-state isolation, dispatch fixtures, a loopback OpenAI-compatible
-server, and the ACP stdio smoke driver. Deterministic tests do not contact a
-real model and the repository currently has no shared spawn or PTY harness.
+This reference covers the harness modules in the current tree: temporary-state isolation, a headless CLI driver, dispatch fixtures, a loopback OpenAI-compatible server and the ACP stdio driver. Deterministic tests do not contact a real model. There is no shared PTY harness; three files use `node-pty` directly.
 
 ## Temporary roots and state isolation
 
@@ -13,6 +10,8 @@ inside it before test modules load, sweeps abandoned roots only after a bounded
 age, and removes the current root on process exit. `tmp-git-guard.ts` prevents
 a test from creating `.git` at the system or run temp root, where it would alter
 project-boundary discovery for unrelated tests.
+
+An exported `TMPDIR` is honored as the parent of the run root, so point it at your lane's scratch directory. The harness scrubs `GIT_CONFIG_*`, `GIT_DIR` and its peers, `HERDR_*` and color variables from the environment; still unset the `GIT_*` repository variables yourself for any git command you run outside the pnpm scripts under a git-driven runner.
 
 Use `tests/harness/scratch-env.ts` for Clio-specific state:
 
@@ -44,12 +43,9 @@ process driver suited to that boundary:
 - `real-binary-boot.test.ts` supports interactive setup input and bounded
   shutdown during first-run and migration checks.
 
-Build before a focused smoke run. `pnpm run ci` performs that build in the
-correct order. Keep environment roots under a scratch directory, capture both
+Build before a focused smoke run. No test script builds for you; run `pnpm run build` first. Keep environment roots under a scratch directory, capture both
 output streams, bound every wait, and terminate a surviving child in teardown.
-Do not import a nonexistent shared `runCli`; copy the closest smoke driver's
-small pattern or extract a helper only when more than one current boundary has
-the same contract.
+`tests/harness/headless-run.ts` exports `runCli`, `headlessScratch`, `initializeScratchHome`, `privateCliCopy` and `sealedReceipt`; use it for a headless subprocess instead of writing a new driver.
 
 ## Loopback provider fixtures
 
@@ -60,10 +56,7 @@ streaming text and one scripted tool call, and records request bodies for
 assertions. Its seed helpers write scratch target configurations for
 orchestrator, tool, fleet, bootstrap, and unregistered-runtime cases.
 
-The current reusable fixture is used by provider contracts. Smoke files define
-their own minimal loopback servers because their wire behavior differs. In
-either lane, close the server in teardown and assert the request body when the
-test's claim concerns payload fields.
+The fixture is the standard way to drive the real CLI without a model; `seedOpenAICompat*` helpers write the scratch target configuration. `toolCall` may be a function of the request. Workers use `CLIO_CODER_WORKER_FAUX=1` (with `_MODEL`, `_TEXT`, `_STOP_REASON`, `_ERROR_MESSAGE`), which affects worker subprocesses only; in-process tests register `registerEngineFauxProvider`.
 
 ## Dispatch contracts
 
@@ -94,9 +87,18 @@ diagnostics belong on stderr.
 
 ## Disposable probes
 
-A one-off diagnostic belongs under `/tmp`, not `tests/`, `scripts/`, or an
-invented benchmark tree. Run TypeScript probes with `node --import tsx`, point
-all Clio state variables at a fresh temporary root, and delete the probe after
-recording the result. A result from a loopback fixture is machinery evidence,
-not live-model evidence. Live validation must name the configured target,
-model, runtime, prompt, and serving settings.
+A one-off diagnostic lives in your lane's scratch directory, never under
+system `/tmp` and never in `tests/` or `scripts/`. Run TypeScript probes with
+`node --import tsx`, point all Clio state variables at a fresh directory under
+the scratch root, and delete the probe after recording the result. A result
+from a loopback fixture is machinery evidence, not live-model evidence.
+
+## Driving the TUI in its own pane
+
+Never launch Clio inside your own pane or split your own pane for it. When a
+pane host is available (`HERDR_ENV=1`), create a separate tab, take the pane
+id the host returns, export the isolated home and `TMPDIR` in that pane, start
+the candidate (`node <workspace>/dist/cli/index.js`), drive it by sending
+keys and reading the pane, quit with `/quit`, and close only the tab you
+created. One TUI at a time. Record what you typed and what the pane showed.
+Without a pane host, say the TUI was not driven.

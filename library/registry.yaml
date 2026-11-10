@@ -147,10 +147,10 @@ entries:
           Clio source, prompts, tools, or library; pair with clio-coder-t"
   - kind: skill
     name: clio-coder-test
-    description: Validate Clio Coder changes using focused source regressions, built
-      CLI and ACP fixtures, skill/library checks, and isolated package or GUI
-      gates. Use when developing or diagnosing Clio itself; select checks from
-      the changed behavior and report evidence without claiming unrun coverage.
+    description: "Validate Clio Coder changes: pick checks from the diff, know what
+      each test tier proves, keep runs isolated, verify behaviour live in a
+      candidate build and report evidence without claiming unrun coverage. Use
+      when developing or diagnosing Clio itself."
     category: meta
     audit: pass
     triggers:
@@ -158,16 +158,16 @@ entries:
       - test Clio context compaction or memory
       - verify Clio skill activation
       - choose Clio test gates
-    version: 0.4.1
+    version: 0.5.0
     sourceUrl: skills/meta/clio-coder-test
-    sha256: b745e44be1fa86ba6230d9d7d0bdcff69c95300de07c2524a27e6a7557f2c419
+    sha256: 4552ffbbcbd82193a82f866ac553d5ecfd2cb8bc2bf773a2f91eff314d6b5f09
     provides:
       - kind: skill
         name: clio-coder-test
-        description: Validate Clio Coder changes using focused source regressions, built
-          CLI and ACP fixtures, skill/library checks, and isolated package or
-          GUI gates. Use when developing or diagnosing Clio itself; select
-          checks from the changed behavior and report evidence wi
+        description: "Validate Clio Coder changes: pick checks from the diff, know what
+          each test tier proves, keep runs isolated, verify behaviour live in a
+          candidate build and report evidence without claiming unrun coverage.
+          Use when developing or diagnosing Clio itself."
   - kind: skill
     name: coding-standards
     description: Correct-by-construction TypeScript rules (errors as values, parse

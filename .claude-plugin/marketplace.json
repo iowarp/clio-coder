@@ -57,8 +57,8 @@
 		{
 			"name": "clio-coder-test",
 			"source": "./library/skills/meta/clio-coder-test",
-			"description": "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage.",
-			"version": "0.4.1",
+			"description": "Validate Clio Coder changes: pick checks from the diff, know what each test tier proves, keep runs isolated, verify behaviour live in a candidate build and report evidence without claiming unrun coverage. Use when developing or diagnosing Clio itself.",
+			"version": "0.5.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},

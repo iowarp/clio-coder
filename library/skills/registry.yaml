@@ -65,8 +65,8 @@ skills:
     sha256: fe93fd68e25e861110a4d4bdbd94380a2b1f82ba78b13157dbc13186fe9bd8b3
   - name: clio-coder-test
     path: meta/clio-coder-test
-    version: 0.4.1
-    sha256: 2395afecb632d155704a4bacc8b705e01013a2955c1aa169d56ab20073884552
+    version: 0.5.0
+    sha256: 239d7b8e2c26e099b71522dbc9a8a6d5d78c5b2404ef5a186b0567c1fe455b8c
   - name: credentials
     path: meta/credentials
     version: 0.2.1

@@ -4,22 +4,20 @@ Read current `package.json` scripts before running a gate; this map is navigatio
 not a substitute for executable source. Use `rg --files tests` to locate stems
 because contracts and extended tests are deliberately separate lanes.
 
-| Lane | Location / command | Execution boundary |
-| --- | --- | --- |
-| Required contracts | `tests/contracts/*.test.ts`; `pnpm run test:file -- <file>` | Usually source through tsx; inspect subprocess cases |
-| Required process smoke | `acp-boundary`, `real-binary-boot`, `process-lifecycle` in `tests/smoke/`; included in `pnpm run test` | Current built CLI |
-| Extended regressions | `tests/extended/`, `tests/extended-smoke/`; focused `test:file` or `pnpm run test:full` | Source or built CLI according to the fixture |
-| Package qualification | `pnpm run test:package` | Packed/installed artifact and native timing |
-| Boundaries and package pins | `pnpm run lint` | Biome and `scripts/check-hygiene.ts` |
-| Required GUI checks | `pnpm run check:gui`, `pnpm run test:gui` | App types/lint and selected API/runtime/UI contracts |
-| Full GUI/browser investigation | `pnpm --filter @iowarp/clio-coder-gui verify` | Extended app tests, Vite build, browser smoke; browser dependency required |
-| Routine integrated gate | `pnpm run ci` | Types, lint, build, required root and maintenance tests, required GUI checks |
-| Release qualification | `pnpm run ci:release` | Clean committed source and exact candidate artifact |
-| Qualified artifact preflight | `pnpm run release:preflight` | Checks unchanged qualified candidate; not a replacement for qualification |
+| Command | Runs | Needs `dist/` | Proves |
+| --- | --- | --- | --- |
+| `pnpm run typecheck` | src, tests, scripts | no | types |
+| `pnpm run lint` | biome, then `scripts/check-hygiene.ts` (formatting, export hygiene, inventories, packaging, every boundary rule) | no | static contracts |
+| `pnpm run test:file -- <files>` | the named files, from the repo root | if the file spawns the CLI | one behaviour |
+| `pnpm run test` | the curated `coreTests` list in `scripts/ci-tests.mjs`, about one file in seven | no | the default contracts only |
+| `pnpm run test:gui` | the curated `guiTests` list, including the OpenAPI contract | no | GUI API and models |
+| `pnpm run test:package` | four files against the packed build | yes, current | the installed artifact |
+| `pnpm run test:full` | every root test file | yes, built from HEAD | everything, slowly |
+| `pnpm run check:gui` | GUI types and lint | no | GUI static |
+| `pnpm --filter @iowarp/clio-coder-gui verify` | extended GUI tests, Vite build, browser smoke | no | GUI app end to end; needs a browser |
+| `pnpm run release:preflight` | checks an unchanged qualified candidate | yes, qualified | not a replacement for qualification |
 
-`pnpm run test` only builds automatically when dist is absent. Existing dist may
-be stale after source edits. `pnpm run build` runs `scripts/build.ts` and the
-codewiki asset build; check the scripts instead of naming an obsolete bundler.
+No test script builds. `pretest:full` refuses a `dist/` built from another commit; it cannot see uncommitted edits. `pnpm run build` runs `scripts/build.ts`, `scripts/build-source-pack.ts` and the codewiki asset build.
 
 ## Find focused coverage
 
@@ -30,7 +28,8 @@ codewiki asset build; check the scripts instead of naming an obsolete bundler.
 | Skill/prompt policy | `prompt-skill-policy`, `skill-install`, `skill-library-activation`, `headless-skill-activation`, `skill-tool-surface`, `prompt-session-snapshot`, `prompt-prefix-layout` |
 | Dispatch/providers | `dispatch-admission`, `dispatch-lifecycle`, `worker-boundary`, `provider-context-boundary`, `provider-transport` |
 | CLI/ACP | `tests/smoke/acp-boundary.test.ts`, `tests/extended-smoke/cli-core.test.ts` |
-| Resource packages | `library-packages`, `library-context`, `library-loader`, `library-hash` when present; discover exact filenames with `rg` |
+| Resource packages | `library-lifecycle`, `library-package-kinds`, `library-import`, `library-context` |
+| GUI contract | `apps/clio-coder-gui/tests/openapi.test.ts`, `apps/clio-coder-gui/tests/boundaries.test.ts` |
 
 Do not guess a broad domain test filename or assume a test belongs to contracts.
 For example:
@@ -64,5 +63,4 @@ validator; use Clio's own validation as the authority for Clio metadata.
 A docs-only correction needs source/command/link verification, not a fabricated
 runtime test. A runtime discovery change needs admission tests, including no-
 skills, hidden/disabled content, wrong repository, and restrictive policies.
-Integration or release work must run the relevant full gate, with the candidate
-build isolated when the running agent uses the main checkout's dist.
+Release qualification is requested work; do not start it from a lane.

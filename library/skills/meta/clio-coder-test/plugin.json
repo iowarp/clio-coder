@@ -1,8 +1,8 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "clio-coder-test",
-	"version": "0.4.1",
-	"description": "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage.",
+	"version": "0.5.0",
+	"description": "Validate Clio Coder changes: pick checks from the diff, know what each test tier proves, keep runs isolated, verify behaviour live in a candidate build and report evidence without claiming unrun coverage. Use when developing or diagnosing Clio itself.",
 	"license": "Apache-2.0",
 	"extensions": {
 		"ai.iowarp.clio": {
