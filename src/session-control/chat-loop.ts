@@ -511,6 +511,8 @@ export interface ChatSubmitOptions {
 	 * model.
 	 */
 	origin?: string;
+	/** An `origin` turn whose text the operator wrote (an operator loop's own task); the safety judge reads it. */
+	operatorAuthored?: boolean;
 	/** Rechecked after admission awaits; a retired peer inbox cannot start a turn. */
 	isAdmissionCurrent?: () => boolean;
 	/** Host-owned run identity, scoped to this submit and its internal continuations. */
@@ -3310,6 +3312,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					options.display?.text,
 					reservedUserTurnId,
 					options.origin,
+					options.operatorAuthored === true,
 				);
 				if (referencedPaths.length > 0) deps.labelReferencedPaths?.(referencedPaths);
 				const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
@@ -4619,6 +4622,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			await api.submit(request.text, {
 				origin: request.origin,
+				...(request.operatorAuthored === true ? { operatorAuthored: true } : {}),
 				...(request.constraints === undefined ? {} : { constraints: request.constraints }),
 				isAdmissionCurrent: current,
 				machineTurn: {

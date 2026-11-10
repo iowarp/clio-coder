@@ -122,6 +122,8 @@ export interface TurnPersistence {
 		id?: string,
 		/** Machine provenance, persisted as `origin` so a replay attributes the turn. */
 		origin?: string,
+		/** Persisted as `operatorAuthored` beside `origin` when the operator wrote the text. */
+		operatorAuthored?: boolean,
 	): string | null;
 	appendBudgetBlock(block: BudgetBlockData): void;
 	appendInRunContinuation(): void;
@@ -412,7 +414,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			state.lastTurnId = turn.id;
 		},
 
-		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText, id, origin): string | null {
+		appendSubmittedUserTurn(
+			agentRuntime,
+			text,
+			images,
+			synthetic,
+			operatorText,
+			displayText,
+			id,
+			origin,
+			operatorAuthored,
+		): string | null {
 			if (!deps.session) return null;
 			if (!deps.session.current()) {
 				deps.session.create({
@@ -430,6 +442,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
 			if (displayText !== undefined && displayText !== (operatorText ?? text)) payload.displayText = displayText;
 			if (origin !== undefined) payload.origin = origin;
+			if (origin !== undefined && operatorAuthored === true) payload.operatorAuthored = true;
 			if (synthetic) {
 				payload.synthetic = true;
 				payload.source = "middleware_request_continuation";

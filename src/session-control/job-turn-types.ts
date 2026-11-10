@@ -8,6 +8,8 @@ export interface MachineTurnRequest {
 	executionId: string;
 	text: string;
 	origin: string;
+	/** The text is the operator's own (an operator-created loop's task), so the safety judge may read it. */
+	operatorAuthored?: boolean;
 	sessionId: string;
 	isAdmissionCurrent(): boolean;
 	signal: AbortSignal;

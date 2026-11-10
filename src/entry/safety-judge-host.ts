@@ -21,7 +21,7 @@ import {
 } from "../domains/safety/safety-judge.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
-import { operatorTextOfUserPayload } from "../domains/session/history.js";
+import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
@@ -32,9 +32,10 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
 
 /**
  * The operator's own messages on the session's active path, oldest first.
- * Only user turns count, and of those only what the operator typed: a
- * continuation nudge Clio synthesized is skipped, and injected reminders and
- * expansions are stripped by `operatorTextOfUserPayload`. Assistant messages,
+ * Only user turns count, and of those only what the operator typed
+ * (`isOperatorTypedUserPayload`): a continuation nudge Clio synthesized, a job's
+ * prompt, follow-up and observation, and a yolo continuation are skipped, and
+ * injected reminders and expansions are stripped by `operatorTextOfUserPayload`. Assistant messages,
  * thinking and tool results never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
@@ -59,7 +60,7 @@ export function operatorMessagesForJudge(
 	const texts: string[] = [];
 	for (const entry of path) {
 		if (entry.kind !== "message" || entry.role !== "user") continue;
-		if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
+		if (!isOperatorTypedUserPayload(entry.payload)) continue;
 		const text = operatorTextOfUserPayload(entry.payload);
 		if (text !== null && text.trim().length > 0) texts.push(text);
 	}

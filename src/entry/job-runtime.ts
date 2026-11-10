@@ -204,6 +204,8 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			executionId: context.executionId,
 			text: prompt,
 			origin: `job ${context.job.id} ${context.executionId}`,
+			// Only an operator-created loop's stored task is the operator's text; an agent-created job or any delivery is not.
+			...(phase === "run" && context.job.spec.originTurnId === null ? { operatorAuthored: true } : {}),
 			sessionId: context.job.owner.sessionId,
 			signal: context.signal,
 			...(constraints === undefined ? {} : { constraints }),

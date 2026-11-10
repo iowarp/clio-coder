@@ -293,6 +293,20 @@ function extractMessageText(payload: unknown): string | null {
 }
 
 /**
+ * Whether a user turn's payload is something the operator wrote. A
+ * continuation nudge Clio synthesized is not, and neither is a machine turn
+ * (`origin`: a job's prompt or follow-up, a yolo continuation), whose text the
+ * agent or Clio wrote, unless it is flagged `operatorAuthored` (an
+ * operator-created loop's own task).
+ */
+export function isOperatorTypedUserPayload(payload: unknown): boolean {
+	if (!payload || typeof payload !== "object") return true;
+	const p = payload as { synthetic?: unknown; origin?: unknown; operatorAuthored?: unknown };
+	if (p.synthetic === true) return false;
+	return typeof p.origin !== "string" || p.operatorAuthored === true;
+}
+
+/**
  * What the operator typed for a user turn, for the picker preview.
  *
  * The persisted text is the composed prompt: a `<system-reminder>` block and
