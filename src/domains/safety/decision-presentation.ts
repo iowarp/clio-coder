@@ -72,6 +72,8 @@ export interface DecisionPresentation {
 	authorizationCopy: string;
 	consequenceCopy: string;
 	reversibilityCopy: string;
+	/** The host fact `reversibilityCopy` words, for a surface that keys a row on it. */
+	reversibility?: DecisionReversibility;
 	requestedByCopy: string;
 	requiredActions: ReadonlyArray<DecisionPresentationAction>;
 }
@@ -354,6 +356,7 @@ export function classifyDecisionPresentation(facts: TrustedDecisionFacts): Decis
 		authorizationCopy: authorizationCopy(facts),
 		consequenceCopy: consequenceCopy(facts, tier),
 		reversibilityCopy: reversibilityCopy(facts),
+		reversibility: facts.reversibility,
 		requestedByCopy: requestedByCopy(facts),
 		requiredActions: requiredActions(facts, tier),
 	};

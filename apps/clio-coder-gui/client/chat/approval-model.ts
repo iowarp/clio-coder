@@ -255,6 +255,8 @@ export function decisionRows(decision: PermissionDecisionFacts | undefined): rea
 	// consequence, so an operator reads what this command does before the reversibility.
 	const effects = decision.consequenceLines ?? [];
 	if (effects.length > 0) rows.push({ term: "Effect", value: effects.join(" "), lines: effects });
+	else if (decision.actionClass === "execute")
+		push("Effect", "Not classified. Clio Coder has no reading of what this command changes.");
 	push(
 		"Reversibility",
 		decision.reversibilityCopy.length > 0

@@ -650,7 +650,16 @@ function permissionFacts(
 	if (identity.ruleFact !== null) facts.push(identity.ruleFact);
 	if (view.consequence !== undefined && view.consequence.length > 0) {
 		facts.push({ label: "effect", value: view.consequence.join("\n") });
+	} else if ((view.tool === "bash" || view.tool === "run_script") && view.artifact === undefined) {
+		// Silence here would read as "no notable effect" on exactly the commands Clio cannot read.
+		facts.push({
+			label: "effect",
+			value: "not classified: Clio has no reading of what this command changes",
+			tone: "warning",
+		});
 	}
+	if (presentation.reversibility === "limited") facts.push({ label: "undo", value: "not guaranteed" });
+	else if (presentation.reversibility === "unknown") facts.push({ label: "undo", value: "unknown, treat as permanent" });
 	// Size and digest stay on the folded card whether or not the operator
 	// opens the mutation, so the decision always carries the identity of the
 	// bytes it applies to. Wrapped, never ellipsized: at 40 columns the digest
