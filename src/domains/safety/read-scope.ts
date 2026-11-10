@@ -1,6 +1,7 @@
 import path from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { canonicalizePath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
+import { storeReadRoots } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
 import { expandPath, readPathVariants } from "../../tools/path-utils.js";
@@ -37,14 +38,15 @@ export interface ReadScopeExemptRoot {
  * Trees outside the workspace that Clio itself points the model at: installed
  * skills, plugins, and extensions (a loaded SKILL.md names sibling files), the
  * user skill roots of the agents Clio interoperates with, the offload scratch
- * a truncation stub names, dispatch run scopes whose result objects a judge reads, and the installed package's own
+ * a truncation stub names, dispatch run scopes whose result objects a judge reads, this project's store directory
+ * whose blob paths `store get` hands back (a worker in a task worktree keys the same project), and the installed package's own
  * documentation and source, which the system prompt names for questions about
  * Clio itself. They are operator-owned, shipped with the package, or
  * Clio-written, the model cannot author them, and zero-access entries still
  * apply inside them. Lexical on purpose: they are resolved again at every
  * admission, because an operator may replace a link after the session starts.
  */
-export function readScopeExemptRoots(): ReadScopeExemptRoot[] {
+export function readScopeExemptRoots(cwd: string = process.cwd()): ReadScopeExemptRoot[] {
 	const roots: ReadScopeExemptRoot[] = [];
 	try {
 		const config = clioConfigDir();
@@ -54,6 +56,7 @@ export function readScopeExemptRoots(): ReadScopeExemptRoot[] {
 		const state = clioStateDir();
 		roots.push({ path: path.join(state, "scratch"), operatorOwned: false });
 		roots.push({ path: telemetryRunsDirectory(state), operatorOwned: false });
+		for (const root of storeReadRoots(cwd)) roots.push({ path: root, operatorOwned: false });
 	} catch {
 		// An unresolvable Clio home exempts nothing.
 	}

@@ -713,7 +713,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 	const skillRoots = activeClioSkillRoots(cwd);
 	const readExemptRoots = [
-		...readScopeExemptRoots(),
+		...readScopeExemptRoots(cwd),
 		...(options.readExemptRoots ?? []).map((root) => ({ path: root, operatorOwned: false })),
 	];
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
