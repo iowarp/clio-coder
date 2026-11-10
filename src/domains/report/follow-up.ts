@@ -217,13 +217,15 @@ function citesIssue(line: string, number: number): boolean {
 	).test(line);
 }
 
-/** Each changelog section as its heading's version and its lines. */
-function changelogSections(changelog: string): Array<{ version: string; triple: Triple; lines: string[] }> {
-	const sections: Array<{ version: string; triple: Triple; lines: string[] }> = [];
+/** Each changelog section as its heading's version, release date and lines. */
+function changelogSections(
+	changelog: string,
+): Array<{ version: string; triple: Triple; date: string | null; lines: string[] }> {
+	const sections: Array<{ version: string; triple: Triple; date: string | null; lines: string[] }> = [];
 	for (const line of changelog.split("\n")) {
-		const heading = /^##\s+v?(\d+\.\d+\.\d+[^\s]*)/u.exec(line);
+		const heading = /^##\s+v?(\d+\.\d+\.\d+[^\s]*)(?:\s+-\s+(\d{4}-\d{2}-\d{2}))?/u.exec(line);
 		const triple = heading ? versionTriple(heading[1] ?? "") : null;
-		if (heading && triple) sections.push({ version: heading[1] ?? "", triple, lines: [] });
+		if (heading && triple) sections.push({ version: heading[1] ?? "", triple, date: heading[2] ?? null, lines: [] });
 		else sections.at(-1)?.lines.push(line);
 	}
 	return sections;
@@ -299,10 +301,16 @@ export function reportsDoctorDetail(stateDir: string, changelog: string | null):
 	if (changelog !== null) {
 		const sections = changelogSections(changelog);
 		for (const entry of sent) {
-			// The oldest citing section is the release that shipped the fix.
+			// The oldest citing section released on or after the send day shipped the fix; an older release that cites
+			// the same issue (a comment on an open issue takes its number) fixed something else.
+			const sentDay = entry.sentAt?.slice(0, 10) ?? "";
 			const section = [...sections]
 				.reverse()
-				.find((candidate) => candidate.lines.some((line) => citesIssue(line, entry.number)));
+				.find(
+					(candidate) =>
+						(candidate.date === null || candidate.date >= sentDay) &&
+						candidate.lines.some((line) => citesIssue(line, entry.number)),
+				);
 			if (section !== undefined) fixed.push(`#${entry.number} in ${section.version}`);
 		}
 	}
