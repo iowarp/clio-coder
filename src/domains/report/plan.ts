@@ -1,4 +1,4 @@
-import { draftIdentity, isFixedPoint, type RenderedReport, renderReport } from "./body.js";
+import { draftIdentity, isFixedPoint, type RenderedReport, type ReportSharePointer, renderReport } from "./body.js";
 import { deleteReportBundle } from "./bundle.js";
 import { issueCanaryFinding, issueCanaryGate } from "./canary.js";
 import {
@@ -15,6 +15,7 @@ import { reportFingerprint } from "./fingerprint.js";
 import type { ReportObservation } from "./observe.js";
 import { outboxEntry, readOutbox, recentSends, updateOutbox } from "./outbox.js";
 import type { LocalIdentity, MaskKind, ReportMask } from "./scrub.js";
+import { reportShare, updateShareReceipt } from "./share/receipts.js";
 import { deleteReportDraft, listReportDrafts, readReportDraft, saveReportDraft, writeReportMarkdown } from "./store.js";
 import {
 	checkLastAttempt,
@@ -46,9 +47,9 @@ export interface ReportPlan {
 	maskSummary: string;
 	/** The network actions sending takes, in order, as sentences. */
 	actions: string[];
-	/** The issue never carries a bundle: a bundle stays on this machine until R-18 uploads one. */
-	bundle: null;
-	consent: "none";
+	/** The block's `bundle:` value: "none", or the encrypted share's `gist:<id>#<shareId>` when the report shares one. */
+	bundle: string | null;
+	consent: string;
 	credit: boolean;
 	/** Gate failures that keep the report from being sent; empty when it may go. */
 	gates: string[];
@@ -62,6 +63,8 @@ export interface PlanOptions {
 	stateDir?: string;
 	/** False when the send skips the review screen, so the footer does not say the reporter reviewed it. */
 	reviewed?: boolean;
+	/** The share the report will point at; before sending its gist id is not known yet. */
+	share?: ReportSharePointer;
 }
 
 const DESTINATION = `github.com/${REPORT_REPOSITORY}`;
@@ -83,12 +86,13 @@ export function planHeadline(plan: Pick<ReportPlan, "postedAs" | "destination">,
 	return `Public${separator}${plan.postedAs} ${joint} ${plan.destination}`;
 }
 
-function planActions(kind: ReportKind, transport: ReportPlanTransport): string[] {
+function planActions(kind: ReportKind, transport: ReportPlanTransport, shared: boolean): string[] {
 	const where = kind === "question" ? "a public discussion in Help" : "a public issue";
 	if (transport.kind === "gh") {
 		const who = transport.login !== null ? `@${transport.login}` : "your gh account";
 		return [
 			`search ${REPORT_REPOSITORY} for an existing report of the same problem`,
+			...(shared ? [`upload the bundle encrypted to the maintainers as a secret gist in ${who}'s account`] : []),
 			`post the text you reviewed as ${where} from ${who}`,
 		];
 	}
@@ -130,7 +134,7 @@ export function maskSummary(masks: ReadonlyArray<ReportMask>): string {
 
 export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan {
 	const identity = draftIdentity(draft, options.identity);
-	const rendered = renderReport(draft, identity, options.reviewed ?? true);
+	const rendered = renderReport(draft, identity, options.reviewed ?? true, options.share);
 	const gates = validateDraft(draft, rendered);
 	if (!isFixedPoint(rendered, identity, draft.unmasked))
 		gates.push("Scrubbing the report again would change it; edit the text so every masked value is gone.");
@@ -150,9 +154,9 @@ export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan
 		rendered,
 		masks: rendered.masks,
 		maskSummary: maskSummary(rendered.masks),
-		actions: planActions(draft.kind, options.transport),
-		bundle: null,
-		consent: "none",
+		actions: planActions(draft.kind, options.transport, options.share !== undefined),
+		bundle: options.share?.bundle ?? null,
+		consent: options.share?.consent ?? "none",
 		credit: draft.credit === true,
 		gates,
 		rateWarning,
@@ -318,6 +322,21 @@ export function relatedLine(issue: RelatedIssue): string {
 	return `#${issue.number}  ${issue.state}  ${issue.title}${fixed}`;
 }
 
+/**
+ * Uploads a report's encrypted bundle just before the report is posted, so the posted block can name its gist. Called
+ * only through an authenticated `gh`; `abandon` deletes the gist again when nothing was posted.
+ */
+export interface ReportShareHook {
+	shareId: string;
+	consent: ReportSharePointer["consent"];
+	upload(): Promise<{ gistId: string } | { failed: string }>;
+	abandon(gistId: string): Promise<void>;
+}
+
+export function sharePointer(gistId: string, shareId: string): string {
+	return `gist:${gistId}#${shareId}`;
+}
+
 export interface ReportFlowDeps extends SendDeps {
 	identity: LocalIdentity;
 	transport: ReportTransport;
@@ -326,6 +345,8 @@ export interface ReportFlowDeps extends SendDeps {
 	replyCheck?: boolean;
 	/** As in `PlanOptions`: false when the send skipped the review screen. */
 	reviewed?: boolean;
+	/** Share the report's bundle encrypted; ignored unless the transport is `gh`. */
+	share?: ReportShareHook;
 	/** Asked only when the search found an open match, a fixed closed match or a fix in a newer version. */
 	chooseDuplicate: (
 		verdict: RelatedVerdict,
@@ -334,7 +355,15 @@ export interface ReportFlowDeps extends SendDeps {
 }
 
 export type ReportFlowOutcome =
-	| { kind: "sent"; result: SendResult; draft: ReportDraft; rendered: RenderedReport; verdict: RelatedVerdict }
+	| {
+			kind: "sent";
+			result: SendResult;
+			draft: ReportDraft;
+			rendered: RenderedReport;
+			verdict: RelatedVerdict;
+			/** The share's gist when one was uploaded and kept. */
+			shared?: { shareId: string; gistId: string };
+	  }
 	| { kind: "stopped"; draft: ReportDraft; verdict: RelatedVerdict };
 
 /**
@@ -392,9 +421,27 @@ export async function runReportSend(
 	let final = applyVerdict(draft, verdict);
 	if (choice === "new" && "issue" in verdict && !final.links.includes(verdict.issue.number))
 		final = { ...final, links: [...final.links, verdict.issue.number] };
-	const finalRendered = final === draft ? rendered : renderReport(final, deps.identity, deps.reviewed ?? true);
-	saveReportDraft(deps.stateDir, final);
 	const route = routeFor(final.kind);
+	let shared: { shareId: string; gistId: string } | undefined;
+	if (deps.share !== undefined && deps.transport.kind === "gh") {
+		const uploaded = await deps.share.upload();
+		if ("failed" in uploaded) {
+			saveReportDraft(deps.stateDir, final);
+			const path = writeReportMarkdown(deps.stateDir, final.id, rendered.body);
+			const reason = `the encrypted bundle was not uploaded, so nothing was posted: ${uploaded.failed}`;
+			return { kind: "sent", result: { status: "failed", reason, path }, draft: final, rendered, verdict };
+		}
+		shared = { shareId: deps.share.shareId, gistId: uploaded.gistId };
+	}
+	const pointer =
+		shared !== undefined && deps.share !== undefined
+			? { bundle: sharePointer(shared.gistId, shared.shareId), consent: deps.share.consent }
+			: undefined;
+	const finalRendered =
+		final === draft && pointer === undefined
+			? rendered
+			: renderReport(final, deps.identity, deps.reviewed ?? true, pointer);
+	saveReportDraft(deps.stateDir, final);
 	const action =
 		choice === "comment" && verdict.kind === "comment"
 			? { kind: "comment" as const, number: verdict.issue.number, body: renderComment(finalRendered, final) }
@@ -404,10 +451,29 @@ export async function runReportSend(
 		identity: draftIdentity(final, deps.identity),
 	});
 	const filed = result.status === "sent" || result.status === "commented" || result.status === "reacted";
+	const now = (deps.now ?? (() => new Date()))().toISOString();
+	if (shared !== undefined && deps.share !== undefined) {
+		// A create that did not answer cleanly may still have posted the pointer; then the gist stays for forget.
+		if (result.status === "failed" && outboxEntry(deps.stateDir, final.id)?.state !== "sending") {
+			await deps.share.abandon(shared.gistId);
+			shared = undefined;
+		} else {
+			updateShareReceipt(deps.stateDir, shared.shareId, {
+				kind: "report-bundle",
+				gistId: shared.gistId,
+				sentAt: now,
+				consent: deps.share.consent,
+				profile: "report",
+				reportId: final.id,
+				...(filed ? { url: result.url } : {}),
+			});
+			updateOutbox(deps.stateDir, final.id, { kind: final.kind, title: finalRendered.title, share: shared });
+		}
+	}
 	const facts = {
 		kind: final.kind,
 		title: finalRendered.title,
-		consent: "none",
+		consent: shared !== undefined && deps.share !== undefined ? deps.share.consent : "none",
 		credit: final.credit === true,
 		...(deps.replyCheck === true && filed ? { replyCheck: (deps.now ?? (() => new Date()))().toISOString() } : {}),
 	};
@@ -419,10 +485,17 @@ export async function runReportSend(
 			state: "sent",
 			url: result.url,
 			number: result.number,
-			sentAt: (deps.now ?? (() => new Date()))().toISOString(),
+			sentAt: now,
 		});
 	else if (result.status !== "failed") updateOutbox(deps.stateDir, final.id, facts);
-	return { kind: "sent", result, draft: final, rendered: finalRendered, verdict };
+	return {
+		kind: "sent",
+		result,
+		draft: final,
+		rendered: finalRendered,
+		verdict,
+		...(shared !== undefined ? { shared } : {}),
+	};
 }
 
 /** One line for the outcome of a send, shared by the CLI and the TUI's last step. */
@@ -509,6 +582,13 @@ export function forgetReport(
 	stateDir: string,
 	id: string,
 ): { ok: true; message: string } | { ok: false; reason: string } {
+	// Deleting the gist needs gh, so only the CLI's forget does it; this refuses until the share is gone.
+	const share = reportShare(stateDir, id);
+	if (share !== null)
+		return {
+			ok: false,
+			reason: `${id} has an encrypted share in gist ${share.receipt.gistId}; run clio-coder report forget ${id} in a terminal, which deletes it`,
+		};
 	const entry = outboxEntry(stateDir, id);
 	if (entry?.state === "sent") {
 		const left = `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}`;

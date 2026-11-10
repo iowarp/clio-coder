@@ -3,6 +3,7 @@ export {
 	isFixedPoint,
 	parseReportBlock,
 	type RenderedReport,
+	type ReportSharePointer,
 	rememberIdentity,
 	renderReport,
 	renderReportBlock,
@@ -24,6 +25,7 @@ export {
 	deleteReportBundle,
 	previewBundle,
 	REPORT_BUNDLE_ENVELOPE_SCHEMA,
+	REPORT_BUNDLE_FORMAT,
 	type ReportBundleEnvelope,
 	readReportBundle,
 	renderBundlePreview,
@@ -153,11 +155,13 @@ export {
 	type ReportPlan,
 	type ReportPlanTransport,
 	type ReportRow,
+	type ReportShareHook,
 	relatedLine,
 	reportEditTemplate,
 	reportRows,
 	runReportSend,
 	sentLine,
+	sharePointer,
 } from "./plan.js";
 export {
 	type IdentitySettings,
@@ -177,6 +181,7 @@ export {
 	readShareGist,
 	type ShareUpload,
 	shareGistFile,
+	sweepShareGists,
 	uploadShare,
 } from "./share/gist.js";
 export {

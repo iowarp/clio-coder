@@ -42,8 +42,14 @@ const TITLE_PREFIX: Readonly<Record<ReportDraft["kind"], string | null>> = {
 	question: null,
 };
 
+/** The encrypted share a report points at: `gist:<gistId>#<shareId>` and the consent scopes, comma-joined. */
+export interface ReportSharePointer {
+	bundle: string;
+	consent: "debug" | "debug,dataset";
+}
+
 /** The machine-readable block of R-04: one `key: value` per line, every value closed or of a fixed shape. */
-export function renderReportBlock(draft: ReportDraft): string {
+export function renderReportBlock(draft: ReportDraft, share?: ReportSharePointer): string {
 	const lines = [
 		"v: 1",
 		`id: ${draft.id}`,
@@ -58,8 +64,8 @@ export function renderReportBlock(draft: ReportDraft): string {
 		`fingerprint: ${draft.fingerprint ?? "none"}`,
 		`links: ${draft.links.length > 0 ? draft.links.map((n) => `#${n}`).join(", ") : "none"}`,
 		`regression: ${draft.regression === true ? "yes" : "no"}`,
-		"bundle: none",
-		"consent: none",
+		`bundle: ${share?.bundle ?? "none"}`,
+		`consent: ${share?.consent ?? "none"}`,
 		`credit: ${draft.credit === true ? "yes" : "no"}`,
 	];
 	return `<details><summary>${REPORT_DETAILS_SUMMARY}</summary>\n\n\`\`\`${REPORT_BLOCK_TAG}\n${lines.join("\n")}\n\`\`\`\n</details>`;
@@ -105,7 +111,12 @@ export function rememberIdentity(draft: ReportDraft, current: LocalIdentity): Re
  * what is not known, the environment, the report block and the footer. Every free-text field is scrubbed; the
  * scaffold and the block hold only fixed words and vocabulary values, which the scrubber never replaces.
  */
-export function renderReport(draft: ReportDraft, current: LocalIdentity, reviewed = true): RenderedReport {
+export function renderReport(
+	draft: ReportDraft,
+	current: LocalIdentity,
+	reviewed = true,
+	share?: ReportSharePointer,
+): RenderedReport {
 	const identity = draftIdentity(draft, current);
 	const lists: ReportMask[][] = [];
 	const scrub = (text: string) => {
@@ -152,7 +163,7 @@ export function renderReport(draft: ReportDraft, current: LocalIdentity, reviewe
 			...(draft.includeModel && env.model !== null ? [`- Model: ${env.model}`] : []),
 		].join("\n"),
 	);
-	const details = `${renderReportBlock(draft)}\n\n${reviewed ? REPORT_FOOTER : REPORT_FOOTER_UNREVIEWED}`;
+	const details = `${renderReportBlock(draft, share)}\n\n${reviewed ? REPORT_FOOTER : REPORT_FOOTER_UNREVIEWED}`;
 
 	const observedSection = section(REPORT_HEADINGS.observed, observed);
 	const notKnownSection = section(REPORT_HEADINGS.notKnown, notKnown);

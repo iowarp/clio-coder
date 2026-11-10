@@ -24,6 +24,7 @@ import {
 	type ReportBundleEnvelope,
 	type ReportCommandRunner,
 	type ReportDraft,
+	readShareReceipts,
 	reportBundlePath,
 	reportMarkdownPath,
 	routeFor,
@@ -724,6 +725,114 @@ test("report --bundle mechanics shows its consent text, keeps the bundle only on
 		out = "";
 		strictEqual(await runReport(["selftest", "--session", "ses_cli", "--anonymize-models"], deps), 0);
 		match(out, /^0 identifiers found in \d+ bytes/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("report --share uploads the bundle sealed as a secret gist, names it in the block, and forget deletes it", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-share-cli-"));
+	try {
+		const stateDir = join(root, "state");
+		await liveSession(stateDir, "ses_share");
+		const bodyFile = join(root, "body.md");
+		writeFileSync(bodyFile, "The footer flickered on every keystroke while a long turn streamed tool output.");
+		const gistId = "0123456789abcdef0123";
+		type GistRequest = { description: string; public: boolean; files: Record<string, { content: string }> };
+		const gists: GistRequest[] = [];
+		let posted = "";
+		const deleted: string[] = [];
+		let gistFails = false;
+		const run: ReportCommandRunner = async (file, args) => {
+			const reply = (stdout: string) => ({ exitCode: 0, stdout, stderr: "", timedOut: false });
+			if (file === "git") return { exitCode: 1, stdout: "", stderr: "not a repository", timedOut: false };
+			if (args[0] === "auth") return reply("");
+			if (args.includes("user")) return reply("octo\n");
+			if (args.includes("search/issues")) return reply("[]");
+			if (args.some((arg) => arg.endsWith("releases/latest"))) return reply("v0.0.1\n");
+			if (args.includes("POST") && args.includes("gists")) {
+				if (gistFails) return { exitCode: 1, stdout: "", stderr: "HTTP 403: missing scope", timedOut: false };
+				gists.push(JSON.parse(readFileSync(args[args.indexOf("--input") + 1] ?? "", "utf8")));
+				return reply(`${gistId}\n`);
+			}
+			if (args.includes("DELETE")) {
+				deleted.push(args[args.length - 1] ?? "");
+				return reply("");
+			}
+			if (args[0] === "issue" && args[1] === "create") {
+				posted = readFileSync(args[args.indexOf("--body-file") + 1] ?? "", "utf8");
+				return reply("https://github.com/iowarp/clio-coder/issues/452\n");
+			}
+			return { exitCode: 1, stdout: "", stderr: "unexpected", timedOut: false };
+		};
+		let out = "";
+		let err = "";
+		const deps: ReportCliDeps = {
+			run,
+			findGh: () => "/usr/bin/gh",
+			browserAvailable: () => false,
+			env: {},
+			interactive: false,
+			stdout: (text) => {
+				out += text;
+			},
+			stderr: (text) => {
+				err += text;
+			},
+			cwd: root,
+			stateDir,
+			identitySettings: {},
+			changelog: null,
+		};
+		const report = (...extra: string[]) =>
+			runReport(
+				["bug", "--title", "fix: x fails on y", "--body-file", bodyFile, "--session", "ses_share", ...extra],
+				deps,
+			);
+
+		strictEqual(await report("--share", "--dry-run"), 2);
+		ok(err.includes("--share shares the diagnostic bundle"), err);
+
+		strictEqual(await report("--bundle", "mechanics", "--consent", "dataset", "--share", "--dry-run"), 0);
+		match(out, /bundle: gist:<created on send>#shr_[0-9a-f]{16}\nconsent: debug,dataset\n/u);
+		ok(out.includes("upload the bundle encrypted to the maintainers as a secret gist"), out);
+		ok(out.includes("Clio Coder deletes the gist 180 days after sending it"), out);
+		strictEqual(gists.length, 0);
+
+		gistFails = true;
+		out = "";
+		err = "";
+		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes"), 1);
+		ok(err.includes("nothing was posted") && err.includes("gh auth refresh -s gist"), err);
+		strictEqual(posted, "");
+
+		gistFails = false;
+		out = "";
+		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes"), 0);
+		const shareId = /#(shr_[0-9a-f]{16})/u.exec(posted)?.[1] ?? "";
+		ok(posted.includes(`bundle: gist:${gistId}#${shareId}\nconsent: debug\n`), posted);
+		strictEqual(gists.length, 1);
+		const shared = gists[0] as GistRequest;
+		strictEqual(shared.public, false);
+		strictEqual(shared.description, `Clio Coder encrypted share ${shareId}`);
+		const envelope = JSON.parse(shared.files[`clio-share-${shareId}.json`]?.content ?? "{}");
+		strictEqual(envelope.format, "clio-coder.share.sealed");
+		strictEqual(envelope.kid, "d7aad758f9cb9edc");
+		strictEqual(envelope.shareId, shareId);
+		strictEqual(envelope.kind, "report-bundle");
+		ok(!JSON.stringify(envelope).includes("telemetry.tar.gz"));
+		const sent = /bundles\/(rpt_[0-9A-Z]{26})\.tar\.gz/u.exec(out)?.[1] ?? "";
+		deepStrictEqual(outboxEntry(stateDir, sent)?.share, { shareId, gistId });
+		strictEqual(outboxEntry(stateDir, sent)?.consent, "debug");
+		strictEqual(readShareReceipts(stateDir)[shareId]?.reportId, sent);
+		ok(!existsSync(join(stateDir, "reports", `${shareId}.gist.json`)), "the gist request file was left behind");
+
+		out = "";
+		strictEqual(await runReport(["forget", sent], deps), 0);
+		deepStrictEqual(deleted, [`gists/${gistId}`]);
+		ok(out.includes(`deleted the encrypted share ${shareId}`), out);
+		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
+		ok(!existsSync(reportBundlePath(stateDir, sent)));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

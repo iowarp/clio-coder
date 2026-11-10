@@ -9,15 +9,18 @@ import {
 	checkLastAttempt,
 	composeReportDraft,
 	type DuplicateChoice,
+	deleteShareGist,
 	detectTransport,
 	forgetReport,
 	type IdentitySettings,
 	type LocalIdentity,
 	localIdentity,
+	newShareId,
 	observeSession,
 	outboxEntry,
 	planHeadline,
 	planReport,
+	REPORT_BUNDLE_FORMAT,
 	REPORT_ID,
 	REPORT_THANKS,
 	type ReportCommandRunner,
@@ -25,22 +28,30 @@ import {
 	type ReportKind,
 	type ReportPlan,
 	type ReportPlanTransport,
+	type ReportShareHook,
+	type ReportSharePointer,
 	type ReportTransport,
 	readReportDraft,
 	refreshReportStatus,
 	relatedLine,
 	rememberIdentity,
+	reportBundleDigest,
 	reportBundlePath,
 	reportEditTemplate,
 	reportMarkdownPath,
 	reportRows,
+	reportShare,
 	routeFor,
 	runReportSend,
+	SHARE_RETENTION_DAYS,
 	saveBuiltBundle,
 	saveReportDraft,
 	sentLine,
 	sweepReportBundles,
+	sweepShareGists,
 	updateOutbox,
+	updateShareReceipt,
+	uploadShare,
 } from "../domains/report/index.js";
 import {
 	attachBundle,
@@ -56,7 +67,8 @@ import { canSelect, promptSelect } from "./select.js";
 
 export const REPORT_HELP = `clio-coder report [bug|feature|question] [--title <t>] [--body-file <f> | -] [--session <id> | --last]
                   [--bundle none|mechanics [--consent debug|dataset] [--transcript [N]] [--with-tool-output]
-                  [--anonymize-models]] [--credit] [--dry-run] [--yes] [--json] [--on-duplicate comment|new|stop]
+                  [--anonymize-models] [--share]] [--credit] [--dry-run] [--yes] [--json]
+                  [--on-duplicate comment|new|stop]
                   [--reply-check]
 clio-coder report status [--json]          clio-coder report show <id> [--bundle]
 clio-coder report send <id> [--yes] [--reply-check]
@@ -86,6 +98,10 @@ the bundle is kept only once you send or save the report.
 tool arguments and output stay out unless --with-tool-output. The bundle stays on
 this machine: show <id> --bundle prints every byte of it and forget deletes it,
 also after the report was sent.
+--share uploads the bundle too, encrypted so only the maintainers can open it, as a
+secret gist in your own GitHub account through gh; the report names that gist.
+forget deletes the gist, and Clio deletes it ${SHARE_RETENTION_DAYS} days after sending. Only a report
+composed and sent with --share shares; report send <id> never does.
 selftest builds that bundle for the newest session here, writes nothing, and
 says whether any of this machine's identifiers survived into it.
 Exit codes: 0 sent, opened, written or previewed; 1 on a send failure or a refused
@@ -124,6 +140,7 @@ interface ComposeArgs {
 	json: boolean;
 	onDuplicate: DuplicateChoice | null;
 	bundle: BundleRequest | null;
+	share: boolean;
 	replyCheck: boolean;
 }
 
@@ -162,6 +179,7 @@ const BOOLEAN_FLAGS = [
 	"--with-tool-output",
 	"--anonymize-models",
 	"--reply-check",
+	"--share",
 ];
 
 function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
@@ -275,6 +293,8 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 	if (typeof attach === "string") return attach;
 	if (attach !== null && !values.has("--session") && !flags.has("--last"))
 		return "--bundle mechanics bundles a session: pass --last or --session <id>";
+	if (flags.has("--share") && attach === null)
+		return "--share shares the diagnostic bundle: pass --bundle mechanics --consent debug|dataset";
 	return {
 		verb: "compose",
 		kind: (verb ?? "bug") as ReportKind,
@@ -288,6 +308,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 		json: flags.has("--json"),
 		onDuplicate,
 		bundle: attach,
+		share: flags.has("--share"),
 		replyCheck: flags.has("--reply-check"),
 	};
 }
@@ -312,7 +333,7 @@ function fail(io: Io, message: string): void {
 const RULE = (label: string) => `----- ${label} -----\n`;
 
 /** The plain preview: destination, title, the body byte for byte between two rules, masks, actions and gates. */
-function formatReportPreview(plan: ReportPlan, bundled: boolean): string {
+function formatReportPreview(plan: ReportPlan, bundled: boolean, id: string): string {
 	const lines = [
 		`${planHeadline(plan)}; nothing sent yet`,
 		"",
@@ -323,9 +344,11 @@ function formatReportPreview(plan: ReportPlan, bundled: boolean): string {
 	const after = [
 		RULE("end of body"),
 		plan.maskSummary,
-		bundled
-			? "The diagnostic bundle stays on this machine; sending does not upload it."
-			: "No diagnostic bundle is attached.",
+		plan.bundle !== null
+			? `The diagnostic bundle is uploaded encrypted to the Clio Coder maintainers, as a secret gist in your GitHub account that the report names. Only the maintainers can open it. clio-coder report forget ${id} deletes the gist; Clio deletes it ${SHARE_RETENTION_DAYS} days after sending.`
+			: bundled
+				? "The diagnostic bundle stays on this machine; sending does not upload it."
+				: "No diagnostic bundle is attached.",
 		...(plan.credit ? ["Credit: the report block asks for credit in the release notes (credit: yes)."] : []),
 		"",
 		"Sending will, in this order:",
@@ -409,6 +432,8 @@ async function confirmAndSend(
 		replyCheck: boolean;
 		/** A bundle built for this report and not yet kept. */
 		bundle?: BuiltBundle | null;
+		/** Share that bundle encrypted to the maintainers when the report goes out through gh. */
+		share?: boolean;
 	},
 ): Promise<number> {
 	// R-12 promises the agent drafts but never sends: a bash call has no terminal, and --yes skips the review the
@@ -476,7 +501,15 @@ async function confirmAndSend(
 	let draft = rememberIdentity(initial, identity);
 	// Only the prompt below is a review; --yes sends what the preview printed without one.
 	const reviewed = !options.yes;
-	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed });
+	// The share id is fixed now so the preview names it; the gist id exists only once sending uploads it.
+	const shareId = options.share === true && pending !== null ? newShareId() : null;
+	const sharing = shareId !== null && planTransport.kind === "gh";
+	if (shareId !== null && !sharing && !options.json)
+		io.err("not shared: --share needs an authenticated gh; the bundle stays on this machine.\n");
+	const consent: ReportSharePointer["consent"] =
+		pending?.summary.scopesGranted.includes("dataset") === true ? "debug,dataset" : "debug";
+	const preview = sharing ? { share: { bundle: `gist:<created on send>#${shareId}`, consent } } : {};
+	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed, ...preview });
 	const emit = (result?: unknown) =>
 		io.out(
 			`${JSON.stringify(
@@ -493,7 +526,7 @@ async function confirmAndSend(
 			)}\n`,
 		);
 	const bundled = pending !== null || Boolean(outboxEntry(io.stateDir, draft.id)?.bundle);
-	if (!options.json) io.out(formatReportPreview(plan, bundled));
+	if (!options.json) io.out(formatReportPreview(plan, bundled, draft.id));
 	if (options.dryRun) {
 		if (options.json) emit();
 		else io.out("dry run: nothing sent\n");
@@ -532,8 +565,14 @@ async function confirmAndSend(
 				else {
 					const before = plan.masks.reduce((sum, mask) => sum + mask.count, 0);
 					draft = edited;
-					plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed });
-					io.out(formatReportPreview(plan, bundled));
+					plan = planReport(draft, {
+						identity,
+						transport: planTransport,
+						stateDir: io.stateDir,
+						reviewed,
+						...preview,
+					});
+					io.out(formatReportPreview(plan, bundled, draft.id));
 					const added = plan.masks.reduce((sum, mask) => sum + mask.count, 0) - before;
 					if (added > 0) io.out(`Clio masked ${added} more value${added === 1 ? "" : "s"} in your edit.\n`);
 				}
@@ -542,13 +581,19 @@ async function confirmAndSend(
 			keepBundle();
 			saveDraft(io, draft, plan.rendered.title);
 			io.out(`nothing sent; saved as draft ${draft.id}. clio-coder report send ${draft.id} sends it later.\n`);
+			if (sharing) io.out("The bundle was not shared; report send <id> sends the report without sharing it.\n");
 			return 0;
 		}
 	}
 	if (transport === null) return 2;
 	keepBundle();
 	if (plan.rateWarning !== null && !options.json) io.err(`${plan.rateWarning}\n`);
+	const share =
+		sharing && transport.kind === "gh" && pending !== null
+			? shareHook(io, transport.path, shareId, consent, pending)
+			: null;
 	const outcome = await runReportSend(draft, plan.rendered, {
+		...(share !== null ? { share } : {}),
 		stateDir: io.stateDir,
 		identity,
 		transport,
@@ -600,6 +645,10 @@ async function confirmAndSend(
 		emit(outcome.result);
 	} else {
 		io.out(`${sentLine(outcome.result)}\n`);
+		if (outcome.shared !== undefined)
+			io.out(
+				`Shared the bundle encrypted as secret gist ${outcome.shared.gistId} (${outcome.shared.shareId}). clio-coder report forget ${draft.id} deletes it.\n`,
+			);
 		if (outcome.result.status !== "failed")
 			io.out(`${REPORT_THANKS}\nclio-coder report status shows it; nothing more is sent without you.\n`);
 	}
@@ -651,11 +700,45 @@ async function compose(args: ComposeArgs, io: Io): Promise<number> {
 			return 1;
 		}
 		(args.json ? io.err : io.out)(
-			`${formatBundleSummary(built, args.dryRun ? null : reportBundlePath(io.stateDir, draft.id))}\n`,
+			`${formatBundleSummary(built, args.dryRun ? null : reportBundlePath(io.stateDir, draft.id), args.share)}\n`,
 		);
 		bundle = built;
 	}
 	return confirmAndSend(draft, io, { ...args, bundle });
+}
+
+/** Uploads the built bundle sealed to the maintainers through the reporter's own gh, and deletes it again if asked. */
+function shareHook(
+	io: Io,
+	gh: string,
+	shareId: string,
+	consent: ReportSharePointer["consent"],
+	built: BuiltBundle,
+): ReportShareHook {
+	const deps = { gh, env: io.env, ...(io.deps.run !== undefined ? { run: io.deps.run } : {}) };
+	return {
+		shareId,
+		consent,
+		upload: () =>
+			uploadShare(
+				io.stateDir,
+				{
+					kind: "report-bundle",
+					shareId,
+					clio: built.envelope.environment.clioCoder,
+					consent: built.summary.scopesGranted,
+					digest: reportBundleDigest(built.bytes),
+					archiveFormat: REPORT_BUNDLE_FORMAT,
+					archive: built.bytes,
+					...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+				},
+				deps,
+			),
+		abandon: async (gistId) => {
+			const deleted = await deleteShareGist(gistId, deps);
+			if ("failed" in deleted) io.err(`${deleted.failed}; delete it at https://gist.github.com/${gistId}\n`);
+		},
+	};
 }
 
 /** The bundle in `--json`: what it holds and the consent text the reporter agreed to, sentence by sentence. */
@@ -766,8 +849,33 @@ async function sendSaved(
 	return confirmAndSend(draft, io, args);
 }
 
-function forget(io: Io, id: string): number {
+async function forget(io: Io, id: string): Promise<number> {
+	let deletedShare: string | null = null;
+	const share = reportShare(io.stateDir, id);
+	if (share !== null) {
+		const gh = (await loadFindGh(io.deps))();
+		if (gh === null) {
+			fail(io, `${id}'s encrypted share is gist ${share.receipt.gistId}; deleting it needs gh, which is not on PATH`);
+			return 1;
+		}
+		const deleted = await deleteShareGist(share.receipt.gistId, {
+			gh,
+			env: io.env,
+			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+		});
+		if ("failed" in deleted) {
+			fail(io, `nothing forgotten: ${deleted.failed}`);
+			return 1;
+		}
+		updateShareReceipt(io.stateDir, share.shareId, { deletedAt: (io.deps.now?.() ?? new Date()).toISOString() });
+		deletedShare = `deleted the encrypted share ${share.shareId} (gist ${share.receipt.gistId})`;
+		io.out(`${deletedShare}\n`);
+	}
 	const result = forgetReport(io.stateDir, id);
+	if (!result.ok && deletedShare !== null) {
+		io.out(`${result.reason}\n`);
+		return 0;
+	}
 	if (!result.ok) {
 		fail(io, `${result.reason}${result.reason.startsWith("no report") ? "; clio-coder report status lists them" : ""}`);
 		return 1;
@@ -814,6 +922,12 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 	};
 	try {
 		sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
+		await sweepShareGists(io.stateDir, {
+			findGh: await loadFindGh(io.deps),
+			env: io.env,
+			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+			...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+		});
 		switch (args.verb) {
 			case "compose":
 				return await compose(args, io);
@@ -824,7 +938,7 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 			case "send":
 				return await sendSaved(io, args);
 			case "forget":
-				return forget(io, args.id);
+				return await forget(io, args.id);
 			case "selftest":
 				return await runReportSelftest(bundleIo(io), args);
 			case "security":

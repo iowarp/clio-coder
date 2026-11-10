@@ -4,6 +4,7 @@ import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { type ReportCommandRunner, runReportCommand } from "../command.js";
 import { reportsDirectory } from "../store.js";
 import { ghEnvironment, REPORT_GH_TIMEOUT_MS } from "../transport.js";
+import { expiredShares, readShareReceipts, updateShareReceipt } from "./receipts.js";
 import { type SealedShare, type SealOptions, SHARE_PLAIN_FORMAT, type ShareKind, sealShare } from "./seal.js";
 
 /**
@@ -130,4 +131,39 @@ export async function uploadShare(
 		upload.seal,
 	);
 	return createShareGist(stateDir, envelope, deps);
+}
+
+/**
+ * Delete the gists of this machine's shares sent more than 180 days ago, as the consent text promises. Best effort and
+ * quiet: it asks `gh` nothing when no share has expired, and a gist that cannot be deleted now is tried next time.
+ */
+export async function sweepShareGists(
+	stateDir: string,
+	deps: { findGh: () => string | null; run?: ReportCommandRunner; env?: NodeJS.ProcessEnv; now?: Date },
+): Promise<number> {
+	let expired: string[];
+	try {
+		expired = expiredShares(stateDir, deps.now);
+	} catch {
+		return 0;
+	}
+	if (expired.length === 0) return 0;
+	const gh = deps.findGh();
+	if (gh === null) return 0;
+	const receipts = readShareReceipts(stateDir);
+	let deleted = 0;
+	for (const shareId of expired) {
+		const gistId = receipts[shareId]?.gistId;
+		if (gistId === undefined) continue;
+		const result = await deleteShareGist(gistId, {
+			gh,
+			...(deps.run !== undefined ? { run: deps.run } : {}),
+			...(deps.env !== undefined ? { env: deps.env } : {}),
+		});
+		if ("deleted" in result) {
+			updateShareReceipt(stateDir, shareId, { deletedAt: (deps.now ?? new Date()).toISOString() });
+			deleted += 1;
+		}
+	}
+	return deleted;
 }

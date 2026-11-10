@@ -83,16 +83,17 @@ function listOrNone(values: ReadonlyArray<string>): string {
 }
 
 /** The shipped consent text for every scope the bundle grants and its transcript. */
-export function consentSentences(built: Pick<BuiltBundle, "summary">): string[] {
+export function consentSentences(built: Pick<BuiltBundle, "summary">, shared = false): string[] {
 	const text = consentText();
 	return [
 		...built.summary.scopesGranted.map((scope) => text[scope]),
 		...(built.summary.transcript !== null ? [text.transcript] : []),
+		...(shared ? [text.share] : []),
 	];
 }
 
 /** The attach step's lines: size, records, what is kept and never kept, what stayed readable, the ticks. */
-export function formatBundleSummary(built: BuiltBundle, keepAt: string | null = null): string {
+export function formatBundleSummary(built: BuiltBundle, keepAt: string | null = null, shared = false): string {
 	const { summary } = built;
 	const anonymized = Object.entries(summary.anonymized)
 		.map(([kind, count]) => `${kind} ${count}`)
@@ -110,14 +111,14 @@ export function formatBundleSummary(built: BuiltBundle, keepAt: string | null = 
 		`  tokens: ${listOrNone(summary.readable.token)}`,
 		`Anonymized: ${anonymized || "none"}; withheld: ${summary.withheld}`,
 		`Consent: ${summary.scopesGranted.join(" and ")}, text version ${built.envelope.consent.textVersion}. By sending the bundle you agree to:`,
-		...consentSentences(built).map((sentence) => `  ${sentence}`),
+		...consentSentences(built, shared).map((sentence) => `  ${sentence}`),
 		summary.transcript
 			? `Transcript: the last ${summary.transcript.turns} of ${summary.transcript.of} turns, tool arguments and output ${summary.transcript.toolOutput ? "included" : "left out"}`
 			: "Transcript: not included",
 		built.path !== null
 			? `Saved at ${built.path}. It stays on this machine; clio-coder report show ${built.envelope.reportId} --bundle prints every byte of it.`
 			: keepAt !== null
-				? `Kept at ${keepAt} only once you send or save the report. It stays on this machine; clio-coder report show ${built.envelope.reportId} --bundle then prints every byte of it.`
+				? `Kept at ${keepAt} only once you send or save the report. ${shared ? "Sending also uploads it encrypted to the maintainers (--share)" : "It stays on this machine"}; clio-coder report show ${built.envelope.reportId} --bundle then prints every byte of it.`
 				: "Not saved: nothing was written.",
 	];
 	return `${lines.join("\n")}\n`;

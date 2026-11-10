@@ -27,6 +27,8 @@ export interface OutboxEntry {
 	consent: string;
 	/** The attached bundle: its file's sha256 and what the reporter agreed it may be used for (R-17). */
 	bundle: OutboxBundle | null;
+	/** The encrypted share of the bundle, uploaded as a secret gist; absent when the report shared nothing. */
+	share?: { shareId: string; gistId: string };
 	credit: boolean;
 	replyCheck: string | null;
 	lastSeen: { state: string; comments: number; at: string } | null;
