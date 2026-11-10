@@ -719,6 +719,11 @@ const RUNTIME_VOCABULARY: ReadonlySet<string> = new Set(
 	BUILTIN_RUNTIME_BOOT_MANIFEST.flatMap((runtime) => [runtime.id, ...(runtime.aliases ?? [])]),
 );
 
+/** Whether a runtime id is one Clio ships, which a share or a report may name verbatim. */
+export function isBuiltinRuntimeId(value: string): boolean {
+	return RUNTIME_VOCABULARY.has(value);
+}
+
 const MODEL_FILE =
 	/\.(?:gguf|ggml|bin|safetensors|pt|pth|ckpt|onnx|tflite|mlmodel|mlpackage|llamafile|h5|npz|pkl|engine)$/iu;
 const HOME_ROOTS: ReadonlySet<string> = new Set(["home", "Users"]);
@@ -729,7 +734,7 @@ const HOME_ROOTS: ReadonlySet<string> = new Set(["home", "Users"]);
  * `~` or empty segment, a home directory root before another segment, or a separator before a model file's name.
  * `qwen/qwen3-coder`, `openrouter/anthropic/x` and `qwen3:8b` stay readable; `org/repo/model-q4.gguf` does not.
  */
-function carriesPath(value: string): boolean {
+export function carriesPath(value: string): boolean {
 	if (/^(?:[\\/~]|[A-Za-z]:[\\/]|[A-Za-z][A-Za-z0-9+.-]*:\/\/|file:)/iu.test(value)) return true;
 	if (value.includes("\\") || /[^A-Za-z0-9._-][\\/]/u.test(value)) return true;
 	const segments = value.split("/");

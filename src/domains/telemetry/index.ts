@@ -109,4 +109,5 @@ export {
 	readVerifiedRun,
 } from "./run-record.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";
+export { carriesPath, isBuiltinRuntimeId } from "./share-projection.js";
 export { emptyUsageDiagnostics, explainRepoRef, isRepoRef, usageWindow } from "./usage-window.js";
