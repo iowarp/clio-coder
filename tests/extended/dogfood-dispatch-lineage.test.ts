@@ -114,6 +114,10 @@ async function fixture(
 									needsSplit: false,
 									proposedSubtasks: [],
 								};
+					// A review gate only counts a pass from a reviewer that inspected something.
+					if (spec.agentId === "verifier") {
+						yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
+					}
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: JSON.stringify(answer) } };
 				})(),
 			};

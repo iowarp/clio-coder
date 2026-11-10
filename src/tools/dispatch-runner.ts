@@ -39,8 +39,10 @@ import {
 	parseCompeteGateResult,
 	preflightPendingGateDecisionMaterialization,
 	preparePendingGateDecisionRecovery,
+	type ReviewerInspection,
 	readGateDecisionArtifacts,
 	resolvePendingGateDecision,
+	reviewerInspectionOf,
 	stagePendingGateDecision,
 	stagePendingGateOutput,
 } from "../domains/dispatch/gate-decisions.js";
@@ -1058,6 +1060,7 @@ async function runReviewGated(
 				decider: subjectRef(reviewer.receipt),
 				correlation: gateCorrelationOf(builder.receipt, reviewer.receipt),
 				output: normalizedAssistantText(reviewer.summary),
+				reviewer: reviewerInspectionOf(reviewer.receipt),
 			});
 			await recordDecision(decided.draft, reviewer.pendingGate);
 			if (decided.findings === null) {
@@ -1085,6 +1088,7 @@ type GateRunFacts = Pick<
 > & {
 	exitCode: number | null;
 	node?: { id: string };
+	inspection?: ReviewerInspection;
 };
 
 /** A finished run read back from its sealed run scope for gate recovery; null when it has not settled under a verified seal. */
@@ -1103,6 +1107,11 @@ function readVerifiedGateRun(deps: DispatchToolDeps, runId: string): GateRunFact
 		outcome: settled.outcome,
 		exitCode: settled.exitCode,
 		...(settled.node ? { node: { id: settled.node.id } } : {}),
+		inspection: reviewerInspectionOf({
+			runtimeKind: settled.route.runtimeKind,
+			toolActivity: settled.toolActivity,
+			validationGrounding: settled.validationGrounding,
+		}),
 	};
 }
 
@@ -1197,6 +1206,7 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 					decider,
 					correlation: recoveredCorrelation(deps, record.subjects, deciderReceipt),
 					output: record.finalOutput,
+					reviewer: deciderReceipt.inspection ?? { toolCalls: null, ungrounded: [] },
 				}).draft;
 			}
 			resolved.push(resolvePendingGateDecision(handle, draft));

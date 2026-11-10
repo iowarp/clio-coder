@@ -74,6 +74,8 @@ import {
 	decideReviewGate,
 	type GateDecisionCorrelation,
 	materializePendingGateDecision,
+	type ReviewerInspection,
+	reviewerInspectionOf,
 	stagePendingGateDecision,
 } from "./gate-decisions.js";
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
@@ -307,6 +309,7 @@ interface StepRun {
 	nodeId: string;
 	changedPaths: ReadonlyArray<string>;
 	pricing: PricingSum;
+	inspection: ReviewerInspection;
 }
 
 function stepRunOf(result: RunResult): StepRun {
@@ -320,6 +323,7 @@ function stepRunOf(result: RunResult): StepRun {
 		nodeId: result.node?.id ?? "local",
 		changedPaths: [...(result.worktree?.changedPaths ?? []), ...(result.checkoutChanges?.changedPaths ?? [])],
 		pricing: sumRunSpend([result]),
+		inspection: reviewerInspectionOf(result),
 	};
 }
 
@@ -344,6 +348,11 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 			usd: "unknownCount" in usd ? usd : sumFacts([usd]),
 			...freeClaim(settled.pricing.pricedBy === "free", settled.pricing.freeRule),
 		},
+		inspection: reviewerInspectionOf({
+			runtimeKind: settled.route.runtimeKind,
+			toolActivity: settled.toolActivity,
+			validationGrounding: settled.validationGrounding,
+		}),
 	};
 }
 
@@ -1278,6 +1287,7 @@ async function runFleetHoldingWorkspace(
 					decider: { runId: decider.runId, digest: decider.digest },
 					correlation,
 					output: stepResult.output,
+					reviewer: decider.inspection,
 				});
 				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
 				if (!replayed.has(step.id)) {
