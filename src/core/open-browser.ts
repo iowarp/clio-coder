@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import path from "node:path";
+import path, { win32 } from "node:path";
 
 function onPath(command: string, env: NodeJS.ProcessEnv): boolean {
 	for (const dir of (env.PATH ?? "").split(path.delimiter)) {
@@ -34,19 +34,49 @@ export function canOpenBrowser(
 	return isWsl(env) && onPath("wslview", env);
 }
 
-/** Launches the platform opener for `url`. Returns false when this session has no local browser. */
+/**
+ * Only https: and loopback http: URLs reach a platform opener. Provider and
+ * device-code servers supply some of these links, so a `file:`, custom-scheme
+ * or remote plain-http link is printed, never opened (R1-safety-secrets-07).
+ */
+export function isOpenableUrl(url: string): boolean {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol === "https:") return true;
+	if (parsed.protocol !== "http:") return false;
+	const host = parsed.hostname.toLowerCase();
+	return host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/u.test(host);
+}
+
+/**
+ * Never cmd.exe or `start`, which split a URL at `&` and run the rest as a
+ * command even with shell:false. The system rundll32 is named by absolute path
+ * so a PATH entry cannot stand in for it, as the GUI's opener does.
+ */
+export function windowsUrlOpener(url: string, env: NodeJS.ProcessEnv = process.env): [string, string[]] | null {
+	const root = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
+	if (!win32.isAbsolute(root)) return null;
+	return [win32.join(root, "System32", "rundll32.exe"), ["url.dll,FileProtocolHandler", url]];
+}
+
+/** Launches the platform opener for `url`. Returns false when this session has no local browser or the URL is refused. */
 export function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
-	if (!canOpenBrowser(env)) return false;
+	if (!canOpenBrowser(env) || !isOpenableUrl(url)) return false;
 	const platform = process.platform;
-	// `start` is a cmd builtin and its first quoted argument is the window title, so the empty string is required.
-	const [command, args]: [string, string[]] =
+	const opener: [string, string[]] | null =
 		platform === "darwin"
 			? ["open", [url]]
 			: platform === "win32"
-				? ["cmd", ["/c", "start", "", url]]
+				? windowsUrlOpener(url, env)
 				: !env.DISPLAY && !env.WAYLAND_DISPLAY && isWsl(env)
 					? ["wslview", [url]]
 					: ["xdg-open", [url]];
+	if (!opener) return false;
+	const [command, args] = opener;
 	try {
 		// Detached rather than through safe-exec: the opener may stay alive as the browser, and safe-exec tears its group down.
 		const child = spawn(command, args, { stdio: "ignore", detached: true });
