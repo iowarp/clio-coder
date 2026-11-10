@@ -3,6 +3,7 @@ import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
+import { clioConfigPath } from "../xdg.js";
 import { sandboxAvailability, sandboxNetworkIsolation } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
 import { withMountAliases } from "./mount-aliases.js";
@@ -267,8 +268,17 @@ function isDirectoryPath(entry: string): boolean {
 
 /** Secret files under the worker's own trees, on top of the home credential masks. */
 function workerSpawnMasks(policy: WorkerSandboxSpec): SandboxMaskedPath[] {
-	const base = workerSandboxMasks();
+	const base = [...workerSandboxMasks(), ...(policy.maskSettings === true ? settingsFileMask() : [])];
 	return [...base, ...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks];
+}
+
+/** Clio's settings.yaml at its link target, since bubblewrap cannot mount over a symlink; absent needs no mask. */
+function settingsFileMask(): SandboxMaskedPath[] {
+	try {
+		return [{ path: realpathSync(path.join(clioConfigPath(), "settings.yaml")), kind: "file" }];
+	} catch {
+		return [];
+	}
 }
 
 /** Once per worker, on stderr like the missing-backend line: the filter could not load and masks stand in. */

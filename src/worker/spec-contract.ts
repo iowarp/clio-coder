@@ -986,6 +986,7 @@ const WORKER_SANDBOX_KEYS = new Set([
 	"passEnv",
 	"secretEnv",
 	"unixSockets",
+	"maskSettings",
 	"backendExpected",
 ]);
 
@@ -1016,6 +1017,8 @@ function validateWorkerSandbox(value: unknown): void {
 	}
 	if (sandbox.unixSockets !== undefined)
 		readEnum(sandbox.unixSockets, "WorkerSpec.sandbox.unixSockets", ["allow"] as const);
+	if (sandbox.maskSettings !== undefined && sandbox.maskSettings !== true)
+		throw new Error("WorkerSpec.sandbox.maskSettings must be true when present");
 	if (sandbox.backendExpected !== undefined && sandbox.backendExpected !== true)
 		throw new Error("WorkerSpec.sandbox.backendExpected must be true when present");
 }

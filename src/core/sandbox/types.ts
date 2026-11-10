@@ -58,6 +58,8 @@ export interface WorkerSandboxSpec {
 	secretEnv?: ReadonlyArray<string>;
 	/** `safety.sandboxUnixSockets: allow`. Absent blocks Unix-domain sockets (unix-sockets.ts). */
 	unixSockets?: "allow";
+	/** A target declares `auth.headers`, so the worker's sandbox masks Clio's settings.yaml as the main session's does. */
+	maskSettings?: true;
 	/**
 	 * The orchestrator found the backend usable on this host. A worker whose
 	 * own probe then fails refuses the command instead of running it direct.

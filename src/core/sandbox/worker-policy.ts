@@ -105,6 +105,7 @@ export function resolveWorkerSandboxSpec(input: WorkerSandboxPolicyInput): Worke
 		...(passEnv.length > 0 ? { passEnv: [...passEnv] } : {}),
 		...(secretEnv.length > 0 ? { secretEnv: [...secretEnv] } : {}),
 		...(input.unixSockets === "allow" ? { unixSockets: "allow" as const } : {}),
+		...(input.env?.maskSettings === true ? { maskSettings: true as const } : {}),
 	};
 }
 
