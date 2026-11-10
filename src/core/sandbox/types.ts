@@ -70,6 +70,8 @@ export interface SandboxEnvPolicy {
 	passEnv: ReadonlyArray<string>;
 	/** Credential variables Clio's own targets read (`auth.apiKeyEnvVar`), removed whatever they are named. */
 	secretNames: ReadonlyArray<string>;
+	/** A target declares `auth.headers`, so Clio's settings.yaml holds literal keys and the main-session sandbox masks it. */
+	maskSettings?: true;
 }
 
 /** A path hidden from the sandboxed process. Only existing paths can be masked. */

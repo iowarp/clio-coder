@@ -652,7 +652,12 @@ export function planMainSandboxSpawn(
 	const hookMasks: SandboxMaskedPath[] = policy.absentGitHooks
 		.filter((hooks) => !pathExists(hooks))
 		.map((hooks) => ({ path: hooks, kind: "directory" }));
-	const baseMasks = [...workerSandboxMasks(), ...mainSandboxAgentMasks(), ...hookMasks];
+	const baseMasks = [
+		...workerSandboxMasks(),
+		...mainSandboxAgentMasks(),
+		...hookMasks,
+		...(policy.env.maskSettings === true ? existingFileMasks([path.join(clioConfigPath(), "settings.yaml")]) : []),
+	];
 	const secretMasks = discoverSecretMasks(
 		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
 		baseMasks,
@@ -687,6 +692,19 @@ export function planMainSandboxSpawn(
 		afterExit: () => sweepMainSandboxGitFiles(absentFiles),
 		env: policy.env,
 	};
+}
+
+/** File masks for the paths that exist, each at its link target, since bubblewrap cannot mount over a symlink. */
+function existingFileMasks(files: ReadonlyArray<string>): SandboxMaskedPath[] {
+	const masks: SandboxMaskedPath[] = [];
+	for (const file of files) {
+		try {
+			masks.push({ path: realpathSync(file), kind: "file" });
+		} catch {
+			// An absent file needs no mask.
+		}
+	}
+	return masks;
 }
 
 /**

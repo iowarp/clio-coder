@@ -133,11 +133,16 @@ export function knownSecretValues(env: NodeJS.ProcessEnv, secretNames: Iterable<
 /** The scrub's inputs from settings: the operator's pass list and the variables Clio's targets read keys from. */
 export function sandboxEnvPolicy(settings: {
 	safety: { sandboxPassEnv: ReadonlyArray<string> };
-	targets: ReadonlyArray<{ auth?: { apiKeyEnvVar?: string } }>;
+	targets: ReadonlyArray<{ auth?: { apiKeyEnvVar?: string; headers?: Readonly<Record<string, string>> } }>;
 }): SandboxEnvPolicy {
 	const secretNames = settings.targets.flatMap((target) => {
 		const name = target.auth?.apiKeyEnvVar?.trim();
 		return name === undefined || name.length === 0 ? [] : [name];
 	});
-	return { passEnv: [...settings.safety.sandboxPassEnv], secretNames: [...new Set(secretNames)] };
+	const maskSettings = settings.targets.some((target) => Object.keys(target.auth?.headers ?? {}).length > 0);
+	return {
+		passEnv: [...settings.safety.sandboxPassEnv],
+		secretNames: [...new Set(secretNames)],
+		...(maskSettings ? { maskSettings: true as const } : {}),
+	};
 }

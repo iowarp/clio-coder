@@ -1,6 +1,6 @@
 import { foreignAgentDirs } from "../interop/registry.js";
 import type { PathPolicyInput } from "./path-policy.js";
-import { WORKSPACE_SECRET_PATHS } from "./secret-paths.js";
+import { HOME_AGENT_SECRET_RELATIVE_PATHS, WORKSPACE_SECRET_PATHS } from "./secret-paths.js";
 
 /**
  * Generated trees the default policy keeps out of hand edits. The operator's
@@ -29,6 +29,7 @@ export const BUILD_OUTPUT_PATHS: ReadonlyArray<string> = [
 export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 	zeroAccessPaths: [
 		...WORKSPACE_SECRET_PATHS,
+		...HOME_AGENT_SECRET_RELATIVE_PATHS.map((relative) => `~/${relative}`),
 		"~/.ssh/",
 		"~/.gnupg/",
 		"~/.aws/",
@@ -64,9 +65,6 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		"/sbin/",
 		"/boot/",
 		"/root/",
-		"~/.bash_history",
-		"~/.zsh_history",
-		"~/.node_repl_history",
 		"~/.bashrc",
 		"~/.zshrc",
 		"~/.profile",

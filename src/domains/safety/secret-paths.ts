@@ -43,9 +43,44 @@ export const HOME_SECRET_RELATIVE_PATHS: ReadonlyArray<string> = [
 	".local/share/keyrings",
 ];
 
+/**
+ * Other agents' logins, tool token stores and shell histories under the home
+ * directory. The sandbox masks them and the typed tools refuse them as
+ * zero-access entries (default-path-policy.ts spreads this list), so a
+ * contained `cat` and a typed `read` agree. Kept apart from the list above
+ * because the workspace secret-file scan matches that one by name at any
+ * depth, and a project's own `.gemini` is not a credential store.
+ */
+export const HOME_AGENT_SECRET_RELATIVE_PATHS: ReadonlyArray<string> = [
+	".claude/.credentials.json",
+	".claude.json",
+	".codex/auth.json",
+	".gemini",
+	".config/github-copilot",
+	".cache/huggingface/token",
+	".huggingface/token",
+	".config/configstore",
+	".config/rclone",
+	".config/op",
+	".config/sops",
+	".terraform.d/credentials.tfrc.json",
+	".vault-token",
+	".pgpass",
+	".my.cnf",
+	".bash_history",
+	".zsh_history",
+	".local/share/fish/fish_history",
+	".python_history",
+	".node_repl_history",
+	".psql_history",
+	".mysql_history",
+];
+
 /** Home-relative secret paths plus Clio's credential store, all absolute. */
 export function workerSecretPaths(home: string = homedir()): string[] {
-	const paths = HOME_SECRET_RELATIVE_PATHS.map((relative) => path.join(home, relative));
+	const paths = [...HOME_SECRET_RELATIVE_PATHS, ...HOME_AGENT_SECRET_RELATIVE_PATHS].map((relative) =>
+		path.join(home, relative),
+	);
 	return [...new Set([...paths, ...clioCredentialStorePaths()])];
 }
 
