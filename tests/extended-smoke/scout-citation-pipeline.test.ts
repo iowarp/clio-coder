@@ -148,6 +148,9 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			const settings = parse(readFileSync(settingsPath, "utf8"));
 			settings.fleet.default.target = "mock-chat";
 			settings.fleet.default.model = "mock-model";
+			// Contained yolo refuses a plan-scale dispatch such as this pipeline, as default would ask for it.
+			settings.safety.yoloConfinement = "unconfined";
+			settings.safety.yoloUnconfinedAccepted = true;
 			writeFileSync(settingsPath, stringify(settings));
 			const result = await run(["run", "--json", "--autonomy", "yolo", fixture.prompt], workspace, env);
 			// A Scout that exhausts its repairs is a dispatched worker that did not deliver.
