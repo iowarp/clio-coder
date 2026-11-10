@@ -86,6 +86,7 @@
 		"!docs/wiki/**",
 		"docs/corpus.json",
 		"assets/clio-mark-gui.webp",
+		"assets/core-host/clio_core_host.py",
 		"assets/windows-launcher/pins.json",
 		"assets/windows-launcher/win32-x64/launcher.exe",
 		"assets/windows-launcher/win32-arm64/launcher.exe",
