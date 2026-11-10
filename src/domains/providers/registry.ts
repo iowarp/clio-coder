@@ -1,7 +1,8 @@
 import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { clioConfigDir } from "../../core/xdg.js";
 import { retiredRuntimeReplacement } from "./retired-runtimes.js";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
@@ -16,6 +17,25 @@ export interface RuntimeRegistry {
 	loadFromDir(dir: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>>;
 	loadFromPackage(packageName: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>>;
 	clear(): void;
+}
+
+const BARE_PACKAGE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9_][\w.-]*(?:\/[\w.-]+)*$/i;
+
+/**
+ * A runtime plugin is imported into Clio's own process, so only a bare package
+ * name or a file under `<configDir>/runtimes/` may name one; `data:`, `http:`,
+ * `file:` and paths elsewhere are refused.
+ */
+function runtimePluginSpecifier(specifier: string): string {
+	if (BARE_PACKAGE.test(specifier) && !specifier.split("/").includes("..")) return specifier;
+	if (isAbsolute(specifier)) {
+		const runtimesDir = join(clioConfigDir(), "runtimes");
+		const full = resolve(specifier);
+		if (full.startsWith(runtimesDir + sep)) return pathToFileURL(full).href;
+	}
+	throw new Error(
+		`runtime plugin '${specifier}' refused: name a bare npm package or an absolute path under ${join(clioConfigDir(), "runtimes")}`,
+	);
 }
 
 export function createRuntimeRegistry(): RuntimeRegistry {
@@ -71,10 +91,11 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		packageName: string,
 		beforeImport?: () => Promise<void>,
 	): Promise<ReadonlyArray<string>> => {
+		const specifier = runtimePluginSpecifier(packageName);
 		let mod: unknown;
 		try {
 			await beforeImport?.();
-			mod = await import(packageName);
+			mod = await import(specifier);
 		} catch (err) {
 			writeDiagnostic(`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`);
 			return [];

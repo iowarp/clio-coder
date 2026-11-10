@@ -425,6 +425,90 @@ function stripProjectOperatorSafety(
 	return cleaned;
 }
 
+const SANDBOX_RANK: Record<string, number> = { off: 0, auto: 1, required: 2 };
+// Lower is tighter: deny and fail refuse, escalate asks the operator, judge and main let Clio decide.
+const FLEET_MODE_RANK: Record<string, number> = { deny: 0, fail: 0, escalate: 1, judge: 2, main: 3 };
+
+/**
+ * Trusted project settings may tighten containment, never widen it: the
+ * sandbox, its network, snapshots and the fleet ask route only move toward the
+ * stricter side of the operator's value, and project layers cannot load code
+ * into Clio or trust their own imports.
+ */
+function stripProjectWidening(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	let cleaned = blob;
+	const drop = (path: string, message: string) => issues.push({ origin, path, message });
+	const userSafety = isRecord(userBlob?.safety) ? userBlob.safety : {};
+	if (isRecord(blob.safety)) {
+		const safety: Record<string, unknown> = { ...blob.safety };
+		let changed = false;
+		if (Object.hasOwn(safety, "sandbox")) {
+			const operator = SANDBOX_RANK[String(userSafety.sandbox)] ?? SANDBOX_RANK[DEFAULT_SETTINGS.safety.sandbox] ?? 1;
+			const requested = SANDBOX_RANK[String(safety.sandbox)];
+			if (requested === undefined || requested < operator) {
+				drop("safety.sandbox", "a project may only tighten the sandbox from user settings; project value ignored");
+				delete safety.sandbox;
+				changed = true;
+			}
+		}
+		if (Object.hasOwn(safety, "sandboxNetwork") && safety.sandboxNetwork !== false) {
+			drop("safety.sandboxNetwork", "sandbox network access is enabled only in user settings; project value ignored");
+			delete safety.sandboxNetwork;
+			changed = true;
+		}
+		if (Object.hasOwn(safety, "snapshots") && safety.snapshots !== "auto") {
+			drop("safety.snapshots", "snapshots are turned off only in user settings; project value ignored");
+			delete safety.snapshots;
+			changed = true;
+		}
+		if (changed) {
+			cleaned = { ...cleaned };
+			if (Object.keys(safety).length === 0) delete cleaned.safety;
+			else cleaned.safety = safety;
+		}
+	}
+	if (isRecord(blob.fleet) && isRecord(blob.fleet.permissions) && Object.hasOwn(blob.fleet.permissions, "mode")) {
+		const userFleet = isRecord(userBlob?.fleet) ? userBlob.fleet : {};
+		const userPermissions = isRecord(userFleet.permissions) ? userFleet.permissions : {};
+		const operator =
+			FLEET_MODE_RANK[String(userPermissions.mode)] ?? FLEET_MODE_RANK[DEFAULT_SETTINGS.fleet.permissions.mode] ?? 2;
+		const requested = FLEET_MODE_RANK[String(blob.fleet.permissions.mode)];
+		if (requested === undefined || requested > operator) {
+			drop(
+				"fleet.permissions.mode",
+				"a project may only tighten the fleet permission mode from user settings; project value ignored",
+			);
+			const { mode: _ignored, ...permissions } = blob.fleet.permissions;
+			cleaned = { ...cleaned, fleet: { ...blob.fleet, permissions } };
+		}
+	}
+	if (isRecord(blob.integrations)) {
+		const integrations: Record<string, unknown> = { ...blob.integrations };
+		let changed = false;
+		if (Object.hasOwn(integrations, "runtimePlugins")) {
+			drop("integrations.runtimePlugins", "runtime plugins are loaded only from user settings; project value ignored");
+			delete integrations.runtimePlugins;
+			changed = true;
+		}
+		if (isRecord(integrations.projectResources) && Object.hasOwn(integrations.projectResources, "trustProjectImports")) {
+			drop(
+				"integrations.projectResources.trustProjectImports",
+				"project imports are trusted only in user settings; project value ignored",
+			);
+			const { trustProjectImports: _ignored, ...projectResources } = integrations.projectResources;
+			integrations.projectResources = projectResources;
+			changed = true;
+		}
+		if (changed) cleaned = { ...cleaned, integrations };
+	}
+	return cleaned;
+}
+
 /**
  * `trustedUnmediated` hands a runtime its own authority over writes, so only
  * the operator's user settings may grant it. A trusted project layer that
@@ -546,10 +630,15 @@ function prepareProjectLayers(
 				? undefined
 				: stripProjectAutonomousCaps(
 						stripProjectTelemetry(
-							stripProjectOperatorSafety(
-								stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+							stripProjectWidening(
+								stripProjectOperatorSafety(
+									stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+									origin,
+									issues,
+								),
 								origin,
 								issues,
+								userBlob,
 							),
 							origin,
 							issues,
