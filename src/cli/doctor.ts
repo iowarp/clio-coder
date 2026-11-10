@@ -1,3 +1,4 @@
+import path from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { proxyEnvSummary } from "../core/proxy-env.js";
@@ -12,6 +13,7 @@ import {
 import { discoverSecretMasks } from "../core/sandbox/secret-files.js";
 import type { SandboxMode, UnixSocketMode } from "../core/sandbox/types.js";
 import { unixSocketHostState } from "../core/sandbox/unix-sockets.js";
+import { resolveOnPath } from "../domains/interop/detect.js";
 import {
 	type DoctorFinding,
 	formatDoctorReport,
@@ -32,6 +34,7 @@ import {
 	effectiveYoloConfinement,
 	type YoloConfinement,
 } from "../domains/safety/autonomy.js";
+import { SCHEDULER_CLIS } from "../domains/safety/containment.js";
 import { droppedScratchRoots, effectiveScratchRoots } from "../domains/safety/scratch-roots.js";
 import {
 	describeHostCapacity,
@@ -160,6 +163,21 @@ export function shellSandboxFinding(workspaceRoot: string): DoctorFinding {
 			unixSockets,
 		),
 	};
+}
+
+/** Scheduler clients need a daemon socket the sandbox blocks, so they leave it with approval. */
+function schedulerClientFindings(): DoctorFinding[] {
+	if (!mainShellContained(configuredSandboxMode(), sandboxAvailability())) return [];
+	const found = resolveOnPath([...SCHEDULER_CLIS]).binary;
+	if (found === undefined) return [];
+	return [
+		{
+			ok: true,
+			name: "scheduler commands",
+			level: "info",
+			detail: `${path.basename(found)} is on PATH: scheduler commands run outside the shell sandbox with approval`,
+		},
+	];
 }
 
 function configuredUnixSockets(): UnixSocketMode {
@@ -480,7 +498,9 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];
-	const scratchChecks = untouched ? [] : [...scratchRootFindings(workspaceRoot), shellSandboxFinding(workspaceRoot)];
+	const scratchChecks = untouched
+		? []
+		: [...scratchRootFindings(workspaceRoot), shellSandboxFinding(workspaceRoot), ...schedulerClientFindings()];
 	// Task worktrees live in the workspace too. The sweep reads claims and asks
 	// git; it removes nothing.
 	const worktreeChecks = taskWorktreeFindings(workspaceRoot, { fix });

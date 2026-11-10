@@ -46,6 +46,48 @@ const CREDENTIALED_CLIS: ReadonlySet<string> = new Set([
 	"sftp",
 ]);
 
+/**
+ * Batch scheduler clients authenticate through a host daemon's Unix socket
+ * (MUNGE or sackd for Slurm), which the sandbox blocks, so they run outside it
+ * under the same rules as ssh. The read-only ones read, for the card words.
+ */
+export const SCHEDULER_CLIS: ReadonlySet<string> = new Set([
+	"sbatch",
+	"srun",
+	"salloc",
+	"scancel",
+	"squeue",
+	"sacct",
+	"sinfo",
+	"scontrol",
+	"sstat",
+	"sprio",
+	"sacctmgr",
+	"sreport",
+	"sattach",
+	"sbcast",
+	"qsub",
+	"qstat",
+	"qdel",
+	"qalter",
+	"qhold",
+	"qrls",
+	"bsub",
+	"bjobs",
+	"bkill",
+	"flux",
+]);
+const SCHEDULER_READERS: ReadonlySet<string> = new Set([
+	"squeue",
+	"sacct",
+	"sinfo",
+	"sstat",
+	"sprio",
+	"sreport",
+	"qstat",
+	"bjobs",
+]);
+
 /** Package and image publishers, by executable and the subcommand words that publish. */
 const PUBLISHERS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["npm", ["publish", "unpublish", "deprecate", "dist-tag", "owner", "access"]],
@@ -128,6 +170,11 @@ function stepOutwardReason(words: ReadonlyArray<string>): string | null {
 		const [noun, verb] = args.filter((arg) => !arg.startsWith("-"));
 		const reads = FORGE_CLIS.has(name) && noun !== "api" && verb !== undefined && FORGE_READ_VERBS.has(verb);
 		return `${name} ${reads ? "reads" : "acts"} with your credentials`;
+	}
+	if (SCHEDULER_CLIS.has(name)) {
+		const reads =
+			SCHEDULER_READERS.has(name) || (name === "scontrol" && args.find((arg) => !arg.startsWith("-")) === "show");
+		return `${name} ${reads ? "reads from" : "acts on"} the cluster scheduler as you`;
 	}
 	const publishes = PUBLISHERS.get(name);
 	const subcommand = args.find((arg) => !arg.startsWith("-"));
