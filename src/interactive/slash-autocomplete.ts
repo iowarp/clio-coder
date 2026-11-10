@@ -557,7 +557,17 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			// A complete built-in name wins: Enter runs it instead of a longer sibling (`/skill`, not `/skills`).
 			// A retired name typed in full does too, so Enter shows its notice and runs the successor
 			// instead of whichever row its description matched (`/workspace` would open Rewind).
-			if (refs.some((ref) => ref.name === prefix) || isRetiredCommandName(prefix)) return null;
+			// An alias or a prompt template typed in full is the same: `/status` opens Usage and
+			// `/review` runs its template instead of a fuzzy row (`status-report`, `/library`).
+			// One listing serves the exact-name guard, the template rows and the extension-command
+			// shadowing check; each listing of plugin prompts costs a plugin walk.
+			const templates = this.promptTemplates();
+			if (
+				refs.some((ref) => ref.name === prefix || ref.aliases?.some((alias) => alias.name === prefix)) ||
+				isRetiredCommandName(prefix) ||
+				templates.some((template) => template.name === prefix)
+			)
+				return null;
 			let matches: ReadonlyArray<CommandMatch> = matchCommandReference(prefix, refs).filter(
 				(match) => !this.hidden(match.ref.name),
 			);
@@ -569,9 +579,6 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				return kind === "exact" || kind === "name";
 			});
 			const items: SlashCompletionItem[] = [...nameClass];
-			// One listing serves both the template rows and the extension-command
-			// shadowing check; each listing of plugin prompts costs a plugin walk.
-			const templates = this.promptTemplates();
 			const promptNames = templates.map((prompt) => prompt.name);
 			const extensionRows = resolveExtensionCommands(this.extensionCommands(), promptNames);
 			const replacements = new Set(
