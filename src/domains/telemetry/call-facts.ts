@@ -44,7 +44,18 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 	const outcomes = ["eligible", "recovered", "failed", "unknown"] as const;
 	const action = actions.find((value) => value === recovery.action);
 	const outcome = outcomes.find((value) => value === recovery.outcome);
-	const continuation = codex.request === "delta" || codex.request === "full" ? codex.request : undefined;
+	// An Anthropic request that continued its message thread sent only the new messages, so it is a delta too; the
+	// last request of the call is the one the provider answered.
+	const threads = record(raw.anthropicResponse).threadRequests;
+	const thread = Array.isArray(threads) && threads.length > 0 ? threads[threads.length - 1] : undefined;
+	const continuation =
+		codex.request === "delta" || codex.request === "full"
+			? codex.request
+			: thread === undefined
+				? undefined
+				: thread === "continue"
+					? "delta"
+					: "full";
 	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
 	const cacheKey = sent && typeof raw.clioCoderPromptCacheKey === "string" ? raw.clioCoderPromptCacheKey : undefined;
 	return {

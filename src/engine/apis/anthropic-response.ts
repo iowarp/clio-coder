@@ -18,6 +18,15 @@ function retryAfterSeconds(value: string | null): number | null {
 	return Number.isFinite(date) ? Math.max(0, (date - Date.now()) / 1000) : null;
 }
 
+/** Pi appends `thread` as the last key of a threaded request body, so the body's tail states what the request asks. */
+const THREAD_REQUEST_TAIL = /,"thread":\{"type":"(create|continue)"[^{}]*\}\}$/;
+
+function threadRequestOf(body: unknown): "create" | "continue" | "none" {
+	if (typeof body !== "string") return "none";
+	const kind = THREAD_REQUEST_TAIL.exec(body.slice(-256))?.[1];
+	return kind === "create" || kind === "continue" ? kind : "none";
+}
+
 /** Capture failures at fetch because Pi's onResponse only sees successful responses (#423). */
 export function observeAnthropicResponse<T extends StreamOptions>(
 	model: Model<Api>,
@@ -36,10 +45,14 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 		messageStart: null,
 	};
 	const fetchImpl = options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
+	const threadRequests: NonNullable<AnthropicResponseObservation["threadRequests"]> = [];
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
 		fetch: async (url, init) => {
+			// Only the wire body says whether Pi continued a thread; the payload hook sees the request before that.
+			threadRequests.push(threadRequestOf(init?.body));
+			if (threadRequests.some((kind) => kind !== "none")) observation.threadRequests = threadRequests;
 			const response = await fetchImpl(url, init);
 			observation.observedAt = new Date().toISOString();
 			observation.status = response.status;

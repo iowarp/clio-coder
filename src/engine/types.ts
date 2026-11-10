@@ -83,6 +83,11 @@ export interface AnthropicResponseObservation {
 	rateLimit: Record<string, string>;
 	/** Preserve message_start diagnostics without response content (#423). */
 	messageStart: Record<string, unknown> | null;
+	/**
+	 * What each request of this call asked of Pi's Anthropic message threads, in send order. Absent when none carried
+	 * a thread. A `continue` followed by anything else is Pi resending after the API rejected the continuation.
+	 */
+	threadRequests?: Array<"create" | "continue" | "none">;
 }
 
 /** Codex context generation; positions are durable ledger user-turn ids (#423). */
