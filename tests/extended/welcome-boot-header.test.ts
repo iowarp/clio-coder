@@ -576,7 +576,7 @@ function presentation(
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
 		bus: { on: () => noop, emit: noop },
-		providers: { list: () => [status()] },
+		providers: { list: () => [status()], getTarget: () => null },
 		dispatch: { snapshot: () => ({ running: [] }) },
 		telemetry: { snapshot: () => ({ session: {} }), subscribe: () => noop },
 		chat: {
