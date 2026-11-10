@@ -171,10 +171,12 @@ export async function probeToolCall(opts: ProbeToolCallOptions): Promise<ProbeTo
 	let argumentsValid = false;
 	let harmony: HarmonyServerParsing | undefined;
 	const started = performance.now();
+	// The Copilot SDK session always streams, but its runtime hands Clio a tool call whole, with no argument deltas.
+	const streamsByDesign = opts.model.api === "copilot-sdk";
 	const outcome = (error?: string): ProbeToolCallResult => {
 		const result: ProbeToolCallResult = {
 			ok: error === undefined,
-			streamed: counter.frames !== null ? counter.frames > 1 : deltas > 1,
+			streamed: counter.frames !== null ? counter.frames > 1 : streamsByDesign || deltas > 1,
 			frames: counter.frames,
 			deltas,
 			toolCall: calls.length > 0,
