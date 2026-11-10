@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { homedir, hostname, userInfo } from "node:os";
 import { basename, sep } from "node:path";
+import { knownSecretValues } from "../../core/sandbox/env-scrub.js";
 import { FailureCause } from "../../core/telemetry/enums.js";
-import { createRedactionTally, redactSecretsText } from "../evidence/index.js";
+import { createRedactionTally, redactKnownSecrets, redactSecretsText } from "../evidence/index.js";
 import { inspectInstallation } from "../lifecycle/index.js";
 import { isBuiltinRuntimeId } from "../telemetry/index.js";
 import { type ReportCommandRunner, runReportCommand } from "./command.js";
@@ -221,7 +222,9 @@ function scrubOnce(
 		return PLACEHOLDER[kind];
 	};
 	const tally = createRedactionTally();
-	let out = redactSecretsText(text, tally);
+	// A credential this process holds is masked by value too, as every tool card already does: a pasted provider error
+	// carries the key in whatever shape the provider prints it.
+	let out = redactKnownSecrets(redactSecretsText(text, tally), knownSecretValues(process.env), tally);
 	if (tally.count > 0) {
 		const entry = masks.get(SECRET_MASK_ID) ?? { id: SECRET_MASK_ID, kind: "secret" as const, count: 0 };
 		entry.count += tally.count;

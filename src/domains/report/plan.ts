@@ -42,7 +42,7 @@ export interface ReportPlan {
 	destination: string;
 	rendered: RenderedReport;
 	masks: ReportMask[];
-	/** "Masked by Clio: 1 host name, 2 paths. No secrets found." */
+	/** "Masked by Clio: 1 host name, 2 paths. No secrets recognized." */
 	maskSummary: string;
 	/** The network actions sending takes, in order, as sentences. */
 	actions: string[];
@@ -123,7 +123,7 @@ export function maskSummary(masks: ReadonlyArray<ReportMask>): string {
 	totals.delete("secret");
 	const parts = [...totals.entries()].map(([kind, count]) => maskNoun(kind, count));
 	const head = parts.length > 0 ? `Masked by Clio: ${parts.join(", ")}.` : "Nothing needed masking.";
-	return `${head} ${secrets > 0 ? `${maskNoun("secret", secrets)} redacted; those stay masked.` : "No secrets found."}`;
+	return `${head} ${secrets > 0 ? `${maskNoun("secret", secrets)} redacted; those stay masked.` : "No secrets recognized."}`;
 }
 
 export function planReport(draft: ReportDraft, options: PlanOptions): ReportPlan {

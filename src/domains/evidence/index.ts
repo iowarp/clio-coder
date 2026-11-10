@@ -9,7 +9,7 @@ export {
 	provenanceCompactSuffix,
 	provenanceTranscriptLines,
 } from "./provenance.js";
-export { createRedactionTally, redactSecretSegments, redactSecretsText } from "./redact.js";
+export { createRedactionTally, redactKnownSecrets, redactSecretSegments, redactSecretsText } from "./redact.js";
 export { inspectRunEvidence, inspectRunFlowProvenance, listRunEvidence, runEvidence } from "./run-evidence.js";
 export type { RunTrustFinding, RunTrustRead } from "./run-trust.js";
 export { readRunGateIndex, readRunTrust } from "./run-trust.js";

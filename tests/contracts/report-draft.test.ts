@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	isFixedPoint,
 	type LocalIdentity,
+	maskSummary,
 	newReportId,
 	parseReportBlock,
 	type ReportDraft,
@@ -63,6 +64,24 @@ test("the scrubber masks this machine's path, host, remote, e-mail and a token, 
 	const host = scrubbed.masks.find((mask) => mask.kind === "host")?.id ?? "";
 	const unmasked = scrubText(text, identity, [host, "secret"]);
 	strictEqual(unmasked.text, scrubbed.text.replace("<host>", "lab-node7"));
+});
+
+test("the scrubber masks a key this process holds by value, and provider key prefixes by shape (R2-safety-secrets-04)", () => {
+	const held = "Zq8vLm3Kp0Rt7Wx2Yb5Nc9Hd";
+	const saved = process.env.GROQ_API_KEY;
+	process.env.GROQ_API_KEY = held;
+	try {
+		const scrubbed = scrubText(`request failed with key ${held} from groq`, identity);
+		strictEqual(scrubbed.text, "request failed with key [redacted:known] from groq");
+	} finally {
+		if (saved === undefined) delete process.env.GROQ_API_KEY;
+		else process.env.GROQ_API_KEY = saved;
+	}
+	for (const prefix of ["gsk_", "hf_", "xai-", "nvapi-", "csk-", "pplx-", "r8_", "npm_"]) {
+		const key = `${prefix}AbCdEfGh1234IjKlMn5678OpQr`;
+		ok(!scrubText(`token ${key} rejected`, identity).text.includes(key), prefix);
+	}
+	strictEqual(maskSummary([]), "Nothing needed masking. No secrets recognized.");
 });
 
 test("names beside . _ - and escapes, spaced and non-ASCII path tails, flagged paths and IPv6 are masked (R2-safety-secrets-10)", () => {

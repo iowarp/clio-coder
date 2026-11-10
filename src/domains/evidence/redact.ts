@@ -48,6 +48,8 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	{ kind: "github-token", re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g },
 	{ kind: "sk-key", re: /\bsk-(?:[A-Za-z0-9_-]{2,20}-)?[A-Za-z0-9_-]{16,}\b/g },
 	{ kind: "slack-token", re: /\bxox[bpars]-[A-Za-z0-9-]{8,}\b/g },
+	// Groq, Hugging Face, xAI, NVIDIA, Cerebras, Perplexity, Replicate and npm keys: a fixed prefix, then the key.
+	{ kind: "provider-key", re: /\b(?:gsk_|hf_|xai-|nvapi-|csk-|pplx-|r8_|npm_)[A-Za-z0-9_-]{20,}\b/g },
 	{ kind: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}\b/g },
 	{ kind: "gitlab-token", re: /\bgl(?:pat|dt|rt|ptt|soat|ft)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]{2,})*/g },
 	// A webhook URL is its own credential: whoever holds the path can post as the integration.
