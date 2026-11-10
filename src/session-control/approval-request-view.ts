@@ -61,6 +61,13 @@ export interface ApprovalRequestView {
 	mutation?: MutationFacts;
 	queueDepth?: number;
 	/**
+	 * The newest message the operator typed on the active path, sanitized and
+	 * bounded; `via` names the machine origin of the current turn when it has
+	 * one. Never model-authored text: a job's prompt or follow-up and a yolo
+	 * continuation are not the operator's (T-01).
+	 */
+	task?: { text: string; via?: string };
+	/**
 	 * The build that answered the System One gate, set only on the card the gate
 	 * raised. The card and the transcript rows name it so an operator can tell
 	 * which build's judgment they overrode.

@@ -13,6 +13,10 @@ import { askAxis } from "../domains/safety/approval-axis.js";
 import { describeMainCallConsequences, mainCallExposure } from "../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
+import type { SessionContract } from "../domains/session/contract.js";
+import type { SessionEntry } from "../domains/session/entries.js";
+import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "../domains/session/history.js";
+import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { Edit } from "../tools/edit-diff.js";
 import type { PermissionRequiredMeta } from "../tools/registry.js";
@@ -164,12 +168,84 @@ function resolvedVerifyCommand(call: ClassifierCall): { command: string } | unde
 }
 
 /** The approval view of a main-agent ask the registry parked. */
+const APPROVAL_TASK_MAX_CHARS = 240;
+
+/** The machine origin of a turn, in the card's words: `job <id>` (no execution id) or `continuation N`. */
+function approvalTaskVia(origin: unknown): string | undefined {
+	if (typeof origin !== "string") return undefined;
+	const job = /^job (\S+)/u.exec(origin);
+	if (job) return sanitizeCallTargetText(`job ${job[1]}`);
+	const continuation = /^yolo continuation (\d+)$/u.exec(origin);
+	return continuation ? `continuation ${continuation[1]}` : undefined;
+}
+
+/**
+ * The operator's newest typed message on the active path, for the approval
+ * card's `task` row. Walks the path the safety judge reads, with the same
+ * operator-typed rule, so a job's follow-up is never quoted as "you".
+ */
+function approvalTaskFact(
+	entries: ReadonlyArray<SessionEntry>,
+	leafTurnId: string | undefined,
+	turnId: string | undefined,
+): ApprovalRequestView["task"] {
+	let path = filterEntriesToActivePath(entries, leafTurnId);
+	if (
+		turnId !== undefined &&
+		!path.some((entry) => entry.turnId === turnId) &&
+		entries.some((entry) => entry.turnId === turnId)
+	) {
+		path = filterEntriesToActivePath(entries, turnId);
+	}
+	let text: string | null = null;
+	for (const entry of path) {
+		if (entry.kind !== "message" || entry.role !== "user" || !isOperatorTypedUserPayload(entry.payload)) continue;
+		const typed = operatorTextOfUserPayload(entry.payload);
+		if (typed !== null && typed.trim().length > 0) text = typed;
+	}
+	if (text === null) return undefined;
+	const chars = Array.from(sanitizeCallTargetText(text));
+	const bounded =
+		chars.length > APPROVAL_TASK_MAX_CHARS ? `${chars.slice(0, APPROVAL_TASK_MAX_CHARS - 1).join("")}…` : chars.join("");
+	if (bounded.trim().length === 0) return undefined;
+	const own =
+		turnId === undefined
+			? undefined
+			: path.find((entry) => entry.turnId === turnId && entry.kind === "message" && entry.role === "user");
+	const via = approvalTaskVia(
+		own?.kind === "message" ? (own.payload as { origin?: unknown } | null)?.origin : undefined,
+	);
+	return { text: bounded, ...(via !== undefined ? { via } : {}) };
+}
+
+/** {@link approvalTaskFact} over the current session; undefined when there is none or it cannot be read. */
+export function sessionApprovalTask(
+	session: Pick<SessionContract, "current" | "leafId" | "readEntries"> | undefined,
+	turnId: string | undefined,
+): ApprovalRequestView["task"] {
+	const meta = session?.current();
+	if (session === undefined || !meta) return undefined;
+	let leaf: string | undefined;
+	try {
+		leaf = session.leafId(meta.id) ?? undefined;
+	} catch {
+		// An unreadable tree snapshot falls back to the newest ledger entry as the leaf, as the judge does.
+	}
+	try {
+		return approvalTaskFact(session.readEntries(), leaf, turnId);
+	} catch {
+		// The row is context for the operator; a ledger read failure must not keep the card from opening.
+		return undefined;
+	}
+}
+
 export function mainApprovalRequestView(
 	call: ClassifierCall,
 	decision: SafetyDecision,
 	meta: PermissionRequiredMeta | undefined,
 	autonomy: string,
 	queueDepth: number | undefined,
+	task?: ApprovalRequestView["task"],
 ): ApprovalRequestView {
 	const axisFromMeta = axisViewFromId(meta?.axis, autonomy);
 	const axisFromDecision = askAxis(decision);
@@ -203,5 +279,6 @@ export function mainApprovalRequestView(
 		...(target.length > 0 ? { target } : {}),
 		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
+		...(task !== undefined ? { task } : {}),
 	};
 }

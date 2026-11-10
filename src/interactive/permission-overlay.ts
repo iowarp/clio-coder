@@ -606,6 +606,10 @@ function wrapArtifactLine(value: string, max: number): string[] {
 	return lines;
 }
 
+function taskVia(task: NonNullable<ApprovalRequestView["task"]>): string {
+	return task.via === undefined ? "" : ` · via ${task.via}`;
+}
+
 /**
  * A label keeps its value's row at every width: a window edge between a label
  * and the value under it left a lone `rule` on the 40-column card.
@@ -677,6 +681,10 @@ function permissionFacts(
 				"no local preview: this call's arguments stay inside the worker, so you are approving the target above without inspecting the change.",
 			tone: "warning",
 		});
+	}
+	// What the operator asked for, beside the call that is meant to serve it. One clipped row of their own words.
+	if (view.task !== undefined) {
+		facts.push({ label: "task", value: `"${view.task.text}" · you${taskVia(view.task)}`, fit: "clip" });
 	}
 	// The rail title already names the model asking; the row earns its place
 	// only for a worker, whose id and run the operator cannot read anywhere else.
@@ -855,6 +863,7 @@ function permissionTermsRows(theme: ClioTheme, view: ApprovalRequestView, width:
 	const presentation = permissionDecisionPresentation(view);
 	const wrapTerm = (text: string): string[] => wrapTextWithAnsi(theme.fg("decisionExplanation", text), width);
 	return [
+		...(view.task !== undefined ? wrapTerm(`Task: "${view.task.text}" · you${taskVia(view.task)}`) : []),
 		...wrapTerm(presentation.authorizationCopy),
 		...wrapTerm(`Consequence: ${presentation.consequenceCopy}`),
 		...wrapTerm(presentation.reversibilityCopy),

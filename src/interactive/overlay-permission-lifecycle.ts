@@ -88,6 +88,8 @@ export interface OverlayPermissionLifecycleDeps {
 		| "workerRunEndsWithTurn"
 	>;
 	getAutonomy(): string;
+	/** The operator's request a main-agent card names on its `task` row, read from the session ledger. */
+	getApprovalTask?(turnId: string | undefined): ApprovalRequestView["task"];
 	getOverlayState(): OverlayState;
 	/**
 	 * Open the dialog for one parked call. `inspect` carries the complete
@@ -538,7 +540,14 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const unsubscribePermission =
 		deps.toolRegistry?.onPermissionRequired((call, decision, meta) => {
 			const autonomy = deps.getAutonomy();
-			const view = mainApprovalRequestView(call, decision, meta, autonomy, deps.toolRegistry?.parkedCount());
+			const view = mainApprovalRequestView(
+				call,
+				decision,
+				meta,
+				autonomy,
+				deps.toolRegistry?.parkedCount(),
+				deps.getApprovalTask?.(meta.turnId),
+			);
 			// The dialog states the tool, target, action class, asking axis, and
 			// decision keys. Another modal is interrupted so this prompt can take
 			// focus. The notice remains for a second queued approval or a frame that

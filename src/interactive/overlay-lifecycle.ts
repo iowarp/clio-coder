@@ -1,5 +1,6 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { unattendedWindowMs } from "../domains/safety/unattended.js";
+import { sessionApprovalTask } from "../session-control/approval-request-facts.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
@@ -331,6 +332,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "default",
+		getApprovalTask: (turnId) => sessionApprovalTask(deps.app.session, turnId),
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect, invocation, advisory, countdown, workerWindow) => {
 			if (overlayTransitions.state === "permission-confirm") return false;

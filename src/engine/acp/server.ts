@@ -111,8 +111,8 @@ import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import { mutationFacts } from "../../session-control/approval-request-facts.js";
-import type { MutationFacts } from "../../session-control/approval-request-view.js";
+import { mutationFacts, sessionApprovalTask } from "../../session-control/approval-request-facts.js";
+import type { ApprovalRequestView, MutationFacts } from "../../session-control/approval-request-view.js";
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
 import {
 	classifyTurnEnding,
@@ -3031,6 +3031,7 @@ function decisionMeta(
 	callTarget: string,
 	consequence: ReadonlyArray<string>,
 	mutation: MutationFacts | null = null,
+	task?: ApprovalRequestView["task"],
 ): Record<string, unknown> {
 	const axis =
 		facts.axis.kind === "safety-net"
@@ -3079,6 +3080,15 @@ function decisionMeta(
 			// so a client can bind what it renders from `rawInput` to the exact call
 			// it approves.
 			...(mutation !== null ? { mutation } : {}),
+			// The operator's own last message, read from the session ledger, never model prose.
+			...(task !== undefined
+				? {
+						task: {
+							text: decisionCopy(task.text),
+							...(task.via !== undefined ? { via: decisionCopy(task.via) } : {}),
+						},
+					}
+				: {}),
 		},
 	};
 }
@@ -3110,6 +3120,8 @@ function installPermissionBridge(input: {
 	/** Shows a warning in the active turn when a worker's ask was settled with no one answering it. */
 	workerAskNotice?: (sessionId: string, text: string) => void;
 	diagnostics?: (line: string) => void;
+	/** The session ledger a main-agent ask reads the operator's request from. */
+	session?: SessionContract;
 }): AcpPermissionBridge {
 	// One client-facing ask at a time: a main-agent ask and a forwarded worker ask
 	// share this queue because the client holds a single pending permission.
@@ -3308,6 +3320,7 @@ function installPermissionBridge(input: {
 										describeCallTarget(call.tool, call.args),
 										describeMainCallConsequences(call),
 										mutationFacts(call.tool, call.args),
+										sessionApprovalTask(input.session, meta.turnId),
 									),
 									// The plan admission rendered, whose hash a plan-scale run seals.
 									...(meta.dispatchPlan !== undefined
@@ -4231,6 +4244,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			activePromptState === null ? null : (activePromptState.toolCallSnapshots.get(wireId) ?? null),
 		permissionTimeoutMs,
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+		...(options.session !== undefined ? { session: options.session } : {}),
 		workerAskNotice: (sessionId, text) => {
 			const active = activePromptState;
 			// Outside a turn there is no message to attach it to; the run's own outcome still says it.
