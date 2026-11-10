@@ -537,6 +537,7 @@ import {
 	type SpawnOptions as WorkerSpawnOptions,
 	type WorkerSpec,
 } from "./worker-spawn.js";
+import { workerMergedNotice } from "./workspace-mutation.js";
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
 /**
@@ -6924,6 +6925,9 @@ export function createDispatchBundle(
 					}
 				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
+				// A merge needs no card at default autonomy, so the operator's transcript says it landed.
+				const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? envelope.id, worktreeReceipt);
+				if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -9429,6 +9433,9 @@ export function createDispatchBundle(
 					}
 				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
+				// A merge needs no card at default autonomy, so the operator's transcript says it landed.
+				const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? envelope.id, worktreeReceipt);
+				if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
 				// A hypothesis slate the worker wrote enters the log only once the host accepted the run into the project
 				// (#406): a merged task worktree's changed paths, or the observed writes of a run in the checkout that
 				// settled succeeded; nothing the worker reported is used. The bytes are read here, in the same synchronous

@@ -18,21 +18,18 @@ export function landedMergeText(applied: unknown, detail: unknown): string | und
 }
 
 /**
- * One operator notice per worker whose task worktree merged onto the checkout, naming the worker and its run:
- * `coder run-1 merged abc1234 onto main`. Preserved, conflicted, refused and empty merges give none.
+ * The transcript notice for a worker whose task worktree merged a commit onto the checkout, naming the worker and its
+ * run: `coder run-1 merged abc1234 onto main`. Preserved, conflicted, refused and empty merges give none.
  */
-export function dispatchMergeNotices(details: unknown): string[] {
-	const runs = isRecord(details) ? details.runs : undefined;
-	if (!Array.isArray(runs)) return [];
-	return runs.flatMap((value: unknown) => {
-		if (!isRecord(value) || !isRecord(value.placement)) return [];
-		const placement = value.placement;
-		if (placement.mode !== "worktree" || placement.apply !== "merge") return [];
-		const landed = landedMergeText(placement.applied, placement.detail);
-		if (landed === undefined) return [];
-		const who = [value.agentId, value.runId].filter((part) => typeof part === "string" && part.length > 0).join(" ");
-		return [who.length > 0 ? `${who} ${landed}` : landed];
-	});
+export function workerMergedNotice(
+	agentId: string,
+	runId: string,
+	worktree: { apply: string; applied: boolean; detail?: string } | undefined,
+): { code: "worker_merged"; level: "info"; agentId: string; runId: string; message: string } | null {
+	if (worktree?.apply !== "merge") return null;
+	const landed = landedMergeText(worktree.applied, worktree.detail);
+	if (landed === undefined) return null;
+	return { code: "worker_merged", level: "info", agentId, runId, message: `${agentId} ${runId} ${landed}` };
 }
 
 /** A sealed dispatch result can move the parent's files even when the worker failed. */

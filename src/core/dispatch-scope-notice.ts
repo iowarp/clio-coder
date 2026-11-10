@@ -15,6 +15,7 @@ const SCOPE_NOTICE_CODES: Record<DispatchScopeNoticePayload["code"], true> = {
 	write_root_dot_unconfined: true,
 	write_roots_checks_withheld: true,
 	mcp_sandbox_no_network: true,
+	worker_merged: true,
 };
 
 export const DISPATCH_SCOPE_NOTICE_CODES = Object.keys(SCOPE_NOTICE_CODES) as ReadonlyArray<
@@ -23,7 +24,7 @@ export const DISPATCH_SCOPE_NOTICE_CODES = Object.keys(SCOPE_NOTICE_CODES) as Re
 
 export interface DispatchScopeNoticeView {
 	code: DispatchScopeNoticePayload["code"];
-	level: "warning";
+	level: "warning" | "info";
 	/** Two sentences: what the entry did, then what it does not change. */
 	message: string;
 }
@@ -31,7 +32,7 @@ export interface DispatchScopeNoticeView {
 /** The notice's display fields, or null for anything that is not a well-formed scope notice. */
 export function readDispatchScopeNotice(value: unknown): DispatchScopeNoticeView | null {
 	if (value === null || typeof value !== "object") return null;
-	const event = value as { code?: unknown; message?: unknown };
+	const event = value as { code?: unknown; level?: unknown; message?: unknown };
 	if (
 		typeof event.message !== "string" ||
 		event.message.length === 0 ||
@@ -41,5 +42,10 @@ export function readDispatchScopeNotice(value: unknown): DispatchScopeNoticeView
 	}
 	const message = sanitizeCallTargetText(event.message).slice(0, 4096);
 	if (message.length === 0) return null;
-	return { code: event.code as DispatchScopeNoticeView["code"], level: "warning", message };
+	return {
+		code: event.code as DispatchScopeNoticeView["code"],
+		// Only a landed worker merge is news rather than a warning; every scope notice stays one.
+		level: event.code === "worker_merged" && event.level === "info" ? "info" : "warning",
+		message,
+	};
 }

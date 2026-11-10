@@ -336,7 +336,8 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;
 			// Both scope notices are two sentences: what was replaced, then what it does not affect.
-			deps.appendTranscriptNotice("warn", notice.message, "fleet");
+			// A landed worker merge is the one info notice: the merge needed no card, so this row is how the operator sees it.
+			deps.appendTranscriptNotice(notice.level === "info" ? "info" : "warn", notice.message, "fleet");
 			deps.requestRender();
 		}),
 		deps.bus.subscribe("safety.loop_blocked", (payload) => {

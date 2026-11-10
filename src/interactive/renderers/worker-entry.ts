@@ -348,6 +348,7 @@ const isStringArray = (value: unknown): value is string[] =>
 function mutationReportLines(
 	value: Record<string, unknown>,
 	placement: WorkerRunResultSummary["placement"] | undefined,
+	taskBranch?: string,
 ): string[] | null {
 	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
 	const lines: string[] = [];
@@ -368,7 +369,9 @@ function mutationReportLines(
 		lines.push(
 			placement?.mode === "worktree"
 				? `commit on ${placement.branch}: ${value.commitMessage.trim()}`
-				: `proposed commit message, not committed: ${value.commitMessage.trim()}`,
+				: taskBranch !== undefined
+					? `commit on ${taskBranch}: ${value.commitMessage.trim()}`
+					: `proposed commit message, not committed: ${value.commitMessage.trim()}`,
 		);
 	}
 	return lines;
@@ -393,8 +396,9 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
 	return (
-		mutationReportLines(structured, entry.result?.placement)?.map(safeWorkerAnswerText) ??
-		answerText(entry, entry.text).split("\n")
+		mutationReportLines(structured, entry.result?.placement, entry.result?.taskWorktree?.branch)?.map(
+			safeWorkerAnswerText,
+		) ?? answerText(entry, entry.text).split("\n")
 	);
 }
 

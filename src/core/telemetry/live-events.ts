@@ -158,6 +158,14 @@ export type DispatchScopeNoticePayload =
 				confidence: "certain" | "high" | "medium" | "low";
 			}>;
 			message: string;
+	  }
+	| {
+			/** A worker's task worktree merged a commit onto the checkout with no card; the operator still hears of it. */
+			code: "worker_merged";
+			level: "info";
+			agentId: string;
+			runId: string;
+			message: string;
 	  };
 
 /** Explicit context boundary: published prompt sources changed or could not be inspected. */
