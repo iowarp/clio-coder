@@ -285,6 +285,8 @@ export function extractCommandWriteTargets(command: string): string[] {
 export interface ShellCommandStep {
 	/** Lowercased basename of the command word, or "" for a redirect with no command. */
 	executable: string;
+	/** The command word is a relative path such as `./sbatch` or `bin/ssh`: a workspace file, not the CLI on PATH. */
+	relativePath?: true;
 	/** Literal words after the command word, redirections removed. */
 	args: string[];
 	/** Targets of `>`-style redirects that replace the file's contents. `>>` is not listed. */
@@ -327,6 +329,7 @@ export function shellCommandSteps(command: string, home?: string): ShellCommandS
 			executable: basenameToken(argv[commandIndex]),
 			args: argv.slice(commandIndex + 1),
 			truncatingRedirects,
+			...(isRelativeCommandPath(argv[commandIndex]) ? { relativePath: true as const } : {}),
 		});
 	}
 	return steps;
@@ -2155,6 +2158,18 @@ function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 
 function isEnvAssignment(token: string): boolean {
 	return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+}
+
+/** True for a command word that names a file by a relative path (`./x`, `bin/x`), not a bare name or absolute path. */
+export function isRelativeCommandPath(token: string | undefined): boolean {
+	if (token === undefined) return false;
+	const normalized = token.replace(/\\/g, "/");
+	return (
+		normalized.includes("/") &&
+		!normalized.startsWith("/") &&
+		!normalized.startsWith("~") &&
+		!/^[A-Za-z]:\//u.test(normalized)
+	);
 }
 
 function basenameToken(token: string | undefined): string {

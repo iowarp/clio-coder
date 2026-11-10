@@ -735,6 +735,12 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	const push = engine.evaluate(bash("git push origin main"), "yolo", refused);
 	strictEqual(push.kind, "allow");
 	strictEqual(push.shellSandbox, undefined);
+	// R1-safety-secrets-04: a workspace file named like a scheduler or credentialed CLI is not that CLI.
+	for (const command of ["./sbatch", "./ssh"]) {
+		strictEqual(engine.evaluate(bash(command), "yolo", sandboxed).shellSandbox?.workspace, cwd, command);
+		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
+	}
+	strictEqual(engine.evaluate(bash("sbatch job.sh"), "yolo", refused).shellSandbox, undefined);
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
 });
 

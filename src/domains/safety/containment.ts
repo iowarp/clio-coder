@@ -1,5 +1,5 @@
 import { normalizedGitCommands } from "./git-command-normalization.js";
-import { shellCommandSteps } from "./protected-artifacts.js";
+import { isRelativeCommandPath, shellCommandSteps } from "./protected-artifacts.js";
 
 /**
  * Containment at autonomy default: containment first, judgment second, asking
@@ -162,10 +162,14 @@ function curlSends(args: ReadonlyArray<string>): boolean {
 	return false;
 }
 
-function stepOutwardReason(words: ReadonlyArray<string>): string | null {
-	const [head, ...args] = unwrapped(words);
+function stepOutwardReason(words: ReadonlyArray<string>, relativeHead: boolean): string | null {
+	const command = unwrapped(words);
+	const [head, ...args] = command;
 	if (head === undefined) return null;
 	const name = head.split("/").pop() ?? head;
+	// R1-safety-secrets-04: `./sbatch` or `bin/ssh` runs a workspace file, which stays sandboxed under `required`.
+	const workspaceFile = command === words ? relativeHead : isRelativeCommandPath(head);
+	if (workspaceFile && (CREDENTIALED_CLIS.has(name) || SCHEDULER_CLIS.has(name))) return null;
 	if (CREDENTIALED_CLIS.has(name)) {
 		const [noun, verb] = args.filter((arg) => !arg.startsWith("-"));
 		const reads = FORGE_CLIS.has(name) && noun !== "api" && verb !== undefined && FORGE_READ_VERBS.has(verb);
@@ -207,7 +211,7 @@ export function outwardShellReason(command: string): string | null {
 		return "git push publishes commits";
 	}
 	for (const step of shellCommandSteps(command)) {
-		const reason = stepOutwardReason([step.executable, ...step.args]);
+		const reason = stepOutwardReason([step.executable, ...step.args], step.relativePath === true);
 		if (reason !== null) return reason;
 	}
 	return null;
