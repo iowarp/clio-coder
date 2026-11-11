@@ -48,3 +48,46 @@ test("x asks once before it supersedes a decision; another key keeps it", () => 
 	deepStrictEqual(superseded.length, 1);
 	handle.hide();
 });
+
+test("End, Home and PgDn move the decision selection; Tab opens detail like Enter (E-13)", () => {
+	const tui = {
+		terminal: { rows: 35, setTitle: () => {} },
+		requestRender: () => {},
+		showOverlay: () => ({ hide: () => {} }),
+	} as unknown as TUI;
+	const three: DecisionLedgerEntry = {
+		...ENTRY,
+		decisions: ["a_key", "b_key", "c_key"].map((key) => ({
+			key,
+			value: `value of ${key}`,
+			status: "active" as const,
+			decidedAt: "2026-11-10T00:01:00.000Z",
+		})),
+	};
+	const superseded: string[] = [];
+	const handle = openDecisionsOverlay(tui, () => [three], {
+		onSupersede: (selection) => superseded.push(JSON.stringify(selection)),
+		onCorrection: () => {},
+		onClose: () => {},
+	});
+	const frame = dockTop(tui)?.frame as unknown as DockFrame & Component;
+	const body = (): string => frame.renderDockBody(100, DOCK_BODY_ROWS_MAX).map(stripTerminalSequences).join("\n");
+	const collapsed = body();
+	frame.handleInput?.("\t");
+	match(body(), /./u);
+	deepStrictEqual(body() !== collapsed, true, "Tab opened the detail");
+	frame.handleInput?.("\x1b[F");
+	frame.handleInput?.("x");
+	frame.handleInput?.("x");
+	frame.handleInput?.("\x1b[H");
+	frame.handleInput?.("x");
+	frame.handleInput?.("x");
+	frame.handleInput?.("\x1b[6~");
+	frame.handleInput?.("x");
+	frame.handleInput?.("x");
+	deepStrictEqual(superseded.length, 3);
+	match(superseded[0] ?? "", /c_key/u);
+	match(superseded[1] ?? "", /a_key/u);
+	match(superseded[2] ?? "", /c_key/u);
+	handle.hide();
+});

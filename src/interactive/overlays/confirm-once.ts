@@ -1,3 +1,4 @@
+import { matchesKey } from "../../engine/tui.js";
 import type { HintEntry } from "../overlay-frame.js";
 
 const LABEL_MAX = 32;
@@ -21,4 +22,18 @@ export function confirmOnceRail(key: string, verb: string, label: string): HintE
 		{ key: `${key} again`, verb: `to ${verb} "${short}"`, short: verb, critical: true },
 		{ key: "any other key", verb: "keeps it", short: "keep" },
 	];
+}
+
+/** Rows one PgUp or PgDn moves in a list overlay that does not know its own height. */
+const LIST_PAGE_ROWS = 10;
+
+/** E-13 paging: PgUp, PgDn, Home and End move a list selection and stop at its ends; null for any other key. */
+export function listJump(data: string, index: number, count: number): number | null {
+	if (count <= 0) return null;
+	const last = count - 1;
+	if (matchesKey(data, "home")) return 0;
+	if (matchesKey(data, "end")) return last;
+	if (matchesKey(data, "pageUp")) return Math.max(0, index - LIST_PAGE_ROWS);
+	if (matchesKey(data, "pageDown")) return Math.min(last, index + LIST_PAGE_ROWS);
+	return null;
 }

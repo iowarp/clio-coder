@@ -16,6 +16,7 @@ import {
 	windowRows,
 } from "../overlay-frame.js";
 import { clioTheme, emptyState, positionRow, statusChip } from "../theme/index.js";
+import { listJump } from "./confirm-once.js";
 
 export const RESEARCH_OVERLAY_WIDTH = 104;
 
@@ -130,7 +131,9 @@ class ResearchOverlayBody implements Component {
 			return;
 		}
 		if (campaigns.length === 0) return;
-		if (matchesKey(data, "up") || data === "k") this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+		const jump = listJump(data, this.selectedIndex, campaigns.length);
+		if (jump !== null) this.selectedIndex = jump;
+		else if (matchesKey(data, "up") || data === "k") this.selectedIndex = Math.max(0, this.selectedIndex - 1);
 		else if (matchesKey(data, "down") || data === "j")
 			this.selectedIndex = Math.min(campaigns.length - 1, this.selectedIndex + 1);
 		else if (matchesKey(data, "enter") || data === "\n") {
