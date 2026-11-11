@@ -385,7 +385,7 @@ export async function adoptDetectedChatRoute(
 }
 
 export type HeadlessChatRoute =
-	| { kind: "none" }
+	| { kind: "none"; reservedForMemory?: string }
 	| { kind: "one"; route: DetectedChatRoute & { model: string }; settings: ClioSettings }
 	| { kind: "needs-model"; route: DetectedChatRoute }
 	| { kind: "several"; routes: DetectedChatRoute[] };
@@ -405,8 +405,12 @@ export async function headlessChatRoute(
 ): Promise<HeadlessChatRoute> {
 	const memoryTarget = settings.context.memory.target;
 	const routes: DetectedChatRoute[] = [];
+	let reservedForMemory: string | undefined;
 	for (const candidate of await detectChatRoutes(settings, readLoopbackJson, { headless: true })) {
-		if (candidate.target.id === memoryTarget) continue;
+		if (candidate.target.id === memoryTarget) {
+			reservedForMemory = memoryTarget;
+			continue;
+		}
 		const fromSettings = candidate.source.startsWith("settings (");
 		if (fromSettings && projectTargets) continue;
 		// An environment key or stored login for a runtime already offered stands for the same choice.
@@ -415,7 +419,10 @@ export async function headlessChatRoute(
 	}
 	const chosen = targetId === undefined ? routes : routes.filter((route) => route.target.id === targetId);
 	const route = chosen[0];
-	if (!route) return { kind: "none" };
+	if (!route)
+		return routes.length === 0 && reservedForMemory !== undefined
+			? { kind: "none", reservedForMemory }
+			: { kind: "none" };
 	if (chosen.length > 1) return { kind: "several", routes: chosen };
 	const chosenModel = model ?? route.model;
 	if (!chosenModel) return { kind: "needs-model", route };

@@ -160,7 +160,13 @@ async function borrowHeadlessRoute(
 		...(model !== undefined ? { model } : {}),
 		projectTargets,
 	});
-	if (found.kind === "none") return null;
+	if (found.kind === "none") {
+		if (found.reservedForMemory !== undefined && model === undefined)
+			writeRunDiagnostic(
+				`clio-coder run: the only usable saved target, ${found.reservedForMemory}, is reserved for memory (context.memory.target); add a chat target or pass --target <id>\n`,
+			);
+		return null;
+	}
 	if (found.kind === "several") {
 		const list = found.routes.map((route) => `${route.target.id} from ${route.source}`).join(", ");
 		writeRunDiagnostic(`clio-coder run: several routes are usable (${list}); choose one with --target <id>\n`);

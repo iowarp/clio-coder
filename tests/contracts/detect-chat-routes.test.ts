@@ -204,3 +204,21 @@ test("headless borrowing never takes a saved copilot target, whatever memory poi
 		if (memory !== "litellm") assert.equal(found.kind === "one" ? found.route.target.id : found.kind, "litellm");
 	}
 });
+
+test("headless borrowing names the memory target when it was the only usable one", async (t) => {
+	const home = await isolateClioEnv("clio-route-headless-memory-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const registry = getRuntimeRegistry();
+	registerBuiltinRuntimes(registry);
+	for (const runtime of registry.list()) if (runtime.credentialsEnvVar) delete process.env[runtime.credentialsEnvVar];
+	process.env.ROUTEFIX_LITELLM_KEY = "fake-key";
+	t.after(() => {
+		delete process.env.ROUTEFIX_LITELLM_KEY;
+	});
+	writeFileSync(
+		settingsPath(),
+		'version: 2\ntargets:\n  - { id: litellm, runtime: litellm, url: "http://127.0.0.1:9", defaultModel: m1, auth: { apiKeyEnvVar: ROUTEFIX_LITELLM_KEY } }\ncontext:\n  memory: { target: litellm, model: m1 }\n',
+	);
+	assert.deepEqual(await headlessChatRoute(readSettings()), { kind: "none", reservedForMemory: "litellm" });
+});
