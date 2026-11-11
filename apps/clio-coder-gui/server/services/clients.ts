@@ -189,6 +189,16 @@ export class ClientRegistry {
 		return !!record && (record.streams > 0 || this.now() - record.lastSeen < PRESENCE_MS);
 	}
 
+	/**
+	 * Clients other than `except` holding an event stream open: a window that can hear a launch. A window
+	 * of a server that restarted holds none, since its credential died with that server.
+	 */
+	liveWindows(except: ClientRecord) {
+		let count = 0;
+		for (const record of this.clients.values()) if (record !== except && record.streams > 0) count += 1;
+		return count;
+	}
+
 	get size() {
 		return this.clients.size;
 	}

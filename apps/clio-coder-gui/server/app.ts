@@ -134,12 +134,15 @@ export function createApp(options: {
 		const client = requestClient(context);
 		return events(context, hub, query.after, (end) => clients.stream(client, end));
 	});
-	// The launcher focuses the open window and stops, so a launch that named a page sends it here and
-	// every window hears it. The one that has the focus goes there.
-	register(app, hub, routes.launch, ({ body }) => {
-		if (!isPagePath(body.path)) throw new AppProblem("validation", "The launch path is not a page of this app.");
-		hub.publish({ type: "app.launch", payload: { path: body.path } });
-		return {};
+	// The launcher asks whether a window can hear it before it focuses one, since a window left by a
+	// restarted server only says it lost the connection. A launch that named a page sends it here and every
+	// window hears it; the one that has the focus goes there.
+	register(app, hub, routes.launch, ({ body }, context) => {
+		if (body.path !== undefined && !isPagePath(body.path))
+			throw new AppProblem("validation", "The launch path is not a page of this app.");
+		const shown = clients.liveWindows(requestClient(context)) > 0;
+		if (shown && body.path !== undefined) hub.publish({ type: "app.launch", payload: { path: body.path } });
+		return { shown };
 	});
 	register(app, hub, routes.tools, async (_input, context) => {
 		const result = await toolchain.list();

@@ -318,8 +318,11 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 	return { status: "installed" as const, files: files.map((file) => file.path) };
 }
 
-/** The managed profile hosts the installed PWA; the shortcut still starts and verifies its local server. */
-export async function openManagedWindowsApp(url: string, directory: string): Promise<boolean> {
+/**
+ * The managed profile hosts the installed PWA; the shortcut still starts and verifies its local server.
+ * `live` says the app has a window that can hear it, so the open window on this address is focused, not replaced.
+ */
+export async function openManagedWindowsApp(url: string, directory: string, live = false): Promise<boolean> {
 	if (!isWsl()) return false;
 	const manifest = await readManifest(directory);
 	if (!manifest?.appDirectory || !manifest.appId) return false;
@@ -328,6 +331,7 @@ export async function openManagedWindowsApp(url: string, directory: string): Pro
 	await runWindowsPowerShell("$ErrorActionPreference='Stop'; & $env:CLIO_WIN_APP_SCRIPT", {
 		CLIO_WIN_APP_SCRIPT: `${manifest.appDirectory}\\app.ps1`,
 		CLIO_WIN_URL: url,
+		CLIO_WIN_LIVE: live ? "1" : "0",
 	});
 	return true;
 }

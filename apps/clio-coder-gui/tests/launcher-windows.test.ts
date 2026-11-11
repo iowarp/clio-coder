@@ -125,19 +125,31 @@ test("managed Windows app uses its owned profile and shell identity and uninstal
 	await installWindowsLauncher(directory, launch, folders);
 	t.after(() => uninstallWindowsLauncher(directory).then(() => {}));
 	const manifest = JSON.parse(await readFile(join(directory, "windows.json"), "utf8"));
-	assert.equal(
-		await openManagedWindowsApp(
-			"http://127.0.0.1:43981/#ticket=clio_install_hardening_isolated_ticket_000001",
-			directory,
-		),
-		true,
-	);
-	// Two simultaneous relaunches must serialize, focus the existing window and preserve its identity.
-	await Promise.all(
-		[0, 1].map(() =>
-			openManagedWindowsApp("http://127.0.0.1:43981/#ticket=clio_install_hardening_isolated_ticket_000001", directory),
-		),
-	);
+	// Every launch carries its own single-use ticket, as the real launcher's links do.
+	let tickets = 0;
+	const link = () =>
+		`http://127.0.0.1:43981/#ticket=clio_install_hardening_isolated_ticket_${String(++tickets).padStart(6, "0")}`;
+	const handles = async () =>
+		JSON.parse(
+			await runWindowsPowerShell(
+				"$ErrorActionPreference='Stop'; Add-Type -Path $env:CLIO_WIN_IDENTITY_SOURCE; $h=@(); Get-CimInstance Win32_Process -Filter \"name='chrome.exe' OR name='msedge.exe'\" | Where-Object { [ClioIdentity]::UsesProfile($_.CommandLine,$env:CLIO_WIN_PROFILE) -and -not $_.CommandLine.Contains('--type=') } | ForEach-Object { foreach($w in [ClioIdentity]::Windows($_.ProcessId)) { $h += $w } }; ConvertTo-Json -Compress -InputObject $h",
+				{
+					CLIO_WIN_IDENTITY_SOURCE: `${manifest.appDirectory}\\identity.cs`,
+					CLIO_WIN_PROFILE: `${manifest.appDirectory}\\browser`,
+				},
+			),
+		) as number[];
+	assert.equal(await openManagedWindowsApp(link(), directory, false), true);
+	const first = await handles();
+	assert.equal(first.length, 1);
+	// Two simultaneous relaunches while the app reports the window live must serialize and focus that window.
+	await Promise.all([0, 1].map(() => openManagedWindowsApp(link(), directory, true)));
+	assert.deepEqual(await handles(), first, "a live window must be focused, not replaced");
+	// A window the app does not know (its server restarted) cannot reconnect, so it is replaced.
+	await openManagedWindowsApp(link(), directory, false);
+	const replaced = await handles();
+	assert.equal(replaced.length, 1);
+	assert.notDeepEqual(replaced, first, "a window the app does not know must be replaced");
 	const result = await runWindowsPowerShell(
 		"$ErrorActionPreference='Stop'; Add-Type -Path $env:CLIO_WIN_IDENTITY_SOURCE; $ids=@(); Get-CimInstance Win32_Process -Filter \"name='chrome.exe' OR name='msedge.exe'\" | Where-Object { [ClioIdentity]::UsesProfile($_.CommandLine,$env:CLIO_WIN_PROFILE) } | ForEach-Object { foreach($w in [ClioIdentity]::Windows($_.ProcessId)) { $ids += [ClioIdentity]::WindowId($w) } }; ConvertTo-Json -Compress -InputObject $ids",
 		{

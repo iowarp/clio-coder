@@ -21,6 +21,7 @@ import { listenPorts } from "./launcher/ports.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { autoOpenBrowser, focusAppWindow, openApp, openBrowser } from "./process-policy.js";
+import { relaunchWindow } from "./relaunch-model.js";
 import { ArenaService } from "./services/arena.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { ClientRegistry } from "./services/clients.js";
@@ -105,8 +106,8 @@ export async function main(args = process.argv.slice(2)) {
 	}
 	const values = serverOptions(args);
 	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
-	const openLink = (href: string) =>
-		openApp(href).catch(() => {
+	const openLink = (href: string, reuse = false) =>
+		openApp(href, process.env, undefined, reuse).catch(() => {
 			console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 			return "failed" as const;
 		});
@@ -146,17 +147,20 @@ export async function main(args = process.argv.slice(2)) {
 				console.error(
 					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
 				);
-			// A window already showing the app is brought forward, still on its own page; a launch that named a
-			// page asks the app to show it there. Without a window a tool can raise, a tab opens as before.
-			if (open && (await focusAppWindow())) {
-				hint("Brought the open Clio Coder window forward.");
-				if (values.path !== "/") {
-					if (!(await background.showBackgroundPage(directory, Number(url.port), values.path).catch(() => false)))
-						console.error(
-							"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
-						);
-				}
-			} else if (open) await openLink(url.href);
+			// A window the app says is live is brought forward, still on its own page; a launch that named a
+			// page asks the app to show it there. A window left by a restarted server is dead, so the fresh link
+			// opens, as it does without a window a tool can raise.
+			if (!open) return;
+			const outcome = await relaunchWindow(values.path, {
+				ask: (path) => background.showBackgroundPage(directory, Number(url.port), path),
+				focus: () => focusAppWindow(),
+				open: (reuse) => openLink(url.href, reuse),
+			});
+			if (outcome !== "opened") hint("Brought the open Clio Coder window forward.");
+			if (outcome === "page-not-shown")
+				console.error(
+					"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
+				);
 			return;
 		}
 		// The flag's promise is that no second server starts. With no background app there is nothing to reuse.

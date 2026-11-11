@@ -189,7 +189,10 @@ $existing=@(AppWindows)
 $link=Join-Path $PSScriptRoot 'last-link'
 $modeFile=Join-Path $PSScriptRoot 'last-window-mode'
 $sameMode=(Test-Path -LiteralPath $modeFile) -and [IO.File]::ReadAllText($modeFile) -eq $mode
-if($sameMode -and $existing.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $url.AbsoluteUri) {
+# Each link carries a fresh single-use ticket, so the window is matched by its address alone. Only the app
+# knows whether that window still holds a connection; one left by a restarted server cannot reconnect.
+$address=$url.GetLeftPart([UriPartial]::Authority)
+if($env:CLIO_WIN_LIVE -eq '1' -and $sameMode -and $existing.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $address) {
  [ClioIdentity]::Focus($existing[0]); return
 }
 if($existing.Count -gt 0) {
@@ -218,7 +221,7 @@ if($window -eq [IntPtr]::Zero) { throw 'The Clio Coder desktop window did not ap
 $relaunch='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -W Hidden -EP Bypass -File "' + (Join-Path $PSScriptRoot 'open.ps1') + '"'
 $id=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'app-id')).Trim()
 foreach($p in (Get-CimInstance Win32_Process -Filter ("name='" + $name + "'") | Where-Object { [ClioIdentity]::UsesProfile($_.CommandLine,$profile) -and -not $_.CommandLine.Contains('--type=') })) { foreach($w in [ClioIdentity]::Windows($p.ProcessId)) { [ClioIdentity]::SetWindow($w,$id,$relaunch,((Join-Path $PSScriptRoot 'clio-coder.ico') + ',0')) } }
-[IO.File]::WriteAllText($link,$url.AbsoluteUri)
+[IO.File]::WriteAllText($link,$address)
 [IO.File]::WriteAllText($modeFile,$mode)
 } finally { if($acquired) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
 

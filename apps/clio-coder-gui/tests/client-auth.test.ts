@@ -109,6 +109,29 @@ test("the event stream opens on a single-use ticket, never on a bearer in its UR
 	assert.equal((await h.app.request(`http://127.0.0.1:4317/api/meta?ticket=${another}`)).status, 401);
 });
 
+test("a launch hears whether an app window is live, so a relaunch after a restart opens a fresh one", async (t) => {
+	const h = await harness();
+	t.after(h.close);
+	const launcher = await h.client("Launcher");
+	const shown = async (body: object) => {
+		const answer = await launcher.post("/api/launch", body);
+		assert.equal(answer.status, 200);
+		return ((await answer.json()) as { shown: boolean }).shown;
+	};
+	// A restarted server knows no window: the old one cannot reconnect, so the launcher must not focus it.
+	assert.equal(await shown({}), false);
+	assert.equal(await shown({ path: "/sessions" }), false);
+	const a = await h.client("Window A");
+	const { ticket } = (await (await a.post("/api/events/ticket")).json()) as { ticket: string };
+	const stream = await h.app.request(`http://127.0.0.1:4317/api/events?ticket=${ticket}`);
+	assert.equal(stream.status, 200);
+	assert.equal(await shown({}), true);
+	assert.equal(await shown({ path: "/sessions" }), true);
+	await stream.body?.cancel();
+	for (let i = 0; i < 50 && (await shown({})); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(await shown({}), false);
+});
+
 test("credentials rotate with a grace, expire, and resume the same id only when no live credential holds it", () => {
 	let now = 1_000_000;
 	const clients = new ClientRegistry(() => now);

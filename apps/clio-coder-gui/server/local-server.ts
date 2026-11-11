@@ -5,6 +5,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { setTimeout } from "node:timers/promises";
 import { launcherProof, sameSecret, serverProof } from "./launch-proof.js";
 import { listenPorts } from "./launcher/ports.js";
+import type { WindowAnswer } from "./relaunch-model.js";
 
 /** What a ready background app reports about itself; `clio` is the version its process loaded. */
 export interface LocalServerMeta {
@@ -272,16 +273,18 @@ export function proxyRequest(
 	});
 }
 /**
- * Ask the app to show a page in the window a launch just brought forward. False when the app did not
- * take the request, which an app still running an older version never does.
+ * Ask the app whether a window is open to hear a launch and, with a path, to show that page in the
+ * window a launch just brought forward. "unknown" when the app did not take the request.
  */
-export async function showPage(port: number, token: string, path: string) {
+export async function showPage(port: number, token: string, path?: string): Promise<WindowAnswer> {
 	identity(port, token);
 	const credential = await clientCredential(port, port, token, "Launcher");
-	if (credential === null) return false;
-	const answer = await exchange(port, port, "POST", "/api/launch", credential, { path });
+	if (credential === null) return "unknown";
+	const answer = await exchange(port, port, "POST", "/api/launch", credential, path === undefined ? {} : { path });
 	if (answer?.status === 401) dropClientCredential(port, port, token);
-	return answer?.status === 200;
+	if (answer?.status !== 200) return "unknown";
+	// An older app took a page and said nothing more, which then meant it was shown.
+	return answer.value?.shown === false ? "no-window" : "shown";
 }
 /**
  * A single-use, short-lived ticket for the URL a launcher opens, so the launch token never sits in an

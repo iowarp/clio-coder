@@ -7,6 +7,7 @@ import { backgroundCapability } from "../../contracts/launch-capability.js";
 import { getVersionInfo, resolveClioDirs } from "../clio/http-shims.js";
 import { findLocalServer, type LocalServerMeta, launchTicket, showPage, waitForLocalServer } from "../local-server.js";
 import { controlService, openApp } from "../process-policy.js";
+import type { WindowAnswer } from "../relaunch-model.js";
 import {
 	type BackgroundConfig,
 	backgroundPaths,
@@ -342,10 +343,10 @@ export async function ticketUrl(directory: string, url: string, mint = launchTic
 	if (ticket) next.hash = `ticket=${ticket}`;
 	return next.href;
 }
-/** Ask the background app's open window to show `path`. */
-export async function showBackgroundPage(directory: string, port: number, path: string) {
+/** Ask the background app whether a window is live and, with `path`, to show that page in it. */
+export async function showBackgroundPage(directory: string, port: number, path?: string): Promise<WindowAnswer> {
 	const state = await owned(directory);
-	return state.status === "installed" && showPage(port, state.config.token, path);
+	return state.status === "installed" ? showPage(port, state.config.token, path) : "unknown";
 }
 const publicStart = ({ url, running }: Awaited<ReturnType<typeof startOwned>>) => ({ url, running });
 export async function startBackground(
@@ -664,7 +665,9 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 		return;
 	}
 	// Print a manual fallback, and fail so the Windows host can display the captured error.
-	await openApp(url, process.env, directory).catch((error: unknown) => {
+	// The launcher that owns its window focuses it only while the app says a window can hear it.
+	const live = await showBackgroundPage(directory, Number(new URL(url).port)).catch(() => "unknown");
+	await openApp(url, process.env, directory, live === "shown").catch((error: unknown) => {
 		console.log(`[clio-coder:gui] ${url}`);
 		console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 		throw new Error(`Desktop launch failed: ${error instanceof Error ? error.message : String(error)}`);

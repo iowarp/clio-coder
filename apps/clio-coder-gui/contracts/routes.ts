@@ -1117,9 +1117,12 @@ export const routes = {
 		...post,
 		status: 200,
 		params: Empty,
-		body: Type.Object({ path: Type.String({ maxLength: 512, pattern: "^/" }) }, { additionalProperties: false }),
-		response: Empty,
-		summary: "Ask the app window a launch just focused to show a page",
+		body: Type.Object(
+			{ path: Type.Optional(Type.String({ maxLength: 512, pattern: "^/" })) },
+			{ additionalProperties: false },
+		),
+		response: Type.Object({ shown: Type.Boolean() }, { additionalProperties: false }),
+		summary: "Say whether an app window is open to hear a launch, and ask the one it focused to show a page",
 		...runtimeRoutes.launch,
 	}),
 	sessionControl: defineRoute({

@@ -20011,7 +20011,7 @@
 		"/api/launch": {
 			"post": {
 				"operationId": "launch",
-				"summary": "Ask the app window a launch just focused to show a page",
+				"summary": "Say whether an app window is open to hear a launch, and ask the one it focused to show a page",
 				"security": [
 					{
 						"bearer": []
@@ -20044,7 +20044,6 @@
 						"application/json": {
 							"schema": {
 								"type": "object",
-								"required": ["path"],
 								"properties": {
 									"path": {
 										"type": "string",
@@ -20064,7 +20063,12 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"properties": {},
+									"required": ["shown"],
+									"properties": {
+										"shown": {
+											"type": "boolean"
+										}
+									},
 									"additionalProperties": false
 								}
 							}

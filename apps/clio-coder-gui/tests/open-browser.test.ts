@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { isAppWindowTitle, wmctrlAppWindow } from "../server/launcher/window-focus.js";
 import { serverOptions } from "../server/options.js";
 import { browserCommand, focusAppWindow, openBrowser } from "../server/process-policy.js";
+import { relaunchWindow, type WindowAnswer } from "../server/relaunch-model.js";
 import { lifecycleLog } from "../server/services/log.js";
 import { serverProcess } from "./harness/server.js";
 
@@ -62,6 +63,48 @@ test("a launch on a Linux desktop raises an open app window and otherwise report
 		await focusAppWindow({ PATH: join(dir, "missing"), DISPLAY: ":0", SWAYSOCK: "/nowhere" }, "linux"),
 		false,
 	);
+});
+
+test("a relaunch focuses only a window the app says is live, and otherwise opens the fresh link", async () => {
+	const run = async (path: string, live: WindowAnswer | Error, focused: boolean, page: WindowAnswer = "shown") => {
+		const calls: string[] = [];
+		const outcome = await relaunchWindow(path, {
+			ask: async (named) => {
+				calls.push(`ask ${named ?? "-"}`);
+				if (named === undefined && live instanceof Error) throw live;
+				return named === undefined ? (live as WindowAnswer) : page;
+			},
+			focus: async () => {
+				calls.push("focus");
+				return focused;
+			},
+			open: async (reuse) => {
+				calls.push(`open ${reuse}`);
+			},
+		});
+		return { outcome, calls };
+	};
+	// The server restarted: the window on screen is dead, so a fresh one opens and nothing is focused.
+	assert.deepEqual(await run("/", "no-window", true), { outcome: "opened", calls: ["ask -", "open false"] });
+	assert.deepEqual(await run("/sessions", "no-window", true), { outcome: "opened", calls: ["ask -", "open false"] });
+	assert.deepEqual(await run("/", "shown", true), { outcome: "focused", calls: ["ask -", "focus"] });
+	assert.deepEqual(await run("/sessions", "shown", true), {
+		outcome: "focused",
+		calls: ["ask -", "focus", "ask /sessions"],
+	});
+	// No tool raised it (WSL leaves that to its Windows launcher): reuse the live window only for a bare launch.
+	assert.deepEqual(await run("/", "shown", false), { outcome: "opened", calls: ["ask -", "focus", "open true"] });
+	assert.deepEqual(await run("/sessions", "shown", false), {
+		outcome: "opened",
+		calls: ["ask -", "focus", "open false"],
+	});
+	// An older app that cannot answer keeps today's behaviour: focus, then name the page.
+	assert.deepEqual(await run("/", new Error("refused"), true), { outcome: "focused", calls: ["ask -", "focus"] });
+	assert.deepEqual(await run("/sessions", "unknown", true, "unknown"), {
+		outcome: "page-not-shown",
+		calls: ["ask -", "focus", "ask /sessions"],
+	});
+	assert.deepEqual((await run("/", "unknown", false)).calls, ["ask -", "focus", "open false"]);
 });
 
 test("--open uses the actual bound URL with its own launch ticket; a removed --token, invalid flags and unsafe log paths fail", {
