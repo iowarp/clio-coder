@@ -78,6 +78,7 @@ export const coreTests = [
 	"worker-refusal-limit",
 	"job-admission",
 	"job-tool",
+	"monitor-collect",
 	"judge-screen-park-surfaces",
 	"acp-v1-basics",
 	"configure-routing",
