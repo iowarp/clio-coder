@@ -346,7 +346,10 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			return;
 		}
 		if (deps.getOverlayState() !== "closed" && deps.cancelFocusedOwner) {
-			deps.cancelFocusedOwner();
+			// Ctrl+C is Esc in every overlay: whatever Esc does there, one layer at a time. The permission card keeps
+			// its own layered handling, where the router's Esc would deny outright.
+			if (deps.getOverlayState() !== "permission-confirm" && deps.routeOverlayKey("\x1b")) deps.requestRender();
+			else deps.cancelFocusedOwner();
 			lastCtrlCAt = 0;
 			setShutdownArmed(false);
 			return;

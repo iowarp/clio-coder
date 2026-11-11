@@ -82,7 +82,15 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		overlays.push({ component, handle });
 		return handle;
 	};
-	const active = { streaming: true, queued: false, parked: false, inspectable: false, inspecting: false, terms: false };
+	const active = {
+		streaming: true,
+		queued: false,
+		parked: false,
+		inspectable: false,
+		inspecting: false,
+		terms: false,
+		detail: false,
+	};
 	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });
 	let state: OverlayState = "closed";
 	let handle: ReturnType<typeof tui.showOverlay> | null = null;
@@ -172,7 +180,14 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 			openDecisionsOverlayState: noop,
 		},
 		refreshFooter: noop,
-		dispatchBoard: { selectPrevious: noop, selectNext: noop, toggleDetail: noop },
+		dispatchBoard: {
+			selectPrevious: noop,
+			selectNext: noop,
+			toggleDetail: () => {
+				active.detail = !active.detail;
+			},
+			detailExpanded: () => active.detail,
+		},
 		watchSelectedDispatch: () => false,
 		steerSelectedDispatch: noop,
 		cancelSelectedDispatch: noop,
@@ -770,6 +785,15 @@ it("cancels a real Library child review before its parent, without writes or glo
 	f.terminal.input("\x03");
 	assert.equal(f.state(), "closed");
 	assert.equal(writes, 0);
+});
+it("Ctrl+C is Esc in Fleet Runs: it folds an open run detail before it closes the board", () => {
+	const f = fixture();
+	f.open("dispatch-board");
+	f.terminal.input("d");
+	f.terminal.input("\x03");
+	assert.equal(f.state(), "dispatch-board", "the first Ctrl+C folds the detail");
+	f.terminal.input("\x03");
+	assert.equal(f.state(), "closed");
 });
 it("closes a real extension panel and cycles Interop kinds with encoded c only in browse", () => {
 	const f = fixture();

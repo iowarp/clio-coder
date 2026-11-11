@@ -456,9 +456,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					),
 				);
 				deps.requestRender();
-			} else if (["usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
-				deps.overlay.closeOverlay();
-			else if (focused()?.handleInput) {
+			} else if (focused()?.handleInput) {
 				focused()?.handleInput?.(owner().ownsCtrlC === true ? "\x03" : "\x1b");
 				deps.requestRender();
 			} else deps.overlay.closeOverlay();
