@@ -92,6 +92,7 @@ describe("store tag grants", () => {
 			strictEqual(classify({ tool: ToolNames.Store, args: fresh }).actionClass, "write");
 			strictEqual((await main.run(fresh)).kind, "ok");
 			const replacing = await storeAdmissionFacts({ ...put, [STORE_REPLACES_ARG]: false }, root, openBackend);
+			strictEqual(replacing[STORE_REPLACES_ARG], (await local.statBlob("results", "summary.csv"))?.bytes);
 			deepStrictEqual(classify({ tool: ToolNames.Store, args: replacing }), {
 				actionClass: "destructive",
 				reasons: ["store-replace: results:summary.csv"],

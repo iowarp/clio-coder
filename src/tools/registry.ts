@@ -2302,7 +2302,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// The safety judge reviews the ask before anyone is asked. An allow runs
 		// the call, a block refuses it back to the model, and anything else parks
 		// exactly as before, with the judge's reason on the card when it had one.
-		const pendingJudgement = judgeParkedCall(call, outcome, options);
+		// The judge reads the admission facts, so a store put's replace marker is admission's, never the model's.
+		const pendingJudgement = judgeParkedCall(factCall, outcome, options);
 		const judged = pendingJudgement instanceof Promise ? await pendingJudgement : pendingJudgement;
 		const judgedSpec = tools.get(admissionCall.tool as ToolName);
 		const unattended = deps.principal !== "worker" && deps.unattendedAsks?.() === true;

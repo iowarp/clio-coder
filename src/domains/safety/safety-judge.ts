@@ -1,9 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { ClioSettings } from "../../core/config.js";
+import { STORE_REPLACES_ARG } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
-import { describeMainCallConsequences, projectScriptConsequences } from "./call-consequence.js";
+import {
+	describeMainCallConsequences,
+	projectScriptConsequences,
+	storeReplaceConsequences,
+} from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
 import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
@@ -381,8 +386,9 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					// A consequence sentence is a feature for the judge, never a precondition.
 				}
 				try {
-					// What a named project script executes, so approving its name is not approving an unread body.
-					consequences = [...consequences, ...projectScriptConsequences(call)];
+					// What a named project script executes, so approving its name is not approving an unread body,
+					// and what a store put replaces.
+					consequences = [...consequences, ...projectScriptConsequences(call), ...storeReplaceConsequences(call)];
 				} catch {
 					// As above: a feature, never a precondition.
 				}
@@ -781,9 +787,11 @@ function renderCallArguments(tool: string, args: Readonly<Record<string, unknown
 		}
 		return lines;
 	}
+	// Admission's replace marker is Clio's own fact, read as a consequence line, not an argument the model sent.
+	const { [STORE_REPLACES_ARG]: _replaces, ...shown } = source;
 	let json: string;
 	try {
-		json = JSON.stringify(redactToolArgs(source)) ?? "{}";
+		json = JSON.stringify(redactToolArgs(tool === ToolNames.Store ? shown : source)) ?? "{}";
 	} catch {
 		json = "(arguments could not be serialized)";
 	}

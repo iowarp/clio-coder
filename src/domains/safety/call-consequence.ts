@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
+import { storeReplacedBytes } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AutonomyExposure } from "./autonomy.js";
@@ -40,6 +41,19 @@ export function describeMainCallConsequences(call: ClassifierCall): string[] {
 	// A step the sandbox refuses as outward says why, so a card titled outward names what reaches out.
 	const outward = shellOutwardReason(call);
 	return outward === null ? [] : [outward];
+}
+
+/**
+ * What a store put replaces, in plain words, when its admission found the blob already there; the
+ * judge reads this line instead of the internal marker admission set on the arguments.
+ */
+export function storeReplaceConsequences(call: ClassifierCall): string[] {
+	if (call.tool !== ToolNames.Store || call.args?.op !== "put") return [];
+	const bytes = storeReplacedBytes(call.args);
+	if (bytes === null) return [];
+	const { tag, blob, path } = call.args;
+	const name = typeof blob === "string" && blob.length > 0 ? blob : typeof path === "string" ? basename(path) : "";
+	return [`this put replaces the existing blob ${String(tag)}:${name} of ${bytes} bytes`];
 }
 
 const PACKAGE_RUNNERS = new Set(["npm", "pnpm", "yarn", "bun"]);

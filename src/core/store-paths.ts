@@ -23,11 +23,17 @@ export const STORE_RECORDS_SUFFIX = "/.records";
 /** Physical prefix a clio-core backend will use: `agentspace/<projectKey>/<tag>`. */
 export const STORE_NATIVE_PREFIX = "agentspace";
 /**
- * Set on a `put`'s admission arguments, never by the model, when the blob it names already
- * exists on a backend whose layout admission cannot stat (clio-core): admission then judges
- * the put as the replace it is.
+ * Set on a `put`'s admission arguments, never by the model, to the size in bytes of the blob it
+ * names when that blob already exists: admission judges the put as the replace it is, also on a
+ * backend whose layout it cannot stat (clio-core), and the safety judge is told what it replaces.
  */
 export const STORE_REPLACES_ARG = "__storeReplaces";
+
+/** The size of the blob a put's admission found it replacing, else null. */
+export function storeReplacedBytes(args: Readonly<Record<string, unknown>> | undefined): number | null {
+	const bytes = args?.[STORE_REPLACES_ARG];
+	return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
 
 const TAG_CHARS = /^[A-Za-z0-9._/-]+$/u;
 // Printable ASCII without `#` (reserved for record names) and `\`.

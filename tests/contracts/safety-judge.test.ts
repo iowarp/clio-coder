@@ -7,6 +7,7 @@ import { type ClioSettings, validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { STORE_REPLACES_ARG } from "../../src/core/store-paths.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
@@ -68,6 +69,36 @@ function judgedRegistry(reply: (user: string) => string | Promise<string>, opera
 	registry.onPermissionRequired((call, _decision, meta) => parks.push({ tool: call.tool, meta }));
 	return { registry, ran, parks, prompts, records };
 }
+
+test("the judge reads a store replace as a plain line, never as admission's marker", async () => {
+	const prompts: string[] = [];
+	const judge = createSafetyJudge({
+		config: () => CONFIG,
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => ["write v3 of the fleet summary"],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	await judge.review({
+		tool: ToolNames.Store,
+		args: { op: "put", tag: "fleet", path: "out/v3.csv", [STORE_REPLACES_ARG]: 1234 },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "destructive", reasons: ["store-replace: fleet:v3.csv"] },
+			rejection: { short: "asks", detail: "store-replace: fleet:v3.csv", hints: [] },
+		},
+		approvalAuthority: "main",
+		worker: { runId: "run-1", agentId: "coder" },
+	});
+	strictEqual(prompts.length, 1);
+	doesNotMatch(prompts[0] ?? "", /__storeReplaces|1234\}/u);
+	match(prompts[0] ?? "", /consequence: this put replaces the existing blob fleet:v3\.csv of 1234 bytes/u);
+	match(prompts[0] ?? "", /\{"op":"put","tag":"fleet","path":"out\/v3\.csv"\}/u);
+});
 
 test("an allow runs the call without parking it", async () => {
 	const { registry, ran, parks } = judgedRegistry(() =>

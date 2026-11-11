@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
-import { STORE_REPLACES_ARG, storeReadRoots, storeWriteTarget } from "../../core/store-paths.js";
+import { storeReadRoots, storeReplacedBytes, storeWriteTarget } from "../../core/store-paths.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { normalizeToolPath } from "../../tools/path-utils.js";
@@ -779,7 +779,7 @@ function classifyStore(args: Record<string, unknown> | undefined): Classificatio
 	// The local backend keeps no blob versions and no snapshot covers the store, so a put over an
 	// existing blob destroys its bytes like remove does and is admitted like remove. Another backend's
 	// blob is stat before admission and marked on the arguments.
-	if (op === "put" && target !== null && (args?.[STORE_REPLACES_ARG] === true || isRegularFile(target))) {
+	if (op === "put" && target !== null && (storeReplacedBytes(args) !== null || isRegularFile(target))) {
 		const blob = typeof args?.blob === "string" && args.blob.length > 0 ? args.blob : path.basename(String(sourceArg));
 		return { actionClass: "destructive", reasons: [`store-replace: ${String(args?.tag)}:${blob}`] };
 	}
