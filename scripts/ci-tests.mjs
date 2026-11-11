@@ -64,6 +64,7 @@ export const coreTests = [
 	"release-boundary",
 	"release-plan",
 	"dispatch-session-ownership",
+	"detached-batch-wake",
 	"dispatch-prefix-stagger",
 	"monitor-steer-tools",
 	"gateway-authority",

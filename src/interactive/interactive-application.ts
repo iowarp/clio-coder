@@ -72,6 +72,7 @@ import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
 import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
+import { createDetachedBatchWake, detachedBatchDecisions } from "./detached-batch-wake.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS, RESTORED_DRAFT_NOTICE } from "./editor-submit.js";
 import { renderExitSummary, renderExitWithoutConversation } from "./exit-summary.js";
@@ -1192,6 +1193,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		stopTerminalProgress: () => agentProgress.stop(),
 		onTurnEnded: () => {
 			desktopNotifications.turnEnded();
+			detachedBatchWake.poke();
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
 			devSession?.poke();
 			staleBuildNotice();
@@ -1853,6 +1855,15 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			: null;
 	// Another Clio that opened this one in a pane reaches it here, as a turn on
 	// the queue rather than as keys in the terminal.
+	const showMachineTurn = (text: string, origin: string): void => {
+		chatRenderer.mutate(() => chatPanel.appendUser(text), "user-submit");
+		appendOperatorAside(origin, {
+			appendReplayBlock: (renderBlock) =>
+				chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "slash-output"),
+			requestRender: () => tui.requestRender(),
+		});
+		tui.requestRender();
+	};
 	const peerInbox =
 		mux && mux.mode === "guest" && deps.createPeerInbox
 			? deps.createPeerInbox({
@@ -1860,17 +1871,25 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					mux,
 					chat: deps.chat,
 					stateDir: clioStateDir(),
-					showTurn: (text, origin) => {
-						chatRenderer.mutate(() => chatPanel.appendUser(text), "user-submit");
-						appendOperatorAside(origin, {
-							appendReplayBlock: (renderBlock) =>
-								chatRenderer.mutate(() => chatPanel.appendReplayBlock(renderBlock), "slash-output"),
-							requestRender: () => tui.requestRender(),
-						});
-						tui.requestRender();
-					},
+					showTurn: showMachineTurn,
 				})
 			: null;
+	// A detached batch that settles, or stops on a decision for the main agent,
+	// after its turn ended starts a turn of its own once the operator is not
+	// mid-draft, so its results never wait for someone to type.
+	const detachedBatchWake = createDetachedBatchWake({
+		openBatches: () => openDetachedBatchViews(deps.dispatch),
+		pendingDecisions: () => detachedBatchDecisions(deps.dispatch),
+		chat: deps.chat,
+		operatorIdle: () =>
+			overlayLifecycle.getState() === "closed" &&
+			editor.getText().length === 0 &&
+			!leaderArmed &&
+			!shutdownArmed &&
+			!operatorExtensions?.busy &&
+			!editorSubmit.hasActiveEditorBash(),
+		showTurn: showMachineTurn,
+	});
 	// The workers dock: the workers dashboard beside Clio, opened and hidden by
 	// the workers key, taken over for one run by `w` in the Fleet Runs board,
 	// `/panes show` and the panes tool through the shared operations object.
@@ -1995,7 +2014,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		renderContextIsland: interactiveTickers.renderContextIsland,
 		requestRender: () => tui.requestRender(),
 		notify,
-		onDispatchSettled: () => desktopNotifications.dispatchSettled(),
+		onDispatchSettled: () => {
+			desktopNotifications.dispatchSettled();
+			detachedBatchWake.poke();
+		},
 		// The reducer mutates one state object per assignment, so the panel is
 		// handed that object rather than a copy: a streamed delta reaches the
 		// screen by invalidating a cached render, not by rebuilding the entry.
@@ -2305,6 +2327,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				watchPane?.dispose();
 				muxBridge?.dispose();
 				peerInbox?.dispose();
+				detachedBatchWake.dispose();
 				interactiveSubscriptions.dispose();
 				exitSummary.dispose();
 				steerReceipts.dispose();

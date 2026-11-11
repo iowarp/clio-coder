@@ -1186,6 +1186,22 @@ Collecting marks the batch so the turn-end nudge stops firing. `wait` observes
 without collecting; `collect` is the authoritative terminal batch operation.
 Collect every detached batch before final synthesis.
 
+The main agent does not have to poll for a batch. In the interactive terminal, a
+detached batch that settles after the turn that dispatched it has ended wakes the
+agent with a turn of its own. The same happens when a worker in a running batch stops
+for a permission decision the main agent must make. The wake turn appears in the
+transcript as a prompt marked `detached batch update`. It names the settled batches or
+the waiting requests and how to answer them. The turn controller collects the settled
+batches into it before the model call, as it does at the start of any turn. The turn starts
+at once when the session is idle. It waits while a turn is running, a message is queued,
+a dialog is open or the composer holds a draft, and starts within about two seconds of
+those clearing ([detached-batch-wake.ts](../../src/interactive/detached-batch-wake.ts)).
+It is an ordinary turn under the session's permissions, budgets, cost caps and yolo pause.
+Each batch and each request wakes the agent at most once, and only a batch the session
+saw while it was still running can wake it. A batch that settles while its turn is still
+running is handled by the turn-end nudge instead. ACP sessions and headless `run` do
+not wake: the client or the next prompt collects there.
+
 ### Review gate
 
 The builder runs the task. A reviewer then inspects the workspace against the
