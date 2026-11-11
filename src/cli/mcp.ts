@@ -175,6 +175,8 @@ export function mcpCommandOutput(
 					const entry = boundEntry(server);
 					return {
 						...server,
+						// An env value is often a token: list names the keys and never prints a value.
+						env: Object.fromEntries(Object.keys(server.env).map((key) => [key, "[redacted]"])),
 						...(entry !== null ? { entry } : {}),
 						...networkGrant(server),
 						tools:
