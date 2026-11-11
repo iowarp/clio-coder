@@ -8,7 +8,7 @@ import {
 	processBirthToken,
 	processIsZombie,
 } from "../../core/process-identity.js";
-import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import { tryWithStateFileLockSync, withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { writeRootsOverlap } from "./parallel-writers.js";
@@ -21,7 +21,20 @@ export interface CheckoutWriterLeaseRecord {
 	pid: number;
 	processBirthToken: string;
 	acquiredAt: string;
+	/**
+	 * When the holder last proved it still runs, and how long that proof lasts. Absent in records written before
+	 * holders heartbeat; such a record is judged by its pid alone, and another host's is honored indefinitely.
+	 */
+	heartbeatAt?: string;
+	heartbeatExpiresMs?: number;
 }
+
+/**
+ * How often a holder refreshes its record, and how long a refresh stays good. The expiry spans several missed beats
+ * and absorbs clock skew between hosts sharing the state directory well short of it.
+ */
+export const CHECKOUT_WRITER_LEASE_HEARTBEAT_MS = 15_000;
+export const CHECKOUT_WRITER_LEASE_EXPIRY_MS = 120_000;
 
 /**
  * One writer holding the lease inside this process. The pid record excludes
@@ -58,7 +71,10 @@ export interface CheckoutWriterLeaseProbe {
 	host?: string;
 }
 
-const held = new Map<string, { count: number; path: string; holders: Set<CheckoutWriterHolder> }>();
+const held = new Map<
+	string,
+	{ count: number; path: string; holders: Set<CheckoutWriterHolder>; stopHeartbeat: () => void }
+>();
 let exitHooksInstalled = false;
 
 function canonicalCheckout(checkout: string): string {
@@ -82,7 +98,11 @@ function validRecord(value: unknown): value is CheckoutWriterLeaseRecord {
 		(record.pid ?? 0) > 0 &&
 		typeof record.processBirthToken === "string" &&
 		typeof record.acquiredAt === "string" &&
-		Number.isFinite(Date.parse(record.acquiredAt))
+		Number.isFinite(Date.parse(record.acquiredAt)) &&
+		(record.heartbeatAt === undefined ||
+			(typeof record.heartbeatAt === "string" && Number.isFinite(Date.parse(record.heartbeatAt)))) &&
+		(record.heartbeatExpiresMs === undefined ||
+			(Number.isSafeInteger(record.heartbeatExpiresMs) && (record.heartbeatExpiresMs ?? 0) > 0))
 	);
 }
 
@@ -99,13 +119,24 @@ function readRecord(path: string): CheckoutWriterLeaseRecord | null {
 	}
 }
 
-function ownerAlive(record: CheckoutWriterLeaseRecord, probe: CheckoutWriterLeaseProbe): boolean {
-	// Another host's pid cannot be probed from here, so its holder stays live, as state-file-lock rules (#439).
-	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return true;
+/** True when the record carries a heartbeat that has lapsed; a record without one never reads as expired. */
+function heartbeatExpired(record: CheckoutWriterLeaseRecord, nowMs: number): boolean {
+	if (record.heartbeatAt === undefined || record.heartbeatExpiresMs === undefined) return false;
+	// A beat stamped ahead of this clock is skew, not age, so it reads as fresh.
+	return nowMs - Date.parse(record.heartbeatAt) > record.heartbeatExpiresMs;
+}
+
+function ownerAlive(record: CheckoutWriterLeaseRecord, probe: CheckoutWriterLeaseProbe, nowMs: number): boolean {
+	// Another host's pid cannot be probed from here, so no local pid check judges it (#439): its holder stays live
+	// until its heartbeat lapses, and a record that carries none stays live.
+	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, nowMs);
 	if (probe.zombie?.(record.pid) === true) return false;
 	const current = probe.birthToken(record.pid);
+	// A different birth token is a different process on a reused pid.
 	if (current === null || current !== record.processBirthToken) return false;
-	if (probe.tokenProvesDeath === false) return probe.alive?.(record.pid) ?? false;
+	// Where the token cannot tell a reused pid from the holder, a live pid proves nothing on its own: the holder's
+	// lapsed heartbeat shows it is gone.
+	if (probe.tokenProvesDeath === false) return (probe.alive?.(record.pid) ?? false) && !heartbeatExpired(record, nowMs);
 	return true;
 }
 
@@ -116,8 +147,30 @@ const defaultProbe: CheckoutWriterLeaseProbe = {
 	zombie: processIsZombie,
 };
 
+/**
+ * Refresh the record while this process holds it. A beat never waits on the record's lock: a contended beat is
+ * skipped and the next one lands well inside the expiry.
+ */
+function startHeartbeat(path: string, checkout: string, pid: number, token: string): () => void {
+	const timer = setInterval(() => {
+		try {
+			tryWithStateFileLockSync(path, () => {
+				const record = readRecord(path);
+				if (record?.checkout !== checkout || record.pid !== pid || record.processBirthToken !== token) return;
+				if (record.host !== undefined && record.host !== hostname()) return;
+				atomicWrite(path, JSON.stringify({ ...record, heartbeatAt: new Date().toISOString() }, null, 2));
+			});
+		} catch {
+			// A failed beat is retried on the next tick; only a long run of them lets the lease lapse.
+		}
+	}, CHECKOUT_WRITER_LEASE_HEARTBEAT_MS);
+	timer.unref();
+	return () => clearInterval(timer);
+}
+
 function releaseAllOnExit(): void {
 	for (const [checkout, entry] of held) {
+		entry.stopHeartbeat();
 		try {
 			withStateFileLockSync(entry.path, () => {
 				const record = readRecord(entry.path);
@@ -205,9 +258,10 @@ export function acquireCheckoutWriterLease(input: {
 	const ownerPid = input.pid ?? process.pid;
 	const token = input.processBirthToken ?? processBirthToken(ownerPid);
 	if (token === null) throw new Error("dispatch: cannot establish checkout writer process birth token");
+	const nowMs = input.nowMs ?? Date.now();
 	withStateFileLockSync(path, () => {
 		const existing = readRecord(path);
-		if (existing !== null && ownerAlive(existing, input.probe ?? defaultProbe)) {
+		if (existing !== null && ownerAlive(existing, input.probe ?? defaultProbe, nowMs)) {
 			const where = existing.host !== undefined && existing.host !== hostname() ? ` on host ${existing.host}` : "";
 			throw new Error(`checkout_writer_lease_held: checkout writer lease is held by pid ${existing.pid}${where}`);
 		}
@@ -217,12 +271,17 @@ export function acquireCheckoutWriterLease(input: {
 			host: hostname(),
 			pid: ownerPid,
 			processBirthToken: token,
-			acquiredAt: new Date(input.nowMs ?? Date.now()).toISOString(),
+			acquiredAt: new Date(nowMs).toISOString(),
+			heartbeatAt: new Date(nowMs).toISOString(),
+			heartbeatExpiresMs: CHECKOUT_WRITER_LEASE_EXPIRY_MS,
 		};
 		atomicWrite(path, JSON.stringify(record, null, 2));
 	});
+	const stopHeartbeat = startHeartbeat(path, checkout, ownerPid, token);
 	const entry =
-		ownerPid === process.pid ? { count: 1, path, holders: new Set<CheckoutWriterHolder>([holder]) } : undefined;
+		ownerPid === process.pid
+			? { count: 1, path, holders: new Set<CheckoutWriterHolder>([holder]), stopHeartbeat }
+			: undefined;
 	if (entry !== undefined) {
 		held.set(checkout, entry);
 		installExitHooks();
@@ -237,7 +296,10 @@ export function acquireCheckoutWriterLease(input: {
 			released = true;
 			entry?.holders.delete(holder);
 			if (ownerPid === process.pid) releaseCheckoutWriterLease(checkout);
-			else releaseLeaseRecord(path, checkout, ownerPid, token);
+			else {
+				stopHeartbeat();
+				releaseLeaseRecord(path, checkout, ownerPid, token);
+			}
 		},
 	};
 }
@@ -255,6 +317,7 @@ function releaseCheckoutWriterLease(checkout: string): void {
 	entry.count -= 1;
 	if (entry.count > 0) return;
 	held.delete(checkout);
+	entry.stopHeartbeat();
 	const token = processBirthToken(process.pid);
 	if (token !== null) releaseLeaseRecord(entry.path, checkout, process.pid, token);
 }

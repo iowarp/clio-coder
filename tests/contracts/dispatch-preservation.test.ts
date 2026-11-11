@@ -209,6 +209,106 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+test("another host's writer lease is honored until its heartbeat lapses, never by a local pid check", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const nowMs = Date.parse("2026-01-01T12:00:00.000Z");
+	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const path = first.path;
+	first.release();
+	// The pid is dead here; on another host that proves nothing.
+	const foreign = (beatAgoMs: number | undefined) =>
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				checkout: root,
+				host: "other-node.invalid",
+				pid: 999_999_999,
+				processBirthToken: "1",
+				acquiredAt: new Date(nowMs - 3_600_000).toISOString(),
+				...(beatAgoMs === undefined
+					? {}
+					: { heartbeatAt: new Date(nowMs - beatAgoMs).toISOString(), heartbeatExpiresMs: 120_000 }),
+			}),
+		);
+	try {
+		foreign(60_000);
+		throws(
+			() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }),
+			/held by pid 999999999 on host other-node/u,
+		);
+		// A beat stamped ahead of this clock is skew between hosts, not a lapse.
+		foreign(-30_000);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }), /on host other-node/u);
+		// A record from a writer that never beats keeps the old rule: held.
+		foreign(undefined);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }), /on host other-node/u);
+		foreign(121_000);
+		const taken = acquireCheckoutWriterLease({ checkout: root, holder, nowMs });
+		const record = JSON.parse(readFileSync(path, "utf8"));
+		strictEqual(record.host, hostname());
+		strictEqual(record.pid, process.pid);
+		taken.release();
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a local writer lease whose pid now names a different process is stale", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const nowMs = Date.parse("2026-01-01T12:00:00.000Z");
+	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const path = first.path;
+	first.release();
+	// process.ppid is alive; the recorded start time is not its own.
+	const local = (token: string, beatAgoMs: number) =>
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				checkout: root,
+				host: hostname(),
+				pid: process.ppid,
+				processBirthToken: token,
+				acquiredAt: new Date(nowMs - 3_600_000).toISOString(),
+				heartbeatAt: new Date(nowMs - beatAgoMs).toISOString(),
+				heartbeatExpiresMs: 120_000,
+			}),
+		);
+	// Where no start time is readable the token is the pid itself, so it cannot tell a reused pid apart.
+	const pidOnly = { birthToken: (pid: number) => `pid-${pid}`, tokenProvesDeath: false, alive: () => true };
+	try {
+		local(`${processBirthToken(process.ppid)}0`, 0);
+		acquireCheckoutWriterLease({ checkout: root, holder, nowMs }).release();
+		local(`pid-${process.ppid}`, 0);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs, probe: pidOnly }), /held by pid/u);
+		local(`pid-${process.ppid}`, 121_000);
+		acquireCheckoutWriterLease({ checkout: root, holder, nowMs, probe: pidOnly }).release();
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a held writer lease beats while it is held and stops when released", (t) => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const startMs = Date.parse("2026-01-01T12:00:00.000Z");
+	t.mock.timers.enable({ apis: ["setInterval", "Date"], now: startMs });
+	try {
+		const lease = acquireCheckoutWriterLease({ checkout: root, holder });
+		const beat = () => JSON.parse(readFileSync(lease.path, "utf8"));
+		strictEqual(beat().heartbeatAt, new Date(startMs).toISOString());
+		strictEqual(beat().heartbeatExpiresMs, 120_000);
+		t.mock.timers.tick(15_000);
+		strictEqual(beat().heartbeatAt, new Date(startMs + 15_000).toISOString());
+		strictEqual(beat().acquiredAt, new Date(startMs).toISOString());
+		lease.release();
+		t.mock.timers.tick(15_000);
+		ok(!existsSync(lease.path));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 test("a holderless read-only lease neither refuses nor is refused by another live process (#420)", () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const other = { pid: process.ppid, processBirthToken: processBirthToken(process.ppid) ?? "unknown" };

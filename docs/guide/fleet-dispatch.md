@@ -679,9 +679,15 @@ token.
 A `workspace-edit` recipe in a Git checkout acquires a process-owned lease under the Clio Coder state
 directory before it runs. Its key is the canonical checkout path (the source checkout
 for a `worktree: true` writer), and its record contains the
-owner pid, process birth token, and acquisition time. A live sibling process
+owner host, pid, process birth token, acquisition time, and a heartbeat the holder
+refreshes every 15 seconds. A live sibling process
 causes admission to fail with `checkout_writer_lease_held` and the holder pid.
-A dead owner or reused pid is reclaimed. The lease remains held until the last
+A dead owner is reclaimed, and so is a pid that now names a different process
+(its start time differs from the recorded one; where no start time can be read,
+the lapsed heartbeat decides). A lease from another host sharing the state
+directory is never judged by a local pid check: it is honored until its heartbeat
+is 120 seconds old, so those hosts need roughly synchronized clocks. A record
+written before holders heartbeat, on another host, stays held. The lease remains held until the last
 writer settles, including writers collected from detached batches. Read-only
 runs never acquire it.
 
