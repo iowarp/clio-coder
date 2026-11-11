@@ -1372,7 +1372,7 @@ handoffs bound to run digests. The scheduler performs whole-plan preflight and r
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
-level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`. A call is plan-scale when it fans out more than one task, continues a
+level, which only the operator answers (the safety judge never reviews a plan, and a headless run denies it), and runs without the stop at `yolo`, contained or unconfined. A `/council` or `/poll` typed in the composer is admitted the same way, so it shows that card at `default` too. A call is plan-scale when it fans out more than one task, continues a
 Scout split, runs compete or council, places work on a remote node, carries a task
 with approved failover, or applies a compete winner with `apply_winner`
 ([dispatch-plan.ts](../../src/tools/dispatch-plan.ts)). Before asking, Clio resolves the effective agent, target,
