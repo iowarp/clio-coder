@@ -100,6 +100,38 @@ test("memory history warnings survive 96-column rendering and cache changes with
 	for (const row of [...unavailable, ...partial, ...recovered]) ok(visibleWidth(row) <= 96);
 });
 
+test("a two-column list draws its meta as one column, so the text column ends at one edge", () => {
+	const text = "Describes what this command does in more words than the row can hold";
+	const view = new ListOverlayView(
+		{
+			title: "Help Center",
+			items: [
+				{ id: "a", label: "a", cells: { lead: "/compact", text }, meta: "Model and context" },
+				{ id: "b", label: "b", cells: { lead: "/help", text }, meta: "Clio" },
+				{ id: "c", label: "c", cells: { lead: "/new", text }, meta: "Session" },
+			],
+			onClose() {},
+		},
+		() => {},
+	);
+	view.setViewportRows(20);
+	const rows = view.render(100).map(stripTerminalSequences);
+	const row = (lead: string): string => rows.find((line) => line.includes(lead)) ?? "";
+	const metaColumn = (lead: string, meta: string): number => row(lead).indexOf(meta);
+	const column = metaColumn("/compact", "Model and context");
+	ok(column > 0, rows.join("\n"));
+	deepStrictEqual(
+		[metaColumn("/help", "Clio"), metaColumn("/new", "Session")],
+		[column, column],
+		`every meta starts in one column:\n${rows.join("\n")}`,
+	);
+	deepStrictEqual(
+		["/help", "/new"].map((lead) => row(lead).indexOf(GLYPH.ellipsis)),
+		["/compact", "/compact"].map((lead) => row(lead).indexOf(GLYPH.ellipsis)),
+		"every text is cut at the same column",
+	);
+});
+
 test("a list mixing rows offers the detail key only on a row that has detail", () => {
 	const view = new ListOverlayView(
 		{

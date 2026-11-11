@@ -785,6 +785,21 @@ export class ListOverlayView implements Component {
 	}
 
 	/**
+	 * The meta column of a two-column list: the widest meta among its rows, so
+	 * every row's text is cut at one edge and the metas read as a column. Like
+	 * the lead it is measured over every filtered row, so scrolling never moves it.
+	 */
+	private metaWidth(items: ReadonlyArray<ListOverlayItem>): number {
+		let widest = 0;
+		for (const item of items) {
+			if (!item.cells) continue;
+			const meta = item.meta;
+			if (meta !== undefined) widest = Math.max(widest, visibleWidth(meta));
+		}
+		return widest;
+	}
+
+	/**
 	 * A row's label. A plain two-column row paints its lead in the option role
 	 * and its text in the description role; the focused row stays plain so the
 	 * selection rule paints it whole in the accent, which is how every other
@@ -936,6 +951,7 @@ export class ListOverlayView implements Component {
 			}
 		} else {
 			const leadWidth = this.leadWidth(width - 2, filteredItems);
+			const metaWidth = this.metaWidth(filteredItems);
 			// With no detail pane, a two-column row the width cuts is stated whole under the list for the focused
 			// row. The rows are reserved whenever any row is cut, so moving the cursor never resizes the window.
 			const focus =
@@ -982,6 +998,7 @@ export class ListOverlayView implements Component {
 							focused: isSelected,
 							label: this.rowLabel(item, isSelected, width - 2, leadWidth),
 							...(meta !== undefined && meta.length > 0 ? { meta } : {}),
+							...(item.cells !== undefined && metaWidth > 0 ? { metaWidth } : {}),
 							width,
 						}),
 					);

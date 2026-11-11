@@ -554,6 +554,11 @@ export interface SelectionRowOptions {
 	label: string;
 	/** Dim right-aligned column; compacts, then drops, before the label is cut. */
 	meta?: string;
+	/**
+	 * A meta column every row of the list shares: the meta starts at its left
+	 * edge, so labels cut at one column instead of wherever each row's meta began.
+	 */
+	metaWidth?: number;
 	/** Rows under the label, indented, in the description role. */
 	description?: string;
 	/** A mark in the cursor column for an unfocused row (a check, a dot); the cursor wins when focused. */
@@ -594,7 +599,10 @@ export function selectionRow(theme: ClioTheme, options: SelectionRowOptions): st
 	const rawMeta = options.meta ?? "";
 	const reservedLabel = Math.min(visibleWidth(options.label), Math.max(8, Math.floor(available * 0.5)));
 	const maxMetaWidth = Math.max(0, available - reservedLabel - 2);
-	const metaText = rawMeta.length === 0 || maxMetaWidth === 0 ? "" : fitMetaChips(theme, rawMeta, maxMetaWidth);
+	const metaRoom = options.metaWidth === undefined ? maxMetaWidth : Math.min(maxMetaWidth, options.metaWidth);
+	const fittedMeta = rawMeta.length === 0 || metaRoom === 0 ? "" : fitMetaChips(theme, rawMeta, metaRoom);
+	const metaText =
+		fittedMeta && options.metaWidth !== undefined ? padAnsi(fittedMeta, Math.max(1, metaRoom)) : fittedMeta;
 	const metaWidth = metaText ? visibleWidth(metaText) : 0;
 	const maxLabelWidth = Math.max(1, available - (metaWidth > 0 ? metaWidth + 2 : 0));
 	const fittedLabel = truncateToWidth(options.label, maxLabelWidth, GLYPH.ellipsis, false);

@@ -62,7 +62,9 @@ overlays are described on [Session control](../session-control.md).
 
 `src/interactive/overlays/list-overlay.ts` defines the data shapes and the view that most list
 surfaces use. `ListOverlayItem` carries an `id`, a themed `label`, optional two-column `cells`, a
-`group`, and a lazily computed `detail` function that receives the pane width. `ListOverlayTab`
+`group`, and a lazily computed `detail` function that receives the pane width. In a two-column
+list the `meta` is one shared column as wide as the widest meta, so every row's text is cut at the
+same edge. `ListOverlayTab`
 owns its own `items()` callback, so the rows are rebuilt on each switch rather than served from a
 snapshot taken when the overlay opened. `ListOverlayOptions` is the single configuration object:
 it holds the title, `tabs`, `activeTabId`, `onTabChange`, `filterable`, `explicitSearch`,
