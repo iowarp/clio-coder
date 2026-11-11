@@ -119,6 +119,17 @@ const WRAPPERS: ReadonlySet<string> = new Set(["timeout", "nohup", "nice", "time
 /** Assigns PATH: bare, through `env`, or with `export`, `declare` and the like. */
 const PATH_ASSIGNMENT = /(?:^|[\s;&|(){}`"'])PATH\+?=/u;
 
+/**
+ * Assigns a variable that makes the program it reaches load or run other code:
+ * the dynamic loader's preload, audit and search paths (LD_*, DYLD_*), Node's
+ * startup options, git's ssh and helper hooks and global config, the startup
+ * file a non-interactive shell sources (BASH_ENV, ENV), and Python, Perl and
+ * Ruby module paths and startup options. Like a PATH assignment it can point an
+ * outward CLI at workspace code, so the line stays contained.
+ */
+const LOADER_ASSIGNMENT =
+	/(?:^|[\s;&|(){}`"'])(?:LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|NODE_OPTIONS|GIT_SSH_COMMAND|GIT_SSH|GIT_EXEC_PATH|GIT_CONFIG_GLOBAL|BASH_ENV|ENV|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|PERL5LIB|RUBYOPT)\+?=/u;
+
 /** curl options that send a body or upload a file. */
 const CURL_BODY = /^(?:-[A-Za-z]*[dFT]|--(?:data(?:-\w+)?|form(?:-string)?|upload-file|json)(?:=.*)?)$/u;
 const READ_METHODS = /^(?:GET|HEAD)$/iu;
@@ -213,6 +224,7 @@ function nameOutwardReason(name: string, args: ReadonlyArray<string>): string | 
 function reboundNames(command: string, steps: ReadonlyArray<ShellCommandStep>): (name: string) => boolean {
 	if (
 		PATH_ASSIGNMENT.test(command) ||
+		LOADER_ASSIGNMENT.test(command) ||
 		/\bcommand_not_found_handle\b/u.test(command) ||
 		steps.some((step) => step.executable === "source" || step.executable === ".")
 	) {

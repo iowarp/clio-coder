@@ -754,6 +754,12 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 		"npx sbatch",
 		"bunx gh pr list",
 		"PATH=. git push origin main",
+		// A loader or exec-hook variable makes the outward program run workspace code.
+		"LD_PRELOAD=./x.so sbatch job.sh",
+		"NODE_OPTIONS=--require=./x.js gh pr create",
+		"GIT_SSH_COMMAND=./x git push origin main",
+		"export BASH_ENV=./x; sbatch job.sh",
+		"env PYTHONPATH=. aws s3 cp a s3://b",
 	]) {
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 	}
