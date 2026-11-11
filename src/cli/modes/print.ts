@@ -1,6 +1,7 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { reminderGist } from "../../core/reminder-gist.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
@@ -1129,7 +1130,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			}
 		}
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
-			process.stderr.write(`clio-coder run: ${redactUrlCredentials(event.text)}\n`);
+			// A reminder is written to the model; the operator gets the one-line gist the TUI shows.
+			const text =
+				event.source === "reminder"
+					? `reminder to the model: ${reminderGist(event.text.replace(/^\s*\[Clio Coder\]\s*/u, ""))}`
+					: event.text;
+			process.stderr.write(`clio-coder run: ${redactUrlCredentials(text)}\n`);
 		}
 		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {

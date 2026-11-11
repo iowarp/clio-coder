@@ -14,6 +14,8 @@
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
+
+import { reminderGist } from "../../core/reminder-gist.js";
 import { taskMemoryNoteForDisplay } from "../../domains/memory/task-memory-ref.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactUrlCredentials } from "../../domains/safety/redaction.js";
@@ -95,16 +97,6 @@ function renderCallout(source: NoticeSource, text: string, mark: NoticeMark, wid
 	const { glyph, token } = MARKS[mark];
 	const heading = theme.style(token, `${glyph} ${title}`, { bold: true });
 	return frame(theme, heading, wrapTextWithAnsi(shown, boxWidth - 4), boxWidth).map((line) => `${CARD_GUTTER}${line}`);
-}
-
-/**
- * What a reminder said, as one line: its first line, up to the end of its first
- * sentence or the colon that introduces a list.
- */
-function reminderGist(text: string): string {
-	// The list a reminder introduces can arrive flattened onto its first line, so the colon ends the gist too.
-	const firstLine = (text.split("\n")[0] ?? "").trim();
-	return (/^(.+?)(?::\s|:$|[.!?](?:\s|$))/u.exec(firstLine)?.[1] ?? firstLine).trim();
 }
 
 /**

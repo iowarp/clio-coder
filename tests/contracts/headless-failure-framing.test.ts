@@ -26,7 +26,12 @@ const answerMessage = (text: string): object => ({
 });
 
 /** Stdout of a headless run whose answer drew a citation check before the final reply. */
-async function stdoutAfterCitationCheck(answer: string, reply: string, mode: "text" | "json"): Promise<string> {
+async function stdoutAfterCitationCheck(
+	answer: string,
+	reply: string,
+	mode: "text" | "json",
+	stderr: string[] = [],
+): Promise<string> {
 	let handler: (event: unknown) => void = () => {};
 	const stub: Record<string, unknown> = {
 		onEvent: (next: (event: unknown) => void) => {
@@ -42,7 +47,7 @@ async function stdoutAfterCitationCheck(answer: string, reply: string, mode: "te
 				level: "warning",
 				surface: "transcript",
 				source: "reminder",
-				text: `${CITATION_CHECK_PREFIX} README.md:2 cite line numbers no tool printed`,
+				text: `${CITATION_CHECK_PREFIX} README.md:2 cite line numbers no tool printed; Before answering, re-read each cited region with read line_numbers=true.`,
 			});
 			handler({ type: "message_end", message: answerMessage(reply) });
 			handler({ type: "agent_end", messages: [answerMessage(answer), answerMessage(reply)] });
@@ -60,7 +65,10 @@ async function stdoutAfterCitationCheck(answer: string, reply: string, mode: "te
 		for (const argument of rest) if (typeof argument === "function") argument();
 		return true;
 	}) as typeof process.stdout.write;
-	process.stderr.write = (() => true) as typeof process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
 	try {
 		await runHeadlessMainAgent(
 			chat as never,
@@ -118,6 +126,18 @@ test("a reply to a citation check that restates the answer is printed alone", as
 	try {
 		const text = await stdoutAfterCitationCheck(answer, reply, "text");
 		strictEqual(text, `${reply}\n`);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a citation check reaches the operator's stderr as one line, not the model's instruction", async () => {
+	const answer = "Run the tests with python3 -m pytest -q (README.md:2).";
+	const env = await isolateClioEnv("headless-citation-check-");
+	try {
+		const stderr: string[] = [];
+		await stdoutAfterCitationCheck(answer, "README.md:2 holds.", "text", stderr);
+		strictEqual(stderr.join(""), "clio-coder run: reminder to the model: Citation check\n");
 	} finally {
 		env.restore();
 	}
