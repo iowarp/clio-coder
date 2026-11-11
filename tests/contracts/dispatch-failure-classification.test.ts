@@ -8,7 +8,12 @@ import {
 	nodeComponentRemedy,
 } from "../../src/domains/dispatch/failure-classification.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
-import { blockedWriteAttempts, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
+import {
+	blockedWriteAttempts,
+	recordToolFinish,
+	summarizeToolActivity,
+	workerNoWorkDetail,
+} from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
@@ -46,6 +51,20 @@ describe("dispatch failure classification", () => {
 		strictEqual(blockedWriteAttempts(stats(...blockedWrites, { tool: "bash", count: 1, ok: 1 }), classify), null);
 		strictEqual(blockedWriteAttempts(stats({ tool: "read", count: 3, ok: 3 }), classify), null);
 		strictEqual(isDeterministicOutcomeCode("worker_mutation_blocked"), true);
+	});
+
+	it("a store-only worker that put into its granted tag and noted a limitation did work", () => {
+		const stats = new Map<string, ToolCallStat>();
+		for (const actionClass of ["write", "write", "read"])
+			recordToolFinish(stats, { tool: "store", outcome: "ok", actionClass });
+		recordToolFinish(stats, { tool: "limitation", outcome: "ok", actionClass: "read" });
+		const activity = summarizeToolActivity(stats, () => "read");
+		strictEqual(workerNoWorkDetail({ activity, limitationRecorded: true, mutatedPathCount: 0 }), null);
+		const readOnly = new Map<string, ToolCallStat>();
+		recordToolFinish(readOnly, { tool: "store", outcome: "ok", actionClass: "read" });
+		recordToolFinish(readOnly, { tool: "limitation", outcome: "ok", actionClass: "read" });
+		const idle = summarizeToolActivity(readOnly, () => "read");
+		match(workerNoWorkDetail({ activity: idle, limitationRecorded: true, mutatedPathCount: 0 }) ?? "", /changed nothing/);
 	});
 
 	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {

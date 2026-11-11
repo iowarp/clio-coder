@@ -510,6 +510,8 @@ export interface ToolCallStat {
 	errors: number;
 	blocked: number;
 	totalDurationMs: number;
+	/** Successful calls the safety layer classed as write or destructive, for tools whose class depends on arguments. */
+	okWrites?: number;
 }
 
 /**
@@ -524,6 +526,8 @@ export interface ToolActivitySummary {
 	failed: number;
 	blocked: number;
 	mutatingSucceeded: boolean;
+	/** The worker wrote at least one blob into a granted store tag. */
+	storeWritten?: boolean;
 }
 
 /** One live-grant request on a worker receipt: who could decide, who did, and whether the call ran. */

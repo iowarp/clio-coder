@@ -25,6 +25,7 @@ export interface ToolFinishPayload {
 	tool?: string;
 	durationMs?: number;
 	outcome?: "ok" | "error" | "blocked";
+	actionClass?: string;
 }
 
 export interface ToolStartPayload {
@@ -66,6 +67,10 @@ export function recordToolFinish(stats: Map<string, ToolCallStat>, payload: Tool
 	if (payload.outcome === "ok") existing.ok += 1;
 	else if (payload.outcome === "error") existing.errors += 1;
 	else if (payload.outcome === "blocked") existing.blocked += 1;
+	// The store tool's class depends on its op, so the tool name alone reads a
+	// granted put as a read; keep the per-call class the worker saw.
+	if (payload.outcome === "ok" && (payload.actionClass === "write" || payload.actionClass === "destructive"))
+		existing.okWrites = (existing.okWrites ?? 0) + 1;
 	stats.set(payload.tool, existing);
 }
 
@@ -117,6 +122,7 @@ export function summarizeToolActivity(
 		if (stat.ok > 0 && MUTATING_ACTION_CLASSES.has(classify(stat.tool))) {
 			summary.mutatingSucceeded = true;
 		}
+		if (stat.tool === "store" && (stat.okWrites ?? 0) > 0) summary.storeWritten = true;
 	}
 	return summary;
 }
@@ -222,7 +228,8 @@ export function workerNoWorkDetail(input: {
 	if (timedOut > 0 && !input.activity.mutatingSucceeded && (input.mutatedPathCount ?? 0) === 0) {
 		return `nobody answered ${timedOut === 1 ? "the worker's permission request" : `${timedOut} of the worker's permission requests`} in time, so it changed nothing and the assignment was not done`;
 	}
-	if (unchanged && (input.limitationRecorded || reportedInability)) {
+	// A store put is the deliverable of a store-only worker, though it touches no workspace path.
+	if (unchanged && !input.activity.storeWritten && (input.limitationRecorded || reportedInability)) {
 		const reason = input.limitationDetail?.trim() || report;
 		return `worker recorded a limitation and changed nothing, so the assignment was not done${reason ? `: ${reason}` : ""}`;
 	}
