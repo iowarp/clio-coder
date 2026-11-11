@@ -131,6 +131,30 @@ test("secret discovery masks an ignored .env and a private key, not templates, p
 	]);
 });
 
+test("a workspace scan is reused past 10 s while the git index is unchanged, and redone once it changes", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-index-")));
+	execFileSync("git", ["init", "-q"], { cwd: root });
+	mkdirSync(join(root, "sub"));
+	writeFileSync(join(root, "sub", "a.txt"), "a\n");
+	execFileSync("git", ["add", "sub/a.txt"], { cwd: root });
+	const t0 = 1_000_000;
+	strictEqual(discoverSecretMasks({ workspaceRoots: [root] }, [], t0).masks.length, 0);
+	// A deep untracked secret leaves the top directory and the index alone.
+	writeFileSync(join(root, "sub", "x.pem"), FAKE_PRIVATE_KEY);
+	strictEqual(discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 20_000).masks.length, 0);
+	writeFileSync(join(root, "sub", "b.txt"), "b\n");
+	execFileSync("git", ["add", "sub/b.txt"], { cwd: root });
+	deepStrictEqual(
+		discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 21_000).masks.map((mask) =>
+			mask.path.slice(root.length + 1),
+		),
+		["sub/x.pem"],
+	);
+	// Past the stable-index ceiling the scan is redone anyway.
+	writeFileSync(join(root, "sub", "y.pem"), FAKE_PRIVATE_KEY);
+	strictEqual(discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 82_000).masks.length, 2);
+});
+
 test("under bwrap a contained command cannot read .env or credential variables, and an unsandboxed one still can", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {

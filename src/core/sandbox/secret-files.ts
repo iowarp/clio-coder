@@ -28,6 +28,13 @@ const SCAN_DEPTH = 6;
 const WALK_ENTRY_BUDGET = 20_000;
 /** A workspace's scan is reused this long, or until its top directory changes. */
 const WORKSPACE_SCAN_TTL_MS = 10_000;
+/**
+ * In a git work tree whose index file has not changed, the workspace scan
+ * (a full `git ls-files` walk) is reused this long instead. An untracked file
+ * created deep in the tree waits at most this long; one beside the project is
+ * still seen at once through the top directory stamp.
+ */
+const WORKSPACE_STABLE_INDEX_TTL_MS = 60_000;
 /** A scratch root such as /tmp changes all the time and is often large, so its scan lives longer. */
 const SCRATCH_SCAN_TTL_MS = 30_000;
 /**
@@ -359,6 +366,7 @@ function scanRoot(root: string, exclude: ReadonlySet<string>): RootScan {
 interface CachedScan {
 	at: number;
 	stamp: number | null;
+	index: string | null;
 	scan: RootScan;
 }
 
@@ -372,15 +380,36 @@ function directoryStamp(root: string): number | null {
 	}
 }
 
+/** Size and mtime of the work tree's git index, or null when there is none to read. */
+function gitIndexStamp(root: string): string | null {
+	let gitDir = path.join(root, ".git");
+	try {
+		if (!statSync(gitDir).isDirectory()) {
+			// A linked worktree: `.git` is a file naming the real git directory.
+			const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(gitDir, "utf8"));
+			if (match?.[1] === undefined) return null;
+			gitDir = path.resolve(root, match[1]);
+		}
+		const index = statSync(path.join(gitDir, "index"));
+		return `${index.size}:${index.mtimeMs}`;
+	} catch {
+		return null;
+	}
+}
+
 function cachedScan(root: string, workspace: boolean, exclude: ReadonlySet<string>, now: number): RootScan {
 	const stamp = workspace ? directoryStamp(root) : null;
-	const ttl = workspace ? WORKSPACE_SCAN_TTL_MS : SCRATCH_SCAN_TTL_MS;
+	const index = workspace ? gitIndexStamp(root) : null;
 	// The roots a scan skips change what it finds, so they are part of its key.
 	const key = [root, ...[...exclude].sort()].join("\0");
 	const cached = scanCache.get(key);
-	if (cached !== undefined && now - cached.at < ttl && cached.stamp === stamp) return cached.scan;
+	if (cached !== undefined && cached.stamp === stamp) {
+		const stable = index !== null && cached.index === index;
+		const ttl = !workspace ? SCRATCH_SCAN_TTL_MS : stable ? WORKSPACE_STABLE_INDEX_TTL_MS : WORKSPACE_SCAN_TTL_MS;
+		if (now - cached.at < ttl) return cached.scan;
+	}
 	const scan = scanRoot(root, exclude);
-	scanCache.set(key, { at: now, stamp, scan });
+	scanCache.set(key, { at: now, stamp, index, scan });
 	return scan;
 }
 
@@ -398,7 +427,8 @@ function isInside(parent: string, candidate: string): boolean {
 /**
  * Impure: masks for the secret files under `workspaceRoots` and
  * `scratchRoots`. A workspace scan is redone when its top directory changes
- * (a new `.env` beside the project) or after 10 s; a scratch root such as
+ * (a new `.env` beside the project) or after 10 s, 60 s while its git index
+ * is unchanged; a scratch root such as
  * /tmp changes constantly, so only a 30 s TTL renews it. Each mask names the
  * physical path, since a mount over a link fails, and a file the scan found
  * that is gone by now is skipped. Masks inside a masked directory and paths
