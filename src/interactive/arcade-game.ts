@@ -13,7 +13,7 @@ export interface ArcadeGhost {
 }
 
 export interface ArcadeState {
-	/** Rows of cells: `#` wall, `=` gate (ghosts only), `.` bug, `*` issue, space empty. */
+	/** Rows of cells: `#` wall, `c` emblem (a wall), `=` gate (ghosts only), `.` bug, `*` issue, space empty. */
 	readonly grid: string[][];
 	player: { x: number; y: number; facing: ArcadeDirection; next: ArcadeDirection | null };
 	ghosts: ArcadeGhost[];
@@ -24,28 +24,29 @@ export interface ArcadeState {
 }
 
 /** `P` is the player start, `1`-`5` the ghosts in GHOST_LABELS order. */
+/** A circuit-trace board around the C emblem chamber (`c`); the ghosts leave it through four gates. */
 export const ARCADE_MAZE: readonly string[] = [
 	"###########################",
-	"#*...........#...........*#",
-	"#.####.#####.#.#####.####.#",
-	"#.####.#####.#.#####.####.#",
-	"#.........................#",
-	"#.####.##.#######.##.####.#",
-	"#......##....#....##......#",
-	"######.#####.#.#####.######",
-	"######.##    1    ##.######",
-	"######.## ###=### ##.######",
-	"      .   #2 3 4#   .      ",
-	"######.## ####### ##.######",
-	"######.##    5    ##.######",
-	"######.## ####### ##.######",
-	"#............#............#",
-	"#.####.#####.#.#####.####.#",
-	"#*..##.......P.......##..*#",
-	"###.##.##.#######.##.##.###",
-	"#......##....#....##......#",
-	"#.##########.#.##########.#",
-	"#.........................#",
+	"#.....#.........#.........#",
+	"#.###.#.#####.#.#.#######.#",
+	"#.#...#.....#.#...#.....#.#",
+	"#.#.#####.#.#.#####.###.#.#",
+	"#.#.......#...........#...#",
+	"#.####.##.##.#.####.#.###.#",
+	"#......#####=#####..#.....#",
+	"####.#.#    1    #.##.###.#",
+	"#....#.#  ccccc  #....#...#",
+	"#.####.=  c   2  =.##.#.#.#",
+	"#......#  ccccc  #.#....#.#",
+	"#.##.###3   4   5#.#.####.#",
+	"#..#...#####=#####.#......#",
+	"##.#.#..............#####.#",
+	"#..#.#.#####.#.###.......##",
+	"#.##...#...#.#...#.#####..#",
+	"#....#.#.#.#.###.#.#...#..#",
+	"#.####.#.#...#...#...#.##.#",
+	"#....P.....#.....#.#.....*#",
+	"#.##*......#.#.......##...#",
 	"###########################",
 ];
 
@@ -94,17 +95,15 @@ function cellAt(state: ArcadeState, x: number, y: number): string {
 	return state.grid[y]?.[x] ?? "#";
 }
 
-/** Rows wrap left to right through an open edge (the tunnel). */
-function moved(state: ArcadeState, x: number, y: number, dir: ArcadeDirection): { x: number; y: number } {
-	const width = state.grid[y]?.length ?? 1;
+function moved(x: number, y: number, dir: ArcadeDirection): { x: number; y: number } {
 	const [dx, dy] = STEP[dir];
-	return { x: (x + dx + width) % width, y: y + dy };
+	return { x: x + dx, y: y + dy };
 }
 
 function open(state: ArcadeState, x: number, y: number, dir: ArcadeDirection, ghost: boolean): boolean {
-	const to = moved(state, x, y, dir);
+	const to = moved(x, y, dir);
 	const cell = cellAt(state, to.x, to.y);
-	return cell !== "#" && (ghost || cell !== "=");
+	return cell !== "#" && cell !== "c" && (ghost || cell !== "=");
 }
 
 /** Queue a turn; it takes effect on the next tick the way is open. */
@@ -140,7 +139,7 @@ function moveGhost(
 	let best: ArcadeDirection | undefined;
 	let bestDistance = Number.POSITIVE_INFINITY;
 	for (const dir of choices) {
-		const to = moved(state, ghost.x, ghost.y, dir);
+		const to = moved(ghost.x, ghost.y, dir);
 		const distance = Math.abs(to.x - tx) + Math.abs(to.y - ty);
 		if (distance < bestDistance) {
 			best = dir;
@@ -148,7 +147,7 @@ function moveGhost(
 		}
 	}
 	if (best === undefined) return last;
-	const to = moved(state, ghost.x, ghost.y, best);
+	const to = moved(ghost.x, ghost.y, best);
 	ghost.x = to.x;
 	ghost.y = to.y;
 	return best;
@@ -166,7 +165,7 @@ export function tickArcade(state: ArcadeState): ArcadeStatus {
 		player.next = null;
 	}
 	if (open(state, player.x, player.y, player.facing, false)) {
-		const to = moved(state, player.x, player.y, player.facing);
+		const to = moved(player.x, player.y, player.facing);
 		player.x = to.x;
 		player.y = to.y;
 	}

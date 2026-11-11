@@ -54,6 +54,7 @@ export function renderArcade(state: ArcadeState, width: number, height: number):
 			if (state.player.x === x && state.player.y === y) text += `${BOLD}${ORANGE}C${TEAL}${facingMark(state)}`;
 			else if (ghost) text += `${BOLD}${GHOST}${ghostGlyph(ghost)}${RESET}${BG}`;
 			else if (cell === "#") text += `${WALL}██`;
+			else if (cell === "c") text += `${BOLD}${TEAL}██`;
 			else if (cell === "=") text += `${ORANGE}▬▬`;
 			else if (cell === ".") text += `${TEAL}· `;
 			else if (cell === "*") text += `${ORANGE}✱ `;
