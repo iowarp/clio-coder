@@ -169,7 +169,7 @@ import {
 	budgetBlockFrame,
 	budgetBlockReplayFrame,
 } from "./budget-notice.js";
-import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
+import type { AcpCommandCatalog, AcpCommandControl, AcpConsentAsk } from "./commands.js";
 import { ACP_CONTEXT_LEDGER_METHOD, ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import { ACP_DISPATCH_PLAN_META_KEY, projectDispatchPlanMeta } from "./dispatch-plan-meta.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
@@ -1642,6 +1642,38 @@ function endToolCallId(active: ActivePrompt, engineId: string | undefined): stri
 	const wireIds = active.toolCallWireIds.get(engineId);
 	if (wireIds === undefined) return null;
 	return wireIds[wireIds.length - 1] ?? null;
+}
+
+/** How long a report waits for the client to allow a diagnostic bundle before it attaches nothing. */
+const REPORT_CONSENT_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * `/report --bundle` consent over ACP: the client is shown the consent text through `session/request_permission`.
+ * Only `allow-once` attaches; a reject, a cancel, an error or a client without the method attaches nothing.
+ */
+function reportConsentAsk(transport: AcpJsonRpcPeerTransport, sessionId: string): AcpConsentAsk {
+	return async (title, consent) => {
+		const response = await transport.request<AcpRequestPermissionResponse>(
+			"session/request_permission",
+			{
+				sessionId,
+				toolCall: {
+					toolCallId: `report-bundle-${randomUUID()}`,
+					title,
+					kind: "other",
+					status: "pending",
+					rawInput: { consent },
+					content: [{ type: "content", content: { type: "text", text: consent.join("\n") } }],
+				},
+				options: [
+					{ optionId: "allow-once", name: "Attach the bundle", kind: "allow_once" },
+					{ optionId: "reject-once", name: "Do not attach it", kind: "reject_once" },
+				],
+			},
+			REPORT_CONSENT_TIMEOUT_MS,
+		);
+		return response?.outcome?.outcome === "selected" && response.outcome.optionId === "allow-once";
+	};
 }
 
 function sendUpdate(
@@ -6477,7 +6509,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		assertCommandWithinCeiling(options.commands, request.command, request.argv);
 		if (request.command !== "context" && request.command !== "compact")
-			return options.commands.invoke({ command: request.command, argv: request.argv });
+			return options.commands.invoke({
+				command: request.command,
+				argv: request.argv,
+				askConsent: reportConsentAsk(options.transport, session.id),
+			});
 		if (session.id !== boundSessionId)
 			throw new AcpRequestError(-32002, "session is not the bound session", { code: "session_not_bound" });
 		if (activeShell !== null) throw new AcpRequestError(-32602, "a shell line is running", { code: "shell_active" });
@@ -7346,7 +7382,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					argv = words.tokens;
 				}
 				if (options.commands !== undefined) assertCommandWithinCeiling(options.commands, command, argv);
-				const result = await options.commands?.invoke({ command, argv });
+				const result = await options.commands?.invoke({
+					command,
+					argv,
+					askConsent: reportConsentAsk(options.transport, session.id),
+				});
 				if (options.commands?.injectsUserTurn(command, argv)) await options.chat.whenSettled?.();
 				if (result !== undefined)
 					sendTextChunks(

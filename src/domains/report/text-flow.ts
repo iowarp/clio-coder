@@ -5,6 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { rememberIdentity } from "./body.js";
+import { type BuiltBundle, buildBundle, type ConsentScopes, consentText, saveBuiltBundle } from "./bundle.js";
 import type { ReportCommandRunner } from "./command.js";
 import type { ReportSessionFacts } from "./environment.js";
 import { observeSession } from "./observe.js";
@@ -35,8 +36,15 @@ export interface ReportTextReply {
 
 export type ReportTextDuplicate = { comment: number } | "new";
 
+/** A diagnostic bundle the reporter asked for and consented to on this call; there is no standing consent. */
+export interface ReportTextBundle {
+	scopes: ConsentScopes;
+	transcript: { turns: number; toolOutput: boolean } | null;
+	models: "keep" | "anonymize";
+}
+
 export interface ReportTextHost {
-	plan(input: { kind: ReportKind | "security"; summary?: string }): Promise<ReportTextReply>;
+	plan(input: { kind: ReportKind | "security"; summary?: string; bundle?: ReportTextBundle }): Promise<ReportTextReply>;
 	send(draftId: string, choices?: { duplicate?: ReportTextDuplicate }): Promise<ReportTextReply>;
 	status(): Promise<ReportTextReply>;
 	forget(id: string): Promise<ReportTextReply>;
@@ -61,7 +69,7 @@ export interface ReportTextDeps {
 const REPORT_TEXT_BODY_LINES = 150;
 
 /** The plan as text: destination, title, the body in a fence, masks, the numbered actions and how to send it. */
-export function formatReportPlanText(plan: ReportPlan, draftId: string): string {
+export function formatReportPlanText(plan: ReportPlan, draftId: string, bundle?: BuiltBundle): string {
 	const body = plan.rendered.body.replace(/\n$/u, "");
 	const fence = body.includes("```") ? "~~~~" : "```";
 	const shownLines = body.split("\n").filter((line) => line.trim() !== "");
@@ -80,7 +88,7 @@ export function formatReportPlanText(plan: ReportPlan, draftId: string): string 
 			? [`${hidden} more body lines are not shown here; \`clio-coder report show ${draftId}\` shows the whole body.`]
 			: []),
 		plan.maskSummary,
-		"No diagnostic bundle is attached.",
+		...(bundle === undefined ? ["No diagnostic bundle is attached."] : bundleLines(bundle)),
 		...(plan.credit ? ["Credit: the report block asks for credit in the release notes (credit: yes)."] : []),
 		"Sending will, in this order:",
 		...plan.actions.map((action, index) => `  ${index + 1}. ${action}`),
@@ -88,6 +96,17 @@ export function formatReportPlanText(plan: ReportPlan, draftId: string): string 
 		...(plan.gates.length > 0 ? ["Cannot send yet:", ...plan.gates.map((gate) => `  - ${gate}`)] : []),
 		`Nothing was sent. To send: \`/report send ${draftId}\`. To change the text, run \`clio-coder report show ${draftId}\` in a terminal, or ask the agent to redraft.`,
 	].join("\n");
+}
+
+/** The bundle a preview carries: its size and the consent text the reporter agreed to; kept only on send. */
+function bundleLines(built: BuiltBundle): string[] {
+	const text = consentText();
+	const { summary } = built;
+	return [
+		`A diagnostic bundle is attached (${summary.bytes} bytes, ${summary.records} telemetry records); it is kept on this machine only once you send. You agreed to:`,
+		...summary.scopesGranted.map((scope) => `  ${text[scope]}`),
+		...(summary.transcript !== null ? [`  ${text.transcript}`] : []),
+	];
 }
 
 export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
@@ -112,6 +131,8 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 	// rewritten on disk after its preview, is shown here again before any send, so an ACP send always follows a
 	// preview of that exact text.
 	const shown = new Map<string, string>();
+	// The bundle each preview built and showed, saved only when that draft is sent.
+	const bundles = new Map<string, BuiltBundle>();
 	const digest = (rendered: { title: string; body: string }): string =>
 		createHash("sha256").update(`${rendered.title}\0${rendered.body}`).digest("hex");
 
@@ -143,13 +164,34 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 			});
 			// Shown with this directory's identity, so a later resume elsewhere still masks what this preview masked.
 			const draft = rememberIdentity(composed, who);
+			let built: BuiltBundle | undefined;
+			if (input.bundle !== undefined) {
+				try {
+					built = await buildBundle(draft, {
+						consent: { scopes: input.bundle.scopes },
+						...(input.bundle.transcript ? { transcript: input.bundle.transcript } : {}),
+						identity: who,
+						stateDir: deps.stateDir,
+						models: input.bundle.models,
+						write: false,
+						...(deps.now ? { now: deps.now() } : {}),
+					});
+				} catch (error) {
+					return {
+						level: "error",
+						text: `Nothing was attached or saved: ${error instanceof Error ? error.message : String(error)}`,
+					};
+				}
+			}
 			const plan = planReport(draft, { identity: who, transport: await offline(), stateDir: deps.stateDir });
 			saveReportDraft(deps.stateDir, draft);
 			updateOutbox(deps.stateDir, draft.id, { kind: draft.kind, title: plan.rendered.title, state: "draft" });
 			shown.set(draft.id, digest(plan.rendered));
+			if (built !== undefined) bundles.set(draft.id, built);
+			else bundles.delete(draft.id);
 			return {
 				level: plan.gates.length > 0 ? "warn" : "info",
-				text: formatReportPlanText(plan, draft.id),
+				text: formatReportPlanText(plan, draft.id, built),
 				report: { draftId: draft.id, state: "draft" },
 			};
 		},
@@ -193,10 +235,12 @@ export function createReportTextHost(deps: ReportTextDeps): ReportTextHost {
 						: `Nothing was sent. ${draftId} changed since it was shown here, so here it is again.`;
 				return {
 					level: "info",
-					text: `${lead}\n${formatReportPlanText(preview, draftId)}`,
+					text: `${lead}\n${formatReportPlanText(preview, draftId, bundles.get(draftId))}`,
 					report: { draftId, state: "draft" },
 				};
 			}
+			const built = bundles.get(draftId);
+			if (built !== undefined) saveBuiltBundle(deps.stateDir, draft, built, deps.now?.());
 			const gh = await findGh();
 			const transport = await (deps.detect ?? ((e) => detectTransport(e, { findGh: () => gh })))(env).catch(
 				(): ReportTransport => ({ kind: "file" }),

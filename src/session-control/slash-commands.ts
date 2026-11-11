@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { mcpCommandOutput } from "../cli/mcp.js";
+import { type BundleRequest, bundleRequest } from "../cli/report-bundle.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SettingsAreaId } from "../core/settings-areas.js";
@@ -139,7 +140,7 @@ type ArchiveCommandVariant =
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean };
 
 type ReportCommandVariant =
-	| { kind: "report"; report: SlashReportKind; summary?: string }
+	| { kind: "report"; report: SlashReportKind; summary?: string; bundle?: BundleRequest }
 	| { kind: "report-status" }
 	| { kind: "report-send"; draftId: string; duplicate?: ReportTextDuplicate }
 	| { kind: "report-forget"; id: string }
@@ -3389,8 +3390,35 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (sub === "forget") return { kind: "report-forget", id: parsed.positionals[0] ?? "" };
 			const report: SlashReportKind = sub === "feature" || sub === "question" ? sub : "bug";
-			const summary = parsed.rest?.trim() ?? "";
-			return { kind: "report", report, ...(summary.length > 0 ? { summary } : {}) };
+			// `--bundle mechanics --consent debug|dataset [--transcript [N]]` ask for a diagnostic bundle; the rest is the summary.
+			const words = (parsed.rest ?? "")
+				.trim()
+				.split(/\s+/u)
+				.filter((word) => word.length > 0);
+			const values = new Map<string, string>();
+			const text: string[] = [];
+			for (let i = 0; i < words.length; i++) {
+				const word = words[i] ?? "";
+				if (word === "--transcript") values.set(word, /^\d+$/u.test(words[i + 1] ?? "") ? (words[++i] ?? "") : "");
+				else if (word === "--bundle" || word === "--consent") values.set(word, words[++i] ?? "");
+				else text.push(word);
+			}
+			const bundle = bundleRequest({
+				bundle: values.get("--bundle"),
+				consent: values.get("--consent"),
+				transcript: values.get("--transcript"),
+				withToolOutput: false,
+				anonymizeModels: false,
+				requireConsent: values.has("--bundle"),
+			});
+			if (typeof bundle === "string") return { kind: "usage-error", command: "report", reason: bundle };
+			const summary = values.size > 0 ? text.join(" ") : (parsed.rest?.trim() ?? "");
+			return {
+				kind: "report",
+				report,
+				...(summary.length > 0 ? { summary } : {}),
+				...(bundle !== null ? { bundle } : {}),
+			};
 		},
 		// Not refused during a turn: a hung turn is a reason to report, and the review never touches the turn.
 		handle(command, ctx) {
@@ -3407,6 +3435,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					reply = text.plan({
 						kind: command.report,
 						...(command.summary !== undefined ? { summary: command.summary } : {}),
+						...(command.bundle !== undefined ? { bundle: command.bundle } : {}),
 					});
 				else return;
 				const shown = reply.then((answer) => ctx.notice(answer.level, answer.text));

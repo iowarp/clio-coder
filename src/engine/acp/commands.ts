@@ -36,6 +36,7 @@ import type { JobRecord } from "../../core/job-types.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import { consentText } from "../../domains/report/index.js";
 import { parseLoopArgv } from "../../session-control/loop-command.js";
 import type { NoticeLevel } from "../../session-control/notice-source.js";
 import type { SlashCommand, SlashCommandContext, SlashCommandKind } from "../../session-control/slash-commands.js";
@@ -485,7 +486,7 @@ function parsedBelongsTo(parsed: SlashCommand, name: string, kinds: ReadonlyArra
  * keep reporting progress through their existing event stream.
  */
 export function invokeAcpCommand(
-	request: { command: unknown; argv: unknown },
+	request: { command: unknown; argv: unknown; askConsent?: AcpConsentAsk },
 	host: AcpCommandHost,
 ): Promise<AcpCommandResult> {
 	if (typeof request.command !== "string") throw invalid("invalid_params", "command must be a string");
@@ -561,9 +562,17 @@ export function invokeAcpCommand(
 			);
 	}
 	const pending: Promise<void>[] = [];
-	const ctx = sessionCommandContext(host, notice, push, pending, rule.name, (next) => {
-		report = next;
-	});
+	const ctx = sessionCommandContext(
+		host,
+		notice,
+		push,
+		pending,
+		rule.name,
+		(next) => {
+			report = next;
+		},
+		request.askConsent,
+	);
 	let outcome: ReturnType<typeof dispatchSlashCommand>;
 	try {
 		outcome = dispatchSlashCommand(parsed, ctx);
@@ -584,11 +593,30 @@ export function invokeAcpCommand(
 	return pending.length === 0 ? Promise.resolve(finish()) : Promise.all(pending).then(finish);
 }
 
-/** The report host, with each reply's draft and state also handed to the result's `_meta`. */
+/**
+ * Ask the ACP client to approve attaching a diagnostic bundle, showing it the consent text. Resolves true only on an
+ * explicit allow; a decline, a cancel, or a client that cannot answer resolves false.
+ */
+export type AcpConsentAsk = (title: string, consent: ReadonlyArray<string>) => Promise<boolean>;
+
+/** The consent sentences a bundle request grants, from the shipped consent text. */
+function bundleConsentSentences(bundle: NonNullable<Parameters<ReportHost["plan"]>[0]["bundle"]>): string[] {
+	const text = consentText();
+	return [...bundle.scopes.map((scope) => text[scope]), ...(bundle.transcript !== null ? [text.transcript] : [])];
+}
+
+type ReportHost = NonNullable<SlashCommandContext["reportHost"]>;
+
+/**
+ * The report host, with each reply's draft and state also handed to the result's `_meta`. A preview that asks for a
+ * diagnostic bundle first asks the client through `session/request_permission`; without an explicit allow the
+ * bundle is dropped and nothing is attached.
+ */
 function reportHostWithMeta(
-	host: NonNullable<SlashCommandContext["reportHost"]>,
+	host: ReportHost,
 	onReport: (report: AcpCommandReportMeta) => void,
-): NonNullable<SlashCommandContext["reportHost"]> {
+	askConsent?: AcpConsentAsk,
+): ReportHost {
 	const seen = <T extends { report?: AcpCommandReportMeta }>(reply: Promise<T>): Promise<T> =>
 		reply.then((answer) => {
 			if (answer.report !== undefined)
@@ -599,7 +627,23 @@ function reportHostWithMeta(
 			return answer;
 		});
 	return {
-		plan: (input) => seen(host.plan(input)),
+		plan: (input) => {
+			const { bundle, ...rest } = input;
+			if (bundle === undefined) return seen(host.plan(input));
+			const asked = askConsent
+				? askConsent("Attach a diagnostic bundle to this report?", bundleConsentSentences(bundle)).catch(() => false)
+				: Promise.resolve(false);
+			return asked.then((allowed) => {
+				if (!allowed)
+					return {
+						level: "warn" as const,
+						text: askConsent
+							? "Nothing was attached: the client did not allow the diagnostic bundle. Run /report again without --bundle, or allow it when asked."
+							: "Nothing was attached: this client cannot be asked for consent, so a diagnostic bundle is not attached here. Run `clio-coder report --bundle mechanics` in a terminal.",
+					};
+				return seen(host.plan({ ...rest, bundle }));
+			});
+		},
 		send: (draftId, choices) => seen(host.send(draftId, choices)),
 		status: () => seen(host.status()),
 		forget: (id) => seen(host.forget(id)),
@@ -627,6 +671,7 @@ function sessionCommandContext(
 	pending: Promise<void>[],
 	commandName: string,
 	onReport: (report: AcpCommandReportMeta) => void,
+	askConsent?: AcpConsentAsk,
 ): SlashCommandContext {
 	const submitTurn = host.submitTurn;
 	// A context operation the operator stopped settles its own canonical
@@ -690,7 +735,7 @@ function sessionCommandContext(
 		...(host.jobs ? { jobs: host.jobs } : {}),
 		...(host.getWorkerRosters ? { getWorkerRosters: host.getWorkerRosters } : {}),
 		...(host.runCouncilDispatch ? { runCouncilDispatch: host.runCouncilDispatch } : {}),
-		...(host.reportHost ? { reportHost: reportHostWithMeta(host.reportHost, onReport) } : {}),
+		...(host.reportHost ? { reportHost: reportHostWithMeta(host.reportHost, onReport, askConsent) } : {}),
 		...(runContextRecall
 			? { runContextRecall: (ref: string) => awaited("context recall", () => runContextRecall(ref), true) }
 			: {}),
@@ -807,7 +852,12 @@ export interface AcpCommandControl {
 	/** Pure and rebuilt per call, so the server memoizes it for a polling client. */
 	catalog(): AcpCommandCatalog;
 	/** Refusals throw {@link AcpRequestError} with the reason already attached. */
-	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult | Promise<AcpCommandResult>;
+	invoke(request: {
+		command: unknown;
+		argv: unknown;
+		/** Asks the client before a diagnostic bundle is attached; absent means nothing is attached. */
+		askConsent?: AcpConsentAsk;
+	}): AcpCommandResult | Promise<AcpCommandResult>;
 	/** True when this command name submits a user turn, which a live prompt owns. */
 	injectsUserTurn(command: unknown, argv?: unknown): boolean;
 	/** True when this command, or its subcommand in `argv[0]`, must run inside a `session/prompt` turn; absent reads as false. */
