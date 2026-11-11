@@ -58,6 +58,9 @@ type RareKind = (typeof RARE_KINDS)[number];
 
 const ANON = /anon_[0-9a-f]{16}/gu;
 const RECORD_ID = /^rec_([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const EPOCH_MS_MIN = 1e12;
+const EPOCH_MS_MAX = 1e13;
+const TIME_KEY = /(?:At|Ms|Time|Ts|Epoch)$|^(?:wall|ts|time)$/u;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
 
 export interface IndexLine {
@@ -153,6 +156,7 @@ function rareValues(admitted: ReadonlyArray<Admitted>): Map<string, RareKind> {
 interface Mapper {
 	string(value: string): string;
 	value<T>(value: T): T;
+	ambiguous: ReadonlySet<string>;
 }
 
 /** Re-key anonymous ids under the release key, shift every timestamp and record id, rename scopes, drop rare values. */
@@ -180,9 +184,20 @@ function mapper(
 		}
 		return value.replace(ANON, (id) => `anon_${createHmac("sha256", releaseKey).update(id).digest("hex").slice(0, 16)}`);
 	};
+	const ambiguous = new Set<string>();
+	// Epoch milliseconds under a time-shaped key move with the strings; durations and counters stay as they are. A
+	// number in the epoch range under any other key is reported for a human to decide, never guessed.
+	const number = (key: string, item: number): number => {
+		if (item < EPOCH_MS_MIN || item >= EPOCH_MS_MAX) return item;
+		if (TIME_KEY.test(key)) return item - shiftMs;
+		ambiguous.add(key);
+		return item;
+	};
 	const value = <T>(input: T): T =>
-		JSON.parse(JSON.stringify(input), (_key, item: unknown) => (typeof item === "string" ? string(item) : item)) as T;
-	return { string, value };
+		JSON.parse(JSON.stringify(input), (key, item: unknown) =>
+			typeof item === "string" ? string(item) : typeof item === "number" ? number(key, item) : item,
+		) as T;
+	return { string, value, ambiguous };
 }
 
 interface Trace {
@@ -193,6 +208,7 @@ interface Trace {
 	trace: Record<string, unknown>;
 	transcript: Buffer | null;
 	schemaSets: string[];
+	ambiguous: string[];
 	clioCoder: string;
 	consentVersion: number;
 }
@@ -231,9 +247,7 @@ function rebuildTrace(item: Admitted, releaseKey: Buffer, rare: Map<string, Rare
 				segment.rows.flatMap((row) => {
 					if (row.kind === "record") return [encodeTelemetryLine(map.value(row.record) as TelemetryRecord)];
 					if (row.kind === "header") {
-						const header = map.value(row.header) as SegmentHeader;
-						const clockOrigin = { ...header.clockOrigin, monoEpochWallMs: header.clockOrigin.monoEpochWallMs - shiftMs };
-						return [encodeTelemetryLine({ ...header, clockOrigin })];
+						return [encodeTelemetryLine(map.value(row.header) as SegmentHeader)];
 					}
 					return [];
 				}),
@@ -311,6 +325,7 @@ function rebuildTrace(item: Admitted, releaseKey: Buffer, rare: Map<string, Rare
 							.join("\n"),
 					),
 		schemaSets: [...schemaSets],
+		ambiguous: [...map.ambiguous],
 		clioCoder: envelope.environment.clioCoder,
 		consentVersion: envelope.consent.textVersion,
 	};
@@ -376,7 +391,7 @@ export interface BuildOptions {
 	identities?: ReadonlyArray<LocalIdentity>;
 }
 
-export function build(options: BuildOptions): { traces: number; out: string } {
+export function build(options: BuildOptions): { traces: number; out: string; ambiguous: string[] } {
 	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(options.release)) throw new Error(`not a release name: ${options.release}`);
 	const admitted = admit(options.store, options.kind);
 	if (admitted.length < MIN_BUNDLES)
@@ -440,12 +455,15 @@ export function build(options: BuildOptions): { traces: number; out: string } {
 		traces.map((trace) => `${JSON.stringify({ traceId: trace.traceId, reportId: trace.reportId })}\n`).join(""),
 		{ mode: 0o600 },
 	);
+	const ambiguous = [...new Set(traces.flatMap((trace) => trace.ambiguous))].sort();
+	if (ambiguous.length > 0)
+		writeFileSync(join(releaseDir, "ambiguous-fields.txt"), ambiguous.map((key) => `${key}\n`).join(""));
 	for (const file of files) {
 		const path = join(options.out, file.path);
 		mkdirSync(join(path, ".."), { recursive: true });
 		writeFileSync(path, file.bytes);
 	}
-	return { traces: traces.length, out: options.out };
+	return { traces: traces.length, out: options.out, ambiguous };
 }
 
 function linesStrings(line: string): string[] {
@@ -587,6 +605,17 @@ export async function selfCheck(): Promise<string[]> {
 		const times = all.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu) ?? [];
 		assert(times.length > 0 && times.every((time) => time < "2000-01-02"), "a timestamp after 2000-01-02 survived");
 		passed.push("unlinking: no report id, original anonymous, scope or install id, or real timestamp survives");
+		const epochs = [...all.matchAll(/"(\w+)":(\d{12,13})\b/gu)];
+		assert(
+			epochs.some(([, key]) => key === "monoEpochWallMs") && epochs.every(([, , ms]) => Number(ms) < EPOCH + 86_400_000),
+			`an epoch-ms value after 2000-01-02 survived: ${epochs
+				.filter(([, , ms]) => Number(ms) >= EPOCH + 86_400_000)
+				.map(([m]) => m)
+				.slice(0, 5)
+				.join(" ")}`,
+		);
+		assert(result.ambiguous.length === 0, `ambiguous epoch fields: ${result.ambiguous.join(", ")}`);
+		passed.push("epoch-ms values under time-shaped keys are shifted too");
 		assert(!all.includes(rareModel), "the rare model id survived");
 		assert(
 			all.includes("rare_model") && all.includes("zqx-common-model"),
@@ -643,6 +672,10 @@ async function main(argv: string[]): Promise<number> {
 		const identities = identitiesFile ? (JSON.parse(readFileSync(identitiesFile, "utf8")) as LocalIdentity[]) : [];
 		const result = build({ store, release, out, kind, identities });
 		process.stdout.write(`built ${result.traces} ${kind} traces in ${result.out}; nothing was published\n`);
+		if (result.ambiguous.length > 0)
+			process.stdout.write(
+				`epoch-like numbers under keys left unshifted, review before publishing: ${result.ambiguous.join(", ")}\n`,
+			);
 		return 0;
 	}
 	const reportId = argv[argv.length - 1];
