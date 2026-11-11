@@ -135,7 +135,7 @@ export type DispatchScopeNoticePayload =
 			 * Write scope changes the tools available for this dispatch, or the
 			 * worker sandbox leaves its admitted MCP servers without network.
 			 */
-			code: "write_root_dot_unconfined" | "write_roots_checks_withheld" | "mcp_sandbox_no_network";
+			code: "write_root_dot_unconfined" | "write_roots_checks_withheld" | "write_roots_overlap" | "mcp_sandbox_no_network";
 			level: "warning";
 			message: string;
 	  }

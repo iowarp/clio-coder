@@ -14,6 +14,7 @@ const SCOPE_NOTICE_CODES: Record<DispatchScopeNoticePayload["code"], true> = {
 	legacy_scope_empty: true,
 	write_root_dot_unconfined: true,
 	write_roots_checks_withheld: true,
+	write_roots_overlap: true,
 	mcp_sandbox_no_network: true,
 	worker_merged: true,
 };

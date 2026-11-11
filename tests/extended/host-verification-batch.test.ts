@@ -1056,12 +1056,7 @@ describe("lint and format checks scoped to the task's changed files", () => {
 		const followUps = lintScriptFollowUpChecks(lint);
 		deepStrictEqual(
 			followUps.map((entry) => [entry.check, entry.argv]),
-			[
-				[
-					"lint: node --import tsx scripts/check-hygiene.ts",
-					["node", "--import", "tsx", "scripts/check-hygiene.ts"],
-				],
-			],
+			[["lint: node --import tsx scripts/check-hygiene.ts", ["node", "--import", "tsx", "scripts/check-hygiene.ts"]]],
 		);
 		deepStrictEqual(lintScriptFollowUpChecks({ ...lint, argv: ["biome", "check", "."] }), []);
 		const hygiene = followUps[0];

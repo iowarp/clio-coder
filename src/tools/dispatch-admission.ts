@@ -19,7 +19,11 @@ import {
 import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { operatorNamedChecks } from "../domains/dispatch/operator-checks.js";
-import { confineGrantOnlyWriters, parallelWriterConflict } from "../domains/dispatch/parallel-writers.js";
+import {
+	confineGrantOnlyWriters,
+	overlappingWriteRootsWarning,
+	parallelWriterConflict,
+} from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
@@ -275,6 +279,31 @@ function announceDotWriteRoot(deps: DispatchToolDeps, rawIntent: unknown): void 
 		message:
 			'[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary: the worker may change any file and keeps bash, verify and git. To confine it, list the files or directories it may change; a confined run loses bash and verify.',
 	});
+}
+
+/** Dispatch calls already warned about overlapping write roots, so preview and run warn once. */
+const overlapNoticed = new WeakSet<object>();
+
+/**
+ * Parallel tasks may declare overlapping write roots when each runs in its own
+ * worktree; admission starts them, but their merges can collide. Say which.
+ */
+function announceOverlappingWriteRoots(
+	deps: DispatchToolDeps,
+	key: object,
+	requests: ReadonlyArray<DispatchRequest>,
+	positions?: ReadonlyArray<number>,
+): void {
+	if (deps.bus === undefined || overlapNoticed.has(key)) return;
+	const isolated = requests.flatMap((request, index) => (request.worktree === true ? [index] : []));
+	if (isolated.length < 2) return;
+	const message = overlappingWriteRootsWarning(
+		isolated.map((index) => requests[index] as DispatchRequest),
+		isolated.map((index) => positions?.[index] ?? index + 1),
+	);
+	if (message === null) return;
+	overlapNoticed.add(key);
+	deps.bus.emit("run.scope_notice_raised", { code: "write_roots_overlap", level: "warning", message });
 }
 
 /**
@@ -733,6 +762,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			const specs = deps.getAgentSpecs();
 			const conflict = parallelWriterConflict(parsed.requests, specs);
 			if (conflict !== null && !confineGrantOnlyWriters(parsed.requests, specs)) return shapeRejection(args, conflict);
+			announceOverlappingWriteRoots(deps, args, parsed.requests, parsed.positions);
 		}
 		const parentCheckout = gitCheckoutRoot(process.cwd());
 		for (const request of parsed.requests) {

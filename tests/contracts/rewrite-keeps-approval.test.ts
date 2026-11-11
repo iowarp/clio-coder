@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { RunPlanProvenance } from "../../src/domains/dispatch/types.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
@@ -286,5 +287,49 @@ describe("the read scope of a rewritten splice task", () => {
 		strictEqual(dispatchRewriteNarrows(approved, snapshot(["src/a/b/"], ["tool:read-a"])), true);
 		strictEqual(dispatchRewriteNarrows(approved, snapshot([], ["tool:read-a"])), false);
 		strictEqual(dispatchRewriteNarrows(approved, snapshot(["src/a/b/"], ["tool:read-a", "tool:read-env"])), false);
+	});
+});
+
+describe("parallel worktree tasks with overlapping write roots", () => {
+	it("warn once on the bus and still start", async () => {
+		const bus = createTelemetryHub();
+		const notices: Array<{ code: string; message: string }> = [];
+		bus.subscribe("run.scope_notice_raised", (notice) => {
+			notices.push(notice);
+		});
+		let started = 0;
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: process.cwd() }), autonomy: () => "default" });
+		registry.register(
+			createDispatchTool({
+				bus,
+				dispatch: {
+					derivedGrants: () => ({ requestedActions: ["read"], mcp: null }),
+					dispatchBatch: async (requests: ReadonlyArray<DispatchRequest>) => {
+						started += requests.length;
+						throw new Error("stub workers");
+					},
+				} as unknown as DispatchContract,
+				getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
+			}),
+		);
+		const tasks = [
+			{ task: "Edit the module.", intent: { write_roots: ["src/"] } },
+			{ task: "Edit the parser.", intent: { write_roots: ["src/parser/"] } },
+			{ task: "Edit the docs.", intent: { write_roots: ["docs/"] } },
+		];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			void registry.resumeParkedCalls({
+				actionClass: decision.classification.actionClass,
+				requestId: meta.requestId,
+				requestedBy: "tool:one_shot",
+			});
+		});
+		await registry.invoke({ tool: "dispatch", args: { agent: "coder", worktree: true, tasks } });
+		strictEqual(started, 3);
+		deepStrictEqual(
+			notices.map((notice) => notice.code),
+			["write_roots_overlap"],
+		);
+		match(notices[0]?.message ?? "", /task 1 \(coder\) and task 2 \(coder\): \S*src ~ \S*src\/parser$/u);
 	});
 });
