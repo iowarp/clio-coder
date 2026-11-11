@@ -40,7 +40,7 @@ export interface RenderTraceFrameRecord {
 	sinceLastCommitMs: number | null;
 	panelHighWater: number;
 	inputHighWater: number;
-	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number; segmentsRendered?: number } | null;
 	/** Clio estimate from root rows at the same indices; viewport moves and overlays can make pi-tui write more. */
 	rowsChanged: number | null;
 	pipeline: {
@@ -342,7 +342,7 @@ interface FrameState {
 	beginAt: number;
 	panelHighWater: number;
 	inputHighWater: number;
-	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number } | null;
+	panel: { durationMs: number; cacheHit: boolean; entriesRendered: number; segmentsRendered?: number } | null;
 	rowsChanged: number | null;
 	phases: Record<"component" | TuiRenderPhase, number>;
 	commits: RenderTraceCommit[];
@@ -350,7 +350,12 @@ interface FrameState {
 
 export interface RenderTrace extends TuiRenderObserver {
 	readonly rowsChangedEnabled: boolean;
-	recordPanelRender(metrics: { durationMs: number; cacheHit: boolean; entriesRendered: number }): void;
+	recordPanelRender(metrics: {
+		durationMs: number;
+		cacheHit: boolean;
+		entriesRendered: number;
+		segmentsRendered?: number;
+	}): void;
 	recordRootRows(rows: readonly string[]): void;
 	beginGeneration(): void;
 	recordVisibleEvent(fields: { kind: VisibleEventKind; contentIndex: number; delta: string }): number;

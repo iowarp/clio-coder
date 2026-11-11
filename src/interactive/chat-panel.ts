@@ -233,6 +233,8 @@ export interface ChatPanelRenderMetrics {
 	durationMs: number;
 	cacheHit: boolean;
 	entriesRendered: number;
+	/** Assistant segments the frame walked; a live turn's settled head is reused without walking its segments. */
+	segmentsRendered: number;
 }
 
 /**
@@ -508,6 +510,8 @@ type TranscriptEntry =
 			sameModelAsBefore?: boolean;
 			segments: AssistantSegment[];
 			reasoningRenders?: Map<number, ThinkingRender>;
+			/** The joined rows of a live turn's settled leading segments; see `settledHeadFor`. */
+			settledHead?: SettledHead | undefined;
 			/**
 			 * `segments.length` when the current model call began, so `message_end`
 			 * can tell which segments belong to the message it is settling. A
@@ -1950,10 +1954,15 @@ interface TurnBlock {
  * action with a body (arguments, output, a diff) opens a gap on both sides so
  * its body cannot be mistaken for its neighbor's.
  */
-function joinTurnBlocks(blocks: readonly TurnBlock[], memo?: JoinedRows): string[] {
+function joinTurnBlocks(
+	blocks: readonly TurnBlock[],
+	memo?: JoinedRows,
+	after?: Pick<TurnBlock, "kind" | "body">,
+): string[] {
 	const parts: (readonly string[])[] = [];
 	const pieces: RowPiece[] = [];
-	let previous: TurnBlock | undefined;
+	// Rows joined to follow rows already joined, such as a live turn's settled head, open with the gap after `after`.
+	let previous: Pick<TurnBlock, "kind" | "body"> | undefined = after;
 	for (const block of blocks) {
 		// Markdown can open or close a block on an empty row; the gap between
 		// blocks is decided here, so a block's own blank edges would double it.
@@ -2035,6 +2044,64 @@ function stacksUnder(
 	return detail.style !== "detailed" && entry.state.helper === true && previous.state.helper === true;
 }
 
+/**
+ * A live turn's leading segments that can no longer change how they render, joined once. A turn that streams
+ * thousands of messages re-rendered and re-joined every one of them on each delta; a frame now starts after the
+ * head. The head ends only after a finalized text block: reasoning is flushed there and no Compact fold reaches
+ * across non-empty text, so nothing after it changes the blocks before it.
+ */
+type SettledHead = {
+	key: string;
+	/** Per covered segment (`segments[0, marks.length)`), the facts its rows are a function of. */
+	marks: SegmentMark[];
+	rows: string[];
+	/** The head's last visible block, which decides the gap before the next one. */
+	last: Pick<TurnBlock, "kind" | "body">;
+	reasoningIndex: number;
+};
+/** A segment's identity and the one field a settled segment of its kind can still change by. */
+type SegmentMark = { seg: AssistantSegment; text: string | undefined; revision: number | undefined };
+
+function segmentMark(seg: AssistantSegment): SegmentMark {
+	return {
+		seg,
+		text: seg.kind === "tool" ? undefined : seg.text,
+		revision: seg.kind === "tool" ? seg.settledRevision : undefined,
+	};
+}
+
+/** A settled segment renders the same rows until its text or revision moves; `segmentSettled` holds for the head. */
+function segmentSettled(seg: AssistantSegment): boolean {
+	if (seg.kind === "text" || seg.kind === "thinking") return seg.finalized;
+	if (seg.kind === "tool") return seg.finished;
+	return true;
+}
+
+function settledHeadFor(entry: Extract<TranscriptEntry, { role: "assistant" }>, key: string): SettledHead | undefined {
+	const head = entry.settledHead;
+	if (head === undefined) return undefined;
+	let valid = head.key === key && head.marks.length <= entry.segments.length;
+	for (let index = 0; valid && index < head.marks.length; index += 1) {
+		const seg = entry.segments[index];
+		const mark = head.marks[index] as SegmentMark;
+		valid =
+			seg === mark.seg &&
+			segmentSettled(seg) &&
+			(seg.kind === "tool" ? seg.settledRevision === mark.revision : seg.text === mark.text);
+	}
+	if (!valid) entry.settledHead = undefined;
+	return valid ? head : undefined;
+}
+
+/**
+ * Asks `renderEntryLines` for a live turn's rows apart from its settled head: `head` is set to the head's rows when
+ * the turn has one, and the rows returned are the ones after it, so a caller can keep the head without copying it.
+ */
+type LiveSplit = { head: string[] | undefined };
+
+/** Segments walked by `renderEntryLines` since the panel's frame began. */
+let segmentsWalked = 0;
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -2046,7 +2113,9 @@ function renderEntryLines(
 	previous?: TranscriptEntry,
 	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry">,
 	stopRequestedAt: number | null = null,
+	split?: LiveSplit,
 ): string[] {
+	if (split !== undefined) split.head = undefined;
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
 	}
@@ -2093,6 +2162,26 @@ function renderEntryLines(
 	let reasoningOpen = false;
 	let reasoningIndex = 0;
 	let lastMarker: TurnBlock | undefined;
+	// Only a live turn keeps a head: a settled one renders once into the panel's entry cache, and its last
+	// reasoning marker is rewritten from the receipt below.
+	const headKey = entry.pending
+		? `${settledKey}|${bareFences}|${detail.reasoningRows}|${detail.reasoningBeforeActionRows}|${detail.invocationRows}|${detail.errorRows}|${entry.models?.join("\u0000") ?? ""}|${entry.sameModelAsBefore === true}`
+		: undefined;
+	let start = 0;
+	const head = headKey === undefined ? undefined : settledHeadFor(entry, headKey);
+	if (head !== undefined) {
+		blocks.length = 0;
+		blocks.push({
+			kind: head.last.kind,
+			lines: head.rows,
+			...(head.last.body === undefined ? {} : { body: head.last.body }),
+		});
+		start = head.marks.length;
+		reasoningIndex = head.reasoningIndex;
+	}
+	// Where a longer head could end: every segment before it settled, and a finalized text block last.
+	let headable = true;
+	let cut: { through: number; blocks: number; reasoningIndex: number } | undefined;
 	const flushReasoning = (next: "action" | "words"): void => {
 		const text = reasoning;
 		reasoning = "";
@@ -2124,9 +2213,11 @@ function renderEntryLines(
 		lastMarker = { kind: "thinking", lines: [renderSettledThinkingMarker(UNMEASURED_REASONING, width)] };
 		blocks.push(lastMarker);
 	};
-	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
+	for (let segIndex = start; segIndex < entry.segments.length; segIndex += 1) {
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
+		segmentsWalked += 1;
+		if (headable && !segmentSettled(seg)) headable = false;
 		if (seg.kind === "thinking") {
 			if (seg.notRetained === true) {
 				flushReasoning("words");
@@ -2188,6 +2279,11 @@ function renderEntryLines(
 					seg.settledFold = fold;
 				}
 				blocks.push({ kind: "tool", lines: fold.lines, body: fold.body });
+				for (let member = segIndex + 1; headable && member <= end; member += 1) {
+					const covered = entry.segments[member];
+					if (covered !== undefined && !segmentSettled(covered)) headable = false;
+				}
+				segmentsWalked += end - segIndex;
 				segIndex = end;
 			} else {
 				flushReasoning("action");
@@ -2219,7 +2315,11 @@ function renderEntryLines(
 		// A stray mark between actions (`.` or `)` left over when a model ends its
 		// words in a tool call) carries nothing to read, and as its own bubble it
 		// looked like a reply. A turn whose only output is that mark keeps it.
-		if (seg.kind === "text" && isStraySegment(seg) && entry.segments.some((other) => carriesOutput(other, seg))) continue;
+		if (seg.kind === "text" && isStraySegment(seg)) {
+			if (entry.segments.some((other) => carriesOutput(other, seg))) continue;
+			// Kept only while nothing else carries output, which a later segment can change.
+			headable = false;
+		}
 		// A skill suggestion is advice for the operator, not the answer: it reads
 		// `§ suggests /skill <name>` as its own row, ahead of the answer wherever
 		// the model put it.
@@ -2230,6 +2330,7 @@ function renderEntryLines(
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences);
 			if (answerLines.length > 0)
 				blocks.push({ kind: "prose", lines: hangSegmentLines(split.answer, answerLines, CLIO_PREFIX()) });
+			if (headable) cut = { through: segIndex + 1, blocks: blocks.length, reasoningIndex };
 			continue;
 		}
 		const suggestionOnly = seg.kind === "text" ? findSkillSuggestionLine(seg) : null;
@@ -2251,11 +2352,28 @@ function renderEntryLines(
 		}
 		if (rendered.length === 0) continue;
 		flushReasoning("words");
-		if (seg.kind === "error") {
-			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR()) });
-			continue;
+		if (seg.kind === "error") blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR()) });
+		else blocks.push({ kind: "prose", lines: hangSegmentLines(seg, rendered, CLIO_PREFIX()) });
+		if (headable) cut = { through: segIndex + 1, blocks: blocks.length, reasoningIndex };
+	}
+	if (headKey !== undefined && cut !== undefined && cut.through > (head?.marks.length ?? 0)) {
+		const headBlocks = blocks.slice(0, cut.blocks);
+		const rows = joinTurnBlocks(headBlocks);
+		const last = [...headBlocks].reverse().find((block) => block.lines.some((line) => !isBlankRow(line)));
+		if (last !== undefined && rows.length > 0) {
+			const marks = head?.marks.slice() ?? [];
+			for (let index = marks.length; index < cut.through; index += 1) {
+				const seg = entry.segments[index];
+				if (seg !== undefined) marks.push(segmentMark(seg));
+			}
+			entry.settledHead = {
+				key: headKey,
+				marks,
+				rows,
+				last: { kind: last.kind, ...(last.body === undefined ? {} : { body: last.body }) },
+				reasoningIndex: cut.reasoningIndex,
+			};
 		}
-		blocks.push({ kind: "prose", lines: hangSegmentLines(seg, rendered, CLIO_PREFIX()) });
 	}
 	// Reasoning at the tail is either still streaming or the turn's last word.
 	flushReasoning("words");
@@ -2273,6 +2391,10 @@ function renderEntryLines(
 			joined = { pieces: [] };
 			joinedTurns.set(entry, joined);
 		}
+	}
+	if (head !== undefined && split !== undefined) {
+		split.head = head.rows;
+		return joinTurnBlocks(blocks.slice(1), joined, head.last);
 	}
 	return joinTurnBlocks(blocks, joined);
 }
@@ -2467,9 +2589,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * line in `previousLines` and full-redraws (clearing scrollback) when the
 	 * head shrinks. Fullscreen mode instead gives the transcript its own pi-tui
 	 * ScrollView. The freeze is dropped whenever a frozen entry is invalidated or
-	 * the render key changes.
+	 * the render key changes. A live turn right after the run can freeze its settled head as well (`head`): a
+	 * turn that streams thousands of messages then copies only its live rows per frame, and the head's rows again
+	 * only when a message settles. The head stays frozen while the turn renders against the very same head rows.
 	 */
-	let frozen: { lines: string[]; through: number; key: string } | null = null;
+	let frozen: {
+		lines: readonly string[];
+		through: number;
+		key: string;
+		head?: { entry: TranscriptEntry; rows: string[]; base: readonly string[] };
+	} | null = null;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 	const bareFences = options.bareCodeFences === true;
 	/**
@@ -3209,14 +3338,22 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			cachedDetail === detail &&
 			cachedTick === tick
 		) {
-			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
+			options.onRenderMetrics?.({
+				durationMs: performance.now() - startedAt,
+				cacheHit: true,
+				entriesRendered: 0,
+				segmentsRendered: 0,
+			});
 			return cachedRegions;
 		}
 		// Stable entries cache by width, height budget, and preset.
 		const baseKey = `${width}|${terminalRows}|${detail.style}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
-		const prefix = frozen === null ? NO_ROWS : frozen.lines;
+		// A frozen head's turn may have left the end of the run: popped, or pushed on by an inserted entry.
+		if (frozen?.head !== undefined && transcript[frozen.through] !== frozen.head.entry)
+			frozen = { lines: frozen.head.base, through: frozen.through, key: frozen.key };
+		let prefix = frozen === null ? NO_ROWS : frozen.lines;
 		let out: string[] = [];
 		// A row-by-row push of a long streaming reply showed in the frame time, so an entry larger than
 		// everything before it is copied natively (#428).
@@ -3234,7 +3371,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let freezeThrough = startIndex;
 		let freezeTailRows = 0;
 		let freezeOpen = true;
+		let freezeChanged = false;
+		// The live turn whose settled head ends the freeze, and the row of `out` its head ends at.
+		let freezeHead: { entry: TranscriptEntry; rows: string[]; end: number; kept: boolean } | undefined;
+		const split: LiveSplit = { head: undefined };
 		let entriesRendered = 0;
+		segmentsWalked = 0;
 		// Only entries at or past `startIndex` can hold a running tool: the frozen
 		// prefix is by construction a run of stable entries, and stable means no
 		// unfinished tool segment.
@@ -3248,11 +3390,26 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// Compact. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
 			const separated = i > 0 && !stacksUnder(entry, previous, detail);
-			if (separated) {
+			// A frozen head holds the gap before its turn too.
+			let frozenHead = i === startIndex ? frozen?.head : undefined;
+			let gapped = false;
+			const pushGap = (): void => {
+				if (!separated) return;
 				out.push("");
 				pieces.push({ rows: GAP_ROW, start: 0, end: 1 });
-			}
-			const entryStart = out.length;
+				gapped = true;
+			};
+			if (frozenHead === undefined) pushGap();
+			let entryStart = out.length;
+			// The head moved on, or another entry took its place: the freeze ends before this entry again.
+			const releaseHead = (base: readonly string[]): void => {
+				prefix = base;
+				frozenHead = undefined;
+				freezeChanged = true;
+				pushGap();
+				entryStart = out.length;
+			};
+			split.head = undefined;
 			const renders = entryRenderCache.get(entry);
 			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
 			const cached = renders?.get(renderKey);
@@ -3263,6 +3420,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// Worker mutations invalidate their own entry; only elapsed time needs a tick (#428).
 			const cacheable = i >= transcript.length - capacity && (entryIsStable(entry) || entry.role === "worker");
 			if (cacheable && cached !== undefined) {
+				if (frozenHead !== undefined) releaseHead(frozenHead.base);
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
 				appendRows(cached);
@@ -3279,7 +3437,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					previous,
 					workerRenderOptions(entry),
 					options.getStopRequestedAt?.() ?? null,
+					split,
 				);
+				if (frozenHead !== undefined && (frozenHead.entry !== entry || frozenHead.rows !== split.head)) {
+					releaseHead(frozenHead.base);
+				}
+				if (split.head !== undefined && frozenHead === undefined) appendRows(split.head);
+				if (split.head !== undefined && freezeOpen && i === freezeThrough) {
+					freezeHead = { entry, rows: split.head, end: out.length, kept: frozenHead !== undefined };
+				}
 				appendRows(renderedEntry);
 				if (cacheable) {
 					const byKey = renders ?? new Map<string, string[]>();
@@ -3297,7 +3463,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 			}
 			// An entry with nothing to show draws no gap either.
-			if (separated && out.length === entryStart) {
+			if (gapped && out.length === entryStart) {
 				out.pop();
 				pieces.splice(-2, 2);
 			}
@@ -3310,12 +3476,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		// The freeze only grows when an entry settles. An unchanged freeze keeps
 		// its array, which is what lets a root that holds the prefix skip it.
-		if (freezeThrough > startIndex) {
-			frozen = {
-				lines: prefix.concat(freezeTailRows === out.length ? out : out.slice(0, freezeTailRows)),
-				through: freezeThrough,
-				key: baseKey,
-			};
+		const headFreezes = freezeHead !== undefined && !freezeHead.kept;
+		if (freezeThrough > startIndex || freezeChanged || headFreezes) {
+			const base =
+				freezeTailRows === 0 ? prefix : prefix.concat(freezeTailRows === out.length ? out : out.slice(0, freezeTailRows));
+			frozen =
+				freezeHead !== undefined && headFreezes
+					? {
+							lines: prefix.concat(out.slice(0, freezeHead.end)),
+							through: freezeThrough,
+							key: baseKey,
+							head: { entry: freezeHead.entry, rows: freezeHead.rows, base },
+						}
+					: { lines: base, through: freezeThrough, key: baseKey };
 		}
 		if (cachedRegions.prefix === prefix) keepRows(out, cachedRegions.tail, keptPieceRows(pieces, tailPieces));
 		tailPieces = pieces;
@@ -3327,7 +3500,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		cachedTick = tick;
 		renderedRunningTool = sawRunningTool;
 		dirty = false;
-		options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: false, entriesRendered });
+		options.onRenderMetrics?.({
+			durationMs: performance.now() - startedAt,
+			cacheHit: false,
+			entriesRendered,
+			segmentsRendered: segmentsWalked,
+		});
 		schedulePrerender(width, terminalRows, detail.style);
 		return cachedRegions;
 	};
