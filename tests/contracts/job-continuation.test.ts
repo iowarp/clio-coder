@@ -387,6 +387,32 @@ describe("job continuation at yolo (#445)", () => {
 		deepStrictEqual(resumed, []);
 	});
 
+	it("backs off a job that runs until stopped once loop-guard stops pass the cap", async () => {
+		const delivered: string[] = [];
+		let stoppedAt = 0;
+		const host = make({
+			...polls([{ state: "done" }], delivered),
+			deliver: async (context) => {
+				context.start();
+				delivered.push(context.job.delivery?.continuation ?? "match");
+				stoppedAt = clock;
+				return GUARD;
+			},
+		});
+		const { count: _count, ...unbounded } = pollJob;
+		await host.create({ ...unbounded, untilStopped: true }, owner);
+		for (let i = 0; i < 8; i++) await advance(host, 1000);
+		deepStrictEqual(delivered, ["match", "loop_guard", "loop_guard", "loop_guard"]);
+		await advance(host, stoppedAt + 60_000 - 1 - clock);
+		strictEqual(delivered.length, 4, "the first continuation past the cap waits a minute");
+		await advance(host, 1);
+		strictEqual(delivered.length, 5);
+		await advance(host, 300_000 - 1);
+		strictEqual(delivered.length, 5, "the next waits five");
+		await advance(host, 1);
+		strictEqual(delivered.length, 6);
+	});
+
 	it("leaves a poll job's end silent below yolo, without a follow-up, or with starts left", async () => {
 		yolo = false;
 		const delivered: string[] = [];

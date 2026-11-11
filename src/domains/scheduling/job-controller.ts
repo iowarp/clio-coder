@@ -555,9 +555,17 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		// The commit is the authority: a branch that returned early queued nothing to announce.
 		const queued = current(id).delivery;
 		if (resuming !== null && queued?.continuation !== undefined && queued.id !== job.delivery?.id) {
+			const attempt = current(id).clockResumes ?? 1;
 			if (resuming === "failure") {
-				const attempt = current(id).clockResumes ?? 1;
 				retryAt.set(id, spanNow() + turnContinuationDelayMs(attempt, result.retryAfterMs));
+				schedule();
+			} else if (
+				job.spec.untilStopped === true &&
+				continuationCountsAgainstCap(resuming) &&
+				attempt > TURN_CONTINUATION_CAP
+			) {
+				// Past the cap only the cost ceiling bounds a job that runs until stopped, and a free route has none.
+				retryAt.set(id, spanNow() + turnContinuationDelayMs(attempt - TURN_CONTINUATION_CAP, result.retryAfterMs));
 				schedule();
 			}
 			try {
