@@ -23,4 +23,10 @@ export async function openStoreBackend(cwd: string): Promise<StoreBackend> {
 	const { createLocalStoreBackend } = await import("./backends/local.js");
 	return createLocalStoreBackend(cwd);
 }
+
+/** True unless `<dataDir>/store/backend.json` selects clio-core, whose runtime a fleet node can reach. */
+export async function storeBackendIsLocal(): Promise<boolean> {
+	const { readStoreBackendSelection } = await import("./selection.js");
+	return readStoreBackendSelection().record?.backend !== "clio-core";
+}
 export { withStoreLock } from "./lock.js";

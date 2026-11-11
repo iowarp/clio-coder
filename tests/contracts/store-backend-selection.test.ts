@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storeFindings } from "../../src/cli/doctor-store.js";
 import { storeRoot } from "../../src/core/store-paths.js";
-import { openStoreBackend } from "../../src/domains/store/index.js";
+import { openStoreBackend, storeBackendIsLocal } from "../../src/domains/store/index.js";
 import { readStoreBackendSelection } from "../../src/domains/store/selection.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -33,6 +33,15 @@ describe("store backend selection", () => {
 			strictEqual(selection.record, null);
 			strictEqual(selection.problem, null);
 			strictEqual((await openStoreBackend(root)).kind, "local");
+		}));
+
+	it("only a clio-core selection lifts the remote-node tag grant refusal (M-31 item 6)", () =>
+		withHome(async () => {
+			strictEqual(await storeBackendIsLocal(), true);
+			writeRecord(JSON.stringify({ v: 1, backend: "local" }));
+			strictEqual(await storeBackendIsLocal(), true);
+			writeRecord(JSON.stringify({ v: 1, backend: "clio-core" }));
+			strictEqual(await storeBackendIsLocal(), false);
 		}));
 
 	it("doctor reports the local default quietly when clio-core is absent", () =>
