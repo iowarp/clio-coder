@@ -88,6 +88,8 @@ interface BudgetFixture {
 	ceilingUsd: number;
 	headless?: boolean;
 	retry?: boolean;
+	/** No target rates; the runtime reports each call's cost itself, as OpenRouter does. */
+	providerCosted?: boolean;
 }
 
 function fixture(
@@ -116,7 +118,7 @@ function fixture(
 			...target,
 			runtime: runtimeId,
 			defaultModel: model.id,
-			...(budget ? { pricing: { input: 1, output: 1 } } : {}),
+			...(budget && !budget.providerCosted ? { pricing: { input: 1, output: 1 } } : {}),
 		},
 	];
 	if (budget) settings.safety.limits.sessionCostUsd = budget.ceilingUsd;
@@ -127,6 +129,7 @@ function fixture(
 		auth: "none",
 		defaultCapabilities: capabilities,
 		synthesizeModel: () => ({ ...model, contextWindow: 131072, maxTokens: 4096 }),
+		...(budget?.providerCosted ? { reportsCallCost: true as const } : {}),
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const wire = transport(mode, firstTokenDelayMs);
@@ -278,6 +281,22 @@ it("a headless request at the ceiling ends on the budget error without a retry, 
 			/budget_ceiling: session priced spend \$1\.50 reached the \$1\.50 ceiling with ~[\d,]+ context tokens per call/u,
 		);
 		doesNotMatch(settled, /stalled|"type":"retry_status"/u);
+	} finally {
+		f.loop.dispose();
+		f.wire.dispose();
+		await f.loop.whenSettled();
+	}
+});
+
+it("an unpriced model on a route that reports its own cost still stops at the ceiling", {
+	timeout: 20_000,
+}, async () => {
+	const f = fixture("cold", 0, { spentUsd: 2, ceilingUsd: 1.5, headless: true, providerCosted: true });
+	try {
+		await f.loop.submit("hello");
+		await f.loop.whenSettled();
+		strictEqual(f.wire.calls(), 0, "nothing reached the provider past the ceiling");
+		match(JSON.stringify(f.events), /budget_ceiling/u);
 	} finally {
 		f.loop.dispose();
 		f.wire.dispose();

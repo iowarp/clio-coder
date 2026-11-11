@@ -195,6 +195,11 @@ export interface RuntimeDescriptor {
 	auth: RuntimeAuth;
 	credentialsEnvVar?: string;
 	/**
+	 * The provider reports each call's cost itself (OpenRouter), so a model with
+	 * no catalog or target price still counts toward the session cost ceiling.
+	 */
+	reportsCallCost?: true;
+	/**
 	 * pi-ai OAuth provider id backing this runtime when `auth === "oauth"` and it
 	 * differs from `id`. `openai-codex` omits this because its registry id, target
 	 * `oauthProfile`, and pi-ai provider id all coincide. The Claude Pro/Max

@@ -108,6 +108,7 @@ const openrouterRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-completions",
 	auth: "api-key",
 	credentialsEnvVar: "OPENROUTER_API_KEY",
+	reportsCallCost: true,
 	defaultCapabilities,
 	probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		return fetchModels(target, ctx);

@@ -1197,7 +1197,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						block: true,
 						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
 					};
-				if (deps.scheduling && pricesCalls(localRuntime.runtimeResolution.pricedBy)) {
+				if (
+					deps.scheduling &&
+					// A provider that reports its own per-call cost reaches the ceiling even with no rates to project.
+					(pricesCalls(localRuntime.runtimeResolution.pricedBy) ||
+						localRuntime.runtimeResolution.runtime.reportsCallCost === true)
+				) {
 					const recordBlock = (block: BudgetAlertPayload): void => {
 						hold.waitedOn = "budget";
 						persistence.appendBudgetBlock({
