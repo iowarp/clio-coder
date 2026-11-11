@@ -26,6 +26,7 @@ export const RUN_OUTCOME_CODES = [
 	"worker_final_output_missing",
 	"host_verification_rejected",
 	"worker_no_work",
+	"worker_partial_work",
 	"worker_mutation_blocked",
 	"merge_withheld",
 	"worker_removed_tests",

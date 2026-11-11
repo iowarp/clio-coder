@@ -477,3 +477,29 @@ test("a capped worker's dirty task worktree is committed on its preserved branch
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("an edit worker that changed files but reports it could not finish settles partial, preserved under a partial subject", async () => {
+	const { taskWorktreeCommitMessage, preservesPartialResult } = await import("../../src/domains/dispatch/merge-gate.js");
+	const { workerPartialWorkDetail } = await import("../../src/domains/dispatch/tool-stats.js");
+	const summary = "Could not finish everything. The parser change is in; the CLI flag is not wired.";
+	const input = {
+		activity: { mutatingSucceeded: true },
+		mutatedPathCount: 2,
+		finalText: JSON.stringify({ mutatedPaths: ["a.ts", "b.ts"], validations: [], summary }),
+	};
+	match(workerPartialWorkDetail(input) ?? "", /did not finish the assignment.*Could not finish everything/su);
+	match(
+		workerPartialWorkDetail({ ...input, finalText: "fix(cli): wire the flag\nPartially done: tests pending." }) ?? "",
+		/partial/u,
+	);
+	// Nothing changed is no work, not partial work; a report that opens with its result is a success.
+	strictEqual(workerPartialWorkDetail({ ...input, mutatedPathCount: 0 }), null);
+	strictEqual(workerPartialWorkDetail({ ...input, finalText: "Wired the flag. The parser cannot overflow." }), null);
+	strictEqual(preservesPartialResult("worker_partial_work", true), true);
+	const task = "Add the --strict flag to the CLI parser.";
+	strictEqual(
+		taskWorktreeCommitMessage({ task, partial: true, commitMessage: "feat(cli): add --strict", summary }),
+		"partial: Add the --strict flag to the CLI parser",
+	);
+	strictEqual(taskWorktreeCommitMessage({ task, partial: false, summary: "Added the flag." }), "Added the flag");
+});

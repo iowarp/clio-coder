@@ -37,6 +37,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 	worker_final_output_missing: "no final answer",
 	host_verification_rejected: "Clio's checks failed",
 	worker_no_work: "did no work",
+	worker_partial_work: "did not finish",
 	worker_mutation_blocked: "change was blocked",
 	merge_withheld: "merge withheld",
 	worker_removed_tests: "removed tests",

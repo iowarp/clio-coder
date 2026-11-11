@@ -56,7 +56,6 @@ import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
 import { bashShellPath } from "../../core/bash-shell.js";
-import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { devRootOwnerForWorkers } from "../../core/dev-roots.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -388,6 +387,7 @@ import {
 	preservesPartialResult,
 	removedTestCases,
 	taskRequestsTestRemoval,
+	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
@@ -475,6 +475,7 @@ import {
 	snapshotUnfinishedTools,
 	summarizeToolActivity,
 	workerNoWorkDetail,
+	workerPartialWorkDetail,
 	zeroSuccessfulToolNote,
 } from "./tool-stats.js";
 import {
@@ -9097,6 +9098,18 @@ export function createDispatchBundle(
 						outcomeCode = "worker_no_work";
 						finalDetail = noWork;
 						failureMessage = noWork;
+					} else {
+						const partialWork = workerPartialWorkDetail({
+							activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+							mutatedPathCount: finishContract?.assessment.mutatedPaths.length ?? null,
+							finalText: finishContractAssistantText,
+						});
+						if (partialWork !== null) {
+							finalOutcome = "failed";
+							outcomeCode = "worker_partial_work";
+							finalDetail = partialWork;
+							failureMessage = partialWork;
+						}
 					}
 				}
 				// Close steering provenance before taking receipt snapshots. A late
@@ -9293,8 +9306,9 @@ export function createDispatchBundle(
 				// for the operator's one merge command instead of left as loose edits.
 				const hostRejectedMerge =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
-				// A worker stopped at its tool-call cap commits what it changed on its
-				// preserved branch as a partial result: never merged, never dropped.
+				// A worker stopped at its tool-call cap, or one that reported it did not
+				// finish, commits what it changed on its preserved branch as a partial
+				// result: never merged, never dropped.
 				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
@@ -9315,8 +9329,12 @@ export function createDispatchBundle(
 							: null;
 					// A report without a commitMessage still lands a readable subject: the
 					// worker's summary, else the task it was given, never only the run id.
-					const taskCommitMessage =
-						authorship?.commitMessage ?? taskCommitSubject(authorship?.summary ?? null) ?? taskCommitSubject(req.task);
+					const taskCommitMessage = taskWorktreeCommitMessage({
+						task: req.task,
+						partial: cappedPartial,
+						commitMessage: authorship?.commitMessage ?? null,
+						summary: authorship?.summary ?? null,
+					});
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,

@@ -1,16 +1,36 @@
+import { taskCommitSubject } from "../../core/commit-message.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { mutationReportChecks, mutationReportFailures } from "../agents/result-contract.js";
 
 /**
  * Whether a failed run's task worktree is committed to its branch as a partial
- * result. A worker stopped at its tool-call cap often stops mid-change; its
- * edits are neither merged (nothing checked them) nor left as loose files, so
- * the host commits them on the preserved branch for the dispatcher to review,
- * continue or land.
+ * result. A worker stopped at its tool-call cap often stops mid-change, and one
+ * whose report says it did not finish changed only part of what it was asked;
+ * their edits are neither merged nor left as loose files, so the host commits
+ * them on the preserved branch for the dispatcher to review, continue or land.
  */
 export function preservesPartialResult(outcomeCode: string | null, hasTaskWorktree: boolean): boolean {
-	return hasTaskWorktree && outcomeCode === "worker_tool_call_cap_exhausted";
+	return hasTaskWorktree && (outcomeCode === "worker_tool_call_cap_exhausted" || outcomeCode === "worker_partial_work");
+}
+
+/**
+ * The commit message for a task worktree: the worker's own commitMessage, else its
+ * summary, else its task. A partial result never takes the worker's words, which
+ * either claim the change ("fix: ...") or report the failure ("Could not finish
+ * everything"); its subject marks it partial over the task it was given.
+ */
+export function taskWorktreeCommitMessage(input: {
+	task: string;
+	partial: boolean;
+	commitMessage?: string | null;
+	summary?: string | null;
+}): string | null {
+	if (input.partial) {
+		const subject = taskCommitSubject(input.task);
+		return subject === null ? null : `partial: ${subject}`;
+	}
+	return input.commitMessage ?? taskCommitSubject(input.summary ?? null) ?? taskCommitSubject(input.task);
 }
 
 /** The failure detail suffix naming where a preserved partial result is and how to land it. */

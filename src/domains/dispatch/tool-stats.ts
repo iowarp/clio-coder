@@ -181,6 +181,51 @@ export function blockedStateChangingCalls(
 	return blocked;
 }
 
+/** A report that opens by saying the worker could not do something. */
+const INABILITY_OPENING =
+	/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu;
+/** A report that opens by saying the work is only partly done. */
+const PARTIAL_OPENING =
+	/^(?:(?:only\s+)?partial(?:ly)?\b|incomplete\b|(?:i\s+)?(?:did not|didn't|have not|haven't)\s+(?:finish|complete)|not\s+(?:all|everything|finished|complete)\b)/iu;
+
+/**
+ * The worker's report (a mutation report's summary, else its final prose) and its opening.
+ * Only a report that opens with its inability counts: "the parser cannot overflow" is not one.
+ * A leading conventional-commit subject line ("fix(scope): ...") is the report's title, not its opening.
+ */
+function workerReportOpening(finalText: string | undefined): { report: string; opening: string } {
+	let report = finalText?.trim() ?? "";
+	try {
+		const parsed: unknown = JSON.parse(report);
+		if (parsed && typeof parsed === "object" && "summary" in parsed && typeof parsed.summary === "string") {
+			report = parsed.summary;
+		}
+	} catch {
+		// Plain final prose is also a valid worker report.
+	}
+	const opening = report.trimStart().replace(/^[a-z]+(?:\([^)\n]*\))?!?:[^\n]*\n\s*/u, "");
+	return { report, opening };
+}
+
+/**
+ * An edit worker that changed files but opened its report by saying it could not
+ * finish did part of its assignment. Its clean exit sealed "succeeded" and merged
+ * the half-done tree under a subject such as "Could not finish everything".
+ */
+export function workerPartialWorkDetail(input: {
+	activity: Pick<ToolActivitySummary, "mutatingSucceeded">;
+	mutatedPathCount: number | null;
+	finalText?: string;
+}): string | null {
+	const changed =
+		(input.mutatedPathCount ?? 0) > 0 || (input.mutatedPathCount === null && input.activity.mutatingSucceeded);
+	if (!changed) return null;
+	const { opening } = workerReportOpening(input.finalText);
+	if (!INABILITY_OPENING.test(opening) && !PARTIAL_OPENING.test(opening)) return null;
+	const reason = opening.split(/\r?\n/u)[0]?.trim() ?? "";
+	return `worker reported it did not finish the assignment, so its changes are a partial result${reason ? `: ${reason}` : ""}`;
+}
+
 /** A clean process exit cannot overrule an edit worker's explicit report of inability. */
 export function workerNoWorkDetail(input: {
 	activity: ToolActivitySummary;
@@ -202,20 +247,8 @@ export function workerNoWorkDetail(input: {
 	finalText?: string;
 	limitationDetail?: string;
 }): string | null {
-	let report = input.finalText?.trim() ?? "";
-	try {
-		const parsed: unknown = JSON.parse(report);
-		if (parsed && typeof parsed === "object" && "summary" in parsed && typeof parsed.summary === "string") {
-			report = parsed.summary;
-		}
-	} catch {
-		// Plain final prose is also a valid worker report.
-	}
-	// Only a report that opens with its inability counts: "the parser cannot overflow" in a no-change report is not one.
-	// A leading conventional-commit subject line ("fix(scope): ...") is the report's title, not its opening.
-	const opening = report.trimStart().replace(/^[a-z]+(?:\([^)\n]*\))?!?:[^\n]*\n\s*/u, "");
-	const reportedInability =
-		/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu.test(opening);
+	const { report, opening } = workerReportOpening(input.finalText);
+	const reportedInability = INABILITY_OPENING.test(opening);
 	const unchanged = input.mutatedPathCount === 0;
 	// The operator must see that the run did nothing because they denied the call
 	// (flywheel p7/A5); the worker's own text may not open with an inability.

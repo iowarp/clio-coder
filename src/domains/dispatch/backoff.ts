@@ -12,6 +12,7 @@ export function isDeterministicOutcomeCode(code: RunOutcomeCode | null | undefin
 		code === "result_contract_exhausted" ||
 		code === "host_verification_rejected" ||
 		code === "worker_no_work" ||
+		code === "worker_partial_work" ||
 		code === "worker_mutation_blocked" ||
 		code === "merge_withheld" ||
 		code === "worker_removed_tests" ||
