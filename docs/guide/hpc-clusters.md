@@ -13,6 +13,11 @@ export PATH="$HOME/.local/bin:$PATH"
 clio-coder doctor
 ```
 
+The installer ends with the next step for this account, for example
+`The first launch sets up a model. Found: ANTHROPIC_API_KEY.`, and, while
+`~/.local/bin` is not on `PATH`, the launcher's full path to run until it is.
+[Connect a model](#connect-a-model) below takes it from there to a first answer.
+
 If coder.iowarp.ai is unreachable from the cluster, fetch the same script from the
 latest GitHub release:
 `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
@@ -90,6 +95,84 @@ unless `NO_PROXY` names its host or IP address exactly:
 export NO_PROXY=localhost,gpu-node-07,10.1.4.22
 ```
 
+## Connect a model
+
+Clio Coder sends prompts to a model it reaches over HTTP: a provider API, a
+site or lab gateway, or a server such as vLLM or llama.cpp that you run on a
+compute node. Its requests use the proxy variables in [Proxies](#proxies), so
+export `https_proxy` and a `NO_PROXY` naming the cluster hosts it should reach
+directly before connecting.
+
+There are three ways to connect. Each saves a *target* in your user settings
+and makes it the chat and worker model.
+
+1. **A site setup file.** When your site or lab publishes one, import it. Clio
+   prints each address and where the key comes from, and asks once:
+
+   ```bash
+   clio-coder configure --import https://hpc.example.edu/clio-coder/setup.yaml
+   export LAB_API_KEY=...    # the key variable the file names, if any
+   ```
+
+   The file can only name targets, routes, key variables and notes; it cannot
+   hold a key or change safety settings. The format is in
+   [Setup files](configuration-and-targets.md#setup-files).
+
+2. **One command with flags**, for a gateway or server whose address and model
+   you know. The key stays in your environment and is read at call time:
+
+   ```bash
+   clio-coder configure --id lab --runtime openai-compat \
+     --url https://llm.lab.example.org/v1 --model qwen3-coder-480b \
+     --api-key-env LAB_API_KEY --set-orchestrator --set-fleet-default
+   ```
+
+   `clio-coder configure --list` names the runtimes (`vllm`, `llamacpp`,
+   `ollama`, `litellm`, `openai-compat`, `anthropic` and the rest). An
+   unreachable address is saved with a warning, so this works before the
+   server is up.
+
+3. **The setup wizard.** Run `clio-coder` in a project with no model chosen,
+   or `clio-coder configure`, and pick **A model server or gateway** and its
+   address, or **An API key** and paste it.
+
+**A server on a compute node.** Start the server inside a job, then forward
+its port to the login node with SSH and connect to the forwarded port:
+
+```bash
+# in the job on gpu-node-07
+vllm serve Qwen/Qwen3-Coder-30B-A3B-Instruct --port 8000
+
+# on the login node
+ssh -N -f -L 8000:localhost:8000 gpu-node-07
+clio-coder configure --id gpu --runtime vllm --url http://127.0.0.1:8000 \
+  --model Qwen/Qwen3-Coder-30B-A3B-Instruct --set-orchestrator --set-fleet-default
+```
+
+A login node is shared, so pick a port other users are unlikely to take, and
+see [Shared login nodes](#shared-login-nodes) for why Clio asks before using a
+server it found on a local port. Connecting to `http://gpu-node-07:8000`
+directly also works when the login node can reach it; name the host in
+`NO_PROXY`.
+
+**Sign in without a browser.** A login node has no display, so
+`clio-coder auth login openai-codex` (or `anthropic-max`) prints a
+link to open on your own computer and a code to enter there or paste back.
+`--method device` picks the code flow on any machine.
+
+**Ask the first question.**
+
+```bash
+cd /path/to/your/project
+clio-coder run --read-only "Summarize this repository and how to run its tests."
+clio-coder          # the interactive session
+```
+
+`clio-coder doctor` names anything still missing, such as a key variable not
+set in this shell, with the command that fixes it. On a cluster, the agent's
+scheduler commands run outside the shell sandbox behind an approval; see
+[Scheduler clients](#scheduler-clients).
+
 ## Scheduler clients
 
 Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch`, `qstat`, `bsub`,
@@ -103,6 +186,28 @@ stays inside the sandbox.
 credentials scrubbed and `safety.sandboxPassEnv` honored, and a failing poll
 shows its first stderr line. With the sandbox active, `clio-coder doctor` adds a
 `scheduler commands` row when a scheduler client is on `PATH`.
+
+## Shared login nodes
+
+Other users run on the same login node, and often share the filesystem your
+home is on.
+
+- **Keep the state directory private.** Session transcripts, the session
+  ledger and spilled tool output are written owner-only (`0700` directories,
+  `0600` files). `clio-coder doctor` warns when the state or data root is
+  open to group or other users, and `clio-coder doctor --fix` tightens it.
+  Keep `CLIO_CODER_HOME` or the state directory out of shared project space.
+- **Do not accept a local server you do not run.** On a home with no chat
+  model, Clio may find a model server on a default local port. It uses one
+  only after a yes, and on Linux the question names the account that owns the
+  listener and defaults to no when it is another user. Prompts sent to
+  someone else's server are readable by them; answer no and connect your own.
+- **One home across nodes.** When the login node and compute nodes share one
+  home, each host's workers are counted against that host's limits for the
+  local node and for local-port servers, and a plan running on one node is
+  not cut short by Clio starting on another. Slots held by a host that died
+  free up five minutes after they expire, or at once with
+  `clio-coder session terminate --force`.
 
 ## Airgapped and mirrored sites
 

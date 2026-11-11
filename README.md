@@ -72,10 +72,18 @@ cd /path/to/your/project
 clio-coder
 ```
 
-The first launch opens setup. Pick what you already have (an app on this
-computer, a model server, a subscription, or an API key), and Clio checks the
-connection and lists the models it can reach. Later, `/model` switches models
-and `/config` reruns setup.
+The curl installer's last lines name the next step for your machine, such as
+a provider key it found in your environment. Until a model is chosen, the first
+launch sets one up before anything else. Clio offers what it found first (a
+key in your environment, a stored sign-in, a model server on this machine);
+otherwise pick what you have: an API key, a subscription, a model server or
+gateway, or a setup file from your lab or team. A pasted key names its
+provider, and Clio picks that provider's recommended model; **Choose a
+different model** on the review screen changes it. A model server's address
+is checked and its model list read; for a key or a subscription the list is
+the provider's catalog, and nothing is sent to the model before you save.
+Started in your home folder, Clio then suggests moving to a project first.
+Later, `/model` switches models and `/config` → **Guided setup** adds another.
 
 **3. Ask for something real.** Start read-only:
 
@@ -247,7 +255,9 @@ human are listed at the end.
 
 **Leave these to the human:**
 
-- Subscription sign-ins open a browser or ask for a pasted code:
+- Subscription sign-ins open a browser on a desktop; over SSH or without a
+  display they print a link to open on another device, with a code to enter
+  there or to paste back:
   `clio-coder auth login openai-codex` (ChatGPT),
   `clio-coder auth login anthropic-max` (Claude), or
   `clio-coder auth login alcf` (Argonne). For GitHub Copilot, the user signs in

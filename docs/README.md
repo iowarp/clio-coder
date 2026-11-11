@@ -41,8 +41,9 @@ current source.
 ## Your first hour
 
 1. **Install and connect.** Run the installer, then `clio-coder` in a project.
-   Setup opens on first launch; the first connection you save (a *target*)
-   serves chat and workers.
+   Until a model is chosen, the first launch sets one up, offering any key,
+   sign-in or local model server it found first; the first connection you save
+   (a *target*) serves chat and workers.
    Read [First-run flow](guide/configuration-and-targets.md#first-run-flow);
    if it fails, see [Install and startup](guide/troubleshooting.md#install-and-startup).
 2. **Check the install.** `clio-coder doctor` lists problems first and
@@ -58,7 +59,7 @@ current source.
    `/view` shows the evidence it kept.
 5. **Write the finish line down.** `.clio-coder/quality.yaml` names the checks
    each changed path needs. See [Project quality policies](guide/quality-policy.md).
-6. **Use a second model.** Add another target with `/config`, switch chat with
+6. **Use a second model.** Add another target with `/config` → **Guided setup**, switch chat with
    `/model`, or send workers elsewhere: see
    [Configure a different model for workers](guide/configuration-and-targets.md#configure-a-different-model-for-workers).
 7. **Add your field's tools.** `clio-coder library search <topic>` finds packs
