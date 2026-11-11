@@ -27,7 +27,7 @@ At startup, Clio loads recipes in four precedence tiers:
 
 Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Only `.md` files directly under a root are read; subdirectories are not scanned.
 
-*   **Precedence**: Tiers merge in the order above. When two non-builtin recipes share an id, the later tier wins and the earlier one is recorded as `overridden`.
+*   **Precedence**: Tiers merge in the order above. When two non-builtin recipes share an id, the later tier wins and the earlier one is recorded as `overridden`. A project recipe loads without project trust, so an interactive session that starts in the project says which agents it replaces, and `clio-coder doctor` names both files.
 *   **Customization**: A user recipe may replace a shipped base agent such as `coder`. Like every non-shipped recipe it must declare `audience: custom`, so the replacement is a custom agent.
 *   **Plugin Protection**: Plugin recipes cannot override any shipped builtin. They are ignored with reason `reserved-builtin`.
 *   **Built-in Protection**: Project agents cannot override any shipped built-in. They are ignored with reason `reserved-builtin` and are otherwise custom/domain agents.

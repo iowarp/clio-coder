@@ -97,6 +97,7 @@ import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
 import { suspendProcessUntilContinued } from "./process-suspend.js";
+import { projectShadowNotice } from "./project-shadow-notice.js";
 import { createProjectTrustSession } from "./project-trust-session.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
@@ -2585,6 +2586,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
+		// Project agents and playbooks load without trust; a copy that replaces
+		// the operator's or a built-in one by name is said once, after paint.
+		setImmediate(() => {
+			if (startupAbort.signal.aborted) return;
+			const shadows = projectShadowNotice(process.cwd());
+			if (shadows !== null) notify("warning", shadows, "project-shadow");
+		});
 		// Read only the saved target snapshot after paint; never probe for upgrade advice (#416).
 		setImmediate(() => {
 			if (startupAbort.signal.aborted) return;

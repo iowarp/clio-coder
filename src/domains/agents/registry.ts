@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import { readSettings } from "../../core/config.js";
-import { writeDiagnostic } from "../../core/diagnostics.js";
+import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -219,7 +219,7 @@ function mergeRecipes(
 			}
 			const previous = byId.get(recipe.id);
 			if (previous) {
-				writeDiagnostic(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
+				writeHeadlessDiagnostic(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
 				recordDiagnostic(diagnostics, {
 					kind: "overridden",
 					id: previous.id,
