@@ -234,13 +234,18 @@ export async function refreshWindowsAppScripts(directory: string) {
 	return rewritten;
 }
 
+/**
+ * Each recorded file is missing, its recorded bytes, or changed. A launch writes the scripts and then the record, so a
+ * script holding this version's own bytes is intact even when the record names the bytes it replaced.
+ */
 async function inspect(files: Owned[]) {
 	let changed = false,
 		missingAny = false;
 	for (const file of files) {
 		const current = await bytes(file.path);
+		const ours = appScripts[basename(file.path)];
 		if (current === null) missingAny = true;
-		else if (sha(current) !== file.sha256) changed = true;
+		else if (sha(current) !== file.sha256 && (ours === undefined || sha(current) !== sha(ours))) changed = true;
 	}
 	return { changed, missing: missingAny };
 }

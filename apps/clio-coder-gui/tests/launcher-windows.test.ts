@@ -130,6 +130,11 @@ test("a launch rewrites the app scripts an older version installed, never one so
 	assert.deepEqual(JSON.parse(await readFile(join(directory, "windows.json"), "utf8")), record(current));
 	assert.equal(await windowsLauncherStatus(directory), "installed");
 	assert.equal(await refreshWindowsAppScripts(directory), false);
+	// A launch stopped after it wrote the scripts and before it recorded them: this version's own bytes are intact.
+	await writeFile(join(directory, "windows.json"), JSON.stringify(record(files)));
+	assert.equal(await windowsLauncherStatus(directory), "installed");
+	assert.equal(await refreshWindowsAppScripts(directory), true);
+	assert.deepEqual(JSON.parse(await readFile(join(directory, "windows.json"), "utf8")), record(current));
 	// A script someone changed is left alone; the launch then refuses it as before.
 	await writeFile(join(app, "app.ps1"), "edited by hand");
 	assert.equal(await refreshWindowsAppScripts(directory), false);
