@@ -219,6 +219,8 @@ export interface UnixSocketRoots {
 	privateTmp: boolean;
 	/** Defaults to the operator's home directory. */
 	home?: string;
+	/** Read for the pane host's control socket; defaults to this process's environment. */
+	env?: NodeJS.ProcessEnv;
 }
 
 const HOME_SCAN_DEPTH = 4;
@@ -293,6 +295,8 @@ function walkSockets(root: string, maxDepth: number, uid: number, state: SocketW
 			// Unreadable to this process: its sockets are unreachable from the sandbox too.
 			continue;
 		}
+		const later: string[] = [];
+		const first: string[] = [];
 		for (const entry of entries) {
 			if (state.visited >= SOCKET_WALK_BUDGET) {
 				state.capped = true;
@@ -312,10 +316,23 @@ function walkSockets(root: string, maxDepth: number, uid: number, state: SocketW
 				!SKIPPED_SOCKET_DIRS.has(entry.name) &&
 				!state.skip.some((masked) => isInside(masked, child))
 			) {
-				stack.push({ dir: child, depth: frame.depth + 1 });
+				(entry.name.startsWith(".") ? first : later).push(child);
 			}
 		}
+		// Daemons keep their sockets in hidden directories (~/.config, ~/.ssh), so those are visited before a large data tree spends the budget.
+		for (const dir of [...later.reverse(), ...first.reverse()]) stack.push({ dir, depth: frame.depth + 1 });
 	}
+}
+
+/**
+ * The control sockets the environment names for the terminal multiplexer this
+ * process runs under (`HERDR_SOCKET_PATH`, the first field of `TMUX`). Either
+ * runs commands outside the sandbox, so they are found wherever they live.
+ */
+function paneHostSockets(env: NodeJS.ProcessEnv): string[] {
+	return [env["HERDR_SOCKET_PATH"], env["TMUX"]?.split(",")[0]]
+		.map((entry) => entry?.trim() ?? "")
+		.filter((entry) => path.isAbsolute(entry));
 }
 
 /**
@@ -367,6 +384,15 @@ function scanSockets(
 		found: new Set(),
 		skip: existing.filter((mask) => mask.kind === "directory").map((mask) => mask.path),
 	};
+	for (const named of unique(paneHostSockets(roots.env ?? process.env))) {
+		if (state.skip.some((masked) => isInside(masked, named))) continue;
+		try {
+			const stat = lstatSync(named);
+			if (stat.isSocket() && stat.uid === uid) state.found.add(named);
+		} catch {
+			// Not there: nothing to mask.
+		}
+	}
 	// Scan the command's explicit roots before shared trees can exhaust the bounded walk (#434).
 	for (const root of unique([...workspaceRoots, ...scratchRoots])) walkSockets(root, TREE_SCAN_DEPTH, uid, state);
 	for (const root of home) walkSockets(root, HOME_SCAN_DEPTH, uid, state);
@@ -392,9 +418,10 @@ function scanSockets(
 
 /**
  * Impure: masks for the user-owned sockets a command could reach, for a
- * launch that cannot load the filter. Home is walked four levels deep, the
- * temp roots, scratch roots and work trees three, skipping dependency and
- * cache trees. A scan is reused for 5 s, and a mask whose path is gone by now
+ * launch that cannot load the filter. The pane host's control socket named
+ * in the environment comes first. Home is walked four levels deep, the temp
+ * roots, scratch roots and work trees three, hidden directories before the
+ * rest, skipping dependency and cache trees. A scan is reused for 5 s, and a mask whose path is gone by now
  * is dropped, because bwrap fails a mount over a missing path on a read-only
  * tree.
  */
@@ -404,7 +431,8 @@ function discoverUnixSocketMasks(
 	now: number = Date.now(),
 ): UnixSocketMaskScan {
 	const uid = typeof process.getuid === "function" ? process.getuid() : -1;
-	const key = JSON.stringify([roots, existing.map((mask) => mask.path).sort()]);
+	const { env, ...walked } = roots;
+	const key = JSON.stringify([walked, paneHostSockets(env ?? process.env), existing.map((mask) => mask.path).sort()]);
 	const cached = socketScanCache.get(key);
 	const scan =
 		cached !== undefined && now - cached.at < SOCKET_SCAN_TTL_MS ? cached.scan : scanSockets(roots, existing, uid);

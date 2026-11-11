@@ -400,3 +400,48 @@ test("under bwrap owned masks the operator's own sockets and leaves a system dae
 		assert.match(theirs, /unix=connected /u, theirs);
 	}
 });
+
+test("socket discovery finds the pane host's socket and a home daemon's past a large data tree", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "clio-unix-walk-")));
+	const home = join(scratch, "home");
+	const workspace = join(home, "ws");
+	const daemonDir = join(home, ".config", "herdr");
+	const data = join(home, "data");
+	const elsewhere = join(scratch, "elsewhere", "a", "b", "c");
+	for (const dir of [workspace, daemonDir, data, elsewhere]) mkdirSync(dir, { recursive: true });
+	// More entries than one discovery may visit, in a tree that holds no socket.
+	for (let i = 0; i <= 40_000; i++) writeFileSync(join(data, String(i)), "");
+	const daemon = join(daemonDir, "herdr.sock");
+	const paneHost = join(elsewhere, "host.sock");
+	const servers = [createServer(), createServer()];
+	await listen(servers[0] as Server, daemon);
+	await listen(servers[1] as Server, paneHost);
+	t.after(() => {
+		for (const server of servers) server.close();
+	});
+	const launch = unixSocketLaunch(
+		"owned",
+		availability,
+		{ workspaceRoots: [workspace], privateTmp: true, home, env: { HERDR_SOCKET_PATH: paneHost } },
+		[],
+	);
+	const masked = launch.masks.map((mask) => mask.path);
+	assert.ok(masked.includes(paneHost), masked.join(", "));
+	assert.ok(masked.includes(daemon), masked.join(", "));
+	const tmux = unixSocketLaunch(
+		"block",
+		availability,
+		{ workspaceRoots: [workspace], privateTmp: true, home: workspace, env: { TMUX: `${paneHost},4242,0` } },
+		[],
+		{ ok: false, reason: "forced by the test" },
+	);
+	assert.ok(
+		tmux.masks.some((mask) => mask.path === paneHost),
+		tmux.masks.map((mask) => mask.path).join(", "),
+	);
+});
