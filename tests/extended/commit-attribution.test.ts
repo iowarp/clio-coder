@@ -30,6 +30,7 @@ import {
 	isVacuousCheckArgv,
 } from "../../src/domains/dispatch/fleet-commit-attribution.js";
 import { commitWorktreePath } from "../../src/tools/task-worktree.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const REFS = ["interview-1/db_engine", "agent:a1b2/cache-key-shape"];
@@ -679,6 +680,105 @@ describe("vacuous loop checks", () => {
 			deepStrictEqual(changedCheckFiles(ran, changed), ["vitest.config.ts", "web/tsconfig.build.json"]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a fleet loop check whose changed-test run executes a worker's test earns no Tested-by", async () => {
+		const { compileExecutionPlan } = await import("../../src/domains/dispatch/execution-plan.js");
+		const { executeFleetRun } = await import("../../src/domains/dispatch/fleet-run.js");
+		const scratch = await isolateClioEnv("clio-check-wiring-");
+		const root = mkdtempSync(join(tmpdir(), "clio-check-wiring-repo-"));
+		try {
+			const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+			git("init", "-q");
+			git("config", "user.name", "Contract");
+			git("config", "user.email", "contract@example.invalid");
+			writeFileSync(join(root, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }));
+			git("add", ".");
+			git("commit", "-qm", "base");
+			const plan = compileExecutionPlan({
+				topology: "fleet",
+				rootTask: "add a test",
+				maxWorkers: 1,
+				onFailure: "stop",
+				steps: [
+					{
+						kind: "agent",
+						id: "edit",
+						agentId: "coder",
+						executionRole: "builder",
+						scope: "workspace",
+						expectedResultContract: "mutation-report",
+						requestedAuthority: "workspace-edit",
+						approvedAuthority: "workspace-edit",
+						dependencies: [],
+						task: "add a test",
+					},
+					{
+						kind: "code",
+						id: "check",
+						commandId: "check",
+						scope: "readonly",
+						dependencies: ["edit"],
+						verification: true,
+						loop: { loopId: "review", role: "check", attempt: 1 },
+					},
+				],
+				loops: [{ id: "review", checkKind: "code", maxAttempts: 1, checkStepIds: ["check"], repairStepIds: [] }],
+			});
+			const receipt = {
+				...fixtureReceiptDraft(fixtureEnvelope("edit-run")),
+				digest: "0".repeat(64),
+				worktree: { changedPaths: ["tests/a.test.js"] },
+			};
+			const dispatch = {
+				preview: () => ({ costUpperBoundUsd: 0, node: { id: "local" } }),
+				reservations: {
+					prepare: () => ({ ownerId: "reservation" }),
+					release: () => null,
+					rollback: () => null,
+					rollbackUnconsumed: () => null,
+				},
+				abort: () => {},
+				dispatch: async () => {
+					mkdirSync(join(root, "tests"));
+					writeFileSync(join(root, "tests", "a.test.js"), 'import { test } from "node:test";\ntest("a", () => {});\n');
+					return { runId: receipt.runId, events: (async function* () {})(), finalPromise: Promise.resolve(receipt) };
+				},
+			} as unknown as Parameters<typeof executeFleetRun>[0]["dispatch"];
+			// The registered check names no file; only the changed-test run the step adds executes the worker's test.
+			const check = {
+				id: "check",
+				argv: [process.execPath, "-e", "process.exit(0)"],
+				cwd: "",
+				timeoutMs: 30_000,
+				env: [],
+				description: "check",
+			};
+			const notices: string[] = [];
+			const outcome = await executeFleetRun({
+				plan,
+				playbookName: "test",
+				commands: { version: 1, path: join(root, "commands.yaml"), commands: new Map([["check", check]]) },
+				workspaceRoot: root,
+				fleetRootId: "check-wiring",
+				dispatch,
+				agents: { getSpec: () => null } as unknown as Parameters<typeof executeFleetRun>[0]["agents"],
+				attributionEnabled: false,
+				onNotice: (text) => notices.push(text),
+			});
+			strictEqual(outcome.cleanRun, true, notices.join("\n"));
+			ok(
+				notices.some((text) =>
+					/^step check: check passed without Tested-by: worker step 'edit' changed the check's own files \(tests\/a\.test\.js\)$/u.test(
+						text,
+					),
+				),
+				notices.join("\n"),
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			scratch.restore();
 		}
 	});
 });
