@@ -375,7 +375,30 @@ export function applyToolRounds(
 	return { context, options };
 }
 
-/** Retry only a rejected routing parameter before output, with one auto attempt (#426). */
+/**
+ * Radiance and SGLang drop the tool block from the rendered prompt when tool_choice is "none", and Qwen-family
+ * templates render tools first, so a text-only round there re-reads the whole prompt; llama.cpp and vLLM keep it.
+ * The runtime id cannot tell which engine is behind a route, so a route is learned: a "none" round whose cache read
+ * fell below half of the previous call's on the same route marks it. An engine that reports no cached count teaches
+ * nothing. The mark is per process.
+ */
+const NONE_RERENDERS = "none re-renders the prompt on this route";
+const noneRerenders = new Set<string>();
+const priorCacheRead = new Map<string, number>();
+
+function noteCacheRead(key: string, message: AssistantMessage, choice: unknown): void {
+	const cacheRead = message.usage?.cacheRead;
+	if (message.stopReason === "error" || message.stopReason === "aborted" || typeof cacheRead !== "number") return;
+	const prior = priorCacheRead.get(key);
+	if (choice === "none" && prior !== undefined && prior > 0 && cacheRead < prior / 2) noneRerenders.add(key);
+	priorCacheRead.set(key, cacheRead);
+}
+
+/**
+ * Retry only a rejected routing parameter before output, with one auto attempt (#426). On a route where "none" is
+ * known to re-render, a text-only round first asks with "auto" beside the lockout directive, which keeps the cached
+ * prefix; a reply that calls a tool anyway is discarded and the round is sent again with "none".
+ */
 export function streamToolRound(
 	model: EngineModel,
 	controlled: ControlledRequest,
@@ -383,10 +406,22 @@ export function streamToolRound(
 	targetId = model.provider,
 	observeRetry?: (message: AssistantMessage) => void,
 ): AssistantMessageEventStream {
+	const routeKey = choiceKey(model, targetId, "none");
+	const observed = (request: ControlledRequest): AssistantMessageEventStream => {
+		const stream = invoke(request);
+		const choice = request.options?.toolChoice;
+		void stream.result().then(
+			(message) => noteCacheRead(routeKey, message, choice),
+			() => {},
+		);
+		return stream;
+	};
 	const initial = controlled.toolRounds?.[0];
-	if (!initial) return invoke(controlled);
+	if (!initial) return observed(controlled);
 	const output = createAssistantMessageEventStream();
-	const records = [initial];
+	const complianceFirst =
+		initial.kind === "text-only" && controlled.options?.toolChoice === "none" && noneRerenders.has(routeKey);
+	const records = [complianceFirst ? { ...initial, choice: "auto" as const, downgradeReason: NONE_RERENDERS } : initial];
 	const annotate = (event: AssistantMessageEvent): AssistantMessageEvent => {
 		if ("partial" in event) Object.assign(event.partial, { toolRounds: records });
 		if (event.type === "done") Object.assign(event.message, { toolRounds: records });
@@ -396,7 +431,25 @@ export function streamToolRound(
 	void (async () => {
 		let source: AssistantMessageEventStream | undefined;
 		try {
-			source = invoke(controlled);
+			if (complianceFirst) {
+				// Held whole: a reply that calls a tool is thrown away, so none of it may reach the transcript.
+				source = observed({ ...controlled, options: { ...controlled.options, toolChoice: "auto" } });
+				const held: AssistantMessageEvent[] = [];
+				for await (const event of source) held.push(event);
+				const reply = await source.result();
+				if (reply.stopReason === "error" || !reply.content.some((block) => block.type === "toolCall")) {
+					for (const event of held) output.push(annotate(event));
+					output.end(Object.assign(reply, { toolRounds: records }));
+					return;
+				}
+				try {
+					observeRetry?.(reply);
+				} catch {
+					/* Telemetry cannot change provider retry behavior (#434). */
+				}
+				records.push({ ...initial, attempt: 1 });
+			}
+			source = observed(controlled);
 			let held: AssistantMessageEvent[] | null = [];
 			for await (const event of source) {
 				if (held !== null && event.type === "start") {

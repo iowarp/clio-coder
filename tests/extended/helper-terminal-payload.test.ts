@@ -361,3 +361,60 @@ test("admitted LiteLLM response schema uses gateway dialect while llama retains 
 	});
 	deepStrictEqual(responseFormatFor(llamacpp, schema, "clio_result"), { type: "json_object", schema });
 });
+
+test("a route where none re-renders asks text-only rounds with auto first and falls back to none after a tool call", async () => {
+	const { applyToolRounds: rounds, streamToolRound } = await import("../../src/engine/provider-payload.js");
+	const model = catalog("openrouter", "google/gemini-2.5-flash");
+	const reply = (cacheRead: number, content: Array<Record<string, unknown>>) => ({
+		role: "assistant" as const,
+		content,
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 10,
+			output: 1,
+			cacheRead,
+			cacheWrite: 0,
+			totalTokens: 11 + cacheRead,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop" as const,
+		timestamp: 5,
+	});
+	const text = [{ type: "text", text: "answer" }];
+	const call = [{ type: "toolCall", id: "c1", name: "write", arguments: {} }];
+	const send = async (targetId: string, round: ToolRound[], replies: ReturnType<typeof reply>[]) => {
+		const sent: unknown[] = [];
+		const controlled = rounds(model, { messages: [], tools: [tool("write")] }, undefined, round, targetId);
+		const result = await streamToolRound(
+			model,
+			controlled,
+			(request) => {
+				sent.push(request.options?.toolChoice);
+				const message = replies[sent.length - 1] ?? reply(0, text);
+				const events = createAssistantMessageEventStream();
+				events.push({ type: "done", reason: "stop", message: message as never });
+				events.end(message as never);
+				return events;
+			},
+			targetId,
+		).result();
+		return { sent, result };
+	};
+	const target = "c06-rerenders";
+	await send(target, [], [reply(8192, text)]);
+	// The first lock on a route always uses none; a cache that collapses under it marks the route.
+	deepStrictEqual((await send(target, [{ kind: "text-only" }], [reply(0, text)])).sent, ["none"]);
+	const compliant = await send(target, [{ kind: "text-only" }], [reply(8192, text)]);
+	deepStrictEqual(compliant.sent, ["auto"]);
+	strictEqual(compliant.result.toolRounds?.[0]?.downgradeReason, "none re-renders the prompt on this route");
+	const fallback = await send(target, [{ kind: "text-only" }], [reply(8192, call), reply(0, text)]);
+	deepStrictEqual(fallback.sent, ["auto", "none"]);
+	ok(fallback.result.content.every((block) => block.type === "text"));
+	// A route where none kept the cache, or that reports no cached count, stays on none.
+	const kept = "c06-keeps";
+	await send(kept, [], [reply(8192, text)]);
+	await send(kept, [{ kind: "text-only" }], [reply(8192, text)]);
+	deepStrictEqual((await send(kept, [{ kind: "text-only" }], [reply(8192, text)])).sent, ["none"]);
+});

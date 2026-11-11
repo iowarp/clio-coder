@@ -1023,7 +1023,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					controlled,
 					(request) => {
 						const retry = invokedAttempt;
-						if (retry && modelCall) modelCall = modelCall.nextAttempt({ toolChoice: "auto" }) ?? modelCall;
+						if (retry && modelCall)
+							modelCall =
+								modelCall.nextAttempt({ toolChoice: request.options?.toolChoice === "none" ? "none" : "auto" }) ?? modelCall;
 						invokedAttempt = true;
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
