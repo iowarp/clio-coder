@@ -907,12 +907,27 @@ function helperRow(
 	].map((row) => redactedRow(row, width));
 }
 
+/** The card body lists a validation the worker itself reported as passing. */
+function reportsPassingCheck(entry: WorkerEntryState): boolean {
+	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
+	const validations = structured?.validations;
+	return (
+		Array.isArray(validations) &&
+		validations.some((check) => typeof check === "object" && check !== null && check.passed === true)
+	);
+}
+
 /**
  * A failure the run's own record holds reads as a failure on the card; where the verdict came from stays with the
  * detail view. A failed validation also names its validator and evidence, because a headline that says failed above
  * checks that read as passed is otherwise a contradiction the operator cannot resolve without opening the run.
  */
-function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, inspect: boolean): string | null {
+function qualityRow(
+	result: WorkerRunResultSummary | undefined,
+	runId: string,
+	inspect: boolean,
+	reportsPassingCheck = false,
+): string | null {
 	// A cancelled run checked nothing by design, so a validation verdict under it says nothing the cancel did not.
 	if (!inspect && result?.outcome === "canceled") return null;
 	// A run that failed before any check ran has nothing to say about validation that its failure row does not.
@@ -934,7 +949,12 @@ function qualityRow(result: WorkerRunResultSummary | undefined, runId: string, i
 	if (!inspect && entry.state === "failed" && entry.authority.id === "result-quality")
 		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
 	// The folded card says whether anything checked the work in plain words; the record's axis wording is for /view.
-	if (!inspect && entry.state === "absent") return "no check ran on this work";
+	// A worker's own passing check row stays above this line, so the record's verdict names whose word that row is
+	// instead of denying it ran: an ad-hoc command such as `python3 -c` is not one Clio credits as a check.
+	if (!inspect && entry.state === "absent")
+		return reportsPassingCheck
+			? "the checks above are the worker's own report; Clio recognized no test or lint run"
+			: "no check ran on this work";
 	return `quality ${validationClause(trust)}${why}`;
 }
 
@@ -991,7 +1011,9 @@ export function renderWorkerEntryLines(
 	// A council that only collected produced nothing of its own to check; each member's row is its own record.
 	const collected = isSynthesis(entry) && !isPending(entry) && parseCouncilReport(entry.text)?.synthesis.kind === "none";
 	const qualityText =
-		isPending(entry) || stopping || (collected && !inspect) ? null : qualityRow(entry.result, entry.runId, inspect);
+		isPending(entry) || stopping || (collected && !inspect)
+			? null
+			: qualityRow(entry.result, entry.runId, inspect, reportsPassingCheck(entry));
 	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
