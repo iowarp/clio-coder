@@ -1,5 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchPrefixGroup } from "../../src/domains/dispatch/contract.js";
 import {
 	claimSharedPrefix,
@@ -7,6 +9,8 @@ import {
 	waitForPrefixLeader,
 } from "../../src/domains/dispatch/prefix-stagger.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const liveTimeouts = (): number => process.getActiveResourcesInfo().filter((name) => name === "Timeout").length;
 const clock = { now: () => 1_000, monotonicNow: () => 7 };
@@ -95,4 +99,46 @@ test("abort during the hold ends the follower cleanly without starting its worke
 	groups.get("shared")?.release();
 	await new Promise((resolve) => setImmediate(resolve));
 	strictEqual(starts.join(","), "lead");
+});
+
+test("a held follower's run row names a live process, then its worker's pid once it starts", async () => {
+	await isolateDispatchState();
+	const spawned: Array<{ worker: SpawnedWorker; finish: () => void }> = [];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings: structuredClone(DEFAULT_SETTINGS) }), {
+		spawnWorker: () => {
+			const next = fakeWorker();
+			spawned.push(next);
+			return { ...next.worker, pid: 4_000 + spawned.length };
+		},
+	});
+	await bundle.extension.start();
+	try {
+		const request = {
+			agentId: "scout",
+			executionRole: "researcher" as const,
+			task: "Inspect the fixture.",
+			requestOrigin: "internal" as const,
+		};
+		const batch = await bundle.contract.dispatchBatch([request, request]);
+		strictEqual(spawned.length, 1, "the follower is held behind its leader");
+		const rows = bundle.contract.listRuns();
+		strictEqual(rows.length, 2);
+		// Recovery in a second Clio settles a row whose pid is not alive, so a held row is vouched for by this process.
+		for (const row of rows) strictEqual(typeof row.pid, "number", `${row.id} has no live pid while held`);
+		// The leader exits, which releases the hold and starts the follower.
+		spawned[0]?.finish();
+		const deadline = Date.now() + 5_000;
+		while (spawned.length < 2) {
+			ok(Date.now() < deadline, "the follower never started");
+			await sleep(5);
+		}
+		const followerPid = rows.map((row) => bundle.contract.getRun(row.id)?.pid).find((pid) => pid === 4_002);
+		strictEqual(followerPid, 4_002);
+		spawned[1]?.finish();
+		await batch.finalPromise.catch(() => undefined);
+	} finally {
+		for (const worker of spawned) worker.finish();
+		await bundle.extension.stop?.();
+		restoreDispatchState();
+	}
 });

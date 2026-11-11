@@ -323,7 +323,7 @@ export interface RunPhaseMarks {
 	queuedAt?: string;
 	admittedAt?: string;
 	workerSpawnedAt?: string;
-	/** C-04: how long this run waited for its batch's shared-prefix leader to stream, and that leader's run id. */
+	/** How long this run waited for its batch's shared-prefix leader to stream, and that leader's run id. */
 	prefixHoldMs?: number;
 	prefixLeaderRunId?: string;
 	endedAt?: string;

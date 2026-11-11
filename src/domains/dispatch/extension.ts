@@ -7721,6 +7721,9 @@ export function createDispatchBundle(
 		const checkoutBefore =
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
+		// A held follower's worker starts after its run row exists; this moves the row onto the real process.
+		let heldFollower = false;
+		let onFollowerStarted: ((started: SpawnedWorker) => void) | null = null;
 		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
@@ -7792,6 +7795,7 @@ export function createDispatchBundle(
 			if (prefixClaim?.role === "follower") {
 				// The handle returns now; only the worker's start waits for the leader, so a slow leader holds no caller.
 				const group = prefixClaim.group;
+				heldFollower = true;
 				worker = startAfterPrefixHold(
 					async (signal) => {
 						const hold = await waitForPrefixLeader(group, {
@@ -7801,12 +7805,21 @@ export function createDispatchBundle(
 						timing.prefixHoldMs = hold.heldMs;
 						timing.prefixLeaderRunId = hold.leaderRunId;
 					},
-					() =>
-						canceledControlRoots.has(controlRootsByAttempt.get(req.runIdHint ?? "") ?? capacityLease.assignmentId) ||
-						preparation?.signal?.aborted === true
-							? null
-							: spawnNow(),
+					() => {
+						if (
+							canceledControlRoots.has(controlRootsByAttempt.get(req.runIdHint ?? "") ?? capacityLease.assignmentId) ||
+							preparation?.signal?.aborted === true
+						)
+							return null;
+						const started = spawnNow();
+						timing.workerSpawnedAt = new Date(now()).toISOString();
+						onFollowerStarted?.(started);
+						return started;
+					},
 					{ now, monotonicNow },
+					// Until the worker exists this process vouches for the run, as it does behind a merge card, so another
+					// Clio on this state directory does not recover a held follower as abandoned.
+					process.pid,
 				);
 			} else worker = spawnNow();
 		} catch (error) {
@@ -7816,8 +7829,7 @@ export function createDispatchBundle(
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
-		timing.workerSpawnedAt = new Date(now()).toISOString();
-		const pid = worker.pid;
+		if (!heldFollower) timing.workerSpawnedAt = new Date(now()).toISOString();
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
 		answerHook = sendToWorker;
@@ -8462,7 +8474,7 @@ export function createDispatchBundle(
 			identity = detectRunIdentity();
 			ledgerRef.update(envelope.id, {
 				status: "running",
-				pid,
+				pid: worker.pid,
 				lineage: publishedLineage(lineage, hostRun),
 				identity,
 				node: placement?.node ?? LOCAL_RUN_NODE,
@@ -8481,7 +8493,7 @@ export function createDispatchBundle(
 			});
 			observer?.onAdmitted({
 				runId: envelope.id,
-				pid,
+				pid: worker.pid,
 				runtimeKind: lifecycle.runtimeKind,
 			});
 			// One durable write at start so sibling processes (clio-coder fleet status)
@@ -8490,6 +8502,15 @@ export function createDispatchBundle(
 			// spawned retry out of `active`, so snapshot and abort could not see it.
 			// A failed write leaves the row dirty for the terminal persist (#428).
 			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
+			if (heldFollower) {
+				const runId = envelope.id;
+				onFollowerStarted = (started) => {
+					// Replace only this process's own vouch; a row that settled meanwhile keeps what it recorded.
+					if (ledgerRef.get(runId)?.pid !== process.pid) return;
+					ledgerRef.update(runId, { pid: started.pid });
+					void persistLedgerInBackground(ledgerRef, runId);
+				};
+			}
 
 			// Fleet-visibility facts for the board: node placement, gate role,
 			// reroute lineage depth, and the model context window for the
@@ -8539,7 +8560,7 @@ export function createDispatchBundle(
 					wireModelId: lifecycle.target.wireModelId,
 					runtimeId: lifecycle.target.runtime.id,
 					runtimeKind: lifecycle.runtimeKind,
-					pid,
+					pid: worker.pid,
 					...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
 					...fleetIdentity,
 					...routeMoveFields(req, lifecycle.target.target.id, lifecycle.target.wireModelId),

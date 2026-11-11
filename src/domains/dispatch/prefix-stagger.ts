@@ -46,14 +46,13 @@ export function claimSharedPrefix(
  */
 export async function waitForPrefixLeader(
 	group: DispatchPrefixGroup,
-	options: { signal?: AbortSignal; now?: () => number; onHold?: () => void } = {},
+	options: { signal?: AbortSignal; now?: () => number } = {},
 ): Promise<PrefixHold> {
 	if (group.isReleased()) return null;
 	const now = options.now ?? Date.now;
 	const startedAt = now();
 	const signal = options.signal;
 	if (signal?.aborted) return null;
-	options.onHold?.();
 	let onAbort: (() => void) | undefined;
 	await Promise.race([
 		group.released,
@@ -66,31 +65,20 @@ export async function waitForPrefixLeader(
 	return { role: "follower", leaderRunId: group.leaderRunId, heldMs: Math.max(0, now() - startedAt) };
 }
 
-/** Claims a place in the key's group and, for a follower, waits for the leader. */
-export async function holdForSharedPrefix(
-	groups: Map<string, DispatchPrefixGroup> | undefined,
-	key: string | null,
-	runId: string,
-	options: { signal?: AbortSignal; now?: () => number; onHold?: () => void } = {},
-): Promise<PrefixHold> {
-	const claim = claimSharedPrefix(groups, key, runId);
-	if (claim === null) return null;
-	if (claim.role === "leader") return { role: "leader", group: claim.group };
-	return waitForPrefixLeader(claim.group, options);
-}
-
 /** The result a follower reports when it was aborted before its worker existed. */
 const ABORTED_BEFORE_START: SpawnedWorkerResult = { exitCode: null, signal: "SIGTERM" };
 
 /**
  * A worker handle that exists at once and starts its real worker only after `wait` resolves, so a batch returns a
  * follower's handle before the shared-prefix hold ends. `abort()` during the wait ends it and no worker starts; `start`
- * returning null means the run was cancelled meanwhile. The heartbeat reads as live while held.
+ * returning null means the run was cancelled meanwhile. The heartbeat reads as live while held, and `pid` reads as
+ * `heldPid` (the process that vouches for the run) until the worker exists.
  */
 export function startAfterPrefixHold(
 	wait: (signal: AbortSignal) => Promise<void>,
 	start: () => SpawnedWorker | null,
 	clock: { now: () => number; monotonicNow: () => number },
+	heldPid: number | null = null,
 ): SpawnedWorker {
 	const local = new AbortController();
 	let real: SpawnedWorker | null = null;
@@ -119,7 +107,7 @@ export function startAfterPrefixHold(
 	})();
 	return {
 		get pid() {
-			return real?.pid ?? null;
+			return real === null ? heldPid : real.pid;
 		},
 		promise: started.then((worker) => (worker === null ? ABORTED_BEFORE_START : worker.promise)),
 		events,

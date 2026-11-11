@@ -254,7 +254,7 @@ export interface DispatchAdmissionObserver {
 	onAdmitted(run: { runId: string; pid: number | null; runtimeKind: RunEnvelope["runtimeKind"] }): void;
 }
 
-/** C-04: one shared-prefix group of a batch; its later runs hold until the leader's first token. */
+/** One shared-prefix group of a batch; its later runs hold until the leader's first token. */
 export interface DispatchPrefixGroup {
 	readonly leaderRunId: string;
 	readonly released: Promise<void>;
@@ -271,7 +271,7 @@ export interface DispatchPreparationOptions {
 	hostRun?: { readonly runId: string; readonly lineage: Readonly<RunLineage> };
 	signal?: AbortSignal;
 	deadlineAt?: number;
-	/** C-04: a parallel batch's shared-prefix groups, keyed by prefix; absent outside a staggered batch. */
+	/** A parallel batch's shared-prefix groups, keyed by prefix; absent outside a staggered batch. */
 	prefixGroups?: Map<string, DispatchPrefixGroup>;
 }
 
