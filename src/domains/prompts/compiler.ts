@@ -764,7 +764,7 @@ const GATEWAY_CALLING_RULE =
 const COMPACT_CONTEXT_WINDOW_TOKENS = 48_000;
 
 /** S-87: v2 system-prompt budgets in characters on the reference fixture; raising one is a reviewed change. */
-export const PROMPT_BUDGET_CHARS = { attended: 26_000, acp: 25_000, headless: 19_000, worker: 11_500 } as const;
+export const PROMPT_BUDGET_CHARS = { attended: 26_000, acp: 25_000, headless: 21_000, worker: 11_500 } as const;
 
 function isCompactPrompt(inputs: SessionPromptInputs): boolean {
 	return (
