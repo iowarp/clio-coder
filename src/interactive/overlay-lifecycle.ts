@@ -293,6 +293,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	 * reference when the dialog closes drops the text with it.
 	 */
 	let permissionBody: PermissionOverlayBodyHandle | null = null;
+	let permissionSettleTimer: ReturnType<typeof setTimeout> | null = null;
+	const isPermissionSettling = (): boolean =>
+		overlayTransitions.state === "permission-confirm" && now() - permissionOpenedAt < PERMISSION_SETTLE_MS;
 	const inspectionHint = (): import("./permission-hint.js").PermissionInspectionHint => {
 		if (permissionBody === null || !permissionBody.canInspect()) return "none";
 		return permissionBody.isInspecting() ? "open" : "closed";
@@ -357,9 +360,18 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				() => editor.getText().length > 0,
 				() => deps.app.chat.isStreaming(),
 				workerWindow,
+				isPermissionSettling,
 			);
 			permissionBody = body;
 			permissionOpenedAt = now();
+			// The allow row is dimmed while Enter is ignored; nothing else may paint
+			// when the window ends, so the card asks for its own frame then.
+			if (permissionSettleTimer !== null) clearTimeout(permissionSettleTimer);
+			permissionSettleTimer = setTimeout(() => {
+				permissionSettleTimer = null;
+				tui.requestRender();
+			}, PERMISSION_SETTLE_MS);
+			permissionSettleTimer.unref?.();
 			const handle = showOverlayFrame(tui, body, {
 				// The card takes the editor's rails and keeps the draft editable under
 				// it: a steer typed while the call is parked is what the CONFIRM rail
@@ -751,8 +763,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openProjectTrustState: overlayResourceOpeners.openProjectTrustState,
 		toggleDispatchBoardOverlay,
 		openQueueNavigatorState,
-		isPermissionSettling: () =>
-			overlayTransitions.state === "permission-confirm" && now() - permissionOpenedAt < PERMISSION_SETTLE_MS,
+		isPermissionSettling,
 		confirmPermission: () => {
 			overlayPermission?.confirm();
 			footer.refresh();
@@ -798,6 +809,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		cancelAskUser: overlayAskUser.cancel,
 		dispose: () => {
+			if (permissionSettleTimer !== null) clearTimeout(permissionSettleTimer);
+			permissionSettleTimer = null;
 			overlayPermission?.dispose();
 			overlayAskUser?.dispose();
 		},

@@ -701,8 +701,11 @@ expose no global send, navigation, background or quit actions. Top-level Library
 model, tree and Workers scopes can expose their owner toggle; editable fields
 expose semantic undo. Nested Library reviews must finish or cancel before the
 browser toggle becomes available. Permission deletion never resolves a user
-submit binding. Enter allows only when its defined empty-draft condition holds;
-legacy LF/Ctrl+J is indistinguishable from Enter in these single-line scopes.
+submit binding. Enter allows only when its defined empty-draft condition holds,
+and not in the first 400 ms after a permission card opens, so an Enter typed for
+the prompt cannot allow a card unread; the `[Enter] allow` row is dimmed until
+then, in the same words. Legacy LF/Ctrl+J is indistinguishable from Enter in
+these single-line scopes.
 
 **Mouse wheel with an overlay open.** In fullscreen, a wheel event while any overlay is open scrolls the transcript (one line per notch, five with Alt held) and never moves a list choice. Choices move on keys only (`src/engine/application-input-tui.ts`). An interview (an `ask_user` round) also turns off mouse tracking and alternate-scroll mode 1007 while it is visible, so the terminal selects and copies text natively and does not turn the wheel into arrow keys that would move the interview's choice. Mode 1007 and mouse tracking return when the interview closes or is hidden (`src/engine/instrumented-tui.ts`).
 

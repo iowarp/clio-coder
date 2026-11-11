@@ -633,6 +633,24 @@ export interface Choice {
 	/** What happens when the key is pressed, in one sentence. */
 	consequence: string;
 	tone?: Tone;
+	/** The key cannot answer yet: key, verb and consequence take the annotation tone, in the same words. */
+	dimmed?: boolean;
+}
+
+/** A choice's key and verb, `[Enter] allow`, in its tone, or quiet while it is dimmed. */
+export function choiceLead(theme: ClioTheme, choice: Choice): { cap: string; verb: string } {
+	if (choice.dimmed === true) {
+		return { cap: keyCap(theme, choice.key, "annotation"), verb: theme.fg("annotation", choice.verb) };
+	}
+	return {
+		cap: keyCap(theme, choice.key),
+		verb: theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true }),
+	};
+}
+
+/** A choice's consequence text in its role, quiet while the choice is dimmed. */
+export function choiceConsequence(theme: ClioTheme, choice: Choice, text: string = choice.consequence): string {
+	return theme.fg(choice.dimmed === true ? "annotation" : "decisionConsequence", text);
 }
 
 /**
@@ -642,6 +660,7 @@ export interface Choice {
  * own column. Below `NARROW_WIDTH` the consequence takes the next row,
  * indented, so no key ever loses its sentence. Every verb carries the same
  * weight: on a safety surface no answer may look more inviting than another.
+ * A dimmed choice keeps its row and words and only goes quiet.
  */
 export function choiceRows(theme: ClioTheme, choices: ReadonlyArray<Choice>, width: number): string[] {
 	const safe = Math.max(1, Math.floor(width));
@@ -650,10 +669,11 @@ export function choiceRows(theme: ClioTheme, choices: ReadonlyArray<Choice>, wid
 	const lines: string[] = [];
 	const stacked = safe < NARROW_WIDTH;
 	for (const choice of choices) {
-		const cap = padAnsi(keyCap(theme, choice.key), keyWidth);
-		const verb = padAnsi(theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true }), verbWidth);
+		const parts = choiceLead(theme, choice);
+		const cap = padAnsi(parts.cap, keyWidth);
+		const verb = padAnsi(parts.verb, verbWidth);
 		const lead = `${cap} ${verb}`;
-		const consequence = theme.fg("decisionConsequence", choice.consequence);
+		const consequence = choiceConsequence(theme, choice);
 		if (stacked) {
 			lines.push(clip(lead, safe));
 			for (const row of wrap(consequence, Math.max(1, safe - 4))) lines.push(`    ${row}`);

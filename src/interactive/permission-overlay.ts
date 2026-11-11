@@ -34,6 +34,8 @@ import {
 	chip,
 	chipRow,
 	chipRows,
+	choiceConsequence,
+	choiceLead,
 	choiceRows,
 	clioTheme,
 	commandBlock,
@@ -108,6 +110,9 @@ export type PermissionDraftReader = () => boolean;
 
 /** Whether a main-agent turn is running, read once per frame: a worker card's stop ends one only if it is. */
 export type PermissionMainTurnReader = () => boolean;
+
+/** Whether the card opened too recently for Enter to answer it, read once per frame. */
+export type PermissionSettlingReader = () => boolean;
 
 export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody {
 	/** Whether this card has a mutation the operator can read locally. */
@@ -413,10 +418,10 @@ function compactChoiceRows(
 ): string[] {
 	const held = (text: string): string => text.replaceAll(" ", "\u00a0");
 	const parts = [
-		...choices.map(
-			(choice) =>
-				`${held(`${keyCap(theme, choice.key)} ${theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true })}`)}${theme.fg("decisionConsequence", `: ${choice.consequence}`)}`,
-		),
+		...choices.map((choice) => {
+			const lead = choiceLead(theme, choice);
+			return `${held(`${lead.cap} ${lead.verb}`)}${choiceConsequence(theme, choice, `: ${choice.consequence}`)}`;
+		}),
 		...readingParts(theme, reading),
 	];
 	return joinChoiceUnits(theme, parts, width);
@@ -465,9 +470,10 @@ function bareChoiceRows(
 	}));
 	const held = (text: string): string => text.replaceAll(" ", "\u00a0");
 	const parts = [
-		...bare.map((choice) =>
-			held(`${keyCap(theme, choice.key)} ${theme.style(toneRole(choice.tone ?? "neutral"), choice.verb, { bold: true })}`),
-		),
+		...bare.map((choice) => {
+			const lead = choiceLead(theme, choice);
+			return held(`${lead.cap} ${lead.verb}`);
+		}),
 		...readingParts(theme, reading),
 	];
 	return joinChoiceUnits(theme, parts, width);
@@ -796,6 +802,7 @@ function permissionCardSections(
 	rowBudget = 0,
 	mainTurn?: boolean,
 	inspectable = false,
+	settling = false,
 ): {
 	facts: string[];
 	/** Leading fact rows that name the call; a short card pins them beside the answer keys. */
@@ -833,7 +840,11 @@ function permissionCardSections(
 					]),
 		);
 	}
-	const choices = permissionChoices(view, presentation, hasDraft, mainTurn);
+	// Enter is ignored for a moment after the card opens, so a key typed for the
+	// prompt cannot allow it unread; its row says so by going quiet meanwhile.
+	const choices = permissionChoices(view, presentation, hasDraft, mainTurn).map((choice) =>
+		settling && choice.key === "Enter" ? { ...choice, dimmed: true } : choice,
+	);
 	// The rail gives up its reading keys before its scroll arrows; when the two
 	// together overflow it, the choice rows carry them instead.
 	const allReading = readingKeys(inspectable);
@@ -1012,6 +1023,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		private readonly draft?: PermissionDraftReader,
 		private readonly mainTurn?: PermissionMainTurnReader,
 		private readonly workerWindow?: WorkerWindowReader,
+		private readonly settling?: PermissionSettlingReader,
 	) {}
 
 	canInspect(): boolean {
@@ -1084,6 +1096,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const countdownMs = this.readCountdown();
 		const hasDraft = this.readDraft();
 		const mainTurn = this.readMainTurn();
+		const settling = this.readSettling();
 		// The countdown is keyed by the second it displays, so a card with a
 		// window redraws once a second and a card without one never redraws
 		// for it.
@@ -1104,12 +1117,13 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 					: (countdownMs ?? ""),
 			hasDraft,
 			mainTurn,
+			settling,
 			permissionKeyLabel(PERMISSION_STOP_KEY),
 			skinEpoch(),
 		].join("|");
 		if (this.memo?.key === key) return this.memo.lines;
 		this.choicesShown = false;
-		const lines = this.renderFresh(width, advisory, countdownMs, hasDraft, mainTurn);
+		const lines = this.renderFresh(width, advisory, countdownMs, hasDraft, mainTurn, settling);
 		this.memo = { key, lines };
 		return lines;
 	}
@@ -1120,6 +1134,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		countdownMs: CardCountdown,
 		hasDraft: boolean,
 		mainTurn: boolean | undefined,
+		settling = false,
 	): string[] {
 		if (this.argumentsOpen && this.invocation) {
 			const theme = clioTheme();
@@ -1174,6 +1189,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				this.bodyRows,
 				mainTurn,
 				this.canInspect(),
+				settling,
 			);
 			this.readingFolded = sections.readingFolded;
 			return this.windowCard(sections, card);
@@ -1423,6 +1439,15 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 	}
 
+	private readSettling(): boolean {
+		if (this.settling === undefined) return false;
+		try {
+			return this.settling();
+		} catch {
+			return false;
+		}
+	}
+
 	invalidate(): void {
 		this.memo = null;
 	}
@@ -1442,6 +1467,17 @@ export function createPermissionOverlayBody(
 	draft?: PermissionDraftReader,
 	mainTurn?: PermissionMainTurnReader,
 	workerWindow?: WorkerWindowReader,
+	settling?: PermissionSettlingReader,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect, invocation, advisory, countdown, draft, mainTurn, workerWindow);
+	return new PermissionOverlayBody(
+		view,
+		inspect,
+		invocation,
+		advisory,
+		countdown,
+		draft,
+		mainTurn,
+		workerWindow,
+		settling,
+	);
 }

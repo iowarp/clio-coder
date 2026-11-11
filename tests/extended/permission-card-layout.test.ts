@@ -26,6 +26,8 @@ import {
 	permissionOverlayHint,
 } from "../../src/interactive/permission-overlay.js";
 import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool-execution.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
+import { keyCap } from "../../src/interactive/theme/primitives.js";
 import type { UnattendedTimers } from "../../src/interactive/unattended-countdown.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
@@ -73,6 +75,41 @@ function plain(lines: ReadonlyArray<string>): string[] {
 function contentWidth(columns: number): number {
 	return Math.min(PERMISSION_OVERLAY_WIDTH, columns) - 4;
 }
+
+test("a fresh card shows allow dimmed while Enter cannot answer it yet, in the same words", () => {
+	const theme = clioTheme();
+	let settling = true;
+	const body = createPermissionOverlayBody(
+		WRITE_VIEW,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		() => settling,
+	);
+	const allowRow = (lines: ReadonlyArray<string>): string => {
+		const row = lines.find((line) => /\[Enter\] allow/u.test(stripTerminalSequences(line)));
+		ok(row !== undefined, "the card shows the allow row");
+		return row;
+	};
+	const denyRow = (lines: ReadonlyArray<string>): string =>
+		lines.find((line) => /\[Esc\]\s+deny/u.test(stripTerminalSequences(line))) ?? "";
+	for (const rows of [0, 9]) {
+		body.setBodyRows(rows);
+		settling = true;
+		const held = body.render(76);
+		ok(allowRow(held).includes(theme.fg("annotation", "[Enter]")), `allow is dimmed (rows ${rows})`);
+		ok(!allowRow(held).includes(keyCap(theme, "Enter")), `allow lost its key color (rows ${rows})`);
+		ok(denyRow(held).includes(keyCap(theme, "Esc")), `deny keeps its key color (rows ${rows})`);
+		settling = false;
+		const live = body.render(76);
+		ok(allowRow(live).includes(keyCap(theme, "Enter")), `allow returns to the key color (rows ${rows})`);
+		deepStrictEqual(plain(held), plain(live));
+	}
+});
 
 test("a permission card refreshes portable hints when the menu key changes", () => {
 	const previous = getKeybindings();
