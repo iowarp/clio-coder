@@ -9,6 +9,7 @@ import {
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
+import { createCapabilityGate } from "../../src/domains/middleware/capability-gate.js";
 import {
 	createSkillsReminderRegistration,
 	skillsReminderMessage,
@@ -17,8 +18,11 @@ import { compile, compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { mainPromptCacheIdentity } from "../../src/session-control/prompt-cache-identity.js";
+import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const table = loadFragments();
@@ -220,4 +224,30 @@ it("skills reminders and suggestion continuations stay silent outside admitted w
 			[],
 		);
 	}
+});
+
+it("names a gateway capability only for a strong match, and Clio's own only for a question about Clio", async (t) => {
+	const env = await isolateClioEnv("clio-coder-capability-note-");
+	t.after(() => env.restore());
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
+	registerAllTools(registry, { mcpCapabilities: false });
+	const candidates = registry.listGateway().map((spec) => ({ id: spec.name, description: spec.description }));
+	const gate = createCapabilityGate();
+	const note = (task: string): string => {
+		const reminder = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 0,
+			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates }),
+		});
+		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });
+		return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
+	};
+	for (const task of [
+		"Read README.md and tell me what the test command is.",
+		"List the files in src and tell me what add.js exports.",
+		"add a median function to src/stats.js and run the unit check",
+	]) {
+		assert.ok(!note(task).includes("[Capabilities]"), task);
+	}
+	assert.match(note("How do I add a second target to Clio?"), /\[Capabilities\] Likely useful: [^.]*\bclio_docs\b/u);
+	assert.match(note("Summarize the columns of data/run.parquet"), /\[Capabilities\] Likely useful: data\b/u);
 });
