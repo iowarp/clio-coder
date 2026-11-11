@@ -293,3 +293,26 @@ it("every /delegate form that fails to parse names /run first", () => {
 		assert.match(notices.at(-1) ?? "", /usage: \/run/u, line);
 	}
 });
+
+it("/delegate naming a Clio recipe runs it the /run way instead of refusing it as ACP", async () => {
+	const notices: string[] = [];
+	const requests: Record<string, unknown>[] = [];
+	const context = {
+		keyboardActions: { menuLabel: () => "" },
+		listAgents: () => [{ id: "scout" }],
+		isExternalAgent: () => false,
+		dispatch: {
+			async dispatch(request: Record<string, unknown>) {
+				requests.push(request);
+				throw new Error("stop here");
+			},
+		},
+		io: {},
+		notice: (_level: string, text: string) => notices.push(text),
+		render: noop,
+	} as unknown as SlashCommandContext;
+	dispatchSlashCommand(parseSlashCommand("/delegate scout list files"), context);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(notices[0], "/delegate is now /run; ran it.");
+	assert.equal(requests[0]?.delegationAgentId, undefined);
+});

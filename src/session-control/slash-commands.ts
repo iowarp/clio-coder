@@ -2297,6 +2297,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind !== "delegate") return;
+			// A Clio recipe is what /run runs; only an external ACP agent keeps the /delegate path.
+			if (!command.agentId.startsWith("acp:") && ctx.listAgents?.().some((agent) => agent.id === command.agentId)) {
+				const rest = command.source.replace(/^\/delegate/u, "").trim();
+				const result = dispatchRetiredCommand({ kind: "retired", name: "delegate", rest, entry: DELEGATE_RETIRED }, ctx);
+				return result === "rejected" ? result : undefined;
+			}
 			if (command.oldName && ctx.keyboardActions) ctx.notice("info", "/delegate is now /run");
 			startDelegate(command, ctx);
 		},
