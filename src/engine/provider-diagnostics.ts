@@ -5,6 +5,7 @@ import type { Api, AssistantMessageEventStream, Model, StreamOptions } from "@ea
 import type { TargetCacheSettings } from "../domains/providers/types/target-descriptor.js";
 import type { PinnedPromptPrefix } from "./apis/anthropic-system-split.js";
 import { splitAnthropicSystem } from "./apis/anthropic-system-split.js";
+import { splitCodexInstructions } from "./apis/codex-instructions-split.js";
 import { findEngineEnvKeys } from "./env-api-keys.js";
 
 /**
@@ -57,13 +58,22 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	if (clioCoderPinnedPrefix !== undefined) {
 		// Clio's compiler metadata never reaches Pi or a provider option surface (#423).
 		effective = providerOptions as T;
-		if (scope === "main" && model.api === "anthropic-messages") {
+		// Only the main thread splits; workers, side calls and any other API keep the request Pi built.
+		const split =
+			scope !== "main"
+				? undefined
+				: model.api === "anthropic-messages"
+					? splitAnthropicSystem
+					: model.api === "openai-codex-responses"
+						? splitCodexInstructions
+						: undefined;
+		if (split !== undefined) {
 			const onPayload = effective.onPayload;
 			effective = {
 				...effective,
 				onPayload: async (payload: unknown, currentModel: Model<Api>) => {
 					const replacement = await onPayload?.(payload, currentModel);
-					return splitAnthropicSystem(replacement === undefined ? payload : replacement, clioCoderPinnedPrefix);
+					return split(replacement === undefined ? payload : replacement, clioCoderPinnedPrefix);
 				},
 			} as T;
 		}

@@ -1,9 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import anthropicMax from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
 import openai from "../../src/domains/providers/runtimes/cloud/openai.js";
+import openaiCodex from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
@@ -112,6 +117,76 @@ test("only the main thread defaults Anthropic to the 1h TTL (#422)", async () =>
 	} finally {
 		if (previous === undefined) delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 		else process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = previous;
+	}
+});
+
+test("the main thread's Codex request sends the pinned prompt layer as its own item, the rest right after it", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
+		"gpt-6-luna",
+		null,
+	);
+	const pinned = "Install-wide identity and harness.\n";
+	const tail = "Project handbook and runtime.\n";
+	const hash = createHash("sha256").update(pinned).digest("hex");
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const dir = mkdtempSync(join(tmpdir(), "clio-codex-split-"));
+	const previous = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+	type Body = { instructions?: string; input: Array<Record<string, unknown>>; prompt_cache_key?: unknown };
+	let calls = 0;
+	// The diagnostic dump records the body after every wrapper; aborting from the innermost hook sends nothing.
+	const send = async (scope: "main" | "side", prefixHash = hash, transport?: "sse") => {
+		const path = join(dir, `${calls++}.jsonl`);
+		process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+		const abort = new AbortController();
+		const options = {
+			apiKey,
+			sessionId: "session",
+			signal: abort.signal,
+			clioCoderPinnedPrefix: { chars: pinned.length, hash: prefixHash },
+			...(transport ? { transport } : {}),
+			onPayload: () => {
+				abort.abort();
+				return undefined;
+			},
+		};
+		const context = { systemPrompt: pinned + tail, messages: [{ role: "user" as const, content: "Task", timestamp: 0 }] };
+		const stream = (scope === "main" ? engineMainStreamSimple : streamSimple)(model, context, options as never);
+		for await (const _event of stream) {
+			/* Drain to the aborted end. */
+		}
+		const dump = JSON.parse(readFileSync(path, "utf8").trim()) as { payloads: Body[] };
+		return dump.payloads.at(-1) as Body;
+	};
+	const text = (item: Record<string, unknown> | undefined) =>
+		(item?.content as Array<{ text: string }> | undefined)?.map((part) => part.text).join("");
+	try {
+		const main = await send("main");
+		const side = await send("side");
+		const at = main.input.findIndex((item) => item.role === "developer" && text(item) === pinned);
+		ok(at >= 0, JSON.stringify(main.input.map((item) => item.type ?? item.role)));
+		deepStrictEqual(main.input[at + 1], { ...main.input[at], content: [{ type: "input_text", text: tail }] });
+		strictEqual(`${text(main.input[at])}${text(main.input[at + 1])}`, pinned + tail, "concatenates to the prompt");
+		// Workers and side calls, and a prompt whose leading bytes are not the pinned layer, keep today's request.
+		strictEqual(text(side.input[at]), pinned + tail);
+		deepStrictEqual(main.input.slice(0, at), side.input.slice(0, at));
+		deepStrictEqual(main.input.slice(at + 2), side.input.slice(at + 1));
+		strictEqual(main.prompt_cache_key, side.prompt_cache_key);
+		deepStrictEqual(await send("main", "0".repeat(64)), side);
+		// Without a continuation the prompt stays in instructions: the pinned part there, the rest the first input item.
+		const stock = await send("main", hash, "sse");
+		strictEqual(stock.instructions, pinned);
+		deepStrictEqual(stock.input[0], {
+			type: "message",
+			role: "developer",
+			content: [{ type: "input_text", text: tail }],
+		});
+		strictEqual((await send("side", hash, "sse")).instructions, pinned + tail);
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
