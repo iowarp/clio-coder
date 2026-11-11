@@ -10,7 +10,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { listPlaybooks } from "../domains/agents/playbook.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
 import type { ContextState } from "../domains/context/index.js";
-import { renderPromptContext } from "../domains/context/index.js";
+import { renderEffectivePromptContext } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { missingFromTargetStatus } from "../domains/lifecycle/setup-status.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
@@ -449,7 +449,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				current?.chat?.target,
 				current?.chat?.model,
 			)?.capabilities;
-			const preload = selectProjectPreload(renderPromptContext(cwd), capabilities?.tools ?? null, { cwd }).classification;
+			const preload = selectProjectPreload(renderEffectivePromptContext(cwd), capabilities?.tools ?? null, {
+				cwd,
+			}).classification;
 			// Coverage is a session fact, not something to put in the operator's face: one short footer
 			// notice per workspace that expires, with /context holding the detail. The welcome shows nothing.
 			if (preload.mode === "partial" && !announcedPreloadCwds.has(cwd)) {

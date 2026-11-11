@@ -54,6 +54,7 @@ export {
 	updateCodewikiPaths,
 } from "./codewiki/indexer.js";
 export { CODEWIKI_VERSION } from "./codewiki/schema.js";
+export { renderEffectivePromptContext } from "./compiled-handbook.js";
 export type {
 	ContextContract,
 	ContextState,

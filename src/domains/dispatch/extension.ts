@@ -1486,11 +1486,12 @@ function workerProjectPrompt(
 	remap: DispatchRequest["protectedArtifactRemap"],
 ): ProjectPromptContext {
 	const own = context.renderPromptContext(cwd);
-	if (remap === undefined || own.handbookSources.length > 0) return own;
+	// A handbook compiled in the worktree never stands in for one the source checkout keeps out of git.
+	if (remap === undefined || own.handbookFiles.length > 0) return own;
 	const inside = relative(remap.workerRoot, cwd);
 	if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return own;
 	const source = context.renderPromptContext(resolvePath(remap.sourceRoot, inside));
-	return source.handbookSources.length > 0
+	return source.handbookFiles.length > 0
 		? {
 				...source,
 				supportFragments: own.supportFragments,

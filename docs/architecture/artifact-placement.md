@@ -37,6 +37,7 @@ Markdown.
 | Session exports from `/export` | `.clio-coder/exports/<sessionId>-<date>.html` unless a path is named | Human transient |
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
 | Handbook ledger from `context init` and `context init --verify` | `.clio-coder/state/handbook-ledger.json`: under `entries`, every sibling handbook unit `context init` judged, with its source file and line, citations, verdict (`verified`, `stale`, `unverifiable`, `contradicted`), reason and commit; under `verification`, `verifiedCommit` and `verifiedAt`, the last `--verify` verdicts for the effective handbook, which `clio-coder context` and the session hint read and a later `context init` keeps. Written atomically. | Agent-to-agent and provenance |
+| Compiled handbook for a repository without `CLIO-CODER.md` | `.clio-coder/state/compiled-handbook.md` and `compiled-handbook.json` (inputs fingerprint, source files, rule count) | Agent-to-agent |
 | Task-memory handoffs | `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md` | Agent-to-agent |
 | `CLIO-CODER.md` proposals from `context init` | `.clio-coder/proposals/CLIO-CODER-<timestamp>-<uuid>.md` with a `.json` provenance sidecar | Human transient |
 | Task worktrees | `.clio-coder/worktrees/<runId>/` by default; `fleet.worktrees.root` can move the working tree to tmpfs or another directory, except when fleet nodes are configured | Agent-to-agent |

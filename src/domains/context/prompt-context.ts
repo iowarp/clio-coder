@@ -7,6 +7,7 @@ import {
 	renderProjectTypeFragment,
 } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
+import type { CompiledProjectHandbook } from "./compiled-handbook.js";
 import type { ProjectPromptContext } from "./contract.js";
 import { renderProjectOrientation } from "./orientation.js";
 import { readClioState } from "./state.js";
@@ -33,7 +34,16 @@ function codewikiArtifactPresent(cwd: string): boolean {
 	}
 }
 
-export function renderPromptContext(cwd: string): ProjectPromptContext {
+export interface PromptContextOptions {
+	/**
+	 * The handbook to compile when no CLIO-CODER.md loads. Injected rather than
+	 * imported: the compiler reads through the bootstrap, which measures its
+	 * written handbook with this renderer.
+	 */
+	compile?: (cwd: string) => CompiledProjectHandbook | null;
+}
+
+export function renderPromptContext(cwd: string, options: PromptContextOptions = {}): ProjectPromptContext {
 	// Foreground detection uses root filenames only; full source classification belongs to indexing.
 	// and this renders on session compile and on every bounded dispatch. An
 	// indexed project already recorded its type when init, refresh, or the
@@ -61,7 +71,16 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 	// Said where the handbook would have been: a model that sees no project
 	// context spends its first tool call reading CLIO-CODER.md and gets
 	// ENOENT, while the operator's header already says it is missing (#191).
-	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) addSupport(HANDBOOK_ABSENT_FRAGMENT);
+	const handbookSources = loadedClioMd.files.map(({ path, source }) => ({ path, source }));
+	let compiledHandbook: ProjectPromptContext["compiledHandbook"];
+	if (loadedClioMd.files.length === 0 && loadedClioMd.errors.length === 0) {
+		const compiled = options.compile?.(cwd) ?? null;
+		if (compiled) {
+			pieces.push(renderProjectContextFragment(compiled.source, compiled.path));
+			handbookSources.push({ path: compiled.path, source: compiled.source });
+			compiledHandbook = { path: compiled.path, sources: compiled.sources, rules: compiled.rules };
+		} else addSupport(HANDBOOK_ABSENT_FRAGMENT);
+	}
 	// Prompt assembly reports recorded snapshots. Current-tree validation belongs
 	// to background lifecycle work and code_nav, never a synchronous full-tree
 	// hash on the prompt/dispatch path. Presence does not certify parseability.
@@ -100,8 +119,9 @@ export function renderPromptContext(cwd: string): ProjectPromptContext {
 		clioMd,
 		warnings,
 		handbookFiles: loadedClioMd.files.map((file) => file.path),
-		handbookSources: loadedClioMd.files.map(({ path, source }) => ({ path, source })),
+		handbookSources,
 		supportFragments,
+		...(compiledHandbook ? { compiledHandbook } : {}),
 		...(orientationObservedAt !== undefined ? { orientationObservedAt } : {}),
 	};
 }

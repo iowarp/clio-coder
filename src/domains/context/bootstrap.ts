@@ -21,7 +21,7 @@ import {
 	type ProjectPreloadClass,
 	selectProjectPreload,
 } from "../prompts/preload.js";
-import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
+import { detectProjectType, detectProjectTypeHint, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
 	adoptionSnapshotsHash,
@@ -47,7 +47,7 @@ import {
 	coordinateCodewikiExclusive,
 	coordinateCodewikiWrite,
 } from "./codewiki/coordinator.js";
-import type { Codewiki } from "./codewiki/schema.js";
+import { CODEWIKI_VERSION, type Codewiki } from "./codewiki/schema.js";
 import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
 import {
@@ -75,7 +75,7 @@ import {
 	statePath as resolveStatePath,
 	writeClioState,
 } from "./state.js";
-import { contradictingFact, factClaims, treeFacts } from "./tree-facts.js";
+import { contradictingFact, factClaims, type TreeFact, treeFacts } from "./tree-facts.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
@@ -1464,6 +1464,7 @@ function authoredProjectRules(
 	input: BootstrapGenerateInput,
 	output: BootstrapStructuredOutput,
 	corpus: ModelGroundingCorpus,
+	options: { verifiedOnly?: boolean } = {},
 ): ClioMdSection[] {
 	const normalize = normalizeHandbookRule;
 	const generated = normalize(
@@ -1583,7 +1584,7 @@ function authoredProjectRules(
 			record(candidate.unit, candidate.citations, "contradicted", `a kept rule states another ${against.key}`, false);
 			continue;
 		}
-		if (!RULE_LANGUAGE_RE.test(candidate.line) || uncited >= MAX_UNVERIFIABLE_RULES) {
+		if (options.verifiedOnly || !RULE_LANGUAGE_RE.test(candidate.line) || uncited >= MAX_UNVERIFIABLE_RULES) {
 			record(candidate.unit, candidate.citations, "unverifiable", "cites nothing the tree can check", false);
 			continue;
 		}
@@ -2704,6 +2705,110 @@ function writeHandbookLedger(cwd: string, entries: ReadonlyArray<HandbookLedgerE
 		...(typeof verifiedAt === "string" ? { verifiedAt } : {}),
 		...(Array.isArray(verification) ? { verification } : {}),
 	});
+}
+
+/** A handbook compiled from the tree alone, for a repository that has none. */
+export interface TreeCompiledHandbook {
+	/** The handbook in CLIO-CODER.md form, so it routes to workers like a written one. */
+	markdown: string;
+	/** Repository-relative files its rules came from, sorted. */
+	sources: string[];
+	/** Rules it states; each was checked against the tree. */
+	rules: number;
+}
+
+/** A tree fact as a convention that names where it was read; scripts are left to the verification section. */
+function treeFactConvention(fact: TreeFact): string | null {
+	switch (fact.key) {
+		case "package-manager":
+			return `The package manager is ${fact.value} (from ${fact.source}).`;
+		case "test-runner":
+			return `Tests run with ${fact.value} (from ${fact.source}).`;
+		case "formatter":
+			return `Code is formatted with ${fact.value} (from ${fact.source}).`;
+		case "ts-strict":
+			return `TypeScript strict mode is ${fact.value === "true" ? "on" : "off"} (from ${fact.source}).`;
+		case "node-engine":
+			return `The supported Node.js range is ${fact.value} (from ${fact.source}).`;
+		case "scripts":
+			return null;
+	}
+}
+
+/**
+ * Compile a handbook without a model for a repository that has no
+ * CLIO-CODER.md: the rules its checkers declare, the rules of other harnesses'
+ * handbooks whose citations resolve in this tree, its verification commands,
+ * and its tree facts. Null when no checker declares a rule and no adopted rule
+ * verifies, so a repository with nothing checkable to say gets nothing.
+ */
+export function compileHandbookFromTree(input: {
+	cwd: string;
+	repositoryFiles: ReadonlyArray<string>;
+	adoption: AdoptionScanResult;
+	enforcement: EnforcementInventory;
+}): TreeCompiledHandbook | null {
+	const { cwd, repositoryFiles, adoption, enforcement } = input;
+	const projectType = detectProjectTypeHint(cwd);
+	const generate: BootstrapGenerateInput = {
+		cwd,
+		projectType,
+		siblingFiles: loadBootstrapSiblingFiles(adoption),
+		adoption,
+		codewiki: { version: CODEWIKI_VERSION, language: projectType, files: [], symbols: [], edges: [] },
+		enforcement,
+		repositoryFiles: repositoryFiles.filter((path) => !GENERATION_EXCLUDED_FILES.has(path)),
+	};
+	const checkerRules = checkerRuleList(generate);
+	if (checkerRules.length === 0 && adoption.sources.length === 0) return null;
+	const ordered = [
+		...checkerRules.filter((rule) => rule.architectural),
+		...checkerRules.filter((rule) => !rule.architectural),
+	];
+	const invariants = ordered
+		.slice(0, HANDBOOK_TARGETS.invariants)
+		.map((rule) => rule.sentence)
+		.filter((sentence) => sentence.length <= HANDBOOK_TARGETS.invariantChars);
+	const conventions = treeFacts(cwd, enforcement.ciCommands ?? [])
+		.map(treeFactConvention)
+		.filter((line): line is string => line !== null);
+	const adopted = authoredProjectRules(
+		generate,
+		{ projectName: "", identity: "", invariants, conventions } as BootstrapStructuredOutput,
+		createModelGroundingCorpus(generate),
+		{ verifiedOnly: true },
+	);
+	const adoptedLines = adopted.flatMap((section) => section.body.split("\n").filter((line) => line.startsWith("- ")));
+	if (invariants.length === 0 && adoptedLines.length === 0) return null;
+	const stated = [...invariants, ...adoptedLines].join("\n");
+	const overflow = uncoveredCheckerSection(
+		ordered.filter((rule) => !invariants.includes(rule.sentence)),
+		stated,
+		new Set(invariants.map(normalizeHandbookRule)),
+	);
+	const tomlFiles = createTomlFileReader(cwd);
+	const verification = verificationSection(cwd, tomlFiles);
+	const sources = [
+		...new Set([
+			...checkerRules
+				.filter((rule) => invariants.includes(rule.sentence) || overflow?.body.includes(rule.sentence))
+				.map((rule) => rule.path),
+			...adoptedLines.flatMap((line) => /\(source: ([^():]+):\d+\)$/.exec(line)?.[1] ?? []),
+		]),
+	].sort();
+	const overflowLines = overflow ? overflow.body.split("\n").filter((line) => line.startsWith("- ")).length : 0;
+	const markdown = serializeClioMd({
+		projectName: projectName(cwd, tomlFiles),
+		identity: `This handbook was compiled from ${sources.map((source) => `\`${source}\``).join(", ")}; no CLIO-CODER.md in this repository. Every rule in it was checked against this tree.`,
+		invariants,
+		conventions,
+		sections: [...adopted, ...(overflow ? [overflow] : []), ...(verification ? [verification] : [])],
+	});
+	return {
+		markdown,
+		sources,
+		rules: invariants.length + conventions.length + adoptedLines.length + overflowLines,
+	};
 }
 
 /** The effective handbook's rules re-checked against the current tree by `context init --verify`. */

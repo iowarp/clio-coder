@@ -18,6 +18,7 @@ import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
+import { compiledProjectHandbook, renderEffectivePromptContext } from "./compiled-handbook.js";
 import type { ContextContract, ContextState, StartupHint } from "./contract.js";
 import { readHandbookFreshness } from "./handbook-ledger.js";
 import {
@@ -154,7 +155,7 @@ export interface ContextBundleOptions {
 	startupHintHost?: StartupHintHost;
 }
 
-function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): StartupHint[] {
+export function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): StartupHint[] {
 	const { initCommand, suggest } = options.startupHintHost ?? { initCommand: "/context init", suggest: true };
 	const hints: StartupHint[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
@@ -168,13 +169,15 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): S
 		projectType = "unknown";
 	}
 	const clio = loadProjectClioMd(cwd);
-	if (
-		clio.files.length === 0 &&
-		clio.errors.length === 0 &&
-		projectType !== "unknown" &&
-		options.noContextFiles !== true &&
-		suggest
-	) {
+	const absent = clio.files.length === 0 && clio.errors.length === 0 && options.noContextFiles !== true && suggest;
+	// Never written without the command: the session runs on the compile and the operator is told once.
+	const compiled = absent ? compiledProjectHandbook(cwd) : null;
+	if (compiled) {
+		hints.push({
+			level: "info",
+			text: `clio-coder: No project handbook; using ${compiled.rules} verified rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")}. Run ${initCommand} to write one.`,
+		});
+	} else if (absent && projectType !== "unknown") {
 		hints.push({
 			level: "info",
 			text: `clio-coder: No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`,
@@ -621,7 +624,7 @@ export function createContextBundle(
 				throw err;
 			}
 		},
-		renderPromptContext,
+		renderPromptContext: renderEffectivePromptContext,
 		contextState: contextState.read,
 		startupHints: () => [...startupHints],
 		noteFileChanges,
