@@ -7,7 +7,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { pathToFileURL } from "node:url";
-import { processBirthToken } from "../../src/core/process-identity.js";
+import { processBirthToken, setProcStatusReaderForTesting } from "../../src/core/process-identity.js";
 import { tryWithStateFileLockSync, withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
 
 // One implementation now backs settings.yaml, the dispatch admission state
@@ -309,6 +309,18 @@ if (mode === "hold") {
 		holder.stdin?.end();
 		await once(holder, "exit");
 		strictEqual(existsSync(lockPath), false, "the holder released its own lock");
+	});
+
+	it("a kernel without NSpid keeps a live container holder's lock until it ages out", async (t) => {
+		// Before Linux 4.1 (EL7) /proc/<pid>/status has no NSpid line, so the holder's namespace pid cannot be matched.
+		setProcStatusReaderForTesting((pid) => readFileSync(`/proc/${pid}/status`, "utf8").replace(/^NSpid:.*\n/m, ""));
+		t.after(() => setProcStatusReaderForTesting(null));
+		const holder = inNamespace(`exec ${peer("hold")}`);
+		strictEqual(await firstLine(holder), "held");
+		strictEqual(takeHere(), false, "a namespace seen without NSpid does not prove its holder gone");
+		const past = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, past, past);
+		strictEqual(takeHere(), true, "the age backstop still applies");
 	});
 
 	it("a waiter in another pid namespace does not reclaim a host holder it cannot see", async () => {

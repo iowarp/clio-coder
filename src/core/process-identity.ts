@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { hostname } from "node:os";
+import { performance } from "node:perf_hooks";
 
 /**
  * Process identity for durable owner records. A pid alone cannot tell "the
@@ -139,12 +140,33 @@ export interface RecordedOwner {
 
 export type OwnerState = "alive" | "gone" | "unknown";
 
+type ProcStatusReader = (pid: number) => string;
+
+const readProcStatus: ProcStatusReader = (pid) => readFileSync(`/proc/${pid}/status`, "utf8");
+let procStatusReader = readProcStatus;
+
+/** Replace how `/proc/<pid>/status` is read, so a test can stand in for a kernel without NSpid; null restores it. */
+export function setProcStatusReaderForTesting(reader: ProcStatusReader | null): void {
+	procStatusReader = reader ?? readProcStatus;
+	namespaceScans.clear();
+}
+
+interface NamespaceScan {
+	visible: boolean;
+	hostPid: number | null;
+}
+
+const NAMESPACE_SCAN_REUSE_MS = 1_000;
+const namespaceScans = new Map<string, { scan: NamespaceScan; atMs: number }>();
+
 /**
  * Find the process a record names in another pid namespace: a process here whose pid namespace is the recorded one
- * and whose innermost NSpid is the recorded pid. `visible` says whether any process of that namespace was seen, which
- * is what lets a missing pid prove the owner gone; a parent or sibling namespace is never visible.
+ * and whose innermost NSpid is the recorded pid. `visible` says whether a process of that namespace was seen with an
+ * NSpid line, which is what lets a missing pid prove the owner gone. A parent or sibling namespace is never visible,
+ * and neither is any namespace on a kernel without NSpid (before 4.1, as on EL7) or a member whose status cannot be
+ * read: there a live owner and a dead one look the same.
  */
-function findInNamespace(pidNs: string, pid: number): { visible: boolean; hostPid: number | null } {
+function scanNamespace(pidNs: string, pid: number): NamespaceScan {
 	let entries: string[];
 	try {
 		entries = readdirSync("/proc");
@@ -155,18 +177,37 @@ function findInNamespace(pidNs: string, pid: number): { visible: boolean; hostPi
 	for (const entry of entries) {
 		if (!/^\d+$/.test(entry)) continue;
 		if (readPidNamespace(Number(entry)) !== pidNs) continue;
-		visible = true;
+		let nspid: string[] | undefined;
 		try {
-			const nspid = /^NSpid:\s+(.+)$/m
-				.exec(readFileSync(`/proc/${entry}/status`, "utf8"))?.[1]
+			nspid = /^NSpid:\s+(.+)$/m
+				.exec(procStatusReader(Number(entry)))?.[1]
 				?.trim()
 				.split(/\s+/);
-			if (nspid !== undefined && Number(nspid[nspid.length - 1]) === pid) return { visible, hostPid: Number(entry) };
 		} catch {
-			// Exited between the readdir and the read.
+			// Exited between the readdir and the read, or not ours to read.
 		}
+		if (nspid === undefined) continue;
+		visible = true;
+		if (Number(nspid[nspid.length - 1]) === pid) return { visible, hostPid: Number(entry) };
 	}
 	return { visible, hostPid: null };
+}
+
+/**
+ * A lock waiter asks about the same record on every poll and several times per attempt; a scan of /proc is reused
+ * for a second, and only for a record carrying a birth token, so a reused pid writes a record that scans afresh. A
+ * found host pid is still probed live by the caller.
+ */
+function findInNamespace(pidNs: string, pid: number, birthToken: string | null): NamespaceScan {
+	if (birthToken === null) return scanNamespace(pidNs, pid);
+	const key = `${pidNs} ${pid} ${birthToken}`;
+	const now = performance.now();
+	const cached = namespaceScans.get(key);
+	if (cached !== undefined && now - cached.atMs < NAMESPACE_SCAN_REUSE_MS) return cached.scan;
+	const scan = scanNamespace(pidNs, pid);
+	if (namespaceScans.size >= 32) namespaceScans.clear();
+	namespaceScans.set(key, { scan, atMs: now });
+	return scan;
 }
 
 /**
@@ -181,7 +222,7 @@ export function ownerState(owner: RecordedOwner): OwnerState {
 	if (owner.bootId && BOOT_ID !== null && owner.bootId !== BOOT_ID) return "gone";
 	let pid = owner.pid;
 	if (owner.pidNs && PID_NAMESPACE !== null && owner.pidNs !== PID_NAMESPACE) {
-		const found = findInNamespace(owner.pidNs, owner.pid);
+		const found = findInNamespace(owner.pidNs, owner.pid, owner.birthToken);
 		if (found.hostPid === null) return found.visible ? "gone" : "unknown";
 		pid = found.hostPid;
 	}

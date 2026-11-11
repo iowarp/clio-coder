@@ -213,10 +213,14 @@ home is on.
   own. The lock Clio takes on its state files (`settings.yaml`,
   `credentials.yaml`, the dispatch admission state) records the holder's pid
   namespace and boot, so a Clio on the host never takes a container
-  holder's lock by mistaking it for a host process, and the reverse. A lock
-  left by a container that has exited is taken over once it is 30 seconds
-  old. Other records Clio keeps on the home (session ownership, worker slot
-  leases, the store lock, update and build locks) still compare plain pids,
+  holder's lock by mistaking it for a host process, and the reverse. This
+  holds only when the host and the container both run a Clio release that
+  records the namespace; an older Clio on either side still compares plain
+  pids. A lock left by a container that has exited, or held where the kernel
+  does not report namespace pids (before Linux 4.1, as on EL7), is taken
+  over once it is 30 seconds old. Other records Clio keeps on the home
+  (session ownership, worker slot leases, the store lock, update and build
+  locks) still compare plain pids,
   so do not share one home between the host and such a container: give the
   container its own `CLIO_CODER_HOME`, or run it without `--pid` and
   `--containall` (the Apptainer default shares the host's pid namespace,
