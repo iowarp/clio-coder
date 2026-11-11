@@ -1,5 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { it } from "node:test";
 import {
 	parseVerifierResult,
@@ -10,6 +12,7 @@ import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatc
 import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
 it("every reader of a verifier report agrees on a closing report, and a second report decides nothing", () => {
 	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
@@ -271,6 +274,49 @@ it("withholds a task-named check the worker never ran, though unrelated shell ca
 	const ran = recorder.snapshot().executedShellCommands ?? [];
 	deepStrictEqual(ran, ["python3 --version"]);
 	match(mergeWithheldDetail({ ...input, executedShellCommands: ran }) ?? "", /never ran/u);
+});
+
+it("a passing verify run of the task's named check satisfies it; a failed or bare listing call does not", () => {
+	const repo = mkdtempSync(join(tmpdir(), "named-verify-"));
+	try {
+		writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", scripts: { test: "node -e 0" } }));
+		const input = {
+			quality: "unmeasured",
+			hostStatus: undefined,
+			contract: { kind: "mutation-report" as const },
+			output: '{"validations":[]}',
+			branch: "clio-coder/task/calc",
+			task: "Add mul. Verify by running `pnpm test`.",
+			executedCheckingCalls: 1,
+		};
+		const ran = (args: Record<string, unknown>, outcome: "ok" | "error") => {
+			const recorder = createRunEffectsRecorder(repo);
+			recorder.start("v1", "verify", args);
+			recorder.checkOutcome("v1", outcome);
+			recorder.finish("v1", outcome === "error");
+			return recorder.snapshot().executedShellCommands ?? [];
+		};
+		const passed = ran({ check: "test" }, "ok");
+		deepStrictEqual(passed, ["npm run test"]);
+		strictEqual(mergeWithheldDetail({ ...input, executedShellCommands: passed }), null);
+		const goReason = mergeWithheldDetail({ ...input, executedShellCommands: ["go run test.go"] }) ?? "";
+		match(goReason, /\(pnpm test\) but the worker never ran/u);
+		doesNotMatch(goReason, /npm-script/u);
+		match(mergeWithheldDetail({ ...input, executedShellCommands: ran({ check: "test" }, "error") }) ?? "", /never ran/u);
+		match(mergeWithheldDetail({ ...input, executedShellCommands: ran({}, "ok") }) ?? "", /never ran/u);
+		// A verifier's task gate resolves in the worker's recorder too.
+		const gated = "Verify the change by running: `python3 -m pytest -q tests`";
+		configureTaskGates(gated, { confined: false });
+		try {
+			const viaGate = ran({ check: "gate-1" }, "ok");
+			deepStrictEqual(viaGate, ["python3 -m pytest -q tests"]);
+			strictEqual(mergeWithheldDetail({ ...input, task: gated, executedShellCommands: viaGate }), null);
+		} finally {
+			clearTaskGates();
+		}
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
 });
 
 it("a declared unrun check holds the merge unless the task opted out of validation", () => {

@@ -131,6 +131,14 @@ function normalizeCommand(command: string): string {
 	return command.trim().replace(/\s+/gu, " ");
 }
 
+/**
+ * One spelling for a package script, for comparison only: `pnpm test`, `npm run test` and `yarn test` all read as
+ * `npm-script test`, a form no real command contains.
+ */
+function scriptForm(command: string): string {
+	return command.replace(/(^|&& |; )(?:npm|pnpm|yarn|bun) (?:run )?(?=\S)/gu, "$1npm-script ");
+}
+
 /** The command the task names as its check, or null when it names none. */
 function taskNamedCheck(task: string): string | null {
 	// Only an unmistakable command counts: backticked after "by running", or the colon form. "By running the tests"
@@ -225,7 +233,7 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 	if (
 		named !== null &&
 		input.executedShellCommands !== undefined &&
-		!input.executedShellCommands.some((command) => normalizeCommand(command).includes(named))
+		!input.executedShellCommands.some((command) => scriptForm(normalizeCommand(command)).includes(scriptForm(named)))
 	) {
 		return {
 			reason: `the task named its check (${boundedCheck(named)}) but the worker never ran it`,

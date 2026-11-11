@@ -2,6 +2,7 @@ import path from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
+import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
@@ -88,7 +89,10 @@ export interface RunEffects {
 	 * exactly why attribution was downgraded instead of exposing only a boolean.
 	 */
 	writeRecordDowngrades: ReadonlyArray<WriteRecordDowngrade>;
-	/** Bash commands that ran to a clean exit, verbatim, in run order. */
+	/**
+	 * Commands that ran to a clean exit, through bash (verbatim) or a verify check (its resolved argv joined by
+	 * spaces), in run order. A verify call that resolves to no argv, such as a bare listing, records nothing.
+	 */
 	executedShellCommands?: ReadonlyArray<string>;
 }
 
@@ -121,7 +125,7 @@ interface PendingEffects {
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
-	/** The bash command text, null for other tools. */
+	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
 	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
 	outcome: "ok" | "error" | "blocked" | null;
@@ -180,6 +184,16 @@ function gitPathOperands(command: string): string[] {
 		}
 	}
 	return targets;
+}
+
+/** The command a verify call runs, resolved as the tool resolves it (task gates included); null when it runs none. */
+function verifyCommandOf(toolName: string, args: Record<string, unknown> | undefined, base: string): string | null {
+	if (toolName !== ToolNames.Verify || args === undefined) return null;
+	try {
+		return verifyResolutionArgv(resolveVerifyCall(base, args), args, base)?.join(" ") ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function commandOf(args: Record<string, unknown> | undefined): string | null {
@@ -263,7 +277,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
-				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : null,
+				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : verifyCommandOf(toolName, args, base),
 				outcome: null,
 			});
 		},
