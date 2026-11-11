@@ -918,7 +918,6 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 				(line) => {
 					if (!acknowledged && typeof line.id === "string") {
 						acknowledged = true;
-						failures = 0;
 						if (isReconnect) {
 							// Events dropped while the socket was down are gone. Take a
 							// fresh snapshot and let the caller rebuild from it.
@@ -931,7 +930,11 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 						return;
 					}
 					const event = readEvent(line);
-					if (event) handler(event);
+					if (!event) return;
+					// Only a delivered event proves the stream works; an ack alone (or an error
+					// reply) followed by a close must keep the reconnect backoff growing.
+					failures = 0;
+					handler(event);
 				},
 				() => stream.destroy(),
 			);

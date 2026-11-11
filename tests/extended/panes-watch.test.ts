@@ -352,3 +352,31 @@ it("retains structured fields even when the mux error message is empty", async (
 	deepStrictEqual(f.calls, ["split"]);
 	controller.dispose();
 });
+
+it("backs off a subscription the server refuses instead of retrying at the initial delay", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "mux-sub-refused-"));
+	const sock = join(dir, "h.sock");
+	let subscribes = 0;
+	const server = createServer((conn) => {
+		conn.on("error", () => undefined);
+		conn.once("data", (chunk) => {
+			const req = JSON.parse(chunk.toString("utf8").split("\n")[0] ?? "{}") as { id: string; method: string };
+			if (req.method === "events.subscribe") subscribes += 1;
+			conn.end(`${JSON.stringify({ id: req.id, error: { code: "invalid_request", message: "no" } })}\n`);
+		});
+	});
+	await new Promise<void>((resolve) => server.listen(sock, resolve));
+	const client = createMuxClient({ socketPath: sock, backoff: { initialDelayMs: 20, maxDelayMs: 10_000, factor: 2 } });
+	try {
+		const sub = await client.subscribe(["pane.closed"], () => undefined);
+		// Doubling from 20 ms reaches 20+40+80+160+320 = 620 ms after five retries, so 700 ms fits
+		// at most seven connects; the flat 20 ms loop this replaces made about 35.
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		sub.close();
+		strictEqual(subscribes <= 7, true, `subscribe connects in 700 ms: ${subscribes}`);
+	} finally {
+		await client.close();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
