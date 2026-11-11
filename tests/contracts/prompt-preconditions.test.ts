@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -179,5 +179,39 @@ describe("safety text matches the session (S-81)", () => {
 		}).systemPrompt;
 		ok(prompt.includes("You run no commands"), prompt);
 		ok(!/\bbash\b|unsandboxed|\/rewind|main session/iu.test(prompt), prompt);
+	});
+});
+
+describe("one entry per capability (S-83)", () => {
+	const fixture = JSON.parse(
+		readFileSync(new URL("../fixtures/prompt-tiers/attended-default.inputs.json", import.meta.url), "utf8"),
+	) as { inputs: Parameters<typeof compile>[1] };
+	const render = (declaredChecks: string[]) =>
+		compile(loadFragments(), {
+			...fixture.inputs,
+			sessionInputs: { ...fixture.inputs.sessionInputs, declaredChecks },
+		}).systemPrompt;
+
+	it("names each mapped capability in exactly one entry, with no Usage notes section", () => {
+		const prompt = render(["unit"]);
+		const tools = prompt.slice(prompt.indexOf("# Tool Contract"), prompt.indexOf("## Ending a turn"));
+		ok(!tools.includes("## Usage notes"));
+		ok(!tools.includes("## Finding the right capability"));
+		const entries = tools.split("\n").filter((line) => line.startsWith("- `"));
+		const names = entries.map((line) => line.slice(3, line.indexOf("`", 3)));
+		ok(names.length > 20);
+		deepStrictEqual(names.length, new Set(names).size);
+	});
+
+	it("lists declared checks in Project, capped, and uses the first in the verify example", () => {
+		const prompt = render(["unit", "lint"]);
+		ok(prompt.includes("Declared checks (verify): unit, lint"));
+		ok(prompt.includes('verify({"check":"unit"})'));
+		const many = render(Array.from({ length: 15 }, (_, i) => `c${i}`));
+		ok(many.includes("c11, +3 more"));
+		ok(!many.includes("c12"));
+		const none = render([]);
+		ok(!none.includes("Declared checks (verify)"));
+		ok(none.includes("verify({})"));
 	});
 });

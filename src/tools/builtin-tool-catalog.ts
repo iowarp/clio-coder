@@ -49,8 +49,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	// OBSERVE: read-class, parallel, envelope + shared turn budget.
 	[ToolNames.Evidence]: {
 		objective: "Inspect a finished run's sealed assessment: trust status, gate verdicts, and findings.",
-		discoveryHint:
-			"Evidence records observed execution and verification separately from an assistant's completion claim. List runs, then inspect a returned run id when a claim needs checking. A run's seal proves only what it records.",
+		discoveryHint: "A run's seal proves only what it records; check a completion claim against its run.",
 		examples: [{ goal: "List assessed runs without running a check", args: { mode: "list" }, startup: true }],
 		uiLabel: "Evidence",
 		retrySafety: "idempotent",
@@ -69,8 +68,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Grep]: {
 		objective: "Search file contents and return line-referenced matches.",
-		discoveryHint:
-			"Search text inside files. Start in the requested path when known; read the matching lines and stop when they answer the question. A filename search cannot find text inside a file.",
+		discoveryHint: "Start in the named path; stop when the matching lines answer the question.",
 		uiLabel: "Grep",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
@@ -89,8 +87,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Find]: {
 		objective: "Find paths by glob pattern with optional mtime ordering.",
-		discoveryHint:
-			"Find filenames and paths. Match the requested language or extension; a guessed glob can hide the answer.",
+		discoveryHint: "Names only, not contents; match the requested extension.",
 		uiLabel: "Find",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
@@ -116,7 +113,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.CodeNav]: {
 		objective: "Navigate the codemap index by symbol, path, entry points, outline, imports, or importers.",
 		discoveryHint:
-			'Symbol definitions: args={mode:"symbol",query:"<symbol>"}; a known file\'s structure: args={mode:"outline",query:"<path>"}. Follow index locations with read when exact source matters; fall back to grep if the index misses.',
+			'A file\'s structure: mode="outline". Follow with read for exact source; fall back to grep if the index misses.',
 		uiLabel: "Nav",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),
@@ -141,7 +138,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Context]: {
 		objective: "Return workspace, effective configuration, skill, or recall context.",
 		discoveryHint:
-			'Retrieve prior tool content marked [evicted ...] with args={scope:"recall",ref:"<returned ref>"}; this restores session evidence, not persistent memory. args={scope:"budget"} inspects context pressure; args={scope:"settings"} reads effective configuration.',
+			'scope="recall" with a ref restores content marked [evicted]; scope="settings" reads live configuration; scope="budget" shows context pressure.',
 		uiLabel: "Context",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
@@ -187,8 +184,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.ClioLibrary]: {
 		objective: "Read the recipe catalog: installed skills, agents, prompts, playbooks, and installable packages.",
-		discoveryHint:
-			'Catalog of reusable workflows and specialists: args={query:"<task>"}. Read readiness and copy the exact returned invocation. An empty search says nothing about other queries; try a shorter task keyword before declaring nothing available. Discovery does not activate a skill or install a package.',
+		discoveryHint: "Copy the readiness and invocation it returns; try one shorter query before deciding nothing exists.",
 		examples: [
 			{ goal: "Find review workflows and specialists with their readiness and invocation", args: { query: "review" } },
 		],
@@ -202,7 +198,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Data]: {
 		objective:
-			"Inspect, select, validate, or summarize CSV/TSV, JSON, JSON Lines and SQLite, and HDF5, NetCDF and Parquet scientific data (variables, dimensions, CF attributes, chunking, hyperslabs, statistics), with bounded memory and honest counts.",
+			"Inspect, select, validate, or summarize tabular and scientific data (CSV/TSV, JSON Lines, SQLite, HDF5, NetCDF, Parquet) with bounded memory and honest counts.",
 		uiLabel: "Data",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
@@ -221,7 +217,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Store]: {
 		objective:
-			"Keep files in this project's store as blobs in named tags, outside the working tree and shared with every worker; a `<tag>:<blob>` ref such as results:summary.parquet names one blob. Records what Clio observed about each (size, hash, producing script, inputs) and gives a readable path on request.",
+			"Keep files as blobs in named tags outside the working tree, shared with every worker, with what Clio observed about each; a `<tag>:<blob>` ref names one.",
 		uiLabel: "Store",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: observePolicy(
@@ -296,7 +292,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Verify]: {
 		objective: "Run declared verification checks (scripts or frontend artifacts).",
 		discoveryHint:
-			'verify({check:"<id>"}) runs one declared check; an undeclared id runs nothing and its error names the declared ids, so no listing is needed first. verify({}) only lists them. Report actual pass, fail, or unrun status; do not treat a plan to verify as evidence.',
+			"Ids are under Declared checks in Project; verify({}) lists them all. Report actual pass, fail or unrun status.",
 		examples: [{ goal: "Run the project's tests", args: { check: "test" }, startup: true }],
 		uiLabel: "Verify",
 		retrySafety: "retry_safe",
@@ -323,7 +319,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Tasks]: {
 		objective: "Declare and track the session task board with completion claims and separate validation evidence.",
 		discoveryHint:
-			"The session task board tracks multi-step work, dependencies, and completion; it is not the worker coordination ledger. For 3+ authorized steps, use the advertised tasks route and maintain the board; reuse existing rows. Mark done only for work actually completed and name unrun checks.",
+			"For three or more authorized steps: plan them here, reuse rows, and mark done only finished work, naming unrun checks.",
 		examples: [
 			{ goal: "Inspect the existing session task board without changing it", args: { action: "list" }, startup: true },
 			{
@@ -379,7 +375,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		discoveryHint:
-			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. Only monitor and dispatch run records show what a worker actually posted.",
+			"Workers that share a ledger board need one parallel dispatch with a tasks array; the board is not a file, and only run records show what a worker posted.",
 		examples: [
 			{
 				goal: "Run two independent workers in one batch with a shared coordination ledger",
@@ -406,8 +402,18 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Job]: {
 		objective: "Create and control bounded interval jobs owned by this conversation.",
 		discoveryHint:
-			"Repeat an explicit main prompt or poll literal command argv. A job without count or for_ms defaults to five starts. Each occurrence rechecks current authority; command predicates match complete stdout JSON only. Use monitor with job_id or scope=jobs for status and settlement. Workers, cron and event triggers are unavailable.",
+			"Repeats a main prompt or polls literal argv; without count or for_ms it runs five times, and a command predicate matches the whole stdout JSON. Status: monitor with job_id.",
 		examples: [
+			{
+				goal: "Poll a command until its output matches, a bounded number of times",
+				args: {
+					action: "create",
+					runner: "command",
+					argv: ["gh", "run", "view", "123", "--json", "status"],
+					every_ms: 60_000,
+					count: 30,
+				},
+			},
 			{
 				goal: "Repeat a bounded check in this conversation",
 				args: { action: "create", runner: "main", every_ms: 60_000, prompt: "Check the current task status.", count: 5 },
@@ -421,7 +427,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs and conversation-owned jobs: state and settled evidence.",
 		discoveryHint:
-			"Inspect existing worker activity. Use observed run IDs with status, record, or collect after describing those modes. Collect completed detached work before claiming it is integrated. Empty history means no recorded runs; do not dispatch a new worker merely to inspect history.",
+			"Collect detached work before calling it integrated. Empty history means no runs; never dispatch just to inspect history.",
 		examples: [
 			{ goal: "List existing worker runs and results without starting a worker", args: { mode: "list" }, startup: true },
 		],
@@ -513,10 +519,10 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{
 				goal: "Record a design choice before implementation",
 				args: {
-					key: "cache-key-shape",
-					value: "Use the full path",
-					alternatives: ["Use the basename"],
-					rationale: "Avoid collisions between directories",
+					key: "cache-key",
+					value: "Full path",
+					alternatives: ["Basename"],
+					rationale: "Avoids collisions",
 				},
 			},
 		],

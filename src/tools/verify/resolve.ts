@@ -44,6 +44,28 @@ function extraArgs(args: Record<string, unknown>): string[] {
 	return Array.isArray(args.args) ? args.args.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+/**
+ * The ids `verify({})` lists at the workspace root: the project catalog's
+ * first (the project wrote them for this), then package scripts, then derived
+ * toolchain checks that are available. Empty when discovery fails.
+ */
+export function declaredCheckIds(workspaceRoot: string): string[] {
+	const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, undefined);
+	if (!discovery.ok) return [];
+	const declared = discovery.sources.flatMap((source) => source.checks);
+	const rank = (check: DeclaredCheck) => (check.source.kind === "project-catalog" ? 0 : 1);
+	const ordered = [...declared].sort((a, b) => rank(a) - rank(b)).map((check) => check.id);
+	let derived: string[] = [];
+	try {
+		derived = availableToolchainChecks(workspaceRoot, declared)
+			.filter((check) => check.availability === undefined)
+			.map((check) => check.id);
+	} catch {
+		// Derived checks are a convenience; a discovery fault leaves the declared ids.
+	}
+	return [...new Set([...ordered, ...derived])];
+}
+
 /** Derived checks that no package script or catalog entry already owns by id. */
 export function availableToolchainChecks(
 	workspaceRoot: string,

@@ -81,7 +81,7 @@ describe("gateway in the session prompt", () => {
 			strictEqual(compiled.systemPrompt.includes('args={scope:"skills",query:"<task>"}'), hasContext);
 			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasGateway);
 			if (hasGateway) {
-				match(compiled.systemPrompt, /Catalog reads activate and install nothing/);
+				match(compiled.systemPrompt, /never invent recipe or skill names/);
 			}
 			if (hasContext) {
 				match(compiled.systemPrompt, /Load a matching ready skill through gateway/);
@@ -153,9 +153,9 @@ describe("gateway in the session prompt", () => {
 				lines.some((line) => line.includes('gateway(op="call", capability="clio_docs"')),
 				"the usage sentence points at the gateway",
 			);
-			ok(lines.some((line) => line.includes("searches builtins, extensions and recorded MCP catalogs")));
+			ok(lines.some((line) => line.includes('gateway(op="describe", capability="<name>") first')));
 			ok(
-				lines.some((line) => line.includes('gateway(op="find", query="<next step>")')),
+				lines.some((line) => line.includes('gateway(op="find", query="<two to four words>")')),
 				"the gateway hint renders",
 			);
 

@@ -51,11 +51,11 @@
 			"toolDiscoveryHints": [
 				{
 					"tool": "clio_library",
-					"hint": "Catalog of reusable workflows and specialists: args={query:\"<task>\"}. Read readiness and copy the exact returned invocation. An empty search says nothing about other queries; try a shorter task keyword before declaring nothing available. Discovery does not activate a skill or install a package."
+					"hint": "Copy the readiness and invocation it returns; try one shorter query before deciding nothing exists."
 				},
 				{
 					"tool": "code_nav",
-					"hint": "Symbol definitions: args={mode:\"symbol\",query:\"<symbol>\"}; a known file's structure: args={mode:\"outline\",query:\"<path>\"}. Follow index locations with read when exact source matters; fall back to grep if the index misses.",
+					"hint": "A file's structure: mode=\"outline\". Follow with read for exact source; fall back to grep if the index misses.",
 					"starterArgs": {
 						"mode": "symbol",
 						"query": "retry",
@@ -64,11 +64,11 @@
 				},
 				{
 					"tool": "context",
-					"hint": "Retrieve prior tool content marked [evicted ...] with args={scope:\"recall\",ref:\"<returned ref>\"}; this restores session evidence, not persistent memory. args={scope:\"budget\"} inspects context pressure; args={scope:\"settings\"} reads effective configuration."
+					"hint": "scope=\"recall\" with a ref restores content marked [evicted]; scope=\"settings\" reads live configuration; scope=\"budget\" shows context pressure."
 				},
 				{
 					"tool": "dispatch",
-					"hint": "Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. Only monitor and dispatch run records show what a worker actually posted.",
+					"hint": "Workers that share a ledger board need one parallel dispatch with a tasks array; the board is not a file, and only run records show what a worker posted.",
 					"starterArgs": {
 						"mode": "parallel",
 						"tasks": [
@@ -85,14 +85,14 @@
 				},
 				{
 					"tool": "evidence",
-					"hint": "Evidence records observed execution and verification separately from an assistant's completion claim. List runs, then inspect a returned run id when a claim needs checking. A run's seal proves only what it records.",
+					"hint": "A run's seal proves only what it records; check a completion claim against its run.",
 					"starterArgs": {
 						"mode": "list"
 					}
 				},
 				{
 					"tool": "find",
-					"hint": "Find filenames and paths. Match the requested language or extension; a guessed glob can hide the answer.",
+					"hint": "Names only, not contents; match the requested extension.",
 					"starterArgs": {
 						"pattern": "**/*.ts",
 						"path": ".",
@@ -101,7 +101,7 @@
 				},
 				{
 					"tool": "grep",
-					"hint": "Search text inside files. Start in the requested path when known; read the matching lines and stop when they answer the question. A filename search cannot find text inside a file.",
+					"hint": "Start in the named path; stop when the matching lines answer the question.",
 					"starterArgs": {
 						"pattern": "retry",
 						"path": ".",
@@ -111,25 +111,25 @@
 				},
 				{
 					"tool": "job",
-					"hint": "Repeat an explicit main prompt or poll literal command argv. A job without count or for_ms defaults to five starts. Each occurrence rechecks current authority; command predicates match complete stdout JSON only. Use monitor with job_id or scope=jobs for status and settlement. Workers, cron and event triggers are unavailable."
+					"hint": "Repeats a main prompt or polls literal argv; without count or for_ms it runs five times, and a command predicate matches the whole stdout JSON. Status: monitor with job_id."
 				},
 				{
 					"tool": "monitor",
-					"hint": "Inspect existing worker activity. Use observed run IDs with status, record, or collect after describing those modes. Collect completed detached work before claiming it is integrated. Empty history means no recorded runs; do not dispatch a new worker merely to inspect history.",
+					"hint": "Collect detached work before calling it integrated. Empty history means no runs; never dispatch just to inspect history.",
 					"starterArgs": {
 						"mode": "list"
 					}
 				},
 				{
 					"tool": "tasks",
-					"hint": "The session task board tracks multi-step work, dependencies, and completion; it is not the worker coordination ledger. For 3+ authorized steps, use the advertised tasks route and maintain the board; reuse existing rows. Mark done only for work actually completed and name unrun checks.",
+					"hint": "For three or more authorized steps: plan them here, reuse rows, and mark done only finished work, naming unrun checks.",
 					"starterArgs": {
 						"action": "list"
 					}
 				},
 				{
 					"tool": "verify",
-					"hint": "verify({check:\"<id>\"}) runs one declared check; an undeclared id runs nothing and its error names the declared ids, so no listing is needed first. verify({}) only lists them. Report actual pass, fail, or unrun status; do not treat a plan to verify as evidence.",
+					"hint": "Ids are under Declared checks in Project; verify({}) lists them all. Report actual pass, fail or unrun status.",
 					"starterArgs": {
 						"check": "test"
 					}
@@ -216,13 +216,13 @@
 				},
 				{
 					"tool": "data",
-					"objective": "Inspect, select, validate, or summarize CSV/TSV, JSON, JSON Lines and SQLite, and HDF5, NetCDF and Parquet scientific data (variables, dimensions, CF attributes, chunking, hyperslabs, statistics), with bounded memory and honest counts.",
+					"objective": "Inspect, select, validate, or summarize tabular and scientific data (CSV/TSV, JSON Lines, SQLite, HDF5, NetCDF, Parquet) with bounded memory and honest counts.",
 					"plane": "observe",
 					"argumentShape": "Required args: op, path. args={\"op\":\"inspect\",\"path\":\"data.csv\",\"sample_rows\":3}"
 				},
 				{
 					"tool": "store",
-					"objective": "Keep files in this project's store as blobs in named tags, outside the working tree and shared with every worker; a `<tag>:<blob>` ref such as results:summary.parquet names one blob. Records what Clio observed about each (size, hash, producing script, inputs) and gives a readable path on request.",
+					"objective": "Keep files as blobs in named tags outside the working tree, shared with every worker, with what Clio observed about each; a `<tag>:<blob>` ref names one.",
 					"plane": "observe",
 					"argumentShape": "Required args: op. args={\"op\":\"put\",\"tag\":\"results\",\"path\":\"out/summary.csv\",\"note\":\"baseline run\"}"
 				},
@@ -248,7 +248,7 @@
 					"tool": "decide",
 					"objective": "Record a design decision with its rejected alternatives and rationale on the session decision board.",
 					"plane": "orchestrate",
-					"argumentShape": "Required args: key, value, alternatives, rationale. args={\"key\":\"cache-key-shape\",\"value\":\"Use the full path\",\"alternatives\":[\"Use the basename\"],\"rationale\":\"Avoid collisions between directories\"}"
+					"argumentShape": "Required args: key, value, alternatives, rationale. args={\"key\":\"cache-key\",\"value\":\"Full path\",\"alternatives\":[\"Basename\"],\"rationale\":\"Avoids collisions\"}"
 				},
 				{
 					"tool": "context",
@@ -308,7 +308,7 @@
 					"tool": "job",
 					"objective": "Create and control bounded interval jobs owned by this conversation.",
 					"plane": "orchestrate",
-					"argumentShape": "Required args: action. args={\"action\":\"create\",\"runner\":\"main\",\"every_ms\":60000,\"prompt\":\"Check the current task status.\",\"count\":5}"
+					"argumentShape": "Required args: action. args={\"action\":\"create\",\"runner\":\"command\",\"argv\":[\"gh\",\"run\",\"view\",\"123\",\"--json\",\"status\"],\"every_ms\":60000,\"count\":30}"
 				},
 				{
 					"tool": "dispatch",
@@ -340,7 +340,8 @@
 			"liveSteering": false,
 			"contextOperationUpdate": "",
 			"hasFleetNodes": false,
-			"contextFiles": "<project-type>javascript</project-type>\n\n<context-evidence>Project handbooks provide standing instructions and navigation hints. They do not establish current branch, HEAD, dirty files, task completion, or implementation behavior. For repository orientation use code_nav mode=project for current Git and recorded task observations, even without an index; on a gateway-only tool surface call gateway with op=call, capability=code_nav, args={mode:project}. Once a loaded skill narrows the tools and its allowed_tools omit code_nav, orient with the tools it allows instead. Read relevant definitions before making behavioral claims or proposing changes; label unverified facts as unknown. Preserve operator edits.</context-evidence>\n\n<project-context path=\"/work/project/CLIO-CODER.md\">\n# Gridstats\n\nGridstats is a JavaScript/Node.js project. Small Node library that computes summary statistics over regular grids.\n\n## Conventions\n\n- Tests use `node:test`.\n\n## Verification expectations\n\nAvailable static checks: `npm run lint`. Declared test command: `npm run test`. Exact package.json#scripts.test: `node --test tests/`. Other test scripts have separate selection; check which command runs a test before claiming coverage. Choose checks relevant to the change within the user-authorized scope and authored project policy. `verify` can run declared checks; an authorized command it cannot run can be executed through `bash`.\n\n</project-context>\n\n<codemap>available snapshot; freshness checked on retrieval; use code_nav</codemap>\n\n<project-orientation>\nRecorded source snapshot; current source/status must be checked with tools.\nDeclared project (package.json): \"gridstats\" — \"Small Node library that computes summary statistics over regular grids\" [README.md#summary]\nDeclared commands: npm run test [package.json#scripts.test]; npm run lint [package.json#scripts.lint]\nIndexed source: 3 files, 1 tests; areas: \"src\" (2), \"tests\" (1).\nNavigation: code_nav mode=symbol|path|entries|outline|deps|dependents; use code_nav mode=project to retrieve current Git and durable operator task evidence. Session progress/blockers: tasks action=list. Recorded task status is not passing verification.\n</project-orientation>"
+			"contextFiles": "<project-type>javascript</project-type>\n\n<context-evidence>Project handbooks provide standing instructions and navigation hints. They do not establish current branch, HEAD, dirty files, task completion, or implementation behavior. For repository orientation use code_nav mode=project for current Git and recorded task observations, even without an index; on a gateway-only tool surface call gateway with op=call, capability=code_nav, args={mode:project}. Once a loaded skill narrows the tools and its allowed_tools omit code_nav, orient with the tools it allows instead. Read relevant definitions before making behavioral claims or proposing changes; label unverified facts as unknown. Preserve operator edits.</context-evidence>\n\n<project-context path=\"/work/project/CLIO-CODER.md\">\n# Gridstats\n\nGridstats is a JavaScript/Node.js project. Small Node library that computes summary statistics over regular grids.\n\n## Conventions\n\n- Tests use `node:test`.\n\n## Verification expectations\n\nAvailable static checks: `npm run lint`. Declared test command: `npm run test`. Exact package.json#scripts.test: `node --test tests/`. Other test scripts have separate selection; check which command runs a test before claiming coverage. Choose checks relevant to the change within the user-authorized scope and authored project policy. `verify` can run declared checks; an authorized command it cannot run can be executed through `bash`.\n\n</project-context>\n\n<codemap>available snapshot; freshness checked on retrieval; use code_nav</codemap>\n\n<project-orientation>\nRecorded source snapshot; current source/status must be checked with tools.\nDeclared project (package.json): \"gridstats\" \u2014 \"Small Node library that computes summary statistics over regular grids\" [README.md#summary]\nDeclared commands: npm run test [package.json#scripts.test]; npm run lint [package.json#scripts.lint]\nIndexed source: 3 files, 1 tests; areas: \"src\" (2), \"tests\" (1).\nNavigation: code_nav mode=symbol|path|entries|outline|deps|dependents; use code_nav mode=project to retrieve current Git and durable operator task evidence. Session progress/blockers: tasks action=list. Recorded task status is not passing verification.\n</project-orientation>",
+			"declaredChecks": ["unit", "test", "lint"]
 		},
 		"additionalFragments": [
 			{
@@ -353,7 +354,7 @@
 			{
 				"id": "context.catalogs",
 				"relPath": "inline/catalogs",
-				"body": "# Catalogs\nInstalled for this session, by name. A name here grants nothing; readiness, admission and approval still apply when you use one.\nSkills (workflows; load one only at the step that needs it):\n- release-notes: Drafts gridstats release notes from the commits since the last tag, grouped by…\nAgents (dispatch one with agent=\"<name>\"; dispatch({list:true}) shows tools and budgets; shadow ones run only through dispatch, so operator /run or `run --agent` commands use coder --read-only):\n- architect: Designs a change across boundaries and slices it into a sprint\n- coder: Implements bounded code changes, repairs, and refactors\n- debugger: Diagnoses failing code, tests, or runs without editing\n- documenter: Writes docs and examples from source\n- git-master: Runs bounded git operations end to end\n- oracle: (shadow, read-only) Shadow advisor that protects consistency with prior…\n- provenance: (shadow, read-only) Reads run records, diffs, and telemetry for evidence\n- researcher: (shadow, read-only) Researches external docs, standards, and papers\n- scout: (shadow, read-only) Reconnaissance and code review with cited findings\n- tester: Adds focused deterministic regression and coverage tests\n- verifier: Runs test, lint, build, review, and release gates\n- wiki-repair: Repairs mechanical publication diagnostics in one existing wiki draft\n- wiki-writer: Plans a repository wiki or writes one wiki page\n- world-knowledge: (shadow, read-only) Current open-world discovery, ecosystem comparisons, broad…\nPlaybooks (multi-step workflows the fleet runs; not startable from this run):\n- build-review: Implement the change, then hold it against an independent reviewer with a…",
+				"body": "# Catalogs\nInstalled for this session, by name. A name here grants nothing; readiness, admission and approval still apply when you use one.\nSkills (workflows; load one only at the step that needs it):\n- release-notes: Drafts gridstats release notes from the commits since the last tag, grouped by\u2026\nAgents (dispatch one with agent=\"<name>\"; dispatch({list:true}) shows tools and budgets; shadow ones run only through dispatch, so operator /run or `run --agent` commands use coder --read-only):\n- architect: Designs a change across boundaries and slices it into a sprint\n- coder: Implements bounded code changes, repairs, and refactors\n- debugger: Diagnoses failing code, tests, or runs without editing\n- documenter: Writes docs and examples from source\n- git-master: Runs bounded git operations end to end\n- oracle: (shadow, read-only) Shadow advisor that protects consistency with prior\u2026\n- provenance: (shadow, read-only) Reads run records, diffs, and telemetry for evidence\n- researcher: (shadow, read-only) Researches external docs, standards, and papers\n- scout: (shadow, read-only) Reconnaissance and code review with cited findings\n- tester: Adds focused deterministic regression and coverage tests\n- verifier: Runs test, lint, build, review, and release gates\n- wiki-repair: Repairs mechanical publication diagnostics in one existing wiki draft\n- wiki-writer: Plans a repository wiki or writes one wiki page\n- world-knowledge: (shadow, read-only) Current open-world discovery, ecosystem comparisons, broad\u2026\nPlaybooks (multi-step workflows the fleet runs; not startable from this run):\n- build-review: Implement the change, then hold it against an independent reviewer with a\u2026",
 				"contentHash": "2c5fb1053d0b60e9361fcb81a84c1f8692fd04bc402cc5da460b4b893f26fd94",
 				"dynamic": true
 			}

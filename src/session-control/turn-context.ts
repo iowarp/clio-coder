@@ -167,6 +167,7 @@ import type {
 import { capabilityArgumentShape, capabilityStarterArgs } from "../tools/gateway/guidance.js";
 import { TOOL_PLANES } from "../tools/policy.js";
 import type { ToolRegistry } from "../tools/registry.js";
+import { declaredCheckIds } from "../tools/verify/resolve.js";
 import {
 	backendCacheVerdict,
 	extractUserText,
@@ -643,6 +644,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// reminder text carrying what the live section added since.
 	let frozenMemorySection: string | null = null;
 	let frozenRouteSources: SessionPromptInputs["routeSources"];
+	// Read once per workspace root so the Project section stays byte-stable across turns.
+	let declaredChecksFor: { cwd: string; ids: string[] } | undefined;
 	let frozenRouteIdentity = "";
 	let thinkingUsesConfigurationUpdate = false;
 	let frozenMemorySessionId = "";
@@ -2871,6 +2874,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							},
 						];
 			});
+			if (declaredChecksFor?.cwd !== cwd) declaredChecksFor = { cwd, ids: declaredCheckIds(cwd) };
+			const declaredChecks = declaredChecksFor.ids;
 			// Only the bound session ceiling shapes compiled guidance; prompt and
 			// template scope arrives in the current turn reminder (#423).
 			const standingConstraints = deps.standingTurnConstraints?.();
@@ -2897,6 +2902,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				coordinatorCapabilities: builtinTools.map((spec) => spec.name).sort(),
 				...(toolDiscoveryHints.length > 0 ? { toolDiscoveryHints } : {}),
 				...(capabilityMap.length > 0 ? { capabilityMap } : {}),
+				...(declaredChecks.length > 0 ? { declaredChecks } : {}),
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),
