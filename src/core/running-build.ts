@@ -199,3 +199,17 @@ export function staleRunningBuilds(state = resolveClioDirs().state): RunningBuil
 		}
 	return records;
 }
+
+/**
+ * Whether the build on disk is no longer the one this process loaded, as
+ * after `pnpm run build` in the checkout a session runs from. One small file
+ * read. A source run (no running id) or an interrupted build (no disk id) is
+ * never stale.
+ */
+export function runningBuildIsStale(
+	root = resolvePackageRoot(),
+	running: string | null = runningBuildId,
+): { stale: boolean; diskId: string | null } {
+	const diskId = installedBuildId(root);
+	return { stale: running !== null && diskId !== null && diskId !== running, diskId };
+}

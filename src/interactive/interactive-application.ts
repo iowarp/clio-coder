@@ -97,6 +97,7 @@ import { hydrateResumedSessionPresentation } from "./resumed-session-presentatio
 import { createSessionFileRecorder, sessionFileOutcomeForExitCode } from "./session-file.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
 import { createSessionTranscript } from "./session-transcript.js";
+import { createStaleBuildNotice } from "./stale-build.js";
 import { createSteerReceipts } from "./steer-receipts.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import {
@@ -1105,6 +1106,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	// outside any render transaction, so the sequence carries frameId null and
 	// never lands inside a frame. A non-TTY process never emits one even when
 	// `CLIO_CODER_INTERACTIVE=1` forced the interactive surface on.
+	const staleBuildNotice = createStaleBuildNotice((level, text, key) => notify(level, text, key));
 	const desktopNotifications = createInteractiveDesktopNotifications({
 		write: (data) => terminal.write(data),
 		enabled: () => deps.getSettings?.().interface.desktopNotifications ?? false,
@@ -1183,6 +1185,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			desktopNotifications.turnEnded();
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
 			devSession?.poke();
+			staleBuildNotice();
 		},
 		refreshLiveWorkspaceGit: (force) => void refreshLiveWorkspaceGit(force),
 		refreshFooter: () => {
