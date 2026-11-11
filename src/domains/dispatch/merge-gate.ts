@@ -122,8 +122,9 @@ const VALIDATION_REQUEST =
  * "Verify the change by running: python3 -B -c 'import calc'" or "Run `make check` to verify": the task names the
  * exact command its validation is. Only these two spellings count, so "run the app" names nothing.
  */
-const NAMED_CHECK_BY_RUNNING =
-	/\b(?:verify|validate|check|test)\b[^\n]{0,80}?\bby\s+running\s*:?\s*(`[^`\n]+`|[^\n]+)/iu;
+const NAMED_CHECK_BY_RUNNING = /\b(?:verify|validate|check|test)\b[^\n]{0,80}?\bby\s+running\b([^\n]*)/iu;
+const BACKTICKED = /`([^`\n]+)`/u;
+const COLON_COMMAND = /^\s*:\s*(\S[^\n]*)/u;
 const NAMED_CHECK_RUN_TO_VERIFY = /\brun\s+`([^`\n]+)`\s+to\s+(?:verify|validate|check|test)\b/iu;
 
 function normalizeCommand(command: string): string {
@@ -132,7 +133,10 @@ function normalizeCommand(command: string): string {
 
 /** The command the task names as its check, or null when it names none. */
 function taskNamedCheck(task: string): string | null {
-	const byRunning = NAMED_CHECK_BY_RUNNING.exec(task)?.[1];
+	// Only an unmistakable command counts: backticked after "by running", or the colon form. "By running the tests"
+	// names nothing and falls back to taskRequestsValidation.
+	const rest = NAMED_CHECK_BY_RUNNING.exec(task)?.[1];
+	const byRunning = rest === undefined ? undefined : (BACKTICKED.exec(rest)?.[1] ?? COLON_COMMAND.exec(rest)?.[1]);
 	const raw = byRunning ?? NAMED_CHECK_RUN_TO_VERIFY.exec(task)?.[1];
 	if (raw === undefined) return null;
 	const command = normalizeCommand(

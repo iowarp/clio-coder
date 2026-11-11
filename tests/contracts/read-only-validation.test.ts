@@ -252,6 +252,25 @@ it("withholds a task-named check the worker never ran, though unrelated shell ca
 		false,
 	);
 	strictEqual(mergeWithheldDetail({ ...input, task: "Add mul and run the app." }), null);
+	match(mergeWithheldDetail({ ...input, task: "Add mul. Verify by running `make check`." }) ?? "", /make check/u);
+	for (const task of [
+		"Verify the change by running the tests",
+		"Test it by running pytest and fix any failures",
+		"check it works by running the app",
+	]) {
+		strictEqual(mergeWithheldDetail({ ...input, task }), null, task);
+	}
+	// The named command present only as a failed run is not a clean execution.
+	const recorder = createRunEffectsRecorder("/w");
+	recorder.start("c1", "bash", { command: "python3 -B -c 'import calc'" });
+	recorder.checkOutcome("c1", "error");
+	recorder.finish("c1", false);
+	recorder.start("c2", "bash", { command: "python3 --version" });
+	recorder.checkOutcome("c2", "ok");
+	recorder.finish("c2", false);
+	const ran = recorder.snapshot().executedShellCommands ?? [];
+	deepStrictEqual(ran, ["python3 --version"]);
+	match(mergeWithheldDetail({ ...input, executedShellCommands: ran }) ?? "", /never ran/u);
 });
 
 it("a declared unrun check holds the merge unless the task opted out of validation", () => {

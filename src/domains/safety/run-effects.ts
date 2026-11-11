@@ -309,7 +309,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
-			if (effects.shellCommand !== null && effects.outcome !== "blocked") executedShellCommands.push(effects.shellCommand);
+			if (effects.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
+				executedShellCommands.push(effects.shellCommand);
 		},
 		checkOutcome(toolCallId, outcome) {
 			const effects = pending.get(toolCallId);
