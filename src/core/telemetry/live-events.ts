@@ -174,6 +174,16 @@ export type DispatchScopeNoticePayload =
 			agentId: string;
 			runId: string;
 			message: string;
+	  }
+	| {
+			/** A delegated harness read its own instruction files beside the compiled rules, and some of their rules no longer hold. */
+			code: "peer_instructions_stale";
+			level: "warning";
+			agentId: string;
+			runId: string;
+			files: ReadonlyArray<string>;
+			stale: number;
+			message: string;
 	  };
 
 /** Explicit context boundary: published prompt sources changed or could not be inspected. */

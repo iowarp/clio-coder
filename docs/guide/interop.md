@@ -157,7 +157,10 @@ a file whose guidance Clio cannot extract as rules. Antigravity, ACP peers, and 
 `none` keep their current behavior. The run record's `projectContext.peerInstructions` names the delivery,
 the files, the count of rules the tree no longer supports (`stale`), and the
 count that hold but did not fit the bound (`notCarried`), and `reason: setting`
-when the setting kept the files.
+when the setting kept the files. When a peer read its files as they are and they
+hold rules the tree no longer supports, Clio raises a `peer_instructions_stale`
+notice once per process for those files and counts, such as `AGENTS.md has 1 rule
+that no longer matches the repository; Codex read it in this run.`
 
 ### Peer modes and their status
 

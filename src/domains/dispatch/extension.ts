@@ -198,6 +198,7 @@ import {
 	sisterRepositoryRules,
 } from "../context/sister-repository.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
+import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
@@ -417,7 +418,7 @@ import {
 	resolveDispatchPathScope,
 	runLedgerProjection,
 } from "./path-scope.js";
-import { type PeerInstructions, resolvePeerInstructions } from "./peer-instructions.js";
+import { type PeerInstructions, peerInstructionsStaleMessage, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import { claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
@@ -1775,6 +1776,11 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
  * handbook. Before that message existed, every receipt in a nine-turn live
  * drive read `bounded chars:0` while its worker hunted for the repository.
  */
+/** The harness's own name ("Claude Code", "Codex"), else the runtime's display name. */
+function harnessLabel(runtime: Pick<RuntimeDescriptor, "id" | "displayName">): string {
+	return INTEROP_AGENT_KINDS.find((kind) => kind.headlessRuntimeId === runtime.id)?.label ?? runtime.displayName;
+}
+
 /** Whether `fleet.keepPeerInstructionFiles` names this runtime by its id or an alias. */
 function keepsPeerInstructionFiles(
 	settings: Readonly<typeof DEFAULT_SETTINGS> | null | undefined,
@@ -2311,6 +2317,8 @@ interface DispatchLifecycleStage {
 	peerOverlay?: ReadonlyArray<{ file: string; content: string }>;
 	/** The run's prompt with the rules in the message instead, for when the overlay cannot be written at spawn. */
 	peerCoexist?: PeerPromptComposition;
+	/** What the operator hears when the harness ends up reading its own files and some of their rules no longer hold. */
+	peerStale?: { files: string[]; stale: number; message: string };
 	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
 	rulesApplied: string[];
 	/** Whether the operator profile rendered non-empty content into this run's system prompt. */
@@ -3917,6 +3925,7 @@ export function createDispatchBundle(
 	const spawnWorker = options?.spawnWorker ?? spawnNativeWorker;
 	// Each unhooked-runtime notice once per process, however many workers it covers.
 	const unhookedNotices = new Set<string>();
+	const staleNotices = new Set<string>();
 	const fleetRegistry = scheduling.fleet;
 	const resolveNode =
 		options?.resolveNode ??
@@ -6175,6 +6184,12 @@ export function createDispatchBundle(
 			};
 		};
 		const composed = composePrompt(peer);
+		const peerStaleMessage =
+			peer?.staleFiles !== undefined ? peerInstructionsStaleMessage(harnessLabel(target.runtime), peer.staleFiles) : null;
+		const peerStale =
+			peer !== null && peerStaleMessage !== null
+				? { files: (peer.staleFiles ?? []).map((entry) => entry.file), stale: peer.stale, message: peerStaleMessage }
+				: null;
 		const { dynamicPromptMessages, compiledPromptHash, dynamicHash } = composed;
 		const projectContextProvenance = composed.projectContext;
 		const staticCompositionHash = promptHash(systemPrompt);
@@ -6229,6 +6244,7 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
+			...(peerStale !== null ? { peerStale } : {}),
 			...(peer?.overlay !== undefined
 				? {
 						peerOverlay: peer.overlay,
@@ -9904,6 +9920,24 @@ export function createDispatchBundle(
 				// A merge needs no card at default autonomy, so the operator's transcript says it landed.
 				const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? envelope.id, worktreeReceipt);
 				if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
+				// The harness read its own files unreconciled; the operator owns them and hears once per process.
+				const peerStale = lifecycle.peerStale;
+				if (
+					peerStale !== undefined &&
+					lifecycle.projectContext.peerInstructions?.delivery === "coexist" &&
+					!staleNotices.has(peerStale.message)
+				) {
+					staleNotices.add(peerStale.message);
+					context.bus.emit("run.scope_notice_raised", {
+						code: "peer_instructions_stale",
+						level: "warning",
+						agentId: req.agentId,
+						runId: envelope.id,
+						files: peerStale.files,
+						stale: peerStale.stale,
+						message: peerStale.message,
+					});
+				}
 				// A hypothesis slate the worker wrote enters the log only once the host accepted the run into the project
 				// (#406): a merged task worktree's changed paths, or the observed writes of a run in the checkout that
 				// settled succeeded; nothing the worker reported is used. The bytes are read here, in the same synchronous

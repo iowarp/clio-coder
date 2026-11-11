@@ -30,6 +30,8 @@ export interface PeerInstructions {
 	notCarried: number;
 	/** Why a harness that can take the rules in place of its files reads them beside the files. */
 	reason?: "setting";
+	/** Per file, in `files` order, the rules the tree no longer supports; files with none are left out. */
+	staleFiles?: Array<{ file: string; stale: number }>;
 	/** The compiled rules; absent when the handbook has no sections to compile, so the run keeps its usual message. */
 	text?: string;
 	/** For an overlay, what to write over each file in the task worktree for the run (worktree-relative paths). */
@@ -176,11 +178,19 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 	if (files.length === 0) return null;
 	const peerRules = await judgePeerFiles(input.cwd, files);
 	const names = files.map((file) => file.file);
+	const staleFiles = names
+		.map((file) => ({
+			file,
+			stale: peerRules.filter(
+				(rule) => rule.source.file === file && (rule.verdict === "stale" || rule.verdict === "contradicted"),
+			).length,
+		}))
+		.filter((entry) => entry.stale > 0);
 	const compiled = input.handbookSources.map(({ source, path }) => compileHandbook(source, path));
 	const handbooks = compiled.filter((handbook): handbook is CompiledHandbook => handbook !== null);
 	if (handbooks.length !== compiled.length) {
 		const stale = peerRules.filter((rule) => rule.verdict === "stale" || rule.verdict === "contradicted").length;
-		return { delivery: "coexist", files: names, stale, notCarried: 0 };
+		return { delivery: "coexist", files: names, stale, notCarried: 0, staleFiles };
 	}
 	const peer = compilePeerHandbook(handbooks, {
 		audience: input.audience,
@@ -191,7 +201,7 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 		facts: treeFacts(repositoryRoot(input.cwd)),
 		clioNames: input.clioNames,
 	});
-	const result = { files: names, stale: peer.stale, notCarried: peer.notCarried, text: peer.text };
+	const result = { files: names, stale: peer.stale, notCarried: peer.notCarried, text: peer.text, staleFiles };
 	if (input.keepFiles === true && input.declared.delivery !== "coexist") {
 		return { delivery: "coexist", ...result, reason: "setting" };
 	}
@@ -201,4 +211,21 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 	const nearest = names.length - 1;
 	const overlay = names.map((file, index) => ({ file, content: index === nearest ? `${peer.text}\n` : "" }));
 	return { delivery: "overlay", ...result, overlay };
+}
+
+/**
+ * What the operator hears when a harness read its own files with rules the tree no longer supports: they own the
+ * files and can fix them. Null when no file has such a rule.
+ */
+export function peerInstructionsStaleMessage(
+	harness: string,
+	staleFiles: ReadonlyArray<{ file: string; stale: number }>,
+): string | null {
+	if (staleFiles.length === 0) return null;
+	const total = staleFiles.reduce((sum, entry) => sum + entry.stale, 0);
+	const counts = staleFiles.map((entry) => `${entry.file} has ${entry.stale} ${entry.stale === 1 ? "rule" : "rules"}`);
+	const which = counts.length === 1 ? counts[0] : `${counts.slice(0, -1).join(", ")} and ${counts.at(-1)}`;
+	return total === 1
+		? `${which} that no longer matches the repository; ${harness} read it in this run.`
+		: `${which} that no longer match the repository; ${harness} read them in this run.`;
 }

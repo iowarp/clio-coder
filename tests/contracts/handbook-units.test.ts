@@ -13,6 +13,7 @@ import {
 import { compilePeerHandbook } from "../../src/domains/context/peer-handbook.js";
 import { treeFacts } from "../../src/domains/context/tree-facts.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
+import { peerInstructionsStaleMessage } from "../../src/domains/dispatch/peer-instructions.js";
 
 const PATH = "/repo/CLIO-CODER.md";
 const HANDBOOK = `# Demo
@@ -325,5 +326,20 @@ describe("peer handbook compile", () => {
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
+	});
+
+	it("names each stale file with its own count and says nothing when every rule holds", () => {
+		strictEqual(peerInstructionsStaleMessage("Codex", []), null);
+		strictEqual(
+			peerInstructionsStaleMessage("Claude Code", [{ file: "CLAUDE.md", stale: 2 }]),
+			"CLAUDE.md has 2 rules that no longer match the repository; Claude Code read them in this run.",
+		);
+		strictEqual(
+			peerInstructionsStaleMessage("Pi CLI", [
+				{ file: "AGENTS.md", stale: 1 },
+				{ file: "CLAUDE.md", stale: 3 },
+			]),
+			"AGENTS.md has 1 rule and CLAUDE.md has 3 rules that no longer match the repository; Pi CLI read them in this run.",
+		);
 	});
 });

@@ -200,6 +200,10 @@ for (const event of [
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "default";
 	const base = dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: ["read", "write"] });
+	const notices: Array<{ code: string; message: string; files?: ReadonlyArray<string>; stale?: number }> = [];
+	const unsubscribe = base.bus.subscribe("run.scope_notice_raised", (payload) => {
+		if ((payload as { code: string }).code === "peer_instructions_stale") notices.push(payload as never);
+	});
 	const bundle = makeDispatchBundle({
 		...base,
 		getContract: ((name: DomainName) =>
@@ -242,6 +246,7 @@ for (const event of [
 			stale: 1,
 			notCarried: 0,
 		});
+		deepStrictEqual(notices, []);
 		// Kept: the operator keeps Codex on its AGENTS.md, so the compiled rules ride beside it.
 		settings.fleet.keepPeerInstructionFiles = ["codex-cli"];
 		const kept = await run();
@@ -256,11 +261,17 @@ for (const event of [
 			notCarried: 0,
 			reason: "setting",
 		});
+		equal(notices.length, 1);
+		equal(notices[0]?.message, "AGENTS.md has 1 rule that no longer matches the repository; Codex read it in this run.");
+		deepStrictEqual(notices[0]?.files, ["AGENTS.md"]);
+		equal(notices[0]?.stale, 1);
 		// Coexist: a handbook of prose alone keeps its usual message, and Codex reads AGENTS.md beside it.
 		writeFileSync(join(root, "CLIO-CODER.md"), "Demo prices carts. Keep money in integer cents.\n");
 		const coexist = await run();
 		ok(!coexist.argv.includes("project_doc_max_bytes=0"), coexist.argv.join(" "));
 		ok(coexist.stdin.includes("Keep money in integer cents."), coexist.stdin);
+		// The same files with the same stale rule are not news a second time in this process.
+		equal(notices.length, 1);
 		deepStrictEqual(coexist.receipt.projectContext?.peerInstructions, {
 			delivery: "coexist",
 			files: ["AGENTS.md"],
@@ -268,6 +279,7 @@ for (const event of [
 			notCarried: 0,
 		});
 	} finally {
+		unsubscribe();
 		await bundle.extension.stop?.();
 	}
 });
@@ -328,6 +340,10 @@ for (const event of [
 	});
 	// Placement runs between the prompt and the spawn: a locked worktree root there makes the overlay write fail.
 	let lockWorktree = false;
+	const notices: string[] = [];
+	const unsubscribe = base.bus.subscribe("run.scope_notice_raised", (payload) => {
+		if ((payload as { code: string }).code === "peer_instructions_stale") notices.push(payload.message);
+	});
 	const bundle = makeDispatchBundle(
 		{
 			...base,
@@ -384,6 +400,10 @@ for (const event of [
 		const named = await run("Tidy AGENTS.md and round the cart total");
 		equal(named.agents, agents);
 		equal(named.receipt.projectContext?.peerInstructions?.delivery, "coexist");
+		// Only a run that read AGENTS.md as it is tells the operator about its stale rule.
+		deepStrictEqual(notices, [
+			"AGENTS.md has 1 rule that no longer matches the repository; OpenCode read it in this run.",
+		]);
 		ok(named.stdin.includes("<project-rules>"), named.stdin);
 
 		// An overlay that cannot be written leaves the harness its own file and sends the rules in the message.
@@ -398,6 +418,7 @@ for (const event of [
 		ok(unwritable.stdin.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."));
 		equal(execFileSync("git", ["-C", locked, "ls-files", "-v", "AGENTS.md"], { encoding: "utf8" }), "H AGENTS.md\n");
 	} finally {
+		unsubscribe();
 		await bundle.extension.stop?.();
 	}
 });
