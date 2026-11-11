@@ -27,6 +27,8 @@ import {
 } from "./trust-vocabulary.js";
 
 const closed = { additionalProperties: false };
+/** Who bills a seat-billed call; a harness word, which a report bundle carries verbatim. */
+export const BILLING_PROVIDERS = ["github-copilot"] as const;
 const count = Type.Integer({ minimum: 0 });
 const estimatedCount = Type.Object({ kind: Type.Literal("estimated"), value: count, method: EstimateMethod }, closed);
 const duration = Type.Number({ minimum: 0 });
@@ -295,7 +297,7 @@ export const CallSettledSchema = Type.Object(
 		billing: Type.Optional(
 			Type.Object(
 				{
-					provider: vocabulary(["github-copilot"]),
+					provider: vocabulary(BILLING_PROVIDERS),
 					premiumRequests: factSchema(Type.Number({ minimum: 0 })),
 					nanoAiu: factSchema(Type.Number({ minimum: 0 })),
 					modelCalls: factSchema(count),

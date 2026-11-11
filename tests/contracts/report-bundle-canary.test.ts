@@ -359,6 +359,45 @@ test("the runtime scan finds escaped, cased and nested canaries and nothing in c
 	deepStrictEqual(issueCanaryHits({ title: "t", body }, IDENTITY), []);
 });
 
+test("a target id inside a built-in runtime id or billing provider is not a leak; the bare target id still is (D14)", () => {
+	const identity: LocalIdentity = {
+		packageRoot: null,
+		paths: [],
+		remotes: [],
+		names: [{ value: "copilot", kind: "target" }],
+	};
+	const scan = (value: unknown) =>
+		canaryScan([{ name: "report.json", bytes: Buffer.from(JSON.stringify(value)) }], identity).map((hit) => hit.path);
+	deepStrictEqual(scan({ runtime: ["copilot-sdk"], token: "copilot-sdk", billing: { provider: "github-copilot" } }), []);
+	deepStrictEqual(scan({ target: "copilot", route: "copilot/claude-haiku-5.5", both: "copilot-sdk copilot" }), [
+		"target",
+		"route",
+		"both",
+	]);
+	deepStrictEqual(scan({ other: "copilot-lab" }), ["other"]);
+});
+
+test("a run's response model id observation label is anonymized, never kept as a readable model id (D14)", () => {
+	const tally = createProjectionTally();
+	const label = "response_model_id_observation=reported:claude-haiku-5.5 ×2";
+	const projected = projectSharedPayload(
+		"run.settled",
+		{ upstream: { responseModelIds: label, gatewayRoutes: null } },
+		anonymize,
+		projectionFor("report"),
+		tally,
+	) as { upstream: { responseModelIds: string } };
+	ok(projected.upstream.responseModelIds !== label);
+	deepStrictEqual([...(tally.readable.get("model") ?? [])], []);
+	const plain = projectSharedPayload(
+		"run.settled",
+		{ upstream: { responseModelIds: "claude-haiku-5.5", gatewayRoutes: null } },
+		anonymize,
+		projectionFor("report"),
+	) as { upstream: { responseModelIds: string } };
+	strictEqual(plain.upstream.responseModelIds, "claude-haiku-5.5");
+});
+
 test("a name beside `-` or `.` is masked on screen, and a miss is a review gate naming it, not a Send refusal (R2b-report-01)", async () => {
 	const raw = `host ${USER}-laptop and ${HOST}.lan, see ${PROJECT}.config.ts and ${PROJECT}-api, the pre-${BRANCH} build`;
 	const scrubbed = scrubText(raw, IDENTITY);

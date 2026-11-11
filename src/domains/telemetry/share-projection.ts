@@ -773,6 +773,12 @@ export function isBuiltinRuntimeId(value: string): boolean {
 	return RUNTIME_VOCABULARY.has(value);
 }
 
+/**
+ * A value a `model-id` field may leave readable: one token with no whitespace or other prose, the shape a report
+ * bundle's envelope carries. A label such as a run's response model observation is not one and is anonymized.
+ */
+const PLAIN_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9_.:@+/-]*$/u;
+
 const MODEL_FILE =
 	/\.(?:gguf|ggml|bin|safetensors|pt|pth|ckpt|onnx|tflite|mlmodel|mlpackage|llamafile|h5|npz|pkl|engine)$/iu;
 const HOME_ROOTS: ReadonlySet<string> = new Set(["home", "Users"]);
@@ -912,7 +918,9 @@ function projectField(
 	if (projection === "drop") return DROP;
 	if (projection === "withhold") return mapStrings(value, withheld);
 	if (projection === "model-id")
-		return mapStrings(value, (text) => (carriesPath(text) ? anonymize("model", text) : readable("model", text)));
+		return mapStrings(value, (text) =>
+			carriesPath(text) || !PLAIN_MODEL_ID.test(text) ? anonymize("model", text) : readable("model", text),
+		);
 	if (projection === "json-schema") return projectJsonSchema(value, anonymize);
 	if (projection === "settings") return mapStringsAndKeys(value, (text) => anonymize("config", text), isSettingsField);
 	if (projection === "settings-path") return mapStrings(value, (text) => projectSettingsPath(text, anonymize));
