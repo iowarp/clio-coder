@@ -23,6 +23,10 @@ import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { settledRunTrust } from "../harness/settled-run.js";
 
+// The verification slot is machine-wide; keep this file's slot in scratch.
+const slotDir = mkdtempSync(join(tmpdir(), "clio-coder-verification-slot-"));
+process.env.CLIO_CODER_VERIFICATION_SLOT_DIR = slotDir;
+
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
 interface Scratch {
@@ -1097,9 +1101,10 @@ it("contains base-check writes and removes concurrent timed-out base checkouts",
 });
 
 describe("the verification slot", () => {
-	it("queues concurrent host verifications on one state root and says which one waits", async () => {
+	it("queues concurrent host verifications across two state roots and says which one waits", async () => {
 		const first = makeScratch();
-		const second = { ...makeScratch(), stateDir: first.stateDir };
+		const second = makeScratch();
+		ok(first.stateDir !== second.stateDir);
 		const running = join(first.root, "running");
 		// Fails when another check is already running, then holds its marker long enough for any overlap to show.
 		const exclusive = (scratch: Scratch, id: string): ResolvedCheck => ({
@@ -1139,6 +1144,6 @@ describe("the verification slot", () => {
 		strictEqual(phases.filter((phase) => phase.endsWith("waiting")).length, 1, phases.join(", "));
 		const waiter = phases.find((phase) => phase.endsWith("waiting"))?.split(" ")[0];
 		ok(phases.indexOf(`${waiter} waiting`) < phases.indexOf(`${waiter} running`), phases.join(", "));
-		ok(!existsSync(join(first.stateDir, "dispatch-verification-slot.lock")), "the slot is released");
+		ok(!existsSync(join(slotDir, "dispatch-verification-slot.lock")), "the slot is released");
 	});
 });

@@ -12,6 +12,8 @@ import {
 	runHostVerification,
 } from "../../src/domains/dispatch/host-verification.js";
 
+process.env.CLIO_CODER_VERIFICATION_SLOT_DIR = mkdtempSync(join(tmpdir(), "clio-coder-verification-slot-"));
+
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
 const scratches: string[] = [];

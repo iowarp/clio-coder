@@ -633,13 +633,12 @@ export async function compareHostVerificationBase(input: {
 		};
 		const stateDir = input.stateDir ?? clioStateDir();
 		const slotted = (): Promise<BaseReplay> =>
-			withVerificationSlot(stateDir, `base replay of ${declared.check}`, replay, input.slot);
+			withVerificationSlot(`base replay of ${declared.check}`, replay, input.slot);
 		const cachedReplay = async (key: string): Promise<BaseReplay> => {
 			const stored = readBaseReplay(stateDir, key);
 			if (stored !== undefined) return stored;
 			// Another process may have replayed this base while this one waited for the slot.
 			const result = await withVerificationSlot(
-				stateDir,
 				`base replay of ${declared.check}`,
 				async () => readBaseReplay(stateDir, key) ?? (await replay()),
 				input.slot,
@@ -884,7 +883,6 @@ async function runResolvedCheck(
 	const note = `host verification ${resolvedCheck.check} for run ${input.runId}`;
 	if (resolvedCheck.kind === "reproduce") {
 		const check = await withVerificationSlot(
-			input.stateDir,
 			note,
 			() => runSealedReproduce(resolvedCheck, input.shellSandbox),
 			input.slot,
@@ -944,7 +942,6 @@ async function runResolvedCheck(
 	// process stored for this tree while this one waited answers it.
 	if (scopedToTask.has(resolvedCheck)) return spawnResolvedCheck(input, command, judgmentKey, key, tree);
 	return withVerificationSlot(
-		input.stateDir,
 		note,
 		async () => memoHit() ?? (await spawnResolvedCheck(input, command, judgmentKey, key, tree)),
 		input.slot,

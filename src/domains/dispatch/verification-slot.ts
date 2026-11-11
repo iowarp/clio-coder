@@ -1,21 +1,23 @@
 /**
- * The verification slot: one host-verification check at a time per state root.
+ * The verification slot: one host-verification check at a time per machine.
  *
  * Host verification runs a task's declared checks on the host, and a whole-repo
  * check (typecheck, a full test suite, an unscoped lint) can use every core.
  * Parallel batches in one session, and parallel Clio sessions on one machine,
  * each ran theirs at once and drove the load far past the core count. Every
  * check that spawns now takes this slot first, so they queue instead. The slot
- * is the state root's `dispatch-verification-slot.lock`, taken through the
- * shared state-file lock, so a holder that dies frees it and a waiter in the
- * same process queues like one in another.
+ * is machine-wide, not per state root, so sessions under different Clio homes
+ * queue too: `dispatch-verification-slot.lock` in {@link verificationSlotDir},
+ * taken through the shared state-file lock, so a holder that dies frees it and
+ * a waiter in the same process queues like one in another.
  *
  * A wait that outlasts {@link VERIFICATION_SLOT_WAIT_MS}, or a lock that cannot
  * be taken at all, runs the check without the slot and says so: the slot is
  * there to spread load, never to fail or hang a verification.
  */
 
-import { join } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 
 /** How long a check waits for the slot before it runs without it. */
@@ -35,13 +37,31 @@ export interface VerificationSlotEvents {
 	onUnavailable?: (error: unknown) => void;
 }
 
-function verificationSlotPath(stateDir: string): string {
-	return join(stateDir, "dispatch-verification-slot");
+/**
+ * The machine-level directory holding the slot, shared across Clio homes:
+ * `CLIO_CODER_VERIFICATION_SLOT_DIR` when set to an absolute path, else
+ * `$XDG_RUNTIME_DIR/clio-coder`, else a per-user directory in the OS temp dir.
+ */
+function verificationSlotDir(env: NodeJS.ProcessEnv = process.env): string {
+	const override = env.CLIO_CODER_VERIFICATION_SLOT_DIR;
+	if (override !== undefined && isAbsolute(override)) return override;
+	const runtime = env.XDG_RUNTIME_DIR;
+	if (runtime !== undefined && isAbsolute(runtime)) return join(runtime, "clio-coder");
+	let user: string;
+	try {
+		user = String(userInfo().uid >= 0 ? userInfo().uid : userInfo().username);
+	} catch {
+		user = "user";
+	}
+	return join(tmpdir(), `clio-coder-${user}`);
+}
+
+function verificationSlotPath(): string {
+	return join(verificationSlotDir(), "dispatch-verification-slot");
 }
 
 /** Run `fn` holding the verification slot; see the module comment. */
 export async function withVerificationSlot<T>(
-	stateDir: string,
 	note: string,
 	fn: () => Promise<T>,
 	events: VerificationSlotEvents = {},
@@ -55,7 +75,7 @@ export async function withVerificationSlot<T>(
 		return fn();
 	};
 	try {
-		return await withStateFileLock(verificationSlotPath(stateDir), enter, {
+		return await withStateFileLock(verificationSlotPath(), enter, {
 			timeoutMs: waitMs,
 			note,
 			onContended: () => {
