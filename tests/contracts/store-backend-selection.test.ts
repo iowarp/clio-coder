@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import net from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { storeFindings } from "../../src/cli/doctor-store.js";
 import { storeRoot } from "../../src/core/store-paths.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { readStoreBackendSelection } from "../../src/domains/store/selection.js";
@@ -32,6 +33,23 @@ describe("store backend selection", () => {
 			strictEqual(selection.record, null);
 			strictEqual(selection.problem, null);
 			strictEqual((await openStoreBackend(root)).kind, "local");
+		}));
+
+	it("doctor reports the local default quietly when clio-core is absent", () =>
+		withHome(async () => {
+			const savedPath = process.env.PATH;
+			process.env.PATH = "";
+			try {
+				const findings = await storeFindings();
+				strictEqual(findings[0]?.detail, "local (no selection; the default)");
+				ok(
+					findings.every((finding) => finding.ok && finding.level !== "warn" && finding.level !== "error"),
+					JSON.stringify(findings),
+				);
+				ok(!findings.some((finding) => finding.name !== "store backend" && finding.name !== "store root"));
+			} finally {
+				process.env.PATH = savedPath;
+			}
 		}));
 
 	it("an unreadable or wrong-version record is reported and treated as local", () =>
