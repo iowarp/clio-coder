@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { parse, stringify } from "yaml";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { runClioRun } from "../../src/cli/run.js";
+import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { codexSubprocessPermissionConfig } from "../../src/domains/providers/runtimes/external-cli-policy.js";
 import { buildAgyArgs } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { buildClaudeCodeArgs } from "../../src/engine/claude/subprocess-runtime.js";
@@ -78,11 +79,10 @@ test("a single-source run turns off each harness's own repository instructions",
 	const run = { ...input(true), skipRepositoryInstructions: true };
 	const codex = buildCodexExecArgs(run);
 	deepStrictEqual(codex.slice(-3), ["-c", "project_doc_max_bytes=0", "-"]);
-	const claude = buildClaudeCodeArgs(run);
-	deepStrictEqual(claude.slice(claude.indexOf("--setting-sources"), claude.indexOf("--setting-sources") + 2), [
-		"--setting-sources",
-		"user",
-	]);
+	// Claude Code has no switch that skips CLAUDE.md alone: `--setting-sources user` also drops the project's
+	// permission rules and hooks, so it reads its files beside the compiled rules.
+	ok(!buildClaudeCodeArgs(run).includes("--setting-sources"));
+	equal(claudeCodeRuntime.repositoryInstructions?.delivery, "coexist");
 	ok(buildPiCliArgs(run).includes("--no-context-files"));
 	const plain = input(true);
 	ok(!buildCodexExecArgs(plain).includes("project_doc_max_bytes=0"));

@@ -74,8 +74,6 @@ export function buildClaudeCodeArgs(input: WorkerRunInput): string[] {
 		permission.permissionMode,
 		...permission.extraArgs,
 	];
-	// Only the user's own settings and CLAUDE.md load; the project's come compiled in the prompt.
-	if (input.skipRepositoryInstructions === true) args.push("--setting-sources", "user");
 	if (input.wireModelId.trim().length > 0) args.push("--model", input.wireModelId);
 	const systemPrompt = input.systemPrompt.trim();
 	if (systemPrompt.length > 0) args.push("--append-system-prompt", systemPrompt);

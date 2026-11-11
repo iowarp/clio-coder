@@ -133,14 +133,15 @@ off so the peer reads one source:
 
 | Runtime | Instruction files, per directory from the repository root down | Delivery | Switch |
 | --- | --- | --- | --- |
-| `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | single source | `--setting-sources user` |
+| `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | coexist | none |
 | `codex-cli` | `AGENTS.override.md`, else `AGENTS.md` | single source | `-c project_doc_max_bytes=0` |
 | `pi-cli` | `AGENTS.md`, else `CLAUDE.md` | single source | `--no-context-files` |
 | `opencode-cli` | `AGENTS.md`, else `CLAUDE.md` | overlay in a task worktree, else coexist | none |
 
-`--setting-sources user` also stops Claude Code from loading the project's
-`.claude/settings.json` and `.claude/settings.local.json`, including their
-hooks and permission rules. OpenCode has no switch. When its run has its own
+Claude Code reads its files beside the compiled rules: its only switch,
+`--setting-sources user`, would also skip the project's `.claude/settings.json`
+and `.claude/settings.local.json`, whose permission rules and hooks are the
+peer's own project guardrails. OpenCode has no switch. When its run has its own
 task worktree, Clio writes the compiled rules over the nearest instruction file
 in that worktree and empties the others for the run, so OpenCode reads them
 there and not in the message. Each overlaid file is marked skip-worktree in the

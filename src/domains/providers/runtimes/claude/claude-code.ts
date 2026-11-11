@@ -24,11 +24,12 @@ const claudeCodeRuntime: RuntimeDescriptor = {
 	outputParser: "claude-code-stream-json",
 	defaultCapabilities: claudeCodeCapabilities,
 	enforcement: UNMEDIATED_ENFORCEMENT,
-	// `--setting-sources user` skips the project's CLAUDE.md, rules and settings.
+	// Coexist: `--setting-sources user` would skip the project's CLAUDE.md but also its .claude/settings*.json,
+	// whose permission rules and hooks are the peer's only project guardrails, since Clio does not mediate its tools.
 	repositoryInstructions: {
 		files: ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"],
 		fallback: ["AGENTS.md"],
-		delivery: "single-source",
+		delivery: "coexist",
 	},
 	// The Claude CLI runs its own tool loop. Clio observes only the stream, so a
 	// declared per-tool budget is recorded as external-one-shot, never enforced.
