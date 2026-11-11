@@ -1451,6 +1451,15 @@ function handbookRuleTokens(rule: string): ReadonlySet<string> {
 // A path below the root: a root document such as `CONTRIBUTING.md` is cited as the source of unrelated rules.
 const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
 
+/** Most words match: two bullets that only cite the same files may state different obligations. */
+function rewordsHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
+	return kept.some((other) => {
+		const shorter = tokens.size <= other.size ? tokens : other;
+		const longer = tokens.size <= other.size ? other : tokens;
+		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
+	});
+}
+
 /**
  * Two rules are one when most words match, or when they cite the same files
  * and names. A model that states a rule as an invariant and again as a change
@@ -1913,10 +1922,19 @@ function stabilizeGeneratedOutput(
 			carriedSection
 				? protectedKeys.has(normalizeHandbookRule(block))
 				: restatesHandbookRule(handbookRuleTokens(block), uncarriedRuleTokens) || duplicatesCarried(block);
+		// A bullet that rewords an earlier bullet of the same section is dropped; the first wording stays.
+		const keptHere: ReadonlySet<string>[] = [];
 		const body = handbookBlocks(section.body)
-			.filter(
-				(block) => !/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block) || (!restatesKept(block) && !restatesArchitecture(block)),
-			)
+			.filter((block) => {
+				if (!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block)) return true;
+				if (restatesKept(block) || restatesArchitecture(block)) return false;
+				if (!carriedSection) {
+					const tokens = handbookRuleTokens(block);
+					if (rewordsHandbookRule(tokens, keptHere)) return false;
+					keptHere.push(tokens);
+				}
+				return true;
+			})
 			.join("\n");
 		if (!body.trim()) return false;
 		const titleKey = section.title.replace(/\s+/g, " ").trim().toLowerCase();

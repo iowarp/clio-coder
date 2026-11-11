@@ -687,6 +687,37 @@ it("carries a section title the rewrite dropped with the blocks that name a defi
 	]);
 });
 
+it("drops a bullet that rewords an earlier bullet of the same section", async () => {
+	writeFileSync(join(cwd, "CLIO-CODER.md"), "# harbor\n\nA widget renderer.\n");
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: [
+					{
+						title: "Change recipes",
+						body: [
+							"- A new widget kind registers its renderer through `renderWidget` in `src/widgets/render.ts` under the widgets tests.",
+							"- A new widget kind registers its renderer through `renderWidget` in `src/widgets/render.ts` with widgets tests first.",
+							"- Exported names from `src/widgets/render.ts` stay stable between minor releases.",
+						].join("\n"),
+					},
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	strictEqual(handbook.match(/registers its renderer/g)?.length, 1, handbook);
+	ok(handbook.includes("under the widgets tests."), handbook);
+	ok(handbook.includes("stay stable between minor releases"), handbook);
+});
+
 it("returns a previous block under a kept title unless a protected rule states it word for word", async () => {
 	const carried = writeCarryFixture();
 	mkdirSync(join(cwd, "docs"), { recursive: true });
