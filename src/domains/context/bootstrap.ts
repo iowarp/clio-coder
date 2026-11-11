@@ -2856,30 +2856,41 @@ function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<strin
 	return { ...codewiki, files, symbols };
 }
 
+/** A handbook file to verify: its repository-relative name, its path and its text. */
+export interface HandbookToVerify {
+	file: string;
+	path: string;
+	content: string;
+}
+
+/** Every rule of some handbooks judged against a tree, and the rules that tree's checkers declare. */
+export interface HandbookRuleVerdicts {
+	entries: HandbookLedgerEntry[];
+	/** The checker rules as whole sentences, each naming its rule id and checker file. */
+	checkerRules: string[];
+}
+
 /**
- * Re-ground every rule of the effective handbook without a model: its
- * backticked citations against the tree, its tree-fact claims against the
- * tree-fact table, and its checker ids against the enforcement inventory.
- * Paths resolve from the repository root whatever directory it runs in, and
- * no instruction file (handbook, AGENTS.md, CLAUDE.md and the like) counts as
- * evidence. Records the verdicts and the commit in the handbook ledger.
+ * Re-ground each rule of `handbooks` against the tree at `root` without a
+ * model and without writing anything: backticked citations against the tree,
+ * tree-fact claims against the tree-fact table, checker ids against the
+ * enforcement inventory. No instruction file (handbook, AGENTS.md, CLAUDE.md
+ * and the like) counts as evidence. With no recorded code index and none
+ * supplied, a rule citing a symbol does not verify.
  */
-export async function verifyHandbook(cwd: string): Promise<HandbookVerification> {
-	const loaded = loadProjectClioMd(cwd);
-	const root = handbookRoot(cwd);
-	const handbooks = loaded.files.map((file) => ({
-		file: relative(root, file.path).split("\\").join("/"),
-		path: file.path,
-		content: file.source,
-	}));
-	const repositoryFiles = (await enumerateWorkspaceFilesAsync(root)).filter(
-		(path) => !GENERATION_EXCLUDED_FILES.has(path),
-	);
+export function verifyHandbookRules(
+	root: string,
+	handbooks: ReadonlyArray<HandbookToVerify>,
+	evidence: { repositoryFiles?: ReadonlyArray<string>; codewiki?: Codewiki } = {},
+): HandbookRuleVerdicts {
+	const repositoryFiles = [
+		...(evidence.repositoryFiles ?? enumerateWorkspaceFiles(root).filter((path) => !GENERATION_EXCLUDED_FILES.has(path))),
+	];
 	const projectType = detectProjectType(root);
-	const indexed = readCodewiki(root);
+	const indexed = evidence.codewiki ?? readCodewiki(root);
 	const codewiki = indexed
 		? codewikiOnTree(indexed, repositoryFiles, root)
-		: (await buildCodewikiCandidate(root, projectType)).codewiki;
+		: { version: CODEWIKI_VERSION, language: projectType, files: [], symbols: [], edges: [] };
 	const enforcement = collectEnforcementInventory(root, repositoryFiles);
 	const adoption = scanAgentConfigs({ cwd: root, includeGlobal: false });
 	const input: BootstrapGenerateInput = {
@@ -2963,6 +2974,28 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 			else entry("unverifiable", "cites nothing the tree can check");
 		}
 	}
+	return { entries, checkerRules: checkerRules.map((rule) => rule.sentence) };
+}
+
+/**
+ * Re-ground every rule of the effective handbook without a model (see
+ * `verifyHandbookRules`). Paths resolve from the repository root whatever
+ * directory it runs in. Records the verdicts and the commit in the handbook
+ * ledger.
+ */
+export async function verifyHandbook(cwd: string): Promise<HandbookVerification> {
+	const loaded = loadProjectClioMd(cwd);
+	const root = handbookRoot(cwd);
+	const handbooks = loaded.files.map((file) => ({
+		file: relative(root, file.path).split("\\").join("/"),
+		path: file.path,
+		content: file.source,
+	}));
+	const repositoryFiles = (await enumerateWorkspaceFilesAsync(root)).filter(
+		(path) => !GENERATION_EXCLUDED_FILES.has(path),
+	);
+	const codewiki = readCodewiki(root) ?? (await buildCodewikiCandidate(root, detectProjectType(root))).codewiki;
+	const { entries } = verifyHandbookRules(root, handbooks, { repositoryFiles, codewiki });
 	const commit = gitOutput(root, ["rev-parse", "HEAD"])?.trim() || null;
 	const previous = readLedgerFile(root);
 	writeLedgerFile(root, {

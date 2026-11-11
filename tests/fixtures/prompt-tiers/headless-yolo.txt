@@ -148,7 +148,9 @@ limitations. Do not certify two implementations equivalent or report no defects
 until every path that changes the compared state is traced in each. A failed run supplies leads, not verification: confirm the few
 relevant locations instead of repeating its exploration, and do not repeat the
 same goal and files under a new wording. Report refused dispatches and why any
-replacement fits. Never narrate a worker you did not run. Operator-shared
+replacement fits. Work in another repository is dispatched with that
+repository as the worker's cwd, one repository per task, and the worker
+receives that repository's rules. Never narrate a worker you did not run. Operator-shared
 [worker result] notes are steering; verify relevant claims the same way.
 
 # Skills

@@ -11,11 +11,19 @@ import {
 import { forgetApprovedFlowPolicy } from "../domains/safety/flow-policy-snapshot.js";
 import { printError } from "./shared.js";
 
-const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings", "extensions", "plugins"];
+const SURFACES: ReadonlyArray<ProjectTrustSurface> = [
+	"safety",
+	"hooks",
+	"settings",
+	"extensions",
+	"plugins",
+	"handbook",
+];
 
 const PACKAGE_RELOAD: Partial<Record<ProjectTrustSurface, string>> = {
 	extensions: "Reload extensions (/reload extensions) to apply it.",
 	plugins: "Reload the library (/reload library) to apply it.",
+	handbook: "Runs from another repository's session receive this handbook in full from their next dispatch.",
 };
 
 /** C1 controls, which JSON escaping leaves raw. */
@@ -44,7 +52,7 @@ export function runConfigTrustCommand(args: ReadonlyArray<string>, cwd = process
 	const surface = args[0] as ProjectTrustSurface | undefined;
 	if (surface === undefined || !SURFACES.includes(surface)) {
 		printError(
-			"usage: clio-coder config trust safety|hooks|settings|extensions|plugins [--json | --hash SHA256 | --revoke]",
+			"usage: clio-coder config trust safety|hooks|settings|extensions|plugins|handbook [--json | --hash SHA256 | --revoke]",
 		);
 		return 2;
 	}

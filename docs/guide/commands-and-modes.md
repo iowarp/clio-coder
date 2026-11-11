@@ -178,6 +178,11 @@ macOS and native Windows run the private server only, and Windows prints the lin
 Five project surfaces carry operator authority. Clio ignores an unapproved
 surface in a workspace. Settings, safety and hooks require approval of their
 exact bytes; extensions and plugins use package identities as described below.
+A sixth, `handbook`, pins a repository's handbook bytes for work that reaches
+it from a session started in another repository; until it is approved there,
+that work carries only the rules the repository's tree verifies. Run
+`clio-coder config trust handbook` in that repository. The startup card does
+not list it.
 
 When the terminal app opens a workspace whose surfaces are untrusted or have
 changed since approval, one card lists them before the session starts:
@@ -229,7 +234,7 @@ Settings and safety take effect at the next restart. A revoked hook stops
 before its next execution, and a newly approved hook registers when extensions
 reload. Approved `extensions` apply on `/reload extensions` and approved
 `plugins` on `/reload library`. A missing or unknown surface name prints
-`usage: clio-coder config trust safety|hooks|settings|extensions|plugins [--json | --hash SHA256 | --revoke]`,
+`usage: clio-coder config trust safety|hooks|settings|extensions|plugins|handbook [--json | --hash SHA256 | --revoke]`,
 and any other argument form, including a `--hash` value that is not 64 lowercase
 hexadecimal characters, prints `trust expects --json, --revoke, or --hash followed by the full reviewed SHA-256 digest`.
 Both exit 2.

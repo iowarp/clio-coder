@@ -17,7 +17,7 @@ import {
 } from "../domains/dispatch/intent-compatibility.js";
 import { mergeOperatorNamedChecks } from "../domains/dispatch/operator-checks.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
-import { scoutReadWorkspace } from "../domains/dispatch/scout-workspace.js";
+import { repositorySpanRefusal, scoutReadWorkspace } from "../domains/dispatch/scout-workspace.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 
@@ -281,6 +281,8 @@ function dispatchRequestFromArgs(
 	if (!workspace.ok) return workspace;
 	cwd = workspace.cwd;
 	request.cwd = cwd;
+	const span = repositorySpanRefusal({ cwd, intent: workspace.intent, writeRoots: args.writeRoots });
+	if (span !== null) return span;
 	let rawIntent = workspace.intent;
 	if (workspace.extraReadRoots !== undefined && workspace.extraReadRoots.length > 0) {
 		request.extraReadRoots = workspace.extraReadRoots;

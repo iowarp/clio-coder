@@ -16,7 +16,7 @@ import { taskWorktreeOrigin } from "./task-worktree-claim.js";
 import { clioConfigDir, configRootRemoved, resolveClioDirs } from "./xdg.js";
 
 export type WorkspaceTrustVerdict = "trusted" | "untrusted" | "changed";
-export type ProjectTrustSurface = "safety" | "hooks" | "settings" | "extensions" | "plugins";
+export type ProjectTrustSurface = "safety" | "hooks" | "settings" | "extensions" | "plugins" | "handbook";
 
 export interface ProjectSurfaceFile {
 	path: string;
@@ -59,7 +59,17 @@ interface PackageIdentities {
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
-const SURFACES: ReadonlyArray<ProjectTrustSurface> = ["safety", "hooks", "settings", "extensions", "plugins"];
+const SURFACES: ReadonlyArray<ProjectTrustSurface> = [
+	"safety",
+	"hooks",
+	"settings",
+	"extensions",
+	"plugins",
+	"handbook",
+];
+
+/** The repository-root handbook files a `handbook` approval pins. */
+export const HANDBOOK_TRUST_FILES: ReadonlyArray<string> = ["CLIO-CODER.override.md", "CLIO-CODER.md", "CLIO-DEV.md"];
 
 function sha256(value: string | Buffer): string {
 	return createHash("sha256").update(value).digest("hex");
@@ -149,6 +159,8 @@ export function workspaceTrustDirectory(): string {
 /** The `.clio-coder/` entries each surface reads, so one lookup decides whose surface this is. */
 function surfaceEntries(surface: ProjectTrustSurface): string[] {
 	if (isPackageSurface(surface)) return [join(surface, "state.json")];
+	// The handbook lives at the repository root, outside `.clio-coder/`.
+	if (surface === "handbook") return [];
 	return surface === "safety" ? ["safety.yaml"] : [`${surface}.yaml`, `${surface}.local.yaml`];
 }
 
@@ -300,6 +312,11 @@ function surfacePaths(root: string, surface: ProjectTrustSurface): string[] {
 		// loaders reverify each tree against it, so the identities parsed from this
 		// one file pin the project packages the operator reviewed.
 		return [join(root, ".clio-coder", surface, "state.json")];
+	}
+	if (surface === "handbook") {
+		// Pinned for a repository a session did not start in, whose handbook
+		// would otherwise reach a prompt only as rules its tree verifies.
+		return HANDBOOK_TRUST_FILES.map((name) => join(root, name));
 	}
 	if (surface !== "safety") {
 		return [join(root, ".clio-coder", `${surface}.yaml`), join(root, ".clio-coder", `${surface}.local.yaml`)];

@@ -20,6 +20,7 @@ import {
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
+import { createSisterRepositoryReminderRegistration } from "./sister-repository-reminder.js";
 import { createMiddlewareSnapshot } from "./snapshot.js";
 
 /**
@@ -75,6 +76,8 @@ export function createMiddlewareBundle(options: MiddlewareBundleOptions = {}): M
 		diagnosticSink: () => diagnosticSink ?? writeMiddlewareDiagnosticToStderr,
 	});
 	for (const registration of options.registrations ?? []) table.registerHook(registration);
+	// Built in, after the caller's entries so a caller can replace it by id.
+	table.registerHook(createSisterRepositoryReminderRegistration());
 	const budgetTracker = options.budgetTracker ?? createEnvHookBudgetTracker();
 	const contract: MiddlewareContract = {
 		runHook(input) {

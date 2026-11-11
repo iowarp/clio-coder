@@ -2,6 +2,7 @@ import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { repositoryIdentity, repositoryRoot } from "../../core/project-root.js";
 import { HOME_SECRET_RELATIVE_PATHS, workerSecretPaths } from "../safety/secret-paths.js";
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -191,4 +192,44 @@ export function scoutReadWorkspace(input: {
 	} catch (error) {
 		return refuse("external_read_root_invalid", error instanceof Error ? error.message : String(error));
 	}
+}
+
+const DECLARED_PATH_FIELDS = ["read_roots", "write_roots", "relevant_paths", "expected_outputs"] as const;
+
+/**
+ * A task works in one repository: the one owning its cwd and every
+ * repository-relative path it declares, which decides the rules its worker
+ * receives. Absolute read roots granted to a worker in its own workspace are
+ * read-only context and do not count. Returns the refusal, or null.
+ */
+export function repositorySpanRefusal(input: {
+	cwd: string;
+	intent: unknown;
+	writeRoots: unknown;
+}): { ok: false; reason: string; message: string } | null {
+	const paths = [input.cwd];
+	const add = (value: unknown): void => {
+		if (!Array.isArray(value)) return;
+		for (const entry of value) {
+			const raw = typeof entry === "string" ? entry : record(entry) && typeof entry.path === "string" ? entry.path : null;
+			if (raw !== null && raw.trim().length > 0 && !path.isAbsolute(raw.trim()))
+				paths.push(path.resolve(input.cwd, raw.trim()));
+		}
+	};
+	if (record(input.intent)) for (const field of DECLARED_PATH_FIELDS) add(input.intent[field]);
+	add(input.writeRoots);
+	const owners = new Map<string, string>();
+	for (const target of paths) {
+		const root = repositoryRoot(target);
+		if (root === null) continue;
+		const identity = repositoryIdentity(root);
+		if (!owners.has(identity)) owners.set(identity, root);
+	}
+	if (owners.size < 2) return null;
+	const roots = [...owners.values()];
+	return {
+		ok: false,
+		reason: "task_spans_repositories",
+		message: `task_spans_repositories: Use one repository per task; all declared paths must stay inside it. ${roots.join(" and ")} are separate repositories: dispatch one task per repository, with that repository as cwd, so each worker receives its own repository's rules.`,
+	};
 }

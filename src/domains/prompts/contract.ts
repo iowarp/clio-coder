@@ -27,6 +27,12 @@ export interface CompileWorkerPromptInput extends WorkerPromptInputs {
 	 * consumes the resolved set without deriving another one.
 	 */
 	workingContextPaths?: ReadonlyArray<string>;
+	/**
+	 * "operator-only" drops the project's `.clio-coder/rules` and project
+	 * profile and keeps the user profile: a run in another repository whose
+	 * handbook the operator has not trusted takes no project prompt text from it.
+	 */
+	projectCustomization?: "project" | "operator-only";
 }
 
 export interface PromptsContract {

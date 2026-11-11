@@ -389,6 +389,8 @@ An external Scout cannot declare `write_roots`, `expected_outputs` or `verificat
 
 The host then asks the operator once per run and root, whatever the session's autonomy level: `Allow one read-only Scout run to inspect external root "<root>"? This grants no writes, commands, or access to other external roots.` The TUI or an ACP permission request answers it, and the approval expires with that run. A headless run, a worker and any host without a permission listener cannot approve, so the task is rejected with `external_read_approval_required: Scout root <root> was not approved for this run; approve it in the TUI or ACP permission request. Headless runs cannot approve external roots.` In a batch the approved tasks still run and each rejected one is listed by position, and when every task is rejected the call returns the error with `rejectedTasks`. Admission re-checks that the approval names this run and the canonical root, and refuses a request without it with the same code.
 
+The external Scout gets that checkout's own handbook as bounded project context, filtered by that repository's `handbook` trust, and nothing of the session's. A task whose declared paths fall in two repositories is refused with `task_spans_repositories`. See [Sister repositories](worker-context.md#sister-repositories).
+
 ---
 
 ## 7. Legacy compatibility

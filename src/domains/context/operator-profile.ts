@@ -101,6 +101,8 @@ function readProfileFile(path: string, issues: string[]): { profile: OperatorPro
 export interface LoadOperatorProfileOptions {
 	/** Override the user profile path; defaults to `<configDir>/profile.yaml`. */
 	userPath?: string;
+	/** Ignore the project's `.clio-coder/profile.yaml`: the user profile is about the person, not the project. */
+	userOnly?: boolean;
 }
 
 /**
@@ -112,7 +114,7 @@ export function loadOperatorProfile(cwd: string, options: LoadOperatorProfileOpt
 	const userPath = options.userPath ?? join(resolveClioDirs().config, "profile.yaml");
 	const projectPath = join(clioProjectRoot(cwd, "profile.yaml"), ".clio-coder", "profile.yaml");
 	const user = readProfileFile(userPath, issues);
-	const project = readProfileFile(projectPath, issues);
+	const project = options.userOnly === true ? { profile: {}, present: false } : readProfileFile(projectPath, issues);
 	const profile: OperatorProfile = { ...user.profile, ...project.profile };
 
 	let origin: OperatorProfileOrigin = "none";

@@ -408,7 +408,7 @@ Unknown keys make the policy invalid. A policy takes effect only after the opera
 
 ## Project trust
 
-Five project surfaces carry privilege and are ignored until the operator approves their captured contents for this workspace. Safety, settings and hooks use byte digests; package surfaces use approved identity sets when every record pins its content ([workspace-trust.ts](../../src/core/workspace-trust.ts)):
+Six project surfaces carry privilege and are ignored until the operator approves their captured contents for this workspace. Safety, settings, hooks and the handbook use byte digests; package surfaces use approved identity sets when every record pins its content ([workspace-trust.ts](../../src/core/workspace-trust.ts)):
 
 | Surface | Files |
 | --- | --- |
@@ -417,14 +417,15 @@ Five project surfaces carry privilege and are ignored until the operator approve
 | `hooks` | `.clio-coder/hooks.yaml` and `.clio-coder/hooks.local.yaml`. |
 | `extensions` | `.clio-coder/extensions/state.json`, the install state of the project's extensions. |
 | `plugins` | `.clio-coder/plugins/state.json`, the install state of the project's library packages. |
+| `handbook` | `CLIO-CODER.override.md`, `CLIO-CODER.md` and `CLIO-DEV.md` at the repository root. It matters only when the session works in another repository: until it is approved there, a worker or reminder carries only the rules that repository's tree verifies ([Worker context](worker-context.md#sister-repositories)). |
 
 ```bash
-clio-coder config trust safety|hooks|settings|extensions|plugins  # print captured files and the SHA-256 digest (read-only)
+clio-coder config trust safety|hooks|settings|extensions|plugins|handbook  # print captured files and the SHA-256 digest (read-only)
 clio-coder config trust <surface> --hash <reviewed-sha256>        # approve the reviewed bytes or package identities
 clio-coder config trust <surface> --revoke                        # remove the approval
 ```
 
-Approval is per canonical workspace and stored under `<config>/workspace-trust/`. Inside a Git repository the workspace is the directory the surface resolves to, so an approval given at the repository root also holds in its subdirectories. For `safety`, `settings` and `hooks`, approval pins captured bytes; the safety digest also binds the resolved source path, so an ancestor policy still needs approval for each workspace using it. An edited byte-approved surface reads `changed`. For `extensions` and `plugins`, review captures install-state bytes but approval records the package identities described below. Legacy unpinned package records retain byte-digest approval. The command exits 2 on a usage error and 1 when the files changed since review or none is readable. Approval takes effect on restart for `safety` and `settings`; hooks register on `/reload extensions`; `extensions` applies on `/reload extensions` and `plugins` on `/reload library`. Tool calls that invoke trust commands are blocked under `trust-authority` at every level. See [Commands and modes](../guide/commands-and-modes.md) for the command reference.
+Approval is per canonical workspace and stored under `<config>/workspace-trust/`. Inside a Git repository the workspace is the directory the surface resolves to, so an approval given at the repository root also holds in its subdirectories. For `safety`, `settings` and `hooks`, approval pins captured bytes; the safety digest also binds the resolved source path, so an ancestor policy still needs approval for each workspace using it. An edited byte-approved surface reads `changed`. For `extensions` and `plugins`, review captures install-state bytes but approval records the package identities described below. Legacy unpinned package records retain byte-digest approval. The command exits 2 on a usage error and 1 when the files changed since review or none is readable. Approval takes effect on restart for `safety` and `settings`; hooks register on `/reload extensions`; `extensions` applies on `/reload extensions`, `plugins` on `/reload library` and `handbook` on the next dispatch. Tool calls that invoke trust commands are blocked under `trust-authority` at every level. See [Commands and modes](../guide/commands-and-modes.md) for the command reference.
 
 An ignored surface is not silent:
 

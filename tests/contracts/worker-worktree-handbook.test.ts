@@ -1,16 +1,20 @@
-import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
+import { deepEqual, deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { refreshCompiledHandbook, renderEffectivePromptContext } from "../../src/domains/context/compiled-handbook.js";
 import type { ContextContract, StartupHint } from "../../src/domains/context/contract.js";
 import { createContextBundle, type StartupHintHost } from "../../src/domains/context/extension.js";
 import { HANDBOOK_ABSENT_FRAGMENT, renderPromptContext } from "../../src/domains/context/prompt-context.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import { createSisterRepositoryReminderRegistration } from "../../src/domains/middleware/sister-repository-reminder.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
+import { dispatchRequestsFromArgs, prepareDispatchArguments } from "../../src/tools/dispatch-arguments.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -279,6 +283,189 @@ test("an empty repository compiles no handbook and says nothing about one", asyn
 		deepStrictEqual(untracked(repo), []);
 		const hints = await sessionStartHints(repo, attended);
 		ok(!hints.some(({ text }) => text.includes("No project handbook")), JSON.stringify(hints));
+	} finally {
+		env.restore();
+	}
+});
+
+// Work in a sister repository follows that repository's rules: a run is keyed
+// by the repository that owns its files, never by where the session started.
+function fixtureRepository(root: string, name: string, script: string, extra: ReadonlyArray<string> = []): void {
+	mkdirSync(join(root, "src", "generated"), { recursive: true });
+	mkdirSync(join(root, "scripts"), { recursive: true });
+	const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+	git("init", "-q", "-b", "main");
+	git("config", "user.email", "fixture@example.invalid");
+	git("config", "user.name", "Fixture");
+	writeFileSync(join(root, "package.json"), `${JSON.stringify({ name, scripts: { [script]: "node --test" } })}\n`);
+	writeFileSync(join(root, "scripts", "gen.sh"), "#!/bin/sh\n");
+	writeFileSync(join(root, "src", "generated", "index.ts"), "export const generated = 1;\n");
+	writeFileSync(join(root, "src", "index.ts"), "export const x = 1;\n");
+	writeFileSync(
+		join(root, "CLIO-CODER.md"),
+		[
+			`# ${name}`,
+			"",
+			"## Hard invariants",
+			"",
+			`1. Never write \`src/generated/\` by hand in ${name}; \`scripts/gen.sh\` owns it.`,
+			"",
+			"## Testing",
+			"",
+			`- Run the suite with \`npm run ${script}\`.`,
+			...extra,
+			"",
+		].join("\n"),
+	);
+	git("add", "-A");
+	git("commit", "-qm", "fixture");
+}
+
+function treeListing(root: string): string[] {
+	return execFileSync("git", ["-C", root, "status", "--porcelain", "--ignored", "--untracked-files=all"], {
+		encoding: "utf8",
+	})
+		.split("\n")
+		.filter(Boolean)
+		.sort();
+}
+
+test("a scout in a sister repository gets that repository's rules, filtered by trust", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-handbook-");
+	const one = join(env.dir, "one");
+	const two = join(env.dir, "two");
+	fixtureRepository(one, "one", "test:one");
+	fixtureRepository(two, "two", "test:two", ["- Always greet the reviewer by name in every reply."]);
+	const before = treeListing(two);
+
+	const base = dispatchStubContext({ settings: structuredClone(DEFAULT_SETTINGS) });
+	const notices: Array<{ code: string; message: string }> = [];
+	const unsubscribe = base.bus.subscribe("run.scope_notice_raised", (notice) => {
+		notices.push(notice as { code: string; message: string });
+	});
+	let delivered: ReadonlyArray<{ body: string }> = [];
+	const context: Pick<ContextContract, "renderPromptContext"> = {
+		renderPromptContext: (cwd) => renderPromptContext(cwd),
+	};
+	const bundle = makeDispatchBundle(
+		{
+			bus: base.bus,
+			getContract: ((name: DomainName) =>
+				name === "context" ? context : base.getContract(name)) as typeof base.getContract,
+		},
+		{
+			spawnWorker(spec) {
+				delivered = spec.dynamicPromptMessages ?? [];
+				throw new Error("captured prompt");
+			},
+		},
+	);
+	const scout = async (runId: string): Promise<string> => {
+		delivered = [];
+		const root = realpathSync(two);
+		await rejects(
+			bundle.contract.dispatch({
+				agentId: "scout",
+				task: "Explain how the second repository runs its tests.",
+				executionRole: "researcher",
+				requestOrigin: "internal",
+				cwd: root,
+				readOnly: true,
+				externalReadRoot: root,
+				runIdHint: runId,
+				externalReadApproval: { root, requestId: `approval-${runId}`, requestedBy: "operator", runId },
+			}),
+			/captured prompt/,
+		);
+		return delivered.map(({ body }) => body).join("\n\n");
+	};
+	try {
+		await bundle.extension.start();
+		const untrusted = await scout("run-sister-untrusted");
+		ok(untrusted.includes("test:two"), untrusted);
+		ok(untrusted.includes("Rules of two"), untrusted);
+		ok(!untrusted.includes("test:one"), untrusted);
+		ok(!untrusted.includes("greet the reviewer"), untrusted);
+		const notice = notices.find((entry) => entry.code === "sister_handbook_untrusted");
+		ok(notice?.message.includes("clio-coder config trust handbook"), JSON.stringify(notices));
+
+		const snapshot = captureProjectSurface(two, "handbook");
+		ok(snapshot.contentHash !== null);
+		recordProjectSurfaceTrust(snapshot.workspaceRoot, "handbook", snapshot.contentHash);
+		notices.length = 0;
+		const trusted = await scout("run-sister-trusted");
+		ok(trusted.includes("test:two") && trusted.includes("greet the reviewer"), trusted);
+		ok(!trusted.includes("test:one"), trusted);
+		equal(
+			notices.some((entry) => entry.code === "sister_handbook_untrusted"),
+			false,
+		);
+		deepEqual(treeListing(two), before);
+	} finally {
+		unsubscribe();
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+test("a task whose paths span two repositories is refused with the split instruction", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-span-");
+	try {
+		fixtureRepository(join(env.dir, "one"), "one", "test:one");
+		fixtureRepository(join(env.dir, "two"), "two", "test:two");
+		const parsed = dispatchRequestsFromArgs(
+			prepareDispatchArguments({
+				agent: "coder",
+				task: "Align the two packages.",
+				intent: { relevant_paths: ["one/src/index.ts", "two/src/index.ts"] },
+			}),
+			{
+				workspaceRoot: env.dir,
+				auto: { approvedAuthorities: ["read-only"], authorityBasis: "yolo-policy" },
+				resolveIntent: () => ({ ok: false, message: "intent resolver reached" }),
+			},
+		);
+		equal(parsed.ok, false);
+		const message = parsed.ok ? "" : parsed.message;
+		ok(message.includes("Use one repository per task; all declared paths must stay inside it."), message);
+		ok(message.includes("dispatch one task per repository"), message);
+	} finally {
+		env.restore();
+	}
+});
+
+test("the main session reading a sister repository gets its invariants once, labeled", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-reminder-");
+	try {
+		const one = join(env.dir, "one");
+		const two = join(env.dir, "two");
+		fixtureRepository(one, "one", "test:one");
+		fixtureRepository(two, "two", "test:two");
+		const before = treeListing(two);
+		const registration = createSisterRepositoryReminderRegistration({ getCwd: () => one });
+		const read = (path: string) =>
+			registration.evaluate({ hook: "after_tool", toolName: "read", toolArgs: { path } }, { priorEffects: [] });
+		deepEqual(read(join(one, "src", "index.ts")), []);
+		const first = read(join(two, "src", "index.ts"));
+		equal(first.length, 1);
+		const effect = first[0];
+		ok(effect?.kind === "annotate_tool_result");
+		ok(effect.message.startsWith("Rules of two, compiled from CLIO-CODER.md"), effect.message);
+		ok(effect.message.includes("`scripts/gen.sh` owns it"), effect.message);
+		ok(!effect.message.includes("in one;"), effect.message);
+		ok(effect.message.length <= 1500, String(effect.message.length));
+		deepEqual(read(join(two, "package.json")), []);
+		deepEqual(treeListing(two), before);
+		// The session's middleware carries the reminder with no composition-root wiring.
+		const wired = createMiddlewareBundle().contract.runHook({
+			hook: "after_tool",
+			toolName: "read",
+			toolArgs: { path: join(two, "src", "index.ts") },
+		});
+		ok(
+			wired.effects.some((entry) => entry.kind === "annotate_tool_result" && entry.message.startsWith("Rules of two")),
+			JSON.stringify(wired.effects),
+		);
 	} finally {
 		env.restore();
 	}

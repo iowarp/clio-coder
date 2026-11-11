@@ -187,6 +187,11 @@ import type { ConfigContract } from "../config/contract.js";
 import { renderProjectContextFragment } from "../context/clio-md.js";
 import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } from "../context/contract.js";
 import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
+import {
+	type SisterRepositoryRules,
+	sisterRepositoryNotice,
+	sisterRepositoryRules,
+} from "../context/sister-repository.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
@@ -1531,6 +1536,18 @@ function workerProjectPrompt(
 				].join("\n\n"),
 			}
 		: own;
+}
+
+/** A sister repository's compile as the worker's project context: that repository's rules and nothing of the session's. */
+function sisterProjectPrompt(rules: SisterRepositoryRules): ProjectPromptContext {
+	return {
+		text: rules.sources.map(({ source, path }) => renderProjectContextFragment(source, path)).join("\n\n"),
+		clioMd: null,
+		warnings: [],
+		handbookFiles: rules.sources.map(({ path }) => path),
+		handbookSources: rules.sources,
+		supportFragments: [],
+	};
 }
 
 /**
@@ -5959,7 +5976,19 @@ export function createDispatchBundle(
 		const personaBody = workerPersonaBody(req, recipe, hasCanonicalContext);
 		const hasBoundSkills =
 			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
+		// A checkout admitted outside the session's workspace is another
+		// repository: its own rules apply, filtered by its handbook trust.
+		const sister = req.externalReadRoot !== undefined ? sisterRepositoryRules(cwd) : null;
+		const sisterNotice = sister === null ? null : sisterRepositoryNotice(sister);
+		if (sisterNotice !== null) {
+			context.bus.emit("run.scope_notice_raised", {
+				code: "sister_handbook_untrusted",
+				level: "warning",
+				message: sisterNotice,
+			});
+		}
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
+			...(sister !== null && !sister.trusted ? { projectCustomization: "operator-only" as const } : {}),
 			...(req.turnConstraints ? { turnConstraints: req.turnConstraints } : {}),
 			...(readOnly ? { readOnly: true } : {}),
 			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
@@ -5994,9 +6023,13 @@ export function createDispatchBundle(
 		// Fetch captured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
-		const tier = spec.projectContextTier;
+		const tier = sister !== null ? "bounded" : spec.projectContextTier;
 		const projectPrompt =
-			projectContext && tier === "bounded" ? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap) : null;
+			sister !== null
+				? sisterProjectPrompt(sister)
+				: projectContext && tier === "bounded"
+					? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap)
+					: null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			capabilityClass: spec.capabilityClass,

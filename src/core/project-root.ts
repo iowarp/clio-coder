@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { safeResourceWrite } from "./safe-resource-write.js";
@@ -47,6 +47,54 @@ export function clioProjectRoot(cwd: string, ...entries: ReadonlyArray<string>):
 		if (entries.some((entry) => existsSync(join(dir, ".clio-coder", entry)))) return dir;
 	}
 	return dirs.at(-1) ?? resolve(cwd);
+}
+
+/**
+ * The repository that owns `path`: its nearest ancestor holding a `.git` entry,
+ * the same boundary the handbook walk ends at, or null outside any repository.
+ * The path need not exist, so a declared output resolves to the repository it
+ * would land in. A home directory that is a repository owns only itself.
+ */
+export function repositoryRoot(path: string): string | null {
+	const start = physicalAncestor(resolve(path));
+	const homes = new Set([resolve(homedir()), physical(homedir())]);
+	let dir = start;
+	while (true) {
+		if (existsSync(join(dir, ".git"))) return homes.has(dir) && dir !== start ? null : dir;
+		const parent = dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+/** The nearest existing ancestor of `path`, with its links resolved. */
+function physicalAncestor(path: string): string {
+	let dir = path;
+	while (!existsSync(dir)) {
+		const parent = dirname(dir);
+		if (parent === dir) return path;
+		dir = parent;
+	}
+	return join(physical(dir), path.slice(dir.length));
+}
+
+/**
+ * Which repository a root belongs to: its common Git directory, so a linked
+ * worktree and its main checkout are one repository while a submodule or a
+ * nested clone is another.
+ */
+export function repositoryIdentity(root: string): string {
+	const dotGit = join(root, ".git");
+	try {
+		if (statSync(dotGit).isDirectory()) return physical(dotGit);
+		const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
+		if (gitdir === undefined) return physical(dotGit);
+		const dir = resolve(root, gitdir);
+		const common = existsSync(join(dir, "commondir")) ? readFileSync(join(dir, "commondir"), "utf8").trim() : null;
+		return physical(common === null || common.length === 0 ? dir : resolve(dir, common));
+	} catch {
+		return physical(dotGit);
+	}
 }
 
 /**

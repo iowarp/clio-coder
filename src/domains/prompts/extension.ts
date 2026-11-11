@@ -359,9 +359,13 @@ export function createPromptsBundle(
 			if (table.byId.size === 0) {
 				throw new Error("prompts: no fragments loaded, check startup logs");
 			}
-			const { cwd: inputCwd, workingContextPaths, ...workerInputs } = input;
+			const { cwd: inputCwd, workingContextPaths, projectCustomization, ...workerInputs } = input;
 			const cwd = inputCwd ?? process.cwd();
-			const customization = customizationFragments(cwd, workingContextPaths ?? []);
+			const customization = customizationFragments(
+				cwd,
+				workingContextPaths ?? [],
+				projectCustomization === "operator-only",
+			);
 			const profile = config()?.get().prompts?.profile;
 			const compiled = compileWorker(table, {
 				...workerInputs,
@@ -446,20 +450,24 @@ export interface CustomizationFragmentsResult {
  * `operatorProfileApplied` off the result rather than re-deriving them, so the
  * receipt can never disagree with what actually rendered.
  */
-function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<string>): CustomizationFragmentsResult {
-	return renderCustomizationFragments(captureCustomizationSources(cwd), cwd, workingContextPaths);
+function customizationFragments(
+	cwd: string,
+	workingContextPaths: ReadonlyArray<string>,
+	operatorOnly = false,
+): CustomizationFragmentsResult {
+	return renderCustomizationFragments(captureCustomizationSources(cwd, operatorOnly), cwd, workingContextPaths);
 }
 
-function captureCustomizationSources(cwd: string): CustomizationSourceSnapshot {
+function captureCustomizationSources(cwd: string, operatorOnly = false): CustomizationSourceSnapshot {
 	let rules: ProjectRulesLoad["rules"] = [];
 	let operatorProfile: LoadedOperatorProfile | null = null;
 	try {
-		rules = loadProjectRules(cwd).rules;
+		if (!operatorOnly) rules = loadProjectRules(cwd).rules;
 	} catch {
 		// Project rules are best-effort; a load failure freezes an empty set.
 	}
 	try {
-		operatorProfile = loadOperatorProfile(cwd);
+		operatorProfile = loadOperatorProfile(cwd, operatorOnly ? { userOnly: true } : {});
 	} catch {
 		// The operator profile is best-effort; a load failure freezes no profile.
 	}

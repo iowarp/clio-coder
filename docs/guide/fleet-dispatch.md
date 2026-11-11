@@ -1032,6 +1032,12 @@ per list, 8 verification entries) and every refusal reason code, including
 `intent_write_roots_contradiction`, are specified in
 [dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md).
 
+A task works in one repository. When its `cwd` and declared paths fall in two,
+such as a nested checkout and its parent, it is refused as
+`task_spans_repositories`; dispatch one task per repository with that repository
+as `cwd`, and each worker gets that repository's rules
+([Sister repositories](../architecture/worker-context.md#sister-repositories)).
+
 Narrow write roots confine a native worker one of two ways. When the OS sandbox
 covers the run (`safety.sandbox` is `auto` or `required`, a local bubblewrap backend
 is usable, the worker runs on a local HTTP runtime, and no `fleet.nodes` are

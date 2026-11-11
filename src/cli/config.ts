@@ -3,7 +3,7 @@ import { runConfigTrustCommand } from "./config-trust.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder config inspect [--json]
-clio-coder config trust safety|hooks|settings|extensions|plugins [--json | --hash SHA256 | --revoke]
+clio-coder config trust safety|hooks|settings|extensions|plugins|handbook [--json | --hash SHA256 | --revoke]
 
 Print the effective-customization graph: what settings, context files, rules,
 skills, prompts, agents, playbooks, extensions, safety, memory, hooks, and the operator
