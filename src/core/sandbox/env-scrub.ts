@@ -1,3 +1,4 @@
+import { holdsCredentialShape } from "../secret-shapes.js";
 import type { SandboxEnvPolicy } from "./types.js";
 
 /**
@@ -30,10 +31,10 @@ const KEPT_NAMES = new Set(["AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"]);
  * `CI_JOB_JWT`) and header sets (`ANTHROPIC_CUSTOM_HEADERS`, `OTEL_EXPORTER_OTLP_HEADERS`). Only the sandbox drops them:
  * scheduler clients run outside it and a Slurm site using JWT auth needs `SLURM_JWT` there.
  */
-const SANDBOX_SECRET_NAME_FRAGMENT = /JWT|HEADERS/u;
+const SANDBOX_SECRET_NAME_FRAGMENT = /JWT|HEADERS|WEBHOOK/u;
 
 /** Credential locations or channels whose names match no fragment. */
-const SECRET_NAMES = new Set(["KUBECONFIG", "NETRC"]);
+const SECRET_NAMES = new Set(["KUBECONFIG", "NETRC", "BW_SESSION"]);
 
 /** `scheme://user:password@`, the user possibly empty (`redis://:pw@host`). */
 const URL_CREDENTIALS = /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]*:[^\s/@]+@/iu;
@@ -70,7 +71,8 @@ function isSandboxSecretEnvValue(value: string): boolean {
 		URL_CREDENTIALS.test(value) ||
 		URL_TOKEN_USER.test(value) ||
 		CONNECTION_STRING_SECRET.test(value) ||
-		PRIVATE_KEY_BLOCK.test(value)
+		PRIVATE_KEY_BLOCK.test(value) ||
+		holdsCredentialShape(value)
 	);
 }
 

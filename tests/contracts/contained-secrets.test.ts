@@ -84,6 +84,19 @@ test("the sandbox scrub keeps ordinary variables and drops credential names, cre
 	deepStrictEqual(passed.env, { PATH: "/bin", HF_TOKEN: "fake", GITHUB_TOKEN: "fake-gh" });
 });
 
+test("the sandbox scrub drops a credential by its value shape under any name, and a session or webhook name", () => {
+	const env = {
+		PATH: "/usr/bin",
+		BW_SESSION: "c2Vzc2lvbmtleQ==",
+		SLACK_WEBHOOK_URL: ["https://hooks.slack.com/services", "T000", "B000", "XXXXXXXXXXXX"].join("/"),
+		MY_SETTING: `ghp_${"a".repeat(36)}`,
+		OTHER: `sk_live_${"b".repeat(24)}`,
+	};
+	const { env: out, removed } = scrubSandboxEnv(env, { passEnv: [], secretNames: [] });
+	deepStrictEqual(Object.keys(out), ["PATH"]);
+	deepStrictEqual(removed.sort(), ["BW_SESSION", "MY_SETTING", "OTHER", "SLACK_WEBHOOK_URL"]);
+});
+
 test("secret discovery masks an ignored .env and a private key, not templates, public certificates, committed fixtures or a virtualenv", () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-scan-")));
 	execFileSync("git", ["init", "-q"], { cwd: root });
