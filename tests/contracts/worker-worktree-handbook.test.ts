@@ -69,6 +69,9 @@ test("a worker in a task worktree receives the source checkout's untracked handb
 			},
 		},
 	);
+	// A session runs from its repository's root.
+	const previous = process.cwd();
+	process.chdir(repo);
 	try {
 		await bundle.extension.start();
 		await rejects(
@@ -88,6 +91,7 @@ test("a worker in a task worktree receives the source checkout's untracked handb
 			JSON.stringify(delivered.map(({ body }) => body.slice(0, 200))),
 		);
 	} finally {
+		process.chdir(previous);
 		await bundle.extension.stop?.();
 		env.restore();
 	}
@@ -165,6 +169,9 @@ async function capturedWorkerContext(repo: string, peer: boolean, worktree = fal
 			},
 		},
 	);
+	// A session runs from its repository's root.
+	const previous = process.cwd();
+	process.chdir(repo);
 	try {
 		await bundle.extension.start();
 		await rejects(
@@ -179,6 +186,7 @@ async function capturedWorkerContext(repo: string, peer: boolean, worktree = fal
 			/captured prompt/,
 		);
 	} finally {
+		process.chdir(previous);
 		await bundle.extension.stop?.();
 	}
 	equal(runtime, peer ? "codex-cli" : "openai");
@@ -355,6 +363,23 @@ function scoutHarness() {
 			},
 		},
 	);
+	/** A builder's prompt for a `worktree: true` task at `dir`. */
+	const builder = async (dir: string, runId: string): Promise<string> => {
+		delivered = [];
+		await rejects(
+			bundle.contract.dispatch({
+				agentId: "coder",
+				task: "Edit src/index.ts.",
+				executionRole: "builder",
+				requestOrigin: "internal",
+				cwd: realpathSync(dir),
+				worktree: true,
+				runIdHint: runId,
+			}),
+			/captured prompt/,
+		);
+		return delivered.map(({ body }) => body).join("\n\n");
+	};
 	/** The scout's prompt in `dir`; `external` admits it as an outside checkout. */
 	const scout = async (dir: string, runId: string, external = true): Promise<string> => {
 		delivered = [];
@@ -382,6 +407,7 @@ function scoutHarness() {
 	return {
 		notices,
 		scout,
+		builder,
 		start: () => bundle.extension.start(),
 		stop: async () => {
 			unsubscribe();
@@ -442,7 +468,7 @@ test("the repository owning a run's cwd decides sister rules: a nested clone is 
 	const one = join(env.dir, "one");
 	fixtureRepository(one, "one", "test:one");
 	const nested = join(one, "vendor", "two");
-	fixtureRepository(nested, "two", "test:two");
+	fixtureRepository(nested, "two", "test:two", ["- Always greet the reviewer by name in every reply."]);
 	const linked = join(env.dir, "one-linked");
 	execFileSync("git", ["-C", one, "worktree", "add", "-q", linked], { encoding: "utf8" });
 	const harness = scoutHarness();
@@ -454,6 +480,15 @@ test("the repository owning a run's cwd decides sister rules: a nested clone is 
 		const inside = await harness.scout(nested, "run-nested", false);
 		ok(inside.includes("Rules of two") && inside.includes("test:two"), inside);
 		ok(!inside.includes("test:one"), inside);
+		ok(!inside.includes("greet the reviewer"), inside);
+		// A task worktree of the nested clone belongs to the nested clone, so it is a sister too.
+		harness.notices.length = 0;
+		const nestedTask = await harness.builder(nested, "run-nested-worktree");
+		ok(!nestedTask.includes("greet the reviewer") && !nestedTask.includes("test:one"), nestedTask);
+		ok(
+			harness.notices.some((entry) => entry.code.startsWith("sister_handbook_")),
+			JSON.stringify(harness.notices),
+		);
 		harness.notices.length = 0;
 		const worktree = await harness.scout(linked, "run-linked");
 		ok(!worktree.includes("Rules of"), worktree);

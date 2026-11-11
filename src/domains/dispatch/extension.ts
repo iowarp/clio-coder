@@ -5983,9 +5983,10 @@ export function createDispatchBundle(
 		// A cwd owned by another repository than the session's (an outside
 		// checkout, a submodule or a nested clone; not a linked worktree of the
 		// session's own) takes that repository's rules, filtered by its handbook
-		// trust, from the cached compile only.
-		const sessionRoot = req.taskWorktree?.root ?? req.protectedArtifactRemap?.sourceRoot ?? process.cwd();
-		const sister = sisterRepositoryRoot(cwd, sessionRoot) === null ? null : sisterRepositoryRules(cwd);
+		// trust, from the cached compile only. Every session runs from its root,
+		// so the comparison is with process.cwd(): a task worktree's root is the
+		// repository owning the cwd, which for a nested clone is the sister itself.
+		const sister = sisterRepositoryRoot(cwd, process.cwd()) === null ? null : sisterRepositoryRules(cwd);
 		const sisterNotice =
 			sister === null
 				? null
