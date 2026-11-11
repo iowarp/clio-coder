@@ -64,9 +64,11 @@ export function interactiveRestartBusyReason(deps: {
 	return null;
 }
 
-export function createInteractiveRestart(deps: InteractiveRestartDeps): (continuation?: string) => void {
+export function createInteractiveRestart(
+	deps: InteractiveRestartDeps,
+): (continuation?: string, chain?: number) => void {
 	let active = false;
-	return (continuation) => {
+	return (continuation, chain) => {
 		if (active) {
 			deps.notify("warning", "Restart refused: a restart is already in progress.");
 			return;
@@ -89,7 +91,7 @@ export function createInteractiveRestart(deps: InteractiveRestartDeps): (continu
 					return;
 				}
 				writeRestartIntent(deps.stateDir, sessionId);
-				if (continuation?.trim()) writeRestartContinuation(deps.stateDir, sessionId, continuation);
+				if (continuation?.trim()) writeRestartContinuation(deps.stateDir, sessionId, continuation, chain);
 				deps.armHandoff();
 				await deps.shutdown();
 			} catch (error) {

@@ -1,5 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { noteRestartChain } from "./restart-request.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 
 export interface RestartIntent {
@@ -69,15 +70,20 @@ function restartContinuationPath(stateDir: string): string {
 }
 
 /** Stores the text the restarted session submits as its first turn. */
-export function writeRestartContinuation(stateDir: string, sessionId: string, text: string): void {
-	const record = { sessionId, text: text.slice(0, RESTART_CONTINUATION_MAX), createdAt: new Date().toISOString() };
+export function writeRestartContinuation(stateDir: string, sessionId: string, text: string, chain = 0): void {
+	const record = {
+		sessionId,
+		text: text.slice(0, RESTART_CONTINUATION_MAX),
+		createdAt: new Date().toISOString(),
+		...(chain > 0 ? { chain } : {}),
+	};
 	safeResourceWrite(restartContinuationPath(stateDir), `${JSON.stringify(record)}\n`, { mode: 0o600 });
 }
 
 /** Returns and deletes the continuation for `sessionId` when it is under a minute old. */
 export function consumeRestartContinuation(stateDir: string, sessionId: string, now = Date.now()): string | undefined {
 	const file = restartContinuationPath(stateDir);
-	let record: { sessionId?: unknown; text?: unknown; createdAt?: unknown } | null = null;
+	let record: { sessionId?: unknown; text?: unknown; createdAt?: unknown; chain?: unknown } | null = null;
 	try {
 		record = JSON.parse(readFileSync(file, "utf8"));
 	} catch {
@@ -87,6 +93,7 @@ export function consumeRestartContinuation(stateDir: string, sessionId: string, 
 	if (!record || record.sessionId !== sessionId || typeof record.text !== "string") return undefined;
 	const age = now - (typeof record.createdAt === "string" ? Date.parse(record.createdAt) : Number.NaN);
 	if (!(age >= 0 && age < 60_000)) return undefined;
+	noteRestartChain(typeof record.chain === "number" ? record.chain : 0);
 	const text = record.text.trim().slice(0, RESTART_CONTINUATION_MAX);
 	return text.length > 0 ? text : undefined;
 }

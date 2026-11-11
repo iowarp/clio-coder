@@ -218,6 +218,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Edit:
 		case ToolNames.Artifact:
 		case ToolNames.ConfigureClio:
+		case ToolNames.RestartSession:
 			return "write";
 		case ToolNames.Bash:
 		case ToolNames.Verify:

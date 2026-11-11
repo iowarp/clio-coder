@@ -6,6 +6,7 @@ import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
 import { consumeRestartContinuation } from "../core/restart-intent.js";
+import { firePendingModelRestart, nextModelRestartChain, setRestartHost } from "../core/restart-request.js";
 import { isRestartHandoff } from "../core/restart-status.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -1190,6 +1191,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
 			devSession?.poke();
 			staleBuildNotice();
+			firePendingModelRestart();
 		},
 		refreshLiveWorkspaceGit: (force) => void refreshLiveWorkspaceGit(force),
 		refreshFooter: () => {
@@ -1272,6 +1274,26 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		arcade = openArcadeOverlay(tui);
 		return true;
 	};
+
+	// `restart_session` asks for a restart during a turn; it runs once that turn has settled.
+	const interactiveRestart = createInteractiveRestart({
+		...(deps.session ? { session: deps.session } : {}),
+		stateDir: deps.stateDir,
+		saveWorkspace: () => operatorExtensions?.saveWorkspace(),
+		busyReason: () =>
+			interactiveRestartBusyReason({
+				chat: deps.chat,
+				dispatch: deps.dispatch,
+				operator: operatorExtensions,
+				editorBash: editorSubmit.hasActiveEditorBash(),
+				reloading: deps.reloadClasses?.active === true,
+				shuttingDown: shutdownArmed !== false || getTerminationCoordinator().getPhase() !== "idle",
+			}),
+		settle: () => deps.chat.whenSettled(),
+		armHandoff: () => deps.armRestartHandoff?.(),
+		shutdown: () => applicationController.shutdown(),
+		notify,
+	});
 	const slashRuntime = createInteractiveSlashRuntime({
 		recordFeature,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
@@ -1381,24 +1403,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			(report) => appendReloadReport(report, busNoticeSink),
 			() => openExtensionsOverlayState(),
 		),
-		restart: createInteractiveRestart({
-			...(deps.session ? { session: deps.session } : {}),
-			stateDir: deps.stateDir,
-			saveWorkspace: () => operatorExtensions?.saveWorkspace(),
-			busyReason: () =>
-				interactiveRestartBusyReason({
-					chat: deps.chat,
-					dispatch: deps.dispatch,
-					operator: operatorExtensions,
-					editorBash: editorSubmit.hasActiveEditorBash(),
-					reloading: deps.reloadClasses?.active === true,
-					shuttingDown: shutdownArmed !== false || getTerminationCoordinator().getPhase() !== "idle",
-				}),
-			settle: () => deps.chat.whenSettled(),
-			armHandoff: () => deps.armRestartHandoff?.(),
-			shutdown: () => applicationController.shutdown(),
-			notify,
-		}),
+		restart: interactiveRestart,
 		startUpgrade: () => {
 			// Keep package-manager and lifecycle code out of boot. The footer does
 			// no more than point at /upgrade; this graph loads only after the operator
@@ -1592,6 +1597,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 		editorSubmit.submitEditorText(text);
 	};
+	setRestartHost((text) => {
+		const chain = nextModelRestartChain();
+		void deps.chat.whenSettled().then(() => interactiveRestart(text, chain));
+	});
 	// `/restart <text>`: the restarted session continues the task on the new build.
 	const restartSessionId = deps.startsResumed ? deps.session?.current()?.id : undefined;
 	const restartContinuation = restartSessionId ? consumeRestartContinuation(deps.stateDir, restartSessionId) : undefined;

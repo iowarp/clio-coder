@@ -72,8 +72,12 @@ export const SAFETY_JUDGE_OPERATOR_ONLY_RULES: ReadonlySet<string> = new Set([
 	GIT_HOOKS_CHANGED_RULE_ID,
 ]);
 
-/** The operator channel itself and Clio's own settings tool. */
-const OPERATOR_ONLY_TOOLS: ReadonlySet<string> = new Set([ToolNames.AskUser, ToolNames.ConfigureClio]);
+/** The operator channel itself, Clio's own settings tool and a restart of the running session. */
+const OPERATOR_ONLY_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.AskUser,
+	ToolNames.ConfigureClio,
+	ToolNames.RestartSession,
+]);
 
 /** Default block categories, in the order the judge reads them. */
 const BLOCK_RULES: ReadonlyArray<readonly [string, string]> = [

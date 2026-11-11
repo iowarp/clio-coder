@@ -106,6 +106,8 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.ConfigureClio]: { plane: "interact", actionClass: "write", executionMode: "sequential" },
+	// restart_session only records a restart the operator approved; the interactive host runs it at turn end.
+	[ToolNames.RestartSession]: { plane: "interact", actionClass: "write", executionMode: "sequential" },
 	// report drafts or offers a Clio Coder report and never sends one; it writes only Clio's own report store.
 	[ToolNames.Report]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
@@ -139,7 +141,11 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Monitor, ToolNames.Steer]);
-const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser, ToolNames.ConfigureClio]);
+const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([
+	ToolNames.AskUser,
+	ToolNames.ConfigureClio,
+	ToolNames.RestartSession,
+]);
 /** Registered only when a pane host answered detection and the mux is live. */
 const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
 /** Registered only when the operator opted the model into the music pane. */

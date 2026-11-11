@@ -44,6 +44,7 @@ import { networkToolsDisabled } from "./network-policy.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { createReadTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
+import { createRestartSessionTool, restartSessionWorkspaceRefusal } from "./restart-session.js";
 import { runScriptToolSurface } from "./run-script.js";
 import { gitTool } from "./safe-exec.js";
 import { prepareStoreAdmissionArguments, storeToolSurface } from "./store/surface.js";
@@ -294,6 +295,19 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 				},
 			),
 		});
+		// Offered only in Clio's own source tree when this session runs from its build.
+		const cwd = deps.session?.current()?.cwd ?? process.cwd();
+		if (restartSessionWorkspaceRefusal(cwd) === null) {
+			registry.register({
+				...builtin(
+					createRestartSessionTool({
+						getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
+						...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
+					}),
+					{ path: "src/tools/restart-session.ts", scope: "core" },
+				),
+			});
+		}
 	}
 	registry.register({
 		...builtin(credentialPresentTool, { path: "src/tools/credential-present.ts", scope: "core" }),

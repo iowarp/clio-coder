@@ -30,6 +30,11 @@ function diskBuild(root: string): { id: string; files: string[] } | null {
  * interrupted build. Fleet preflight compares it across machines because two
  * builds of one `-dev` version share a version string.
  */
+/** The package root this process runs from. */
+export function runningPackageRoot(): string {
+	return resolvePackageRoot();
+}
+
 export function installedBuildId(root = resolvePackageRoot()): string | null {
 	const id = diskBuild(root)?.id;
 	return id !== undefined && /^[0-9a-f-]{36}$/u.test(id) ? id : null;

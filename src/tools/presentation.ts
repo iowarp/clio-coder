@@ -778,6 +778,14 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 			typeof args.path === "string" || typeof details.path !== "string" ? args : { ...args, path: details.path },
 		nouns: ["setting", "settings"],
 	},
+	[ToolNames.RestartSession]: {
+		class: "mutate",
+		verbs: ["restarting", "restart requested"],
+		object: (args) => plain(text(args, "continuation") ?? "session"),
+		consumes: ["continuation", "reason"],
+		dropsUnknownArgs: true,
+		nouns: ["restart", "restarts"],
+	},
 	[ToolNames.Gateway]: {
 		class: "external",
 		verbs: CLASS_VERBS.external,

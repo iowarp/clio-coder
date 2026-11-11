@@ -586,6 +586,15 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			"When asked to change Clio settings or add a target, call configure_clio through gateway. Preview first, then apply the returned proposal id; the operator approves the exact diff on a card. Headless, read-only and yolo sessions only preview: hand the operator the diff and steps. Never run clio-coder configure, targets or auth from bash.",
 	},
+	[ToolNames.RestartSession]: {
+		objective: "Restart Clio on a rebuilt build of this tree and continue the task, after the operator approves.",
+		uiLabel: "Restart",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: { kind: "exact", maxBytes: 2_048 },
+		costLatency: "local_slow",
+		promptHint:
+			"After rebuilding the tree this session runs from, request restart_session with what to do next; the session resumes on the new build and receives that text.",
+	},
 	[ToolNames.Report]: {
 		objective:
 			"Draft a Clio Coder report for the operator to review, or ask once whether to; it never sends or shares one.",
