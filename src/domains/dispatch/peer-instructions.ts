@@ -28,6 +28,8 @@ export interface PeerInstructions {
 	stale: number;
 	/** Rules of those files that hold but did not fit the bound. */
 	notCarried: number;
+	/** Why a harness that can take the rules in place of its files reads them beside the files. */
+	reason?: "setting";
 	/** The compiled rules; absent when the handbook has no sections to compile, so the run keeps its usual message. */
 	text?: string;
 	/** For an overlay, what to write over each file in the task worktree for the run (worktree-relative paths). */
@@ -157,6 +159,8 @@ interface PeerInstructionsInput {
 	taskWorktree?: string;
 	/** Paths the task declares or names; an overlay never covers one of them. */
 	declaredPaths: ReadonlyArray<string>;
+	/** The operator keeps this harness's files (`fleet.keepPeerInstructionFiles`): the rules ride beside them. */
+	keepFiles?: boolean;
 }
 
 /**
@@ -164,7 +168,7 @@ interface PeerInstructionsInput {
  * of them, so the run is unchanged. Single source and overlay are used only
  * when the handbook compiled; a handbook of prose alone keeps its usual message
  * and the harness's files are read beside it. An overlay the run cannot take
- * falls back to coexist.
+ * falls back to coexist, and so does a harness the operator keeps on its files.
  */
 export async function resolvePeerInstructions(input: PeerInstructionsInput): Promise<PeerInstructions | null> {
 	if (input.declared === undefined) return null;
@@ -188,6 +192,9 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 		clioNames: input.clioNames,
 	});
 	const result = { files: names, stale: peer.stale, notCarried: peer.notCarried, text: peer.text };
+	if (input.keepFiles === true && input.declared.delivery !== "coexist") {
+		return { delivery: "coexist", ...result, reason: "setting" };
+	}
 	if (input.declared.delivery !== "overlay") return { delivery: input.declared.delivery, ...result };
 	if (!(await overlayAllowed(input, repositoryRoot(input.cwd), files))) return { delivery: "coexist", ...result };
 	// The harness reads every one of these files; the nearest holds the rules and the others are emptied for the run.

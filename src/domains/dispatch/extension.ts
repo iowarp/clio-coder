@@ -1775,6 +1775,15 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
  * handbook. Before that message existed, every receipt in a nine-turn live
  * drive read `bounded chars:0` while its worker hunted for the repository.
  */
+/** Whether `fleet.keepPeerInstructionFiles` names this runtime by its id or an alias. */
+function keepsPeerInstructionFiles(
+	settings: Readonly<typeof DEFAULT_SETTINGS> | null | undefined,
+	runtime: Pick<RuntimeDescriptor, "id" | "aliases">,
+): boolean {
+	const kept = settings?.fleet.keepPeerInstructionFiles ?? [];
+	return kept.includes(runtime.id) || (runtime.aliases ?? []).some((alias) => kept.includes(alias));
+}
+
 function projectContextProvenanceFor(
 	tier: AgentProjectContextTier,
 	messages: ReadonlyArray<WorkerPromptMessage>,
@@ -1805,6 +1814,7 @@ function projectContextProvenanceFor(
 						files: [...peer.files],
 						stale: peer.stale,
 						notCarried: peer.notCarried,
+						...(peer.reason !== undefined ? { reason: peer.reason } : {}),
 					},
 				}
 			: {}),
@@ -6108,6 +6118,7 @@ export function createDispatchBundle(
 						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
 						...(req.taskWorktree !== undefined ? { taskWorktree: req.taskWorktree.path } : {}),
 						declaredPaths: [...pathScope.workingContextPaths, ...pathScope.writeBoundaries, ...pathScope.inferredOnlyPaths],
+						keepFiles: keepsPeerInstructionFiles(settings, target.runtime),
 					})
 				: null;
 		const dynamicContext: WorkerDynamicContext = {

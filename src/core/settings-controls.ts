@@ -701,6 +701,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Sandbox unix sockets",
 		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Owned hides only the sockets you own (tmux, an X11 socket file, your agents) and leaves other users' reachable, such as the MUNGE and SSSD sockets cluster commands need; abstract sockets stay reachable. Allow leaves every socket reachable. User settings only.",
 	],
+	"fleet.keepPeerInstructionFiles": [
+		"Peers that keep their own instruction files",
+		"Runtime ids (claude-code, codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules Clio compiled for the run beside them. Others read the compiled rules in place of their files.",
+	],
 	"safety.scratchRoots": [
 		"Scratch roots",
 		"Absolute directories your sandboxed commands and file edits may write at autonomy default without asking, and where deletes run as they do in the workspace. TMPDIR, /tmp and /var/tmp always count. User settings only.",

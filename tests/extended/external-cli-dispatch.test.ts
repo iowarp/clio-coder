@@ -242,6 +242,20 @@ for (const event of [
 			stale: 1,
 			notCarried: 0,
 		});
+		// Kept: the operator keeps Codex on its AGENTS.md, so the compiled rules ride beside it.
+		settings.fleet.keepPeerInstructionFiles = ["codex-cli"];
+		const kept = await run();
+		settings.fleet.keepPeerInstructionFiles = [];
+		ok(!kept.argv.join(" ").includes("project_doc_max_bytes=0"), kept.argv.join(" "));
+		ok(kept.stdin.includes("Money is integer cents; see `src/cart.ts`."), kept.stdin);
+		ok(kept.stdin.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."), kept.stdin);
+		deepStrictEqual(kept.receipt.projectContext?.peerInstructions, {
+			delivery: "coexist",
+			files: ["AGENTS.md"],
+			stale: 1,
+			notCarried: 0,
+			reason: "setting",
+		});
 		// Coexist: a handbook of prose alone keeps its usual message, and Codex reads AGENTS.md beside it.
 		writeFileSync(join(root, "CLIO-CODER.md"), "Demo prices carts. Keep money in integer cents.\n");
 		const coexist = await run();

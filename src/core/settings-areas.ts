@@ -210,6 +210,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "integrations.externalAgents.defaults.toolGovernance":
 			return place("safety", "Worker approvals");
 		case "integrations.externalAgents.entries":
+		case "fleet.keepPeerInstructionFiles":
 			return place("workspace", "External agents");
 		case "integrations.externalAgents.defaults.connectTimeoutMs":
 		case "integrations.externalAgents.defaults.turnTimeoutMs":

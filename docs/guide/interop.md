@@ -151,10 +151,13 @@ Git tracks, or when the run is on a remote host, and it is dropped when Clio
 cannot write a file at spawn. OpenCode then reads its files beside the compiled
 rules in the message (coexist). A peer also reads them beside the usual
 project message when a handbook is prose without sections, because there is
-nothing to compile it into. Antigravity, ACP peers, and tier `none` keep their current
-behavior. The run record's `projectContext.peerInstructions` names the delivery,
+nothing to compile it into. A runtime id listed in `fleet.keepPeerInstructionFiles`
+always reads its files beside the compiled rules, with no switch and no overlay, for
+a file whose guidance Clio cannot extract as rules. Antigravity, ACP peers, and tier
+`none` keep their current behavior. The run record's `projectContext.peerInstructions` names the delivery,
 the files, the count of rules the tree no longer supports (`stale`), and the
-count that hold but did not fit the bound (`notCarried`).
+count that hold but did not fit the bound (`notCarried`), and `reason: setting`
+when the setting kept the files.
 
 ### Peer modes and their status
 

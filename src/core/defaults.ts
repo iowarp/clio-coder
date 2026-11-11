@@ -535,6 +535,8 @@ export interface FleetSettings extends FleetRouteSettings {
 	concurrency: "auto" | number;
 	/** On by default: a parallel batch's native workers that share a prompt prefix start after the first one streams; handles return at once. */
 	staggerSharedPrefix: boolean;
+	/** Runtime ids of delegated harnesses that read their own repository instruction files unchanged, with the compiled rules beside them. */
+	keepPeerInstructionFiles: string[];
 	worktrees: FleetWorktreesSettings;
 	retry: FleetRetrySettings;
 	limits: FleetLimitsSettings;
@@ -828,6 +830,7 @@ export const DEFAULT_SETTINGS = {
 		},
 		concurrency: "auto" as "auto" | number,
 		staggerSharedPrefix: true,
+		keepPeerInstructionFiles: [] as string[],
 		worktrees: { root: "disk" },
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
@@ -1037,6 +1040,8 @@ fleet:
   concurrency: auto
   # On by default; workers that share a prompt prefix start after the leader streams (at most 15 s), so they reuse its cache. Handles return at once.
   staggerSharedPrefix: true
+  # Delegated harness runtime ids that read their own repository instruction files beside the rules Clio compiles.
+  keepPeerInstructionFiles: []
   worktrees:
     root: disk
   retry:

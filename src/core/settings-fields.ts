@@ -117,6 +117,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"interpretation",
 	"journal",
 	"judge",
+	"keepPeerInstructionFiles",
 	"keybindings",
 	"kind",
 	"label",

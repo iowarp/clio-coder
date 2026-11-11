@@ -1778,6 +1778,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"permissions",
 				"concurrency",
 				"staggerSharedPrefix",
+				"keepPeerInstructionFiles",
 				"worktrees",
 				"retry",
 				"limits",
@@ -2034,6 +2035,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		if ("staggerSharedPrefix" in rawFleet) {
 			const parsed = expectBoolean(issues, "fleet.staggerSharedPrefix", rawFleet.staggerSharedPrefix);
 			if (parsed !== undefined) settings.fleet.staggerSharedPrefix = parsed;
+		}
+		if ("keepPeerInstructionFiles" in rawFleet) {
+			const parsed = expectStringArray(issues, "fleet.keepPeerInstructionFiles", rawFleet.keepPeerInstructionFiles);
+			if (parsed !== undefined) settings.fleet.keepPeerInstructionFiles = parsed;
 		}
 		if ("worktrees" in rawFleet) {
 			const rawWorktrees = rawFleet.worktrees;
