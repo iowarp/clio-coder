@@ -449,21 +449,21 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			// Sessions are created lazily by the CLI. Dispatch scope notices reach
 			// every surface only on the live bus; record each in the open session so
 			// a warning such as an overlapping write root stays checkable afterwards.
-			unsubscribeScopeNotices =
-				context.bus.subscribe?.("run.scope_notice_raised", (payload) => {
-					const notice = readDispatchScopeNotice(payload);
-					if (notice === null || !state) return;
-					try {
-						appendEntry(state, {
-							kind: "custom",
-							customType: SCOPE_NOTICE_CUSTOM_TYPE,
-							parentTurnId: null,
-							data: { code: notice.code, level: notice.level, message: notice.message },
-						});
-					} catch {
-						// Advisory only; the live notice already reached the operator.
-					}
-				}) ?? null;
+			unsubscribeScopeNotices = context.bus.subscribe("run.scope_notice_raised", (payload) => {
+				const notice = readDispatchScopeNotice(payload);
+				if (notice === null || !state) return;
+				try {
+					appendEntry(state, {
+						kind: "custom",
+						customType: SCOPE_NOTICE_CUSTOM_TYPE,
+						// The notice hangs off the turn it followed, so /fork and /tree keep it on that branch.
+						parentTurnId: currentTurnId,
+						data: { code: notice.code, level: notice.level, message: notice.message },
+					});
+				} catch {
+					// Advisory only; the live notice already reached the operator.
+				}
+			});
 		},
 		async stop() {
 			unsubscribeScopeNotices?.();

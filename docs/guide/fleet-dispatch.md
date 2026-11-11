@@ -1061,7 +1061,8 @@ detail naming the re-dispatch, with `intent.write_roots` including the paths.
 Each scope notice reaches every operator surface: the terminal transcript, headless
 stderr in text mode and a `dispatch_scope_notice` event in `--json`, the ACP
 `dispatch.scopeNotice` event for a client that opted into events, and the GUI's
-**Dispatch scope** row. The transcript row for a dispatch summarizes `intent` on one line,
+**Dispatch scope** row. The open session also records it as a `clio-coder.scope-notice`
+entry under the turn it followed, so `/fork` and `/tree` keep it on that branch. The transcript row for a dispatch summarizes `intent` on one line,
 such as `write: src/a.ts; checks: test`, with up to three entries per list and `(+N)` for
 the rest. A read root that is only the workspace is the default and is left out.
 

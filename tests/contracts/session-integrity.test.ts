@@ -795,6 +795,15 @@ describe("dispatch scope notices", () => {
 				level: "warning",
 				message,
 			});
+			strictEqual(notices[0]?.parentTurnId, null);
+			// A notice raised after a turn hangs off that turn, so /fork and /tree keep it on its branch.
+			const turn = bundle.contract.append({ id: "turn-1", parentId: null, kind: "user", payload: { text: "go" } });
+			bus.emit("run.scope_notice_raised", { code: "write_roots_overlap", level: "warning", message });
+			const later = bundle.contract
+				.readEntries()
+				.filter((entry) => entry.kind === "custom" && entry.customType === "clio-coder.scope-notice");
+			strictEqual(later.length, 2);
+			strictEqual(later[1]?.parentTurnId, turn.id);
 		} finally {
 			await bundle.extension.stop?.();
 			scratch.restore();
