@@ -1656,6 +1656,7 @@ export const CompletionEvaluatedSchema = Type.Object(
 			"prose_only",
 			"validation_evidence",
 			"explicit_limitation",
+			"no_checks_declared",
 			"unvalidated_mutation",
 		]),
 		rigor: vocabulary(["normal", "high"]),

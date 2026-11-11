@@ -128,6 +128,11 @@ async function runResolvedVerify(args: Record<string, unknown>, options: VerifyR
 			return unavailableCheck(resolution.check);
 		case "unresolved":
 			// The name resolved to no check, so nothing ran; the marker keeps this apart from a check that ran and failed.
-			return { kind: "error", message: `verify: ${resolution.message}`, details: { unresolved: true } };
+			// A workspace with no check at all also carries that fact, which the finish contract settles on.
+			return {
+				kind: "error",
+				message: `verify: ${resolution.message}`,
+				details: { unresolved: true, ...(resolution.noChecksDeclared ? { noChecksDeclared: true } : {}) },
+			};
 	}
 }

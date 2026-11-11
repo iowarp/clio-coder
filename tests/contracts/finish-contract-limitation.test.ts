@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import { createFinishContractRegistration } from "../../src/domains/safety/finis
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 
 const SOURCE = { source: "builtin" } as never;
 
@@ -112,6 +113,43 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		strictEqual(assessment.kind, "engage");
 		strictEqual(assessment.reason, "unvalidated_mutation");
 		deepStrictEqual(assessment.evidence, []);
+	});
+
+	it("settles ok/no_checks_declared when verify finds no check in the workspace, without a limitation", async (t) => {
+		const root = mkdtempSync(join(tmpdir(), "clio-no-checks-"));
+		const cwd = process.cwd();
+		t.after(() => {
+			process.chdir(cwd);
+			rmSync(root, { recursive: true, force: true });
+		});
+		process.chdir(root);
+		for (const args of [{}, { check: "test" }]) {
+			// The list is an answer; a named check that resolved to nothing stays an error, so it credits no pass.
+			const result = await verifyTool.run(args);
+			strictEqual(result.kind, "check" in args ? "error" : "ok", JSON.stringify(result));
+			strictEqual(result.details?.noChecksDeclared, true);
+			match(result.kind === "ok" ? result.output : result.message, /fact about this workspace, not a limitation/u);
+			const entries = [
+				...mutationWindow(),
+				toolCall("verify-1", ToolNames.Verify, args),
+				{
+					kind: "message",
+					role: "tool_result",
+					turnId: "verify-1",
+					payload: { toolName: ToolNames.Verify, toolCallId: "verify-1", isError: result.kind === "error", result },
+				},
+				assistantMessage("assistant-1", "Saved the summary table."),
+			];
+			const assessment = assessFinishContract({
+				sessionEntries: entries,
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				rigor: "high",
+			});
+			strictEqual(assessment.kind, "ok", JSON.stringify(args));
+			strictEqual(assessment.reason, "no_checks_declared");
+			strictEqual(assessment.advisory, undefined);
+		}
 	});
 
 	it("engages on prose such as 'not verified' when no limitation receipt exists", () => {

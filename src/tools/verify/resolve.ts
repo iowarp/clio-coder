@@ -15,6 +15,7 @@ import {
 import { resolveCleanRunArgv } from "./toolchain.js";
 import {
 	discoverToolchainChecks,
+	NO_CHECKS_DECLARED_NOTE,
 	TOOLCHAIN_DISCOVERY_SOURCES,
 	type ToolchainCheck,
 	toolchainArgv,
@@ -36,7 +37,8 @@ export type VerifyResolution =
 	/** A gate the dispatched verifier task names; `confined` is the worker's OS sandbox, read by the safety scan. */
 	| { kind: "task"; check: DeclaredCheck; confined: boolean; containable: boolean }
 	| { kind: "unavailable"; check: ToolchainCheck }
-	| { kind: "unresolved"; message: string };
+	/** `noChecksDeclared`: the workspace declares and derives no check and no task gate applies, a fact, not a failure. */
+	| { kind: "unresolved"; message: string; noChecksDeclared?: true };
 
 const FAMILY_WORDS = new Set(["test", "lint", "check", "typecheck", "format", "build", "ci"]);
 
@@ -78,8 +80,7 @@ export function availableToolchainChecks(
 
 function nothingDeclared(root: string, diagnostics: ReadonlyArray<string>): string {
 	const skipped = diagnostics.length > 0 ? ` Skipped during discovery: ${diagnostics.join(" ")}` : "";
-	const fallback =
-		taskGateFallbackHint() || " Run the repository's documented test or gate command through bash instead.";
+	const fallback = taskGateFallbackHint() || ` ${NO_CHECKS_DECLARED_NOTE}`;
 	return `no declared or derivable verification checks in ${root}. Looked for ${TOOLCHAIN_DISCOVERY_SOURCES}.${fallback}${skipped}`;
 }
 
@@ -257,7 +258,11 @@ function resolveWithDiscovery(
 		// Rediscover only on this empty path, to name the files that were skipped.
 		const diagnostics = [...(discovery.diagnostics ?? [])];
 		discoverToolchainChecks(workspaceRoot, diagnostics);
-		return { kind: "unresolved", message: nothingDeclared(root, diagnostics) };
+		return {
+			kind: "unresolved",
+			message: nothingDeclared(root, diagnostics),
+			...(taskGateFallbackHint() === "" ? { noChecksDeclared: true as const } : {}),
+		};
 	}
 	if (owners.length > 1) {
 		return {

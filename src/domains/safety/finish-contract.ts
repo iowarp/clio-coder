@@ -84,6 +84,7 @@ export type FinishContractReason =
 	| "prose_only"
 	| "validation_evidence"
 	| "explicit_limitation"
+	| "no_checks_declared"
 	| "unvalidated_mutation";
 
 export type FinishContractAssessment =
@@ -95,7 +96,8 @@ export type FinishContractAssessment =
 				| "deletion_only"
 				| "prose_only"
 				| "validation_evidence"
-				| "explicit_limitation";
+				| "explicit_limitation"
+				| "no_checks_declared";
 			evidence: ReadonlyArray<FinishContractEvidence>;
 			mutatedPaths: ReadonlyArray<string>;
 			quality?: ReadonlyArray<QualityFinding>;
@@ -169,6 +171,7 @@ interface MutationCandidate {
  *   1. no mutating receipt in the window        -> ok/no_mutation
  *   2. validation evidence present              -> ok/validation_evidence, with bounded scope advisory
  *   3. successful `limitation` receipt present  -> ok/explicit_limitation
+ *      or verify reported no declared check     -> ok/no_checks_declared
  *   4. only prose written, or only non-source removed -> ok/prose_only or ok/deletion_only
  *   5. otherwise                                -> engage/unvalidated_mutation
  *
@@ -312,6 +315,10 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 
 	if (limitations.length > 0) {
 		return { kind: "ok", reason: "explicit_limitation", evidence: limitations, mutatedPaths };
+	}
+	// A workspace with no check to run is a fact the verify receipt states, not a gap the turn left open.
+	if (declared.length === 0 && verifyFoundNoChecks(window)) {
+		return { kind: "ok", reason: "no_checks_declared", evidence: [], mutatedPaths };
 	}
 	// A handoff note, a spec or a Mermaid diagram has no check to run, so
 	// writing only prose is not an unverified change.
@@ -614,6 +621,34 @@ function collectLimitationEvidence(recent: ReadonlyArray<unknown>): FinishContra
 	}
 
 	return evidence;
+}
+
+/**
+ * A verify result in the window whose typed details say the workspace declares and derives no check: the list, or a
+ * named check that resolved to nothing and so stays an error that credits no pass.
+ */
+export function verifyFoundNoChecks(recent: ReadonlyArray<unknown>): boolean {
+	const calls = new Set<string>();
+	for (const entry of capabilityEntries(recent)) {
+		const record = asRecord(entry);
+		const payload = asRecord(record?.payload);
+		if (payload === null) continue;
+		if (record?.role === "tool_call") {
+			const id = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
+			if (id !== null && stringFromFirst(payload, ["name", "toolName", "tool"]) === ToolNames.Verify) calls.add(id);
+			continue;
+		}
+		if (record?.role !== "tool_result" || payload.outcome === "blocked" || typeof payload.blockReason === "string")
+			continue;
+		const resultId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
+		if (
+			resultId !== null &&
+			calls.has(resultId) &&
+			asRecord(asRecord(payload.result)?.details)?.noChecksDeclared === true
+		)
+			return true;
+	}
+	return false;
 }
 
 function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {

@@ -37,6 +37,13 @@ export const TOOLCHAIN_DISCOVERY_SOURCES =
 	"tests/ or test/ with test_*.py modules, uv.lock, Makefile and justfile targets, Cargo.toml, go.mod, " +
 	"CMakePresets.json test presets, and scripts run by .github/workflows, .gitlab-ci.yml, .circleci or azure-pipelines";
 
+/**
+ * What verify tells the main agent when a workspace declares and derives no check. Finding none is the workspace's
+ * verification status, so the finish contract settles on it instead of asking for a limitation.
+ */
+export const NO_CHECKS_DECLARED_NOTE =
+	"No checks declared is a fact about this workspace, not a limitation: say so in your answer and do not record a limitation for it. If the repository documents a test command, run it through bash.";
+
 /** A derived check and the argv prefix model-supplied `args` extend; absent means the check takes none. */
 export interface ToolchainCheck extends DeclaredCheck {
 	argsBase?: string[];

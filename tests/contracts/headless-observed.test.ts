@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { formatHeadlessObservedLine } from "../../src/cli/modes/headless-observed.js";
+import { formatHeadlessObservedLine, observeHeadlessRun } from "../../src/cli/modes/headless-observed.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -43,6 +43,42 @@ test("the observed line omits a run with no tool calls and names a write with no
 	strictEqual(
 		formatHeadlessObservedLine({ toolCalls: 2, refused: 1, writes: 1, checks: [] }),
 		"clio-coder run: observed: 2 tool calls, 1 refused · 1 write · no check observed after the last write",
+	);
+});
+
+test("a run whose verify call found no check in the workspace is observed as no checks declared", () => {
+	const noChecks = [
+		call("v1", "verify", {}),
+		{
+			kind: "message",
+			role: "tool_result",
+			timestamp: "t",
+			payload: { toolCallId: "v1", outcome: "ok", isError: false, result: { details: { noChecksDeclared: true } } },
+		},
+	];
+	const observed = observeHeadlessRun({
+		entries: [...edit, ...noChecks],
+		start: 0,
+		workspaceRoot: root,
+		toolCalls: 2,
+		refused: 0,
+		writes: 1,
+	});
+	strictEqual(observed.noChecksDeclared, true);
+	strictEqual(
+		formatHeadlessObservedLine(observed),
+		"clio-coder run: observed: 2 tool calls, 0 refused · 1 write · no checks declared in the workspace",
+	);
+	strictEqual(
+		observeHeadlessRun({
+			entries: [...noChecks, ...edit],
+			start: 2,
+			workspaceRoot: root,
+			toolCalls: 1,
+			refused: 0,
+			writes: 1,
+		}).noChecksDeclared,
+		undefined,
 	);
 });
 

@@ -45,7 +45,7 @@ import {
 	parsePackageJson,
 	readRegularFileText,
 } from "./toolchain.js";
-import { TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
+import { NO_CHECKS_DECLARED_NOTE, TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
 
 /** The structured verdict a numeric-compare, perf-budget or reproduce check records beside the command facts. */
 export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport | ReproduceReport;
@@ -130,12 +130,13 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 			lines.push(`- not runnable: ${entry.text} (${entry.reason}); report it unverified`);
 		lines.push("");
 	}
+	const noChecksDeclared = declared.length === 0 && derived.length === 0 && taskGateFallbackHint() === "";
 	if (declared.length === 0 && derived.length === 0) {
 		lines.push(
 			`No declared verification checks found (no package.json verification scripts or ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} entries).`,
 			`Nothing derivable either: looked for ${TOOLCHAIN_DISCOVERY_SOURCES}.`,
 			taskGateFallbackHint().trim() ||
-				"Run the repository's documented test command through bash, or run `clio-coder verifiers author` to create the catalog after confirmation.",
+				`${NO_CHECKS_DECLARED_NOTE} \`clio-coder verifiers author\` creates the catalog after confirmation.`,
 		);
 	} else {
 		if (declared.length > 0) lines.push("Declared verification checks:");
@@ -174,6 +175,7 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 		kind: "ok",
 		output: lines.join("\n"),
 		details: {
+			...(noChecksDeclared ? { noChecksDeclared: true } : {}),
 			...(diagnostics.length > 0 ? { diagnostics } : {}),
 			sources: clonedSources(discovery.sources),
 			...(gates.gates.length > 0 || gates.rejected.length > 0
