@@ -105,6 +105,8 @@ export interface ExtensionReloadCoordinatorDeps {
 	now?: () => number;
 	/** One operator line per issue; stderr in headless runs, dropped or noticed by the host in interactive runs. */
 	report: (line: string) => void;
+	/** The launch trust card already told the operator project configuration is not active; boot repeats none of it. */
+	holdBootTrustNotices?: boolean;
 	/** Called once per published generation, after both references are live. */
 	onCommitted?: (event: ExtensionGenerationCommitted) => void;
 	/**
@@ -239,9 +241,19 @@ function failure(message: string): ExtensionSnapshotDiagnostics {
 function issueLines(
 	built: BuildUserHookRegistrationsResult,
 	dropped: ReadonlyArray<MiddlewareRegistrationConflict>,
+	shownTrust: Set<string>,
+	holdTrust: boolean,
 ): string[] {
 	const lines: string[] = [];
-	for (const issue of built.fileIssues) lines.push(`[clio-coder:hooks] ${issue.message}`);
+	for (const issue of built.fileIssues) {
+		// An untrusted file is a standing condition: one notice per session, not one per reload.
+		if (issue.trust) {
+			const shown = shownTrust.has(issue.message);
+			shownTrust.add(issue.message);
+			if (shown || holdTrust) continue;
+		}
+		lines.push(`[clio-coder:hooks] ${issue.message}`);
+	}
 	for (const issue of built.issues) {
 		lines.push(`[clio-coder:hooks] ${issue.source.sourcePath}#${issue.index}: ${issue.issues.join("; ")}`);
 	}
@@ -258,6 +270,8 @@ function issueLines(
 
 export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinatorDeps): ExtensionReloadCoordinator {
 	let inFlight = false;
+	const shownTrust = new Set<string>();
+	let holdTrust = false;
 	let promptGate: ExtensionPromptGate | null = null;
 	let publishedPackages: ReadonlyArray<InstalledExtension> = [];
 	let toolRegistry: Pick<ToolRegistry, "register" | "unregister" | "get"> | null = null;
@@ -330,7 +344,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 		if (deps.middleware.ownedGeneration("user-hooks") !== 0) return;
 		const built = build(workspace, null);
 		const report = deps.middleware.replaceRegistrations("user-hooks", 1, built.registrations);
-		const lines = issueLines(built, report.dropped);
+		const lines = issueLines(built, report.dropped, shownTrust, holdTrust);
 		if (!report.applied) lines.push(`[clio-coder:hooks] project hooks were not applied: ${report.reason ?? "refused"}`);
 		emitLines(lines);
 	};
@@ -459,7 +473,11 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			workerEvaluators = runtimeHooks.workerEvaluators;
 			// Both references are live. Observers may run from here on.
 			replacement.emitConflicts();
-			const lines = [...issueLines(built, replacement.dropped), ...publishRuntimeTools(), ...workerHookLines];
+			const lines = [
+				...issueLines(built, replacement.dropped, shownTrust, holdTrust),
+				...publishRuntimeTools(),
+				...workerHookLines,
+			];
 			try {
 				deps.onCommitted?.({
 					generation: candidate.generation,
@@ -501,7 +519,14 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 	};
 
 	return {
-		applyBoot: () => run(true),
+		applyBoot: () => {
+			holdTrust = deps.holdBootTrustNotices === true;
+			try {
+				return run(true);
+			} finally {
+				holdTrust = false;
+			}
+		},
 		reload: () => run(false),
 		promptGate: () => promptGate,
 		attachRuntimeTools(registry) {

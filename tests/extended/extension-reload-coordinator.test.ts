@@ -398,6 +398,27 @@ describe("extension reload coordinator publication", () => {
 		harness.stop();
 	});
 
+	it("reports an untrusted project hooks file once per session, and not at all after the trust card answered", () => {
+		for (const held of [false, true]) {
+			const project = scratch();
+			mkdirSync(path.join(project, ".clio-coder"), { recursive: true });
+			writeFileSync(
+				path.join(project, ".clio-coder", "hooks.yaml"),
+				"- id: fmt\n  on: turn_start\n  kind: prompt\n  message: x\n",
+			);
+			const harness = liveHarness(project);
+			try {
+				const coordinator = harness.coordinator(held ? { holdBootTrustNotices: true } : {});
+				coordinator.applyBoot();
+				coordinator.reload();
+				const trustLines = harness.lines.filter((line) => line.includes("project hooks ignored"));
+				strictEqual(trustLines.length, held ? 0 : 1, trustLines.join("\n"));
+			} finally {
+				harness.stop();
+			}
+		}
+	});
+
 	it("publishes project-only hooks on degraded boot and leaves them unchanged on a rejected reload", () => {
 		const project = scratch();
 		writeProjectHooks(project, "project-only", "still-applies");

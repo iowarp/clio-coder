@@ -1640,6 +1640,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The gateway is registered after this coordinator; the lookup runs at call time.
 		mcpOwner: (tool) => toolBootstrap.mcpCapabilities?.ownerIdOf(tool) ?? null,
 		cwd: () => process.cwd(),
+		...(options.trustCardNotices !== undefined ? { holdBootTrustNotices: true } : {}),
 		recordReceipt: extensionHookReceiptSink(() => session?.current()?.id),
 		report: (line) => {
 			if (reloadClasses.captureIssue(line)) return;

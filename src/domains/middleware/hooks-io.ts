@@ -49,6 +49,8 @@ const COMMAND_OUTPUT_MAX_BYTES = 1024 * 1024;
 export interface HookFileIssue {
 	source: UserHookSource;
 	message: string;
+	/** The file is present but not trusted; a standing condition, not a parse fault. */
+	trust?: true;
 }
 
 export interface ReadHookSourcesResult {
@@ -134,7 +136,7 @@ export function readHookSources(options: ReadHookSourcesOptions): ReadHookSource
 		if (file.error !== undefined) fileIssues.push({ source, message: file.error });
 		if (file.text === null) continue;
 		if (projectSurface.verdict !== "trusted") {
-			fileIssues.push({ source, message: projectSurfaceTrustNotice(projectSurface, file.path) });
+			fileIssues.push({ source, message: projectSurfaceTrustNotice(projectSurface, file.path), trust: true });
 			continue;
 		}
 		const batch = readBatch(source, file.path, file.text, fileIssues);
