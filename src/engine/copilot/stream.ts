@@ -55,6 +55,12 @@ import {
 import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessionRecordsSync } from "./session-fs.js";
 
 type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
+type ContextTier = "default" | "long_context";
+
+/** The tier a copilot-sdk target opted into (`contextTier: long_context`), stamped on its synthesized model. */
+export function copilotContextTierFor(model: Model<Api>): ContextTier {
+	return (model as { copilotContextTier?: unknown }).copilotContextTier === "long_context" ? "long_context" : "default";
+}
 
 export const COPILOT_SDK_API = "copilot-sdk";
 
@@ -154,6 +160,7 @@ class Conversation {
 	toolsHash: string;
 	model: string;
 	reasoningEffort: string | undefined;
+	contextTier: ContextTier;
 	synced: string[] = [];
 	state: ConversationState = "idle";
 	pendingToolCallIds: string[] = [];
@@ -193,6 +200,7 @@ class Conversation {
 		toolsHash: string;
 		model: string;
 		reasoningEffort: string | undefined;
+		contextTier: ContextTier;
 	}) {
 		this.key = input.key;
 		this.session = input.session;
@@ -201,6 +209,7 @@ class Conversation {
 		this.toolsHash = input.toolsHash;
 		this.model = input.model;
 		this.reasoningEffort = input.reasoningEffort;
+		this.contextTier = input.contextTier;
 		this.unsubscribe = this.session.on((event) => this.route(event));
 	}
 
@@ -880,6 +889,7 @@ async function openConversationHeld(input: {
 	systemPrompt: string;
 	tools: ReadonlyArray<Tool>;
 	reasoningEffort: string | undefined;
+	contextTier: ContextTier;
 }): Promise<Conversation> {
 	// The signed-in account is the authorization; a missing login fails here with `copilot login` named.
 	await copilotAccount();
@@ -904,6 +914,8 @@ async function openConversationHeld(input: {
 			enableConfigDiscovery: false,
 			workingDirectory: process.cwd(),
 			...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort as ReasoningEffort } : {}),
+			// Opt-in only: a target without `contextTier: long_context` sends nothing and keeps the runtime default.
+			...(input.contextTier === "long_context" ? { contextTier: input.contextTier } : {}),
 			// No Copilot built-in runs, so any permission request is outside Clio's surface and is refused.
 			onPermissionRequest: () => ({
 				kind: "reject",
@@ -922,6 +934,7 @@ async function openConversationHeld(input: {
 		toolsHash: toolsSignature(input.tools),
 		model: input.model.id,
 		reasoningEffort: input.reasoningEffort,
+		contextTier: input.contextTier,
 	});
 	conversation = opened;
 	await acquireBoundaries(opened);
@@ -1036,6 +1049,7 @@ async function runStep(
 	const tools = getCurrentTools(context.messages);
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
+	const contextTier = copilotContextTierFor(model);
 	// Messages that are only per-call host framing carry no transcript identity; they still reach the model.
 	const core = context.messages.filter((message): message is CoreMessage => message.role !== "system");
 	const kept = core.filter((message) => fingerprint(message) !== null);
@@ -1056,7 +1070,7 @@ async function runStep(
 	try {
 		if (!conversation) {
 			evictFor(key);
-			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort }, signal);
+			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort, contextTier }, signal);
 			if (step.isFinished) {
 				// Ended another way while the session was being created: it never carries a message.
 				void opened.dispose("The Copilot step was cancelled before its session was used.");
@@ -1113,14 +1127,18 @@ async function runStep(
 			active.busy = false;
 			return;
 		}
-		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort) {
-			await active.session.setModel(
-				model.id,
-				reasoningEffort !== undefined ? { reasoningEffort: reasoningEffort as ReasoningEffort } : undefined,
-			);
+		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort || active.contextTier !== contextTier) {
+			// The tier is named whenever either side is long_context, so leaving it returns the session to default.
+			const tierOption = contextTier === "long_context" || active.contextTier === "long_context" ? { contextTier } : {};
+			const switchOptions = {
+				...(reasoningEffort !== undefined ? { reasoningEffort: reasoningEffort as ReasoningEffort } : {}),
+				...tierOption,
+			};
+			await active.session.setModel(model.id, Object.keys(switchOptions).length > 0 ? switchOptions : undefined);
 			if (step.isFinished) return;
 			active.model = model.id;
 			active.reasoningEffort = reasoningEffort;
+			active.contextTier = contextTier;
 		}
 		const policyIds: string[] = [];
 		const policyText = policies

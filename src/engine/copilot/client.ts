@@ -288,6 +288,17 @@ export async function probeCopilotSignIn(keychain: boolean): Promise<CopilotSign
 	}
 }
 
+export type CopilotContextTier = "default" | "long_context";
+
+/** A model's token prices on one tier, in the runtime's own unit (AI credits per `batchSize` tokens). */
+export interface CopilotModelPrices {
+	input: number | undefined;
+	output: number | undefined;
+	cacheRead: number | undefined;
+	cacheWrite: number | undefined;
+	batchSize: number | undefined;
+}
+
 export interface CopilotModelRow {
 	id: string;
 	label: string;
@@ -295,11 +306,20 @@ export interface CopilotModelRow {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
+	/** The tier the window and prices were read for; `default` unless the target opted into `long_context`. */
+	contextTier: CopilotContextTier;
+	prices: CopilotModelPrices | undefined;
+	/**
+	 * The long-context tier's window and prices, when the listing publishes that tier
+	 * (`billing.tokenPrices.longContext`). A copilot-sdk target with `contextTier: long_context` reads these.
+	 */
+	longContext?: { contextWindow: number | undefined; prices: CopilotModelPrices | undefined };
 }
 
 /**
  * Models the signed-in account may use, from the runtime's own listing. A model whose policy is disabled
  * or still unconfigured is left out: enabling one is the account owner's decision in GitHub, never Clio's.
+ * Each row carries the default tier and, when the listing has one, the long-context tier beside it.
  */
 export function listCopilotModels(): Promise<CopilotModelRow[]> {
 	return held(() => listHeld());
@@ -307,35 +327,65 @@ export function listCopilotModels(): Promise<CopilotModelRow[]> {
 
 /**
  * The prompt budget Copilot enforces sits under the context window; compaction must trip below it. A session
- * runs on the default tier, whose budget is `billing.tokenPrices.maxPromptTokens`; `capabilities.limits` can
- * describe the long-context tier instead (live 2026-11-10: Claude Opus 5.5 limits 1M, default tier 200K, the
- * budget the runtime refused at).
+ * on the default tier has the budget `billing.tokenPrices.maxPromptTokens`; one opted into `long_context` has
+ * `billing.tokenPrices.longContext.maxPromptTokens`. `capabilities.limits` can describe the long-context tier
+ * (live 2026-11-10: Claude Opus 5.5 limits 1M, default tier 200K, the budget the runtime refused at). A model
+ * whose listing has no long-context budget keeps its default budget whatever tier was asked for.
  */
-function promptWindow(model: ModelInfo): number | undefined {
+function promptWindow(model: ModelInfo, tier: CopilotContextTier): number | undefined {
 	const limits = model.capabilities?.limits;
+	const prices = model.billing?.tokenPrices;
+	const longBudget = tier === "long_context" ? prices?.longContext?.maxPromptTokens : undefined;
 	const budgets = [
 		limits?.max_context_window_tokens,
 		limits?.max_prompt_tokens,
-		model.billing?.tokenPrices?.maxPromptTokens,
+		longBudget ?? prices?.maxPromptTokens,
 	].filter((tokens): tokens is number => tokens !== undefined);
 	return budgets.length === 0 ? undefined : Math.min(...budgets);
+}
+
+/** The tier's prices: the long-context ones under `long_context` when the listing has them, else the default ones. */
+function tierPrices(model: ModelInfo, tier: CopilotContextTier): CopilotModelPrices | undefined {
+	const prices = model.billing?.tokenPrices;
+	if (!prices) return undefined;
+	const source = tier === "long_context" && prices.longContext ? prices.longContext : prices;
+	return {
+		input: source.inputPrice,
+		output: source.outputPrice,
+		cacheRead: source.cacheReadPrice ?? source.cachePrice,
+		cacheWrite: source.cacheWritePrice,
+		batchSize: prices.batchSize,
+	};
+}
+
+/** One listing row read for a tier; the contract test feeds it a faked listing row. */
+export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTier = "default"): CopilotModelRow {
+	const long = model.billing?.tokenPrices?.longContext;
+	return {
+		id: model.id,
+		label: model.name || model.id,
+		contextWindow: promptWindow(model, contextTier),
+		maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
+		vision: model.capabilities?.supports?.vision === true,
+		reasoning: model.capabilities?.supports?.reasoningEffort === true,
+		contextTier,
+		prices: tierPrices(model, contextTier),
+		...(long
+			? {
+					longContext: {
+						contextWindow: promptWindow(model, "long_context"),
+						prices: tierPrices(model, "long_context"),
+					},
+				}
+			: {}),
+	};
 }
 
 async function listHeld(): Promise<CopilotModelRow[]> {
 	await copilotAccount();
 	const client = await copilotClient();
 	const models: ModelInfo[] = await client.listModels();
-	const rows = models
+	return models
 		.filter((model) => model.policy === undefined || model.policy.state === "enabled")
-		.map(
-			(model): CopilotModelRow => ({
-				id: model.id,
-				label: model.name || model.id,
-				contextWindow: promptWindow(model),
-				maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
-				vision: model.capabilities?.supports?.vision === true,
-				reasoning: model.capabilities?.supports?.reasoningEffort === true,
-			}),
-		);
-	return rows;
+		.map((model) => copilotModelRow(model));
 }

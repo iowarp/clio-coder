@@ -58,6 +58,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"content",
 	"context",
 	"contextLength",
+	"contextTier",
 	"contextWindow",
 	"controlUrl",
 	"cooldownMs",

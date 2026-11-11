@@ -6,7 +6,7 @@ import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import type { CapabilityFlags, ProvidersContract, RuntimeTier } from "../../domains/providers/index.js";
-import { acceptsImageInput } from "../../domains/providers/index.js";
+import { acceptsImageInput, copilotContextTierLabel } from "../../domains/providers/index.js";
 import { effectiveYoloConfinement } from "../../domains/safety/autonomy.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
@@ -297,7 +297,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const statuses = deps.providers.list();
 		const current = settings?.chat?.target ? (statuses.find((s) => s.target.id === settings.chat?.target) ?? null) : null;
 
-		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model, { abbreviate: false });
+		const tierLabel = copilotContextTierLabel(current?.target);
+		const routeLabel = formatTargetLabel(settings?.chat?.target, settings?.chat?.model, { abbreviate: false });
+		const target = tierLabel ? `${routeLabel} · ${tierLabel}` : routeLabel;
 
 		const wireModelId = settings?.chat?.model ?? current?.target.defaultModel ?? null;
 		return {

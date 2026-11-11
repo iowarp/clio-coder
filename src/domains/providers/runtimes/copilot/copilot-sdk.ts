@@ -6,6 +6,7 @@ import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
+import { copilotContextTierOf } from "../../types/target-descriptor.js";
 
 export const COPILOT_SDK_RUNTIME_ID = "copilot-sdk";
 
@@ -32,21 +33,43 @@ const copilotCapabilities: CapabilityFlags = {
 	maxTokens: 16384,
 };
 
-/** Capabilities the runtime's listing reported for each model this process listed. */
-const listed = new Map<string, Partial<CapabilityFlags>>();
+/** Capabilities the runtime's listing reported for each model this process listed, per context tier. */
+const listed = new Map<string, { base: Partial<CapabilityFlags>; longContext: Partial<CapabilityFlags> | undefined }>();
 
-function rowCapabilities(row: {
+type ListedRow = {
 	contextWindow: number | undefined;
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
-}): Partial<CapabilityFlags> {
+	longContext?: { contextWindow: number | undefined };
+};
+
+function rowCapabilities(row: ListedRow, contextWindow = row.contextWindow): Partial<CapabilityFlags> {
 	return {
 		vision: row.vision,
 		reasoning: row.reasoning,
-		...(row.contextWindow !== undefined ? { contextWindow: row.contextWindow } : {}),
+		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(row.maxOutputTokens !== undefined ? { maxTokens: row.maxOutputTokens } : {}),
 	};
+}
+
+/**
+ * The capabilities a listed model has on a target's tier: the long-context window when the target opts into
+ * `contextTier: long_context` and the listing publishes that tier, else the default window.
+ */
+export function copilotTierCapabilities(
+	row: ListedRow,
+	target: Pick<TargetDescriptor, "runtime" | "contextTier">,
+): Partial<CapabilityFlags> {
+	return copilotContextTierOf(target) === "long_context" && row.longContext
+		? rowCapabilities(row, row.longContext.contextWindow)
+		: rowCapabilities(row);
+}
+
+function listedFor(id: string, target: TargetDescriptor): Partial<CapabilityFlags> | undefined {
+	const entry = listed.get(id);
+	if (!entry) return undefined;
+	return copilotContextTierOf(target) === "long_context" && entry.longContext ? entry.longContext : entry.base;
 }
 
 async function probeCopilotSdk(
@@ -58,7 +81,7 @@ async function probeCopilotSdk(
 	const snapshot = readTargetModelSnapshot(target);
 	// The cached listing is used only once this process has the capabilities that go with it.
 	if (snapshot && snapshot.models.length > 0 && snapshot.models.every((id) => listed.has(id))) {
-		const modelCapabilities = Object.fromEntries(snapshot.models.map((id) => [id, listed.get(id) ?? {}]));
+		const modelCapabilities = Object.fromEntries(snapshot.models.map((id) => [id, listedFor(id, target) ?? {}]));
 		const capabilityModelId =
 			target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : snapshot.models[0];
 		return {
@@ -66,7 +89,9 @@ async function probeCopilotSdk(
 			models: [...snapshot.models],
 			modelsSource: "cache",
 			modelCapabilities,
-			...(capabilityModelId ? { capabilityModelId, discoveredCapabilities: listed.get(capabilityModelId) ?? {} } : {}),
+			...(capabilityModelId
+				? { capabilityModelId, discoveredCapabilities: listedFor(capabilityModelId, target) ?? {} }
+				: {}),
 			...(snapshot.modelLabels ? { modelLabels: snapshot.modelLabels } : {}),
 		};
 	}
@@ -84,8 +109,11 @@ async function probeCopilotSdk(
 		const modelLabels = Object.fromEntries(rows.map((row) => [row.id, row.label]));
 		const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
 		for (const row of rows) {
-			modelCapabilities[row.id] = rowCapabilities(row);
-			listed.set(row.id, modelCapabilities[row.id] as Partial<CapabilityFlags>);
+			modelCapabilities[row.id] = copilotTierCapabilities(row, target);
+			listed.set(row.id, {
+				base: rowCapabilities(row),
+				longContext: row.longContext ? rowCapabilities(row, row.longContext.contextWindow) : undefined,
+			});
 		}
 		recordTargetModelSnapshot(target, models, { modelLabels });
 		const capabilityModelId = target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : models[0];
@@ -132,8 +160,8 @@ const copilotSdkRuntime = {
 	defaultModel: COPILOT_SDK_DEFAULT_MODEL,
 	probe: probeCopilotSdk,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
-		const discovered = listed.get(wireModelId);
-		return synthesizeCatalogBackedModel({
+		const discovered = listedFor(wireModelId, target);
+		const model = synthesizeCatalogBackedModel({
 			target,
 			wireModelId,
 			kb,
@@ -143,6 +171,10 @@ const copilotSdkRuntime = {
 			provider: "copilot-sdk",
 			defaultBaseUrl: "copilot-sdk://local",
 		});
+		// The engine reads the tier off the model it streams with: session create and model switch pass it on.
+		return copilotContextTierOf(target) === "long_context"
+			? (Object.assign(model, { copilotContextTier: "long_context" }) as Model<Api>)
+			: model;
 	},
 } satisfies RuntimeDescriptor;
 

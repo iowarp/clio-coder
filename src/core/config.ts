@@ -433,6 +433,8 @@ function describe(value: unknown): string {
 	return String(value);
 }
 
+/** Copilot SDK context tiers a copilot-sdk target may opt into; absent means `default`. */
+const COPILOT_CONTEXT_TIERS = ["default", "long_context"] as const;
 const TOOL_CALL_FORMATS = ["openai", "anthropic", "hermes", "llama3-json", "mistral", "qwen", "xml"] as const;
 const THINKING_FORMATS = [
 	"qwen-chat-template",
@@ -717,6 +719,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"ollama",
 		"maxConcurrentRequests",
 		"trustedUnmediated",
+		"contextTier",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
 	const runtime = "runtime" in value ? expectString(issues, `${path}.runtime`, value.runtime) : undefined;
@@ -876,6 +879,14 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("trustedUnmediated" in value) {
 		const v = expectBoolean(issues, `${path}.trustedUnmediated`, value.trustedUnmediated);
 		if (v !== undefined) target.trustedUnmediated = v;
+	}
+	if ("contextTier" in value) {
+		if (runtime !== "copilot-sdk") {
+			issues.add(`${path}.contextTier`, `applies only to copilot-sdk targets, not runtime ${describe(runtime)}`);
+		} else {
+			const v = expectEnum(issues, `${path}.contextTier`, value.contextTier, COPILOT_CONTEXT_TIERS);
+			if (v !== undefined) target.contextTier = v;
+		}
 	}
 	return target;
 }

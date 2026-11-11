@@ -206,4 +206,10 @@ export type {
 	RuntimeKind,
 	RuntimeTier,
 } from "./types/runtime-descriptor.js";
-export type { TargetAuth, TargetDescriptor, TargetPricing } from "./types/target-descriptor.js";
+export type {
+	CopilotContextTier,
+	TargetAuth,
+	TargetDescriptor,
+	TargetPricing,
+} from "./types/target-descriptor.js";
+export { copilotContextTierLabel, copilotContextTierOf } from "./types/target-descriptor.js";

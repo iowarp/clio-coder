@@ -28,6 +28,7 @@ import {
 } from "../domains/lifecycle/doctor.js";
 import { describeMissing } from "../domains/lifecycle/setup-status.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
+import { copilotContextTierLabel } from "../domains/providers/types/target-descriptor.js";
 import { withFrontmatterCacheReadOnly } from "../domains/resources/skills/frontmatter-cache.js";
 import {
 	type AutonomyLevel,
@@ -105,6 +106,33 @@ function configuredAutonomy(): AutonomyLevel {
 	} catch {
 		return DEFAULT_AUTONOMY_LEVEL;
 	}
+}
+
+/**
+ * One info row per copilot-sdk target that opted into the long-context tier, so the larger prompt budget and
+ * its prices are visible. The default tier, the common case, adds no row.
+ */
+function copilotTierFindings(): DoctorFinding[] {
+	let targets: ReadonlyArray<{ id: string; runtime: string; contextTier?: "default" | "long_context" }>;
+	try {
+		targets = readSettings().targets;
+	} catch {
+		// An unreadable settings file has its own doctor row.
+		return [];
+	}
+	return targets.flatMap((target) => {
+		const label = copilotContextTierLabel(target);
+		return label
+			? [
+					{
+						ok: true,
+						level: "info" as const,
+						name: `copilot tier ${target.id}`,
+						detail: `${label} (contextTier: long_context): the model's long-context prompt budget and prices apply`,
+					},
+				]
+			: [];
+	});
 }
 
 /**
@@ -470,7 +498,7 @@ async function collectFindings(options: DoctorCollectOptions): Promise<DoctorFin
 		...(options.confirm ? { confirm: options.confirm } : {}),
 		...(copilot?.check.kind === "keychain-only" ? { copilotKeychainLogin: copilot.check.login } : {}),
 	});
-	const copilotChecks = copilot ? [copilot.finding] : [];
+	const copilotChecks: DoctorFinding[] = copilot ? [copilot.finding, ...copilotTierFindings()] : [];
 	// The interop and fleet sweeps read the state and config roots through the
 	// ensuring accessors, which create them, and there is no fleet or interop
 	// state to inspect before Clio has ever written anything. On a home Clio has

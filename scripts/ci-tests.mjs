@@ -128,6 +128,8 @@ export const coreTests = [
 	"tui-presentation-modes",
 	"copilot-sdk-route",
 	"copilot-keychain",
+	"copilot-context-tier",
+	"copilot-context-tier-setting",
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
 	"plugin-engine",

@@ -125,4 +125,25 @@ export interface TargetDescriptor {
 	 * governed the run (operator decision Q6).
 	 */
 	trustedUnmediated?: boolean;
+	/**
+	 * Copilot SDK context tier for a copilot-sdk target. Opt-in: absent means `default`; `long_context` asks the
+	 * runtime for the model's long-context prompt budget and its long-context prices.
+	 */
+	contextTier?: CopilotContextTier;
+}
+
+export type CopilotContextTier = "default" | "long_context";
+
+/** The tier a target's Copilot sessions run on: `long_context` only when a copilot-sdk target opts in. */
+export function copilotContextTierOf(
+	target: Pick<TargetDescriptor, "runtime" | "contextTier"> | null | undefined,
+): CopilotContextTier {
+	return target?.runtime === "copilot-sdk" && target.contextTier === "long_context" ? "long_context" : "default";
+}
+
+/** Short label for surfaces (footer, /model, doctor), or null on the default tier. */
+export function copilotContextTierLabel(
+	target: Pick<TargetDescriptor, "runtime" | "contextTier"> | null | undefined,
+): string | null {
+	return copilotContextTierOf(target) === "long_context" ? "long context" : null;
 }

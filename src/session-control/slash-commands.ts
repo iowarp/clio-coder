@@ -41,7 +41,12 @@ import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "..
 import { PANE_PEER_IDS, PANES_PRESET_IDS, PANES_PRESETS, resolvePanesPresetId } from "../domains/mux/operations.js";
 import { isClioHostSocket } from "../domains/mux/workspace/platform.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
-import { acceptsImageInput, resolveModelCapabilities, resolveModelReference } from "../domains/providers/index.js";
+import {
+	acceptsImageInput,
+	copilotContextTierLabel,
+	resolveModelCapabilities,
+	resolveModelReference,
+} from "../domains/providers/index.js";
 import {
 	chooseSecondOpinionRoute,
 	type SecondOpinionCandidate,
@@ -3234,9 +3239,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					const status = ctx.providers.list().find((candidate) => candidate.target.id === result.ref?.target);
 					const caps = status ? resolveModelCapabilities(status, result.ref.model, ctx.providers.knowledgeBase) : null;
 					const imageInput = caps === null ? "unknown" : acceptsImageInput({ vision: caps.vision }) ? "yes" : "no";
+					const tierLabel = copilotContextTierLabel(status?.target);
+					const tier = tierLabel ? ` · ${tierLabel}` : "";
 					ctx.notice(
 						"success",
-						`active this session: ${result.ref.target}/${result.ref.model}${suffix} · image input ${imageInput}`,
+						`active this session: ${result.ref.target}/${result.ref.model}${suffix}${tier} · image input ${imageInput}`,
 					);
 				}
 				ctx.render?.();
