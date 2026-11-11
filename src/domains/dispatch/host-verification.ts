@@ -32,6 +32,7 @@ import { redactCommandOutputSecrets } from "../evidence/redact.js";
 import { effectiveScratchRoots } from "../safety/scratch-roots.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
+import { BASE_PREFLIGHT_EXIT, BASE_PREFLIGHT_SCRIPT, baseModulesLinks } from "./host-verification-base.js";
 import { hostCheckBaseNote } from "./host-verification-note.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
 import { type VerificationSlotEvents, withVerificationSlot } from "./verification-slot.js";
@@ -320,10 +321,12 @@ async function manifestsMatch(
 interface BaseReplay {
 	exitCode: number | null;
 	incomplete: boolean;
+	/** The base tree could not resolve the check's toolchain; never cached, never compared. */
+	startFailed?: boolean;
 	/** The base run's output as {@link outputLines}. */
 	lines: string[];
 }
-const BASE_REPLAY_VERSION = 1;
+const BASE_REPLAY_VERSION = 2;
 const BASE_REPLAY_CACHE_MAX = 64;
 const BASE_REPLAY_LINES_MAX = 20_000;
 const baseReplayCache = new Map<string, Promise<BaseReplay>>();
@@ -501,10 +504,13 @@ export async function compareHostVerificationBase(input: {
 	const backend = sandbox.backend;
 	const executable = sandbox.executable;
 	// The archived base has no installed dependencies. When the manifests match,
-	// the base borrows the task's node_modules through a link inside the private
-	// tmpfs; the target sits under the read-only root mount (flywheel Q4).
-	const taskModules = join(worktree.path, "node_modules");
-	const linkModules = existsSync(taskModules);
+	// the base borrows the task's dependency view: the nearest node_modules from
+	// the check cwd upward (a nested task worktree's is its enclosing checkout's)
+	// and each workspace package's own, linked inside the private tmpfs.
+	const linksByCwd = new Map(
+		candidates.map(({ declared }) => [declared.cwd, baseModulesLinks(worktree.path, declared.cwd)] as const),
+	);
+	const linkModules = [...linksByCwd.values()].some((links) => links.length > 0);
 	if (linkModules && !(await manifestsMatchBase(worktree.path, worktree.base))) {
 		for (const { check } of candidates)
 			check.baseComparison = {
@@ -535,6 +541,7 @@ export async function compareHostVerificationBase(input: {
 			}),
 		);
 		const baseSha = resolvedBaseSha(worktree.path, worktree.base);
+		const links = linksByCwd.get(declared.cwd) ?? [];
 		const cacheKey =
 			baseSha === null
 				? null
@@ -543,7 +550,7 @@ export async function compareHostVerificationBase(input: {
 							baseSha,
 							argv: declared.argv,
 							relativeCwd,
-							linkModules,
+							links,
 							timeout: declared.timeoutMs,
 							env,
 						}),
@@ -553,13 +560,18 @@ export async function compareHostVerificationBase(input: {
 			// cannot leave a checkout or shared Git registration behind (flywheel p9/C1).
 			const basePath = `/tmp/verification-base-${randomUUID()}`;
 			const script = [
-				'base_dir="$1"; source_dir="$2"; base_ref="$3"; relative_cwd="$4"; shift 4',
+				'base_dir="$1"; source_dir="$2"; base_ref="$3"; relative_cwd="$4"; node_bin="$5"; preflight="$6"; link_count="$7"; shift 7',
 				'mkdir -p "$base_dir" || exit 125',
 				'git -C "$source_dir" archive "$base_ref" | tar -x -C "$base_dir" || exit 125',
-				...(linkModules ? ['ln -s "$source_dir/node_modules" "$base_dir/node_modules" || exit 125'] : []),
+				'while [ "$link_count" -gt 0 ]; do',
+				'  link_path="$base_dir/$2"; mkdir -p "$(dirname "$link_path")" || exit 125',
+				'  rm -rf "$link_path"; ln -s "$1" "$link_path" || exit 125',
+				"  shift 2; link_count=$((link_count - 1))",
+				"done",
 				'cd "$base_dir/$relative_cwd" || exit 125',
 				'case "$(pwd -P)/" in "$base_dir/"*) ;; *) exit 125 ;; esac',
 				'export TMPDIR="$base_dir" TMP="$base_dir" TEMP="$base_dir"',
+				'"$node_bin" -e "$preflight" "$base_dir" "$1" || exit $?',
 				'exec "$@"',
 			].join("\n");
 			// The base check runs repository code, so it gets the same socket refusal as a worker command.
@@ -578,6 +590,10 @@ export async function compareHostVerificationBase(input: {
 							worktree.path,
 							worktree.base,
 							relativeCwd,
+							process.execPath,
+							BASE_PREFLIGHT_SCRIPT,
+							String(links.length),
+							...links.flatMap((link) => [link.target, link.relativePath]),
 							...declared.argv,
 						],
 					},
@@ -598,9 +614,14 @@ export async function compareHostVerificationBase(input: {
 				killGraceMs: 0,
 				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
 			});
+			// The preflight, not the check's exit code, decides whether the check could start on the base.
+			const startFailed =
+				outcome.exitCode === BASE_PREFLIGHT_EXIT && /^base preflight: .* does not resolve$/mu.test(outcome.stderr);
 			return {
 				exitCode: outcome.exitCode,
+				...(startFailed ? { startFailed } : {}),
 				incomplete:
+					startFailed ||
 					outcome.timedOut ||
 					outcome.signal !== null ||
 					outcome.outputCapped ||
@@ -652,7 +673,15 @@ export async function compareHostVerificationBase(input: {
 					);
 				}
 			}
-			const { exitCode, incomplete, lines } = await pending;
+			const { exitCode, incomplete, startFailed, lines } = await pending;
+			if (startFailed === true) {
+				check.baseComparison = {
+					status: "not_compared",
+					base: worktree.base,
+					reason: "the check could not start on the base",
+				};
+				continue;
+			}
 			// A failure the base has too excuses the task only when the task's output
 			// adds nothing to the base's: a new error in an already red check rejects.
 			const known = new Set(lines);
