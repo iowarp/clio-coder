@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { isWsl, runWindowsPowerShell } from "../process-policy.js";
 import type { LaunchPaths } from "./desktop-entry.js";
 import { windowsAppScript, windowsIdentitySource } from "./windows-app.js";
@@ -204,6 +204,36 @@ async function readManifest(directory: string): Promise<Manifest | null> {
 	}
 	throw new Error("Windows launcher record is invalid; no Windows files were changed.");
 }
+/** The scripts a launch runs, as this version writes them. */
+const appScripts: Readonly<Record<string, string>> = {
+	"identity.cs": windowsIdentitySource,
+	"app.ps1": `\uFEFF${windowsAppScript}`,
+};
+
+/**
+ * Brings the scripts a launch runs up to this version. An upgrade rewrites the launcher only when its launch
+ * paths change, so an install keeps the scripts the version that installed it wrote. A script is rewritten only
+ * while its bytes still match the record, so a file someone changed is never overwritten. True when one was.
+ */
+export async function refreshWindowsAppScripts(directory: string) {
+	const manifest = await readManifest(directory);
+	if (manifest === null || (await inspect(manifest.files)).changed) return false;
+	let rewritten = false;
+	const files: Owned[] = [];
+	for (const file of manifest.files) {
+		const text = appScripts[basename(file.path)];
+		if (text === undefined || sha(text) === file.sha256 || (await bytes(file.path)) === null) {
+			files.push(file);
+			continue;
+		}
+		await publish(file.path, text);
+		files.push({ path: file.path, sha256: sha(text) });
+		rewritten = true;
+	}
+	if (rewritten) await publish(join(directory, manifestName), `${JSON.stringify({ ...manifest, files }, null, 2)}\n`);
+	return rewritten;
+}
+
 async function inspect(files: Owned[]) {
 	let changed = false,
 		missingAny = false;
@@ -272,8 +302,8 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 		appScript = join(dirname(icon), "app.ps1"),
 		identityFile = join(dirname(icon), "app-id");
 	const appId = `io.iowarp.ClioCoder.${sha(`${distro}\n${user}\n${directory}`).slice(0, 16)}`;
-	await publish(identitySource, windowsIdentitySource);
-	await publish(appScript, `\uFEFF${windowsAppScript}`);
+	await publish(identitySource, appScripts["identity.cs"] as string);
+	await publish(appScript, appScripts["app.ps1"] as string);
 	await publish(identityFile, appId);
 	await runWindowsPowerShell(shortcutScript, {
 		CLIO_WIN_MENU_PATH: `${programs}\\${menuName}`,
@@ -333,6 +363,7 @@ export async function openManagedWindowsApp(
 	if (!manifest?.appDirectory || !manifest.appId) return false;
 	if ((await inspect(manifest.files)).changed)
 		throw new Error("Windows launcher files were changed; run clio-coder doctor --fix.");
+	await refreshWindowsAppScripts(directory);
 	const output = await runWindowsPowerShell("$ErrorActionPreference='Stop'; & $env:CLIO_WIN_APP_SCRIPT", {
 		CLIO_WIN_APP_SCRIPT: `${manifest.appDirectory}\\app.ps1`,
 		CLIO_WIN_URL: url,

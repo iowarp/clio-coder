@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	installWindowsLauncher,
+	refreshWindowsAppScripts,
 	uninstallWindowsLauncher,
 	visibleWslArguments,
 	visibleWslScript,
@@ -14,6 +16,7 @@ import {
 	windowsToWsl,
 	wslLaunchArguments,
 } from "../server/launcher/windows.js";
+import { windowsAppScript, windowsIdentitySource } from "../server/launcher/windows-app.js";
 import { isWsl, runWindowsPowerShell } from "../server/process-policy.js";
 
 test("Windows launch wrapper retains literal WSL arguments and reports exit failures with a timeout", () => {
@@ -96,6 +99,41 @@ test("real Windows temporary shortcuts migrate renamed owned pins, preserve othe
 	assert.equal(await runWindowsPowerShell(script), "");
 	assert.ok(windowsArgument("space path").startsWith('"'));
 	assert.throws(() => visibleWslArguments("x".repeat(1024)), /limit/);
+});
+
+test("a launch rewrites the app scripts an older version installed, never one someone changed", async (t) => {
+	const directory = await mkdtemp(join(tmpdir(), "clio-win-refresh-"));
+	t.after(() => rm(directory, { recursive: true, force: true }));
+	const app = join(directory, "app");
+	await mkdir(app);
+	const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+	const files: Record<string, string> = {
+		"open.ps1": "open, as installed",
+		"identity.cs": "an older identity source",
+		"app.ps1": "\uFEFFan older app script",
+	};
+	for (const [name, text] of Object.entries(files)) await writeFile(join(app, name), text);
+	const record = (current: Record<string, string>) => ({
+		v: 1,
+		owner: "clio-coder-gui-windows",
+		distro: "Test",
+		launch: "key",
+		files: Object.entries(current).map(([name, text]) => ({ path: join(app, name), sha256: sha(text) })),
+		appDirectory: "C:\\clio",
+		appId: "io.iowarp.ClioCoder.test",
+	});
+	await writeFile(join(directory, "windows.json"), JSON.stringify(record(files)));
+	// An upgrade rewrites the launcher only when its launch paths change, so the launch brings the scripts current.
+	assert.equal(await refreshWindowsAppScripts(directory), true);
+	const current = { ...files, "identity.cs": windowsIdentitySource, "app.ps1": `\uFEFF${windowsAppScript}` };
+	for (const [name, text] of Object.entries(current)) assert.equal(await readFile(join(app, name), "utf8"), text, name);
+	assert.deepEqual(JSON.parse(await readFile(join(directory, "windows.json"), "utf8")), record(current));
+	assert.equal(await windowsLauncherStatus(directory), "installed");
+	assert.equal(await refreshWindowsAppScripts(directory), false);
+	// A script someone changed is left alone; the launch then refuses it as before.
+	await writeFile(join(app, "app.ps1"), "edited by hand");
+	assert.equal(await refreshWindowsAppScripts(directory), false);
+	assert.equal(await readFile(join(app, "app.ps1"), "utf8"), "edited by hand");
 });
 
 test("managed Windows app uses its owned profile and shell identity and uninstall removes that profile", {
