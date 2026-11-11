@@ -11,6 +11,7 @@ import { previewBudget, previewRows } from "./preview.js";
 import {
 	councilAnswerGist,
 	councilCollectedWords,
+	councilMemberAnswerLines,
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
 	presentCouncilReport,
@@ -396,6 +397,17 @@ function mutationReportLines(
  * Truncated text is not one object and passes through as the prose it is.
  */
 function bodySourceLines(entry: WorkerEntryState): string[] {
+	// A settled council member's answer reads as words even when its record is unverified; the rail above says so.
+	if (
+		entry.council !== undefined &&
+		!isSynthesis(entry) &&
+		!entry.pending &&
+		!isPending(entry) &&
+		entry.droppedLines === 0
+	) {
+		const lines = presentedContractAnswer(entry)?.lines ?? councilMemberAnswerLines(entry.text);
+		if (lines !== null) return lines;
+	}
 	if (
 		entry.pending ||
 		entry.result?.trust?.artifactIntegrity.state !== "verified" ||

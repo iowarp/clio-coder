@@ -3049,6 +3049,11 @@ describe("agent invocations", () => {
 		const memberRow = memberRows.find((row) => row.startsWith("  fast")) ?? "";
 		match(memberRow, /calc\.py defines add and mul with no input checks/u);
 		doesNotMatch(memberRow, /\{"findings"/u);
+		const detailed = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("detailed") })
+			.map(stripTerminalSequences)
+			.join("\n");
+		match(detailed, /calc\.py defines add and mul with no input checks/u);
+		doesNotMatch(detailed, /\{"findings"/u);
 	});
 
 	it("names a council that only collected by its size, not by a member's route", () => {

@@ -234,19 +234,27 @@ export function presentWorkerContractAnswer(
  * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
  */
 export function councilAnswerGist(answer: string): string {
-	const value = exactWorkerAnswerObject(answer);
-	const typed =
-		value === null
-			? null
-			: (researchReport(value) ??
-				worldKnowledgeReport(value) ??
-				debuggerReport(value) ??
-				verifierReport(value) ??
-				scoutReport(value) ??
-				firstFindingClaim(value));
-	const first = typed?.lines.find((line) => line.trim().length > 0 && !line.startsWith("  "));
+	const typed = councilMemberAnswerLines(answer);
+	const first = typed?.find((line) => line.trim().length > 0 && !line.startsWith("  "));
 	const line = (first ?? answer.split("\n").find((row) => row.trim().length > 0) ?? "").replace(/^-\s*/u, "").trim();
 	return safeWorkerAnswerText(line);
+}
+
+/**
+ * A council member's typed answer as readable lines, or null when it is not one. A member card shows these in place of
+ * the JSON the member returned, even when the run's record could not be verified for the full presenter.
+ */
+export function councilMemberAnswerLines(answer: string): string[] | null {
+	const value = exactWorkerAnswerObject(answer);
+	if (value === null) return null;
+	const typed =
+		researchReport(value) ??
+		worldKnowledgeReport(value) ??
+		debuggerReport(value) ??
+		verifierReport(value) ??
+		scoutReport(value) ??
+		firstFindingClaim(value);
+	return typed === null ? null : typed.lines.map(safeWorkerAnswerText);
 }
 
 /** A scout-shaped answer that misses a field the full report needs still has a claim a person can read. */
