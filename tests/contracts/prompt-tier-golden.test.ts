@@ -94,6 +94,7 @@ describe("prompts.profile v2 (S-82)", () => {
 		check("attended", "attended-default", PROMPT_BUDGET_CHARS.attended);
 		check("headless", "headless-default", PROMPT_BUDGET_CHARS.headless);
 		check("attended", "attended-yolo", PROMPT_BUDGET_CHARS.attended);
+		check("headless", "headless-yolo", PROMPT_BUDGET_CHARS.headless);
 		for (const name of ["worker-coder", "worker-scout"]) {
 			const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as Tier;
 			if (tier.kind !== "worker") throw new Error(`${name} is not a worker tier`);
