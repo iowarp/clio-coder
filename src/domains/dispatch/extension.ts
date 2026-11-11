@@ -414,6 +414,7 @@ import {
 	resolveDispatchPathScope,
 	runLedgerProjection,
 } from "./path-scope.js";
+import { type PeerInstructions, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import { claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
@@ -1560,6 +1561,24 @@ function sisterProjectPrompt(rules: SisterRepositoryRules | null): ProjectPrompt
  */
 const WORKER_HANDBOOK_MAX_CHARS = 6000;
 
+/** Names other harnesses share: a rule citing one is not Clio-only. */
+const SHARED_TOOL_NAMES: ReadonlySet<string> = new Set([
+	ToolNames.Read,
+	ToolNames.Write,
+	ToolNames.Edit,
+	ToolNames.Bash,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Ls,
+	ToolNames.Git,
+	ToolNames.Data,
+]);
+
+/** Clio's tool and recipe names; a handbook rule citing one is left out of a delegated harness's rules. */
+function clioOnlyNames(recipeIds: ReadonlyArray<string>): string[] {
+	return [...Object.values(ToolNames).filter((name) => !SHARED_TOOL_NAMES.has(name)), ...recipeIds];
+}
+
 /**
  * Cap on the projected "Verification expectations" section body, applied
  * before the overall WORKER_PROJECT_CONTEXT_MAX_CHARS trim. Truncation order
@@ -1756,6 +1775,7 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
 function projectContextProvenanceFor(
 	tier: AgentProjectContextTier,
 	messages: ReadonlyArray<WorkerPromptMessage>,
+	peer: PeerInstructions | null = null,
 ): RunProjectContextProvenance {
 	const sections: string[] = [];
 	const workspace = messages.find((entry) => entry.id === "dispatch-workspace");
@@ -1775,6 +1795,16 @@ function projectContextProvenanceFor(
 		chars,
 		...(sent.length > 0 ? { contentHash: sha256(sent.map((entry) => entry.contentHash).join("\n")) } : {}),
 		...(sections.length > 0 ? { sections } : {}),
+		...(peer !== null
+			? {
+					peerInstructions: {
+						delivery: peer.delivery,
+						files: [...peer.files],
+						stale: peer.stale,
+						notCarried: peer.notCarried,
+					},
+				}
+			: {}),
 	};
 }
 
@@ -1842,6 +1872,8 @@ export interface WorkerDynamicContext {
 	taskWorktree?: boolean;
 	/** Captured authored handbooks; preferred over the legacy structured projection. */
 	projectPrompt?: ProjectPromptContext | null;
+	/** The rules compiled for a delegated harness from the handbooks and its own files; sent in their place. */
+	peerHandbook?: string;
 	/** Admitted native read capability; null for an unknown external inventory. */
 	projectReadTools?: boolean | null;
 	/** External runtimes do not promise the native read schema. */
@@ -1951,35 +1983,38 @@ export function buildDynamicPromptMessages(
 		const handbooks = compiled.filter((handbook) => handbook !== null);
 		// A handbook with routable sections ships the rules this worker's role and
 		// paths need; prose with no sections keeps the verbatim bounded prefix.
-		const body = authored
-			? handbooks.length > 0 && handbooks.length === compiled.length
-				? selectWorkerHandbook(handbooks, {
-						audience: workerHandbookAudience(dynamicContext.agentId ?? req.agentId, dynamicContext.capabilityClass),
-						cwd: dynamicContext.cwd ?? req.cwd ?? process.cwd(),
-						workingPaths: dynamicContext.workingContextPaths ?? [],
-						maxChars: WORKER_HANDBOOK_MAX_CHARS,
-					}).text
-				: authored.handbookSources.length > 0
-					? selectProjectPreload(
-							{
-								...authored,
-								text: authored.handbookSources
-									.map(({ source, path }) => renderProjectContextFragment(source, path))
-									.join("\n\n"),
-								supportFragments: [],
-							},
-							dynamicContext.projectReadTools ?? null,
-							{
-								maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
-								externalReadTools: dynamicContext.projectExternalReadTools === true,
-							},
-						).text
-					: ""
-			: dynamicContext.project
-				? renderWorkerProjectContext(dynamicContext.project, {
-						includeVerification: dynamicContext.capabilityClass === "verification",
-					})
-				: "";
+		const body =
+			dynamicContext.peerHandbook !== undefined
+				? dynamicContext.peerHandbook
+				: authored
+					? handbooks.length > 0 && handbooks.length === compiled.length
+						? selectWorkerHandbook(handbooks, {
+								audience: workerHandbookAudience(dynamicContext.agentId ?? req.agentId, dynamicContext.capabilityClass),
+								cwd: dynamicContext.cwd ?? req.cwd ?? process.cwd(),
+								workingPaths: dynamicContext.workingContextPaths ?? [],
+								maxChars: WORKER_HANDBOOK_MAX_CHARS,
+							}).text
+						: authored.handbookSources.length > 0
+							? selectProjectPreload(
+									{
+										...authored,
+										text: authored.handbookSources
+											.map(({ source, path }) => renderProjectContextFragment(source, path))
+											.join("\n\n"),
+										supportFragments: [],
+									},
+									dynamicContext.projectReadTools ?? null,
+									{
+										maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
+										externalReadTools: dynamicContext.projectExternalReadTools === true,
+									},
+								).text
+							: ""
+					: dynamicContext.project
+						? renderWorkerProjectContext(dynamicContext.project, {
+								includeVerification: dynamicContext.capabilityClass === "verification",
+							})
+						: "";
 		if (body.length > 0) {
 			messages.push({ id: "dispatch-project-context", body, contentHash: sha256(body) });
 		}
@@ -2203,6 +2238,8 @@ interface DispatchWorkerSpecInput {
 	middlewareSnapshot: ReturnType<MiddlewareContract["snapshot"]>;
 	protectedArtifactState?: ProtectedArtifactState;
 	readOnly: boolean;
+	/** The harness starts without its repository instruction files; their rules ride compiled in the prompt. */
+	skipRepositoryInstructions?: boolean;
 	budget: WorkerBudget;
 	/** Effective settings snapshot for this run; falls back to config.get(). */
 	settings?: Readonly<ReturnType<ConfigContract["get"]>>;
@@ -3461,6 +3498,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// per-tool calls can refuse a narrowing profile they would otherwise ignore.
 	if (input.admission.toolProfile !== undefined) spec.toolProfile = input.admission.toolProfile;
 	if (input.readOnly) spec.readOnly = true;
+	if (input.skipRepositoryInstructions === true) spec.skipRepositoryInstructions = true;
 	if (input.req.contextSeed && input.target.runtime.kind === "http")
 		spec.contextSeed = parseWorkerContextSeed(input.req.contextSeed);
 	if (Buffer.byteLength(JSON.stringify(spec), "utf8") + 1 > WORKER_STDIN_FRAME_MAX_BYTES)
@@ -6045,6 +6083,19 @@ export function createDispatchBundle(
 				: projectContext && tier === "bounded"
 					? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap)
 					: null;
+		// A delegated harness also reads its own instruction files; it gets one rule set compiled from both.
+		const peer =
+			tier === "bounded" && target.runtime.kind === "subprocess"
+				? await resolvePeerInstructions({
+						declared: target.runtime.repositoryInstructions,
+						cwd,
+						handbookSources: projectPrompt?.handbookSources ?? [],
+						audience: workerHandbookAudience(recipe.id, spec.capabilityClass),
+						workingPaths: pathScope.workingContextPaths,
+						maxChars: WORKER_HANDBOOK_MAX_CHARS,
+						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
+					})
+				: null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			capabilityClass: spec.capabilityClass,
@@ -6065,6 +6116,7 @@ export function createDispatchBundle(
 			permit,
 			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
 			projectPrompt,
+			...(peer?.text !== undefined ? { peerHandbook: peer.text } : {}),
 			projectReadTools:
 				target.runtime.kind === "subprocess"
 					? null
@@ -6077,7 +6129,7 @@ export function createDispatchBundle(
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
 			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
 		});
-		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
+		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages, peer);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
 		const compiledPromptHash = promptCompositionHash([
 			systemPrompt,
@@ -7631,6 +7683,9 @@ export function createDispatchBundle(
 							: {}),
 						...(launchCredential?.expiresAt !== undefined ? { credentialExpiresAt: launchCredential.expiresAt } : {}),
 						readOnly: lifecycle.readOnly,
+						...(lifecycle.projectContext?.peerInstructions?.delivery === "single-source"
+							? { skipRepositoryInstructions: true }
+							: {}),
 						budget: lifecycle.budget,
 						...(lifecycle.settings ? { settings: lifecycle.settings } : {}),
 						workerPermissionResponder:

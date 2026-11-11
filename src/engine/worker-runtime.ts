@@ -310,6 +310,11 @@ export interface WorkerRunInput {
 	emitGrantRequest?: (request: WorkerGrantRequestFrame) => void;
 	/** Dispatch-owned restriction on tool admission for this run. */
 	readOnly?: boolean;
+	/**
+	 * A subprocess harness starts with its documented switch that skips the repository's instruction files: the
+	 * dispatch compiled their rules that still hold into the run's project message. Other runtimes ignore it.
+	 */
+	skipRepositoryInstructions?: boolean;
 	/** Internal external-connector posture. Native workers ignore it and always use default. */
 	autonomy?: import("../domains/safety/autonomy.js").AutonomyLevel;
 	/**

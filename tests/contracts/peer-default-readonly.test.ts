@@ -74,6 +74,22 @@ test("peer launch arguments depend only on the read-only restriction", () => {
 	}
 });
 
+test("a single-source run turns off each harness's own repository instructions", () => {
+	const run = { ...input(true), skipRepositoryInstructions: true };
+	const codex = buildCodexExecArgs(run);
+	deepStrictEqual(codex.slice(-3), ["-c", "project_doc_max_bytes=0", "-"]);
+	const claude = buildClaudeCodeArgs(run);
+	deepStrictEqual(claude.slice(claude.indexOf("--setting-sources"), claude.indexOf("--setting-sources") + 2), [
+		"--setting-sources",
+		"user",
+	]);
+	ok(buildPiCliArgs(run).includes("--no-context-files"));
+	const plain = input(true);
+	ok(!buildCodexExecArgs(plain).includes("project_doc_max_bytes=0"));
+	ok(!buildClaudeCodeArgs(plain).includes("--setting-sources"));
+	ok(!buildPiCliArgs(plain).includes("--no-context-files"));
+});
+
 test("read-only is available on each operator dispatch command", () => {
 	const run = parseSlashCommand("/run --read-only builder Inspect");
 	equal(run.kind, "run");

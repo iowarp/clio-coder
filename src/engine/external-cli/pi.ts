@@ -16,6 +16,7 @@ export function buildPiCliArgs(input: WorkerRunInput, builtinLlamaCpp = false): 
 	assertToolProfileEnforceable(input.toolProfile, "pi-cli");
 	const mode = piCliMode(input.readOnly === true);
 	const args = ["--print", "--mode", "json", "--no-session", "--no-extensions", "--no-approve"];
+	if (input.skipRepositoryInstructions === true) args.push("--no-context-files");
 	if (builtinLlamaCpp) args.push("-e", "builtin:llama.cpp");
 	if (mode === "read-only") args.push("--tools", "read,grep,find,ls");
 	if (input.wireModelId.trim() && input.wireModelId !== PI_CLI_DEFAULT_MODEL) {

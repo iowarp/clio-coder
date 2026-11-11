@@ -252,6 +252,8 @@ interface WorkerSpecFields {
 	escalation?: WorkerEscalationConfig;
 	/** Dispatch restriction for this worker run. */
 	readOnly?: boolean;
+	/** Start a subprocess harness without its repository instruction files (see WorkerRunInput). */
+	skipRepositoryInstructions?: boolean;
 	/**
 	 * Absolute path boundaries write-class tool calls are confined to for this run.
 	 * Exact files omit a trailing slash and subtrees retain one.
@@ -1210,6 +1212,9 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	if (spec.readOnly !== undefined && typeof spec.readOnly !== "boolean") {
 		throw new Error("WorkerSpec.readOnly must be a boolean");
+	}
+	if (spec.skipRepositoryInstructions !== undefined && typeof spec.skipRepositoryInstructions !== "boolean") {
+		throw new Error("WorkerSpec.skipRepositoryInstructions must be a boolean");
 	}
 	validateWorkerPermit(spec);
 	if (spec.taskWorktree !== undefined) {

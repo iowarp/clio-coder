@@ -6,7 +6,12 @@ import { synthesizeCatalogBackedModel } from "../catalog.js";
 import { UNMEDIATED_ENFORCEMENT } from "../runtime-enforcement.js";
 import type { CapabilityFlags } from "../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../types/knowledge-base.js";
-import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../types/runtime-descriptor.js";
+import type {
+	ProbeContext,
+	ProbeResult,
+	RepositoryInstructionFiles,
+	RuntimeDescriptor,
+} from "../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../types/target-descriptor.js";
 
 const opaqueCliCapabilities: CapabilityFlags = {
@@ -33,6 +38,7 @@ export interface CliRuntimeRecipe {
 	provider: string;
 	/** The CLI's read-only mode is an OS sandbox (see RuntimeDescriptor.readOnlySandbox). */
 	readOnlySandbox?: "os";
+	repositoryInstructions?: RepositoryInstructionFiles;
 	probe?: (target: TargetDescriptor, ctx: ProbeContext) => Promise<ProbeResult>;
 }
 
@@ -81,6 +87,7 @@ export function createExternalCliRuntime(recipe: CliRuntimeRecipe): RuntimeDescr
 		// modes are the CLI's authority, not Clio per-call mediation.
 		enforcement: UNMEDIATED_ENFORCEMENT,
 		...(recipe.readOnlySandbox !== undefined ? { readOnlySandbox: recipe.readOnlySandbox } : {}),
+		...(recipe.repositoryInstructions !== undefined ? { repositoryInstructions: recipe.repositoryInstructions } : {}),
 		externalAgentLoop: {
 			tools: "externally-governed-unobserved",
 			network: "externally-governed-unobserved",

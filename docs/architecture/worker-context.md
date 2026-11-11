@@ -8,6 +8,8 @@ The default remains an isolated conversation. A native worker gets its own Pi Ag
 
 With project-context tier `bounded`, workers also receive up to 2,400 characters of codemap, orientation, and wiki discovery fragments even when no handbook exists. Handbook selection remains separate; when a handbook's invariants overflow the worker budget, part of the budget stays reserved for the worker's own sections and the omitted invariants are named (see [Context engine](context-engine.md)). A repository with no handbook supplies its compiled handbook (see [Project context](project-context.md)) through the same selection; in a task worktree a handbook the source checkout keeps out of git still wins over the worktree's compile, and the source checkout's compiled handbook stands in when the worktree has neither. A task worktree supplies its own structural context when guidance falls back to the source checkout, and the run's project-context provenance includes the orientation message. See [Project context](project-context.md) for freshness and current status retrieval.
 
+A headless peer runtime (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`) at tier `bounded` receives one compiled rule set in that message when the handbook has sections: the handbook's sections plus the rules in its own repository instruction files that the tree still supports. Where the runtime has a switch, Clio turns its own instruction discovery off for the run. The run record's `projectContext.peerInstructions` names the delivery mode, the files, and the counts of stale rules and of holding rules that did not fit; see [Repository instructions on a headless peer](../guide/interop.md#repository-instructions-on-a-headless-peer).
+
 ## Dispatch API
 
 ```json

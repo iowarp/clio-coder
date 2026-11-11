@@ -61,6 +61,8 @@ const codexCliRuntime = createExternalCliRuntime({
 	provider: "openai-codex",
 	// A read-only run starts with `--sandbox read-only`, which the OS enforces.
 	readOnlySandbox: "os",
+	// `-c project_doc_max_bytes=0` stops Codex reading them.
+	repositoryInstructions: { files: ["AGENTS.override.md"], fallback: ["AGENTS.md"], delivery: "single-source" },
 	probe(_target, ctx) {
 		return probeCodexCli(ctx);
 	},

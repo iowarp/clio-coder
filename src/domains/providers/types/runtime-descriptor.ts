@@ -184,6 +184,19 @@ export interface DecisionAlias {
 	readonly profile: ProfileId;
 }
 
+/**
+ * The repository instruction files a delegated harness loads on its own, and how a dispatched run's rules reach it.
+ * In each directory from the repository root down to the run's directory the harness reads every name in `files`
+ * that is present there, or, when none is, the first present name in `fallback`. With "single-source" the adapter
+ * starts the harness with its documented switch that skips those files, so the rules compiled for the run are the
+ * only project rules it reads; with "coexist" the harness reads them anyway and the compiled rules ride beside them.
+ */
+export interface RepositoryInstructionFiles {
+	files: ReadonlyArray<string>;
+	fallback?: ReadonlyArray<string>;
+	delivery: "single-source" | "coexist";
+}
+
 export interface RuntimeDescriptor {
 	id: string;
 	/** Deprecated or compatibility ids that resolve to this descriptor object. */
@@ -266,6 +279,8 @@ export interface RuntimeDescriptor {
 	 * runtime without it is refused read-only work.
 	 */
 	readOnlySandbox?: "os";
+	/** The repository instruction files this subprocess runtime's harness reads; absent when it reads none. */
+	repositoryInstructions?: RepositoryInstructionFiles;
 	externalAgentLoop?: {
 		tools: "externally-governed-unobserved";
 		network: "externally-governed-unobserved";

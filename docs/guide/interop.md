@@ -121,6 +121,33 @@ session carries context restricted by an information-flow rule, because the
 peer's own model requests are not admitted by Clio Coder; see
 [information flow](information-flow.md).
 
+### Repository instructions on a headless peer
+
+Each headless peer also reads its own instruction files from the repository.
+At project-context tier `bounded`, Clio Coder judges the rules in those files
+against the tree and sends the peer one compiled rule set in the project-context
+message: the handbook's sections, then the peer file's rules that still hold.
+A stale command rule is replaced by the tree's value, such as the test command
+in `package.json`. When the runtime has a switch, Clio turns its own discovery
+off so the peer reads one source:
+
+| Runtime | Instruction files, per directory from the repository root down | Delivery | Switch |
+| --- | --- | --- | --- |
+| `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | single source | `--setting-sources user` |
+| `codex-cli` | `AGENTS.override.md`, else `AGENTS.md` | single source | `-c project_doc_max_bytes=0` |
+| `pi-cli` | `AGENTS.md`, else `CLAUDE.md` | single source | `--no-context-files` |
+| `opencode-cli` | `AGENTS.md`, else `CLAUDE.md` | coexist | none |
+
+`--setting-sources user` also stops Claude Code from loading the project's
+`.claude/settings.json` and `.claude/settings.local.json`, including their
+hooks and permission rules. OpenCode has no switch, so it reads its files
+beside the compiled rules. A peer also reads them beside the usual project
+message when a handbook is prose without sections, because there is nothing to
+compile it into. Antigravity, ACP peers, and tier `none` keep their current
+behavior. The run record's `projectContext.peerInstructions` names the delivery,
+the files, the count of rules the tree no longer supports (`stale`), and the
+count that hold but did not fit the bound (`notCarried`).
+
 ### Peer modes and their status
 
 `interop inspect` and `/library interop` list each peer's modes with a status, a reason,

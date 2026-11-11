@@ -52,6 +52,8 @@ export function buildCodexExecArgs(input: WorkerRunInput): string[] {
 	if (input.wireModelId.trim() && input.wireModelId !== CODEX_CLI_DEFAULT_MODEL) {
 		args.push("--model", input.wireModelId.trim());
 	}
+	// A zero byte budget for project docs: Codex reads no AGENTS.md.
+	if (input.skipRepositoryInstructions === true) args.push("-c", "project_doc_max_bytes=0");
 	args.push("-");
 	return args;
 }

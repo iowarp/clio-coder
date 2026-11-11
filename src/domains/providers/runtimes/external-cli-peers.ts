@@ -9,6 +9,8 @@ export const piCliRuntime = createExternalCliRuntime({
 	outputParser: "pi-jsonl",
 	authNotice: "Uses the installed `pi` command and its own configured provider login.",
 	provider: "pi-cli",
+	// `--no-context-files` stops Pi reading them.
+	repositoryInstructions: { files: ["AGENTS.md"], fallback: ["CLAUDE.md"], delivery: "single-source" },
 });
 
 export const opencodeCliRuntime = createExternalCliRuntime({
@@ -20,4 +22,6 @@ export const opencodeCliRuntime = createExternalCliRuntime({
 	outputParser: "opencode-run-jsonl",
 	authNotice: "Uses the installed `opencode` command and its own configured provider login.",
 	provider: "opencode-cli",
+	// OpenCode run has no switch that skips them.
+	repositoryInstructions: { files: ["AGENTS.md"], fallback: ["CLAUDE.md"], delivery: "coexist" },
 });

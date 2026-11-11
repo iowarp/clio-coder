@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainName } from "../../src/core/domain-loader.js";
+import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
@@ -36,6 +38,7 @@ else {
 
 let root: string;
 let previousPath: string | undefined;
+const sessionCwd = process.cwd();
 
 beforeEach(async () => {
 	await isolateDispatchState();
@@ -51,6 +54,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+	process.chdir(sessionCwd);
 	process.env.PATH = previousPath;
 	rmSync(root, { recursive: true, force: true });
 	restoreDispatchState();
@@ -150,6 +154,105 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		equal(receipt.safety?.flowRestrictions?.restrictions[0]?.ruleId, "private");
 		deepStrictEqual(reports[0]?.flowRestrictions, receipt.safety?.flowRestrictions);
 		match(JSON.stringify(reports[1]?.body), /canceled/);
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+test("a delegated Codex CLI run reads one compiled rule set in place of its AGENTS.md", {
+	timeout: 30_000,
+}, async () => {
+	execFileSync("git", ["init", "-q", root]);
+	// The session runs from the fixture repository, so its handbook is the session's and not a sister's.
+	process.chdir(root);
+	writeFileSync(
+		join(root, "bin", "codex"),
+		`#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+let stdin = "";
+for await (const chunk of process.stdin) stdin += chunk;
+writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify({ argv: process.argv.slice(2), stdin }));
+const answer = JSON.stringify({ mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
+for (const event of [
+  { type: "thread.started", thread_id: "peer-thread" },
+  { type: "turn.started" },
+  { type: "item.completed", item: { type: "agent_message", text: answer } },
+  { type: "turn.completed", usage: { input_tokens: 3, output_tokens: 1 } },
+]) process.stdout.write(JSON.stringify(event) + "\\n");
+`,
+	);
+	writeFileSync(join(root, "package.json"), JSON.stringify({ name: "demo", scripts: { test: "node --test" } }));
+	writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+	mkdirSync(join(root, "src"));
+	writeFileSync(join(root, "src", "cart.ts"), "export const cents = (value: number): number => value;\n");
+	const sectioned =
+		"# Demo\n\nDemo prices carts.\n\n## Hard invariants\n\n1. Never write to the operator's real home from tests.\n";
+	writeFileSync(join(root, "CLIO-CODER.md"), sectioned);
+	writeFileSync(
+		join(root, "AGENTS.md"),
+		"# Notes\n\n- Money is integer cents; see `src/cart.ts`.\n- Run `pnpm run test:all` before committing.\n",
+	);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "codex-test", runtime: "codex-cli", defaultModel: "codex-cli-default" }];
+	settings.fleet.default.target = "codex-test";
+	settings.fleet.default.model = "codex-cli-default";
+	settings.fleet.retry.maxRetries = 0;
+	settings.safety.autonomy = "default";
+	const base = dispatchStubContext({ settings, runtime: codexCliRuntime, agentTools: ["read", "write"] });
+	const bundle = makeDispatchBundle({
+		...base,
+		getContract: ((name: DomainName) =>
+			name === "context" ? { renderPromptContext } : base.getContract(name)) as typeof base.getContract,
+	});
+	await bundle.extension.start();
+	const run = async () => {
+		const dispatched = await bundle.contract.dispatch({
+			agentId: "coder",
+			target: "codex-test",
+			task: "Reply PONG",
+			readOnly: true,
+			executionRole: "researcher",
+			requestOrigin: "user",
+			cwd: root,
+		});
+		const receipt = await dispatched.finalPromise;
+		equal(receipt.outcome, "succeeded", receipt.failureMessage);
+		const seen = JSON.parse(readFileSync(join(root, "seen.json"), "utf8")) as { argv: string[]; stdin: string };
+		rmSync(join(root, "seen.json"));
+		return { receipt, ...seen };
+	};
+	try {
+		// Single source: Codex skips its AGENTS.md and reads the compiled rules alone.
+		const single = await run();
+		ok(single.argv.join(" ").includes("-c project_doc_max_bytes=0"), single.argv.join(" "));
+		ok(single.stdin.includes("Never write to the operator's real home from tests."), single.stdin);
+		ok(single.stdin.includes("Money is integer cents; see `src/cart.ts`."), single.stdin);
+		ok(single.stdin.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."), single.stdin);
+		ok(!single.stdin.includes("test:all"), single.stdin);
+		const compiled = single.stdin.slice(
+			single.stdin.indexOf("<project-handbook"),
+			single.stdin.indexOf("</project-rules>"),
+		);
+		ok(compiled.length > 0, single.stdin);
+		ok(!/AGENTS\.md|\bignore|\boverrid|\bcorrect/iu.test(compiled), compiled);
+		deepStrictEqual(single.receipt.projectContext?.peerInstructions, {
+			delivery: "single-source",
+			files: ["AGENTS.md"],
+			stale: 1,
+			notCarried: 0,
+		});
+		// Coexist: a handbook of prose alone keeps its usual message, and Codex reads AGENTS.md beside it.
+		writeFileSync(join(root, "CLIO-CODER.md"), "Demo prices carts. Keep money in integer cents.\n");
+		const coexist = await run();
+		ok(!coexist.argv.includes("project_doc_max_bytes=0"), coexist.argv.join(" "));
+		ok(coexist.stdin.includes("Keep money in integer cents."), coexist.stdin);
+		deepStrictEqual(coexist.receipt.projectContext?.peerInstructions, {
+			delivery: "coexist",
+			files: ["AGENTS.md"],
+			stale: 1,
+			notCarried: 0,
+		});
 	} finally {
 		await bundle.extension.stop?.();
 	}
