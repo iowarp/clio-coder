@@ -985,3 +985,34 @@ test("a resumed request that departs from the last journaled one mid-transcript 
 	strictEqual(extended.replayMismatch, undefined);
 	strictEqual(sessionTelemetry(sourceOf(exact)).context.cache?.replayMismatch, undefined);
 });
+
+test("a replayed call that only fell short of the engine floor is no break in the report or the session DTO", () => {
+	let second = 0;
+	const d = (c: string) => c.repeat(16);
+	const call = (cacheRead: number, input: number, structure: NonNullable<CallSettled["cache"]["structure"]>) =>
+		telemetryCall("cache-replay-floor", {
+			at: new Date(Date.UTC(2026, 10, 6, 12, 0, second++)).toISOString(),
+			usage: { cacheRead, input },
+			cache: { verdict: "partial", rePrefilledTokens: { kind: "unknown", reason: "not-observed" }, structure },
+		});
+	const head = { system: d("a"), tools: d("b") };
+	const floored: SessionSource = {
+		...source,
+		sessionId: "cache-replay-floor",
+		journal: {
+			...source.journal,
+			records: [
+				...call(6_144, 2_600, { ...head, entries: [`user:${d("1")}`] }),
+				...call(6_144, 2_700, { ...head, base: 1, entries: [`assistant:${d("2")}`, `toolResult:${d("3")}`] }),
+				...call(8_192, 2_100, {
+					...head,
+					entries: [`user:${d("1")}`, `assistant:${d("9")}`, `toolResult:${d("3")}`, `user:${d("4")}`],
+				}),
+			],
+		},
+	};
+	const report = cacheReport(floored, now);
+	deepStrictEqual([report.engineFloor?.[0]?.calls, report.breaks.length], [3, 0]);
+	strictEqual(report.replayMismatch, undefined);
+	strictEqual(sessionTelemetry(floored).context.cache?.replayMismatch, undefined);
+});

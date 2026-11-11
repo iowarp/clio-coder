@@ -1911,7 +1911,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
 						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
 						...cacheShares(analysis.attempts),
-						...replayMismatch(view, id, analysis.attempts.filter(isBreak)),
+						...replayMismatch(view, id, cacheBreaks(analysis.attempts)),
 					}
 				: null,
 			used: quantity(view, { scope: "context", owner: id, metric: "contextUsed" }),
@@ -2303,16 +2303,12 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const floors = engineFloors(analysis.attempts);
-	const floorCalls = new Map<Attempt, number>();
-	for (const attempt of analysis.attempts) {
-		const granularity = floorGranularity(attempt, floors);
-		if (granularity !== null) floorCalls.set(attempt, granularity);
-	}
+	const floorCalls = engineFloorCalls(analysis.attempts, floors);
 	const verdicts = { hot: 0, partial: 0, cold: 0, small: 0, unknown: 0 };
 	for (const attempt of analysis.attempts)
 		if (invoked(attempt) && attempt.settled)
 			verdicts[floorCalls.has(attempt) ? "hot" : attempt.settled.cache.verdict] += 1;
-	const breaks = analysis.attempts.filter((attempt) => isBreak(attempt) && !floorCalls.has(attempt));
+	const breaks = cacheBreaks(analysis.attempts, floorCalls);
 	const causes = [...new Set(breaks.flatMap(coldKeys))].sort();
 	const floorRows = [...floors].flatMap(([route, granularity]) => {
 		const calls = [...floorCalls.keys()].filter((attempt) => routeOf(attempt) === route);
@@ -2451,6 +2447,27 @@ const lowestBit = (value: number): number => {
 	while (value % (bit * 2) === 0) bit *= 2;
 	return bit;
 };
+
+/** Each call that hit its route's engine floor, with that floor. */
+function engineFloorCalls(
+	attempts: readonly Attempt[],
+	floors: ReadonlyMap<string, number> = engineFloors(attempts),
+): Map<Attempt, number> {
+	const calls = new Map<Attempt, number>();
+	for (const attempt of attempts) {
+		const granularity = floorGranularity(attempt, floors);
+		if (granularity !== null) calls.set(attempt, granularity);
+	}
+	return calls;
+}
+
+/** The cache breaks `telemetry cache`, the exit summary and the session DTO all count: an engine-floor call is hot. */
+function cacheBreaks(
+	attempts: readonly Attempt[],
+	floorCalls: ReadonlyMap<Attempt, number> = engineFloorCalls(attempts),
+) {
+	return attempts.filter((attempt) => isBreak(attempt) && !floorCalls.has(attempt));
+}
 
 /** A partial call that read whole blocks and fell short by under two of them hit the engine's floor, not a break. */
 function floorGranularity(attempt: Attempt, floors: ReadonlyMap<string, number>): number | null {
