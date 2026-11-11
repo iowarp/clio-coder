@@ -77,6 +77,9 @@ const WORKERSPEC_REJECTION = /\[worker\] fatal: workerspec/;
 const MISSING_RUNTIME_COMPONENT =
 	/the (?:copilot-sdk|claude sdk) runtime needs \S+\. run: clio-coder tools install (?:copilot-sdk|claude-sdk)\b|no @anthropic-ai\/claude-agent-sdk in prepared prefix\b/;
 
+/** The Copilot runtime's not-signed-in refusal, lowercased; only an operator sign-in changes it. */
+const COPILOT_NOT_SIGNED_IN = /github copilot is not signed in\b/;
+
 /** HTTP status the worker reported for the provider answer that ended its run. */
 function workerProviderHttpStatus(result: SpawnedWorkerResult | null): number | null {
 	const tail = result?.stderrTail;
@@ -239,6 +242,9 @@ export function classifyFailure(
 	// retry only repeats the error and charging the target breaker blames an
 	// endpoint Clio never reached.
 	if (MISSING_RUNTIME_COMPONENT.test(diagnostic)) return "deterministic-task";
+	// A Copilot worker that is not signed in earns the same refusal on every
+	// attempt until the operator signs in.
+	if (COPILOT_NOT_SIGNED_IN.test(diagnostic)) return "deterministic-task";
 	// ACP model admission and 400/404 prompt verdicts reject the same request
 	// on every attempt. They do not indicate that the peer is unhealthy.
 	if (
