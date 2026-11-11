@@ -78,6 +78,7 @@ export const coreTests = [
 	"settings-authority",
 	"settings-controls",
 	"mcp-config-trust",
+	"project-trust-card",
 	"url-userinfo-hold",
 	"url-credential-surfaces",
 	"bootstrap-grounding",

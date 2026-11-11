@@ -177,6 +177,16 @@ Five project surfaces carry operator authority. Clio ignores an unapproved
 surface in a workspace. Settings, safety and hooks require approval of their
 exact bytes; extensions and plugins use package identities as described below.
 
+When the terminal app opens a workspace whose surfaces are untrusted or have
+changed since approval, one card lists them before the session starts:
+settings by top-level area and each connection's address, safety by rule
+counts, hooks by event and command, and extensions and plugins by name. A
+surface that changed is marked `changed since you trusted it`. **Review** (the
+default) prints each file in full and returns to the card; **Trust all** records
+the same approvals the `--hash` form below records and applies them to this
+launch; **Open without it** starts without them and shows one notice instead of
+a notice per file. Headless runs, ACP and the GUI keep the per-file notices.
+
 | Surface | Files |
 | --- | --- |
 | `safety` | The nearest `.clio-coder/safety.yaml`, searching up from the workspace root. |

@@ -750,10 +750,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		!options.headless &&
 		options.acp === undefined &&
 		process.env.CLIO_CODER_INTERACTIVE === "1";
-	const heldTrustNotices: string[] = [];
+	const heldTrustNotices: string[] = [...(options.trustCardNotices ?? [])];
 	for (const surface of ["safety", "settings", "extensions", "plugins"] as const) {
 		const snapshot = captureProjectSurface(process.cwd(), surface);
-		if (snapshot.verdict === "trusted") continue;
+		if (snapshot.verdict === "trusted" || options.trustCardNotices !== undefined) continue;
 		for (const file of snapshot.files) {
 			if (file.text !== null || file.error !== undefined) {
 				const notice = projectSurfaceTrustNotice(snapshot, file.path);

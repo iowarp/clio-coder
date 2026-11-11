@@ -213,6 +213,18 @@ export async function runClioCommand(
 			return 0;
 		}
 	}
+	let trustCardNotices: string[] | undefined;
+	if (terminalLeaseEligible(options)) {
+		// One card for the repository's own configuration, before anything reads it into the session (S-76).
+		const { runProjectTrustCard } = await import("./project-trust-card.js");
+		const outcome = await runProjectTrustCard(process.cwd());
+		if (outcome === "trusted") {
+			trustCardNotices = [];
+			startupSettings = readStrictLayeredSettings(process.cwd()).settings;
+		} else if (outcome === "skipped") {
+			trustCardNotices = ["Project configuration not active · restart Clio to review it, or run clio-coder config trust"];
+		}
+	}
 	if (startupSettings) {
 		// The workspace launcher runs after the configuration gate, so a first
 		// run answers its questions in the plain terminal, and before the lease,
@@ -277,6 +289,7 @@ export async function runClioCommand(
 		const result = await deps.bootOrchestrator({
 			...options,
 			...(startupSettings ? { startupSettings } : {}),
+			...(trustCardNotices !== undefined ? { trustCardNotices } : {}),
 			...(terminalLease ? { terminalLease } : {}),
 		});
 		return result.exitCode;

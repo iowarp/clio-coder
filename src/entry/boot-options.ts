@@ -49,6 +49,8 @@ export interface BootOptions {
 	terminalLease?: TerminalLease;
 	/** Strict effective settings snapshot shared by preflight, Stage 0, and hydration. */
 	startupSettings?: Readonly<ClioSettings>;
+	/** Set when the launch trust card ran: these notices replace the per-file trust notices (S-76). */
+	trustCardNotices?: ReadonlyArray<string>;
 	/** `--with-panes`: join the current pane host as a guest. */
 	panes?: "with";
 	/** Global `--autonomy <level>`: a one-session override for the interactive app; settings.yaml is untouched. */
