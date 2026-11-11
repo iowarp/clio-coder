@@ -1,4 +1,3 @@
-import { join, resolve } from "node:path";
 import { formatContextOperationResult } from "../core/context-operation.js";
 import { refreshOperationFacts } from "../domains/context/operation-result.js";
 import type { BootstrapGenerationState } from "../domains/context/state.js";
@@ -99,17 +98,12 @@ async function printContextStatus(): Promise<number> {
 
 	const clio = context.loadProjectClioMd(cwd);
 	const state = context.readClioState(cwd);
-	const localStandardIsEffective = clio.files.some((file) => file.path === join(resolve(cwd), "CLIO-CODER.md"));
 	const clioMdState =
 		clio.files.length === 0 && clio.errors.length === 0
 			? "none"
 			: clio.errors.length > 0
 				? "malformed"
-				: localStandardIsEffective &&
-						state?.contextSources !== undefined &&
-						context.adoptionSourcesChanged(state.contextSources, { cwd })
-					? "stale"
-					: "ok";
+				: context.describeHandbookFreshness(cwd);
 
 	const prompt = context.renderPromptContext(cwd);
 	const preloadClass = preload.selectProjectPreload(prompt, null).classification;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
-import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
+import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { instructionUnits } from "./instruction-units.js";
 import type { TreeFact } from "./tree-facts.js";
@@ -879,7 +879,7 @@ export function adoptionSourcesChanged(
  * enumeration. Catches edits and removals of what was adopted; a newly added
  * instruction file needs the full `adoptionSourcesChanged` scan.
  */
-export function recordedAdoptionSourcesChanged(
+function recordedAdoptionSourcesChanged(
 	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
 	homeDirOverride?: string,
 ): boolean {
@@ -901,13 +901,4 @@ export function recordedAdoptionSourcesChanged(
 		}
 	}
 	return false;
-}
-
-/** `adoptionSourcesChanged` with the workspace enumerated off the event loop's critical path. */
-export async function adoptionSourcesChangedAsync(
-	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
-	options: AdoptionSourcesChangedOptions & { cwd: string },
-): Promise<boolean> {
-	const workspaceFiles = await enumerateWorkspaceFilesAsync(resolve(options.cwd));
-	return adoptionSourcesChanged(snapshots, { ...options, workspaceFiles });
 }

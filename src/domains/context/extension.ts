@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
@@ -12,19 +12,14 @@ import { readSessionEntriesForId } from "../session/archive-readers.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { detectProjectTypeHint, type ProjectType } from "../session/workspace/project-type.js";
-import {
-	type AdoptionSourceSnapshot,
-	adoptionSnapshotsHash,
-	adoptionSourcesChanged,
-	adoptionSourcesChangedAsync,
-	recordedAdoptionSourcesChanged,
-} from "./adoption.js";
+import { adoptionSourcesChanged } from "./adoption.js";
 import { runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
 import type { ContextContract, ContextState, StartupHint } from "./contract.js";
+import { readHandbookFreshness } from "./handbook-ledger.js";
 import {
 	bootstrapOperationFacts,
 	ContextOperationAbortError,
@@ -116,36 +111,15 @@ function memoryCount(): number {
 	}
 }
 
-/**
- * Latest full discovery answer for one workspace, valid only for the adopted
- * snapshot it was computed against. Discovery enumerates the workspace, so it
- * runs at session start and after writes, never on a footer render.
- */
-interface AdoptionDiscovery {
-	cwd: string;
-	sourcesHash: string;
-	changed: boolean;
-}
-
-type DiscoveredChange = (cwd: string, sources: ReadonlyArray<AdoptionSourceSnapshot>) => boolean;
-
-function resolveClioMdState(cwd: string, discoveredChange: DiscoveredChange): ContextState["clioMd"] {
+function resolveClioMdState(cwd: string): ContextState["clioMd"] {
 	const clio = loadProjectClioMd(cwd);
 	if (clio.files.length === 0 && clio.errors.length === 0) return "none";
 	if (clio.errors.length > 0) return "malformed";
-	const state = readClioState(cwd);
-	const localStandardIsEffective = clio.files.some((file) => file.path === join(resolve(cwd), "CLIO-CODER.md"));
-	if (
-		localStandardIsEffective &&
-		state?.contextSources !== undefined &&
-		(recordedAdoptionSourcesChanged(state.contextSources) || discoveredChange(cwd, state.contextSources))
-	) {
-		return "stale";
-	}
-	return "ok";
+	// Stale means the last `context init --verify` flagged rules that no longer match the code.
+	return readHandbookFreshness(cwd).attention > 0 ? "stale" : "ok";
 }
 
-function createContextStateReader(discoveredChange: DiscoveredChange): {
+function createContextStateReader(): {
 	read(cwd?: string): ContextState;
 	invalidate(cwd?: string): void;
 } {
@@ -153,7 +127,7 @@ function createContextStateReader(discoveredChange: DiscoveredChange): {
 	return {
 		read(cwd = process.cwd()): ContextState {
 			if (cached && cached.cwd === cwd && Date.now() - cached.at < CONTEXT_STATE_CACHE_TTL_MS) return cached.state;
-			const state: ContextState = { clioMd: resolveClioMdState(cwd, discoveredChange), memoryCount: memoryCount() };
+			const state: ContextState = { clioMd: resolveClioMdState(cwd), memoryCount: memoryCount() };
 			// Stamp after the work: a computation slower than the TTL must still cache.
 			cached = { cwd, at: Date.now(), state };
 			return state;
@@ -180,11 +154,7 @@ export interface ContextBundleOptions {
 	startupHintHost?: StartupHintHost;
 }
 
-function collectStartupHints(
-	cwd: string,
-	options: ContextBundleOptions = {},
-	onDiscovery?: (discovery: AdoptionDiscovery) => void,
-): StartupHint[] {
+function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): StartupHint[] {
 	const { initCommand, suggest } = options.startupHintHost ?? { initCommand: "/context init", suggest: true };
 	const hints: StartupHint[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
@@ -213,6 +183,15 @@ function collectStartupHints(
 	for (const issue of clio.errors) {
 		hints.push({ level: "warning", text: `clio-coder: malformed ${issue.path} ignored: ${issue.error}` });
 	}
+	if (suggest && clio.files.length > 0) {
+		const { attention } = readHandbookFreshness(cwd);
+		if (attention > 0) {
+			hints.push({
+				level: "warning",
+				text: `The project handbook has ${attention} rule${attention === 1 ? "" : "s"} that no longer match the code; run clio-coder context init --verify`,
+			});
+		}
+	}
 	// An invalid validation contract leaves rigor at normal; say so once here
 	// rather than letting the finish gate quietly behave as if no contract existed.
 	const contract = loadValidationContract(cwd);
@@ -225,7 +204,6 @@ function collectStartupHints(
 	if (!state) return hints;
 	if (suggest && state.contextSources !== undefined) {
 		const changed = adoptionSourcesChanged(state.contextSources, { cwd });
-		onDiscovery?.({ cwd: resolve(cwd), sourcesHash: adoptionSnapshotsHash(state.contextSources), changed });
 		if (changed) {
 			hints.push({
 				level: "warning",
@@ -243,40 +221,7 @@ export function createContextBundle(
 	let lastCwd = process.cwd();
 	let stopping = false;
 	let startupHints: StartupHint[] = [];
-	let adoptionDiscovery: AdoptionDiscovery | null = null;
-	const contextState = createContextStateReader((cwd, sources) => {
-		const found = adoptionDiscovery;
-		if (!found?.changed) return false;
-		return found.cwd === resolve(cwd) && found.sourcesHash === adoptionSnapshotsHash(sources);
-	});
-	// One discovery in flight; writes during it queue a single rerun.
-	let discoveryRunning = false;
-	let discoveryPendingCwd: string | null = null;
-	const scheduleAdoptionDiscovery = (cwd: string): void => {
-		if (stopping) return;
-		if (discoveryRunning) {
-			discoveryPendingCwd = cwd;
-			return;
-		}
-		const sources = readClioState(cwd)?.contextSources;
-		if (sources === undefined) return;
-		discoveryRunning = true;
-		const workspace = resolve(cwd);
-		void adoptionSourcesChangedAsync(sources, { cwd: workspace })
-			.then((changed) => {
-				adoptionDiscovery = { cwd: workspace, sourcesHash: adoptionSnapshotsHash(sources), changed };
-				contextState.invalidate(cwd);
-			})
-			.catch(() => {
-				// Best-effort footer hint; keep the previous answer.
-			})
-			.finally(() => {
-				discoveryRunning = false;
-				const next = discoveryPendingCwd;
-				discoveryPendingCwd = null;
-				if (next !== null) scheduleAdoptionDiscovery(next);
-			});
-	};
+	const contextState = createContextStateReader();
 	const semanticBackground = createSemanticBackgroundRefresh(() => _context.getContract("config")?.get());
 	const onStart = (): void => {
 		lastCwd = process.cwd();
@@ -287,12 +232,7 @@ export function createContextBundle(
 			.catch(() => {
 				// Indexing is best-effort; a failed refresh must not block session start.
 			});
-		let discovered = false;
-		startupHints = collectStartupHints(lastCwd, options, (discovery) => {
-			adoptionDiscovery = discovery;
-			discovered = true;
-		});
-		if (!discovered) scheduleAdoptionDiscovery(lastCwd);
+		startupHints = collectStartupHints(lastCwd, options);
 		const sink = options.startupHintHost?.sink;
 		if (sink) for (const hint of startupHints) sink(hint);
 	};
@@ -341,7 +281,6 @@ export function createContextBundle(
 					},
 				);
 				contextState.invalidate(workspace);
-				scheduleAdoptionDiscovery(workspace);
 			})
 			.catch(() => {
 				// Best-effort: never let incremental indexing surface as a tool error.

@@ -7,6 +7,7 @@ export {
 	scanAgentConfigs,
 } from "./adoption.js";
 export {
+	applyHandbookVerification,
 	type BootstrapFallbackMode,
 	type BootstrapFallbackResult,
 	type BootstrapGenerate,
@@ -18,9 +19,11 @@ export {
 	type BootstrapRunTelemetry,
 	type BootstrapStructuredOutput,
 	fallbackBootstrapOutput,
+	type HandbookVerification,
 	type RunBootstrapInput,
 	type RunBootstrapResult,
 	runBootstrap,
+	verifyHandbook,
 } from "./bootstrap.js";
 export { type RunContextClearInput, type RunContextClearResult, runContextClear } from "./clear.js";
 export {
@@ -60,6 +63,7 @@ export {
 	computeFingerprint,
 	isStale,
 } from "./fingerprint.js";
+export { describeHandbookFreshness, readHandbookFreshness } from "./handbook-ledger.js";
 export {
 	type LoadedOperatorProfile,
 	loadOperatorProfile,

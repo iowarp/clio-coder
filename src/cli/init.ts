@@ -1,5 +1,5 @@
 import { formatContextOperationResult } from "../core/context-operation.js";
-import { runBootstrap } from "../domains/context/index.js";
+import { applyHandbookVerification, runBootstrap, verifyHandbook } from "../domains/context/index.js";
 import {
 	bootstrapInputFromInitOptions,
 	CONTEXT_INIT_FLAG_TABLE,
@@ -14,6 +14,7 @@ import { createContextCliOperation, createContextCliProgress } from "./context-p
 const HELP = `Usage:
   clio-coder context init [--preview] [--heuristic] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
+  clio-coder context init --verify [--apply] [--json]
 
 Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
 the codewiki index, and the .clio-coder state. The configured Clio
@@ -37,7 +38,67 @@ Options:
   --target <id>    override the configured bootstrap target for this noninteractive run
   --model <id>     override the bootstrap wire model (requires --target)
   --thinking <n>   override bootstrap thinking: ${VALID_THINKING_LEVELS.join("|")} (requires --target)
+  --verify         re-check every rule of the effective handbook against the current tree without a model;
+                   lists rules as verified, stale, contradicted or unverifiable with file:line, records the
+                   verdicts in the handbook ledger, and exits 1 when any rule is stale or contradicted.
+                   With --apply, removes the flagged rules (correcting renumbered rule ids) and prints the diff
 `;
+
+const VERDICT_ORDER = ["verified", "stale", "contradicted", "unverifiable"] as const;
+
+async function runVerifyCommand(args: ReadonlyArray<string>): Promise<number> {
+	const extra = args.filter((arg) => arg !== "--verify" && arg !== "--json" && arg !== "--apply");
+	if (extra.length > 0) {
+		process.stderr.write(`clio-coder context init: --verify takes only --apply and --json, not ${extra.join(" ")}\n`);
+		return 2;
+	}
+	const json = args.includes("--json");
+	const cwd = process.cwd();
+	const verification = await verifyHandbook(cwd);
+	const flagged = verification.entries.filter((entry) => entry.verdict === "stale" || entry.verdict === "contradicted");
+	const applied = args.includes("--apply") && flagged.length > 0 ? applyHandbookVerification(cwd, verification) : [];
+	if (json) {
+		process.stdout.write(
+			`${JSON.stringify({
+				version: 1,
+				files: verification.files,
+				commit: verification.commit,
+				flagged: flagged.length,
+				rules: verification.entries.map((entry) => ({
+					verdict: entry.verdict,
+					file: entry.source.file,
+					line: entry.source.line,
+					text: entry.text,
+					reason: entry.reason,
+					...(entry.ruleIds ? { ruleIds: entry.ruleIds } : {}),
+				})),
+				applied,
+			})}\n`,
+		);
+	} else if (verification.files.length === 0) {
+		process.stdout.write("No project handbook to verify.\n");
+	} else {
+		const lines = [`Verified ${verification.files.join(", ")} at ${verification.commit?.slice(0, 12) ?? "uncommitted"}`];
+		for (const verdict of VERDICT_ORDER) {
+			const rows = verification.entries.filter((entry) => entry.verdict === verdict);
+			if (rows.length === 0) continue;
+			lines.push("", `${verdict} (${rows.length}):`);
+			for (const entry of rows) {
+				const text = entry.text.length > 100 ? `${entry.text.slice(0, 97)}...` : entry.text;
+				const reason = verdict === "verified" ? "" : ` [${entry.reason}]`;
+				lines.push(`  ${entry.source.file}:${entry.source.line}  ${text}${reason}`);
+			}
+		}
+		for (const result of applied) lines.push("", result.diff);
+		if (flagged.length > 0 && applied.length === 0)
+			lines.push(
+				"",
+				`${flagged.length} rule${flagged.length === 1 ? "" : "s"} need attention; rerun with --apply to remove or correct them.`,
+			);
+		process.stdout.write(`${lines.join("\n")}\n`);
+	}
+	return flagged.length > 0 ? 1 : 0;
+}
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
 	return args.includes(name);
@@ -111,6 +172,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		process.stdout.write(HELP);
 		return 0;
 	}
+	if (hasFlag(args, "--verify")) return runVerifyCommand(args);
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
 		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);

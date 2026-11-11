@@ -35,11 +35,13 @@ import { collectBootstrapEvidence } from "./bootstrap-evidence.js";
 import {
 	type ClioMdSection,
 	HANDBOOK_TARGETS,
+	loadProjectClioMd,
 	type ParsedClioMd,
 	parseClioMd,
 	serializeClioMd,
 	tryReadClioMd,
 } from "./clio-md.js";
+import { readCodewiki } from "./codewiki/artifact.js";
 import {
 	buildCodewikiCandidate,
 	coordinateCodewikiExclusive,
@@ -54,6 +56,7 @@ import {
 	normalizeHandbookRule,
 	type ProtectedHandbook,
 } from "./handbook-budget.js";
+import { handbookLedgerPath } from "./handbook-ledger.js";
 import { instructionUnits } from "./instruction-units.js";
 import { ContextOperationAbortError } from "./operation-result.js";
 import { packageManager } from "./package-manager.js";
@@ -131,12 +134,14 @@ export interface BootstrapGenerateInput {
 export interface HandbookLedgerEntry {
 	id: string;
 	text: string;
-	origin: "adopted";
+	origin: "adopted" | "handbook";
 	source: { file: string; line: number };
 	citations: string[];
 	verdict: "verified" | "stale" | "unverifiable" | "contradicted";
 	reason: string;
 	kept: boolean;
+	/** Renumbered checker ids `--verify` found; when this is the only problem, `--apply` rewrites them. */
+	ruleIds?: { from: string; to: string }[];
 }
 
 export type BootstrapGenerate = (
@@ -2563,13 +2568,180 @@ function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
  */
 function writeHandbookLedger(cwd: string, entries: ReadonlyArray<HandbookLedgerEntry>): void {
 	const commit = gitOutput(cwd, ["rev-parse", "HEAD"])?.trim() || null;
-	const dir = join(cwd, ".clio-coder", "state");
-	mkdirSync(dir, { recursive: true });
+	mkdirSync(dirname(handbookLedgerPath(cwd)), { recursive: true });
 	writeFileSync(
-		join(dir, "handbook-ledger.json"),
+		handbookLedgerPath(cwd),
 		`${JSON.stringify({ version: 1, commit, entries: entries.map((entry) => ({ ...entry, commit })) }, null, 2)}\n`,
 		"utf8",
 	);
+}
+
+/** The effective handbook's rules re-checked against the current tree by `context init --verify`. */
+export interface HandbookVerification {
+	/** Repository-relative paths of the handbook files that were checked. */
+	files: string[];
+	commit: string | null;
+	entries: HandbookLedgerEntry[];
+}
+
+/**
+ * Re-ground every rule of the effective handbook without a model: its
+ * backticked citations against the tree, its tree-fact claims against the
+ * tree-fact table, and its checker ids against the enforcement inventory.
+ * Records the verdicts and the commit in the handbook ledger.
+ */
+export async function verifyHandbook(cwd: string): Promise<HandbookVerification> {
+	const loaded = loadProjectClioMd(cwd);
+	const handbooks = loaded.files.map((file) => ({
+		file: relative(cwd, file.path).split("\\").join("/"),
+		path: file.path,
+		content: file.source,
+	}));
+	const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter(
+		(path) => !GENERATION_EXCLUDED_FILES.has(path),
+	);
+	const projectType = detectProjectType(cwd);
+	const codewiki = readCodewiki(cwd) ?? (await buildCodewikiCandidate(cwd, projectType)).codewiki;
+	const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
+	const input: BootstrapGenerateInput = {
+		cwd,
+		projectType,
+		// The handbook under review is the claim, never its own evidence.
+		siblingFiles: handbooks.map((handbook) => ({ source: "handbook", path: handbook.path, content: handbook.content })),
+		adoption: scanAgentConfigs({ cwd, includeGlobal: false }),
+		codewiki,
+		enforcement,
+		repositoryFiles,
+	};
+	const corpus = createModelGroundingCorpus(input);
+	const facts = treeFacts(cwd, enforcement.ciCommands ?? []);
+	const checkerRules = checkerRuleList(input);
+	const codes = new Set(checkerRules.map((rule) => rule.code));
+	const entries: HandbookLedgerEntry[] = [];
+	for (const handbook of handbooks) {
+		for (const unit of instructionUnits(handbook.content, 600, handbook.file)) {
+			const line = unit.text.trim();
+			if (line.length === 0) continue;
+			const citations = [...line.matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? "").filter(Boolean);
+			const ids = [...new Set([...line.matchAll(/\brule\d+\b/g)].map((match) => match[0]))];
+			const entry = (
+				verdict: HandbookLedgerEntry["verdict"],
+				reason: string,
+				ruleIds: { from: string; to: string }[] = [],
+			): void => {
+				entries.push({
+					id: createHash("sha256").update(`${unit.file}:${unit.line}:${line}`).digest("hex").slice(0, 12),
+					text: line,
+					origin: "handbook",
+					source: { file: unit.file, line: unit.line },
+					citations,
+					verdict,
+					reason,
+					kept: true,
+					...(ruleIds.length > 0 ? { ruleIds } : {}),
+				});
+			};
+			// A rule is stale when nothing it cites survives grounding, or when a concrete file it names is gone.
+			const missing = citations.filter((token) => !groundedToken(token, corpus));
+			const missingFile = missing.some((token) => CONCRETE_FILE_RE.test(citedPath(token)));
+			if (citations.length > 0 && (missingFile || groundedModelBody(line, corpus).length === 0)) {
+				entry(
+					"stale",
+					missing.length > 0
+						? `does not resolve in this tree: ${missing.join(", ")}`
+						: "its citations do not pass the citation rule",
+				);
+				continue;
+			}
+			if (codes.size > 0 && ids.length > 0) {
+				const report: HandbookCompileReport = { merged: [], ruleIds: [], unknownRuleIds: [] };
+				correctedRuleIds(line, checkerRules, report);
+				if (report.ruleIds.length > 0) {
+					const changes = report.ruleIds.map((change) => `${change.from} is now ${change.to}`).join(", ");
+					entry("stale", `renumbered rule id: ${changes}`, report.ruleIds);
+					continue;
+				}
+				const unknown = [...new Set([...report.unknownRuleIds, ...ids.filter((id) => !codes.has(id))])];
+				if (unknown.length > 0) {
+					entry("stale", `no checker declares ${unknown.join(", ")}`);
+					continue;
+				}
+			}
+			const fact = contradictingFact(line, facts);
+			if (fact) {
+				entry("contradicted", `${fact.source} states ${fact.key} ${fact.value}`);
+				continue;
+			}
+			if (citations.length > 0 || ids.length > 0) entry("verified", "every citation resolves");
+			else entry("unverifiable", "cites nothing the tree can check");
+		}
+	}
+	const commit = gitOutput(cwd, ["rev-parse", "HEAD"])?.trim() || null;
+	const ledger = {
+		version: 1,
+		commit,
+		verifiedCommit: commit ?? "uncommitted",
+		verifiedAt: new Date().toISOString(),
+		entries: entries.map((entry) => ({ ...entry, commit })),
+	};
+	mkdirSync(dirname(handbookLedgerPath(cwd)), { recursive: true });
+	writeFileSync(handbookLedgerPath(cwd), `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
+	return { files: handbooks.map((handbook) => handbook.file), commit, entries };
+}
+
+/** How many physical lines the unit starting at 0-based `start` spans: a list item with its continuation, or a paragraph. */
+function unitLineSpan(lines: ReadonlyArray<string>, start: number): number {
+	let end = start + 1;
+	while (end < lines.length) {
+		const next = lines[end] ?? "";
+		if (next.trim().length === 0 || /^\s*(?:[-*+]|\d+[.)])\s/.test(next) || /^\s*#/.test(next)) break;
+		end += 1;
+	}
+	return end - start;
+}
+
+/**
+ * The edit `--verify --apply` makes and shows: each stale or contradicted rule
+ * is removed, except one whose only fault is a renumbered checker id, which is
+ * rewritten to the id the checker declares now. Returns one unified diff per file.
+ */
+export function applyHandbookVerification(
+	cwd: string,
+	verification: HandbookVerification,
+): Array<{ file: string; diff: string }> {
+	const results: Array<{ file: string; diff: string }> = [];
+	for (const file of verification.files) {
+		const flagged = verification.entries
+			.filter((entry) => entry.source.file === file && (entry.verdict === "stale" || entry.verdict === "contradicted"))
+			.sort((a, b) => b.source.line - a.source.line);
+		if (flagged.length === 0) continue;
+		const path = join(cwd, file);
+		const lines = readFileSync(path, "utf8").split("\n");
+		const hunks: string[] = [];
+		for (const entry of flagged) {
+			const start = entry.source.line - 1;
+			const count = unitLineSpan(lines, start);
+			const before = lines.slice(start, start + count);
+			const changes = entry.ruleIds ?? [];
+			const after =
+				changes.length === 0
+					? []
+					: before.map((text) =>
+							changes.reduce((current, change) => current.replace(new RegExp(`\\b${change.from}\\b`, "g"), change.to), text),
+						);
+			lines.splice(start, count, ...after);
+			hunks.unshift(
+				[
+					`@@ -${start + 1},${count} +${start + 1},${after.length} @@ ${entry.reason}`,
+					...before.map((text) => `-${text}`),
+					...after.map((text) => `+${text}`),
+				].join("\n"),
+			);
+		}
+		writeFileSync(path, lines.join("\n"), "utf8");
+		results.push({ file, diff: [`--- a/${file}`, `+++ b/${file}`, ...hunks].join("\n") });
+	}
+	return results;
 }
 
 function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {

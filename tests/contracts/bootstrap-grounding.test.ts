@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it, mock } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
+import { runInitCommand } from "../../src/cli/init.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { fitGeneratedHandbook } from "../../src/domains/context/handbook-budget.js";
@@ -1203,6 +1204,66 @@ it("verifies sibling handbook rules against the tree before adopting them", asyn
 		[adopted?.verdict, adopted?.origin, adopted?.kept, adopted?.source.line],
 		["verified", "adopted", true, 6],
 	);
+});
+
+it("context init --verify flags a missing path and a wrong rule id, and --apply leaves a handbook that verifies", async () => {
+	mkdirSync(join(cwd, "tests", "boundaries"), { recursive: true });
+	writeFileSync(
+		join(cwd, "tests", "boundaries", "check-owners.ts"),
+		[
+			"/**",
+			" * 1. Every widget test file stays under the widgets suite directory.",
+			" * 2. The render registrar capability of the widget owner is named only inside src/widgets/render.ts.",
+			" */",
+			"export function runOwnersCheck(): string[] {",
+			'\treturn ["rule1: a widget test is outside its suite", "rule2: the registrar is named outside its owner"];',
+			"}",
+			"",
+		].join("\n"),
+	);
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"## Rules",
+			"",
+			"- Exported names from `src/widgets/render.ts` stay stable between minor releases.",
+			"- Never edit `src/legacy/old.ts` by hand.",
+			"- Every widget test file stays under the widgets suite directory (rule7).",
+			"",
+		].join("\n"),
+	);
+	const previous = process.cwd();
+	process.chdir(cwd);
+	let stdout = "";
+	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+		// The test runner's own reporter writes bytes; the command writes strings.
+		if (typeof chunk === "string") stdout += chunk;
+		return true;
+	});
+	try {
+		strictEqual(await runInitCommand(["--verify", "--json"]), 1);
+		const report = JSON.parse(stdout) as { rules: { verdict: string; line: number }[]; usage?: unknown };
+		deepStrictEqual(
+			report.rules.filter((rule) => rule.verdict === "stale").map((rule) => rule.line),
+			[6, 7],
+		);
+		strictEqual("usage" in report, false);
+		const ledger = JSON.parse(readFileSync(join(cwd, ".clio-coder", "state", "handbook-ledger.json"), "utf8"));
+		ok(typeof ledger.verifiedCommit === "string", JSON.stringify(ledger));
+		stdout = "";
+		strictEqual(await runInitCommand(["--verify", "--apply"]), 1);
+		const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+		strictEqual(handbook.includes("src/legacy"), false, handbook);
+		ok(handbook.includes("suite directory (rule1)."), handbook);
+		ok(stdout.includes("-- Never edit `src/legacy/old.ts` by hand."), stdout);
+		stdout = "";
+		strictEqual(await runInitCommand(["--verify"]), 0, stdout);
+	} finally {
+		write.mock.restore();
+		process.chdir(previous);
+	}
 });
 
 it("does not let a rule stated only in a sibling handbook ground a model line", async () => {
