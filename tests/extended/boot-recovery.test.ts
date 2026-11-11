@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
+import { getStoredAssignment, recordAssignmentAttempt } from "../../src/domains/dispatch/assignment-store.js";
 import { createWorktreeBootRecovery, type WorktreeBootRecovery } from "../../src/domains/dispatch/boot-recovery.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -248,9 +249,15 @@ describe("dispatch admission during boot recovery", () => {
 		}
 	});
 
-	it("reports a ledger that no longer reads once and admits dispatch once it reads again", async () => {
-		const { ledger } = abandonedRow(scratch.dir);
+	it("reports a ledger that no longer reads once, leaves assignments running and admits dispatch once it reads again", async () => {
+		const { ledger, row } = abandonedRow(scratch.dir);
 		await ledger.persist();
+		// An assignment whose owner died with this run as its attempt: only a ledger that reads may settle it.
+		await recordAssignmentAttempt("orphan", row.id);
+		const assignmentsPath = join(scratch.dir, "state", "assignments.json");
+		const store = JSON.parse(readFileSync(assignmentsPath, "utf8")) as { assignments: Array<Record<string, unknown>> };
+		for (const record of store.assignments) delete record.processOwner;
+		writeFileSync(assignmentsPath, JSON.stringify(store));
 		const runsPath = join(scratch.dir, "state", "runs.json");
 		const intact = readFileSync(runsPath, "utf8");
 		const recovery = heldRecovery();
@@ -264,6 +271,7 @@ describe("dispatch admission during boot recovery", () => {
 			recovery.release();
 			await gate;
 			strictEqual(reports.filter((line) => line.includes("ledger recovery")).length, 1, reports.join(""));
+			strictEqual(getStoredAssignment("orphan")?.status, "running");
 
 			writeFileSync(runsPath, intact);
 			const handle = await bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
