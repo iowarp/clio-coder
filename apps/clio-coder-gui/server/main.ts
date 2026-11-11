@@ -33,6 +33,7 @@ import { lifecycleLog } from "./services/log.js";
 import { MachineAttachments } from "./services/machine-attach.js";
 import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
+import { ProblemReportsService } from "./services/problem-reports.js";
 import { ReportsService } from "./services/reports.js";
 import { ResearchService } from "./services/research.js";
 import { SessionService } from "./services/sessions.js";
@@ -268,6 +269,7 @@ export async function main(args = process.argv.slice(2)) {
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
+		problemReports: new ProblemReportsService(ops, workspaces),
 		arena,
 		research,
 		evidence: new EvidenceService(reads, cli, workspaces, operations),

@@ -17,7 +17,7 @@ import { type CommandFields, type CommandPlan, planCommand } from "./command-mod
 import type { PaneSection } from "./pane-context.js";
 
 /** Session actions hosted in a dialog over the conversation. */
-export type SlashAction = "tree" | "fork" | "handoff" | "btw" | "draft" | "extensions" | "fleet-run";
+export type SlashAction = "tree" | "fork" | "handoff" | "btw" | "draft" | "extensions" | "fleet-run" | "report";
 /** Pane views a slash name opens beside the conversation, `/decisions` at the board's Decisions. */
 export type SlashPaneView = "context" | "usage" | "board" | { readonly view: "board"; readonly section: PaneSection };
 
@@ -154,6 +154,14 @@ const ACTIONS: readonly ActionSpec[] = [
 		title: "Run a playbook",
 		summary: "Preview a playbook and start the approved plan",
 		supported: (capabilities) => !!capabilities.fleet,
+	},
+	{
+		// The app's own dialog over the host's report plan, in place of the text preview other ACP clients get (R-24).
+		action: "report",
+		name: "report",
+		title: "Report a problem",
+		summary: "Review exactly what would be sent, then send it yourself",
+		supported: () => true,
 	},
 ];
 

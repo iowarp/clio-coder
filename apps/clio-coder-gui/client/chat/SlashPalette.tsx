@@ -94,6 +94,7 @@ const DIALOG_COPY: Readonly<Record<SlashAction, { title: string; eyebrow: string
 	draft: { title: "Compare approaches", eyebrow: "Explore a request" },
 	extensions: { title: "Tools and add-ons", eyebrow: "Task tools" },
 	"fleet-run": { title: "Run a workflow", eyebrow: "Guided workflow" },
+	report: { title: "Report a problem", eyebrow: "CLIO CODER" },
 };
 
 /**

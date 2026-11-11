@@ -74,10 +74,13 @@ export function TurnOutcome({
 	client,
 	outcome,
 	formatClock,
+	onReport,
 }: {
 	client: Client;
 	outcome: TurnOutcomeView;
 	formatClock: (at: string) => string;
+	/** A failed turn offers the report dialog, pre-filled from this session by the host (R-24). */
+	onReport?: () => void;
 }) {
 	return (
 		<div className="turn-outcome" data-tone={outcome.tone}>
@@ -119,6 +122,11 @@ export function TurnOutcome({
 			</details>
 			{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
 			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
+			{outcome.tone === "fail" && onReport ? (
+				<button type="button" className="secondary" onClick={onReport}>
+					Report this
+				</button>
+			) : null}
 			{outcome.nerd.length > 0 ? (
 				<dl className="turn-outcome__nerd">
 					{outcome.nerd.map((fact) => (

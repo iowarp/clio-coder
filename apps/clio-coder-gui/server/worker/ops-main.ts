@@ -36,5 +36,14 @@ serveWorker(async (call, progress) => {
 		const { writeSettingControl } = await import("../clio/adapters/settings-controls.js");
 		return writeSettingControl(call.params.cwd, call.params.write);
 	}
+	if (call.method.startsWith("reports.")) {
+		const { reportDialog } = await import("../clio/adapters/report.js");
+		if (call.method === "reports.plan") return reportDialog.plan(call.params.cwd, call.params.input);
+		if (call.method === "reports.update")
+			return reportDialog.update(call.params.cwd, call.params.draftId, call.params.edits);
+		if (call.method === "reports.send")
+			return reportDialog.send(call.params.cwd, call.params.draftId, call.params.choices);
+		if (call.method === "reports.status") return reportDialog.status(call.params.cwd);
+	}
 	throw new AppProblem("unsupported", "Method is not available in the ops worker.");
 }, closeMachines);

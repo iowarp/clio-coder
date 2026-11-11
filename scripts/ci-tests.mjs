@@ -141,6 +141,7 @@ export const coreTests = [
 	);
 
 export const guiTests = [
+	"report-dialog-model",
 	"chat-composer",
 	"chat-approval",
 	"chat-interview",

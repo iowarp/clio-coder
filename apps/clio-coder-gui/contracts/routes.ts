@@ -65,6 +65,15 @@ import { MachineAttachment, MachineAttachments, MachineId, MachineMutation, Mach
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
+import {
+	ProblemReportChoices,
+	ProblemReportDraftParams,
+	ProblemReportEdits,
+	ProblemReportPlanRequest,
+	ProblemReportRows,
+	ProblemReportSent,
+	ProblemReportView,
+} from "./problem-reports.js";
 import { UsageReport } from "./reports.js";
 import {
 	ResearchCampaign,
@@ -333,6 +342,40 @@ export const routes = {
 		response: UsageReport,
 		summary: "Canonical usage report for the last 30 days",
 		...runtimeRoutes.usage,
+	}),
+	problemReports: defineRoute({
+		...get,
+		params: operationParams,
+		response: ProblemReportRows,
+		summary: "Problem reports on this machine: drafts and what was sent",
+		...runtimeRoutes.problemReports,
+	}),
+	problemReportPlan: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		body: ProblemReportPlanRequest,
+		response: ProblemReportView,
+		summary: "Start a problem report draft and return the exact text sending would post; sends nothing",
+		...runtimeRoutes.problemReportPlan,
+	}),
+	problemReportUpdate: defineRoute({
+		...post,
+		status: 200,
+		params: ProblemReportDraftParams,
+		body: ProblemReportEdits,
+		response: ProblemReportView,
+		summary: "Edit a problem report draft and re-plan it on the host; sends nothing",
+		...runtimeRoutes.problemReportUpdate,
+	}),
+	problemReportSend: defineRoute({
+		...post,
+		status: 200,
+		params: ProblemReportDraftParams,
+		body: ProblemReportChoices,
+		response: ProblemReportSent,
+		summary: "Send a reviewed problem report draft; requires consent from the dialog's Send button",
+		...runtimeRoutes.problemReportSend,
 	}),
 	arenaMatches: defineRoute({
 		...get,

@@ -25,6 +25,7 @@ import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
+import { requestReport } from "../report/report-events.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { useSessionCommands } from "../shell/SessionControls.js";
 import { taskTitle } from "../shell/shell-model.js";
@@ -565,6 +566,7 @@ export const Composer = memo(function Composer({
 		}
 		store.clear();
 		if (entry.kind === "pane") pane?.show(entry.view);
+		else if (entry.action === "report") requestReport({ sessionId });
 		else setDialog(entry.action);
 	};
 
@@ -1515,6 +1517,7 @@ export const Composer = memo(function Composer({
 					onPick={(entry) => {
 						setActionsOpen(false);
 						if (entry.kind === "pane") pane?.show(entry.view);
+						else if (entry.kind === "action" && entry.action === "report") requestReport({ sessionId });
 						else if (entry.kind === "action") setDialog(entry.action);
 					}}
 					onShowChanges={() => {

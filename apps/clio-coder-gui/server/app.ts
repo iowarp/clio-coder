@@ -38,6 +38,7 @@ import type { LibraryService } from "./services/library.js";
 import type { MachinesService } from "./services/machines.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
+import type { ProblemReportsService } from "./services/problem-reports.js";
 import type { ReportsService } from "./services/reports.js";
 import type { ResearchService } from "./services/research.js";
 import { SessionControls } from "./services/session-control.js";
@@ -72,6 +73,8 @@ export function createApp(options: {
 	system: SystemService;
 	library: LibraryService;
 	reports: ReportsService;
+	/** The report dialog (R-24); absent, its routes are not served. */
+	problemReports?: ProblemReportsService;
 	arena: ArenaService;
 	research: ResearchService;
 	evidence: EvidenceService;
@@ -163,7 +166,7 @@ export function createApp(options: {
 	machinesRoutes(app, hub, options.machines, options.attachments);
 	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
-	reportRoutes(app, hub, options.reports);
+	reportRoutes(app, hub, options.reports, options.problemReports);
 	arenaRoutes(app, hub, options.arena);
 	researchRoutes(app, hub, options.research);
 	evidenceRoutes(app, hub, options.evidence, artifacts);

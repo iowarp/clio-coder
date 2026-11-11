@@ -18,6 +18,7 @@ import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
 import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
+import { onReportRequest, type ReportRequest } from "./report/report-events.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SessionControlNotice, SessionControlsProvider, useSessionCommands } from "./shell/SessionControls.js";
@@ -37,6 +38,9 @@ import "./shell/shell.css";
 const Wizard = lazy(() => import("./wizard/Wizard.js"));
 const CommandPalette = lazy(() =>
 	import("./interaction/CommandPalette.js").then((module) => ({ default: module.CommandPalette })),
+);
+const ReportDialog = lazy(() =>
+	import("./report/ReportDialog.js").then((module) => ({ default: module.ReportDialog })),
 );
 const HelpDialog = lazy(() => import("./interaction/HelpDialog.js").then((module) => ({ default: module.HelpDialog })));
 
@@ -90,6 +94,9 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const [connection, setConnection] = useState<ConnectionState>(client.signedIn ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
+	const [reportRequest, setReportRequest] = useState<ReportRequest | null>(null);
+	useEffect(() => onReportRequest((request) => setReportRequest(request)), []);
+	const openReport = useCallback(() => setReportRequest({}), []);
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [drawer, setDrawer] = useState(false);
 	const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
@@ -309,6 +316,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 				{
 					navigate: (path) => void navigate(path),
 					openHelp,
+					openReport,
 					toggleSidebar: revealSidebar,
 					dismissNotices: dismissAll,
 					newTask: startTask,
@@ -337,6 +345,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			startTask,
 			openWorkspace,
 			openHelp,
+			openReport,
 			paletteTasks,
 			openTask,
 			openWindow,
@@ -506,7 +515,23 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			<Suspense fallback={null}>
 				{paletteOpen ? <CommandPalette open commands={commands} onClose={() => setPaletteOpen(false)} /> : null}
 				{helpOpen ? (
-					<HelpDialog open onClose={() => setHelpOpen(false)} bundledDocsPath={meta.data?.bundledDocsPath} />
+					<HelpDialog
+						open
+						onClose={() => setHelpOpen(false)}
+						bundledDocsPath={meta.data?.bundledDocsPath}
+						onReport={() => {
+							setHelpOpen(false);
+							openReport();
+						}}
+					/>
+				) : null}
+				{reportRequest && activeWorkspaceId ? (
+					<ReportDialog
+						client={client}
+						workspaceId={activeWorkspaceId}
+						request={reportRequest}
+						onClose={() => setReportRequest(null)}
+					/>
 				) : null}
 			</Suspense>
 			{/* The right sidebar, the left rail's mirror in the same chrome. Pages portal into its body. */}

@@ -1,0 +1,88 @@
+/* The report dialog (R-24). Existing tokens only; no new colours. */
+.report-dialog {
+	display: grid;
+	gap: var(--space-4);
+}
+.report-dialog__destination {
+	margin: 0;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--line);
+	background: var(--surface-sunken);
+	font-size: var(--text-meta);
+	color: var(--ink-strong);
+}
+.report-dialog__error {
+	color: var(--status-fail-fg);
+}
+.report-dialog__steps {
+	display: flex;
+	gap: var(--space-2);
+}
+.report-dialog__steps [aria-selected="true"] {
+	border-color: var(--accent-line);
+	color: var(--accent-strong);
+}
+.report-dialog__pane {
+	display: grid;
+	gap: var(--space-3);
+}
+.report-dialog__field {
+	display: grid;
+	gap: var(--space-1);
+	font-size: var(--text-meta);
+}
+.report-dialog__field textarea,
+.report-dialog__field input {
+	font: inherit;
+	font-size: var(--text-body);
+}
+.report-dialog__masks {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.report-dialog__chip {
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	padding: 2px var(--space-2);
+	font-size: var(--text-meta);
+}
+.report-dialog__chip[aria-pressed="false"] {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+	color: var(--status-warn-fg);
+}
+.report-dialog__label {
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.report-dialog__preview {
+	max-height: 320px;
+	overflow: auto;
+	margin: 0;
+	padding: var(--space-3);
+	background: var(--code-paper);
+	color: var(--code-ink);
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	white-space: pre-wrap;
+}
+.report-dialog__actions {
+	margin: 0;
+}
+.report-dialog__tick {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+.report-dialog__hint {
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.report-dialog__line {
+	white-space: pre-wrap;
+}

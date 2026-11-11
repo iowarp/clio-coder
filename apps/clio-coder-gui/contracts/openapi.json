@@ -3494,6 +3494,849 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/reports": {
+			"get": {
+				"operationId": "problemReports",
+				"summary": "Problem reports on this machine: drafts and what was sent",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["rows"],
+									"properties": {
+										"rows": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "state", "kind", "title", "url"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"state": {
+														"type": "string"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"title": {
+														"type": "string"
+													},
+													"url": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/reports/plan": {
+			"post": {
+				"operationId": "problemReportPlan",
+				"summary": "Start a problem report draft and return the exact text sending would post; sends nothing",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["kind"],
+								"properties": {
+									"kind": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "bug"
+											},
+											{
+												"type": "string",
+												"const": "feature"
+											},
+											{
+												"type": "string",
+												"const": "question"
+											}
+										]
+									},
+									"summary": {
+										"type": "string",
+										"maxLength": 120
+									},
+									"sessionId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["draftId", "state", "headline", "plan", "masks", "fields", "sendable"],
+									"properties": {
+										"draftId": {
+											"type": "string"
+										},
+										"state": {
+											"type": "string"
+										},
+										"headline": {
+											"type": "string"
+										},
+										"plan": {
+											"type": "object",
+											"required": [
+												"postedAs",
+												"destination",
+												"rendered",
+												"maskSummary",
+												"actions",
+												"bundle",
+												"consent",
+												"credit",
+												"gates",
+												"rateWarning"
+											],
+											"properties": {
+												"postedAs": {
+													"type": "string"
+												},
+												"destination": {
+													"type": "string"
+												},
+												"rendered": {
+													"type": "object",
+													"required": ["title", "body"],
+													"properties": {
+														"title": {
+															"type": "string"
+														},
+														"body": {
+															"type": "string"
+														}
+													}
+												},
+												"maskSummary": {
+													"type": "string"
+												},
+												"actions": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"bundle": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"consent": {
+													"type": "string"
+												},
+												"credit": {
+													"type": "boolean"
+												},
+												"gates": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"rateWarning": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										"masks": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "kind", "count", "masked", "locked"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"count": {
+														"type": "integer"
+													},
+													"masked": {
+														"type": "boolean"
+													},
+													"locked": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"fields": {
+											"type": "object",
+											"required": ["title", "happened", "expected", "reproduce"],
+											"properties": {
+												"title": {
+													"type": "string"
+												},
+												"happened": {
+													"type": "string"
+												},
+												"expected": {
+													"type": "string"
+												},
+												"reproduce": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"sendable": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/reports/{draft}": {
+			"patch": {
+				"operationId": "problemReportUpdate",
+				"summary": "Edit a problem report draft and re-plan it on the host; sends nothing",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "draft",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^rpt_[0-9A-HJKMNP-TV-Z]{26}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"title": {
+										"type": "string",
+										"maxLength": 200
+									},
+									"happened": {
+										"type": "string",
+										"maxLength": 60000
+									},
+									"expected": {
+										"type": "string",
+										"maxLength": 60000
+									},
+									"reproduce": {
+										"type": "string",
+										"maxLength": 60000
+									},
+									"unmasked": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"maxLength": 200
+										},
+										"maxItems": 200
+									},
+									"credit": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["draftId", "state", "headline", "plan", "masks", "fields", "sendable"],
+									"properties": {
+										"draftId": {
+											"type": "string"
+										},
+										"state": {
+											"type": "string"
+										},
+										"headline": {
+											"type": "string"
+										},
+										"plan": {
+											"type": "object",
+											"required": [
+												"postedAs",
+												"destination",
+												"rendered",
+												"maskSummary",
+												"actions",
+												"bundle",
+												"consent",
+												"credit",
+												"gates",
+												"rateWarning"
+											],
+											"properties": {
+												"postedAs": {
+													"type": "string"
+												},
+												"destination": {
+													"type": "string"
+												},
+												"rendered": {
+													"type": "object",
+													"required": ["title", "body"],
+													"properties": {
+														"title": {
+															"type": "string"
+														},
+														"body": {
+															"type": "string"
+														}
+													}
+												},
+												"maskSummary": {
+													"type": "string"
+												},
+												"actions": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"bundle": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"consent": {
+													"type": "string"
+												},
+												"credit": {
+													"type": "boolean"
+												},
+												"gates": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"rateWarning": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										"masks": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "kind", "count", "masked", "locked"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"count": {
+														"type": "integer"
+													},
+													"masked": {
+														"type": "boolean"
+													},
+													"locked": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"fields": {
+											"type": "object",
+											"required": ["title", "happened", "expected", "reproduce"],
+											"properties": {
+												"title": {
+													"type": "string"
+												},
+												"happened": {
+													"type": "string"
+												},
+												"expected": {
+													"type": "string"
+												},
+												"reproduce": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"sendable": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/reports/{draft}/send": {
+			"post": {
+				"operationId": "problemReportSend",
+				"summary": "Send a reviewed problem report draft; requires consent from the dialog's Send button",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "draft",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^rpt_[0-9A-HJKMNP-TV-Z]{26}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["consent"],
+								"properties": {
+									"consent": {
+										"type": "boolean"
+									},
+									"replyCheck": {
+										"type": "boolean"
+									},
+									"duplicate": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "new"
+											},
+											{
+												"type": "object",
+												"required": ["comment"],
+												"properties": {
+													"comment": {
+														"type": "integer",
+														"minimum": 1
+													}
+												},
+												"additionalProperties": false
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["status", "draftId", "state", "line", "url"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "sent"
+												},
+												"draftId": {
+													"type": "string"
+												},
+												"state": {
+													"type": "string"
+												},
+												"line": {
+													"type": "string"
+												},
+												"url": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "draftId", "state", "line"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "failed"
+												},
+												"draftId": {
+													"type": "string"
+												},
+												"state": {
+													"type": "string"
+												},
+												"line": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "draftId", "state", "related", "comment", "allowNew"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "duplicates"
+												},
+												"draftId": {
+													"type": "string"
+												},
+												"state": {
+													"type": "string"
+												},
+												"related": {
+													"type": "string"
+												},
+												"comment": {
+													"anyOf": [
+														{
+															"type": "integer"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"allowNew": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["status", "draftId", "state", "reasons"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "blocked"
+												},
+												"draftId": {
+													"type": "string"
+												},
+												"state": {
+													"type": "string"
+												},
+												"reasons": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/arena/matches": {
 			"get": {
 				"operationId": "arenaMatches",

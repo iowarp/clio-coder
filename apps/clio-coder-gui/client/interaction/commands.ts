@@ -105,6 +105,8 @@ export interface CommandHandlers {
 	openTask?(id: string): void;
 	/** Show the task on screen in a second window. */
 	openWindow?(): void;
+	/** The report dialog (R-24). */
+	openReport?(): void;
 }
 
 export const NO_SITUATION: CommandSituation = {
@@ -202,6 +204,15 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 		available: true,
 		run: handlers.openHelp,
 	});
+	if (handlers.openReport)
+		commands.push({
+			id: "app.report",
+			title: "Report a problem",
+			group: "App",
+			keywords: ["report", "bug", "issue", "problem", "feedback"],
+			available: true,
+			run: handlers.openReport,
+		});
 	commands.push({
 		id: "app.sidebar",
 		title: "Collapse or expand the sidebar",

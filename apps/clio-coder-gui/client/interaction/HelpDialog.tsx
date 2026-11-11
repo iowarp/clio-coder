@@ -179,10 +179,13 @@ export function HelpDialog({
 	open,
 	onClose,
 	bundledDocsPath,
+	onReport,
 }: {
 	open: boolean;
 	onClose: () => void;
 	bundledDocsPath?: string | undefined;
+	/** "Report a problem": the report dialog (R-24). */
+	onReport?: () => void;
 }) {
 	const searchRef = useRef<HTMLInputElement>(null);
 	if (!open) return null;
@@ -195,6 +198,13 @@ export function HelpDialog({
 			initialFocus={searchRef}
 			onClose={onClose}
 		>
+			{onReport ? (
+				<div className="actions">
+					<button type="button" onClick={onReport}>
+						Report a problem
+					</button>
+				</div>
+			) : null}
 			<HelpReferenceBody bundledDocsPath={bundledDocsPath} searchRef={searchRef} />
 		</Dialog>
 	);

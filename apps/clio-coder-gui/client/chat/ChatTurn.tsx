@@ -24,6 +24,7 @@ import { formatClock, formatDuration, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
+import { requestReport } from "../report/report-events.js";
 import { ActivityGroup } from "./ActivityGroup.js";
 import { isAwaitingAnswer } from "./approval-model.js";
 import {
@@ -276,6 +277,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 							client={client}
 							outcome={turnOutcome(row, turnActivity(turn, compactions))}
 							formatClock={formatClock}
+							onReport={() => requestReport({ sessionId: session.id })}
 						/>
 					) : null}
 					<MessageActions

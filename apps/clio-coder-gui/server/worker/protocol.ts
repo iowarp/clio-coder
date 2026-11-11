@@ -4,6 +4,11 @@ import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
 import type { Machine, MachineMutation } from "../../contracts/machines.js";
+import type {
+	ProblemReportChoices,
+	ProblemReportEdits,
+	ProblemReportPlanRequest,
+} from "../../contracts/problem-reports.js";
 import type { SettingWrite } from "../../contracts/settings-controls.js";
 import type { TelemetryRequest } from "../../contracts/telemetry.js";
 import type { Tool } from "../../contracts/toolchain.js";
@@ -62,6 +67,10 @@ export interface Methods {
 	"library.apply": { params: { cwd: string; planId: string }; result: unknown };
 	"library.release": { params: { cwd: string; planId: string }; result: unknown };
 	"tools.remove": { params: { id: string }; result: { id: string; message: string } };
+	"reports.plan": { params: { cwd: string; input: ProblemReportPlanRequest }; result: unknown };
+	"reports.update": { params: { cwd: string; draftId: string; edits: ProblemReportEdits }; result: unknown };
+	"reports.send": { params: { cwd: string; draftId: string; choices: ProblemReportChoices }; result: unknown };
+	"reports.status": { params: { cwd: string }; result: unknown };
 }
 export type Method = keyof Methods;
 export type Call = {
