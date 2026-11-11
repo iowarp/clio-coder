@@ -232,6 +232,10 @@ function phaseWords(phase: WorkerPhase): [string, string] {
 			return ["⚙", "calling a tool"];
 		case "waiting":
 			return ["◔", "waiting for the model"];
+		case "verification-queued":
+			return ["◌", "waiting for a verification slot"];
+		case "verifying":
+			return ["⚙", "running host checks"];
 		case "settled":
 			return ["◔", "sealing the run record"];
 		default:

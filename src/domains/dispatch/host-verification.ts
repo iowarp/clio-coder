@@ -34,6 +34,7 @@ import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { hostCheckBaseNote } from "./host-verification-note.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
+import { type VerificationSlotEvents, withVerificationSlot } from "./verification-slot.js";
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
 
 const OUTPUT_TAIL_BYTES = 2_048;
@@ -162,13 +163,16 @@ function memoKey(command: PlaybookCommand, judgment: string, fingerprint: string
  * and each changed file is appended as `./<path>` (biome also gets
  * `--no-errors-on-unmatched`). A task that changed no such file passes the check
  * without running it. Every other check, typecheck included, runs whole-repo as
- * declared; the whole-repo lint runs again when the work lands.
+ * declared, and a whole-repo check takes the machine's verification slot (see
+ * src/domains/dispatch/verification-slot.ts) while a scoped one does not.
  */
 const LINT_FORMAT_TOOLS = new Set(["biome", "eslint", "prettier", "ruff", "black", "stylelint"]);
 const SCRIPT_UNSAFE_RE = /[&|;<>`$()'"\\\n*?{}]/u;
 const SCOPED_PATHS_MAX = 1_000;
 /** Scoped checks whose task changed no file under them; they pass without running. */
 const nothingChanged = new WeakSet<ResolvedCheck>();
+/** Checks narrowed to a task's changed files; they run without the verification slot. */
+const scopedToTask = new WeakSet<ResolvedCheck>();
 
 /** Index of the linter or formatter in `argv`, or -1. */
 function lintFormatToolIndex(argv: ReadonlyArray<string>): number {
@@ -250,7 +254,9 @@ function scopeCheckToTask(check: ResolvedCheck, changed: ReadonlyArray<string> |
 	const scopedArgv = argv.filter((arg, index) => index <= toolIndex || (arg !== "." && arg !== "./"));
 	if (basename(argv[toolIndex] ?? "") === "biome" && !scopedArgv.includes("--no-errors-on-unmatched"))
 		scopedArgv.push("--no-errors-on-unmatched");
-	return { ...check, argv: [...scopedArgv, ...inside] };
+	const scoped = { ...check, argv: [...scopedArgv, ...inside] };
+	scopedToTask.add(scoped);
+	return scoped;
 }
 
 /** A request's declared checks as this task runs them; see {@link scopeCheckToTask}. */
@@ -454,6 +460,8 @@ export async function compareHostVerificationBase(input: {
 	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
+	/** Reports the wait for the verification slot each base replay takes; see {@link withVerificationSlot}. */
+	slot?: VerificationSlotEvents;
 }): Promise<void> {
 	const failures = input.verification?.checks.filter((check) => check.exitCode !== 0) ?? [];
 	if (failures.length === 0) return;
@@ -603,10 +611,18 @@ export async function compareHostVerificationBase(input: {
 			};
 		};
 		const stateDir = input.stateDir ?? clioStateDir();
+		const slotted = (): Promise<BaseReplay> =>
+			withVerificationSlot(stateDir, `base replay of ${declared.check}`, replay, input.slot);
 		const cachedReplay = async (key: string): Promise<BaseReplay> => {
 			const stored = readBaseReplay(stateDir, key);
 			if (stored !== undefined) return stored;
-			const result = await replay();
+			// Another process may have replayed this base while this one waited for the slot.
+			const result = await withVerificationSlot(
+				stateDir,
+				`base replay of ${declared.check}`,
+				async () => readBaseReplay(stateDir, key) ?? (await replay()),
+				input.slot,
+			);
 			if (!result.incomplete) {
 				try {
 					storeBaseReplay(stateDir, key, result);
@@ -619,7 +635,7 @@ export async function compareHostVerificationBase(input: {
 		try {
 			let pending = cacheKey === null ? undefined : baseReplayCache.get(cacheKey);
 			if (pending === undefined) {
-				pending = cacheKey === null ? replay() : cachedReplay(cacheKey);
+				pending = cacheKey === null ? slotted() : cachedReplay(cacheKey);
 				if (cacheKey !== null) {
 					baseReplayCache.set(cacheKey, pending);
 					while (baseReplayCache.size > BASE_REPLAY_CACHE_MAX) {
@@ -821,7 +837,7 @@ async function runSealedReproduce(
 	}
 }
 
-async function runResolvedCheck(input: {
+interface ResolvedCheckRun {
 	runId: string;
 	index: number;
 	resolvedCheck: ResolvedCheck;
@@ -829,10 +845,21 @@ async function runResolvedCheck(input: {
 	env: NodeJS.ProcessEnv;
 	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
-}): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
+	slot?: VerificationSlotEvents;
+}
+
+async function runResolvedCheck(
+	input: ResolvedCheckRun,
+): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
 	const resolvedCheck = input.resolvedCheck;
+	const note = `host verification ${resolvedCheck.check} for run ${input.runId}`;
 	if (resolvedCheck.kind === "reproduce") {
-		const check = await runSealedReproduce(resolvedCheck, input.shellSandbox);
+		const check = await withVerificationSlot(
+			input.stateDir,
+			note,
+			() => runSealedReproduce(resolvedCheck, input.shellSandbox),
+			input.slot,
+		);
 		return { check, outputExcerpt: check.outputTail };
 	}
 	if (nothingChanged.has(resolvedCheck)) {
@@ -861,13 +888,14 @@ async function runResolvedCheck(input: {
 	const tree = checkedTree(resolvedCheck.cwd) ?? undefined;
 	const fingerprint = tree?.fingerprint ?? null;
 	const key = fingerprint === null ? null : memoKey(command, judgmentKey, fingerprint, input.env);
-	const hit =
-		key === null
-			? undefined
-			: readMemo(input.stateDir).entries.find((entry) => entry.key === key && entry.check.exitCode === 0);
-	// A memo hit is always a pass, so no caller ever needs its output for
-	// attribution; the empty excerpt says the fresh output does not exist.
-	if (hit !== undefined) {
+	const memoHit = (): { check: RunHostVerificationCheck; outputExcerpt: string } | undefined => {
+		const hit =
+			key === null
+				? undefined
+				: readMemo(input.stateDir).entries.find((entry) => entry.key === key && entry.check.exitCode === 0);
+		if (hit === undefined) return undefined;
+		// A memo hit is always a pass, so no caller ever needs its output for
+		// attribution; the empty excerpt says the fresh output does not exist.
 		// The tree is stamped fresh on a hit: the memo matched this tree's content,
 		// but its stored entry names whichever checkout first produced the pass (F6).
 		return {
@@ -880,7 +908,28 @@ async function runResolvedCheck(input: {
 			},
 			outputExcerpt: "",
 		};
-	}
+	};
+	const hit = memoHit();
+	if (hit !== undefined) return hit;
+	// A check scoped to the task's own files is small; every other one takes the slot, and a pass another
+	// process stored for this tree while this one waited answers it.
+	if (scopedToTask.has(resolvedCheck)) return spawnResolvedCheck(input, command, judgmentKey, key, tree);
+	return withVerificationSlot(
+		input.stateDir,
+		note,
+		async () => memoHit() ?? (await spawnResolvedCheck(input, command, judgmentKey, key, tree)),
+		input.slot,
+	);
+}
+
+async function spawnResolvedCheck(
+	input: ResolvedCheckRun,
+	command: PlaybookCommand,
+	judgmentKey: string,
+	key: string | null,
+	tree: RunHostVerificationCheck["tree"],
+): Promise<{ check: RunHostVerificationCheck; outputExcerpt: string }> {
+	const resolvedCheck = input.resolvedCheck;
 	const judged = resolvedCheck.kind === "numeric-compare" || resolvedCheck.kind === "perf-budget";
 	const captureMaxBytes = judged ? JUDGED_CHECK_MAX_OUTPUT_BYTES : CODE_STEP_CAPTURE_MAX_BYTES;
 	const outcome = await runCodeStep({
@@ -960,6 +1009,8 @@ export async function runHostVerification(input: {
 	/** The sandbox every check runs in; see {@link hostVerificationSandbox}. Absent runs them bare. */
 	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
+	/** Reports each check waiting for and taking the verification slot; see {@link withVerificationSlot}. */
+	slot?: VerificationSlotEvents;
 }): Promise<RunHostVerification | undefined> {
 	const checks = input.request.resolvedVerification;
 	if (checks === undefined || checks.length === 0) return undefined;
@@ -976,6 +1027,7 @@ export async function runHostVerification(input: {
 			env,
 			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
 			...(input.onDiagnostic !== undefined ? { onDiagnostic: input.onDiagnostic } : {}),
+			...(input.slot !== undefined ? { slot: input.slot } : {}),
 		});
 		results.push(outcome.check);
 	}
@@ -1039,6 +1091,8 @@ export interface BatchVerificationParticipant {
 	workerSuccessful: boolean;
 	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
+	/** Reports this run's checks waiting for and taking the verification slot. */
+	slot?: VerificationSlotEvents;
 }
 
 export interface BatchVerificationGate {
@@ -1199,6 +1253,7 @@ export function createBatchVerificationGate(
 			env,
 			...(participant.shellSandbox !== undefined ? { shellSandbox: participant.shellSandbox } : {}),
 			...(participant.onDiagnostic !== undefined ? { onDiagnostic: participant.onDiagnostic } : {}),
+			...(participant.slot !== undefined ? { slot: participant.slot } : {}),
 		});
 
 	/** Today's value for a member that contributes no check; runs no command. */
@@ -1227,6 +1282,15 @@ export function createBatchVerificationGate(
 			}
 		}
 		const ran = new Map<string, { check: RunHostVerificationCheck; owner: string; outputExcerpt: string }>();
+		// Every member of the wave is parked on these checks, so each card says when they wait for the slot.
+		const waveSlot: VerificationSlotEvents = {
+			onWaiting: () => {
+				for (const member of members) member.slot?.onWaiting?.();
+			},
+			onTaken: () => {
+				for (const member of members) member.slot?.onTaken?.();
+			},
+		};
 		for (const [key, entry] of distinct) {
 			const outcome = await runResolvedCheck({
 				runId: entry.owner.runId,
@@ -1240,6 +1304,7 @@ export function createBatchVerificationGate(
 				// run id it was built for (`extension.ts:5534`); any other member's
 				// callback would name a run whose artifacts the failure is not under.
 				...(entry.owner.onDiagnostic !== undefined ? { onDiagnostic: entry.owner.onDiagnostic } : {}),
+				slot: { ...waveSlot, onUnavailable: (error) => entry.owner.slot?.onUnavailable?.(error) },
 			});
 			ran.set(key, { check: outcome.check, owner: entry.owner.runId, outputExcerpt: outcome.outputExcerpt });
 		}

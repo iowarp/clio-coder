@@ -512,6 +512,11 @@ import {
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
 import {
+	HOST_VERIFICATION_EVENT,
+	type VerificationSlotEvents,
+	type VerificationSlotState,
+} from "./verification-slot.js";
+import {
 	createWorkerApprovalWindows,
 	workerApprovalBackstopMs,
 	workerApprovalCeilingMs,
@@ -9109,6 +9114,30 @@ export function createDispatchBundle(
 					(req.resolvedVerification?.length ?? 0) > 0
 						? hostVerificationSandbox(lifecycle.settings, req.taskWorktree?.path ?? lifecycle.cwd)
 						: undefined;
+				// The worker has ended, so the card's phase is the run's own: a check queued behind the machine's one
+				// verification slot says so instead of reading as a worker waiting for its model.
+				let hostVerificationPhase: VerificationSlotState | null = null;
+				const publishHostVerificationPhase = (message: VerificationSlotState): void => {
+					if (hostVerificationPhase === message) return;
+					hostVerificationPhase = message;
+					context.bus.emit("run.progressed", {
+						runId: envelope.id,
+						agentId: req.agentId,
+						task: req.task,
+						agentAudience: lifecycle.agentAudience,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId: lifecycle.target.target.id,
+						wireModelId: lifecycle.target.wireModelId,
+						runtimeId: lifecycle.target.runtime.id,
+						runtimeKind: lifecycle.runtimeKind,
+						event: { type: HOST_VERIFICATION_EVENT, message },
+					});
+				};
+				const hostVerificationSlot: VerificationSlotEvents = {
+					onWaiting: () => publishHostVerificationPhase("waiting for a verification slot"),
+					onTaken: () => publishHostVerificationPhase("running host checks"),
+					onUnavailable: (error) => reportDispatchDiagnostic(`take the verification slot for ${envelope.id}`, error),
+				};
 				const hostVerificationInput = {
 					runId: envelope.id,
 					request: req,
@@ -9116,6 +9145,7 @@ export function createDispatchBundle(
 					...(hostVerificationSandboxPolicy !== undefined ? { shellSandbox: hostVerificationSandboxPolicy } : {}),
 					onDiagnostic: (error: unknown) =>
 						reportDispatchDiagnostic(`write host verification memo for ${envelope.id}`, error),
+					slot: hostVerificationSlot,
 				};
 				// The hypotheses each declared check tests are bound now, before any of them starts (#406): a check-start
 				// record per bound check enters the project's log, so a slate that lands while they run is not credited.
@@ -9139,7 +9169,7 @@ export function createDispatchBundle(
 					settlement === undefined
 						? await runHostVerification(hostVerificationInput)
 						: await settlement.arrive(hostVerificationInput);
-				await compareHostVerificationBase({ verification: hostVerification, request: req });
+				await compareHostVerificationBase({ verification: hostVerification, request: req, slot: hostVerificationSlot });
 				const hostRejection = hostVerificationRejection(hostVerification);
 				const workerSucceeded = finalOutcome === "succeeded";
 				if (hostRejection !== null && workerSucceeded) {

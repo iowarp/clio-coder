@@ -800,6 +800,17 @@ check without running it. Typecheck, tests and every other check run whole-repo 
 Clio Coder does not rerun the whole-repo lint when a task branch merges; leave that to the
 project's own gate before the work lands (`pnpm run check`, CI).
 
+Host verification runs one check at a time per state root. Every check that runs a command,
+and every base replay, first takes the verification slot, the lock file
+`dispatch-verification-slot.lock` under the state root; a lint or format check scoped to the
+task's files and a check answered from the memo skip it. Parallel batches and parallel Clio
+Coder sessions that share a state root therefore queue their typechecks and test suites
+instead of running them all at once. Sessions with different state roots
+(`CLIO_CODER_STATE_DIR`, `CLIO_CODER_HOME`) do not share a slot. While a run's check waits,
+the run's feed and its card in the workers dashboard say `waiting for a verification slot`,
+then `running host checks` once it holds the slot. A slot whose holder died is taken over; a
+check that waits 30 minutes runs without the slot rather than failing the run.
+
 #### Merge task branch card
 
 When the gate withholds a merge, an attached operator is asked first with a `Merge task

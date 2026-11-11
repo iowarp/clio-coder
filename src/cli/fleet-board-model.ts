@@ -33,6 +33,7 @@ import {
 import { readRunResultFacts } from "../domains/dispatch/run-result-facts.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
+import { HOST_VERIFICATION_EVENT, type VerificationSlotState } from "../domains/dispatch/verification-slot.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
@@ -118,7 +119,16 @@ export interface StreamRow {
 	pending?: boolean;
 }
 
-export type WorkerPhase = "starting" | "thinking" | "writing" | "tool" | "waiting" | "settled";
+/** `verification-queued` and `verifying` follow the worker: its checks wait for, then hold, the verification slot. */
+export type WorkerPhase =
+	| "starting"
+	| "thinking"
+	| "writing"
+	| "tool"
+	| "waiting"
+	| "verification-queued"
+	| "verifying"
+	| "settled";
 
 export interface RunFold {
 	present: boolean;
@@ -310,6 +320,14 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 		case "agent_end":
 			fold.current = null;
 			fold.phase = "waiting";
+			return;
+		case HOST_VERIFICATION_EVENT:
+			fold.current = null;
+			fold.phase =
+				detail === ("waiting for a verification slot" satisfies VerificationSlotState)
+					? "verification-queued"
+					: "verifying";
+			if (detail.length > 0) pushRow(cursor, { at: line.at, kind: "note", text: detail });
 			return;
 		default:
 			if (detail.length > 0) pushRow(cursor, { at: line.at, kind: "note", text: `${line.type}: ${detail}` });

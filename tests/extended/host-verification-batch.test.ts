@@ -1095,3 +1095,50 @@ it("contains base-check writes and removes concurrent timed-out base checkouts",
 		2,
 	);
 });
+
+describe("the verification slot", () => {
+	it("queues concurrent host verifications on one state root and says which one waits", async () => {
+		const first = makeScratch();
+		const second = { ...makeScratch(), stateDir: first.stateDir };
+		const running = join(first.root, "running");
+		// Fails when another check is already running, then holds its marker long enough for any overlap to show.
+		const exclusive = (scratch: Scratch, id: string): ResolvedCheck => ({
+			check: id,
+			argv: [
+				process.execPath,
+				"-e",
+				[
+					`const fs = require("node:fs");`,
+					`try { fs.writeFileSync(${JSON.stringify(running)}, ${JSON.stringify(id)}, { flag: "wx" }); }`,
+					`catch { console.error("overlapped " + fs.readFileSync(${JSON.stringify(running)}, "utf8")); process.exit(3); }`,
+					"const until = Date.now() + 400; while (Date.now() < until) {}",
+					`fs.rmSync(${JSON.stringify(running)});`,
+				].join(" "),
+			],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		});
+		const phases: string[] = [];
+		const verify = (scratch: Scratch, id: string) =>
+			runHostVerification({
+				runId: `run-${id}`,
+				request: { resolvedVerification: [exclusive(scratch, id)] },
+				workerSuccessful: true,
+				stateDir: scratch.stateDir,
+				slot: {
+					onWaiting: () => phases.push(`${id} waiting`),
+					onTaken: () => phases.push(`${id} running`),
+				},
+			});
+		const [a, b] = await Promise.all([verify(first, "a"), verify(second, "b")]);
+		deepStrictEqual(
+			[a?.status, b?.status],
+			["verified", "verified"],
+			[...(a?.checks ?? []), ...(b?.checks ?? [])].map((check) => check.outputTail).join("\n"),
+		);
+		strictEqual(phases.filter((phase) => phase.endsWith("waiting")).length, 1, phases.join(", "));
+		const waiter = phases.find((phase) => phase.endsWith("waiting"))?.split(" ")[0];
+		ok(phases.indexOf(`${waiter} waiting`) < phases.indexOf(`${waiter} running`), phases.join(", "));
+		ok(!existsSync(join(first.stateDir, "dispatch-verification-slot.lock")), "the slot is released");
+	});
+});
