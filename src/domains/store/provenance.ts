@@ -113,6 +113,17 @@ async function usedFrom(
 	return used;
 }
 
+/** `used` with each blob (by tag, blob and sha256) or path listed once, first entry kept. */
+function uniqueUses(used: ReadonlyArray<StoreRecordUse>): StoreRecordUse[] {
+	const seen = new Set<string>();
+	return used.filter((use) => {
+		const key = JSON.stringify(use.tag !== undefined ? [use.tag, use.blob, use.sha256] : [null, use.path, use.sha256]);
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
+
 /**
  * The hash a put record holds: the sha256 the put computed over the bytes it
  * streamed. Above the run-record hash ceiling it is omitted, as for any other
@@ -179,7 +190,7 @@ export async function buildPutRecord(input: PutRecordInput): Promise<StoreRecord
 			// A source that vanished after the put has no producing run to report.
 		}
 	}
-	used.push(...derived);
+	used = uniqueUses([...used, ...derived]);
 
 	return {
 		kind: "put",

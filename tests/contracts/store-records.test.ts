@@ -210,6 +210,55 @@ describe("store records", () => {
 			strictEqual(await backend.blobRefOfPath(realpathSync(stray)), null);
 		}));
 
+	it("lists a blob the script read both as a store input and through its get copy once", () =>
+		withBackend(async (backend, root) => {
+			const sha = createHash("sha256").update("h5").digest("hex");
+			await backend.getOrCreateTag("inputs");
+			writeFileSync(join(root, "source.h5"), "h5");
+			await backend.putBlobFromFile("inputs", "sim.h5", join(root, "source.h5"));
+			const got = await backend.getBlobAsPath("inputs", "sim.h5");
+			mkdirSync(join(root, "data"));
+			symlinkSync(got.path, join(root, "data", "sim.h5"));
+			writeFileSync(join(root, "out.json"), "{}");
+			const out = statSync(join(root, "out.json"));
+			const runId = "20261110T230000Z-abcdef";
+			mkdirSync(join(runRecordsDir(root), runId), { recursive: true });
+			writeFileSync(
+				join(runRecordsDir(root), runId, "run.json"),
+				JSON.stringify({
+					version: 1,
+					runId,
+					tool: "run_script",
+					finishedAt: "2026-11-10T23:00:01.000Z",
+					script: { path: "sum.py", sha256: null },
+					argv: ["python3", "sum.py"],
+					outcome: "succeeded",
+					inputs: [
+						{ path: "inputs:sim.h5", exists: true, bytes: 2, sha256: sha, store: { tag: "inputs", blob: "sim.h5" } },
+						{ path: "data/sim.h5", exists: true, bytes: 2, sha256: sha },
+						{ path: "notes.txt", exists: true, bytes: 1, sha256: null },
+						{ path: "notes.txt", exists: true, bytes: 1, sha256: null },
+					],
+					outputs: [{ path: "out.json", exists: true, status: "created", bytes: 2, mtimeMs: out.mtimeMs }],
+				}),
+			);
+			const body = await buildPutRecord({
+				backend,
+				cwd: root,
+				tag: "results",
+				blob: "out.json",
+				sourceAbs: join(root, "out.json"),
+				stat: { bytes: 2, modifiedMs: 5, version: null },
+				hash: { sha256: null },
+				receipt: { backend: "local", key: "out.json", version: null },
+				actor: "main",
+			});
+			deepStrictEqual(body.used, [
+				{ tag: "inputs", blob: "sim.h5", bytes: 2, sha256: sha },
+				{ path: "notes.txt", bytes: 1, sha256: null },
+			]);
+		}));
+
 	it("keeps clio-core tag and blob names apart: tag a blob b/c is not tag a/b blob c", () =>
 		withBackend(async (_local, root) => {
 			const paths: string[] = [];
