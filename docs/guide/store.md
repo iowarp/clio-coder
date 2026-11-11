@@ -46,5 +46,6 @@ The command probes the interpreter, the daemon and its version, the host and a d
 - After each record put the store syncs the tag, so a record survives a runtime crash. An older `iowarp-core` without `AsyncSyncTag` skips the sync, and records written within about 10 seconds of a crash can then be lost. Reading a lost one afterwards fails with a message that the record was lost at a clio-core restart, instead of returning damaged data.
 - A clio-core space reserved over `agentspace/<project key>/` charges both the records and the data blobs (agentspace operator 1e54daa or later).
 - A put over an existing blob asks first, as a replace does on the local backend; clio-core keeps no blob versions.
+- `rm-tag` removes the tag's blob files from the clio filesystem along with its records, so their space is freed and a re-created tag starts empty. A runtime whose filesystem binding cannot remove directories leaves the empty directories behind.
 - With a `--mount`, `store get` returns the path inside the mount, and the model may read it.
 - Through the FUSE mount, `close()` publishes a file's size asynchronously. A writer that hands a file to a reader outside the mount calls `fsync` before closing it (or the runtime runs with `CLIO_FUSE_ASYNC_FLUSH=0`).
