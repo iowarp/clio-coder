@@ -408,7 +408,7 @@ import {
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { holdForSharedPrefix } from "./prefix-stagger.js";
+import { claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -7765,7 +7765,7 @@ export function createDispatchBundle(
 				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
 				...(spec.extensionHooks !== undefined ? { onHookRequest } : {}),
 			};
-			const prefixHold = await holdForSharedPrefix(
+			const prefixClaim = claimSharedPrefix(
 				preparation?.prefixGroups,
 				lifecycle.runtimeKind === "http" && lifecycle.promptSignature !== null && req.runIdHint !== undefined
 					? sha256(
@@ -7780,24 +7780,35 @@ export function createDispatchBundle(
 						)
 					: null,
 				req.runIdHint ?? "",
-				{
-					...(preparation?.signal ? { signal: preparation.signal } : {}),
-					...(preparation?.onPrefixHold ? { onHold: preparation.onPrefixHold } : {}),
-				},
 			);
-			if (prefixHold?.role === "leader") prefixLeader = prefixHold.group;
-			else if (prefixHold?.role === "follower") {
-				timing.prefixHoldMs = prefixHold.heldMs;
-				timing.prefixLeaderRunId = prefixHold.leaderRunId;
-				// abort() during the hold cancels the assignment but cannot reach a worker that does not exist yet.
-				if (canceledControlRoots.has(controlRootsByAttempt.get(req.runIdHint ?? "") ?? capacityLease.assignmentId))
-					throw new AdmissionCanceledError("dispatch: cancelled while waiting for the shared-prefix leader");
-			}
+			if (prefixClaim?.role === "leader") prefixLeader = prefixClaim.group;
 			if (remoteReturn) await prepareFleetChangeReturn(remoteReturn.node, remoteReturn.worktree);
 			preparation?.signal?.throwIfAborted();
-			// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
-			if (narrowPermitToLiveLevel()) spec = buildSpec();
-			worker = (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
+			const spawnNow = (): SpawnedWorker => {
+				// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
+				if (narrowPermitToLiveLevel()) spec = buildSpec();
+				return (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
+			};
+			if (prefixClaim?.role === "follower") {
+				// The handle returns now; only the worker's start waits for the leader, so a slow leader holds no caller.
+				const group = prefixClaim.group;
+				worker = startAfterPrefixHold(
+					async (signal) => {
+						const hold = await waitForPrefixLeader(group, {
+							signal: preparation?.signal ? AbortSignal.any([signal, preparation.signal]) : signal,
+						});
+						if (hold?.role !== "follower") return;
+						timing.prefixHoldMs = hold.heldMs;
+						timing.prefixLeaderRunId = hold.leaderRunId;
+					},
+					() =>
+						canceledControlRoots.has(controlRootsByAttempt.get(req.runIdHint ?? "") ?? capacityLease.assignmentId) ||
+						preparation?.signal?.aborted === true
+							? null
+							: spawnNow(),
+					{ now, monotonicNow },
+				);
+			} else worker = spawnNow();
 		} catch (error) {
 			prefixLeader?.release();
 			await closeRunJournal();
@@ -10638,46 +10649,25 @@ export function createDispatchBundle(
 			reqs.length > 1 && reqs.some((req) => (req.resolvedVerification?.length ?? 0) > 0)
 				? createBatchVerificationGate()
 				: undefined;
-		// C-04 (opt-in): workers that share a prompt prefix start after the first one streams, so they read its cache entry.
+		// Workers that share a prompt prefix start after the first one streams, so they read its cache entry.
 		const prefixGroups =
 			reqs.length > 1 && getEffectiveSettings()?.fleet.staggerSharedPrefix === true
 				? new Map<string, DispatchPrefixGroup>()
 				: undefined;
 		const staggered = prefixGroups === undefined ? preparation : { ...preparation, prefixGroups };
-		// A follower holding for its leader must not hold up the leaders of later groups (C-04), so admission moves on
-		// once it holds; every request is collected in order before the groups are released.
-		const admitted: Array<Promise<Awaited<ReturnType<typeof dispatch>>>> = [];
+		const releaseGroups = (): void => {
+			for (const group of prefixGroups?.values() ?? []) group.release();
+		};
+		// A follower's handle returns at admission and only its worker start holds, so admission never waits on a leader.
+		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
 		try {
 			for (const req of reqs) {
-				let holding!: () => void;
-				const held = new Promise<void>((resolve) => {
-					holding = resolve;
-				});
-				const dispatched = dispatch(
-					req,
-					undefined,
-					prefixGroups === undefined ? staggered : { ...staggered, onPrefixHold: holding },
-					settlement,
-				);
-				admitted.push(dispatched);
-				// Collected below; a held follower's rejection must not surface as unhandled meanwhile.
-				dispatched.catch(() => {});
-				await Promise.race([dispatched, held]);
+				const handle = await dispatch(req, undefined, staggered, settlement);
+				handles.push({ ...handle, agentId: req.agentId });
 			}
-		} catch {
-			// Stop admitting; held followers are released and settle below, and the rejection is rethrown there.
-			for (const group of prefixGroups?.values() ?? []) group.release();
-		}
-		const settled = await Promise.allSettled(admitted);
-		// Only this batch's runs can hold, so no group's cap timer outlives the batch's admission.
-		for (const group of prefixGroups?.values() ?? []) group.release();
-		const handles: Array<Awaited<ReturnType<typeof dispatch>> & { agentId: string }> = [];
-		let failure: PromiseRejectedResult | undefined;
-		for (const [index, result] of settled.entries()) {
-			if (result.status === "rejected") failure ??= result;
-			else handles.push({ ...result.value, agentId: reqs[index]?.agentId ?? "" });
-		}
-		if (failure !== undefined) {
+		} catch (error) {
+			// Held followers start (and are aborted) at once rather than waiting out the cap.
+			releaseGroups();
 			for (const handle of handles) {
 				try {
 					contract.abort(handle.runId);
@@ -10685,7 +10675,7 @@ export function createDispatchBundle(
 					// best-effort cleanup for partially admitted batches
 				}
 			}
-			throw failure.reason;
+			throw error;
 		}
 		const batchRef = { current: createBatch(handles.map((handle) => handle.runId)) };
 		const finalPromise = Promise.all(
@@ -10695,6 +10685,9 @@ export function createDispatchBundle(
 				return receipt;
 			}),
 		).then((receipts) => receipts as ReadonlyArray<RunResult>);
+		// Only this batch's runs hold, so no group's cap timer outlives the batch's runs.
+		if (prefixGroups !== undefined)
+			void Promise.allSettled(handles.map((handle) => handle.finalPromise)).then(releaseGroups);
 		return {
 			batchId: batchRef.current.id,
 			assignmentIds: batchRef.current.assignmentIds,

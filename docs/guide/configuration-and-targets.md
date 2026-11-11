@@ -210,7 +210,7 @@ explains worker route selection.
 | `fleet.permissions.escalation.timeoutMs` | `120000` | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | next dispatch |
 | `fleet.concurrency` | `auto` | restart |
-| `fleet.staggerSharedPrefix` | `false` | next dispatch; off by default; holds the batch up to 15 s while the leader starts |
+| `fleet.staggerSharedPrefix` | `true` | next dispatch; held workers start after the leader streams (at most 15 s); batch handles return at once |
 | `fleet.retry.maxRetries` | `2` | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | next dispatch |
