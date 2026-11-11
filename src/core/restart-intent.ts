@@ -75,23 +75,13 @@ export function consumeRestartIntent(
  * text was carried over, so the resumed model does not read a bare
  * "Restarted on build X." prefix as injected text.
  */
-export function restartContinuationMessage(text: string, buildId: string | null): string {
-	const build = buildId ? `build ${buildId}` : "the source tree";
+export function restartContinuationMessage(text: string, buildId: string | null, commit: string | null = null): string {
+	const build = buildId ? `build ${buildId}${commit ? ` (${commit})` : ""}` : "the source tree";
 	return `This session resumed on ${build} after /restart, which carried this task over from before the restart: ${text}`;
 }
 
 /** Longest task text `/restart <text>` carries into the restarted session. */
 export const RESTART_CONTINUATION_MAX = 2000;
-
-/** The first turn of a restarted session: "Restarted on build <id> (<commit>)." then the task; no parenthesis without a commit. */
-export function formatRestartContinuation(
-	buildId: string | null | undefined,
-	commit: string | null | undefined,
-	text: string,
-): string {
-	const build = buildId || "source";
-	return `Restarted on build ${build}${commit ? ` (${commit})` : ""}. ${text}`;
-}
 
 function restartContinuationPath(stateDir: string): string {
 	return join(stateDir, "restart-continuation.json");

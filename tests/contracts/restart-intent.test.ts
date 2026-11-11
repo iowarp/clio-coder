@@ -7,7 +7,6 @@ import { armRestartHandoff, restartFallbackAdvice } from "../../src/core/restart
 import {
 	consumeRestartContinuation,
 	consumeRestartIntent,
-	formatRestartContinuation,
 	RESTART_CONTINUATION_MAX,
 	RESTART_EXEC_ENV,
 	restartContinuationMessage,
@@ -117,9 +116,9 @@ test("restart continuation reaches only the restarted session, once, capped", ()
 });
 
 test("the restart continuation names the new build and its commit, omitting an unknown commit", () => {
-	assert.equal(formatRestartContinuation("b123", "abc1234", "go on"), "Restarted on build b123 (abc1234). go on");
-	assert.equal(formatRestartContinuation("b123", null, "go on"), "Restarted on build b123. go on");
-	assert.equal(formatRestartContinuation(null, "", "go on"), "Restarted on build source. go on");
+	assert.match(restartContinuationMessage("go on", "b123", "abc1234"), /resumed on build b123 \(abc1234\) after/);
+	assert.match(restartContinuationMessage("go on", "b123"), /resumed on build b123 after/);
+	assert.match(restartContinuationMessage("go on", null, "abc1234"), /resumed on the source tree after/);
 });
 
 test("/restart takes an optional task to continue with", () => {

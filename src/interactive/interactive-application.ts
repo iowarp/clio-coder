@@ -1,4 +1,4 @@
-import { runningBuildId } from "../core/build-info.js";
+import { readBuildProvenance, runningBuildId } from "../core/build-info.js";
 import type { ClioSettings } from "../core/config.js";
 import { interfaceGuidanceEnabled, nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
@@ -1607,7 +1607,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const restartContinuation = restartSessionId ? consumeRestartContinuation(deps.stateDir, restartSessionId) : undefined;
 	if (restartContinuation)
 		setImmediate(() =>
-			editorSubmit.submitEditorText(restartContinuationMessage(restartContinuation, runningBuildId ?? null)),
+			editorSubmit.submitEditorText(
+				restartContinuationMessage(
+					restartContinuation,
+					runningBuildId ?? null,
+					((b) => (b ? `${b.commit}${b.dirty ? "-dirty" : ""}` : null))(readBuildProvenance()),
+				),
+			),
 		);
 
 	const interactiveTickers = createInteractiveTickers({
