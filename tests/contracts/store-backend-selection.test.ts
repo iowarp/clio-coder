@@ -1,4 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
@@ -151,5 +153,47 @@ describe("store backend selection", () => {
 					else process.env[key] = value;
 				}
 			}
+		}));
+
+	it("a process killed by a signal still releases the shared daemon", () =>
+		withHome(async (dir, root) => {
+			const released = join(dir, "released");
+			const clioRun = join(dir, "clio_run");
+			writeFileSync(
+				clioRun,
+				`#!${process.execPath}\n` +
+					`const args = process.argv.slice(2);\n` +
+					`if (args.includes("--help")) process.exit(0);\n` +
+					`if (args[0] === "release") process.getBuiltinModule("node:fs").writeFileSync(${JSON.stringify(released)}, args.join(" "));\n` +
+					`else console.log(JSON.stringify({ action: "started", port: 1, version: "x" }));\n`,
+			);
+			chmodSync(clioRun, 0o755);
+			writeRecord(JSON.stringify({ v: 1, backend: "clio-core", python: join(dir, "python3") }));
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"--input-type=module",
+					"-e",
+					`const { openStoreBackend } = await import(${JSON.stringify(join(process.cwd(), "src/domains/store/index.ts"))});\n` +
+						`await openStoreBackend(${JSON.stringify(root)}).catch(() => {});\n` +
+						`console.log("attached");\nsetInterval(() => {}, 1000);\n`,
+				],
+				{ stdio: ["ignore", "pipe", "inherit"] },
+			);
+			let out = "";
+			child.stdout.setEncoding("utf8");
+			await new Promise<void>((resolve) => {
+				child.stdout.on("data", (chunk: string) => {
+					out += chunk;
+					if (out.includes("attached")) resolve();
+				});
+			});
+			child.kill("SIGTERM");
+			const [, signal] = (await once(child, "exit")) as [number | null, NodeJS.Signals | null];
+			strictEqual(signal, "SIGTERM", "the process still dies by the signal");
+			ok(existsSync(released), "clio_run release ran");
+			ok(readFileSync(released, "utf8").startsWith("release --client clio-coder-"));
 		}));
 });

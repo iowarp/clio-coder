@@ -52,6 +52,7 @@ const PIP_PACKAGE = "iowarp-core";
 const DAEMON_CONNECT_MS = 2000;
 const ENSURE_TIMEOUT_MS = 60_000;
 const RELEASE_TIMEOUT_MS = 5000;
+const RELEASE_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -244,12 +245,20 @@ type EnsureOutcome =
 
 const registered = new Set<string>();
 
-/** Released once, synchronously, as this process exits; never `--stop-if-last` unless the record asks for it. */
+/**
+ * Released once, synchronously, as this process exits or a signal kills it; never
+ * `--stop-if-last` unless the record asks for it. A signal no one else handles
+ * would end the process without an exit event, so this releases first and then
+ * re-raises it; where a handler exists, that handler's exit releases instead.
+ */
 function releaseOnExit(clioRun: string, config: string | undefined, stopIfLast: boolean): void {
 	const key = `${clioRun}\0${config ?? ""}`;
 	if (registered.has(key)) return;
 	registered.add(key);
-	process.once("exit", () => {
+	let released = false;
+	const release = (): void => {
+		if (released) return;
+		released = true;
 		spawnSync(
 			clioRun,
 			[
@@ -261,7 +270,17 @@ function releaseOnExit(clioRun: string, config: string | undefined, stopIfLast: 
 			],
 			{ env: toolEnv(config), timeout: RELEASE_TIMEOUT_MS, stdio: "ignore", windowsHide: true },
 		);
-	});
+	};
+	process.once("exit", release);
+	for (const signal of RELEASE_SIGNALS) {
+		const onSignal = (): void => {
+			process.off(signal, onSignal);
+			if (process.listenerCount(signal) > 0) return;
+			release();
+			process.kill(process.pid, signal);
+		};
+		process.on(signal, onSignal);
+	}
 }
 
 async function ensureDaemon(clioRun: string, selection: ClioCoreSelection): Promise<EnsureOutcome> {
