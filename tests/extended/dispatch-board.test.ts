@@ -25,6 +25,7 @@ import {
 	createDispatchBoardView,
 	type DispatchBoardRow,
 	dispatchStatusPresentation,
+	formatFleetDockRows,
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
@@ -839,4 +840,26 @@ it("keeps shadow runs inspectable while presenting them only as compact helper a
 	match(mixed, /coder/);
 	doesNotMatch(mixed, /scout/);
 	match(dispatchSegment([...rows, ordinary]) ?? "", /helpers scout ×4 4 active · dispatch 1 active/);
+});
+
+it("keeps a council's settled member in its live card so the count is the whole council", () => {
+	const { bus, board } = setup();
+	const member = (runId: string, label: string): DispatchEnqueuedPayload => ({
+		...IDENTITY,
+		runId,
+		council: { group: "g-two", label, round: 1 },
+	});
+	for (const [runId, label] of [
+		["fast-run", "fast"],
+		["slow-run", "slow"],
+	] as const) {
+		bus.emit("run.enqueued", member(runId, label));
+		bus.emit("run.started", { ...member(runId, label), pid: null, assignmentId: runId, attempt: 0 });
+	}
+	bus.emit("run.completed", { ...COMPLETED, ...member("fast-run", "fast") });
+	board.reconcile();
+	const dock = formatFleetDockRows(board.liveRows(), 120).map(stripTerminalSequences).join("\n");
+	match(dock, /council of 2 · running/u);
+	doesNotMatch(dock, /council of 1/u);
+	board.unsubscribe();
 });

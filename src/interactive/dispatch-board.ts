@@ -1563,6 +1563,23 @@ function foldCouncilGroup(
 	};
 }
 
+/**
+ * Live rows plus the settled members of any council still running. A council is one card, so the member that already
+ * answered stays in it: without it a council of two with one member left read `council of 1 · running`.
+ */
+function withCouncilSiblings(
+	active: ReadonlyArray<DispatchBoardRow>,
+	all: ReadonlyArray<DispatchBoardRow>,
+): DispatchBoardRow[] {
+	const groups = new Set(active.flatMap((row) => (row.council === undefined ? [] : [row.council.group])));
+	if (groups.size === 0) return [...active];
+	const shown = new Set(active.map((row) => row.runId));
+	return [
+		...active,
+		...all.filter((row) => row.council !== undefined && groups.has(row.council.group) && !shown.has(row.runId)),
+	];
+}
+
 /** A board entry: either one ordinary run, or one whole council in the position of its first row. */
 export type DispatchBoardItem = { kind: "run"; row: DispatchBoardRow } | { kind: "council"; group: CouncilGroupView };
 
@@ -2875,9 +2892,12 @@ export function createDispatchBoardStore(
 		activeRows: () => projectRows(true),
 		liveRows: () => {
 			const live = plans.live();
-			if (live.length === 0) return projectRows(true);
+			if (live.length === 0) return withCouncilSiblings(projectRows(true), projectRows(false));
 			const byRun = new Map(projectRows(false).map((row) => [row.runId, row]));
-			return [...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())), ...projectRows(true)];
+			return [
+				...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())),
+				...withCouncilSiblings(projectRows(true), projectRows(false)),
+			];
 		},
 		workerRows: () => projectRows(false),
 		reconcile() {
