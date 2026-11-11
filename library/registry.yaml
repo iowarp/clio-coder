@@ -407,6 +407,37 @@ entries:
           self-reviews against the acceptance criteria, leaving a verified
           uncommitted change. Not for filing; use file-ticket. Not for commi"
   - kind: plugin
+    name: hoare
+    description: "Hoare-logic correctness review: states pre- and postconditions,
+      loop invariants and variants for named functions, derives the verification
+      conditions with language-specific hazard obligations for C/C++, Python and
+      Fortran, and discharges each by a declared prover check or a written
+      argument. Every obligation carries an honest status (mechanized, modeled,
+      argued, assumed, refuted, unknown), so an argued proof is never reported
+      as a machine-checked one. Ships a read-only verifier agent that answers a
+      verifier-report, a /hoare:review prompt and a build-review playbook."
+    version: 0.1.0
+    sourceUrl: plugins/hoare
+    sha256: a4a7b1825326808a5b2c8b58ebe50732490479a198f2573eed2fa5ec1b5a62e1
+    provides:
+      - kind: agent
+        name: hoare-verifier
+        description: Reviews named functions with Hoare logic and reports every proof
+          obligation with an honest status, as a pass/fail verifier report.
+      - kind: playbook
+        name: hoare-build-review
+        description: Implement a change, then hold it against an independent Hoare-logic
+          reviewer with a bounded revise loop.
+      - kind: prompt
+        name: hoare:review
+        description: Review named functions with Hoare logic and write a correctness report.
+      - kind: skill
+        name: hoare-verification
+        description: Reviews named functions for correctness with Hoare logic. States
+          each precondition and postcondition with its source, adds loop
+          invariants, variants and frame conditions, derives the verification
+          conditions with the language's hazard obligations, and disch
+  - kind: plugin
     name: hpc
     description: "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm
       server, Lmod and Spack software environments, parallel HDF5 and MPI-IO,
