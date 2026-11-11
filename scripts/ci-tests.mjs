@@ -11,6 +11,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // Keep the development gate small and source-only. Package, platform and
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
+	"package-manager-launch",
+	"release-clean-build",
+	"stale-build-replaced",
 	"arcade-egg",
 	"check-lane-selection",
 	"handbook-bench",
