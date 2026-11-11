@@ -398,6 +398,10 @@
 	border-radius: var(--radius-sm);
 	background: var(--surface);
 }
+.json-tree__branch > summary {
+	cursor: pointer;
+	white-space: nowrap;
+}
 .markdown .md-details > summary {
 	display: flex;
 	align-items: center;
@@ -573,10 +577,6 @@
 	overflow: auto;
 	color: var(--code-ink);
 	font: var(--text-exact) / 1.7 var(--font-mono);
-}
-.json-tree__branch > summary {
-	cursor: pointer;
-	white-space: nowrap;
 }
 .json-tree__children {
 	margin-left: 0.45em;

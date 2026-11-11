@@ -345,21 +345,6 @@
 	outline: 2px solid var(--focus);
 	outline-offset: 2px;
 }
-.pane-more > summary > span {
-	display: grid;
-	flex: 1;
-	gap: var(--space-1);
-	min-width: 0;
-}
-.pane-more > summary strong {
-	font-size: var(--text-meta);
-	font-weight: 500;
-	color: var(--ink);
-}
-.pane-more > summary small {
-	font-size: var(--text-exact);
-	color: var(--ink-muted);
-}
 .pane-more > summary > .icon {
 	flex: none;
 	width: var(--icon-sm);
@@ -1015,4 +1000,19 @@
 	white-space: nowrap;
 	color: var(--ink);
 	text-decoration: none;
+}
+.pane-more > summary > span {
+	display: grid;
+	flex: 1;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.pane-more > summary strong {
+	font-size: var(--text-meta);
+	font-weight: 500;
+	color: var(--ink);
+}
+.pane-more > summary small {
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
 }
