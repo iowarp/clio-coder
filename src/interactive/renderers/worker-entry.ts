@@ -172,15 +172,19 @@ function originGlyph(entry: WorkerEntryState): string {
  * else's process and can only name the protocol it was reached through, so it
  * carries that on the agent instead of a route.
  */
-function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
-	const { kind, targetId, wireModelId } = entry.runtime;
+function workerRoute(entry: WorkerEntryState): string | undefined {
+	const { targetId, wireModelId } = entry.runtime;
 	// A model id that already starts with its target's name (`mock` serving `mock/judge-model`) is not repeated.
-	const route =
-		targetId !== undefined && wireModelId !== undefined
-			? wireModelId.startsWith(`${targetId}/`)
-				? wireModelId
-				: `${targetId}/${wireModelId}`
-			: (targetId ?? wireModelId);
+	return targetId !== undefined && wireModelId !== undefined
+		? wireModelId.startsWith(`${targetId}/`)
+			? wireModelId
+			: `${targetId}/${wireModelId}`
+		: (targetId ?? wireModelId);
+}
+
+function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
+	const { kind } = entry.runtime;
+	const route = workerRoute(entry);
 	// A council member reads by its roster label in its roster color, the name
 	// the operator configured, rather than by its agent id. The synthesis card is the council's own row, so it goes by
 	// the council's size, and a council that only collected ran no model of its own, so it names no route.
@@ -701,6 +705,14 @@ function councilMemberGist(entry: WorkerEntryState): string {
 	return displayText(entry, "gist", first.replace(/^\s*-\s*/u, "").trim());
 }
 
+/** A council member's aligned header names the route that answered, since members differ mainly by route. */
+function alignedName(entry: WorkerEntryState): string {
+	const name = workerName(entry);
+	if (entry.council === undefined || isSynthesis(entry) || entry.runtime.kind === "acp") return name;
+	const route = workerRoute(entry);
+	return route === undefined ? name : `${name} · ${displayText(entry, "route", route)}`;
+}
+
 /** Dispatch rows reserve the clock before cutting the task or agent name. */
 function alignedHeader(
 	entry: WorkerEntryState,
@@ -739,8 +751,8 @@ function alignedHeader(
 		...(siblings ?? []).map((sibling) => (isPending(sibling) ? 0 : visibleWidth(headerWord(sibling)))),
 	);
 	const status = word === null ? mark : `${mark}${meta(` ${word.padEnd(wordWidth)}`)}`;
-	const name = workerName(entry);
-	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
+	const name = alignedName(entry);
+	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(alignedName(sibling))));
 	const prefix = cardPrefix(entry);
 	const nameWidth = Math.max(0, Math.min(widest, width - visibleWidth(prefix) - TIMER_WIDTH - 3));
 	const shown = truncateToWidth(name, nameWidth, GLYPH.ellipsis, false);

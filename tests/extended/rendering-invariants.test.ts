@@ -3083,7 +3083,7 @@ describe("agent invocations", () => {
 				outcome: "succeeded",
 				durationMs: 4_000,
 				toolCalls: 0,
-				trust: { validationGrounding: { state: "absent", authority: { id: "none" } } } as never,
+				trust: settledRunTrust(fixtureReceiptDraft(fixtureEnvelope("p2"))),
 			},
 		});
 		const plain = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("standard"), siblings: [member] })
