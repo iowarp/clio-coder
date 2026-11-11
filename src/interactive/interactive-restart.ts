@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { runningBuildId } from "../core/build-info.js";
-import { writeRestartIntent } from "../core/restart-intent.js";
+import { writeRestartContinuation, writeRestartIntent } from "../core/restart-intent.js";
 import { missingBuildFiles } from "../core/running-build.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
@@ -64,9 +64,9 @@ export function interactiveRestartBusyReason(deps: {
 	return null;
 }
 
-export function createInteractiveRestart(deps: InteractiveRestartDeps): () => void {
+export function createInteractiveRestart(deps: InteractiveRestartDeps): (continuation?: string) => void {
 	let active = false;
-	return () => {
+	return (continuation) => {
 		if (active) {
 			deps.notify("warning", "Restart refused: a restart is already in progress.");
 			return;
@@ -89,6 +89,7 @@ export function createInteractiveRestart(deps: InteractiveRestartDeps): () => vo
 					return;
 				}
 				writeRestartIntent(deps.stateDir, sessionId);
+				if (continuation?.trim()) writeRestartContinuation(deps.stateDir, sessionId, continuation);
 				deps.armHandoff();
 				await deps.shutdown();
 			} catch (error) {

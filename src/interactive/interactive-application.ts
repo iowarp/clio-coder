@@ -1,9 +1,11 @@
+import { runningBuildId } from "../core/build-info.js";
 import type { ClioSettings } from "../core/config.js";
 import { interfaceGuidanceEnabled, nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
+import { consumeRestartContinuation } from "../core/restart-intent.js";
 import { isRestartHandoff } from "../core/restart-status.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -1579,6 +1581,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 		editorSubmit.submitEditorText(text);
 	};
+	// `/restart <text>`: the restarted session continues the task on the new build.
+	const restartSessionId = deps.startsResumed ? deps.session?.current()?.id : undefined;
+	const restartContinuation = restartSessionId ? consumeRestartContinuation(deps.stateDir, restartSessionId) : undefined;
+	if (restartContinuation)
+		setImmediate(() =>
+			editorSubmit.submitEditorText(`Restarted on build ${runningBuildId ?? "source"}. ${restartContinuation}`),
+		);
 
 	const interactiveTickers = createInteractiveTickers({
 		tui,

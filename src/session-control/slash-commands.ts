@@ -184,7 +184,7 @@ type SlashCommandVariant =
 	| { kind: "upgrade" }
 	| { kind: "quit" }
 	| { kind: "reload"; target: ReloadTarget }
-	| { kind: "restart" }
+	| { kind: "restart"; continuation?: string }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
@@ -1126,7 +1126,7 @@ export interface SessionCommandContext {
 	/** Fire-and-forget shutdown. Handler must not await. */
 	shutdown?: () => void;
 	reloadClasses?: (target: ReloadTarget) => void;
-	restart?: () => void;
+	restart?: (continuation?: string) => void;
 	runInit: (options: InitCommandOptions) => void;
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
@@ -1669,14 +1669,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Save and restart into this session and workspace",
 		group: "Clio",
 		kinds: ["restart"],
-		args: {},
-		fromArgs: fromArgsOrUsage("restart", { kind: "restart" }),
-		handle(_command, ctx) {
+		args: { positionals: [{ name: "task", required: false, rest: true }] },
+		fromArgs(parsed) {
+			const continuation = parsed.rest?.trim();
+			return continuation ? { kind: "restart", continuation } : { kind: "restart" };
+		},
+		handle(command, ctx) {
 			if (!ctx.restart) {
 				ctx.notice("warn", "/restart is available only in an interactive terminal.");
 				return;
 			}
-			ctx.restart();
+			ctx.restart(command.kind === "restart" ? command.continuation : undefined);
 		},
 	},
 	{

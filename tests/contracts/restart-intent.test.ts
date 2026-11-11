@@ -3,8 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { consumeRestartIntent, restartIntentPath, writeRestartIntent } from "../../src/core/restart-intent.js";
+import {
+	consumeRestartContinuation,
+	consumeRestartIntent,
+	RESTART_CONTINUATION_MAX,
+	restartIntentPath,
+	writeRestartContinuation,
+	writeRestartIntent,
+} from "../../src/core/restart-intent.js";
 import { createInteractiveRestart, restartPreflight } from "../../src/interactive/interactive-restart.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 test("restart intent is preserved for the child of the process that wrote it (#420)", () => {
@@ -51,4 +59,27 @@ test("restart preflight refuses a build with a missing file and leaves the sessi
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("restart continuation reaches only the restarted session, once, capped", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-restart-continuation-"));
+	try {
+		writeRestartContinuation(root, "s1", `run the tests ${"x".repeat(3000)}`);
+		assert.equal(consumeRestartContinuation(root, "other"), undefined);
+		writeRestartContinuation(root, "s1", "run the tests");
+		assert.equal(consumeRestartContinuation(root, "s1", Date.now() + 61_000), undefined);
+		writeRestartContinuation(root, "s1", "x".repeat(3000));
+		assert.equal(consumeRestartContinuation(root, "s1")?.length, RESTART_CONTINUATION_MAX);
+		assert.equal(consumeRestartContinuation(root, "s1"), undefined);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("/restart takes an optional task to continue with", () => {
+	assert.deepEqual(parseSlashCommand("/restart"), { kind: "restart" });
+	assert.deepEqual(parseSlashCommand("/restart  run the lane check "), {
+		kind: "restart",
+		continuation: "run the lane check",
+	});
 });

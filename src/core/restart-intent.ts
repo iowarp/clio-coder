@@ -60,3 +60,33 @@ export function consumeRestartIntent(
 	const age = now - Date.parse(intent.createdAt);
 	return age >= 0 && age < 60_000 ? intent.sessionId : undefined;
 }
+
+/** Longest task text `/restart <text>` carries into the restarted session. */
+export const RESTART_CONTINUATION_MAX = 2000;
+
+function restartContinuationPath(stateDir: string): string {
+	return join(stateDir, "restart-continuation.json");
+}
+
+/** Stores the text the restarted session submits as its first turn. */
+export function writeRestartContinuation(stateDir: string, sessionId: string, text: string): void {
+	const record = { sessionId, text: text.slice(0, RESTART_CONTINUATION_MAX), createdAt: new Date().toISOString() };
+	safeResourceWrite(restartContinuationPath(stateDir), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+}
+
+/** Returns and deletes the continuation for `sessionId` when it is under a minute old. */
+export function consumeRestartContinuation(stateDir: string, sessionId: string, now = Date.now()): string | undefined {
+	const file = restartContinuationPath(stateDir);
+	let record: { sessionId?: unknown; text?: unknown; createdAt?: unknown } | null = null;
+	try {
+		record = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		// Absent or malformed: nothing to continue.
+	}
+	rmSync(file, { force: true });
+	if (!record || record.sessionId !== sessionId || typeof record.text !== "string") return undefined;
+	const age = now - (typeof record.createdAt === "string" ? Date.parse(record.createdAt) : Number.NaN);
+	if (!(age >= 0 && age < 60_000)) return undefined;
+	const text = record.text.trim().slice(0, RESTART_CONTINUATION_MAX);
+	return text.length > 0 ? text : undefined;
+}
