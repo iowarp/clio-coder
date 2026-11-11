@@ -176,7 +176,7 @@ describe("store backend selection", () => {
 			}
 		}));
 
-	it("clio_run ensure gets clio-core's environment contract, without Clio Coder's or credential variables (M-40 F20)", () =>
+	it("clio_run ensure gets clio-core's environment contract, without Clio Coder's or credential variables", () =>
 		withHome(async (dir, root) => {
 			const passed = { CLIO_REPO_PATH: "/opt/ops", CLIO_STORAGE_ROOT: "/srv/tier", LD_LIBRARY_PATH: "/opt/clio/lib" };
 			const dropped = ["CLIO_CODER_PROBE", "CLIO_ACCESS_TOKEN", "OPENAI_API_KEY"];

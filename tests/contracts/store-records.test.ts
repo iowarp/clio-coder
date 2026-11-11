@@ -111,7 +111,7 @@ describe("store records", () => {
 			strictEqual(findProducingRun(root, "out.csv", { bytes: 2, mtimeMs: out.mtimeMs, sha256: sha("4\n") }), null);
 		}));
 
-	it("names a clio-core input read through its cached copy by tag and blob (M-40 F10)", () =>
+	it("names a clio-core input read through its cached copy by tag and blob", () =>
 		withBackend(async (_local, root) => {
 			const host = {
 				state: "ready",

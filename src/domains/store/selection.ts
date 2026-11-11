@@ -152,7 +152,7 @@ const CLIO_CORE_ENV_NAMES = ["PATH", "HOME", "USER", "TMPDIR", "LD_LIBRARY_PATH"
 
 /**
  * clio-core's runtime environment contract, so a daemon Clio Coder starts is
- * the daemon the operator's shell would start (M-40 F20). Passed through:
+ * the daemon the operator's shell would start. Passed through:
  * - `PATH`, `HOME`, `USER`, `TMPDIR`;
  * - `LD_LIBRARY_PATH`, which locates the core's native libraries and operators;
  * - every `CLIO_*` variable except Clio Coder's own `CLIO_CODER_*`. Among them

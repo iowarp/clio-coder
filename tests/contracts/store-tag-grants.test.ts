@@ -65,7 +65,7 @@ describe("store tag grants", () => {
 			match(String((created as { message?: unknown }).message), /can read the store but not write/);
 		}));
 
-	it("reads tags a model sent as a JSON array string (M-40 3e)", () => {
+	it("reads tags a model sent as a JSON array string", () => {
 		const options = { auto: { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const } };
 		const parsed = dispatchRequestsFromArgs(
 			{
@@ -115,7 +115,7 @@ describe("store tag grants", () => {
 			strictEqual(writeRootsOverlap([`${join(root, "a")}/`], [`${join(root, "a", "x")}/`]), true);
 		}));
 
-	it("parallel writers holding only a grant are confined to their store directories (M-40 F13)", () =>
+	it("parallel writers holding only a grant are confined to their store directories", () =>
 		withWorkspace(async (root) => {
 			const specs = [{ id: "coder", capabilityClass: "workspace-edit" }] as never;
 			const normalized = normalizeDispatchIntent({ read_roots: ["src/"] }, new Map());
