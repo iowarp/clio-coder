@@ -170,3 +170,19 @@ test("a replaced build is told once, then pinned as a short footer line", async 
 		],
 	);
 });
+
+test("the model hears once that its own build was replaced, and only in the tree it runs from", async () => {
+	const { createStaleBuildReminderRegistration, STALE_BUILD_REMINDER } = await import(
+		"../../src/domains/middleware/stale-build-reminder.js"
+	);
+	let stale = false;
+	let own = false;
+	const rule = createStaleBuildReminderRegistration({ isStale: () => stale, runsFromWorkspace: () => own });
+	const fire = () => rule.evaluate({ hook: "turn_start" });
+	assert.deepEqual(fire(), []);
+	stale = true;
+	assert.deepEqual(fire(), [], "another workspace never hears it");
+	own = true;
+	assert.deepEqual(fire(), [{ kind: "inject_reminder", severity: "warn", message: STALE_BUILD_REMINDER }]);
+	assert.deepEqual(fire(), []);
+});

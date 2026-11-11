@@ -181,6 +181,7 @@ import {
 import type { MemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
+import { createStaleBuildReminderRegistration } from "../domains/middleware/stale-build-reminder.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
@@ -1352,6 +1353,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// static routing line and tasks hint ask for the same board; battery-tested
 	// local models only comply when the instruction rides the user message.
 	middlewareRegistrar.registerHook(createTaskBoardReminderRegistration());
+	middlewareRegistrar.registerHook(createStaleBuildReminderRegistration());
 	const taskMemoryBank = memoryOwner.bank;
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
