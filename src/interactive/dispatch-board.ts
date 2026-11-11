@@ -2274,7 +2274,7 @@ export function dispatchBoardHintEntries(
 			entries.push({ key: "w", verb: "watch in a pane", short: "watch" });
 		entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: !steerable });
 	} else entries.push({ key: "Enter", verb: board.detailExpanded() ? "hide detail" : "detail", critical: true });
-	if (steerable) entries.push({ key: "s", verb: "steer", critical: true });
+	if (steerable) entries.push({ key: "m", verb: "steer", critical: true });
 	if (isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });
 	return entries;
 }

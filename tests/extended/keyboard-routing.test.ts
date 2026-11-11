@@ -105,7 +105,9 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		dismiss: 0,
 		shutdown: 0,
 		runCancel: 0,
+		steer: 0,
 	};
+	const moved: string[] = [];
 	editor.onSubmit = () => {
 		counts.submit++;
 	};
@@ -204,7 +206,12 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 			},
 		},
 		watchSelectedDispatch: () => false,
-		steerSelectedDispatch: noop,
+		steerSelectedDispatch: () => {
+			counts.steer++;
+		},
+		notifyMovedKey: (text: string) => {
+			moved.push(text);
+		},
 		cancelSelectedDispatch: () => {
 			counts.runCancel++;
 		},
@@ -274,6 +281,7 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		close,
 		overlays,
 		active,
+		moved,
 		state: () => state,
 		mount(next: OverlayState, factory: () => ReturnType<typeof tui.showOverlay>) {
 			state = next;
@@ -806,11 +814,25 @@ it("cancels a real Library child review before its parent, without writes or glo
 it("Ctrl+C is Esc in Fleet Runs: it folds an open run detail before it closes the board", () => {
 	const f = fixture();
 	f.open("dispatch-board");
-	f.terminal.input("d");
+	f.terminal.input("\r");
 	f.terminal.input("\x03");
 	assert.equal(f.state(), "dispatch-board", "the first Ctrl+C folds the detail");
 	f.terminal.input("\x03");
 	assert.equal(f.state(), "closed");
+});
+it("m steers a fleet run; the old s and d answer with their new key and do nothing", () => {
+	const f = fixture();
+	f.open("dispatch-board");
+	f.terminal.input("d");
+	assert.equal(f.active.detail, false, "d no longer toggles the detail");
+	f.terminal.input("\r");
+	assert.equal(f.active.detail, true, "Enter does");
+	assert.equal(f.state(), "dispatch-board");
+	f.terminal.input("s");
+	assert.equal(f.counts.steer, 0, "s no longer steers");
+	f.terminal.input("m");
+	assert.equal(f.counts.steer, 1);
+	assert.deepEqual(f.moved, ["d is now Enter here", "s is now m here"]);
 });
 it("x asks once before it cancels a fleet run; another key keeps the run", () => {
 	const f = fixture();

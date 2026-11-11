@@ -252,7 +252,7 @@ for (const width of widths) {
 		rows = [{ ...boardRow("live"), runtimeKind: "http", status: "running" }];
 		let text = hint?.(width) ?? "";
 		bounded([text], width - 3);
-		assert.match(text, /\[s\] steer/u);
+		assert.match(text, /\[m\] steer/u);
 		assert.match(text, /\[x\] cancel/u);
 		rows = [{ ...boardRow("peer"), runtimeKind: "acp-delegation", status: "running" }];
 		text = hint?.(width) ?? "";
