@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { missingBuildFiles, staleRunningBuilds } from "../core/running-build.js";
 import { runCommandVector } from "../core/safe-exec.js";
+import { packageManagerLaunch } from "../core/self-update.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
@@ -31,7 +32,8 @@ export async function installationFindings(fix: boolean): Promise<DoctorFinding[
 		let rebuildFailed = false;
 		if (fix && missing.length && installation.kind === "source") {
 			try {
-				const result = await runCommandVector("pnpm", ["run", "build"], {
+				const build = packageManagerLaunch("pnpm", ["run", "build"]);
+				const result = await runCommandVector(build.file, build.args, {
 					cwd: installation.root,
 					workspaceRoot: installation.root,
 					timeoutMs: 300_000,
