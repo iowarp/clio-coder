@@ -282,6 +282,22 @@ export const CallSettledSchema = Type.Object(
 				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle (#434). */
 				bill: Type.Optional(PricingSchema),
 				verdict: vocabulary(["hot", "partial", "cold", "small", "unknown"]),
+				/**
+				 * The request's structure as short digests, so a later process can name where a resumed request departs
+				 * from the last one journaled on its route. `entries` are `role:digest` past the first `base` entries of
+				 * this process's previous request on the route; with no `base`, the process had none and lists them all.
+				 */
+				structure: Type.Optional(
+					Type.Object(
+						{
+							system: Type.String({ pattern: "^[0-9a-f]{16}$" }),
+							tools: Type.String({ pattern: "^[0-9a-f]{16}$" }),
+							base: Type.Optional(count),
+							entries: Type.Array(Type.String({ pattern: "^[A-Za-z]{1,32}:[0-9a-f]{16}$" }), { maxItems: 65536 }),
+						},
+						closed,
+					),
+				),
 			},
 			closed,
 		),

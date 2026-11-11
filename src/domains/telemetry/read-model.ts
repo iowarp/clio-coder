@@ -190,6 +190,8 @@ interface Attempt extends FoldedAttempt {
 	recordIds: string[];
 	/** The tools the attempt's call asked for, as tool.settled recorded them; null when none is recorded. */
 	tools: ToolSummary | null;
+	/** Where a process's first request on its route departs mid-transcript from the last one journaled there. */
+	replay: string | null;
 }
 /** The tool calls one model call asked for (#434 §12.3, §12.4). */
 interface ToolSummary {
@@ -260,6 +262,7 @@ interface Analysis {
 interface Growth {
 	folder: CallJournalFolder;
 	meta: Map<string, AttemptMeta>;
+	replays: ReplayRoutes;
 	/** Tool calls by the model call that asked for them, and each call's attempts, so a late tool record moves its call. */
 	tools: Map<string, ToolSummary>;
 	callAttempts: Map<string, Set<string>>;
@@ -279,6 +282,7 @@ interface AttemptMeta {
 	settledAt?: string;
 	ctx?: TelemetryContext;
 	ids: Set<string>;
+	replay?: string;
 }
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -332,7 +336,42 @@ function attemptOf(
 		ctx: entry?.ctx ?? null,
 		recordIds: [...(entry?.ids ?? [])].sort(),
 		tools: tools.get(attempt.started.callId) ?? null,
+		replay: entry?.replay ?? null,
 	};
+}
+
+/** Each route's transcript rebuilt from its requests' structure digests: all journaled, and the last one sent. */
+interface ReplayRoutes {
+	journaled: Map<string, string[]>;
+	sent: Map<string, string[]>;
+}
+const replayRoutes = (): ReplayRoutes => ({ journaled: new Map(), sent: new Map() });
+
+/**
+ * A request with no `base` is a process's first on its route, so it replayed the transcript from the session file:
+ * when its entries part from the last request the provider saw there before that request's last entry, the replay
+ * sent a different prefix, named by the first entry that differs, `message[7]:tool`. Followed in journal order, the
+ * order the runtime settled them in.
+ */
+function noteReplay(routes: ReplayRoutes, meta: Map<string, AttemptMeta>, record: TelemetryRecord): void {
+	if (record.k !== "call.settled") return;
+	const structure = record.data.cache.structure;
+	if (!structure) return;
+	const route = `${record.ctx.agent.id}\u0000${modelKey(record.data.target)}`;
+	const previous = routes.sent.get(route);
+	const entries =
+		structure.base === undefined
+			? [...structure.entries]
+			: [...(routes.journaled.get(route) ?? []).slice(0, structure.base), ...structure.entries];
+	routes.journaled.set(route, entries);
+	if (record.data.disposition === "never_sent") return;
+	routes.sent.set(route, entries);
+	if (structure.base !== undefined || previous === undefined) return;
+	const index = previous.findIndex((entry, at) => entries[at] !== entry);
+	if (index < 0 || index === previous.length - 1) return;
+	const entry = entries[index] ?? previous[index] ?? "";
+	const attempt = meta.get(record.data.attemptId);
+	if (attempt) attempt.replay = `message[${index}]:${entry.slice(0, entry.indexOf(":"))}`;
 }
 
 /** The read model's attempt order, which per-attempt fact sums follow: start time, then attempt id. */
@@ -349,8 +388,10 @@ const byAttemptId = (a: Attempt, b: Attempt) => a.started.attemptId.localeCompar
 function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly FoldedAttempt[]): Attempt[] {
 	const meta = new Map<string, AttemptMeta>();
 	const tools = new Map<string, ToolSummary>();
+	const routes = replayRoutes();
 	for (const record of records) {
 		noteMeta(meta, record);
+		noteReplay(routes, meta, record);
 		noteTool(tools, record);
 	}
 	return attempts.map((attempt) => attemptOf(attempt, meta.get(attempt.started.attemptId), tools)).sort(byStart);
@@ -402,6 +443,7 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 /** Fold one record into the growth state; returns the attempts it may have changed. */
 function grow(growth: Growth, record: TelemetryRecord): readonly string[] {
 	noteMeta(growth.meta, record);
+	noteReplay(growth.replays, growth.meta, record);
 	if (record.k === "call.started" || record.k === "call.settled") {
 		const attempts = growth.callAttempts.get(record.data.callId) ?? new Set<string>();
 		attempts.add(record.data.attemptId);
@@ -438,6 +480,7 @@ function buildAnalysis(
 	const growth: Growth = {
 		folder: callJournalFolder(undefined, READ_MODEL_FOLD),
 		meta: new Map(),
+		replays: replayRoutes(),
 		tools: new Map(),
 		callAttempts: new Map(),
 		references: new Map(),
@@ -875,7 +918,16 @@ function isBreak(attempt: Attempt): boolean {
 }
 function coldKeys(attempt: Attempt): string[] {
 	const reasons = attempt.settled?.cache.expectedColdReasons ?? [];
-	return reasons.length > 0 ? [...new Set(reasons)] : ["unattributed"];
+	if (reasons.length > 0) return [...new Set(reasons)];
+	return [attempt.replay === null ? "unattributed" : "replay_mismatch"];
+}
+
+/** The journaled divergence, or a replay's when the process had no earlier request to compare against. */
+function divergence(attempt: Attempt): Fact<string | null> {
+	const fact = attempt.settled?.cache.firstDivergentSection ?? unobserved;
+	return attempt.replay !== null && fact.kind === "unknown"
+		? { kind: "measured", value: attempt.replay, source: "local-count" }
+		: fact;
 }
 
 function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string }): boolean {
@@ -2289,7 +2341,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 				at: attempt.settledAt ?? attempt.startedAt,
 				verdict: attempt.settled?.cache.verdict ?? "unknown",
 				expectedColdReasons: attempt.settled?.cache.expectedColdReasons ?? [],
-				firstDivergentSection: textFact(attempt.settled?.cache.firstDivergentSection ?? unobserved),
+				firstDivergentSection: textFact(divergence(attempt)),
 				rePrefilled: q("rePrefilled"),
 				uncachedPrefill: q("uncachedPrefill"),
 				breakUsd: q("breakUsd"),

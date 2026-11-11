@@ -41,6 +41,8 @@ export interface CacheRequestStructure {
 	tools: string;
 	/** Every later transcript entry, in the order the provider sends them. */
 	entries: string[];
+	/** Each entry's message role, in the same order. */
+	roles?: string[];
 	/** An earlier call's reply rides in this request, so some call on this history came before it. */
 	answered: boolean;
 }
@@ -75,6 +77,8 @@ export type CacheBreakCause =
 	| "model_changed"
 	| "transport_reset"
 	| "idle_expiry"
+	/** A resumed session's first request replayed a transcript that departs from the one last journaled. */
+	| "replay_mismatch"
 	| "unknown";
 
 export interface CacheCallObservation {

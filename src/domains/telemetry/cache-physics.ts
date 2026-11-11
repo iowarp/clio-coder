@@ -57,6 +57,32 @@ export function firstDivergentSection(previous: CacheRequestStructure, current: 
 	return current.entries.length < previous.entries.length ? "messages" : null;
 }
 
+const short = (digest: string) => digest.slice(0, 16);
+
+/**
+ * What the journal keeps of a request's structure: short digests, all of the transcript's entries for the process's
+ * first request on its route, then only those past where it parts from the previous one (`base`), so the journal
+ * grows with the transcript rather than with every request.
+ */
+export function journaledStructure(
+	structure: CacheRequestStructure,
+	previous: CacheRequestStructure | undefined,
+): NonNullable<CallSettled["cache"]["structure"]> {
+	let base = 0;
+	if (previous) {
+		const shared = Math.min(previous.entries.length, structure.entries.length);
+		while (base < shared && previous.entries[base] === structure.entries[base]) base += 1;
+	}
+	return {
+		system: short(structure.system),
+		tools: short(structure.tools),
+		...(previous ? { base } : {}),
+		entries: structure.entries
+			.slice(base)
+			.map((entry, index) => `${structure.roles?.[base + index] ?? "entry"}:${short(entry)}`),
+	};
+}
+
 /**
  * rePrefilledTokens × (input rate − cache-read rate), labelled the way the call's own cost is (#434). Both sides keep
  * the whole prompt, so a tiered rate map prices them on one tier. The re-prefilled tokens are priced as input even when

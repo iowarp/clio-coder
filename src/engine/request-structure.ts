@@ -61,6 +61,7 @@ export function requestStructure(
 			: {}),
 		tools: digest((head?.toolsAdded ?? []).map(toToolDeclaration)),
 		entries: rest.map(entryDigest),
+		roles: rest.map((message) => message.role),
 		answered: rest.some((message) => message.role === "assistant"),
 	};
 }

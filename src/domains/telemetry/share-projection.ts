@@ -129,6 +129,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		responseId: "id",
 		cache: {
 			...keep("expectedColdReasons", "rePrefilledTokens", "uncachedPrefillTokens", "verdict", "bill"),
+			// Digests of the request's text: a short message could be guessed from its digest.
+			structure: "drop",
 			firstDivergentSection: fact("token"),
 		},
 		quota: { ...keep("source"), provider: "runtime", windows: QUOTA_WINDOW },

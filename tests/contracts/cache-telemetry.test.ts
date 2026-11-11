@@ -6,7 +6,12 @@ import {
 	type CacheRequestStructure,
 } from "../../src/core/cache-telemetry.js";
 import type { CallUsage } from "../../src/core/telemetry/schemas.js";
-import { cachePhysics, firstDivergentSection, serverTimedUsage } from "../../src/domains/telemetry/cache-physics.js";
+import {
+	cachePhysics,
+	firstDivergentSection,
+	journaledStructure,
+	serverTimedUsage,
+} from "../../src/domains/telemetry/cache-physics.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
 // #423: a break the host cannot name is attributed to the route lifetime it outlived, or to a continuation
@@ -156,4 +161,29 @@ test("an omitted cache read leaves the shortfall unknown and is never a break (#
 	strictEqual(omitted.shortfallTokens, null);
 	strictEqual(omitted.cacheReadTokens, null);
 	strictEqual(omitted.cause, "none");
+});
+
+test("a request's structure is journaled whole once per process and route, then as what it appended", () => {
+	const hex = (c: string) => c.repeat(64);
+	const structure = (entries: string[]) => ({
+		system: hex("a"),
+		tools: hex("b"),
+		entries: entries.map(hex),
+		roles: entries.map((_, index) => (index % 2 === 0 ? "user" : "assistant")),
+		answered: entries.length > 1,
+	});
+	const first = structure(["1", "2", "3"]);
+	deepStrictEqual(journaledStructure(first, undefined), {
+		system: "a".repeat(16),
+		tools: "b".repeat(16),
+		entries: [`user:${"1".repeat(16)}`, `assistant:${"2".repeat(16)}`, `user:${"3".repeat(16)}`],
+	});
+	// An append carries only its new entries; a rewrite restarts where the transcripts part.
+	deepStrictEqual(journaledStructure(structure(["1", "2", "3", "4"]), first).entries, [`assistant:${"4".repeat(16)}`]);
+	deepStrictEqual(journaledStructure(structure(["1", "9", "3"]), first), {
+		system: "a".repeat(16),
+		tools: "b".repeat(16),
+		base: 1,
+		entries: [`assistant:${"9".repeat(16)}`, `user:${"3".repeat(16)}`],
+	});
 });

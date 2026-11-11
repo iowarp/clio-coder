@@ -16,7 +16,7 @@ import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/pro
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
-import { cachePhysics, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
+import { cachePhysics, journaledStructure, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
 import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/telemetry/session-journals.js";
@@ -38,7 +38,7 @@ import { prefixBlocksOf } from "./prefix-blocks.js";
  */
 
 import { performance } from "node:perf_hooks";
-import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
+import type { BackendCompletionTimings, CacheRequestStructure } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import type { BudgetAlertPayload } from "../core/telemetry/live-events.js";
@@ -409,6 +409,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// cache comparison, so the journal compares within one context generation as #423 does (#434).
 	const cacheBaselines = new Map<string, CacheBaseline>();
 	let cacheBaselineGeneration: number | undefined;
+	// The last structure journaled on each session and cache key in this process, never reset, so each request
+	// journals only what it appended to it and a later process can rebuild the transcript the provider saw.
+	const journaledStructures = new Map<string, CacheRequestStructure>();
 	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
 	// that closed the socket after its call, so the next call sends the recovery frame (#434).
 	let carriedColdReasons: ExpectedColdReason[] = [];
@@ -800,6 +803,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			});
 			if (physics.baseline) cacheBaselines.set(key, physics.baseline);
 			else cacheBaselines.delete(key);
+			const journalKey = JSON.stringify([deps.sessionId?.() ?? null, key]);
+			const journaled = structure ? journaledStructure(structure, journaledStructures.get(journalKey)) : undefined;
+			if (structure) journaledStructures.set(journalKey, structure);
 			const usage = (message as { usage?: Record<string, unknown> }).usage ?? {};
 			const verdict =
 				settlement.disposition === "settled" && typeof usage.input === "number" && typeof usage.cacheRead === "number"
@@ -818,6 +824,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...(timed ? { uncachedPrefillTokens: timed.input } : {}),
 					expectedColdReasons: sent ? reasons : [],
 					verdict,
+					...(journaled ? { structure: journaled } : {}),
 				},
 			};
 		};

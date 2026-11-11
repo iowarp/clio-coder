@@ -935,3 +935,48 @@ test("C-05: cached share skips an omitted read, and whole-block reads learn the 
 	const share = report.share?.fact;
 	ok(share?.kind === "measured" && Math.abs(share.value - (100 * 20_480) / (20_480 + 7_400)) < 1e-9);
 });
+
+test("a resumed request that departs from the last journaled one mid-transcript is a replay mismatch", () => {
+	let second = 0;
+	const d = (c: string) => c.repeat(16);
+	const call = (structure: NonNullable<CallSettled["cache"]["structure"]>) =>
+		telemetryCall("cache-replay", {
+			at: new Date(Date.UTC(2026, 10, 6, 12, 0, second++)).toISOString(),
+			usage: { cacheRead: 0, input: 9_000 },
+			cache: { verdict: "cold", rePrefilledTokens: { kind: "unknown", reason: "not-observed" }, structure },
+		});
+	const head = { system: d("a"), tools: d("b") };
+	const report = (resumed: string[]) =>
+		cacheReport(
+			{
+				...source,
+				sessionId: "cache-replay",
+				journal: {
+					...source.journal,
+					records: [
+						// One process: the first request lists its transcript, the next only what it appended.
+						...call({ ...head, entries: [`user:${d("1")}`] }),
+						...call({ ...head, base: 1, entries: [`assistant:${d("2")}`, `toolResult:${d("3")}`] }),
+						// The next process lists the whole transcript again.
+						...call({ ...head, entries: resumed }),
+					],
+				},
+			},
+			now,
+		);
+	const replayed = report([`user:${d("1")}`, `assistant:${d("9")}`, `toolResult:${d("3")}`, `user:${d("4")}`]);
+	deepStrictEqual(
+		replayed.byCause.map((row) => [row.cause, row.breaks]),
+		[
+			["replay_mismatch", 1],
+			["unattributed", 2],
+		],
+	);
+	strictEqual(replayed.breaks.at(-1)?.firstDivergentSection.display, "message[1]:assistant");
+	// A resume that only extends the journaled transcript replayed it exactly.
+	const extended = report([`user:${d("1")}`, `assistant:${d("2")}`, `toolResult:${d("3")}`, `user:${d("4")}`]);
+	deepStrictEqual(
+		extended.byCause.map((row) => [row.cause, row.breaks]),
+		[["unattributed", 3]],
+	);
+});
