@@ -50,4 +50,19 @@ describe("worker own-check bypass hardening", () => {
 		}
 		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "check", args: ["x\ncurl"] } }), "ask");
 	});
+
+	it("refuses option-like arguments after --", () => {
+		const admit = harness(false);
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run test -- tests/x.test.ts" } }), "allow");
+		for (const command of [
+			"pnpm run check -- --import=./pwn.mjs",
+			"pnpm run check -- --prefix=/",
+			"pnpm run check -- tests/x.test.ts --require=./pwn.cjs",
+			"pnpm run check -- -r ./pwn.cjs",
+			"pnpm run check -- --config=./pwn.json",
+		]) {
+			strictEqual(admit({ tool: ToolNames.Bash, args: { command } }), "ask", command);
+		}
+		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "check", args: ["--import=./pwn.mjs"] } }), "ask");
+	});
 });

@@ -312,12 +312,13 @@ function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerCo
 /**
  * A project's own check, run as a bare package script or test runner with plain
  * path arguments on one line: only spaces and tabs separate words, so a line
- * break cannot start a second command.
+ * break cannot start a second command, and nothing after `--` may be an option.
  */
 const WORKER_CHECK_COMMAND =
-	/^(?:TMPDIR=[\w./-]+[ \t]+)?(?:pnpm|npm)[ \t]+(?:run[ \t]+)?(?:test|lint|check|typecheck|build)(?::[\w.-]+)?(?:[ \t]+--(?:[ \t]+[\w=./:-]+)+)?$/u;
+	/^(?:TMPDIR=[\w./-]+[ \t]+)?(?:pnpm|npm)[ \t]+(?:run[ \t]+)?(?:test|lint|check|typecheck|build)(?::[\w.-]+)?(?:[ \t]+--(?:[ \t]+[\w=./:][\w=./:-]*)+)?$/u;
 const WORKER_CHECK_ID = /^(?:test|lint|check|typecheck|build)(?::[\w.-]+)?$/u;
-const WORKER_CHECK_ARG = /^[\w=./:-]+$/u;
+/** A path-like argument; one that begins with `-` is an option (`--import`, `--require`, `--config`, `--prefix`) and is refused. */
+const WORKER_CHECK_ARG = /^[\w=./:][\w=./:-]*$/u;
 
 /**
  * A dispatched worker's focused check inside the task worktree it owns is its
