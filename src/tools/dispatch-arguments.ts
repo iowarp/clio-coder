@@ -15,6 +15,7 @@ import {
 	dispatchIntentRefusals,
 	dispatchIntentScopeWidening,
 } from "../domains/dispatch/intent-compatibility.js";
+import { mergeOperatorNamedChecks } from "../domains/dispatch/operator-checks.js";
 import { parseRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { scoutReadWorkspace } from "../domains/dispatch/scout-workspace.js";
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
@@ -100,6 +101,12 @@ export interface DispatchArgumentParserOptions {
 	) =>
 		| { ok: true; intent: DispatchIntent; resolvedVerification: NonNullable<DispatchRequest["resolvedVerification"]> }
 		| { ok: false; message: string; reason?: string };
+	/**
+	 * Declared check ids the operator named in the turn issuing this dispatch,
+	 * for a task at `cwd`. Each one joins the request's intent verification so
+	 * the merge gate enforces it even when the coordinator left it out.
+	 */
+	operatorNamedChecks?: (cwd: string | undefined) => ReadonlyArray<string>;
 }
 
 export interface DispatchRejectedTask {
@@ -296,6 +303,12 @@ function dispatchRequestFromArgs(
 			};
 		}
 		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };
+	}
+	// External and read-only Scouts run no verification; every other task from
+	// this turn carries the checks the operator named (deduplicated).
+	if (workspace.externalReadRoot === undefined && options.isReadOnlyScout?.(agentId) !== true) {
+		const named = options.operatorNamedChecks?.(cwd) ?? [];
+		if (named.length > 0) rawIntent = mergeOperatorNamedChecks(rawIntent, named);
 	}
 	if (rawIntent !== undefined) {
 		if (options.resolveIntent === undefined) return { ok: false, message: "intent resolver is unavailable" };

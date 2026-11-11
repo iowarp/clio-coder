@@ -18,6 +18,7 @@ import {
 } from "../domains/dispatch/gate-role-prompts.js";
 import { narrowDispatchIntentToReadOnly, normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
+import { operatorNamedChecks } from "../domains/dispatch/operator-checks.js";
 import { confineGrantOnlyWriters, parallelWriterConflict } from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -276,6 +277,33 @@ function announceDotWriteRoot(deps: DispatchToolDeps, rawIntent: unknown): void 
 	});
 }
 
+/**
+ * Text of the operator's latest message in the model-visible history, the
+ * turn issuing this dispatch. Empty when no parent conversation is available.
+ */
+function operatorTurnText(deps: DispatchToolDeps): string {
+	let snapshot: ReturnType<NonNullable<DispatchToolDeps["captureWorkerContext"]>> | undefined;
+	try {
+		snapshot = deps.captureWorkerContext?.();
+	} catch {
+		return "";
+	}
+	const messages = snapshot?.messages ?? [];
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index] as { role?: unknown; content?: unknown } | undefined;
+		if (message?.role !== "user") continue;
+		if (typeof message.content === "string") return message.content;
+		if (!Array.isArray(message.content)) return "";
+		return message.content
+			.flatMap((part: unknown) => {
+				const block = part as { type?: unknown; text?: unknown } | null;
+				return block?.type === "text" && typeof block.text === "string" ? [block.text] : [];
+			})
+			.join("\n");
+	}
+	return "";
+}
+
 export function createDispatchAdmissionController(deps: DispatchToolDeps): DispatchAdmissionController {
 	const state: DispatchAdmissionState = {
 		preparedAdmissionArgs: new WeakSet<Record<string, unknown>>(),
@@ -306,8 +334,18 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 	const parseRequests = (args: Record<string, unknown>) => {
 		// A task cwd cannot supply its own approval boundary; only the host chooses the workspace (#433).
 		const sessionWorkspace = deps.getWorkspaceRoot?.() ?? deps.dispatch.owner?.().cwd ?? process.cwd();
+		const turnText = operatorTurnText(deps);
 		return dispatchRequestsFromArgs(args, {
 			workspaceRoot: sessionWorkspace,
+			operatorNamedChecks(cwd) {
+				if (turnText.length === 0) return [];
+				const discovery = discoverDeclaredChecksAtRoot(sessionWorkspace, cwd);
+				if (!discovery.ok) return [];
+				const declared = discovery.sources.flatMap((source) => source.checks);
+				// Sweep checks judge one named run and cannot ride host verification.
+				const ids = new Set(declared.filter((check) => check.runs === undefined).map((check) => check.id));
+				return operatorNamedChecks(turnText, ids);
+			},
 			isReadOnlyScout: (id) =>
 				deps.getAgentSpecs().some((spec) => spec.id === id && id === "scout" && spec.capabilityClass === "read-only"),
 			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),

@@ -1008,6 +1008,20 @@ timeout, and normalized intent into the execution snapshot and plan hash. A
 later catalog edit cannot change the approved command. Undeclared ids fail
 before approval with `verification_check_undeclared` and declaration guidance.
 
+The host also attaches the checks the operator named in the turn that issued the
+dispatch, so the merge gate enforces a "verify by running X" even when the
+coordinator does not pass it on. Admission reads the operator's latest message
+and takes every declared check id it names as `pnpm run <id>` (or another
+package manager's script run), a backticked `` `<id>` ``, or
+`verify(check="<id>")`, and appends each to the `intent.verification` of every
+task from that turn, after the coordinator's own entries and without
+duplicates, up to the 8-entry cap. Names the project does not declare are
+ignored, never invented. A script run followed by `--` arguments (such as
+`pnpm run test:file -- <path>`) is not attached, because a verification entry
+seals the declared argv and cannot carry the arguments; sweep checks and
+external or read-only Scouts are skipped
+([operator-checks.ts](../../src/domains/dispatch/operator-checks.ts)).
+
 After a successful worker attempt, the orchestrator runs the frozen checks with
 no shell, a fixed cwd, and the code-step environment allowlist. The worker may
 have written the tests and helpers a check runs, so each check, a sealed

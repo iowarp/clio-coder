@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { mergeOperatorNamedChecks, operatorNamedChecks } from "../../src/domains/dispatch/operator-checks.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -48,6 +49,35 @@ describe("dispatch schema composition", () => {
 			parsed.requests.map((request) => request.agentId),
 			["verifier", "verifier", "tester", "coder"],
 		);
+	});
+
+	it("attaches declared checks the operator named in the turn to every task's intent verification", () => {
+		const turn =
+			"Fix it, then verify by running `pnpm run check`, `lint` and pnpm run test:file -- tests/x.test.ts; also `deploy`.";
+		const named = operatorNamedChecks(turn, new Set(["check", "lint", "test:file"]));
+		assert.deepEqual(named, ["check", "lint"]);
+		const seen: unknown[] = [];
+		const parsed = dispatchRequestsFromArgs(
+			{
+				tasks: [
+					{ agent: "coder", task: "a", intent: { verification: [{ check: "lint", timeout_ms: 5000 }] } },
+					{ agent: "coder", task: "b" },
+				],
+			},
+			{
+				auto: { approvedAuthorities: ["workspace-edit"], authorityBasis: "yolo-policy" },
+				operatorNamedChecks: () => named,
+				resolveIntent(rawIntent) {
+					seen.push(rawIntent);
+					return { ok: false, message: "stop" };
+				},
+			},
+		);
+		assert.equal(parsed.ok, false);
+		assert.deepEqual(seen[0], { verification: [{ check: "lint", timeout_ms: 5000 }, { check: "check" }] });
+		assert.deepEqual(mergeOperatorNamedChecks(undefined, named), {
+			verification: [{ check: "check" }, { check: "lint" }],
+		});
 	});
 
 	it("advertises compete for a one-route fleet without a roster or adaptive routing", () => {
