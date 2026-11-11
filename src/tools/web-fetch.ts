@@ -7,6 +7,7 @@ import { fetchWebUrl } from "./web-fetch-network.js";
 import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 600_000;
 const DEFAULT_MAX_BYTES = 600_000;
 const HARD_MAX_BYTES = 5_000_000;
 const ERROR_PREVIEW_BYTES = 8_000;
@@ -687,7 +688,11 @@ export const webFetchTool: ToolSpec = {
 		const headers = { ...DEFAULT_HEADERS, ...userHeaders };
 		const hasBody = typeof args.body === "string";
 		const body = hasBody ? (args.body as string) : undefined;
-		const timeoutMs = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : DEFAULT_TIMEOUT_MS;
+		// A delay past 2^31-1 ms makes setTimeout fire after 1 ms, so a huge timeout_ms is clamped.
+		const timeoutMs =
+			typeof args.timeout_ms === "number" && args.timeout_ms > 0
+				? Math.min(Math.floor(args.timeout_ms), MAX_TIMEOUT_MS)
+				: DEFAULT_TIMEOUT_MS;
 		const requestedMaxBytes =
 			typeof args.max_bytes === "number" && args.max_bytes > 0 ? args.max_bytes : DEFAULT_MAX_BYTES;
 		const maxBytes = Math.min(Math.floor(requestedMaxBytes), HARD_MAX_BYTES);
@@ -762,11 +767,15 @@ export const webFetchTool: ToolSpec = {
 				const preview = extractWebFetchContent(read.text, contentType, response.url || parsed.toString(), "auto").content;
 				return {
 					kind: "error",
-					message: `web_fetch: HTTP ${response.status}: ${response.statusText}${preview ? `\n${UNTRUSTED_CONTENT_BANNER}\nPreview:\n${truncate(neutralizeFraming(preview), ERROR_PREVIEW_BYTES)}` : ""}`,
+					// The status text is the server's, so it follows the banner with the preview.
+					message: `web_fetch: HTTP ${response.status}\n${UNTRUSTED_CONTENT_BANNER}\nStatus text: ${truncate(neutralizeFraming(response.statusText), 200)}${preview ? `\nPreview:\n${truncate(neutralizeFraming(preview), ERROR_PREVIEW_BYTES)}` : ""}`,
 				};
 			}
 			if (isProbablyBinary(contentType, read.text)) {
-				return { kind: "error", message: `web_fetch: binary or unsupported content type: ${contentType || "unknown"}` };
+				return {
+					kind: "error",
+					message: `web_fetch: binary or unsupported content type\n${UNTRUSTED_CONTENT_BANNER}\nContent-Type: ${truncate(neutralizeFraming(contentType || "unknown"), 200)}`,
+				};
 			}
 			const finalUrl = response.url || parsed.toString();
 			const extracted = extractWebFetchContent(read.text, contentType, finalUrl, format);

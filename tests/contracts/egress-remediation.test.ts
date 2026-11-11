@@ -232,3 +232,40 @@ test("remote success and HTTP error previews carry the shared untrusted banner",
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
+
+test("server status text and content type follow the untrusted banner, and a huge timeout_ms is clamped", async () => {
+	const { createServer } = await import("node:http");
+	const { UNTRUSTED_CONTENT_BANNER } = await import("../../src/core/untrusted-content.js");
+	const server = createServer((request, response) => {
+		if (request.url === "/error") response.writeHead(400, "STATUS-MARKER");
+		else if (request.url === "/binary") response.writeHead(200, { "content-type": "image/png; TYPE-MARKER" });
+		else {
+			setTimeout(() => response.end("slow body"), 30);
+			return;
+		}
+		response.end("x");
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const previous = process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+	process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = "1";
+	try {
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("missing address");
+		const base = `http://127.0.0.1:${address.port}`;
+		for (const [path, marker] of [
+			["/error", "STATUS-MARKER"],
+			["/binary", "TYPE-MARKER"],
+		] as const) {
+			const result = await webFetchTool.run({ url: `${base}${path}` });
+			const text = result.kind === "ok" ? result.output : result.message;
+			const banner = text.indexOf(UNTRUSTED_CONTENT_BANNER);
+			strictEqual(banner >= 0 && banner < text.indexOf(marker), true, text);
+		}
+		const slow = await webFetchTool.run({ url: `${base}/slow`, timeout_ms: 1e12 });
+		strictEqual(slow.kind, "ok", slow.kind === "error" ? slow.message : "");
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+		else process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = previous;
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
