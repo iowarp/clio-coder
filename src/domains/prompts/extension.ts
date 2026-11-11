@@ -376,7 +376,15 @@ export function createPromptsBundle(
 				if (!diffTouchesFragments(paths)) return;
 				reload();
 			});
-			unsubscribePluginsReload = context.bus.subscribe("plugin.reloaded", () => reload());
+			const unsubscribePlugins = context.bus.subscribe("plugin.reloaded", () => reload());
+			const unsubscribeRequested = context.bus.subscribe("prompts.reload_requested", () => {
+				reload();
+				invalidateSessionSources();
+			});
+			unsubscribePluginsReload = () => {
+				unsubscribePlugins();
+				unsubscribeRequested();
+			};
 		},
 		async stop() {
 			unsubscribeContextSources?.();

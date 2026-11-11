@@ -83,7 +83,15 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					);
 				}
 			};
-			unsubscribePluginsReload = _context.bus.subscribe("plugin.reloaded", onResourceReload);
+			const unsubscribePlugins = _context.bus.subscribe("plugin.reloaded", onResourceReload);
+			const unsubscribeRequested = _context.bus.subscribe("prompts.reload_requested", () => {
+				rediscoveryPending = true;
+				onResourceReload(undefined);
+			});
+			unsubscribePluginsReload = () => {
+				unsubscribePlugins();
+				unsubscribeRequested();
+			};
 		},
 		async stop() {
 			unsubscribePluginsReload?.();

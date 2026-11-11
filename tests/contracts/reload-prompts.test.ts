@@ -1,0 +1,47 @@
+import { match, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { createReloadClasses } from "../../src/entry/reload-classes.js";
+
+const fragment = (id: string, body: string) => `---\nid: ${id}\nversion: 1\ndescription: Test.\n---\n${body}\n`;
+
+test("/reload prompts reports a modified fragment by id and keeps the old table when one is broken", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "clio-reload-prompts-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	mkdirSync(join(root, "identity"));
+	writeFileSync(join(root, "identity", "main.md"), fragment("identity.main", "One."));
+	const bus = createTelemetryHub();
+	let requested = 0;
+	bus.subscribe("prompts.reload_requested", () => {
+		requested += 1;
+	});
+	const reloads = createReloadClasses({
+		config: undefined,
+		bus,
+		cwd: () => root,
+		library: () => undefined,
+		reloadLibrary: () => {
+			throw new Error("unused");
+		},
+		extensions: () => [],
+		fragmentsRoot: root,
+	});
+	const operators = async () => ({ status: "ok", message: "", failures: [], nextSession: [] });
+
+	writeFileSync(join(root, "identity", "main.md"), fragment("identity.main", "Two."));
+	const changed = await reloads.run("prompts", operators);
+	strictEqual(changed.failed, false);
+	match(changed.text, /modified: 1 \(identity\.main\)/u);
+	match(changed.text, /safety rule packs/u);
+	strictEqual(requested, 1);
+
+	writeFileSync(join(root, "identity", "broken.md"), "no frontmatter\n");
+	const broken = await reloads.run("prompts", operators);
+	strictEqual(broken.failed, true);
+	ok(broken.text.includes("previous table kept"));
+	match(broken.text, /broken\.md/u);
+	strictEqual(requested, 1);
+});

@@ -4,6 +4,7 @@ import { diffSettings, settingsChangeKind } from "../domains/config/classify.js"
 import type { ConfigContract } from "../domains/config/contract.js";
 import type { InstalledExtension } from "../domains/extensions/types.js";
 import type { InstalledPlugin, PluginSnapshot } from "../domains/plugins/types.js";
+import { loadFragments } from "../domains/prompts/fragment-loader.js";
 import type { ReloadClassesController, ReloadReport } from "../session-control/reload-report.js";
 
 type Inventory = Map<string, string>;
@@ -65,6 +66,13 @@ export interface ReloadClassesDeps {
 	library(): PluginSnapshot | undefined;
 	reloadLibrary(): PluginSnapshot;
 	extensions(): ReadonlyArray<InstalledExtension>;
+	/** Fragment root to read; tests point it at a temporary tree. Defaults to the running package's. */
+	fragmentsRoot?: string;
+}
+
+function fragmentInventory(rootDir: string | undefined): Inventory {
+	const table = loadFragments(rootDir === undefined ? undefined : { rootDir });
+	return new Map([...table.byId].map(([id, fragment]) => [id, fragment.contentHash]));
 }
 
 /** Owns just one command's reporting scope; the existing reloads remain the writers. */
@@ -75,6 +83,12 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 	let configFailure: string | null = null;
 	const bootSettings = deps.config ? structuredClone(deps.config.get()) : undefined;
 	let reportedSettings = bootSettings;
+	let reportedFragments: Inventory | null = null;
+	try {
+		reportedFragments = fragmentInventory(deps.fragmentsRoot);
+	} catch {
+		// The prompts domain reports a broken table at boot; the first reload compares against itself.
+	}
 	deps.bus.subscribe("config.reload_failed", ({ message }) => {
 		configFailure = message;
 	});
@@ -165,8 +179,24 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 						failure("Extensions", error);
 					}
 				}
+				if (target === "all" || target === "prompts") {
+					try {
+						const before = reportedFragments ?? fragmentInventory(deps.fragmentsRoot);
+						// Validate first: a broken fragment fails here and the domains keep their tables.
+						const after = fragmentInventory(deps.fragmentsRoot);
+						deps.bus.emit("prompts.reload_requested", { cwd: deps.cwd() });
+						reportedFragments = after;
+						lines.push(...summary("Prompt fragments", before, after));
+						lines.push("  recipes: rediscovered");
+						lines.push("  session sources (handbook, project rules, catalogs): re-read on the next request");
+						lines.push("  prompt prefix changed; the next request re-sends it uncached");
+						lines.push("  failed: none");
+					} catch (error) {
+						failure("Prompt fragments (previous table kept)", error);
+					}
+				}
 				lines.push(
-					"Restart-bound classes: core tool schemas, provider runtimes, runtime plugins, safety rule packs, config/session schemas and pane host are not reloaded by these commands.",
+					"Restart-bound classes: compiled source (everything under src/**/*.ts), core tool schemas, provider runtimes, runtime plugins, safety rule packs, config/session schemas and pane host are not reloaded by these commands.",
 				);
 				return { text: lines.join("\n"), failed };
 			} finally {

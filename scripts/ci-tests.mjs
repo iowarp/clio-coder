@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
 	"check-lane-selection",
+	"reload-prompts",
 	"memory-off-marker",
 	"headless-observed",
 	"prompt-preconditions",

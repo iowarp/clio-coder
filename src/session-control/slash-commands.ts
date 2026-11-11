@@ -1638,12 +1638,20 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Reload settings, library resources and extension runtimes with one report",
 		group: "Clio",
 		kinds: ["reload"],
-		args: { positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "all"] }] },
+		args: {
+			positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "prompts", "all"] }],
+		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "reload", reason: parsed.error };
 			const target = parsed.positionals[0] ?? "all";
-			if (target !== "settings" && target !== "library" && target !== "extensions" && target !== "all")
-				return { kind: "usage-error", command: "reload", reason: "Choose settings, library, extensions or all" };
+			if (
+				target !== "settings" &&
+				target !== "library" &&
+				target !== "extensions" &&
+				target !== "prompts" &&
+				target !== "all"
+			)
+				return { kind: "usage-error", command: "reload", reason: "Choose settings, library, extensions, prompts or all" };
 			return { kind: "reload", target };
 		},
 		handle(command, ctx) {

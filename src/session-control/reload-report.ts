@@ -1,5 +1,5 @@
 /** Shared command types; this leaf never loads the interactive runtime. */
-export type ReloadClass = "settings" | "library" | "extensions";
+export type ReloadClass = "settings" | "library" | "extensions" | "prompts";
 export type ReloadTarget = ReloadClass | "all";
 
 export interface ReloadReport {
