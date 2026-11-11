@@ -130,6 +130,7 @@ export const coreTests = [
 	"copilot-keychain",
 	"copilot-context-tier",
 	"copilot-context-tier-setting",
+	"web-read-taint",
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
 	"plugin-engine",
