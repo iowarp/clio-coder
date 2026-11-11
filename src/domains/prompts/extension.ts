@@ -21,7 +21,10 @@ import {
 import { detectRunIdentity } from "../dispatch/run-identity.js";
 import { headForRedaction } from "../evidence/redact.js";
 import { loadMcpServerConfig } from "../gateway/mcp/config.js";
+import { interopAgentKind, peerModeCapabilities } from "../interop/index.js";
+import type { InteropAgentRecord } from "../interop/types.js";
 import { redactForMemoryRoute } from "../memory/secret-text.js";
+import { PANE_PEER_IDS } from "../mux/operations.js";
 import type { ResourcesContract } from "../resources/contract.js";
 import { modelVisibleSkills } from "../resources/skills/loader.js";
 import { isAutonomyLevel } from "../safety/autonomy.js";
@@ -107,7 +110,14 @@ export function createPromptsBundle(
 
 	/** Names and purposes only; every route below re-checks readiness and admission when used. */
 	function captureCatalogs(cwd: string): CatalogSnapshot {
-		const snapshot: CatalogSnapshot = { skills: [], agents: [], playbooks: [], mcpServers: [] };
+		const snapshot: CatalogSnapshot = {
+			skills: [],
+			agents: [],
+			playbooks: [],
+			mcpServers: [],
+			peers: [],
+			peerTargets: [],
+		};
 		try {
 			const skills = resourcesDomain()?.skills(cwd).items ?? [];
 			snapshot.skills = modelVisibleSkills(skills).map((skill) => ({ name: skill.name, purpose: skill.description }));
@@ -135,6 +145,18 @@ export function createPromptsBundle(
 				.map((server) => server.id);
 		} catch {
 			// Project and malformed declarations stay behind gateway find, which reports them.
+		}
+		try {
+			// The recorded report, never a probe: a session start does not wait on detection.
+			const interop = context.getContract("interop");
+			const configured = new Set((interop?.configured() ?? []).map((agent) => agent.id));
+			snapshot.peers = (interop?.lastReport()?.agents ?? []).map((record) => ({
+				record,
+				configuredAcp: configured.has(record.kind),
+			}));
+			snapshot.peerTargets = (config()?.get().targets ?? []).map(({ id, runtime }) => ({ id, runtime }));
+		} catch {
+			// An unreadable report lists no peers; /interop shows the agents and why.
 		}
 		return snapshot;
 	}
@@ -303,6 +325,7 @@ export function createPromptsBundle(
 				hasFleetNodes: (settings?.fleet.nodes.length ?? 0) > 0,
 				...(options.noSkills === true ? { skillDiscoveryEnabled: false } : {}),
 				...(contextFiles.length > 0 ? { contextFiles } : {}),
+				...(readyPeerLines(sources.catalogs, input.sessionInputs).length > 0 ? { peers: true } : {}),
 			};
 			const compiled = compile(table, {
 				identity: "identity.clio",
@@ -622,6 +645,35 @@ interface CatalogSnapshot {
 	agents: CatalogEntry[];
 	playbooks: CatalogEntry[];
 	mcpServers: string[];
+	peers: Array<{ record: InteropAgentRecord; configuredAcp: boolean }>;
+	peerTargets: Array<{ id: string; runtime: string }>;
+}
+
+/**
+ * One line per installed agent with a mode `peerModeCapabilities` reports
+ * ready, and how to reach it. Only a pane handoff is ever ready, and only
+ * when this session carries `panes`; a configured headless target is named
+ * beside it for dispatch.
+ */
+function readyPeerLines(catalogs: CatalogSnapshot, inputs: SessionPromptInputs): string[] {
+	if (inputs.providerSupportsTools === false) return [];
+	const names = new Set(inputs.toolNames ?? []);
+	return catalogs.peers.flatMap(({ record, configuredAcp }) => {
+		const kind = interopAgentKind(record.kind);
+		if (!kind || !(PANE_PEER_IDS as ReadonlyArray<string>).includes(kind.id)) return [];
+		const modes = peerModeCapabilities(kind, record, {
+			configuredAcp,
+			configuredTargets: catalogs.peerTargets,
+			paneAvailable: names.has("panes"),
+		});
+		if (!modes.some((mode) => mode.mode === "pane" && mode.status === "ready")) return [];
+		const target = modes.find((mode) => mode.mode === "headless" && mode.status !== "unavailable")?.targetIds?.[0];
+		const reach = [
+			`panes(action="handoff", peer="${kind.id}")`,
+			...(target !== undefined && names.has("dispatch") ? [`dispatch with target="${target}"`] : []),
+		];
+		return [`- ${kind.id}: ${reach.join(", or ")}`];
+	});
 }
 
 /**
@@ -692,6 +744,13 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 				? "Playbooks (multi-step workflows the fleet runs; not startable from this run):"
 				: "Playbooks (multi-step workflows the fleet runs; the operator starts one with /fleet run <playbook>, so suggest it rather than dispatching its steps yourself):",
 			...catalogLines(catalogs.playbooks),
+		);
+	}
+	const peers = readyPeerLines(catalogs, inputs);
+	if (peers.length > 0) {
+		sections.push(
+			"Peers (other coding agents installed here; a handoff is interactive and its result unverified):",
+			...peers,
 		);
 	}
 	if (catalogs.mcpServers.length > 0 && names.has("gateway")) {

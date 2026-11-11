@@ -35,6 +35,7 @@ export const coreTests = [
 	"headless-observed",
 	"prompt-preconditions",
 	"prompt-tier-golden",
+	"prompt-peers-catalog",
 	"memory-recall-hygiene",
 	"memory-observation-envelope",
 	"dispatch-memory-scope",

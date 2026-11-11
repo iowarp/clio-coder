@@ -195,7 +195,7 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
 | `context.clio-repo-awareness` | The note that the workspace is Clio Coder's own source tree. | session | Snapshot. |
 | `context.self-development-skills` | The skill-loading note above. | session | Built per compile from session inputs. |
-| `context.catalogs` | Installed skills, agents and playbooks by name and a short purpose, plus user-scope MCP server ids. Each list is capped at 60 entries. | session | Snapshot. Grants nothing. |
+| `context.catalogs` | Installed skills, agents and playbooks by name and a short purpose, plus user-scope MCP server ids. Each list is capped at 60 entries. A Peers group lists each installed coding agent whose pane handoff is ready (its CLI is on the recorded interop report and the session carries `panes`), with any configured headless target for `dispatch`; it also turns on the harness's peers row. | session | Snapshot. Grants nothing. |
 | `context.project-rules` | Unconditional `.clio-coder/rules` plus path-scoped rules matching the working context. | turn | Rules load into the snapshot. Selection re-runs against the working-context paths. |
 | `context.operator-profile` | The capped operator profile. | session | Snapshot. |
 
