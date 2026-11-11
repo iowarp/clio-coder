@@ -221,7 +221,7 @@ function taskChangedPaths(worktree: { path: string; base: string }): string[] | 
 }
 
 /** The check to run for this task: a lint or format check narrowed to `changed`, else the check as declared. */
-export function scopeCheckToTask(check: ResolvedCheck, changed: ReadonlyArray<string> | null): ResolvedCheck {
+function scopeCheckToTask(check: ResolvedCheck, changed: ReadonlyArray<string> | null): ResolvedCheck {
 	if (changed === null) return check;
 	const argv = lintFormatScopeArgv(check);
 	if (argv === null) return check;
@@ -368,6 +368,8 @@ export async function compareHostVerificationBase(input: {
 			};
 		return;
 	}
+	const backend = sandbox.backend;
+	const executable = sandbox.executable;
 	// The archived base has no installed dependencies. When the manifests match,
 	// the base borrows the task's node_modules through a link inside the private
 	// tmpfs; the target sits under the read-only root mount (flywheel Q4).
@@ -440,8 +442,8 @@ export async function compareHostVerificationBase(input: {
 					maskedPaths: sockets.masks,
 					...sockets.fields,
 				},
-				sandbox.backend,
-				sandbox.executable,
+				backend,
+				executable,
 			);
 			const env = Object.fromEntries(
 				PLAYBOOK_COMMAND_BASE_ENV.flatMap((name) => {
