@@ -121,6 +121,19 @@ test("a launch hears whether an app window is live, so a relaunch after a restar
 	// A restarted server knows no window: the old one cannot reconnect, so the launcher must not focus it.
 	assert.equal(await shown({}), false);
 	assert.equal(await shown({ path: "/sessions" }), false);
+	// The stream leaves the hub in the same step that releases its window, so the test waits for that, not a clock.
+	const connect = h.hub.connect.bind(h.hub);
+	let ended: () => void = () => {};
+	const end = new Promise<void>((resolve) => {
+		ended = resolve;
+	});
+	h.hub.connect = (cursor, receive) => {
+		const unsubscribe = connect(cursor, receive);
+		return () => {
+			unsubscribe();
+			ended();
+		};
+	};
 	const a = await h.client("Window A");
 	const { ticket } = (await (await a.post("/api/events/ticket")).json()) as { ticket: string };
 	const stream = await h.app.request(`http://127.0.0.1:4317/api/events?ticket=${ticket}`);
@@ -128,7 +141,7 @@ test("a launch hears whether an app window is live, so a relaunch after a restar
 	assert.equal(await shown({}), true);
 	assert.equal(await shown({ path: "/sessions" }), true);
 	await stream.body?.cancel();
-	for (let i = 0; i < 50 && (await shown({})); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+	await end;
 	assert.equal(await shown({}), false);
 });
 
