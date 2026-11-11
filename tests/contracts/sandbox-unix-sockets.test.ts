@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import { unixSocketFilterProgram, unixSocketLaunch } from "../../src/core/sandbo
 import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
 import { composeWorkerSandboxInvocation } from "../../src/core/sandbox/worker-process.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { settingsChangeKind } from "../../src/domains/config/classify.js";
 import type { ExtensionRuntimeDeclarationV2 } from "../../src/domains/extensions/manifest-v2.js";
 import { planExtensionLaunch } from "../../src/domains/extensions/runtime-sandbox.js";
@@ -197,7 +198,7 @@ test("the extension runtime launch blocks unix sockets by default and honors the
 	assert.doesNotMatch(profile("allow"), /unix-socket/u);
 });
 
-test("the extension runtime launch masks Clio's settings.yaml and the copies beside it", async (t) => {
+test("the extension runtime launch masks Clio's config directory, or its settings files when the directory holds a root", async (t) => {
 	const home = await isolateClioEnv("clio-extension-settings-mask-");
 	t.after(() => home.restore());
 	const roots = {
@@ -211,17 +212,75 @@ test("the extension runtime launch masks Clio's settings.yaml and the copies bes
 	mkdirSync(join(home.dir, "config"), { recursive: true });
 	const settingsFiles = ["settings.yaml", "settings.yaml.bak"].map((name) => join(home.dir, "config", name));
 	for (const file of settingsFiles) writeFileSync(file, "targets:\n  - auth: { headers: { x-api-key: secret } }\n");
+	const plan = (launchRoots: typeof roots) =>
+		planExtensionLaunch({
+			declaration: {
+				permissions: { fs: { read: [], write: [] }, exec: false, net: false },
+			} as unknown as ExtensionRuntimeDeclarationV2,
+			roots: launchRoots,
+			argv: [process.execPath, launchRoots.bootstrap],
+			availability: { available: true, backend: "seatbelt", executable: "/usr/bin/sandbox-exec", reason: null },
+		});
+	const launch = plan(roots);
+	assert.equal(launch.report.backend, "seatbelt", launch.report.reason);
+	const configDir = realpathSync(join(home.dir, "config"));
+	const maskedDirs = (args: ReadonlyArray<string>) =>
+		args.filter((arg) => /^MASKED_DIR_\d+=/u.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+	assert.ok(maskedDirs(launch.args).includes(configDir), "the config directory is not masked");
+	// A config directory that holds the child's own workspace cannot be hidden whole, so its settings files are.
+	const nested = { ...roots, workspace: join(home.dir, "config", "workspace") };
+	mkdirSync(nested.workspace);
+	const fallbackArgs = plan(nested).args;
+	assert.ok(!maskedDirs(fallbackArgs).includes(configDir), "a config directory holding the workspace is masked whole");
+	const fallback = fallbackArgs.join("\n");
+	for (const file of settingsFiles) assert.ok(fallback.includes(realpathSync(file)), `${file} is not masked`);
+});
+
+test("under bwrap the extension runtime's settings mask survives a save by rename and covers later backups", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const home = await isolateClioEnv("clio-extension-settings-rename-");
+	t.after(() => home.restore());
+	const workspace = join(realpathSync(home.dir), "workspace");
+	// Inside the workspace, so the child would see it through its readable root even under a private /tmp.
+	const config = join(workspace, "clio-config");
+	mkdirSync(config, { recursive: true });
+	process.env.CLIO_CODER_CONFIG_DIR = config;
+	resetXdgCache();
+	writeFileSync(join(workspace, "visible.txt"), "visible\n");
+	writeFileSync(join(config, "settings.yaml"), "x-api-key: launch-secret\n");
+	const roots = {
+		workspace,
+		packageCopy: join(home.dir, "runtime", "package"),
+		storeDir: join(home.dir, "store"),
+		bootstrap: join(home.dir, "bootstrap", "runtime-child-v2.mjs"),
+	};
+	for (const directory of [roots.packageCopy, roots.storeDir, join(home.dir, "bootstrap")])
+		mkdirSync(directory, { recursive: true });
+	const script = 'sleep 1; cat "$1/visible.txt" "$2/settings.yaml" "$2/settings.yaml.bak-later" 2>&1; true';
 	const launch = planExtensionLaunch({
 		declaration: {
 			permissions: { fs: { read: [], write: [] }, exec: false, net: false },
 		} as unknown as ExtensionRuntimeDeclarationV2,
 		roots,
-		argv: [process.execPath, roots.bootstrap],
-		availability: { available: true, backend: "seatbelt", executable: "/usr/bin/sandbox-exec", reason: null },
+		argv: ["/bin/sh", "-c", script, "sh", workspace, config],
+		availability,
 	});
-	assert.equal(launch.report.backend, "seatbelt", launch.report.reason);
-	const args = launch.args.join("\n");
-	for (const file of settingsFiles) assert.ok(args.includes(realpathSync(file)), `${file} is not masked`);
+	assert.equal(launch.report.backend, "bwrap", launch.report.reason);
+	const output = new Promise<string>((resolve) => {
+		execFile(launch.file, launch.args, { timeout: 15_000 }, (_error, stdout, stderr) => resolve(`${stdout}${stderr}`));
+	});
+	// Settings saves write a temporary file and rename it over settings.yaml; a backup can appear at any time.
+	await new Promise((resolve) => setTimeout(resolve, 400));
+	writeFileSync(join(config, ".settings.yaml.tmp-1"), "x-api-key: saved-secret\n");
+	renameSync(join(config, ".settings.yaml.tmp-1"), join(config, "settings.yaml"));
+	writeFileSync(join(config, "settings.yaml.bak-later"), "x-api-key: backup-secret\n");
+	const seen = await output;
+	assert.match(seen, /visible/u, seen);
+	assert.doesNotMatch(seen, /secret/u, seen);
 });
 
 test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies live and reaches the worker spec", async (t) => {

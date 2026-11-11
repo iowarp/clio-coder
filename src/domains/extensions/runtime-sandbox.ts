@@ -5,6 +5,7 @@ import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import {
 	type SandboxAvailability,
 	type SandboxBackend,
+	type SandboxMaskedPath,
 	type UnixSocketMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 } from "../../core/sandbox/types.js";
@@ -145,6 +146,19 @@ export function releaseDeclaredWriteRoots(created: ReadonlyArray<string>): void 
 }
 
 /**
+ * Hide Clio's settings.yaml, which can hold target auth headers, and every copy beside it. The whole config directory is
+ * masked: a settings save renames a new file over settings.yaml, which would drop a mask mounted on the old file, and a
+ * backup written after launch would never have had one. The child reads nothing there, so only a config directory that
+ * holds one of its own roots falls back to masking the files present at launch.
+ */
+function settingsMasks(roots: ExtensionLaunchRoots, writable: Iterable<string>): SandboxMaskedPath[] {
+	const config = canonicalizeExistingPath(clioConfigDir());
+	const needed = [roots.workspace, roots.packageCopy, roots.bootstrap, roots.storeDir, ...writable];
+	if (needed.some((entry) => contained(config, canonicalizeExistingPath(entry)))) return settingsFileMasks();
+	return [{ path: config, kind: "directory" }];
+}
+
+/**
  * Compose the child's launch. With an OS sandbox the child runs read-only
  * outside its declared write roots, with secrets masked, Clio-managed paths
  * re-bound read-only, new Unix-domain sockets refused unless the operator
@@ -198,7 +212,7 @@ export function planExtensionLaunch(input: {
 			workspace,
 			availability,
 			// An extension never reads Clio's settings, which can hold target auth headers, so they are masked always.
-			[...workerSandboxMasks(), ...settingsFileMasks()],
+			[...workerSandboxMasks(), ...settingsMasks(roots, writable)],
 		);
 	} catch (error) {
 		return {
