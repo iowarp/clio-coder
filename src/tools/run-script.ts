@@ -1,4 +1,4 @@
-import { closeSync, openSync, realpathSync, statSync, writeSync } from "node:fs";
+import { closeSync, lstatSync, openSync, realpathSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import { bashSecretValues } from "../core/bash-exec.js";
@@ -27,9 +27,11 @@ import {
 } from "../core/safe-exec.js";
 import { knownSecretValues } from "../core/sandbox/env-scrub.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
+import { storeReadRoots, validateBlobName, validateTagName } from "../core/store-paths.js";
 import type { DynamicToolName } from "../core/tool-names.js";
 import { CommandOutputMask, maskCommandOutput } from "../domains/evidence/output-mask.js";
 import { isSecretArgKey } from "../domains/safety/redaction.js";
+import type { StoreBackend } from "../domains/store/backend.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolSurface } from "./lazy-tool.js";
@@ -162,11 +164,17 @@ export function prepareRunScriptArguments(args: Record<string, unknown>): Record
 	return next;
 }
 
+/** An input that is a blob of this project's store: declared as `<tag>:<blob>`, or as a path under a store read root. */
+type StoreInput = { kind: "ref"; tag: string; blob: string } | { kind: "path"; realPath: string };
+
 interface DeclaredRef {
 	/** The argument exactly as declared. */
 	declared: string;
 	/** Workspace-relative rendering for the manifest and the result. */
 	relative: string;
+	/** `inputs[<n>]` as declared, for messages. */
+	location: string;
+	store?: StoreInput;
 }
 
 interface RunScriptRequest {
@@ -213,7 +221,46 @@ function validateArgVector(value: unknown, field: string): string[] | string {
 	return entries;
 }
 
-function validateDeclaredRefs(value: unknown, field: string, workspaceRoot: string): DeclaredRef[] | string {
+/** The canonical path of an absolute entry inside one of this project's store read roots, else null. */
+function storeReadRootPath(workspaceRoot: string, entry: string): string | null {
+	let real: string;
+	try {
+		real = realpathSync(entry);
+	} catch {
+		return null;
+	}
+	for (const root of storeReadRoots(workspaceRoot)) {
+		try {
+			const realRoot = realpathSync(root);
+			if (real !== realRoot && insideRoot(realRoot, real)) return real;
+		} catch {
+			// A read root that does not exist holds nothing.
+		}
+	}
+	return null;
+}
+
+/** `<tag>:<blob>` split at the first `:`, unless the workspace holds an entry of that exact name. */
+function storeRefShape(workspaceRoot: string, entry: string): { tag: string; blob: string } | null {
+	const colon = entry.indexOf(":");
+	if (colon <= 0) return null;
+	const tag = entry.slice(0, colon);
+	const blob = entry.slice(colon + 1);
+	if (validateTagName(tag) !== null || validateBlobName(blob) !== null) return null;
+	try {
+		lstatSync(path.resolve(workspaceRoot, entry));
+		return null;
+	} catch {
+		return { tag, blob };
+	}
+}
+
+function validateDeclaredRefs(
+	value: unknown,
+	field: string,
+	workspaceRoot: string,
+	acceptStore = false,
+): DeclaredRef[] | string {
 	const entries = parseStringArray(value);
 	if (entries === null) return `${field} must be an array of workspace-relative path strings`;
 	if (entries.length > RUN_SCRIPT_CAPS.declaredRefs) {
@@ -226,13 +273,29 @@ function validateDeclaredRefs(value: unknown, field: string, workspaceRoot: stri
 		if (entry.trim().length === 0) return `${location} must be a non-empty path`;
 		if (entry.includes("\0")) return `${location} must not contain a NUL byte`;
 		if (path.isAbsolute(entry) || path.win32.isAbsolute(entry)) {
-			return `${location} must be workspace-relative; absolute path '${entry}' is not allowed`;
+			const realPath = acceptStore ? storeReadRootPath(workspaceRoot, entry) : null;
+			if (realPath === null) {
+				return acceptStore
+					? `${location} must be workspace-relative or a store blob; absolute path '${entry}' is not allowed`
+					: `${location} must be workspace-relative; absolute path '${entry}' is not allowed`;
+			}
+			if (seen.has(realPath)) continue;
+			seen.add(realPath);
+			refs.push({ declared: entry, relative: entry, location, store: { kind: "path", realPath } });
+			continue;
+		}
+		const ref = acceptStore ? storeRefShape(workspaceRoot, entry) : null;
+		if (ref !== null) {
+			if (seen.has(`${ref.tag}:${ref.blob}`)) continue;
+			seen.add(`${ref.tag}:${ref.blob}`);
+			refs.push({ declared: entry, relative: entry, location, store: { kind: "ref", ...ref } });
+			continue;
 		}
 		const relative = workspaceRelativePath(workspaceRoot, entry);
 		if (relative === null) return `${location} escapes the workspace root: '${entry}'`;
 		if (seen.has(relative)) continue;
 		seen.add(relative);
-		refs.push({ declared: entry, relative });
+		refs.push({ declared: entry, relative, location });
 	}
 	return refs;
 }
@@ -343,7 +406,7 @@ function validateRequest(args: Record<string, unknown>, workspaceRoot: string, o
 		timeoutMs = Math.min(Math.max(1, args.timeout_ms), RUN_SCRIPT_CAPS.maxTimeoutMs);
 	}
 
-	const inputs = validateDeclaredRefs(args.inputs, "inputs", realRoot);
+	const inputs = validateDeclaredRefs(args.inputs, "inputs", realRoot, true);
 	if (typeof inputs === "string") return invalid(inputs);
 	const outputs = validateDeclaredRefs(args.outputs, "outputs", realRoot);
 	if (typeof outputs === "string") return invalid(outputs);
@@ -621,9 +684,65 @@ function refsTable(heading: string, refs: ReadonlyArray<RunFileRef | RunOutputRe
 		const status = "status" in ref ? ref.status : ref.exists ? "present" : "absent";
 		const size = ref.bytes === undefined ? "" : ` ${ref.bytes} bytes`;
 		const omission = ref.hashOmitted === undefined ? "" : ` (hash omitted: ${ref.hashOmitted})`;
-		lines.push(`  ${ref.path}  ${status}${size}${omission}`);
+		const name = ref.store === undefined ? ref.path : `${ref.store.tag}:${ref.store.blob} -> ${ref.path}`;
+		lines.push(`  ${name}  ${status}${size}${omission}`);
 	}
 	return lines;
+}
+
+interface ResolvedStoreInput {
+	/** The readable path the script is given. */
+	path: string;
+	tag: string;
+	blob: string;
+}
+
+/**
+ * The readable path and blob of each store input, by position in `inputs`, or a message naming the first one that
+ * does not resolve. `<tag>:<blob>` resolves the way `store get` does; a path under a store read root must name a blob.
+ */
+async function resolveStoreInputs(
+	request: RunScriptRequest,
+	openBackend: ((cwd: string) => Promise<StoreBackend>) | undefined,
+	signal: AbortSignal | undefined,
+): Promise<Array<ResolvedStoreInput | null> | string> {
+	const resolved: Array<ResolvedStoreInput | null> = request.inputs.map(() => null);
+	if (!request.inputs.some((input) => input.store !== undefined)) return resolved;
+	const { openStoreBackend, StoreRefusal } = await import("../domains/store/index.js");
+	const { storeBlobRefOfPath } = await import("../domains/store/provenance.js");
+	const refusal = (error: unknown): string =>
+		error instanceof StoreRefusal
+			? `${error.reason}: ${error.message}`
+			: error instanceof Error
+				? error.message
+				: String(error);
+	let backend: StoreBackend;
+	try {
+		backend = await (openBackend ?? openStoreBackend)(request.workspaceRoot);
+	} catch (error) {
+		return `the store cannot be opened for the declared store inputs (${refusal(error)})`;
+	}
+	for (const [index, input] of request.inputs.entries()) {
+		const store = input.store;
+		if (store === undefined) continue;
+		if (store.kind === "path") {
+			const ref = await storeBlobRefOfPath(backend, request.workspaceRoot, store.realPath).catch(() => null);
+			if (ref === null)
+				return `${input.location} '${input.declared}' is in the store's files but names no blob of this project`;
+			resolved[index] = { path: input.declared, ...ref };
+			continue;
+		}
+		try {
+			const got = await backend.getBlobAsPath(store.tag, store.blob, signal);
+			resolved[index] = { path: got.path, tag: store.tag, blob: store.blob };
+		} catch (error) {
+			if (error instanceof StoreRefusal && error.reason === "not-found") {
+				return `${input.location} names ${store.tag}:${store.blob}, which is not in the store`;
+			}
+			return `${input.location} names ${store.tag}:${store.blob}, which cannot be read (${refusal(error)})`;
+		}
+	}
+	return resolved;
 }
 
 /**
@@ -645,12 +764,16 @@ export interface RunScriptToolDeps {
 	keepRuns?: number;
 	/** The process runner; defaults to `runCommandVector`. Tests inject one that fails to start. */
 	runCommand?: typeof runCommandVector;
+	/** Opens the store backend store inputs resolve through; defaults to the selected backend. */
+	openStoreBackend?: (cwd: string) => Promise<StoreBackend>;
 }
 
 const DESCRIPTION =
 	"Run one script from the workspace with an explicit interpreter, arguments, and working directory, as an observable scientific step. " +
 	"Complete stdout and stderr, with credentials masked as in the result, stream to .clio-coder/runs/<runId>/stdout.log and stderr.log and a run.json manifest records the script hash, exact argv, cwd, declared env keys, timing, outcome, and the observed state of declared inputs and outputs; the result carries bounded tails of both streams and names the run directory. " +
-	"Declared inputs and outputs are provenance only and do not restrict what the script may touch. No dependency installation, no retries, no hidden environment changes. " +
+	"Declared inputs and outputs are provenance only and do not restrict what the script may touch. " +
+	"An input may be a store blob, as <tag>:<blob> or the path store get returned: the script reads it from the store, never from a copy in the workspace, an args entry equal to a declared <tag>:<blob> is replaced with the blob's readable path, and a store put of an output names the blob it used. " +
+	"No dependency installation, no retries, no hidden environment changes. " +
 	"At autonomy default the script runs in an OS sandbox when the host has one: the workspace, the scratch roots and package caches are writable, the network is on and credentials are hidden. " +
 	`Default timeout ${RUN_SCRIPT_CAPS.defaultTimeoutMs}ms; a nonzero exit, timeout, or cancellation returns an error that still names the logs and any partial outputs.`;
 
@@ -681,7 +804,8 @@ export const runScriptToolSurface: ToolSurface = {
 		),
 		inputs: Type.Optional(
 			Type.Array(Type.String(), {
-				description: "Workspace-relative files the script reads; recorded with size and hash before the run.",
+				description:
+					"Files the script reads, recorded with size and hash before the run: workspace-relative paths, or store blobs as <tag>:<blob> or the path store get returned. Do not copy a blob into the workspace to declare it.",
 			}),
 		),
 		outputs: Type.Optional(
@@ -804,8 +928,26 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 			if (scriptHash.hashOmitted === "unreadable") {
 				return { kind: "error", message: `run_script: script cannot be read: ${request.scriptDeclared}` };
 			}
+			const storeInputs = await resolveStoreInputs(request, deps.openStoreBackend, signal);
+			if (typeof storeInputs === "string") return { kind: "error", message: `run_script: ${storeInputs}` };
+			if (signal?.aborted) return abortedBeforeExecution();
 			const inputRefs: RunFileRef[] = [];
-			for (const ref of request.inputs) inputRefs.push(await captureFileRef(workspaceRoot, ref.declared, { signal }));
+			for (const [index, ref] of request.inputs.entries()) {
+				const store = storeInputs[index];
+				if (store === null || store === undefined) {
+					inputRefs.push(await captureFileRef(workspaceRoot, ref.declared, { signal }));
+					continue;
+				}
+				const { path: readPath, ...observed } = await captureFileRef(workspaceRoot, store.path, { signal });
+				inputRefs.push({ path: readPath, store: { tag: store.tag, blob: store.blob }, ...observed });
+			}
+			// The script reads a `<tag>:<blob>` input at the path it resolved to; the manifest's argv records that path.
+			const storeArgs = new Map<string, string>();
+			for (const [index, ref] of request.inputs.entries()) {
+				const store = storeInputs[index];
+				if (ref.store?.kind === "ref" && store !== null && store !== undefined) storeArgs.set(ref.declared, store.path);
+			}
+			const scriptArgs = request.args.map((arg) => storeArgs.get(arg) ?? arg);
 			const outputsBefore: RunFileRef[] = [];
 			for (const ref of request.outputs) {
 				outputsBefore.push(await captureFileRef(workspaceRoot, ref.declared, { signal }));
@@ -843,7 +985,7 @@ export function createRunScriptTool(deps: RunScriptToolDeps = {}): ToolSpec {
 							mask,
 							...(deps.scheduler ? { scheduler: deps.scheduler } : {}),
 						});
-			const vector = [...request.interpreterArgs, request.scriptRealPath, ...request.args];
+			const vector = [...request.interpreterArgs, request.scriptRealPath, ...scriptArgs];
 			const written = { stdout: 0, stderr: 0 };
 			const startedAt = now();
 			let result: SafeCommandResult;

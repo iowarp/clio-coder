@@ -14,6 +14,14 @@ import {
 	runRecordsDir,
 	workspaceRelativePath,
 } from "../../core/run-records.js";
+import {
+	decodeTagSegment,
+	storeProjectKey,
+	storeProjectRoot,
+	validateBlobName,
+	validateTagName,
+} from "../../core/store-paths.js";
+import { clioCachePath } from "../../core/xdg.js";
 import { isSecretArgKey, redactSecretString } from "../safety/redaction.js";
 import type { StoreBackend } from "./backend.js";
 import {
@@ -68,7 +76,44 @@ export function findProducingRun(
 	return null;
 }
 
-/** The script's declared inputs as `used` entries; an input that resolves to a blob of this project's store names it. */
+function validRef(tag: string, blob: string): { tag: string; blob: string } | null {
+	return validateTagName(tag) === null && validateBlobName(blob) === null ? { tag, blob } : null;
+}
+
+/**
+ * The blob of this project's store whose bytes a resolved local path holds, else null. Asks the backend first,
+ * then reads the store cache's layout (`<cache>/store/<projectKey>/<encoded tag>/<blob>`), where every backend's
+ * `get` leaves its read-only copy, so the path `store get` returned names its blob on any backend.
+ */
+export async function storeBlobRefOfPath(
+	backend: StoreBackend,
+	cwd: string,
+	realPath: string,
+): Promise<{ tag: string; blob: string } | null> {
+	const ref = await backend.blobRefOfPath(realPath);
+	if (ref !== null) return validRef(ref.tag, ref.blob);
+	let cacheDir: string;
+	try {
+		cacheDir = realpathSync(path.join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd))));
+	} catch {
+		return null;
+	}
+	const relative = path.relative(cacheDir, realPath);
+	if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+	const [encodedTag, ...blob] = relative.split(path.sep);
+	if (encodedTag === undefined || blob.length === 0) return null;
+	try {
+		return validRef(decodeTagSegment(encodedTag), blob.join("/"));
+	} catch {
+		// A malformed escape is no tag of ours.
+		return null;
+	}
+}
+
+/**
+ * The script's declared inputs as `used` entries: a store input names its blob, and so does a workspace
+ * input that resolves to a blob of this project's store.
+ */
 async function usedFrom(
 	manifest: RunManifest,
 	workspaceRoot: string,
@@ -77,11 +122,16 @@ async function usedFrom(
 	const used: StoreRecordUse[] = [];
 	for (const input of manifest.inputs) {
 		const facts = { ...(input.bytes !== undefined ? { bytes: input.bytes } : {}), sha256: input.sha256 ?? null };
-		let ref: { tag: string; blob: string } | null = null;
-		try {
-			ref = await backend.blobRefOfPath(realpathSync(path.resolve(workspaceRoot, input.path)));
-		} catch {
-			// A missing or unreadable input keeps its declared path.
+		let ref: { tag: string; blob: string } | null =
+			typeof input.store?.tag === "string" && typeof input.store.blob === "string"
+				? validRef(input.store.tag, input.store.blob)
+				: null;
+		if (ref === null) {
+			try {
+				ref = await storeBlobRefOfPath(backend, workspaceRoot, realpathSync(path.resolve(workspaceRoot, input.path)));
+			} catch {
+				// A missing or unreadable input keeps its declared path.
+			}
 		}
 		used.push(ref !== null ? { ...ref, ...facts } : { path: input.path, ...facts });
 	}

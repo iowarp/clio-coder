@@ -342,11 +342,11 @@ Runs one workspace script through safe-exec, with stdout/stderr logs and a prove
 | `args`, `interpreter_args` | Optional string arrays, max 64 items/4096 UTF-8 bytes each, no NUL. Interpreter args precede script. Omission defaults Python to `-u`; explicit `[]` suppresses it. |
 | `cwd` | Workspace-relative directory, default root; symlink escapes refused, except in a contained call at `default` or at `yolo`. |
 | `timeout_ms` | Positive integer, default 600000; values above 21600000 clamp to six hours. |
-| `inputs`, `outputs` | Up to 64 workspace-relative provenance references each; they do not restrict process I/O. |
+| `inputs`, `outputs` | Up to 64 workspace-relative provenance references each; they do not restrict process I/O. An input may also be a store blob, as `<tag>:<blob>` or the path `store get` returned; any other absolute path is refused. The script reads the blob from the store, never from a copy in the workspace, and an `args` entry equal to a declared `<tag>:<blob>` is replaced with the blob's readable path. |
 | `env` | Optional map, max 32 keys matching `[A-Z_][A-Z0-9_]*`, values max 4096 bytes. Adds to safe-exec environment. Manifest stores keys/redacted key names, not values. Args are literal. Script output is masked as [Command output](../architecture/evidence-and-memory.md#command-output) describes, which covers a declared value only under a credential name and any other secret only by its shape. |
 | `unsandboxed` | Optional boolean. At `default`, run outside the main-session sandbox, only after the script failed because of the sandbox; the safety judge reviews that call. |
 
-Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log` with credentials masked as in the result; `run.json` counts the bytes the script wrote. Disk use is not bounded by model-view caps. Progress is throttled with 2 KiB tails; terminal tails retain 8 KiB. `run.json` records script/interpreter identity, exact argv/cwd/timeout/timing, environment keys, input identities, and output state (`created`, `modified`, `unchanged`, `absent`). File hashes cap at 64 MiB and record omission reason if unavailable. No install or automatic retry occurs.
+Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log` with credentials masked as in the result; `run.json` counts the bytes the script wrote. Disk use is not bounded by model-view caps. Progress is throttled with 2 KiB tails; terminal tails retain 8 KiB. `run.json` records script/interpreter identity, exact argv/cwd/timeout/timing, environment keys, input identities (a store input as its `tag` and `blob` with the path read), and output state (`created`, `modified`, `unchanged`, `absent`). File hashes cap at 64 MiB and record omission reason if unavailable. No install or automatic retry occurs.
 
 Outcomes: `succeeded`, `failed`, `timed-out`, `aborted`, `spawn-failed`, `cleanup-incomplete`, `pipe-drain-incomplete`. Failure returns retained logs and observed partial outputs. `exitCode` is effective status; `leaderExit` records the process code/signal. Cleanup/drain failure changes a leader zero to effective 1. Cancellation after leader exit can retain exit 0 with `aborted=true`; inspect outcome and flags. Neither zero exit nor output existence proves scientific validity; verify separately.
 
@@ -355,6 +355,7 @@ On POSIX, the original process group receives TERM, 3s grace, then KILL; cleanup
 ```text
 run_script(interpreter="python3", script="scripts/analyze.py", args=["inputs.csv"], outputs=["out/stats.json"])
 verify(check="compare-stats")
+run_script(interpreter="python3", script="scripts/summarize.py", args=["sim:run042.h5", "results/summary.csv"], inputs=["sim:run042.h5"], outputs=["results/summary.csv"])
 ```
 
 ## data: inspect structured files through the gateway
@@ -412,8 +413,8 @@ The `store` capability, reached through the gateway, keeps a project's results a
 | `create` | `tag`, `description`, `class` | Creates a tag. `class` is `input`, `output` (the default), `cache` or `archive`. |
 | `list` | `tag`, `pattern`, `offset`, `limit` | Lists a tag's blobs. `pattern` is a regular expression matched against the whole blob name; `limit` defaults to 100, at most 500. |
 | `stat` | `tag`, `blob` | Reports what Clio recorded (size, hash, producing script and inputs) and drift: `none`, `changed`, `missing` or `unrecorded`. |
-| `get` | `tag`, `blob` | Returns a readable path to pass unchanged to `data`, `read`, `run_script` or an MCP tool. Reading that path does not ask. |
-| `put` | `tag`, `path`, `blob`, `note`, `derived_from` | Copies a workspace file into the tag, named after its basename unless `blob` is given, and records where it came from. When a `run_script` run produced the file, the record keeps its script hash, redacted arguments and declared inputs, so provenance outlives the run-record sweep. |
+| `get` | `tag`, `blob` | Returns a readable path to pass unchanged to `data`, `read`, `run_script` (in `args` and `inputs`) or an MCP tool. Reading that path does not ask. |
+| `put` | `tag`, `path`, `blob`, `note`, `derived_from` | Copies a workspace file into the tag, named after its basename unless `blob` is given, and records where it came from. When a `run_script` run produced the file, the record keeps its script hash, redacted arguments and declared inputs, so provenance outlives the run-record sweep; an input that was a store blob is named by its `<tag>:<blob>` and sha256. |
 | `note` | `tag`, `blob`, `note`, `derived_from` | Adds a remark to a blob's record. `derived_from` lists the `<tag>:<blob>` refs the blob was made from. |
 | `remove` | `tag`, `blob` | Removes a blob. |
 

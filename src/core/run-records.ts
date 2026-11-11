@@ -80,8 +80,13 @@ export type RunOutputStatus = "created" | "modified" | "unchanged" | "absent";
 export type RunHashOmission = "too-large" | "cancelled" | "unreadable";
 
 export interface RunFileRef {
-	/** Workspace-relative path exactly as declared, normalized to forward slashes. */
+	/**
+	 * Workspace-relative path exactly as declared, normalized to forward slashes;
+	 * for a store input, the readable path the script was given.
+	 */
 	path: string;
+	/** Set on an input that is a blob of this project's store, declared as `<tag>:<blob>` or as the path `store get` returned. */
+	store?: { tag: string; blob: string };
 	exists: boolean;
 	bytes?: number;
 	/**
