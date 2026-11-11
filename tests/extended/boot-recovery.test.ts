@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { createWorktreeBootRecovery, type WorktreeBootRecovery } from "../../src/domains/dispatch/boot-recovery.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -104,20 +105,26 @@ const REQUEST: DispatchRequest = {
 	resultContractOverride: { kind: "provenance-report" },
 };
 
-/** A boot recovery the test settles by hand. */
-function heldRecovery(): WorktreeBootRecovery & { starts: number; release(): void } {
+/** A boot recovery the test settles by hand; `begun` settles on the first start. */
+function heldRecovery(): WorktreeBootRecovery & { starts: number; begun: Promise<void>; release(): void } {
 	let release!: () => void;
 	const settled = new Promise<void>((resolve) => {
 		release = resolve;
+	});
+	let begin!: () => void;
+	const begun = new Promise<void>((resolve) => {
+		begin = resolve;
 	});
 	const handle = {
 		starts: 0,
 		started: false,
 		settled,
+		begun,
 		release,
 		start() {
 			handle.starts += 1;
 			handle.started = true;
+			begin();
 			return settled;
 		},
 	};
@@ -241,6 +248,33 @@ describe("dispatch admission during boot recovery", () => {
 		}
 	});
 
+	it("reports a ledger that no longer reads once and admits dispatch once it reads again", async () => {
+		const { ledger } = abandonedRow(scratch.dir);
+		await ledger.persist();
+		const runsPath = join(scratch.dir, "state", "runs.json");
+		const intact = readFileSync(runsPath, "utf8");
+		const recovery = heldRecovery();
+		const { bundle, spawned } = fleet(recovery);
+		const reports: string[] = [];
+		const uninstall = installDiagnosticSink((text) => reports.push(text));
+		try {
+			await bundle.extension.start();
+			writeFileSync(runsPath, "{ not json");
+			const gate = bundle.contract.awaitStartupRecovery?.();
+			recovery.release();
+			await gate;
+			strictEqual(reports.filter((line) => line.includes("ledger recovery")).length, 1, reports.join(""));
+
+			writeFileSync(runsPath, intact);
+			const handle = await bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
+			await handle.finalPromise;
+			strictEqual(spawned(), 1);
+		} finally {
+			uninstall();
+			await bundle.extension.stop?.();
+		}
+	});
+
 	it("holds the dispatch tool's own gate and compete recovery until boot recovery settles", async () => {
 		const recovery = heldRecovery();
 		const { bundle, spawned } = fleet(recovery);
@@ -261,8 +295,7 @@ describe("dispatch admission during boot recovery", () => {
 				getAutonomy: () => "yolo",
 			});
 			const run = tool.run({ task: "Inspect isolated fixture evidence.", agent: "scout" }, {});
-			for (let i = 0; i < 50 && recovery.starts === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
-			await new Promise((resolve) => setTimeout(resolve, 20));
+			await recovery.begun;
 			strictEqual(recovery.starts, 1);
 			// Admission previews the plan; after that the runner touches the contract only to wait.
 			strictEqual(touched.at(-1), "awaitStartupRecovery", touched.join(","));

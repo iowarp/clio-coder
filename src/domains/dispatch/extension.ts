@@ -11004,12 +11004,13 @@ export function createDispatchBundle(
 			});
 			ledger = runLedger;
 			const recoverRuns = async (): Promise<void> => {
-				// The ledger was read before the first frame; a sibling may have settled
-				// a run since, and a scan of that stale copy would persist it as abandoned.
-				runLedger.reload();
 				// Symphony P10: restart recovery from durable artifacts. A row whose
 				// host died settles from its run's journal, or closes as stalled.
 				try {
+					// The ledger was read before the first frame; a sibling may have settled
+					// a run since, and a scan of that stale copy would persist it as abandoned.
+					// A ledger that no longer reads skips the scan, as a failed one does.
+					runLedger.reload();
 					const recovery = recoverAbandonedRuns(runLedger, {
 						journalUnsealed: (runId) => {
 							const directory = telemetryRunDirectory(clioStateDir(), runId);
@@ -11031,8 +11032,9 @@ export function createDispatchBundle(
 							process.stderr.write(`[dispatch] ledger recovery: sealed=${recovery.sealed} abandoned=${recovery.abandoned}\n`);
 						}
 					}
-				} catch {
+				} catch (error) {
 					// Recovery is best-effort; a failed scan never blocks startup.
+					reportDispatchDiagnostic("ledger recovery", error);
 				}
 				// Reconcile durable assignments orphaned in `running` by a crash: the
 				// in-memory registry and retry queue do not survive restart, so an
