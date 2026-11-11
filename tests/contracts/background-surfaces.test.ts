@@ -103,6 +103,53 @@ test("fleet dock follows live tiers, prioritizes approval waits, and does not re
 	dock.render(120);
 });
 
+test("a run waiting for the verification slot says so on its worker card and Fleet Runs row until its checks start", () => {
+	const fixture = footerState().dispatchRows[0];
+	ok(fixture);
+	const fold = createWorkerProgressFold();
+	fold.observe({ type: "agent_start" });
+	fold.observe({ type: "agent_end" });
+	ok(fold.observe({ type: "host_verification", message: "waiting for a verification slot" }));
+	let row: DispatchBoardRow = { ...fixture, status: "running", agentId: "checker", progress: fold.snapshot() };
+	const board = createDispatchBoardView(
+		() => [row],
+		() => undefined,
+		() => "standard",
+	);
+	board.setBodyRows(30);
+	const card = () =>
+		plain(
+			renderWorkerEntryLines(
+				{
+					runId: row.runId,
+					assignmentId: row.runId,
+					origin: "user",
+					agentId: "checker",
+					runtime: { kind: "clio" },
+					text: "",
+					droppedLines: 0,
+					pending: true,
+					tools: [],
+					attempts: [],
+					...(row.progress ? { progress: row.progress } : {}),
+				},
+				120,
+				{ detail: transcriptDetail("standard") },
+			),
+		);
+	match(plain(board.render(120)), /waiting for a verification slot/);
+	match(card(), /waiting for a verification slot/);
+	ok(fold.observe({ type: "host_verification", message: "running host checks" }));
+	row = { ...row, progress: fold.snapshot() };
+	board.invalidate();
+	for (const surface of [plain(board.render(120)), card()]) {
+		doesNotMatch(surface, /waiting for a verification slot/);
+		match(surface, /running host checks/);
+	}
+	fold.settle("done", true);
+	doesNotMatch(JSON.stringify(fold.snapshot()), /verification|host checks/);
+});
+
 test("fleet board tier changes invalidate cached rows and explicit detail overrides compact mode", () => {
 	const fixture = footerState().dispatchRows[0];
 	ok(fixture);

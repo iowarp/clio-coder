@@ -30,6 +30,7 @@
 
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../dispatch/event-pump.js";
+import { HOST_VERIFICATION_EVENT, type VerificationSlotState } from "../dispatch/verification-slot.js";
 import type { CallActionDescriptor } from "../safety/call-target.js";
 import {
 	type CutHeadGuard,
@@ -128,6 +129,11 @@ export interface WorkerProgressSnapshot {
 	awaitingApproval?: boolean;
 	/** When an unanswered ask ends and how, while the dispatching process runs its window. */
 	approvalWindow?: WorkerApprovalWindowFacts;
+	/**
+	 * The worker's loop has ended and the host is checking its work: `queued` while the checks wait for the
+	 * verification slot, `running` once they hold it. Absent before the checks and once the run settles.
+	 */
+	verification?: "queued" | "running";
 	/** The stream ended on purpose, so a held URL may release. Absent reads as not completed (#446). */
 	completed?: boolean;
 	/**
@@ -386,6 +392,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 	let droppedBytes = 0;
 	let currentAction: WorkerAction | null = null;
 	let awaitingApproval = false;
+	let verification: "queued" | "running" | null = null;
 	let approvalWindow: WorkerApprovalWindowFacts | null = null;
 	let quietSinceMs: number | null = null;
 	let evidenceAtMs: number | null = null;
@@ -526,7 +533,16 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 	return {
 		observe(event: unknown, nowMs = Date.now()): boolean {
-			if (!isRecord(event) || settled) return false;
+			if (!isRecord(event)) return false;
+			// The host checks a worker's work after its loop ended, so these arrive after agent_end sealed the fold.
+			if (event.type === HOST_VERIFICATION_EVENT) {
+				const next =
+					event.message === ("waiting for a verification slot" satisfies VerificationSlotState) ? "queued" : "running";
+				if (next === verification) return false;
+				verification = next;
+				return touch();
+			}
+			if (settled) return false;
 			if (event.type === "heartbeat_status") {
 				const quiet = event.status === "stale" || event.status === "dead";
 				const at = typeof event.heartbeatAt === "string" ? Date.parse(event.heartbeatAt) : Number.NaN;
@@ -685,10 +701,14 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 			return changed;
 		},
 
-		settle: seal,
+		settle(text?: string, runCompleted?: boolean): boolean {
+			verification = null;
+			return seal(text, runCompleted);
+		},
 
 		restart(): void {
 			awaitingApproval = false;
+			verification = null;
 			approvalWindow = null;
 			quietSinceMs = null;
 			evidenceAtMs = null;
@@ -731,6 +751,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				...(awaitingApproval && !settled ? { awaitingApproval: true } : {}),
 				...(awaitingApproval && !settled && approvalWindow !== null ? { approvalWindow: { ...approvalWindow } } : {}),
 				completed,
+				...(verification !== null ? { verification } : {}),
 				...(quietSinceMs !== null && !settled ? { quietSinceMs } : {}),
 				...(evidenceAtMs !== null && !settled ? { evidenceAtMs } : {}),
 				...(streamedChars > 0 ? { streamedOutputTokens: Math.ceil(streamedChars / 4) } : {}),

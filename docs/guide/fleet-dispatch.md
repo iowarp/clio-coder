@@ -812,8 +812,9 @@ task's files and a check answered from the memo skip it. Parallel batches and pa
 Coder sessions that share a state root therefore queue their typechecks and test suites
 instead of running them all at once. Sessions with different state roots
 (`CLIO_CODER_STATE_DIR`, `CLIO_CODER_HOME`) do not share a slot. While a run's check waits,
-the run's feed and its card in the workers dashboard say `waiting for a verification slot`,
-then `running host checks` once it holds the slot. A slot whose holder died is taken over; a
+the run's feed, its card in the workers dashboard, its worker card in the transcript and its
+Fleet Runs row say `waiting for a verification slot`, then `running host checks` once it holds
+the slot. A slot whose holder died is taken over; a
 check that waits 30 minutes runs without the slot rather than failing the run.
 
 #### Merge task branch card
@@ -1984,7 +1985,7 @@ hard block.
   opens one. A council row shows its member grid when selected and has no further detail.
 - The board and the transcript worker block read one projection
   ([worker-progress.ts](../../src/domains/telemetry/worker-progress.ts)), so they cannot disagree about what a
-  worker is saying or touching. Progress settles on `agent_end`, with the live phase shown as `finishing` until the terminal run event arrives. It keeps 40 lines and 4096 bytes of tail, 8
+  worker is saying or touching. Progress settles on `agent_end`, with the live phase shown as `finishing` until the terminal run event arrives, or as `waiting for a verification slot` and then `running host checks` while host verification checks the worker's work. It keeps 40 lines and 4096 bytes of tail, 8
   distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
   250 ms; what the bounds refuse is counted and named on the card beside the
   `/view dispatch:<runId>` deep link.

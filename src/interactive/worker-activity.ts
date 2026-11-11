@@ -26,6 +26,12 @@ const WORKER_PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, wo
 	settled: [GLYPH.phaseWaiting, "finishing"],
 };
 
+/** The host's checks after the worker's loop ended, which outrank the `finishing` phase they follow. */
+const VERIFICATION_ACTIVITY: Readonly<Record<"queued" | "running", readonly [glyph: string, words: string]>> = {
+	queued: [GLYPH.queued, "waiting for a verification slot"],
+	running: [GLYPH.phaseTool, "running host checks"],
+};
+
 /**
  * A worker whose heartbeat stopped, in words: how long it has been quiet. Its
  * phase is what it was doing when it went quiet, so every surface says this
@@ -140,8 +146,11 @@ export function workerSilenceWords(
 }
 
 /** The phase's glyph and words; `starting` until the stream reports a phase. */
-export function workerPhaseActivity(phase: string | undefined): readonly [glyph: string, words: string] {
-	return WORKER_PHASE_ACTIVITY[phase ?? "starting"] ?? [GLYPH.phaseWaiting, "starting"];
+export function workerPhaseActivity(
+	progress: Pick<WorkerProgressSnapshot, "phase" | "verification"> | undefined,
+): readonly [glyph: string, words: string] {
+	if (progress?.verification !== undefined) return VERIFICATION_ACTIVITY[progress.verification];
+	return WORKER_PHASE_ACTIVITY[progress?.phase ?? "starting"] ?? [GLYPH.phaseWaiting, "starting"];
 }
 
 /**
@@ -302,7 +311,14 @@ export function approvalWaitWords(
 export function workerActivityWords(
 	progress: Pick<
 		WorkerProgressSnapshot,
-		"phase" | "currentAction" | "awaitingApproval" | "approvalWindow" | "quietSinceMs" | "evidenceAtMs" | "settled"
+		| "phase"
+		| "verification"
+		| "currentAction"
+		| "awaitingApproval"
+		| "approvalWindow"
+		| "quietSinceMs"
+		| "evidenceAtMs"
+		| "settled"
 	>,
 	options: { now?: number; room?: number; history?: RouteFirstOutput | null } = {},
 ): string {
@@ -311,7 +327,7 @@ export function workerActivityWords(
 	if (progress.awaitingApproval === true) return approvalWaitWords(progress, options);
 	const action = progress.currentAction;
 	if (action !== null && action !== undefined) return workerActionParts(action, "running").verb;
-	return workerSilenceWords(progress, options) ?? workerPhaseActivity(progress.phase)[1];
+	return workerSilenceWords(progress, options) ?? workerPhaseActivity(progress)[1];
 }
 
 /**

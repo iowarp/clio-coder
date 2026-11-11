@@ -541,8 +541,9 @@ function actionPhrase(action: WorkerAction, tense: "running" | "finished"): stri
 /** The phase word an expanded card names, or null for a phase that says nothing new. */
 function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): string | null {
 	// The phase only, in the words the dock and the inline card use. Reasoning content never reaches an operator surface.
-	if (progress.phase === "settled" || progress.phase === "starting") return null;
-	const [glyph, words] = workerPhaseActivity(progress.phase);
+	if (progress.verification === undefined && (progress.phase === "settled" || progress.phase === "starting"))
+		return null;
+	const [glyph, words] = workerPhaseActivity(progress);
 	return theme.fg("dispatchAction", `${glyph} ${words}`);
 }
 
@@ -586,7 +587,7 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 	const lines: string[] = [];
 	// The inline card's and the dock's words for the same phase, so the three surfaces never disagree.
 	// A running call is what the worker is doing now; without one, the phase says it.
-	const phase = workerPhaseActivity(progress.phase)[1];
+	const phase = workerPhaseActivity(progress)[1];
 	const words = progress.currentAction
 		? actionPhrase(progress.currentAction, "running")
 		: `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;

@@ -814,14 +814,16 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 			? quiet
 			: current !== null
 				? clean(current)
-				: last !== undefined
-					? clean(finishedAction(last))
-					: isPending(entry)
-						? ((entry.progress === undefined
-								? null
-								: workerSilenceWords(entry.progress, { room: 48, history: entry.routeFirstOutput ?? null })) ??
-							workerPhaseActivity(entry.progress?.phase)[1])
-						: "";
+				: isPending(entry) && entry.progress?.verification !== undefined
+					? workerPhaseActivity(entry.progress)[1]
+					: last !== undefined
+						? clean(finishedAction(last))
+						: isPending(entry)
+							? ((entry.progress === undefined
+									? null
+									: workerSilenceWords(entry.progress, { room: 48, history: entry.routeFirstOutput ?? null })) ??
+								workerPhaseActivity(entry.progress)[1])
+							: "";
 	const facts = [
 		target,
 		tools,
@@ -890,7 +892,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 			? [GLYPH.warnInline, quiet]
 			: silence !== null
 				? [GLYPH.warnInline, silence]
-				: workerPhaseActivity(entry.progress?.phase);
+				: workerPhaseActivity(entry.progress);
 	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
 		entry.helper ||
