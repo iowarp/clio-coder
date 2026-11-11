@@ -408,7 +408,10 @@ test("a route where none re-renders asks text-only rounds with auto first and fa
 	deepStrictEqual((await send(target, [{ kind: "text-only" }], [reply(0, text)])).sent, ["none"]);
 	const compliant = await send(target, [{ kind: "text-only" }], [reply(8192, text)]);
 	deepStrictEqual(compliant.sent, ["auto"]);
-	strictEqual(compliant.result.toolRounds?.[0]?.downgradeReason, "none re-renders the prompt on this route");
+	strictEqual(
+		(compliant.result as { toolRounds?: ToolRoundRecord[] }).toolRounds?.[0]?.downgradeReason,
+		"none re-renders the prompt on this route",
+	);
 	const fallback = await send(target, [{ kind: "text-only" }], [reply(8192, call), reply(0, text)]);
 	deepStrictEqual(fallback.sent, ["auto", "none"]);
 	ok(fallback.result.content.every((block) => block.type === "text"));
