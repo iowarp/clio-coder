@@ -19,7 +19,7 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
+import { pricesCalls, pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -2135,8 +2135,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice(deps.getSettings().chat) };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
-			// An unpriced route projects nothing, but the session's settled spend may already be at the ceiling.
-			if (admitHere) {
+			// The pre-warm is gated like the turn it warms: the turn on an unpriced route is
+			// not held at the ceiling, so neither is the round that warms it.
+			if (admitHere && pricesCalls(resolution.pricedBy)) {
 				await deps.scheduling?.admitPaidRequest?.({
 					waitForRaise: deps.headless !== true,
 					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
