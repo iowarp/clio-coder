@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
 	projectLedgerAssignments,
 	projectReceiptFindings,
@@ -15,8 +16,11 @@ import {
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { finishRunResult, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -148,6 +152,95 @@ test("projection survives run-row resume and renders an empty board and worker s
 		await closeAgentLedger("board");
 		assert.deepEqual(await appendAgentLedgerReport("board", attribution, report), posted);
 		assert.equal(readAgentLedger("board")?.entries.length, 1);
+	} finally {
+		env.restore();
+	}
+});
+
+test("members of one board batch share their prompt prefix, so the stagger holds the rest behind the first", async () => {
+	await isolateDispatchState();
+	const spawned: Array<{ leaderDone: boolean; finish: () => void }> = [];
+	let leaderDone = false;
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.staggerSharedPrefix = true;
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		spawnWorker: () => {
+			let finish!: (result: SpawnedWorkerResult) => void;
+			const promise = new Promise<SpawnedWorkerResult>((resolve) => {
+				finish = resolve;
+			});
+			const index = spawned.length;
+			const end = () => {
+				if (index === 0) leaderDone = true;
+				finish({ exitCode: 0, signal: null });
+			};
+			spawned.push({ leaderDone, finish: end });
+			// The leader never streams, so only its exit releases a held follower. Unheld followers end it at once.
+			if (index === 0) setTimeout(end, 1_000);
+			if (index === 2) spawned[0]?.finish();
+			const worker: SpawnedWorker = {
+				pid: 6_000 + index,
+				promise,
+				heartbeatAt: { current: 5, monotonic: 3 },
+				events: (async function* () {
+					yield { type: "message_start" };
+					await promise;
+				})(),
+				abort: end,
+			};
+			return worker;
+		},
+	});
+	await bundle.extension.start();
+	try {
+		await openAgentLedger("board-batch");
+		const request = {
+			agentId: "scout",
+			executionRole: "researcher" as const,
+			task: "Inspect the fixture.",
+			requestOrigin: "internal" as const,
+			ledger: { id: "board-batch", sequence: 0 },
+		};
+		const batch = await bundle.contract.dispatchBatch([request, request, request]);
+		for (const member of spawned) member.finish();
+		await batch.finalPromise.catch(() => undefined);
+		assert.equal(spawned.length, 3);
+		assert.deepEqual(
+			spawned.map((member) => member.leaderDone),
+			[false, true, true],
+			"members 2 and 3 started before the first member's prefix was written",
+		);
+	} finally {
+		for (const member of spawned) member.finish();
+		await bundle.extension.stop?.();
+		restoreDispatchState();
+	}
+});
+
+test("the board roster rides after the shared prompt prefix, in each member's own tail", async () => {
+	const env = await isolateClioEnv("clio-ledger-roster-tail-");
+	try {
+		await openAgentLedger("board");
+		const p = projection();
+		const member = (count: number) =>
+			buildDynamicPromptMessages(
+				{
+					agentId: "scout",
+					executionRole: "researcher",
+					task: "Inspect",
+					ledger: { id: "board", sequence: 0 },
+					briefing: "Shared batch briefing.",
+					memorySection: "Shared memory.",
+				},
+				{ ledgerToolAvailable: true, ledgerAssignments: p.assignments.slice(0, count) },
+			);
+		const [first, second] = [member(1), member(2)];
+		const ids = first.map((message) => message.id);
+		// Only the board differs between members, and nothing shared follows it.
+		assert.deepEqual(ids, ["dispatch-memory", "dispatch-briefing", "dispatch-agent-ledger"]);
+		assert.notEqual(first.at(-1)?.body, second.at(-1)?.body);
+		assert.deepEqual(first.slice(0, -1), second.slice(0, -1));
 	} finally {
 		env.restore();
 	}
