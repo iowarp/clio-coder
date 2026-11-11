@@ -418,6 +418,25 @@ function notSpawnedResult(message: string): BashCommandResult {
 	};
 }
 
+/** Process groups of commands this process started that may still hold members, keyed by leader pid. */
+const liveCommandGroups = new Set<number>();
+
+/**
+ * SIGKILL every command group this process started. A dispatched worker calls it when cancelled: each command runs in
+ * its own group, so the parent's kill of the worker's group misses it, and the 5 s escalation timer below dies with
+ * the worker.
+ */
+export function killLiveCommandGroups(): void {
+	for (const pgid of liveCommandGroups) {
+		try {
+			process.kill(-pgid, "SIGKILL");
+		} catch {
+			// Already gone.
+		}
+	}
+	liveCommandGroups.clear();
+}
+
 export async function runBashCommand(command: string, options: RunBashCommandOptions = {}): Promise<BashCommandResult> {
 	const shell = bashShellPath();
 	if (shell === null)
@@ -472,6 +491,11 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		if (child.pid !== undefined) options.onSpawn?.(child.pid);
+		const groupId = process.platform !== "win32" ? child.pid : undefined;
+		if (groupId !== undefined) liveCommandGroups.add(groupId);
+		const forgetGroup = (): void => {
+			if (groupId !== undefined && !hasOwnedProcesses()) liveCommandGroups.delete(groupId);
+		};
 
 		// The main-session sandbox removes git config and commondir files its command
 		// planted once the sandbox is gone, before the result resolves (#419).
@@ -536,6 +560,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			killGraceTimer = setTimeout(() => {
 				killGraceTimer = null;
 				if (hasOwnedProcesses()) sendSignal("SIGKILL");
+				if (groupId !== undefined) liveCommandGroups.delete(groupId);
 				const finish = pendingClose;
 				pendingClose = null;
 				finish?.();
@@ -593,6 +618,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			});
 		});
 		child.on("close", (code, signalName) => {
+			forgetGroup();
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);

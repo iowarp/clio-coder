@@ -8,6 +8,7 @@ import {
 	type BashCommandProgress,
 	type BashProgressScheduler,
 	createBashOutputProgressController,
+	killLiveCommandGroups,
 	runBashCommand,
 } from "../../src/core/bash-exec.js";
 import { bashShellEnvironment, POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
@@ -177,6 +178,26 @@ describe("bash abort settlement (#445)", () => {
 			}
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("worker cancel stops running commands", () => {
+	it("kills a command group that ignores SIGTERM, which would outlive a cancelled worker", async () => {
+		const controller = new AbortController();
+		let spawned!: () => void;
+		const started = new Promise<void>((resolve) => {
+			spawned = resolve;
+		});
+		const run = runBashCommand(`trap "" TERM; echo up; sleep 30`, {
+			timeoutMs: 3_600_000,
+			signal: controller.signal,
+			onUpdate: () => spawned(),
+		});
+		await started;
+		controller.abort();
+		killLiveCommandGroups();
+		const settled = await Promise.race([run, new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000))]);
+		ok(settled !== null, "the command outlived the kill");
 	});
 });
 

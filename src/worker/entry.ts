@@ -17,7 +17,7 @@ process.title = "clio-coder-worker";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { AI_AGENT_NAME } from "../core/agent-environment.js";
-import { setToolEnvAutonomy } from "../core/bash-exec.js";
+import { killLiveCommandGroups, setToolEnvAutonomy } from "../core/bash-exec.js";
 import { deleteInjectedCompileCacheFrom } from "../core/compile-cache.js";
 import { adoptDevRootOwner } from "../core/dev-roots.js";
 import {
@@ -396,6 +396,9 @@ async function main(): Promise<number> {
 		// #425: a signal abort must leave its route in the worker's own diagnostics.
 		process.stderr.write(`[worker] ${signal} received; aborting run\n`);
 		abortOnce();
+		// The parent kills this worker's group shortly after this signal; a command runs in its own group, so stop it
+		// here or it outlives the cancel.
+		killLiveCommandGroups();
 	};
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
