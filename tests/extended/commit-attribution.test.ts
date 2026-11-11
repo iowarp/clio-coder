@@ -24,7 +24,10 @@ import {
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { installWindowsLauncher, windowsLaunchFile } from "../../src/core/windows-launcher.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
-import { deriveFleetCommitAttribution } from "../../src/domains/dispatch/fleet-commit-attribution.js";
+import {
+	deriveFleetCommitAttribution,
+	isVacuousCheckArgv,
+} from "../../src/domains/dispatch/fleet-commit-attribution.js";
 import { commitWorktreePath } from "../../src/tools/task-worktree.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -581,5 +584,18 @@ describe("autonomous commit authorship", () => {
 			strictEqual(git(["log", "-1", "--format=%an <%ae>"]).trim(), HUMAN);
 			strictEqual(git(["log", "-1", "--format=%B"]), "task: b\n\n");
 		});
+	});
+});
+
+describe("vacuous loop checks", () => {
+	it("a check that cannot fail earns no Tested-by", () => {
+		for (const argv of [["true"], ["/usr/bin/true"], [":"], ["sh", "-c", "exit 0"], ["bash", "-c", "true"]])
+			strictEqual(isVacuousCheckArgv(argv), true, argv.join(" "));
+		for (const argv of [
+			["pnpm", "test"],
+			["sh", "-c", "pnpm test"],
+			["true", "x"],
+		])
+			strictEqual(isVacuousCheckArgv(argv), false, argv.join(" "));
 	});
 });

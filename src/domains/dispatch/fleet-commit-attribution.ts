@@ -58,3 +58,20 @@ export function deriveFleetCommitAttribution(input: {
 		...(decisions === undefined ? {} : { decisions }),
 	};
 }
+
+const NO_OP_COMMANDS = new Set(["true", ":"]);
+const NO_OP_SCRIPTS = /^\s*(?:true|:|exit\s+0)?\s*;?\s*$/u;
+
+/**
+ * A check whose argv cannot fail (`true`, `:`, or a shell running only that) proves nothing, so its pass earns no
+ * `Tested-by` trailer. The registry is repository-owned; this only refuses the trivially vacuous forms.
+ */
+export function isVacuousCheckArgv(argv: ReadonlyArray<string>): boolean {
+	const [program, ...rest] = argv;
+	if (program === undefined) return true;
+	const name = program.split("/").at(-1) ?? program;
+	if (NO_OP_COMMANDS.has(name) && rest.length === 0) return true;
+	if (["sh", "bash", "dash", "zsh"].includes(name) && rest.length === 2 && rest[0] === "-c")
+		return NO_OP_SCRIPTS.test(rest[1] ?? "");
+	return false;
+}

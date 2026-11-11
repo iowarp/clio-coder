@@ -66,7 +66,7 @@ import {
 import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
-import { deriveFleetCommitAttribution } from "./fleet-commit-attribution.js";
+import { deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 import { acquireFleetWorkspaceLock } from "./fleet-workspace-lock.js";
@@ -1225,7 +1225,7 @@ async function runFleetHoldingWorkspace(
 					commitBaseline = commitPointSnapshot(workspaceRoot);
 					if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 				}
-				if (step.verification === true) validationFresh = outcome.report.passed;
+				if (step.verification === true) validationFresh = outcome.report.passed && !isVacuousCheckArgv(command.argv);
 				if (!telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry.context))
 					throw new Error(`fleet code step '${step.id}' settlement could not be enqueued`);
 				await rootTelemetry.flush();
