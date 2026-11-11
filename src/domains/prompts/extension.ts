@@ -376,7 +376,10 @@ export function createPromptsBundle(
 				if (!diffTouchesFragments(paths)) return;
 				reload();
 			});
-			const unsubscribePlugins = context.bus.subscribe("plugin.reloaded", () => reload());
+			const unsubscribePlugins = context.bus.subscribe("plugin.reloaded", () => {
+				reload();
+				invalidateSessionSources();
+			});
 			const unsubscribeRequested = context.bus.subscribe("prompts.reload_requested", () => {
 				reload();
 				invalidateSessionSources();

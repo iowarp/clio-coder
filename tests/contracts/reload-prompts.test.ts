@@ -77,3 +77,24 @@ test("/reload prompts reports a failed recipe rediscovery instead of failed: non
 	ok(!result.text.includes("failed: none"));
 	ok(!result.text.includes("recipes: rediscovered"));
 });
+
+test("/reload library does not claim every agent recipe reloaded", async () => {
+	const bus = createTelemetryHub();
+	const reloads = createReloadClasses({
+		config: undefined,
+		bus,
+		cwd: () => process.cwd(),
+		library: () => undefined,
+		reloadLibrary: () => ({ generation: 2, packages: [] }) as never,
+		extensions: () => [],
+		fragmentsRoot: process.cwd(),
+	});
+	const report = await reloads.run("library", async () => ({
+		status: "ok",
+		message: "",
+		failures: [],
+		nextSession: [],
+	}));
+	match(report.text, /agent recipes only from changed packages/u);
+	ok(!/prompts, agents and playbooks reload here/u.test(report.text));
+});

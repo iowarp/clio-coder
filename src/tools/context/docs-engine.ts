@@ -195,6 +195,11 @@ interface ScoredSection {
 
 let cachedIndex: DocsIndex | null = null;
 
+/** Drop the cached docs index so the next `clio_docs` call rebuilds it (`/reload prompts`). */
+export function resetDocsIndex(): void {
+	cachedIndex = null;
+}
+
 function normalizeText(text: string): string {
 	return text
 		.toLowerCase()

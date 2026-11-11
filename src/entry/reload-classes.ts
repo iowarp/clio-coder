@@ -6,6 +6,7 @@ import type { InstalledExtension } from "../domains/extensions/types.js";
 import type { InstalledPlugin, PluginSnapshot } from "../domains/plugins/types.js";
 import { loadFragments } from "../domains/prompts/fragment-loader.js";
 import type { ReloadClassesController, ReloadReport } from "../session-control/reload-report.js";
+import { resetDocsIndex } from "../tools/context/docs-engine.js";
 
 type Inventory = Map<string, string>;
 
@@ -155,7 +156,10 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 								if (issue.type === "error") failed = true;
 								lines.push(`  ${issue.type}: ${entry.id}: ${issue.message}`);
 							}
-						lines.push("  restart required: none (skills, prompts, agents and playbooks reload here)");
+						lines.push(
+							"  reloaded: skills, playbooks and prompt fragments; agent recipes only from changed packages (/reload prompts rediscovers all); session catalogs re-read on the next request",
+						);
+						lines.push("  restart required: none");
 						if (!snapshot.packages.some((entry) => entry.diagnostics.some((issue) => issue.type === "error")))
 							lines.push("  failed: none");
 					} catch (error) {
@@ -187,10 +191,11 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 						const recipeFailures: string[] = [];
 						deps.bus.emit("prompts.reload_requested", { cwd: deps.cwd(), failures: recipeFailures });
 						reportedFragments = after;
+						resetDocsIndex();
 						lines.push(...summary("Prompt fragments", before, after));
 						if (recipeFailures.length === 0) lines.push("  recipes: rediscovered");
 						else failure("  Agent recipes (plugin recipes withdrawn)", recipeFailures.join("; "));
-						lines.push("  session sources (handbook, project rules, catalogs): re-read on the next request");
+						lines.push("  session sources (handbook, project rules, catalogs) and docs index: re-read on the next request");
 						lines.push("  prompt prefix changed; the next request re-sends it uncached");
 						if (recipeFailures.length === 0) lines.push("  failed: none");
 					} catch (error) {
