@@ -147,6 +147,10 @@ describe("safety gate boundary", () => {
 		writeFileSync(join(scratch, ".env.local"), "API_KEY=other\n");
 		strictEqual(kind("cp .env.example .env.local"), "block", "replacing an existing secret stays refused");
 		strictEqual(kind('grep -sq "^API_KEY=" .env'), "allow", "the presence check keeps working");
+		strictEqual(kind('grep -sq "^API_KEY=" .env && echo set || echo missing'), "allow", "the hinted form chained");
+		strictEqual(kind("grep -qs '^API_KEY=' .env || echo missing"), "allow");
+		strictEqual(kind('grep -sq "^API_KEY=" .env && cat .env'), "block", "a chained read stays refused");
+		strictEqual(kind('grep -sq "^API_KEY=" .env | cat'), "block", "a pipe is not a presence check");
 	});
 
 	it("refuses a recursive search whose walk reaches a zero-access file unless it excludes it", () => {

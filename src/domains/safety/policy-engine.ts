@@ -1932,6 +1932,31 @@ function isSafePresenceCheck(command: string): boolean {
 	return /^\^[A-Za-z_][A-Za-z0-9_]*=$/.test(pattern);
 }
 
+/**
+ * A presence check chained into a list (`grep -sq "^NAME=" .env && echo set`)
+ * still reads nothing; the rest of the list is judged on its own. Returns the
+ * command left after removing leading presence checks, "" when nothing
+ * remains, or null when the command does not start with one. Pipes and
+ * redirections never bind to the check: only `&&`, `||` and `;` separate it.
+ */
+const LEADING_PRESENCE_RE =
+	/^\s*(grep\s+-(?:q|sq|qs)\s+(?:'[^']*'|"[^"]*"|[^\s;&|<>]+)\s+[^\s;&|<>]+)\s*(?:&&|\|\||;)(?!&|\|)/;
+
+function stripPresenceChecks(command: string): string | null {
+	if (isSafePresenceCheck(command)) return "";
+	let rest = command;
+	let stripped = false;
+	for (;;) {
+		const match = LEADING_PRESENCE_RE.exec(rest);
+		if (!match || match[1] === undefined || !isSafePresenceCheck(match[1])) break;
+		rest = rest.slice(match[0].length);
+		stripped = true;
+		if (isSafePresenceCheck(rest)) return "";
+	}
+	if (!stripped) return null;
+	return rest.trim();
+}
+
 function stripQuotes(token: string): string {
 	if (token.length >= 2) {
 		const first = token[0];
@@ -1982,7 +2007,8 @@ function bashPathTokenCandidates(command: string): string[] {
 export function flowSourceCallFor(rawCall: ClassifierCall, cwd: string): FlowSourceCall {
 	const call = normalizeCallPaths(rawCall);
 	const command = call.tool === ToolNames.Bash ? commandArg(call.args) : null;
-	const readTokens = command === null || isSafePresenceCheck(command) ? [] : bashOperandRoles(command).reads;
+	const remaining = command === null ? null : (stripPresenceChecks(command) ?? command);
+	const readTokens = remaining === null || remaining === "" ? [] : bashOperandRoles(remaining).reads;
 	return {
 		tool: call.tool,
 		args: call.args,
@@ -1997,7 +2023,9 @@ function evaluateBashZeroAccessRead(
 	callCwd: string,
 ): BashZeroAccessHit | null {
 	if (zeroAccessPolicy.entries.length === 0) return null;
-	if (isSafePresenceCheck(command)) return null;
+	const remaining = stripPresenceChecks(command);
+	if (remaining === "") return null;
+	if (remaining !== null) command = remaining;
 	const roles = bashOperandRoles(command);
 	for (const token of roles.reads) {
 		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd);
