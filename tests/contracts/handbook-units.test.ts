@@ -328,6 +328,60 @@ describe("peer handbook compile", () => {
 		}
 	});
 
+	it("keeps the handbook's summary and invariants when a peer's file overflows the bound, and counts every rule left out", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-peer-handbook-"));
+		try {
+			writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "demo", scripts: { test: "node --test" } }));
+			const conventions = Array.from({ length: 60 }, (_, n) => `- Convention ${n}: keep module ${n}'s exports sorted.`);
+			const handbook = [
+				"# Demo",
+				"",
+				"Demo prices carts.",
+				"",
+				"## Hard invariants",
+				"",
+				"1. Never write to the operator's real home from tests.",
+				"",
+				"## Conventions",
+				"",
+				...conventions,
+				"",
+			].join("\n");
+			const notes = Array.from(
+				{ length: 150 },
+				(_, n) => `- Peer note ${n}: the widget ${n} stays aligned with its frame.`,
+			);
+			const peerFile = ["# Notes", "", ...notes, ""].join("\n");
+			const peerRules = await judgeInstructionFiles(
+				cwd,
+				[{ file: "AGENTS.md", path: join(cwd, "AGENTS.md"), content: peerFile }],
+				"adopted",
+			);
+			const compiled = compileHandbook(handbook, join(cwd, "CLIO-CODER.md"));
+			ok(compiled);
+			const peer = compilePeerHandbook([compiled], {
+				audience: workerHandbookAudience("coder", "workspace-edit"),
+				cwd,
+				workingPaths: [],
+				maxChars: 6000,
+				peerRules,
+				facts: treeFacts(cwd),
+				clioNames: [],
+			});
+			ok(peer.text.length <= 6000, String(peer.text.length));
+			ok(peer.text.includes("Demo prices carts."), peer.text);
+			ok(peer.text.includes("Never write to the operator's real home from tests."), peer.text);
+			const carriedNotes = peer.text.match(/Peer note \d+:/g)?.length ?? 0;
+			const carriedConventions = peer.text.match(/Convention \d+:/g)?.length ?? 0;
+			ok(carriedNotes > 0 && carriedNotes < notes.length, String(carriedNotes));
+			ok(carriedConventions > 0, peer.text);
+			strictEqual(peer.carried, carriedNotes);
+			strictEqual(peer.notCarried, notes.length - carriedNotes + conventions.length - carriedConventions);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("names each stale file with its own count and says nothing when every rule holds", () => {
 		strictEqual(peerInstructionsStaleMessage("Codex", []), null);
 		strictEqual(

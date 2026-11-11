@@ -137,7 +137,7 @@ export interface RunProjectContextProvenance {
 	 * it: `single-source` when the harness started without the files and read the compiled rules alone, `overlay`
 	 * when the compiled rules were written over the files in the run's task worktree and put back before its change
 	 * was taken, `coexist` when it read the files unreconciled beside them. `stale` counts the files' rules the tree no longer supports;
-	 * `notCarried` those that hold but did not fit the bound. `reason` says why a harness that can take the rules in
+	 * `notCarried` the run's rules, of the handbook or those files, that hold but did not fit the bound. `reason` says why a harness that can take the rules in
 	 * place of its files read them beside the files instead: `setting` when `fleet.keepPeerInstructionFiles` names it.
 	 */
 	peerInstructions?: {

@@ -26,7 +26,7 @@ export interface PeerInstructions {
 	files: string[];
 	/** Rules of those files the tree no longer supports. */
 	stale: number;
-	/** Rules of those files that hold but did not fit the bound. */
+	/** The run's rules, of the handbook or those files, that hold but did not fit the bound. */
 	notCarried: number;
 	/** Why a harness that can take the rules in place of its files reads them beside the files. */
 	reason?: "setting";

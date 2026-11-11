@@ -39,9 +39,12 @@ export interface PeerHandbook {
 	stale: number;
 	/** Tree facts emitted as rules where a stale rule stated the value. */
 	facts: number;
-	/** Rules of the peer's files that hold but did not fit the bound. */
+	/** Rules for this run, of the handbook or the peer's files, that hold but did not fit the bound. */
 	notCarried: number;
 }
+
+/** The share of the bound the peer's own rules may claim; the handbook, invariants first, keeps the rest. */
+const PEER_RULES_SHARE = 0.4;
 
 const CODE_TOKEN_RE = /`([^`\n]+)`/g;
 const SCRIPT_CALL_RE = /^(pnpm|npm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9_:.-]+)$/;
@@ -150,14 +153,11 @@ export function compilePeerHandbook(
 		else (rule.verdict === "verified" ? verified : unverifiable).push(rule.text);
 	}
 
-	// The peer's own rules hold their room first; the handbook selection takes what is left.
+	// The handbook keeps its room first, invariants leading, less a reserve for the peer's own rules; those then
+	// take whatever room the selection left.
 	const own = [...verified, ...replacements, ...unverifiable];
-	let kept = own.length;
-	while (kept > 0 && renderBlock(own.slice(0, kept)).length > options.maxChars) kept -= 1;
-	const lines = own.slice(0, kept);
-	const ownCarried = lines.filter((line) => !replacements.includes(line)).length;
-	let notCarried = verified.length + unverifiable.length - ownCarried;
-	const reserved = lines.length > 0 ? renderBlock(lines).length + 2 : 0;
+	const reserved =
+		own.length > 0 ? Math.min(Math.floor(PEER_RULES_SHARE * options.maxChars), renderBlock(own).length + 2) : 0;
 	const selection = selectWorkerHandbook(portable, {
 		audience: options.audience.filter((entry) => entry !== "orchestrator"),
 		cwd: options.cwd,
@@ -165,6 +165,11 @@ export function compilePeerHandbook(
 		maxChars: Math.max(0, options.maxChars - reserved),
 	});
 	const join = (block: string): string => [selection.text, block].filter((part) => part.length > 0).join("\n\n");
+	let kept = own.length;
+	while (kept > 0 && join(renderBlock(own.slice(0, kept))).length > options.maxChars) kept -= 1;
+	const lines = own.slice(0, kept);
+	const ownCarried = lines.filter((line) => !replacements.includes(line)).length;
+	let notCarried = verified.length + unverifiable.length - ownCarried;
 	// A rule the handbook also states rides once: in the handbook when selected, else in the peer's block if it fits.
 	let carriedDuplicates = 0;
 	for (const duplicate of duplicates) {
@@ -177,6 +182,9 @@ export function compilePeerHandbook(
 			carriedDuplicates += 1;
 		} else notCarried += 1;
 	}
+	// A dropped handbook rule the peer's files also state was settled above, carried or counted.
+	const duplicateUnitIds = new Set(duplicates.map((duplicate) => duplicate.unitId));
+	notCarried += new Set(selection.droppedIds.filter((id) => !duplicateUnitIds.has(id))).size;
 	return {
 		text: join(renderBlock(lines)),
 		carried: ownCarried + carriedDuplicates,

@@ -267,6 +267,8 @@ export interface WorkerHandbookSelection {
 	total: number;
 	/** Ids of the rendered units, in document order. */
 	unitIds: string[];
+	/** Ids of the units this worker's audience and paths call for that did not fit the budget. */
+	droppedIds: string[];
 }
 
 function asRule(unit: HandbookUnit, sourcePath: string): ProjectRule {
@@ -403,5 +405,9 @@ export function selectWorkerHandbook(
 	const unitIds = fits
 		? handbooks.flatMap((handbook) => handbook.units.filter((unit) => chosen.has(unit))).map((unit) => unit.id)
 		: [];
-	return { text: fits ? text : "", selected: chosen.size, total, unitIds };
+	const droppedIds = tiers
+		.flat()
+		.filter((unit) => !fits || !chosen.has(unit))
+		.map((unit) => unit.id);
+	return { text: fits ? text : "", selected: chosen.size, total, unitIds, droppedIds };
 }

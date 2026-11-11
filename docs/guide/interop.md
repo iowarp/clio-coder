@@ -127,6 +127,8 @@ Each headless peer also reads its own instruction files from the repository.
 At project-context tier `bounded`, Clio Coder judges the rules in those files
 against the tree and sends the peer one compiled rule set in the project-context
 message: the handbook's sections, then the peer file's rules that still hold.
+The handbook keeps its summary and invariants first; the peer file's rules have
+a reserve of up to 40% of the bound and take whatever room the handbook leaves.
 A stale command rule is replaced by the tree's value, such as the test command
 in `package.json`. When the runtime has a switch, Clio turns its own discovery
 off so the peer reads one source:
@@ -156,8 +158,9 @@ nothing to compile it into. A runtime id listed in `fleet.keepPeerInstructionFil
 always reads its files beside the compiled rules, with no switch and no overlay, for
 a file whose guidance Clio cannot extract as rules. Antigravity, ACP peers, and tier
 `none` keep their current behavior. The run record's `projectContext.peerInstructions` names the delivery,
-the files, the count of rules the tree no longer supports (`stale`), and the
-count that hold but did not fit the bound (`notCarried`), and `reason: setting`
+the files, the count of their rules the tree no longer supports (`stale`), and the
+count of the run's rules, from the handbook or those files, that hold but did not
+fit the bound (`notCarried`), and `reason: setting`
 when the setting kept the files. When a peer read its files as they are and they
 hold rules the tree no longer supports, Clio raises a `peer_instructions_stale`
 notice once per process for those files and counts, such as `AGENTS.md has 1 rule
