@@ -7,6 +7,7 @@ import {
 	type GitHookChange,
 	type GitHookFile,
 	gitHookEntryId,
+	UNLISTED_GIT_CONFIG_KEY,
 } from "../../core/sandbox/git-hooks-fingerprint.js";
 import type { AutonomyLevel } from "./autonomy.js";
 import {
@@ -29,8 +30,12 @@ const STOCK_LFS_FILTER = new Map(
 	}).map(([key, value]) => [key, createHash("sha256").update(value).digest("hex")]),
 );
 
-/** A filter driver set in the repository's own config, local or worktree scope, other than stock git-lfs. */
+/**
+ * A filter driver set in the repository's own config, local or worktree scope, other than stock git-lfs, or
+ * config git could not list, which may set one.
+ */
 function repositoryFilter(entry: GitHookFile): boolean {
+	if (entry.key === UNLISTED_GIT_CONFIG_KEY) return true;
 	if (entry.key === undefined || !entry.key.startsWith("filter.")) return false;
 	if (entry.scope !== "local" && entry.scope !== "worktree") return false;
 	return STOCK_LFS_FILTER.get(entry.key) !== entry.hash;
@@ -222,6 +227,13 @@ function noticeFor(record: Omit<InternalGitDriftRecord, "message" | "announce">,
 	const changed = `${named.join("; ")}${more}`;
 	if (record.outcome === "yolo")
 		return `[safety] Clio ran ${record.operation} under yolo with changed git hooks or config: ${changed}.`;
+	if (record.changes.length === 0 && record.unneutralized.includes(UNLISTED_GIT_CONFIG_KEY)) {
+		const ran =
+			record.outcome === "skipped"
+				? `does not run its own status and diff probes in ${record.repository}`
+				: `ran ${record.operation} with hooks off`;
+		return `[safety] Clio ${ran}, because git cannot list the repository's git config within its time and size bounds, so a filter driver or hook it sets could run unseen. This lasts until the config lists again.`;
+	}
 	if (record.outcome === "skipped" && record.changes.length === 0)
 		return `[safety] Clio does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
 	if (record.outcome === "skipped")
@@ -298,6 +310,15 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 		return { overrides, unneutralized };
 	};
 
+	const unlistedConfig = (repository: string): boolean => {
+		try {
+			const guard = outsideConfigGuard(repository) ?? deps.guard;
+			return guard.executableConfig(repository).some((entry) => entry.key === UNLISTED_GIT_CONFIG_KEY);
+		} catch {
+			return true;
+		}
+	};
+
 	const hooksOff = (): string[] =>
 		configWord("core.hooksPath", emptyDirectory(deps.emptyHooksDir) ?? UNREACHABLE_HOOKS_DIR);
 
@@ -337,7 +358,12 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 			const changes = [
 				...new Map(reports.flatMap((entry) => entry.changes).map((change) => [gitHookEntryId(change), change])).values(),
 			];
-			if (changes.length === 0) return [];
+			if (changes.length === 0) {
+				// Config git cannot list may set a hook path the guard never saw, baseline or not.
+				if (yolo || !unlistedConfig(operation.repository)) return [];
+				report({ ...operation, hardened: true, outcome: "hooks-off", changes, unneutralized: [UNLISTED_GIT_CONFIG_KEY] });
+				return hooksOff();
+			}
 			if (yolo) {
 				report({ ...operation, hardened: false, outcome: "yolo", changes, unneutralized: [] });
 				return [];

@@ -1,6 +1,15 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -239,6 +248,53 @@ test("a repository filter whose key no -c can name refuses Clio's read at every 
 		ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
 		rmSync(scratch, { recursive: true, force: true });
 	}
+});
+
+test("a repository config git cannot list within its bounds refuses Clio's read and runs its worktree add with hooks off", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const { root, scratch } = repository();
+	const filterRan = join(scratch, "oversized-filter-ran");
+	const hookRan = join(scratch, "oversized-hook-ran");
+	git(root, "config", "filter.big.clean", markerScript(join(scratch, "clean.sh"), filterRan, "cat\n"));
+	markerScript(join(root, ".git", "hooks", "post-checkout"), hookRan);
+	// Over the listing's 4 MiB output bound, from before the baseline.
+	appendFileSync(join(root, ".git", "config"), `[padding]\n${"\tkey = ".padEnd(1024, "x")}\n`.repeat(5 * 1024));
+	const { records } = session(root, scratch);
+	filtered(root, "big");
+	probeGit(root);
+	strictEqual(existsSync(filterRan), false, "the filter in the unlistable config did not run");
+	createTaskWorktree(root, "run-unlisted");
+	strictEqual(existsSync(hookRan), false, "the hook did not run");
+	deepStrictEqual(
+		records.map(({ outcome, unneutralized }) => ({ outcome, unneutralized })),
+		[
+			{ outcome: "skipped", unneutralized: ["(unlisted git config)"] },
+			{ outcome: "hooks-off", unneutralized: ["(unlisted git config)"] },
+		],
+	);
+	match(records[0]?.message ?? "", /cannot list .*git config/u);
+	spawnSync("git", ["-C", root, "status", "--porcelain"]);
+	ok(existsSync(filterRan), "a plain git status runs the filter, so the fixture is live");
+	rmSync(scratch, { recursive: true, force: true });
+});
+
+test("an include target missing at the baseline is watched, so a filter it gains later does not run in Clio's read", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const { root, scratch } = repository();
+	const marker = join(scratch, "included-filter-ran");
+	git(root, "config", "include.path", "../extra.cfg");
+	session(root, scratch);
+	probeGit(root);
+	writeFileSync(
+		join(root, "extra.cfg"),
+		`[filter "late"]\n\tclean = ${markerScript(join(scratch, "clean.sh"), marker, "cat\n")}\n`,
+	);
+	filtered(root, "late");
+	probeGit(root);
+	strictEqual(existsSync(marker), false, "the filter the include gained did not run");
+	spawnSync("git", ["-C", root, "status", "--porcelain"]);
+	ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
+	rmSync(scratch, { recursive: true, force: true });
 });
 
 test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line does not", () => {

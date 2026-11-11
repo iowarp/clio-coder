@@ -11,6 +11,7 @@ import {
 	type Stats,
 	statSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { gitConfigScopeFiles, mainSandboxGitLayout } from "./main-session.js";
 
@@ -96,6 +97,14 @@ const FIRST_LINE_BYTES = 512;
 const FIRST_LINE_CHARS = 120;
 const CONFIG_LIST_TIMEOUT_MS = 5_000;
 const CONFIG_LIST_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The key of the entry a repository's config listing stands for when git
+ * cannot list it within its time and size bounds: what it sets is unknown, a
+ * filter driver or a hook path included, so a rule that distrusts the
+ * repository's own config treats it as one it cannot override.
+ */
+export const UNLISTED_GIT_CONFIG_KEY = "(unlisted git config)";
 
 /** A hook file's path, or a config value's file and key: what a fingerprint, a baseline and a change are keyed by. */
 export function gitHookEntryId(entry: { path: string; key?: string }): string {
@@ -375,9 +384,22 @@ function scopeOfOrigin(origin: string, file: string | null): string {
 }
 
 /**
+ * The file an `include.path` or `includeIf.<condition>.path` value set in
+ * `file` names: relative to the including file's directory, `~/` from home.
+ * Null for one set on the command line or by a prefix git expands itself.
+ */
+function includeTarget(value: string, file: string | null): string | null {
+	if (value === "" || value.startsWith("%(")) return null;
+	if (value === "~" || value.startsWith("~/")) return path.join(homedir(), value.slice(1));
+	if (path.isAbsolute(value)) return path.normalize(value);
+	return file === null ? null : path.resolve(path.dirname(file), value);
+}
+
+/**
  * Impure: the executable config values git reads in `dir`, every scope
- * included, as fingerprint entries, and the files they came from. Null when
- * git cannot list them. Listing config runs no hook and no configured
+ * included, as fingerprint entries, and the files they came from, an include
+ * target git did not read because it is missing too. Null when git cannot
+ * list them. Listing config runs no hook and no configured
  * program.
  */
 function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>; origins: string[] } | null {
@@ -417,6 +439,11 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 		// Git prints a file below the work tree top relative to it, having moved there to read config.
 		const file = origin.startsWith("file:") ? path.resolve(dir, origin.slice("file:".length)) : null;
 		if (file !== null) origins.add(file);
+		// A missing include target is watched too, so the config it gains once created is listed.
+		if (key === "include.path" || (key.startsWith("includeif.") && key.endsWith(".path"))) {
+			const target = includeTarget(value, file);
+			if (target !== null) origins.add(target);
+		}
 		const scope = scoped ? (fields[at] as string) : scopeOfOrigin(origin, file);
 		const where = file ?? origin.replace(/:$/u, "");
 		const id = gitHookEntryId({ path: where, key });
@@ -451,8 +478,23 @@ function executableConfigOf(scope: RepositoryScope, cached: ConfigListing | unde
 	const stamp = statStamp(watched(cached?.origins ?? []));
 	if (cached !== undefined && cached.stamp === stamp) return cached;
 	const listed = listExecutableConfig(scope.dir);
-	// A failed listing keeps what was last seen and lists again next time.
-	if (listed === null) return { stamp: null, origins: cached?.origins ?? [], entries: cached?.entries ?? new Map() };
+	// A failed listing keeps what was last seen, adds the entry that stands for what it could not read, and lists
+	// again next time.
+	if (listed === null) {
+		const entries = new Map(cached?.entries ?? []);
+		const unlisted: GitHookFile = {
+			path: scope.dir,
+			kind: "config",
+			key: UNLISTED_GIT_CONFIG_KEY,
+			scope: "local",
+			executable: true,
+			size: -1,
+			hash: "",
+			firstLine: "",
+		};
+		entries.set(gitHookEntryId(unlisted), unlisted);
+		return { stamp: null, origins: cached?.origins ?? [], entries };
+	}
 	const sameOrigins =
 		cached !== undefined &&
 		listed.origins.length === cached.origins.length &&
