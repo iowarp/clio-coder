@@ -1,11 +1,17 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { judgeInstructionFiles } from "../../src/domains/context/bootstrap.js";
 import type { ProjectPromptContext } from "../../src/domains/context/contract.js";
 import {
 	compileHandbook,
 	selectWorkerHandbook,
 	workerHandbookAudience,
 } from "../../src/domains/context/handbook-units.js";
+import { compilePeerHandbook } from "../../src/domains/context/peer-handbook.js";
+import { treeFacts } from "../../src/domains/context/tree-facts.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 
 const PATH = "/repo/CLIO-CODER.md";
@@ -232,5 +238,92 @@ describe("dispatch project context", () => {
 		const body = messages.find(({ id }) => id === "dispatch-project-context")?.body ?? "";
 		ok(body.includes("GUI logic"));
 		ok(!body.includes("Route scout"));
+	});
+});
+
+describe("peer handbook compile", () => {
+	it("gives a delegated peer one rule set: its own rules that hold, the tree's value for a stale one, nothing about its file", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-peer-handbook-"));
+		try {
+			writeFileSync(
+				join(cwd, "package.json"),
+				JSON.stringify({ name: "demo", scripts: { test: "node --test", build: "tsc" } }),
+			);
+			writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+			mkdirSync(join(cwd, "src"));
+			writeFileSync(join(cwd, "src", "cart.ts"), "export const cents = (value: number): number => value;\n");
+			const handbook = [
+				"# Demo",
+				"",
+				"Demo prices carts.",
+				"",
+				"## Hard invariants",
+				"",
+				"1. Never write to the operator's real home from tests.",
+				"",
+				"## Conventions",
+				"",
+				"- Cart prices live in `src/cart.ts`.",
+				"- Fan reviews out with the `dispatch` tool.",
+				"",
+				"## Operating rules",
+				"",
+				"- Route scout before planner.",
+				"",
+			].join("\n");
+			const peerFile = [
+				"# Notes",
+				"",
+				"- Money is integer cents; see `src/cart.ts`.",
+				"- Run `pnpm run test:all` before committing.",
+				"- Never write to the operator's real home from tests.",
+				"",
+			].join("\n");
+			writeFileSync(join(cwd, "CLIO-CODER.md"), handbook);
+			writeFileSync(join(cwd, "CLAUDE.md"), peerFile);
+			const peerRules = await judgeInstructionFiles(
+				cwd,
+				[{ file: "CLAUDE.md", path: join(cwd, "CLAUDE.md"), content: peerFile }],
+				"adopted",
+			);
+			const compiled = compileHandbook(handbook, join(cwd, "CLIO-CODER.md"));
+			ok(compiled);
+			const peer = compilePeerHandbook([compiled], {
+				audience: workerHandbookAudience("coder", "workspace-edit"),
+				cwd,
+				workingPaths: [],
+				maxChars: 6000,
+				peerRules,
+				facts: treeFacts(cwd),
+				clioNames: ["dispatch", "context", "scout"],
+			});
+			strictEqual(peer.text.split("Never write to the operator's real home from tests").length - 1, 1, peer.text);
+			ok(peer.text.includes("Money is integer cents; see `src/cart.ts`."), peer.text);
+			ok(peer.text.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."), peer.text);
+			ok(!peer.text.includes("test:all"), peer.text);
+			// Rules that only make sense inside Clio stay out.
+			ok(!peer.text.includes("`dispatch`"), peer.text);
+			ok(!peer.text.includes("Route scout"), peer.text);
+			doesNotMatch(peer.text, /CLAUDE\.md|\bignore|\boverrid|\bcorrect/iu);
+			deepStrictEqual(
+				{ carried: peer.carried, stale: peer.stale, facts: peer.facts, notCarried: peer.notCarried },
+				{ carried: 2, stale: 1, facts: 1, notCarried: 0 },
+			);
+			// Deterministic for unchanged inputs.
+			strictEqual(
+				compilePeerHandbook([compiled], {
+					audience: workerHandbookAudience("coder", "workspace-edit"),
+					cwd,
+					workingPaths: [],
+					maxChars: 6000,
+					peerRules,
+					facts: treeFacts(cwd),
+					clioNames: ["dispatch", "context", "scout"],
+				}).text,
+				peer.text,
+			);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 });

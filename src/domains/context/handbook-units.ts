@@ -265,6 +265,8 @@ export interface WorkerHandbookSelection {
 	text: string;
 	selected: number;
 	total: number;
+	/** Ids of the rendered units, in document order. */
+	unitIds: string[];
 }
 
 function asRule(unit: HandbookUnit, sourcePath: string): ProjectRule {
@@ -397,5 +399,9 @@ export function selectWorkerHandbook(
 	for (const tier of tiers.slice(1)) for (const unit of tier) tryAdd(unit, options.maxChars);
 	for (const unit of skipped) tryAdd(unit, options.maxChars);
 	const total = handbooks.reduce((sum, handbook) => sum + handbook.units.length, 0);
-	return { text: text.length <= options.maxChars ? text : "", selected: chosen.size, total };
+	const fits = text.length <= options.maxChars;
+	const unitIds = fits
+		? handbooks.flatMap((handbook) => handbook.units.filter((unit) => chosen.has(unit))).map((unit) => unit.id)
+		: [];
+	return { text: fits ? text : "", selected: chosen.size, total, unitIds };
 }

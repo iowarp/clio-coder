@@ -21,6 +21,7 @@ export {
 	type BootstrapStructuredOutput,
 	fallbackBootstrapOutput,
 	type HandbookVerification,
+	judgeInstructionFiles,
 	proposeHandbookVerification,
 	type RunBootstrapInput,
 	type RunBootstrapResult,

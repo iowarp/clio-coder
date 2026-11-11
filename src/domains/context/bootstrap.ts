@@ -2882,6 +2882,7 @@ export function verifyHandbookRules(
 	root: string,
 	handbooks: ReadonlyArray<HandbookToVerify>,
 	evidence: { repositoryFiles?: ReadonlyArray<string>; codewiki?: Codewiki } = {},
+	origin: HandbookLedgerEntry["origin"] = "handbook",
 ): HandbookRuleVerdicts {
 	const repositoryFiles = [
 		...(evidence.repositoryFiles ?? enumerateWorkspaceFiles(root).filter((path) => !GENERATION_EXCLUDED_FILES.has(path))),
@@ -2925,7 +2926,7 @@ export function verifyHandbookRules(
 				entries.push({
 					id: createHash("sha256").update(`${unit.file}:${unit.line}:${line}`).digest("hex").slice(0, 12),
 					text: line,
-					origin: "handbook",
+					origin,
 					source: { file: unit.file, line: unit.line, endLine: unit.endLine },
 					citations,
 					verdict,
@@ -3007,6 +3008,26 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 		verification: entries.map((entry) => ({ ...entry, commit })),
 	});
 	return { root, files: handbooks.map((handbook) => handbook.file), commit, entries };
+}
+
+/**
+ * Judge each instruction unit of `files` against the tree, the way
+ * `context init --verify` judges the handbook (see `verifyHandbookRules`),
+ * with `origin` on each entry. Paths resolve from the repository root above
+ * `cwd`. The files under review are the claim, never their own evidence, and
+ * neither is any other instruction file. Writes nothing.
+ */
+export async function judgeInstructionFiles(
+	cwd: string,
+	files: ReadonlyArray<HandbookToVerify>,
+	origin: HandbookLedgerEntry["origin"],
+): Promise<HandbookLedgerEntry[]> {
+	const root = handbookRoot(cwd);
+	const repositoryFiles = (await enumerateWorkspaceFilesAsync(root)).filter(
+		(path) => !GENERATION_EXCLUDED_FILES.has(path),
+	);
+	const codewiki = readCodewiki(root) ?? (await buildCodewikiCandidate(root, detectProjectType(root))).codewiki;
+	return verifyHandbookRules(root, files, { repositoryFiles, codewiki }, origin).entries;
 }
 
 /** One handbook file `--verify --apply` proposes to change, as a proposal `--accept` writes. */
