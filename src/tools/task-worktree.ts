@@ -464,6 +464,9 @@ export function mergeWorktreeBranch(
 			root,
 			[
 				...hostCommitIdentity(root, identity),
+				// An autostash merges over the operator's WIP, exits 0 and leaves the restore conflicted; refuse instead.
+				"-c",
+				"merge.autoStash=false",
 				"merge",
 				"--no-edit",
 				"--no-verify",

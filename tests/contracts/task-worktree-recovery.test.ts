@@ -13,6 +13,7 @@ import {
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	listPreservedTaskWorktrees,
+	mergeWorktreeBranch,
 	previewTaskWorktree,
 	receiptWithDrift,
 	recoverTaskWorktrees,
@@ -491,4 +492,29 @@ if (process.cwd() === ${JSON.stringify(task.path)}) require('node:fs').writeFile
 			rmSync(plain, { recursive: true, force: true });
 		}
 	});
+});
+
+it("refuses a merge over overlapping uncommitted work even with merge.autoStash set", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-autostash-")));
+	const g = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+	try {
+		g("init", "-q");
+		g("config", "user.name", "T");
+		g("config", "user.email", "t@example.invalid");
+		g("config", "merge.autoStash", "true");
+		writeFileSync(join(root, "f.txt"), "base\n");
+		g("add", ".");
+		g("commit", "-qm", "base");
+		g("switch", "-qc", "task");
+		writeFileSync(join(root, "f.txt"), "task\n");
+		g("commit", "-qam", "task");
+		g("switch", "-q", "-");
+		writeFileSync(join(root, "f.txt"), "operator wip\n");
+		const result = mergeWorktreeBranch(root, "task", "fixture");
+		strictEqual(result.ok, false);
+		strictEqual(g("diff", "--name-only", "--diff-filter=U"), "");
+		strictEqual(readFileSync(join(root, "f.txt"), "utf8"), "operator wip\n");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
