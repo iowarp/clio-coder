@@ -624,7 +624,7 @@ function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
 		"## Ending a turn",
 		"Every turn ends in one of two states:",
 		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
-		`2. Waiting on the operator: the turn's last act is ${askUserCall} with a clear question, the context needed to answer it, and 2 to 4 options with one-line descriptions, recommended first.`,
+		`2. Waiting on the operator: the turn's last act is ${askUserCall} with a clear question, the context needed to answer it, and 2 to 4 options, each described by what choosing it leads to, recommended first.`,
 		"Use ask_user for clarification, plan approval, yes/no decisions, and going deeper. A question inside an explanation is fine; waiting for a typed answer is not. Tools settle workspace facts. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.",
 		"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous or lies outside the workspace.",
 		"Examples:",
@@ -1215,6 +1215,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Every harness in the 2026-10 campaign lost T3 by finishing with a
 	// performance clause unaddressed; a headless run has no operator to catch it.
 	const headlessContract = picker.pick("operating.contract-headless");
+	// Nobody watched an unattended reply being produced, so its first line must carry the standing (STAR T-04).
+	const report = !attended || autonomyLevel === "yolo" ? picker.pick("operating.report") : undefined;
 	const skillInstalls = picker.pick("operating.skill-installs");
 	// The routing directives teach a gateway call, so they render only when
 	// gateway is on the surface and the provider supports tool calls. The paths
@@ -1311,6 +1313,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		reportGuidance?.body,
 		headlessContract?.body,
 		v2 && headlessContract ? V2_HEADLESS_APPROVAL : undefined,
+		report?.body,
 		userControl?.body,
 		steering?.body,
 	]

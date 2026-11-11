@@ -173,6 +173,42 @@ describe("interactive-only guidance in the session prompt", () => {
 			match(prompt, /missing module imported only there/u);
 		}
 	});
+
+	// STAR T-04: an unattended final reply opens with the standing against the request.
+	it("renders the report rule for headless and attended yolo main sessions only", () => {
+		const table = loadFragments();
+		const rule = "first line is the bottom line";
+		const attendedRule = "what you expected and did not get comes before what went well";
+		const main = (safety: string, headless: boolean, promptProfile: "v1" | "v2" = "v1") =>
+			compile(table, {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety,
+				sessionInputs: { coordinatorCapabilities: [], headless, promptProfile },
+			}).systemPrompt.replace(/\s+/gu, " ");
+		const count = (text: string) => text.split(rule).length - 1;
+		for (const profile of ["v1", "v2"] as const) {
+			strictEqual(count(main("safety.default", true, profile)), 1, `${profile} headless`);
+			strictEqual(count(main("safety.yolo", false, profile)), 1, `${profile} attended yolo`);
+			strictEqual(count(main("safety.default", false, profile)), 0, `${profile} attended default`);
+			ok(main("safety.default", false, profile).includes(attendedRule), `${profile} attended standing sentence`);
+			ok(main("safety.default", false, profile).includes("say in one line why you are making it"), profile);
+			ok(!main("safety.default", true, profile).includes(attendedRule), `${profile} headless`);
+			ok(!main("safety.default", true, profile).includes("why you are making it"), `${profile} headless`);
+		}
+		const coderPath = new URL("../../src/domains/agents/builtins/coder.md", import.meta.url);
+		const { body } = parseFrontmatter(readFileSync(coderPath, "utf8"), coderPath.pathname);
+		const worker = compileWorker(table, {
+			providerSupportsTools: false,
+			toolNames: [],
+			toolPromptHints: [],
+			hasCanonicalContext: false,
+			hasBoundSkills: false,
+			onPermission: "deny",
+			persona: { id: "persona.coder", relPath: coderPath.pathname, body, contentHash: "coder", dynamic: false },
+		}).systemPrompt;
+		strictEqual(worker.replace(/\s+/gu, " ").includes(rule), false);
+	});
 });
 
 describe("headless flag threading into the compiled session inputs", () => {
