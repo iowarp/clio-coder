@@ -3,10 +3,13 @@
  * Loaded on first use, with the report domain behind it, so a session that never reports pays nothing at boot.
  */
 
+import { formatBundleSummary } from "../cli/report-bundle.js";
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { canOpenBrowser, openBrowser } from "../core/open-browser.js";
 import {
 	applyReportEdit,
+	type BuiltBundle,
+	buildBundle,
 	composeReportDraft,
 	detectTransport,
 	forgetReport,
@@ -16,6 +19,7 @@ import {
 	observeSessionAsync,
 	outboxEntry,
 	planReport,
+	previewBundle,
 	REPORT_DRAFT_SAVED,
 	type ReportDraft,
 	type ReportOfferPrefill,
@@ -25,11 +29,14 @@ import {
 	readReportDraft,
 	refreshReportStatus,
 	rememberIdentity,
+	renderBundlePreview,
+	reportBundlePath,
 	reportDraftsDirectory,
 	reportEditTemplate,
 	reportRows,
 	routeFor,
 	runReportSend,
+	saveBuiltBundle,
 	saveReportDraft,
 	sentLine,
 	setReplyCheck,
@@ -40,7 +47,12 @@ import type { SlashReportRequest } from "../session-control/slash-commands.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openListOverlay } from "./overlays/list-overlay.js";
-import { openReportReviewOverlay, type ReportReviewDone } from "./overlays/report-review.js";
+import {
+	openReportReviewOverlay,
+	type ReportBundleChoice,
+	type ReportBundleView,
+	type ReportReviewDone,
+} from "./overlays/report-review.js";
 
 export interface ReportHostDeps {
 	tui: TUI;
@@ -59,6 +71,10 @@ export interface ReportHostDeps {
 	openReview?: typeof openReportReviewOverlay;
 	/** The report offer on screen, consumed by a bug report so its draft carries the offer's trigger and fingerprint. */
 	takeOffer?: () => ReportOfferPrefill | null;
+	/** Flush the live telemetry journals before a bundle reads them. */
+	flushTelemetry?: () => Promise<void>;
+	/** This process's telemetry scope, shared in a bundle as a live snapshot. */
+	telemetryProcess?: () => string | null;
 }
 
 export interface ReportHost {
@@ -133,6 +149,27 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			deps.notify("warning", `report: ${refused}`, "report:refused");
 			return;
 		}
+		// The attach step's bundle: built by the one bundle builder with the consent the ticks grant, written only on send.
+		const bundles = new Map<string, BuiltBundle>();
+		const bundle = async (choice: ReportBundleChoice): Promise<ReportBundleView> => {
+			const scope = deps.telemetryProcess?.() ?? null;
+			const built = await buildBundle(draft, {
+				consent: { scopes: choice.dataset ? ["debug", "dataset"] : ["debug"] },
+				...(choice.transcript ? { transcript: {} } : {}),
+				identity,
+				stateDir: deps.stateDir,
+				models: choice.anonymizeModels ? "anonymize" : "keep",
+				write: false,
+				...(deps.flushTelemetry ? { flush: deps.flushTelemetry } : {}),
+				...(scope !== null ? { process: scope } : {}),
+			});
+			bundles.set(built.sha256, built);
+			return {
+				sha256: built.sha256,
+				summary: formatBundleSummary(built, reportBundlePath(deps.stateDir, draft.id)).trimEnd().split("\n"),
+				pages: renderBundlePreview(previewBundle(built.bytes)).trimEnd().split("\n"),
+			};
+		};
 		const open = deps.openReview ?? openReportReviewOverlay;
 		deps.transitions.state = "report-review";
 		const session = open(deps.tui, {
@@ -141,8 +178,12 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			plan: (current) => planReport(current, { identity, transport: shown, stateDir: deps.stateDir }),
 			ready: () => detected !== null,
 			edit,
+			...(draft.sessionId !== null ? { bundle } : {}),
 			send: (current, plan, choose, choices) => {
 				if (detected === null) throw new Error("still checking how to send");
+				const kept = choices.bundle !== null ? bundles.get(choices.bundle.sha256) : undefined;
+				if (choices.bundle !== null && kept === undefined) throw new Error("the attached bundle was not built here");
+				if (kept !== undefined) saveBuiltBundle(deps.stateDir, current, kept);
 				return runReportSend(current, plan.rendered, {
 					stateDir: deps.stateDir,
 					identity,

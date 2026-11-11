@@ -1,8 +1,8 @@
 /**
  * `/report` review: the exact text a report sends, and the keys that decide whether it goes.
  *
- * One frame, four steps. Review shows the title and body as they will be posted, with what Clio masked; attach says
- * that no diagnostic bundle goes with it; send lists the network actions in order and is the only step where a key
+ * One frame, four steps. Review shows the title and body as they will be posted, with what Clio masked; attach offers
+ * the diagnostic bundle as ticks (never pre-ticked), lists its inventory, and `v` pages every member byte for byte; send lists the network actions in order and is the only step where a key
  * (`s`) sends. Enter never sends: a typed-ahead Enter can walk review and attach, and then stops. Esc goes back one
  * step, and on review it closes and keeps the draft. The controller is pure, so the promise is testable without a TUI.
  */
@@ -41,7 +41,22 @@ import { clioTheme, GLYPH, positionRow, sectionRule, selectionRow } from "../the
 
 export const REPORT_REVIEW_TITLE = "Report to Clio Coder's maintainers";
 
-export type ReportReviewStep = "review" | "masks" | "attach" | "send" | "sending" | "duplicates" | "done";
+export type ReportReviewStep = "review" | "masks" | "attach" | "bundle" | "send" | "sending" | "duplicates" | "done";
+
+/** The attach step's ticks. Only `attach` adds a bundle; the rest refine it and are off until ticked. */
+export interface ReportBundleChoice {
+	attach: boolean;
+	dataset: boolean;
+	transcript: boolean;
+	anonymizeModels: boolean;
+}
+
+/** A bundle built for the ticks on screen: its hash, its inventory lines, and every member as text for the pager. */
+export interface ReportBundleView {
+	sha256: string;
+	summary: string[];
+	pages: string[];
+}
 
 export type ChooseDuplicate = (
 	verdict: RelatedVerdict,
@@ -64,8 +79,13 @@ export interface ReportReviewOptions {
 		draft: ReportDraft,
 		plan: ReportPlan,
 		choose: ChooseDuplicate,
-		choices: { replyCheck: boolean },
+		choices: { replyCheck: boolean; bundle: ReportBundleView | null },
 	): Promise<ReportFlowOutcome>;
+	/**
+	 * Build the bundle for the ticks on screen, writing nothing; called again on every toggle. Absent means this
+	 * surface offers no bundle. A rejection is shown as the reason no bundle can be attached.
+	 */
+	bundle?(choice: ReportBundleChoice): Promise<ReportBundleView>;
 	/** Esc on review: the host keeps the draft and closes the review. */
 	onCancel(draft: ReportDraft, plan: ReportPlan): void;
 	/** The send settled: the host closes the review and leaves a line in the transcript. */
@@ -93,6 +113,7 @@ const STEP_LABEL: Readonly<Record<ReportReviewStep, string>> = {
 	review: "1/4 review",
 	masks: "1/4 masks",
 	attach: "2/4 attach",
+	bundle: "2/4 bundle",
 	send: "3/4 send",
 	sending: "3/4 sending",
 	duplicates: "3/4 already reported?",
@@ -114,6 +135,15 @@ const HINTS: Readonly<Record<ReportReviewStep, ReadonlyArray<HintEntry>>> = {
 	],
 	attach: [
 		{ key: "Enter", verb: "continue", critical: true },
+		{ key: "b", verb: "attach a diagnostic bundle", short: "bundle" },
+		{ key: "d", verb: "allow datasets", short: "dataset" },
+		{ key: "t", verb: "include the transcript", short: "transcript" },
+		{ key: "a", verb: "anonymize model ids", short: "anon" },
+		{ key: "v", verb: "view every byte", short: "view" },
+		{ key: "Esc", verb: "back", critical: true },
+	],
+	bundle: [
+		{ key: "↑↓", verb: "scroll" },
 		{ key: "Esc", verb: "back", critical: true },
 	],
 	send: [
@@ -173,6 +203,42 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 	let finished: ReportReviewDone | null = null;
 	let sent = false;
 	let replyCheck = false;
+	const choice: ReportBundleChoice = { attach: false, dataset: false, transcript: false, anonymizeModels: false };
+	let built: ReportBundleView | null = null;
+	let building = false;
+	let bundleError: string | null = null;
+	let generation = 0;
+	let pageScroll = 0;
+	let pageMax = 0;
+	// Every toggle rebuilds; only the newest build lands, so the hash on screen is always the ticks on screen.
+	const rebuild = (): void => {
+		generation += 1;
+		const mine = generation;
+		built = null;
+		bundleError = null;
+		const builder = options.bundle;
+		building = choice.attach && builder !== undefined;
+		if (!building || builder === undefined) return;
+		const ask = { ...choice };
+		Promise.resolve()
+			.then(() => builder(ask))
+			.then(
+				(view) => {
+					if (mine !== generation) return;
+					built = view;
+					building = false;
+					options.requestRender();
+				},
+				(error: unknown) => {
+					if (mine !== generation) return;
+					bundleError = error instanceof Error ? error.message : String(error);
+					building = false;
+					options.requestRender();
+				},
+			);
+	};
+	// A ticked bundle that is not built yet, or failed, holds the attach step: nothing unbuilt is promised.
+	const attachReady = (): boolean => !choice.attach || built !== null;
 	// The check reads the filed issue through the reporter's gh; a browser, a file or a discussion has nothing to read.
 	const canCheckReplies = (): boolean => plan.postedAs.startsWith("posted") && draft.kind !== "question";
 	// Every mask seen in this review, so one the operator let through stays listed and can be masked again.
@@ -209,7 +275,12 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 			go("done");
 		};
 		Promise.resolve()
-			.then(() => options.send(draft, plan, choose, { replyCheck: replyCheck && canCheckReplies() }))
+			.then(() =>
+				options.send(draft, plan, choose, {
+					replyCheck: replyCheck && canCheckReplies(),
+					bundle: choice.attach ? built : null,
+				}),
+			)
 			.then(
 				(outcome) => settle({ kind: "outcome", outcome }),
 				(error: unknown) =>
@@ -276,9 +347,38 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 				}
 				return;
 			}
-			case "attach":
-				if (matchesKey(data, "enter")) go("send");
-				else if (matchesKey(data, "escape")) go("review");
+			case "attach": {
+				if (matchesKey(data, "enter")) {
+					if (attachReady()) go("send");
+					return;
+				}
+				if (matchesKey(data, "escape")) {
+					go("review");
+					return;
+				}
+				if (options.bundle === undefined) return;
+				const tick = (["b", "d", "t", "a"] as const).find((key) => matchesKey(data, key));
+				if (tick !== undefined) {
+					if (tick === "b") choice.attach = !choice.attach;
+					else if (!choice.attach) return;
+					else if (tick === "d") choice.dataset = !choice.dataset;
+					else if (tick === "t") choice.transcript = !choice.transcript;
+					else choice.anonymizeModels = !choice.anonymizeModels;
+					rebuild();
+					options.requestRender();
+				} else if (matchesKey(data, "v") && built !== null) {
+					pageScroll = 0;
+					go("bundle");
+				}
+				return;
+			}
+			case "bundle":
+				if (matchesKey(data, "escape") || matchesKey(data, "v") || matchesKey(data, "q")) go("attach");
+				else if (matchesKey(data, "up")) pageScroll = Math.max(0, pageScroll - 1);
+				else if (matchesKey(data, "down")) pageScroll = Math.min(pageMax, pageScroll + 1);
+				else if (matchesKey(data, "pageUp")) pageScroll = Math.max(0, pageScroll - 10);
+				else if (matchesKey(data, "pageDown")) pageScroll = Math.min(pageMax, pageScroll + 10);
+				options.requestRender();
 				return;
 			case "send":
 				// Enter is deliberately inert here, so an Enter typed ahead through the first two steps cannot send.
@@ -374,13 +474,45 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 				lines.push(...note("Values never leave this machine to be shown here; only their kind and count."));
 				return lines;
 			}
-			case "attach":
+			case "attach": {
+				const tickRow = (on: boolean, key: string, label: string): string[] =>
+					wrapTextWithAnsi(`  [${on ? "x" : " "}] ${key}  ${label}`, w);
+				const offer = tickRow(choice.attach, "b", "Attach a diagnostic bundle: this session's telemetry mechanics");
+				if (options.bundle === undefined || !choice.attach)
+					return [
+						...head,
+						sectionRule(theme, w, "Attach"),
+						...wrapTextWithAnsi("No diagnostic bundle is attached.", w),
+						...note("Only the title and body you just reviewed are sent."),
+						...(options.bundle !== undefined ? ["", ...offer] : []),
+					];
 				return [
 					...head,
 					sectionRule(theme, w, "Attach"),
-					...wrapTextWithAnsi("No diagnostic bundle is attached.", w),
-					...note("Only the title and body you just reviewed are sent."),
+					...offer,
+					...tickRow(choice.dataset, "d", "Also allow its mechanics in public datasets"),
+					...tickRow(choice.transcript, "t", "Include the transcript: your prompts and code"),
+					...tickRow(choice.anonymizeModels, "a", "Anonymize model ids"),
+					"",
+					...(building ? note(`Building the bundle${GLYPH.ellipsis}`) : []),
+					...(bundleError !== null ? warn(`No bundle can be attached: ${bundleError}`) : []),
+					...(built !== null ? built.summary.flatMap((line) => plainRows(line, w)) : []),
+					...(built !== null ? note("v shows every byte of it.") : []),
 				];
+			}
+			case "bundle": {
+				const document = (built?.pages ?? []).flatMap((line) => plainRows(line, w));
+				const budget = rows > 0 ? Math.max(3, rows - head.length - 2) : DEFAULT_BODY_ROWS;
+				const pane = windowRows(document, pageScroll, budget);
+				pageMax = pane.maxScroll;
+				pageScroll = Math.min(pageScroll, pageMax);
+				return [
+					...head,
+					sectionRule(theme, w, `Bundle sha256 ${built?.sha256.slice(0, 12) ?? ""}`),
+					...pane.window,
+					...(pane.position === null ? [] : [positionRow(theme, pane.position, w)]),
+				];
+			}
 			case "send":
 			case "sending": {
 				const login = plan.postedAs.startsWith("posted as ") ? plan.postedAs.slice("posted as ".length) : "me";
@@ -395,6 +527,11 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 						? wrapTextWithAnsi(
 								`  [${replyCheck ? "x" : " "}] Check this issue once a day for a maintainer's reply, using your gh`,
 								w,
+							)
+						: []),
+					...(choice.attach && built !== null
+						? note(
+								`The diagnostic bundle (sha256 ${built.sha256.slice(0, 12)}) is kept on this machine with the report; clio-coder report show ${draft.id} --bundle prints it.`,
 							)
 						: []),
 					...(plan.rateWarning !== null ? warn(plan.rateWarning) : []),
@@ -456,6 +593,16 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 		hints: () => {
 			if (step === "review" && plan.gates.length > 0) return HINTS.review.filter((hint) => hint.key !== "Enter");
 			if (step === "review" && known.size === 0) return HINTS.review.filter((hint) => hint.key !== "m");
+			if (step === "attach") {
+				const offered = options.bundle !== undefined;
+				return HINTS.attach.filter((hint) => {
+					if (hint.key === "Enter") return attachReady();
+					if (hint.key === "Esc") return true;
+					if (hint.key === "b") return offered;
+					if (hint.key === "v") return built !== null;
+					return offered && choice.attach;
+				});
+			}
 			if (step === "send")
 				return HINTS.send.filter((hint) => (hint.key !== "s" || ready()) && (hint.key !== "r" || canCheckReplies()));
 			return [...HINTS[step]];
