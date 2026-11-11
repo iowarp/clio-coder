@@ -1599,7 +1599,13 @@ function splitModelNotes(text: string): { body: string; notes: string[] } {
 
 function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string {
 	const text = typeof result === "string" ? result : jsonStringifySafe(result);
-	return truncate(sanitizeMultilineDisplayText(text).text, limit);
+	// Only what can be shown is sanitized: a 2 MB result cost most of a second per
+	// first render when the whole of it went through the sanitizer before the cut.
+	// Twice the limit leaves room for the escapes the sanitizer removes.
+	const window = Number.isFinite(limit) ? limit * 2 : Number.POSITIVE_INFINITY;
+	if (text.length <= window) return truncate(sanitizeMultilineDisplayText(text).text, limit);
+	const shown = sanitizeMultilineDisplayText(text.slice(0, window)).text;
+	return shown.length > limit ? truncate(shown, limit) : `${shown}${GLYPH.ellipsis}`;
 }
 
 function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isError: boolean): string[] {
