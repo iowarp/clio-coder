@@ -140,7 +140,9 @@ export const coreTests = [
 		["working-set-core", "verify-perf", "dispatch-heartbeat-finalization"].map(
 			(name) => `tests/extended/${name}.test.ts`,
 		),
-	);
+	)
+	// The issue labeler runs on untrusted report bodies in GitHub Actions.
+	.concat(".github/scripts/report-labels.test.mjs");
 
 export const guiTests = [
 	"report-dialog-model",

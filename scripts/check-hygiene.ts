@@ -301,6 +301,25 @@ function checkCiScripts(): void {
 			}
 		}
 	}
+	// The labeler is the one workflow fed by untrusted issue text: pinned, read-only contents, issues write only, and
+	// no expression reaching a run step or the script.
+	const labels = parseYaml(readRoot(".github/workflows/report-labels.yml"));
+	if (!isDeepStrictEqual(labels.permissions, { contents: "read", issues: "write" }))
+		fail("ci-scripts", "report-labels.yml may only read contents and write issues");
+	for (const job of Object.values(labels.jobs ?? {}) as Array<{
+		permissions?: unknown;
+		"continue-on-error"?: boolean;
+		steps?: Array<{ "continue-on-error"?: boolean; run?: string; uses?: string; with?: { script?: string } }>;
+	}>) {
+		if (job.permissions !== undefined) fail("ci-scripts", "report-labels.yml jobs inherit the workflow permissions");
+		if (job["continue-on-error"]) fail("ci-scripts", "gate jobs must propagate failures");
+		for (const step of job.steps ?? []) {
+			if (step["continue-on-error"]) fail("ci-scripts", "steps must propagate failures and lifecycle hooks");
+			if (step.uses && !/@[0-9a-f]{40}$/u.test(step.uses)) fail("ci-scripts", `report-labels.yml must pin ${step.uses}`);
+			if (`${step.run ?? ""}${step.with?.script ?? ""}`.includes("${{"))
+				fail("ci-scripts", "report-labels.yml must not interpolate expressions into a step");
+		}
+	}
 	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
 		fail("ci-scripts", "preserve branch-protection check names");
 	if (ci.jobs?.ci?.needs !== "prepare" || ci.jobs?.["runtime-compatibility"]?.needs !== "prepare")
