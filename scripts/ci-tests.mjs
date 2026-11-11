@@ -70,6 +70,7 @@ export const coreTests = [
 	"engine-utilities",
 	"assistant-text-tool-order",
 	"test-runner-vocabulary",
+	"worker-check-bypass-hardening",
 	"bootstrap-schema-retry-identity",
 	"installed-package-ci",
 	"release-boundary",

@@ -309,9 +309,13 @@ function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerCo
 	);
 }
 
-/** A project's own check, run as a bare package script or test runner with plain path arguments. */
+/**
+ * A project's own check, run as a bare package script or test runner with plain
+ * path arguments on one line: only spaces and tabs separate words, so a line
+ * break cannot start a second command.
+ */
 const WORKER_CHECK_COMMAND =
-	/^(?:TMPDIR=[\w./-]+\s+)?(?:pnpm|npm)\s+(?:run\s+)?(?:test|lint|check|typecheck|build)(?::[\w.-]+)?(?:\s+--(?:\s+[\w=./:-]+)+)?$/u;
+	/^(?:TMPDIR=[\w./-]+[ \t]+)?(?:pnpm|npm)[ \t]+(?:run[ \t]+)?(?:test|lint|check|typecheck|build)(?::[\w.-]+)?(?:[ \t]+--(?:[ \t]+[\w=./:-]+)+)?$/u;
 const WORKER_CHECK_ID = /^(?:test|lint|check|typecheck|build)(?::[\w.-]+)?$/u;
 const WORKER_CHECK_ARG = /^[\w=./:-]+$/u;
 
@@ -328,7 +332,8 @@ function workerOwnTaskCheck(effect: ClassifierCall, decision: SafetyDecision, in
 	const args = effect.args ?? {};
 	if (args.unsandboxed !== undefined && args.unsandboxed !== false) return false;
 	if (effect.tool === ToolNames.Bash) {
-		if (typeof args.command !== "string" || !WORKER_CHECK_COMMAND.test(args.command.trim())) return false;
+		if (typeof args.command !== "string" || /[\r\n]/u.test(args.command)) return false;
+		if (!WORKER_CHECK_COMMAND.test(args.command.trim())) return false;
 	} else if (effect.tool === ToolNames.Verify) {
 		if (typeof args.check !== "string" || !WORKER_CHECK_ID.test(args.check)) return false;
 		if (args.path !== undefined || args.browser !== undefined) return false;
