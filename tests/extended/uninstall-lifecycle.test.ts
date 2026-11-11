@@ -27,6 +27,27 @@ const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 /** The launcher path uninstall resolves, from CLIO_CODER_BIN_DIR. */
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");
 
+/**
+ * Runs `fn` as a source-checkout launch from a fake checkout under the home. The real entry is the
+ * test runner, so the worktree's dist/ decided the method: an unbuilt worktree read as "unknown".
+ */
+async function asSourceCheckout<T>(temp: LifecycleHome, fn: () => Promise<T>): Promise<T> {
+	const checkout = join(temp.root, "checkout");
+	mkdirSync(join(checkout, "dist", "cli"), { recursive: true });
+	mkdirSync(join(checkout, "src", "cli"), { recursive: true });
+	writeFileSync(join(checkout, "package.json"), JSON.stringify({ name: "@iowarp/clio-coder" }), "utf8");
+	writeFileSync(join(checkout, "src", "cli", "index.ts"), "", "utf8");
+	writeFileSync(join(checkout, "dist", "cli", "index.js"), "", "utf8");
+	const saved = process.argv[1];
+	process.argv[1] = join(checkout, "dist", "cli", "index.js");
+	try {
+		return await fn();
+	} finally {
+		if (saved === undefined) process.argv.splice(1, 1);
+		else process.argv[1] = saved;
+	}
+}
+
 describe("contracts/uninstall-lifecycle", () => {
 	it("stops for an open session on any install method, even with --force", async () => {
 		const temp = home();
@@ -486,7 +507,9 @@ describe("contracts/uninstall-lifecycle", () => {
 		const withoutLauncher = home();
 		try {
 			writeFileSync(launcherPath(withLauncher), "#!/bin/sh\n", "utf8");
-			const present = await runInHome(withLauncher, () => runUninstallCommand(["--dry-run"]));
+			const present = await asSourceCheckout(withLauncher, () =>
+				runInHome(withLauncher, () => runUninstallCommand(["--dry-run"])),
+			);
 			match(present.stdout, /(finish removing|remove) the launcher/u);
 
 			// An absent launcher used to get the same "to finish removing the
@@ -507,8 +530,10 @@ describe("contracts/uninstall-lifecycle", () => {
 		try {
 			writeFileSync(launcherPath(preview), "#!/bin/sh\n", "utf8");
 			writeFileSync(launcherPath(real), "#!/bin/sh\n", "utf8");
-			const previewed = await runInHome(preview, () => runUninstallCommand(["--dry-run"]));
-			const executed = await runInHome(real, () => runUninstallCommand(["--force"]));
+			const previewed = await asSourceCheckout(preview, () =>
+				runInHome(preview, () => runUninstallCommand(["--dry-run"])),
+			);
+			const executed = await asSourceCheckout(real, () => runInHome(real, () => runUninstallCommand(["--force"])));
 
 			// The old dry run appended a twenty-line "Binary removal guidance"
 			// block that the real run never printed, so the preview was not the
