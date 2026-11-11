@@ -201,6 +201,28 @@ test("a vote task that lists options gets a neutral verdict placeholder; others 
 	match(polled, /exactly one of the options listed above, verbatim: a \| b \| c/u);
 });
 
+test("/poll refuses a choice its ballot could not carry verbatim", async () => {
+	const { parseSlashCommand } = await import("../../src/session-control/slash-commands.js");
+	const { councilBallotContract } = await import("../../src/domains/dispatch/gate-role-prompts.js");
+	const { renderPollQuestion } = await import("../../src/session-control/poll.js");
+	// The task lists its choices joined by ", ", so a choice holding one would split into two and spoil the verbatim match.
+	const comma = parseSlashCommand('/poll --options "yes, ship it|no" 3 Ship?');
+	strictEqual(comma.kind, "usage-error");
+	match((comma as { reason?: string }).reason ?? "", /"yes, ship it" holds ", "/u);
+	// A choice past the verdict bound would leave the poll with no options to bind the ballot to.
+	const long = parseSlashCommand(`/poll --options "${"x".repeat(65)}|no" 3 Ship?`);
+	strictEqual(long.kind, "usage-error");
+	match((long as { reason?: string }).reason ?? "", /longer than 64 bytes/u);
+	const kept = parseSlashCommand('/poll --options "ship it,now|no" 3 Ship?');
+	if (kept.kind !== "poll") throw new Error(`expected a poll, got ${kept.kind}`);
+	const options = kept.options.options;
+	deepStrictEqual(options, ["ship it,now", "no"]);
+	deepStrictEqual(councilBallotContract(renderPollQuestion({ participants: 3, question: "Ship?", options })), {
+		kind: "council-ballot",
+		options,
+	});
+});
+
 test("a poll ballot that copies an example token fails into a repair round that names the options", async () => {
 	const { councilBallotContract } = await import("../../src/domains/dispatch/gate-role-prompts.js");
 	const { parseWorkerResultContract, resultContractShape, validateResultContract } = await import(

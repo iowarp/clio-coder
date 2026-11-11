@@ -10,6 +10,8 @@
  * Pure: no I/O, no dispatch. The caller owns the run.
  */
 
+import { COUNCIL_BALLOT_VERDICT_MAX_BYTES, isCouncilBallotOption } from "../domains/agents/index.js";
+
 /** Council member bounds the dispatch tool admits; a poll seats the same. */
 export const POLL_MIN_PARTICIPANTS = 2;
 export const POLL_MAX_PARTICIPANTS = 5;
@@ -39,6 +41,23 @@ export function parsePollSeat(entry: string): PollSeat | undefined {
 	const model = trimmed.slice(slash + 1).trim();
 	if (target.length === 0 || model.length === 0) return undefined;
 	return { target, model };
+}
+
+/**
+ * Why a `--options` choice cannot bind the ballot, or undefined when it can. The
+ * vote recovers the choices from the task this module writes, joined by ", ",
+ * so a choice holding that separator would read back as two; and a choice past
+ * the verdict bound could never be cast verbatim.
+ */
+export function pollChoiceProblem(choice: string): string | undefined {
+	if (choice.includes(", ")) {
+		return `choice "${choice}" holds ", ", which separates the choices each participant reads; drop the comma or the space after it`;
+	}
+	if (Buffer.byteLength(choice, "utf8") > COUNCIL_BALLOT_VERDICT_MAX_BYTES) {
+		return `choice "${choice}" is longer than ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} bytes, the most a verdict holds`;
+	}
+	if (!isCouncilBallotOption(choice)) return `choice "${choice}" is not a single line a participant can cast verbatim`;
+	return undefined;
 }
 
 /** The ask every participant receives, before the council's own vote directive is appended. */

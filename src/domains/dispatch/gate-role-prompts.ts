@@ -77,7 +77,7 @@ export const COUNCIL_VOTE_MEMBER_DIRECTIVE = [
  * The answers a vote task lists, as `/poll --options` writes them, or undefined
  * when it lists none or one of them could not be cast as a verdict.
  */
-export function councilVoteOptions(task: string): string[] | undefined {
+function councilVoteOptions(task: string): string[] | undefined {
 	const listed = /^Choose exactly one of these options: (.+)\. Your verdict is that option, verbatim\.$/mu.exec(task);
 	if (listed === null) return undefined;
 	const options = (listed[1] ?? "").split(", ");

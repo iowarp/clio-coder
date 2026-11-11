@@ -95,7 +95,7 @@ import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import type { PollCommandOptions } from "./poll.js";
-import { buildPollDispatchArgs, formatPollTally } from "./poll.js";
+import { buildPollDispatchArgs, formatPollTally, pollChoiceProblem } from "./poll.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
 import type { ReloadTarget } from "./reload-report.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
@@ -2344,6 +2344,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					.map((choice) => choice.trim())
 					.filter((choice) => choice.length > 0);
 				if (list.length < 2) return usageError("poll", "--options takes two or more choices, a|b|c");
+				for (const choice of list) {
+					const problem = pollChoiceProblem(choice);
+					if (problem !== undefined) return usageError("poll", `--options ${problem}`);
+				}
 				options.options = list;
 			}
 			const models = parsed.flags.get("--models");

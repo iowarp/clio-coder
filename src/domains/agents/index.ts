@@ -79,6 +79,8 @@ export type {
 	VerifierResult,
 } from "./result-contract.js";
 export {
+	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
+	isCouncilBallotOption,
 	parseCouncilReport,
 	parseDelegationPlanResult,
 	parseOracleResult,
