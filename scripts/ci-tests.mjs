@@ -71,6 +71,7 @@ export const coreTests = [
 	"assistant-text-tool-order",
 	"test-runner-vocabulary",
 	"worker-check-bypass-hardening",
+	"sandbox-daemon-socket-masks",
 	"bootstrap-schema-retry-identity",
 	"installed-package-ci",
 	"release-boundary",

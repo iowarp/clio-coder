@@ -110,13 +110,46 @@ export function workerSandboxApplies(): boolean {
 }
 
 /**
+ * System daemon sockets that are root-equivalent for their group, reachable
+ * under `safety.sandboxUnixSockets: owned` because another user owns them:
+ * Docker, rootful Podman, containerd, LXD (snap and package), libvirt and
+ * Incus. A runtime directory is masked where the daemon keeps several sockets
+ * there (libvirt's modular daemons, containerd's ttrpc socket).
+ */
+const DAEMON_SOCKET_PATHS = [
+	"run/docker.sock",
+	"var/run/docker.sock",
+	"run/podman",
+	"var/run/podman",
+	"run/containerd",
+	"var/run/containerd",
+	"var/snap/lxd/common/lxd/unix.socket",
+	"var/lib/lxd/unix.socket",
+	"run/libvirt",
+	"var/run/libvirt",
+	"var/lib/incus/unix.socket",
+	"var/lib/incus/unix.socket.user",
+	"run/incus",
+	"var/run/incus",
+];
+
+/**
  * Sockets and runtime directories reachable through the read-only root that
  * would let a sandboxed command act outside it: the session bus, agent
- * sockets under the user runtime directory, and the container daemon.
+ * sockets under the user runtime directory, and the container and
+ * virtualization daemons. `root` exists for tests.
  */
-function runtimeEscapePaths(): string[] {
+function runtimeEscapePaths(root = "/"): string[] {
 	const uid = typeof process.getuid === "function" ? process.getuid() : null;
-	return [...(uid === null ? [] : [`/run/user/${uid}`]), "/run/docker.sock", "/var/run/docker.sock"];
+	return [
+		...(uid === null ? [] : [path.join(root, "run", "user", String(uid))]),
+		...DAEMON_SOCKET_PATHS.map((entry) => path.join(root, entry)),
+	];
+}
+
+/** The escape masks for a filesystem rooted at `root`, without the credential paths. */
+export function runtimeEscapeMasksUnder(root: string): SandboxMaskedPath[] {
+	return workerSandboxMaskedPaths(runtimeEscapePaths(root));
 }
 
 /** Existing secret and escape paths, each with the mount kind that hides it. */
