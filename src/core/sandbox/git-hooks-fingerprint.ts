@@ -408,6 +408,7 @@ function includeTarget(value: string, file: string | null): string | null {
 function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>; origins: string[] } | null {
 	const env = { ...process.env };
 	for (const name of REPOSITORY_ENV) Reflect.deleteProperty(env, name);
+	let usageError = false;
 	const list = (args: string[]): string | null => {
 		try {
 			return execFileSync("git", ["config", "--list", ...args, "--show-origin", "-z"], {
@@ -418,14 +419,16 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 				timeout: CONFIG_LIST_TIMEOUT_MS,
 				maxBuffer: CONFIG_LIST_MAX_BYTES,
 			});
-		} catch {
+		} catch (error) {
+			usageError = (error as { status?: unknown }).status === 129;
 			return null;
 		}
 	};
-	// `--show-scope` needs git 2.26; an older git lists without it, and the scope is read from the origin.
+	// `--show-scope` needs git 2.26; an older git rejects it as a usage error (exit 129) and lists without it, the
+	// scope read from the origin. A listing that timed out or failed otherwise is not retried.
 	let output = list(["--show-scope"]);
 	const scoped = output !== null;
-	output ??= list([]);
+	if (output === null && usageError) output = list([]);
 	if (output === null) return null;
 	// `-z` prints `<scope>\0<origin>\0<key>\n<value>\0` per value (no `<scope>` without `--show-scope`), and only
 	// `<key>` for a key with no `=`.

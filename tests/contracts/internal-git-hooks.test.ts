@@ -194,14 +194,21 @@ test("a filter the repository's own config names does not run in Clio's status p
 	rmSync(global.scratch, { recursive: true, force: true });
 });
 
-/** Puts a `git` first on PATH that rejects `--show-scope` the way git before 2.26 does, and runs the real one otherwise. */
-function gitWithoutShowScope(t: { after: (fn: () => void) => void }, scratch: string): void {
+/**
+ * Puts a `git` first on PATH that rejects `--show-scope` the way git before 2.26 does (or fails it with
+ * `onShowScope`), and runs the real one otherwise.
+ */
+function gitWithoutShowScope(
+	t: { after: (fn: () => void) => void },
+	scratch: string,
+	onShowScope = `echo "error: unknown option \\\`show-scope'" >&2; exit 129`,
+): void {
 	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 	const bin = join(scratch, "old-git");
 	execFileSync("mkdir", ["-p", bin]);
 	writeFileSync(
 		join(bin, "git"),
-		`#!/bin/sh\nfor a; do [ "$a" = --show-scope ] && { echo "error: unknown option \\\`show-scope'" >&2; exit 129; }; done\nexec '${real}' "$@"\n`,
+		`#!/bin/sh\nfor a; do [ "$a" = --show-scope ] && { ${onShowScope}; }; done\nexec '${real}' "$@"\n`,
 	);
 	chmodSync(join(bin, "git"), 0o755);
 	const prior = process.env.PATH;
@@ -228,6 +235,23 @@ test("on a git without --show-scope the drift guard still sees config and a repo
 	);
 	spawnSync("git", ["-C", root, "status", "--porcelain"]);
 	ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
+	rmSync(scratch, { recursive: true, force: true });
+});
+
+test("a config listing with --show-scope that is killed, as by its timeout, is not retried without it and refuses Clio's read", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const { root, scratch } = repository();
+	const marker = join(scratch, "killed-list-filter-ran");
+	git(root, "config", "filter.k.clean", markerScript(join(scratch, "clean.sh"), marker, "cat\n"));
+	gitWithoutShowScope(t, scratch, "kill -TERM $$");
+	const { records } = session(root, scratch);
+	filtered(root, "k");
+	probeGit(root);
+	strictEqual(existsSync(marker), false, "the filter did not run");
+	deepStrictEqual(
+		records.map(({ outcome, unneutralized }) => ({ outcome, unneutralized })),
+		[{ outcome: "skipped", unneutralized: ["(unlisted git config)"] }],
+	);
 	rmSync(scratch, { recursive: true, force: true });
 });
 
