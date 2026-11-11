@@ -82,7 +82,7 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 ## Git and release
 <!-- clio: paths=none -->
 
-- Work on a branch cut from the current version branch (`v` plus the digits of the `package.json` version, `v071` for 0.7.1); `main` moves only when a release ships.
+- Work on a branch cut from the current version branch (`v` plus the digits of the `package.json` version, `v080` for 0.8.0); `main` moves only when a release ships.
 - Conventional commits; a tracked-issue fix ends with `fixes #N`, one issue per commit. Never hand-write attribution trailers or set the author: Clio's commit hook appends its own trailers and authors worker and headless commits.
 - All worktrees share one `.git/config`, stash and object store: never `git stash`, never move a branch by relative ref, never amend a commit you did not just make, and unset `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` and `GIT_PREFIX` for any command a git-driven runner such as `git bisect run` executes.
 - Publication is the maintainer's release flow in `CONTRIBUTING.md`; CI never publishes to npm.

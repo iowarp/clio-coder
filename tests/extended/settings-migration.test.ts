@@ -391,7 +391,7 @@ targets:
 	it("leaves a provisioned home's deny alone at boot after an upgrade from 0.7.0", async () => {
 		const written = "version: 2\nfleet:\n  permissions:\n    mode: deny\n";
 		writeFileSync(settingsFile, written, "utf8");
-		writeFileSync(join(stateDir, "home.json"), JSON.stringify({ version: "0.7.1", upgradedFrom: "0.7.0" }), "utf8");
+		writeFileSync(join(stateDir, "home.json"), JSON.stringify({ version: "0.8.0", upgradedFrom: "0.7.0" }), "utf8");
 		await applyPendingMigrationsAtBoot(false);
 		strictEqual(readFileSync(settingsFile, "utf8"), written);
 		ok(!existsSync(join(scratch.dir, "config", "migrations.json")));

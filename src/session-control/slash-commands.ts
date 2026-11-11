@@ -327,27 +327,27 @@ export interface RetiredCommand {
 }
 
 export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
-	{ name: "background", since: "0.7.1", to: { menuLetter: "d", action: "clio-coder.dispatch.background" } },
-	{ name: "branch", since: "0.7.1", to: { command: "/fork" } },
-	{ name: "editor", since: "0.7.1", to: { menuLetter: "g", action: "clio-coder.editor.external" }, keepsText: true },
+	{ name: "background", since: "0.8.0", to: { menuLetter: "d", action: "clio-coder.dispatch.background" } },
+	{ name: "branch", since: "0.8.0", to: { command: "/fork" } },
+	{ name: "editor", since: "0.8.0", to: { menuLetter: "g", action: "clio-coder.editor.external" }, keepsText: true },
 	{
 		name: "interrupt",
-		since: "0.7.1",
+		since: "0.8.0",
 		to: { menuLetter: "s", action: "clio-coder.message.interrupt" },
 		keepsText: true,
 	},
-	{ name: "notifications", since: "0.7.1", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
-	{ name: "health", since: "0.7.1", to: { command: "/usage health" } },
-	{ name: "systemone", since: "0.7.1", to: { command: "/usage health" } },
-	{ name: "skills", since: "0.7.1", to: { command: "/library skills" } },
-	{ name: "prompts", since: "0.7.1", to: { command: "/library prompts" } },
-	{ name: "agents", since: "0.7.1", to: { command: "/library agents" } },
-	{ name: "interop", since: "0.7.1", to: { command: "/library interop" } },
-	{ name: "workspace off", since: "0.7.1", to: { command: "/extensions leave" } },
-	{ name: "workspace", since: "0.7.1", to: { command: "/extensions" } },
-	{ name: "library reload", since: "0.7.1", to: { command: "/reload library" } },
-	{ name: "extensions reload", since: "0.7.1", to: { command: "/reload extensions" } },
-	{ name: "peer", since: "0.7.1", to: { command: "/panes peer" } },
+	{ name: "notifications", since: "0.8.0", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
+	{ name: "health", since: "0.8.0", to: { command: "/usage health" } },
+	{ name: "systemone", since: "0.8.0", to: { command: "/usage health" } },
+	{ name: "skills", since: "0.8.0", to: { command: "/library skills" } },
+	{ name: "prompts", since: "0.8.0", to: { command: "/library prompts" } },
+	{ name: "agents", since: "0.8.0", to: { command: "/library agents" } },
+	{ name: "interop", since: "0.8.0", to: { command: "/library interop" } },
+	{ name: "workspace off", since: "0.8.0", to: { command: "/extensions leave" } },
+	{ name: "workspace", since: "0.8.0", to: { command: "/extensions" } },
+	{ name: "library reload", since: "0.8.0", to: { command: "/reload library" } },
+	{ name: "extensions reload", since: "0.8.0", to: { command: "/reload extensions" } },
+	{ name: "peer", since: "0.8.0", to: { command: "/panes peer" } },
 ];
 
 /** A one-word retired name, typed bare, must reach `dispatchRetiredCommand` rather than a palette row. */
@@ -1908,7 +1908,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		group: "Work",
 		// Kept one release so ACP clients that call `share` keep working; /fleet owns the kind.
 		hidden: true,
-		retiredSince: "0.7.1",
+		retiredSince: "0.8.0",
 		kinds: [],
 		args: { positionals: [{ name: "run-id", required: false }] },
 		fromArgs(parsed) {

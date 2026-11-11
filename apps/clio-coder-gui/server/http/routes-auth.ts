@@ -31,7 +31,7 @@ export function authRoutes(
 				? answerLaunchProof(launch.token, body.challenge, body.proof, Number(new URL(launch.origin()).port))
 				: null;
 		const admitted = bearer
-			? // The launch token as a bearer is what launchers and links from before 0.7.1 send; remove in 0.7.3.
+			? // The launch token as a bearer is what launchers and links from before 0.8.0 send; remove in 0.8.2.
 				// A live credential is a window of this browser opening its own client, which buys nothing it lacks.
 				sameSecret(launch.token, bearer) || clients.authenticate(bearer) !== null
 			: body.ticket !== undefined

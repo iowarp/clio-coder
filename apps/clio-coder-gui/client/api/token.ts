@@ -1,4 +1,4 @@
-/** What a launch link carried: a single-use launch ticket, or a launch token from a link made before 0.7.1. */
+/** What a launch link carried: a single-use launch ticket, or a launch token from a link made before 0.8.0. */
 export interface LaunchSecret {
 	ticket?: string;
 	token?: string;

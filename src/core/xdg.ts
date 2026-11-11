@@ -186,7 +186,7 @@ export function removableClioRootProblem(role: ClioDirRole, path: string): strin
 	if (physical === physicalPath(platformDefaults()[role])) return null;
 	if (basename(physical).toLowerCase() === "clio-coder") return null;
 	if (existsSync(join(path, ROLE_OWNERSHIP_FILE[role]))) return null;
-	// Before 0.7.1 a CLIO_CODER_HOME home got no marker in its data and cache roots; its
+	// Before 0.8.0 a CLIO_CODER_HOME home got no marker in its data and cache roots; its
 	// own config or state file vouches for the role directory it resolved.
 	const clioHome = clioHomeOrNull();
 	if (

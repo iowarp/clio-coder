@@ -259,5 +259,5 @@ Clio Coder reads the same inventory through `gateway(op="call", capability="clio
 ## Retired surfaces
 
 - `/plugins` and `/resources` slash commands: no longer recognized. Use `/library plugins` or `/library extensions` to browse and install, and `/extensions` to control the running ones.
-- `/skills`, `/prompts`, `/agents` and `/interop`: retired in 0.7.1 in favor of `/library skills|prompts|agents|interop`; they answer with a notice until 0.7.2.
-- `/library reload` and `/extensions reload`: retired in 0.7.1 in favor of `/reload library` and `/reload extensions`.
+- `/skills`, `/prompts`, `/agents` and `/interop`: retired in 0.8.0 in favor of `/library skills|prompts|agents|interop`; they answer with a notice until 0.8.1.
+- `/library reload` and `/extensions reload`: retired in 0.8.0 in favor of `/reload library` and `/reload extensions`.

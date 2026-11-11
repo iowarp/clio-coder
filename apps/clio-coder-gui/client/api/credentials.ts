@@ -35,7 +35,7 @@ interface Held {
 }
 
 export interface Credentials {
-	/** The launch token a link from before 0.7.1 opened this document with; empty otherwise. */
+	/** The launch token a link from before 0.8.0 opened this document with; empty otherwise. */
 	readonly launchToken: string;
 	/** Whether this window holds anything that can open a client: a launch secret, a credential or a remembered one. */
 	available(): boolean;
@@ -106,7 +106,7 @@ export function createCredentials(
 		legacy: legacyToken,
 	} = typeof launch === "string" ? { token: launch } : launch;
 	let ticket = launchTicket;
-	// A stored launch token from before 0.7.1 is spent on the first exchange and never kept.
+	// A stored launch token from before 0.8.0 is spent on the first exchange and never kept.
 	let legacy = legacyToken;
 	let held: Held | null = null;
 	let pending: Promise<Held> | null = null;

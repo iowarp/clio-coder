@@ -428,7 +428,7 @@ export async function restartBackgroundIfIdle(
 	if (state.status === "absent") return { status: "absent" as const };
 	const report = serverReport(await probe(state.config.port, state.config.token));
 	if (report.running === null) {
-		// An app from before 0.7.1 cannot answer this launcher's proof; it is never stopped unproven.
+		// An app from before 0.8.0 cannot answer this launcher's proof; it is never stopped unproven.
 		const active = (await serviceState(state.files, control)).ActiveState === "active";
 		return { status: "left" as const, reason: active ? ("unproven" as const) : ("stopped" as const), running: null };
 	}

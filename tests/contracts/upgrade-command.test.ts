@@ -15,6 +15,7 @@ import {
 	npmInstallArgs,
 } from "../../src/domains/lifecycle/install-method.js";
 import { listMigrations } from "../../src/domains/lifecycle/migrations/index.js";
+import { describeUpgradeNotice } from "../../src/domains/lifecycle/upgrade-notice.js";
 import { isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 
 const ARGV_MODULE = new URL("../../src/cli/argv.ts", import.meta.url).href;
@@ -403,4 +404,23 @@ test("upgrade refuses while another registered session runs from an npm prefix t
 	assert.match(result.stdout + result.stderr, new RegExp(`${pid}@${hostname().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 	assert.throws(f.calls, /ENOENT/, "no package manager ran");
 	assert.equal(existsSync(join(hold, ".clio-coder-update.json")), false);
+});
+
+test("a home a 0.7.1 pre-release build stamped opens under 0.8.0 without the older-version prompt", async (t) => {
+	const home = await isolateClioEnv("clio-prerelease-stamp-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	for (const version of ["0.7.1", "0.7.1-dev", "0.7.1-rc.0", "0.7.0"]) {
+		writeFileSync(
+			join(home.dir, "state", "home.json"),
+			JSON.stringify({ version, upgradedFrom: "0.7.0", platform: "linux", nodeVersion: "v24" }),
+		);
+		assert.equal(detectNewerHome(), null, version);
+	}
+});
+
+test("the upgrade from 0.7.0 names the keyboard changes under the 0.8.0 section", () => {
+	const notice = describeUpgradeNotice({ from: "0.7.0", to: "0.8.0" });
+	assert.match(notice, /upgraded 0\.7\.0 → 0\.8\.0\. What changed at the keyboard: \/skills/);
+	assert.match(notice, /CHANGELOG\.md, section 0\.8\.0\./);
 });

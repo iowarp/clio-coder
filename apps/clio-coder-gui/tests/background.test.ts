@@ -460,7 +460,7 @@ test("restart --if-idle restarts only an idle background app and says why it lef
 		running: "0.5.6",
 	});
 	assert.equal(calls.at(-1), "restart");
-	// An active service whose app cannot prove the launch token (one from before 0.7.1) is never stopped unproven.
+	// An active service whose app cannot prove the launch token (one from before 0.8.0) is never stopped unproven.
 	assert.deepEqual(await restartBackgroundIfIdle(directory, control, ready, async () => null), {
 		status: "left",
 		reason: "unproven",

@@ -61,7 +61,7 @@ Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/har
 3. If only `--fast` differs, drop `--fast` in `scripts/typecheck.mjs`. Otherwise set `typecheck` back to `tsc -p tsconfig.tests.json`, which leaves the `--fast` speed behind but changes nothing else.
 4. Add the case to the corpus in the commit that moves to a tsrs release that fixes it.
 
-**Trial.** tsrs is on trial as the default until 0.7.2 ships. It stays the default only if no qualification in that period reports a difference that the rule above did not resolve. `tsc` remains the release gate after the trial.
+**Trial.** tsrs is on trial as the default until 0.8.1 ships. It stays the default only if no qualification in that period reports a difference that the rule above did not resolve. `tsc` remains the release gate after the trial.
 
 ## GUI development
 
@@ -97,7 +97,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Submitting Changes
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, which is `v` plus the digits of the `package.json` version, such as `v071` for 0.7.1. Open the pull request against that branch. `main` moves only when a release ships.
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, which is `v` plus the digits of the `package.json` version, such as `v080` for 0.8.0. Open the pull request against that branch. `main` moves only when a release ships.
 2. Add focused contract tests exercising the changed behavior.
 3. Keep commit subjects concise conventional commits (max 72 characters):
    ```text
@@ -153,7 +153,7 @@ and its expected wall time, and performs the next step until it needs the
 owner, finishes or fails. Interrupting is safe; the next run resumes from the
 real state. One release command runs per clone at a time: a lock and a receipt
 live in `$(git rev-parse --git-common-dir)/clio-release/`, and every remote
-write asks for a typed phrase such as `push v071` or `publish 0.7.1`.
+write asks for a typed phrase such as `push v071` or `publish 0.8.0`.
 Qualification and packing refuse `/tmp` and long `TMPDIR` paths; export a short
 private one such as `TMPDIR=$HOME/.cache/cr`.
 

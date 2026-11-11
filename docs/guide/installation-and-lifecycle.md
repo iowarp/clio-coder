@@ -759,7 +759,7 @@ print the migration retry command. The package remains installed;
 
 `clio-coder doctor`, `clio-coder paths` (the `tracking` row) and `clio-coder upgrade --dry-run`
 say what an installer install follows, for example `follows latest` or
-`pinned to 0.7.1 since 2026-11-09 (installed from a package file); release with clio-coder upgrade --channel latest`.
+`pinned to 0.8.0 since 2026-11-09 (installed from a package file); release with clio-coder upgrade --channel latest`.
 
 `clio-coder upgrade --post-install`, which every installer runs, tidies up after a move to
 another method:
