@@ -2527,7 +2527,7 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	strictEqual(detail.match(/verifier validation failed/gu)?.length, 2, "the timeline says what each run's record says");
 });
 
-test("the exit summary counts a failed-over council member once, by its last attempt", async () => {
+test("the exit summary counts a failed-over council member once, by its last attempt, and the sealed report not at all", async () => {
 	const { renderExitSummary } = await import("../../src/interactive/exit-summary.js");
 	const { createExitSummaryCollector } = await import("../../src/interactive/exit-summary-collector.js");
 	const { telemetryViewOf } = await import("../harness/telemetry-view.js");
@@ -2559,8 +2559,23 @@ test("the exit summary counts a failed-over council member once, by its last att
 	}
 	start("alpha-r0", "alpha", 0);
 	bus.emit("run.completed", { runId: "alpha-r0", agentId: "scout", outcome: "succeeded" } as never);
-	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
+	// The sealed report runs no model, so it is no worker, whatever synthesis the council was asked for.
+	bus.emit("run.started", {
+		runId: "seal-1",
+		agentId: "council-synthesis",
+		targetId: "mini",
+		wireModelId: "m",
+		assignmentId: "seal-1",
+		attempt: 0,
+	} as never);
+	bus.emit("run.completed", { runId: "seal-1", agentId: "council-synthesis", outcome: "succeeded" } as never);
+	const snapshot = collector.snapshot();
+	const card = renderExitSummary(snapshot, "standard", 120, false).join("\n");
 	match(card, /Workers: 1 failed · 1 succeeded/u, card);
+	deepStrictEqual(
+		(snapshot?.workers ?? []).map((worker) => worker.runId),
+		["broken-r2", "alpha-r0"],
+	);
 });
 
 test("a chained verify step naming no declared check seals no failed validation and leaves an earlier pass standing", async () => {

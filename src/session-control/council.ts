@@ -37,6 +37,13 @@ export const COUNCIL_MAX_ROUNDS = 3;
  */
 export const COUNCIL_SYNTHESIS_LABEL = "synthesis";
 
+/**
+ * The agent id of the run that seals a council's report. It runs no model: it
+ * copies the first final member's route into its record, so a view that names
+ * routes or counts workers leaves it out.
+ */
+export const COUNCIL_SEALED_REPORT_AGENT_ID = "council-synthesis";
+
 /** `--deadline` value: bare seconds, `Ns` or `Nm`, as milliseconds; undefined when malformed. */
 export function parseCouncilDeadline(value: string): number | undefined {
 	const match = /^(\d+)(s|m)?$/u.exec(value.trim());

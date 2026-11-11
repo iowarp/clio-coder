@@ -3162,26 +3162,33 @@ describe("agent invocations", () => {
 		match(plain, /python3 -c import calc passed on the worker's own report/u, plain);
 	});
 
-	it("names a council that only collected by its size, not by a member's route", () => {
-		const report = {
-			members: [
-				{ label: "fast", runId: "m1-r1", round: 1, answer: "a" },
-				{ label: "slow", runId: "m2-r1", round: 1, answer: "b" },
-			],
-			synthesis: { kind: "none" },
-		};
-		const synthesis = card({
-			assignmentId: "s1",
-			agentId: "council-synthesis",
-			origin: "user",
-			council: { group: "g1", label: "synthesis", round: 1 },
-			text: JSON.stringify(report),
-		});
-		const head = renderWorkerEntryLines(synthesis, 160, { detail: transcriptDetail("standard") })
-			.map(stripTerminalSequences)
-			.find((row) => row.startsWith("  council"));
-		match(head ?? "", /^ {2}council of 2 /u);
-		doesNotMatch(head ?? "", /dynamo\/qwen/u);
+	it("names a council's sealed report by its size, never by a member's route, whatever the synthesis", () => {
+		// The sealed report runs no model; its record carries the first member's route, which the header must not show.
+		for (const synthesis of [
+			{ kind: "none" },
+			{ kind: "vote", verdict: "yes", tally: { yes: 2 } },
+			{ kind: "judge", text: "both agree", verdict: "yes", judgeRunId: "j1" },
+		]) {
+			const report = {
+				members: [
+					{ label: "fast", runId: "m1-r1", round: 1, answer: "a" },
+					{ label: "slow", runId: "m2-r1", round: 1, answer: "b" },
+				],
+				synthesis,
+			};
+			const sealed = card({
+				assignmentId: "s1",
+				agentId: "council-synthesis",
+				origin: "user",
+				council: { group: "g1", label: "synthesis", round: 1 },
+				text: JSON.stringify(report),
+			});
+			const head = renderWorkerEntryLines(sealed, 160, { detail: transcriptDetail("standard") })
+				.map(stripTerminalSequences)
+				.find((row) => row.startsWith("  council"));
+			match(head ?? "", /^ {2}council of 2 /u, synthesis.kind);
+			doesNotMatch(head ?? "", /dynamo\/qwen/u, `${synthesis.kind}: ${head}`);
+		}
 	});
 
 	it("a council whose members failed does not head its card with a plain done", () => {

@@ -13,6 +13,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
+import { COUNCIL_SEALED_REPORT_AGENT_ID } from "../session-control/council.js";
 import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
@@ -413,6 +414,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		}),
 		deps.bus.subscribe("run.started", (run) => {
 			hasModelTurn = true;
+			// A council's sealed report is no worker: it runs no model and carries a member's route.
+			if (run.agentId === COUNCIL_SEALED_REPORT_AGENT_ID) return;
 			// A failover's next attempt is the same worker: it replaces the attempt before it rather than counting again.
 			const assignment = (run as { assignmentId?: unknown }).assignmentId;
 			if (typeof assignment === "string") {

@@ -2040,7 +2040,9 @@ hard block.
   columns and larger ones stack. Each column carries the
   member label in its roster color (a member with no color takes the accent), the
   target and model, the round, the status, and a bounded answer tail of at most four rows. The synthesis run takes the full width under the
-  members, because it is the council's answer rather than one voice in it. A
+  members, because it is the council's answer rather than one voice in it. In the
+  transcript the council's sealed report reads `council of N` and names no route,
+  since it runs no model; a judge's route is on the judge's own card. A
   council that ran several rounds still shows one column per member: each label
   keeps its newest round, so the card describes the council rather than its
   history.

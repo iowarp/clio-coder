@@ -3,7 +3,7 @@ import { renderCalls } from "../../core/telemetry/render.js";
 import { parseCouncilReport } from "../../domains/agents/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
-import { COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
+import { COUNCIL_SEALED_REPORT_AGENT_ID, COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
 import { cardRail, cardRows } from "../card.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
@@ -187,7 +187,8 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 	const route = workerRoute(entry);
 	// A council member reads by its roster label in its roster color, the name
 	// the operator configured, rather than by its agent id. The synthesis card is the council's own row, so it goes by
-	// the council's size, and a council that only collected ran no model of its own, so it names no route.
+	// the council's size. The sealed report ran no model of its own whatever the synthesis (its record carries the first
+	// member's route), so it names no route; a judge's route is on the judge's own card.
 	const report = isSynthesis(entry) && !isPending(entry) ? parseCouncilReport(entry.text) : null;
 	const who =
 		entry.council !== undefined
@@ -201,7 +202,11 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 					entry.council.color,
 				)
 			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
-	const showRoute = kind !== "acp" && route !== undefined && report?.synthesis.kind !== "none";
+	const showRoute =
+		kind !== "acp" &&
+		route !== undefined &&
+		entry.agentId !== COUNCIL_SEALED_REPORT_AGENT_ID &&
+		report?.synthesis.kind !== "none";
 	return [
 		who,
 		...(entry.planStep !== undefined ? [theme.fg("info", sanitizeCallTargetText(entry.planStep))] : []),
