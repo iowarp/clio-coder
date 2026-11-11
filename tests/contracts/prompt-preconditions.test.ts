@@ -211,6 +211,17 @@ describe("one entry per capability (S-83)", () => {
 		deepStrictEqual(names.length, new Set(names).size);
 	});
 
+	it("keeps the v2 Tool Contract within 6,500 characters on the reference fixture", () => {
+		const prompt = compile(loadFragments(), {
+			...fixture.inputs,
+			sessionInputs: { ...fixture.inputs.sessionInputs, promptProfile: "v2" },
+		}).systemPrompt;
+		const start = prompt.indexOf("# Tool Contract");
+		const end = prompt.indexOf("\nAutonomy: ", start);
+		ok(start >= 0 && end > start);
+		ok(end - start <= 6_500, `Tool Contract is ${end - start} characters`);
+	});
+
 	it("lists declared checks in Project, capped, and uses the first in the verify example", () => {
 		const prompt = render(["unit", "lint"]);
 		ok(prompt.includes("Declared checks (verify): unit, lint"));
