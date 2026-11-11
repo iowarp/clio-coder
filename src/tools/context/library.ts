@@ -1,5 +1,6 @@
 import { discoveryScore } from "../../core/harness-discovery.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { guidanceForLibraryKind } from "../../domains/prompts/runtime-guidance.js";
 import type {
 	LibraryComponent,
 	LibraryInventory,
@@ -429,6 +430,7 @@ export async function runLibraryScope(
 	const inventoryCapped = inventory.truncated.resources || inventory.truncated.packages || copiesCapped;
 	const diagnostics = boundDiagnostics(inventory.diagnostics);
 
+	const libraryGuidance = guidanceForLibraryKind(kind);
 	const header = {
 		scope: "library",
 		...(kind !== undefined ? { kind } : {}),
@@ -438,6 +440,7 @@ export async function runLibraryScope(
 		...(inventoryCapped ? { totalIsLowerBound: true } : {}),
 		offset,
 		...(diagnostics.length > 0 ? { diagnostics } : {}),
+		...(libraryGuidance.length > 0 ? { guidance: libraryGuidance } : {}),
 	};
 	// Measure the envelope with every optional clause present, so the page that
 	// fits inside it still fits once the real, shorter note is written.

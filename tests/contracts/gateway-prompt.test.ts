@@ -68,21 +68,15 @@ describe("gateway in the session prompt", () => {
 			});
 			const hasGateway = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Gateway);
 			const hasContext = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Context);
-			strictEqual(compiled.systemPrompt.includes("# Clio Coder documentation routing"), hasGateway);
-			strictEqual(
-				compiled.fragmentManifest.some((fragment) => fragment.id === "identity.docs-routing"),
-				hasGateway,
-			);
+			strictEqual(compiled.systemPrompt.includes("carry the procedure under Guidance"), hasGateway);
+			ok(!compiled.fragmentManifest.some((fragment) => fragment.id === "identity.docs-routing"));
 			strictEqual(compiled.systemPrompt.includes('capability="clio_docs"'), hasGateway);
 			strictEqual(
 				compiled.sections.some((section) => section.id === "skills"),
 				hasContext,
 			);
 			strictEqual(compiled.systemPrompt.includes('args={scope:"skills",query:"<task>"}'), hasContext);
-			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasGateway);
-			if (hasGateway) {
-				match(compiled.systemPrompt, /never invent recipe or skill names/);
-			}
+			strictEqual(compiled.systemPrompt.includes("clio_library kind=playbook"), hasGateway);
 			if (hasContext) {
 				match(compiled.systemPrompt, /Load a matching ready skill through gateway/);
 				match(compiled.systemPrompt, /Install only when requested or approved/);
@@ -134,12 +128,10 @@ describe("gateway in the session prompt", () => {
 			const lines = compiled.systemPrompt.split("\n");
 			ok(
 				compiled.systemPrompt.includes(
-					'For questions about Clio Coder\'s documented commands, configuration, or behavior, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search.',
+					'Questions about Clio Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first',
 				),
 				"The compiled prompt routes documented Clio Coder behavior through gateway before answering or searching the workspace.",
 			);
-			match(compiled.systemPrompt, /hit's ready-to-use read call/);
-			match(compiled.systemPrompt, /offset, limit, and line_numbers select exactly the cited section/);
 			doesNotMatch(
 				compiled.systemPrompt,
 				/\bcontext\s*\(\s*scope\s*=\s*["']docs["']/,

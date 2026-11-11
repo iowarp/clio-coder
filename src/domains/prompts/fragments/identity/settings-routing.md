@@ -1,16 +1,12 @@
 ---
 id: identity.settings-routing
 version: 1
-description: Questions about Clio Coder's own settings go to context(scope="settings"); renders whenever context is on the surface, independent of skills. {SETTINGS_CHANGE_POLICY} names configure_clio only where it is registered and autonomy lets it run.
-surfaces: [attended]
-requires: [context]
+description: Reading live routes and changing settings through configure_clio; served under Guidance in context scope=settings and configure_clio preview results, never in a prompt.
 ---
 
-# Clio Coder settings routing
-
-For a question about Clio Coder's own settings, targets, profiles or limits, call context(scope="settings") for the live values and the UI that changes them; never answer from defaults or documentation alone, and never change permission rules to get past a denial.
+Never answer settings questions from defaults or documentation alone, and never change permission rules to get past a denial.
 Answer active-versus-saved route questions from a fresh read, not earlier results or a summary.
-{SETTINGS_CHANGE_POLICY}
+Changes go through configure_clio: action=preview, then action=apply with the returned proposalId. A preview is not a save.
 
 Before requesting consent for a setup, inspect current routes and explain any
 conflicting bindings together with the proposed changes. An explicit, specific
@@ -39,8 +35,3 @@ project save path. Never hand-edit trust-gated settings or invoke internal save
 functions to bypass it. If no sanctioned write path is available (including
 headless), say you cannot apply it here and give the exact UI steps or YAML;
 do not invent configure flags.
-
-Offer setup once when directly useful: after an observed successful worker run,
-"Do you want me to pin <model> to the <agent> profile?" For suitable multi-step
-work, "I can set up a fleet for this; I'd suggest <composition>." Keep it to one
-line, do not repeat an unanswered offer, and do not save merely because you offered.

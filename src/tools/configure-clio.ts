@@ -8,6 +8,7 @@ import { applyControlValue, formatControlValue, settingControl } from "../core/s
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { settingsChangeKind } from "../domains/config/classify.js";
+import { guidanceForSettings, renderGuidance } from "../domains/prompts/runtime-guidance.js";
 import { findBuiltinRuntimeBootMetadata } from "../domains/providers/runtimes/boot-manifest.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -190,7 +191,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 						pending = null;
 						return {
 							kind: "ok",
-							output: `Proposed saved settings change (not applied: ${blocked}):\n${preview}\n\n${operatorSteps(change)}\nShow the operator this diff and these steps; do not try to apply it another way.${routing}`,
+							output: `Proposed saved settings change (not applied: ${blocked}):\n${preview}\n\n${operatorSteps(change)}\nShow the operator this diff and these steps; do not try to apply it another way.${routing}${renderGuidance(guidanceForSettings())}`,
 						};
 					}
 					pending = {
@@ -203,7 +204,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					};
 					return {
 						kind: "ok",
-						output: `Proposed saved settings change:\n${preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to show the operator the approval card. This proposal expires in 10 minutes.${routing}`,
+						output: `Proposed saved settings change:\n${preview}\n\nCall configure_clio(action="apply", proposalId="${pending.id}") to show the operator the approval card. This proposal expires in 10 minutes.${routing}${renderGuidance(guidanceForSettings())}`,
 					};
 				} catch (error) {
 					return { kind: "error", message: error instanceof Error ? error.message : String(error) };

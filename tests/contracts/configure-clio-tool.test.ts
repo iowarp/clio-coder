@@ -56,6 +56,10 @@ test("configure_clio previews an exact change, applies it once and logs the save
 	strictEqual(tool.name, ToolNames.ConfigureClio);
 	const preview = await tool.run({ action: "preview", path: "chat.thinkingLevel", value: "high" }, { sessionId: "s-1" });
 	match(preview.kind === "ok" ? preview.output : "", /chat\.thinkingLevel: low → high/);
+	match(
+		preview.kind === "ok" ? preview.output : "",
+		/\n\nGuidance:\n[\s\S]*profile map first, then the binding map[\s\S]*effect\ntiming/,
+	);
 	strictEqual(readSettings().chat.thinkingLevel, "low");
 	const proposalId = /proposalId="([^"]+)"/.exec(preview.kind === "ok" ? preview.output : "")?.[1];
 	if (!proposalId) throw new Error("preview omitted proposal id");
@@ -191,7 +195,7 @@ test("configure_clio Apply cards show sanitized changed leaves without unchanged
 	const bounded = await tool.run({ action: "preview", path: "fleet.agentProfiles", value: JSON.stringify(large) });
 	ok(bounded.kind === "ok", JSON.stringify(bounded));
 	match(bounded.output, /more changed values/);
-	ok(bounded.output.length < 3600);
+	ok((bounded.output.split("\n\nGuidance:\n")[0] ?? "").length < 3600);
 });
 
 test("configure_clio fleet routing apply parks for the operator while its preview stays free", async (t) => {

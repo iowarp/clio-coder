@@ -18,6 +18,7 @@ import {
 	resolveRecallByPath,
 } from "../../domains/context/working-set/recall.js";
 import { withPluginDiscoveryPass } from "../../domains/plugins/index.js";
+import { guidanceForSettings } from "../../domains/prompts/runtime-guidance.js";
 import {
 	buildSkillCatalogView,
 	checkSkillDrift,
@@ -1005,7 +1006,7 @@ export function createContextTool(
 					tool: ToolNames.Context,
 					unit: "entries",
 					format: "json",
-					output: JSON.stringify(snapshot, null, 2),
+					output: JSON.stringify({ ...snapshot, guidance: guidanceForSettings() }, null, 2),
 					shownCount: snapshot.rows.length,
 					totalCount: snapshot.total,
 					truncated: snapshot.nextOffset !== null,

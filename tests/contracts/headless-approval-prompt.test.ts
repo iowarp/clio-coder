@@ -110,7 +110,7 @@ describe("interactive-only guidance in the session prompt", () => {
 		];
 		deepStrictEqual(
 			headings.map((heading) => prompt(false).includes(heading)),
-			[true, true, true],
+			[false, false, true],
 		);
 		deepStrictEqual(
 			headings.map((heading) => prompt(true).includes(heading)),
@@ -119,7 +119,11 @@ describe("interactive-only guidance in the session prompt", () => {
 		ok(!prompt(true).includes("# Answering questions about Clio"), "no inline support guidance replaces the routing");
 		const lookup = 'call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering';
 		ok(!prompt(true).includes(lookup), "a headless map without clio_docs never names the lookup");
-		strictEqual(prompt(false).split(lookup).length, 2, "the attended prompt carries the lookup once");
+		strictEqual(
+			prompt(false).split('Questions about Clio Coder itself: gateway(op="call", capability="clio_docs"').length,
+			2,
+			"the attended prompt carries the lookup row once",
+		);
 		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
 	});
 

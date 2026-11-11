@@ -48,6 +48,7 @@ test("context reads the current snapshot each time and refuses to invent a worke
 	assert.equal(first.kind, "ok");
 	if (first.kind !== "ok") return;
 	assert.match(first.output, /default/);
+	assert.match(first.output, /"guidance": \[\s*\{\s*"id": "identity.settings-routing"/);
 	settings.safety.autonomy = "yolo";
 	const second = await tool.run({ scope: "settings", query: "autonomy" });
 	assert.equal(second.kind, "ok");

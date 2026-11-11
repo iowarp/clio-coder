@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { compile, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
+import { guidanceForSettings } from "../../src/domains/prompts/runtime-guidance.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -46,28 +47,20 @@ describe("self-knowledge in the session prompt", () => {
 		]) {
 			ok(compileSession("safety.default", inputs).includes(SETTINGS_ROUTE), JSON.stringify(inputs));
 		}
-		ok(!compileSession("safety.default", { toolNames: [ToolNames.Gateway] }).includes(SETTINGS_ROUTE));
 	});
 
-	it("teaches the configure_clio preview only where the tool is registered and autonomy lets it run", () => {
-		const configure = /capability="configure_clio"/;
-		match(compileSession("safety.default", { canConfigureClio: true }), configure);
-		match(compileSession("safety.yolo", { canConfigureClio: true }), configure);
-		for (const [safety, inputs] of [
-			["safety.default", {}],
-			["safety.default", { canConfigureClio: true, toolNames: [ToolNames.Context] }],
-		] as const) {
-			const prompt = compileSession(safety, inputs);
-			doesNotMatch(prompt, configure, `${safety} ${JSON.stringify(inputs)}`);
-			if (prompt.includes(SETTINGS_ROUTE)) match(prompt, /\/settings/);
+	it("keeps configure_clio and setup consent procedure out of the prompt and in settings results (S-84)", () => {
+		for (const safety of ["safety.default", "safety.yolo"] as const) {
+			const prompt = compileSession(safety, { canConfigureClio: true });
+			doesNotMatch(prompt, /capability="configure_clio"/);
+			doesNotMatch(prompt, /Offer setup once/);
 		}
-	});
-
-	it("carries specific setup consent while preserving per-write policy cards", () => {
-		const prompt = compileSession("safety.default", { canConfigureClio: true });
-		match(prompt, /yes authorizes those named changes and fleet creation/);
-		match(prompt, /without another prose confirmation or ask_user/);
-		match(prompt, /Required per-write Apply or policy approval cards still/);
+		const guidance = guidanceForSettings()
+			.map((block) => block.text)
+			.join("\n");
+		match(guidance, /yes authorizes those named changes and fleet creation/);
+		match(guidance, /Required per-write Apply or policy approval cards still/);
+		doesNotMatch(guidance, /Offer setup once/);
 	});
 
 	it("never routes to the code map file or the removed docs scope", () => {

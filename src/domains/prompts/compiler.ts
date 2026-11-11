@@ -731,6 +731,12 @@ class FragmentPicker {
 }
 
 /** How every capability is called; stated once, ahead of the entries it governs. */
+const HARNESS_ROUTING_ROW =
+	'Questions about Clio Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first, live values from gateway(op="call", capability="context", args={scope:"settings"}), changes through configure_clio; those results and clio_library kind=playbook or kind=agent carry the procedure under Guidance. Never for a question about the workspace.';
+
+const SETTINGS_ROUTING_ROW =
+	'Questions about Clio Coder\'s own settings, targets, profiles or limits: gateway(op="call", capability="context", args={scope:"settings"}) for live values; the result carries the procedure under Guidance.';
+
 const GATEWAY_CALLING_RULE =
 	'Call a (gateway) entry with gateway(op="call", capability="<name>", args={...}); naming it does not attach it. With no arguments shown, gateway(op="describe", capability="<name>") first; never guess argument names. Not listed: gateway(op="find", query="<two to four words>"). Discovery grants no authority.';
 
@@ -1161,7 +1167,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		turnAllowsTool(session.turnConstraints, "clio_docs")
 			? picker.pick("identity.docs-lookup")
 			: undefined;
-	const docsRouting = docsLookup && attended ? picker.pick("identity.docs-routing") : undefined;
+	// Docs, catalog and settings procedures ride in the results of the tools
+	// that answer those questions (S-84); the prompt keeps one routing row.
+	const docsRouting = docsLookup !== undefined && attended;
 	// Defer procedures only when this session can retrieve them. Restricted or
 	// tool-less sessions keep the same guidance without an impossible tool route.
 	const inlineGuidance =
@@ -1185,32 +1193,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			)
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		const settingsRouting = picker.pick("identity.settings-routing");
 		harnessAwareness = [
 			rendered.trim(),
-			...(attendedSelfAwareness ? [attendedSelfAwareness.body.trim()] : []),
-			...(docsLookup ? [docsLookup.body.trim()] : []),
-			...(docsRouting
-				? [
-						docsRouting.body
-							.replace(
-								"{LIBRARY_ROUTING}",
-								session.coordinatorCapabilities.includes("clio_library") &&
-									turnAllowsTool(session.turnConstraints, "clio_library")
-									? 'For available workflows, skills, specialists, or how to start a task, first call gateway(op="call", capability="clio_library", args={query:"<task>"}). Use its current readiness and exact invocation; catalog lookup does not activate or install anything.'
-									: "",
-							)
-							.trim(),
-					]
-				: []),
-			...(settingsRouting
-				? [
-						settingsRouting.body
-							.replace("{SETTINGS_CHANGE_POLICY}", settingsChangePolicy(session, autonomyLevel))
-							.replace('context(scope="settings")', 'gateway(op="call", capability="context", args={scope:"settings"})')
-							.trim(),
-					]
-				: []),
+			...(attendedSelfAwareness && !docsRouting ? [attendedSelfAwareness.body.trim()] : []),
+			...(docsLookup && !docsRouting ? [docsLookup.body.trim()] : []),
+			...(docsRouting ? [HARNESS_ROUTING_ROW] : []),
+			...(!docsRouting && attended && toolSurfaceHasTool(session.toolNames, "context") ? [SETTINGS_ROUTING_ROW] : []),
 		].join("\n\n");
 	}
 
@@ -1306,9 +1294,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(attendedIdentity ? [attendedIdentity] : []),
 		...inlineGuidance,
 		...(selfAwareness ? [selfAwareness] : []),
-		...(attendedSelfAwareness ? [attendedSelfAwareness] : []),
-		...(docsLookup ? [docsLookup] : []),
-		...(docsRouting ? [docsRouting] : []),
+		...(attendedSelfAwareness && !docsRouting ? [attendedSelfAwareness] : []),
+		...(docsLookup && !docsRouting ? [docsLookup] : []),
 		operatingContract,
 		...(decisions ? [decisions] : []),
 		...(attendedContract ? [attendedContract] : []),

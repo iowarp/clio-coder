@@ -126,6 +126,14 @@ describe("fragment preconditions in the compiled prompt", () => {
 		ok(memory?.text.includes("tool. `memory_recall` only reads:"), memory?.text);
 		ok(!memory?.text.includes("{memory_recall}"), memory?.text);
 	});
+
+	it("serves playbook guidance only on its topic (S-84)", () => {
+		const ids = (query: string) => guidanceForDocs(query).map((entry) => entry.id);
+		const authoring = guidanceForDocs("fleet authoring").find((entry) => entry.id === "identity.docs-routing");
+		ok(authoring?.text.includes("playbook new <name> --from <builtin>"), authoring?.text);
+		ok(!ids("how do I change the theme").includes("identity.docs-routing"));
+		ok(!ids("how do I change the theme").includes("identity.settings-routing"));
+	});
 });
 
 describe("safety text matches the session (S-81)", () => {
