@@ -2,10 +2,12 @@
 """Run the prompt-profile matrix for one model and print the report.
 
   pnpm eval:prompts -- --seed-home <home> --target <target> --model <model> [--profiles v1,v2] [--runs 5]
-                       [--tasks 01,02] [--lock <file>] [--out <file.jsonl>] [--keep-raw]
+                       [--tasks 01,02] [--lock <file>] [--out <file.jsonl>] [--keep-raw] [--resume]
 
 Each (task, profile, run) gets a fresh home and a fresh fixture workspace; every prompt of a task is a new
 session in that same home and workspace. One JSON row per run is appended to --out; the report follows.
+Clio reads prompt fragments from the checkout's src/, so point --worktree at a checkout nothing edits during
+the run; the runner stops without recording a run whose prompt failed to load or whose sources changed.
 """
 import argparse, datetime, fcntl, json, os, shutil, sys
 
@@ -25,6 +27,7 @@ ap.add_argument("--lock", default="", help="flock this file around each Clio cal
 ap.add_argument("--timeout", type=int, default=600)
 ap.add_argument("--out", default="")
 ap.add_argument("--keep-raw", action="store_true", help="keep each run's raw event stream next to the results")
+ap.add_argument("--resume", action="store_true", help="skip the (task, profile, run) cells already in --out")
 a = ap.parse_args()
 
 cli = os.path.join(a.worktree, "dist/cli/index.js")
@@ -37,6 +40,15 @@ stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
 out = a.out or os.path.join(lib.tmproot(), "prompt-eval", f"{stamp}-{a.model.replace('/', '_')}.jsonl")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 rawdir = out[:-6] + ".raw"
+done = set()
+if a.resume and os.path.exists(out):
+    for l in open(out):
+        if l.strip():
+            r = json.loads(l)
+            if r["commit"] != commit:
+                sys.exit(f"--resume: {out} holds runs of {r['commit']}, the worktree is {commit}")
+            done.add((r["task"], r["profile"], r["run"]))
+sources = lib.prompt_sources_digest(a.worktree)
 sel = [tasks.BY_ID[i] for i in a.tasks.split(",")] if a.tasks else tasks.TASKS
 
 
@@ -55,6 +67,8 @@ class Lock:
 for n in range(a.runs):
     for t in sel:
         for prof in a.profiles.split(","):
+            if (t["id"], prof, n) in done:
+                continue
             home = lib.make_home(prof, a.target, a.model, a.seed_home, t.get("safety", ()))
             ws = lib.make_workspace(t["fixture"], t.get("remote"))
             parts = []
@@ -69,6 +83,12 @@ for n in range(a.runs):
                 if a.keep_raw:
                     os.makedirs(rawdir, exist_ok=True)
                     open(f"{rawdir}/{t['id']}-{prof}-{n}-{i}.jsonl", "w").write(raw)
+            failed = [e for p in parts for e in p.get("prompt_errors") or []]
+            if failed or lib.prompt_sources_digest(a.worktree) != sources:
+                shutil.rmtree(home, ignore_errors=True)
+                shutil.rmtree(ws, ignore_errors=True)
+                sys.exit(f"[{n}] {t['id']} {prof}: not recorded; " + (f"the prompt failed to load: {failed[0]}" if failed else
+                         f"prompt sources under {a.worktree}/src changed during the run; run from a frozen checkout"))
             rec = {"task": t["id"], "name": t["name"], "profile": prof, "target": a.target, "model": a.model, "run": n,
                    "surface": t["surface"], "commit": commit, "parts": parts}
             try:

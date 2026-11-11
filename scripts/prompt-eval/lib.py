@@ -5,7 +5,7 @@ A normalized part (one prompt in one session) is what every scorer reads, and wh
    "usage": [{"input","cacheRead","cacheReadField"}], "blocked": [...], "acp_methods": [...],
    "files_changed": [...], "seconds", "stderr_tail"}
 """
-import json, os, re, shutil, subprocess, tempfile, time
+import hashlib, json, os, re, shutil, subprocess, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECKOUT = os.path.dirname(os.path.dirname(HERE))
@@ -130,15 +130,16 @@ def run_headless(cli, home, ws, prompt, target, model, extra=(), timeout=900):
         out = x.stdout.decode() if isinstance(x.stdout, bytes) else (x.stdout or "")
         err = "harness timeout"
     part = parse_headless(out)
-    part.update(prompt=prompt, seconds=round(time.time() - t0, 1), stderr_tail=err[-400:])
+    part.update(prompt=prompt, seconds=round(time.time() - t0, 1), stderr_tail=err[-400:], prompt_errors=prompt_errors(err))
     return part, out
 
 
 def run_acp(cli, home, ws, prompt, target, model, timeout=900):
     """One attended turn over ACP. The client advertises interviews and answers every ask_user round with a
     cancel, so the agent sees a person who closed the card; that is enough to score whether it asked."""
+    errf = tempfile.TemporaryFile(mode="w+", dir=tmproot())
     p = subprocess.Popen(["node", cli, "acp", "--cwd", ws], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, env=env_for(home), text=True, cwd=ws)
+                         stderr=errf, env=env_for(home), text=True, cwd=ws)
     nid, tools, byid, texts, methods, raw = [0], [], {}, [], [], []
     deadline = time.time() + timeout
     t0 = time.time()
@@ -222,11 +223,32 @@ def run_acp(cli, home, ws, prompt, target, model, timeout=900):
             p.wait(timeout=30)
         except Exception:
             p.kill()
+    errf.seek(0)
+    stderr = errf.read()
+    errf.close()
     final = texts[-1][1].strip() if texts else ""
     part = {"exit": 0 if err is None else 1, "final": final, "tools": tools, "rounds": len({t for t, _ in texts if t > 0}),
             "usage": [], "blocked": [], "acp_methods": methods, "prompt": prompt, "stop": stop, "error": err,
-            "seconds": round(time.time() - t0, 1), "stderr_tail": ""}
+            "seconds": round(time.time() - t0, 1), "stderr_tail": stderr[-400:], "prompt_errors": prompt_errors(stderr)}
     return part, "".join(raw)
+
+
+def prompt_errors(stderr):
+    """Diagnostics from Clio's prompt domain. A failed fragment load leaves the run without a system prompt."""
+    return [l for l in stderr.splitlines() if l.startswith("[clio-coder:prompts]") and "failed" in l][:3]
+
+
+def prompt_sources_digest(worktree):
+    """Clio reads prompt fragments from the checkout's src/ at every start, not from dist/, so a run is only
+    as frozen as this tree."""
+    h = hashlib.sha256()
+    root = os.path.join(worktree, "src", "domains", "prompts")
+    for d, dirs, files in sorted(os.walk(root)):
+        dirs.sort()
+        for f in sorted(files):
+            fp = os.path.join(d, f)
+            h.update(os.path.relpath(fp, root).encode() + b"\0" + open(fp, "rb").read())
+    return h.hexdigest()
 
 
 def build_commit(worktree):

@@ -21,6 +21,13 @@ dropped and `prompts.profile` set, and a fresh git fixture under `TMPDIR`. One J
 `python3 -B scripts/prompt-eval/report.py a.jsonl b.jsonl` merges models into one table. `--lock` serializes
 Clio calls with `flock` for a route that serves one request at a time. `--worktree` runs another checkout's dist.
 
+Clio reads its prompt fragments from the checkout's `src/` at every start, not from `dist/`, so a run that
+outlasts an edit to that checkout mixes prompts, and a fragment the build cannot parse leaves the model with no
+system prompt. Run a long matrix from a checkout nothing edits, for example a `--shared` clone detached at the
+commit under test with that commit's `dist/` and a `node_modules` link. The runner stops without recording a
+run whose prompt failed to load or whose prompt sources changed. `--resume` skips the (task, profile, run)
+cells already in `--out`, and refuses a file that holds another commit's runs.
+
 ## Files
 - `tasks.py`: fixtures, prompts and one scorer per task (pass, fail or n/a, plus a note).
 - `lib.py`: isolated homes, workspaces, the headless and ACP drivers, event normalization.
