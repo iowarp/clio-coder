@@ -1,6 +1,5 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchPrefixGroup } from "../../src/domains/dispatch/contract.js";
 import {
@@ -104,10 +103,18 @@ test("abort during the hold ends the follower cleanly without starting its worke
 test("a held follower's run row names a live process, then its worker's pid once it starts", async () => {
 	await isolateDispatchState();
 	const spawned: Array<{ worker: SpawnedWorker; finish: () => void }> = [];
-	const bundle = makeDispatchBundle(dispatchStubContext({ settings: structuredClone(DEFAULT_SETTINGS) }), {
+	let followerStarted!: () => void;
+	const followerSpawned = new Promise<void>((resolve) => {
+		followerStarted = resolve;
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	// The fake workers end without a result; a retry would start workers nothing finishes.
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
 		spawnWorker: () => {
 			const next = fakeWorker();
 			spawned.push(next);
+			if (spawned.length === 2) followerStarted();
 			return { ...next.worker, pid: 4_000 + spawned.length };
 		},
 	});
@@ -127,11 +134,7 @@ test("a held follower's run row names a live process, then its worker's pid once
 		for (const row of rows) strictEqual(typeof row.pid, "number", `${row.id} has no live pid while held`);
 		// The leader exits, which releases the hold and starts the follower.
 		spawned[0]?.finish();
-		const deadline = Date.now() + 5_000;
-		while (spawned.length < 2) {
-			ok(Date.now() < deadline, "the follower never started");
-			await sleep(5);
-		}
+		await followerSpawned;
 		const followerPid = rows.map((row) => bundle.contract.getRun(row.id)?.pid).find((pid) => pid === 4_002);
 		strictEqual(followerPid, 4_002);
 		spawned[1]?.finish();
