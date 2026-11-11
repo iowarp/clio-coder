@@ -123,6 +123,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `/reload prompts` (and bare `/reload`) re-reads prompt fragments, agent recipes, the project handbook and project rules in a running session and says which fragments changed. The safety rule pack still needs a restart.
 - `/restart` first checks that the build on disk can start and refuses, keeping the session, when it cannot. `/restart <text>` hands the text to the restarted session as its first turn. If the new build dies before resuming, the old process prints the exit code and how to `/resume` instead of exiting silently.
 - A running session warns once when the build it was started from is replaced on disk.
+- An old-school arcade cabinet is hiding in the composer; it only wakes up for the right two words.
 
 ### Sign-in, setup and providers
 
@@ -312,6 +313,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Worker diagnostics can no longer be mistaken for control frames.
 - The wiki generation lock records host and process identity, so another node's run is respected and a reused pid no longer blocks generation; a codewiki lock left by a gone process on another host is reclaimed after a minute.
 - A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer.
+- `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason.
 
 ### Extensions and MCP
 
