@@ -1,9 +1,75 @@
-import { realpathSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { HOME_SECRET_RELATIVE_PATHS, workerSecretPaths } from "../safety/secret-paths.js";
 
 function record(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const SYSTEM_TREES = ["/proc", "/sys", "/dev", "/run", "/etc"];
+/** Names of credential stores a directory tree may hold anywhere (`.ssh`, `.gnupg`, `.aws`, ...). */
+const CREDENTIAL_NAMES = new Set(HOME_SECRET_RELATIVE_PATHS.map((entry) => entry.split("/")[0] ?? entry));
+const CREDENTIAL_SCAN_DEPTH = 4;
+const CREDENTIAL_SCAN_ENTRIES = 20_000;
+
+function within(child: string, parent: string): boolean {
+	const rel = path.relative(parent, child);
+	return rel === "" || !(rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel));
+}
+
+function physicalOrSelf(target: string): string {
+	try {
+		return realpathSync(target);
+	} catch {
+		return path.resolve(target);
+	}
+}
+
+/**
+ * Whether `root` holds a credential store within a few levels. A tree too large
+ * to scan counts as holding one, so the grant fails closed.
+ */
+function holdsCredentialStore(root: string): boolean {
+	let budget = CREDENTIAL_SCAN_ENTRIES;
+	const queue: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+	for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(next.dir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		budget -= entries.length;
+		if (budget < 0) return true;
+		for (const entry of entries) {
+			if (CREDENTIAL_NAMES.has(entry.name)) return true;
+			if (
+				entry.isDirectory() &&
+				next.depth + 1 < CREDENTIAL_SCAN_DEPTH &&
+				entry.name !== "node_modules" &&
+				entry.name !== ".git"
+			)
+				queue.push({ dir: path.join(next.dir, entry.name), depth: next.depth + 1 });
+		}
+	}
+	return false;
+}
+
+/** Why a granted read root would expose the host or the operator's secrets, or null when it is fine. */
+function sensitiveReadRoot(physical: string, workspace: string): string | null {
+	if (SYSTEM_TREES.some((tree) => within(physical, physicalOrSelf(tree)) || within(physical, tree)))
+		return "names a system tree (/proc, /sys, /dev, /run, /etc)";
+	const home = physicalOrSelf(process.env.HOME ?? homedir());
+	if (physical === home) return "names the home directory";
+	if (within(workspace, physical)) return "contains the workspace";
+	for (const secret of workerSecretPaths(home)) {
+		const target = physicalOrSelf(secret);
+		if (within(physical, target) || within(target, physical)) return "is or contains a credential store";
+	}
+	if (holdsCredentialStore(physical)) return "is or contains a credential store";
+	return null;
 }
 
 /**
@@ -43,6 +109,10 @@ function grantedReadRoots(
 				"intent_path_absolute",
 				`intent.read_roots entry ${trimmed} lies inside the workspace; name it repository-relative.`,
 			);
+		}
+		const sensitive = sensitiveReadRoot(physical, workspace);
+		if (sensitive !== null) {
+			return refuse("external_read_root_invalid", `intent.read_roots entry ${trimmed} ${sensitive}.`);
 		}
 		roots.push(physical);
 	}

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { scoutReadWorkspace } from "../../src/domains/dispatch/scout-workspace.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { taskWorktreeManifestsChanged } from "../../src/tools/task-worktree.js";
@@ -99,5 +100,47 @@ describe("worker own-check bypass hardening", () => {
 		rmSync(join(repo, "pkg", ".npmrc"));
 		strictEqual(changed(), false);
 		strictEqual(taskWorktreeManifestsChanged({ path: join(scratch, "missing"), base }), true, "git failure");
+	});
+});
+
+describe("granted read roots refuse sensitive directories", () => {
+	const grant = (workspace: string, root: string) =>
+		scoutReadWorkspace({
+			agentId: "coder",
+			readOnlyScout: false,
+			workspaceRoot: workspace,
+			intent: { read_roots: [root] },
+			worktree: true,
+			writeRoots: undefined,
+		}).ok;
+
+	it("refuses system trees, HOME, workspace ancestors and credential directories", () => {
+		const home = join(scratch, "home");
+		const workspace = join(home, "proj", "repo");
+		const reference = join(home, "reference");
+		for (const dir of [workspace, reference, join(home, ".ssh"), join(home, ".aws"), join(home, "keys", ".gnupg")])
+			mkdirSync(dir, { recursive: true });
+		const saved = process.env.HOME;
+		process.env.HOME = home;
+		try {
+			strictEqual(grant(workspace, reference), true, "plain outside directory stays granted");
+			for (const root of [
+				"/proc",
+				"/sys",
+				"/dev",
+				"/run",
+				"/etc",
+				home,
+				join(home, "proj"),
+				join(home, ".ssh"),
+				join(home, ".aws"),
+				join(home, "keys"),
+			]) {
+				strictEqual(grant(workspace, root), false, root);
+			}
+		} finally {
+			if (saved === undefined) delete process.env.HOME;
+			else process.env.HOME = saved;
+		}
 	});
 });
