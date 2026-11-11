@@ -653,7 +653,7 @@ describe("library browser behavior", () => {
 	it("reviews a removal, and cancelling writes nothing and releases staging", () => {
 		const state = harness({ initialTab: "plugin" });
 		state.options.globalActions?.b?.();
-		state.press("r");
+		state.press("x");
 		ok(state.review, "r on an installed copy opens a review");
 		equal(state.applied, 0, "nothing is written before the review is accepted");
 		state.review?.cancel();
@@ -665,7 +665,7 @@ describe("library browser behavior", () => {
 	it("applies an accepted plan once and reports the session refresh separately", () => {
 		const state = harness({ initialTab: "plugin" });
 		state.options.globalActions?.b?.();
-		state.press("r");
+		state.press("x");
 		state.review?.accept();
 		equal(state.applied, 1);
 		deepStrictEqual(state.planned, [{ operation: "remove", ref: "plugin:materio", scope: "user" }]);
@@ -861,7 +861,7 @@ describe("library browser behavior", () => {
 	it("releases a pending review when the browser closes under it", () => {
 		const state = harness({ initialTab: "plugin" });
 		state.options.globalActions?.b?.();
-		state.press("r");
+		state.press("x");
 		ok(state.review);
 		state.handle.hide();
 		equal(state.released, 1, "closing the browser releases the plan it left open");
@@ -902,7 +902,7 @@ describe("library browser behavior", () => {
 		afterView.handleInput("\u001b[C");
 		afterView.handleInput("\u001b[C");
 		after.options.globalActions?.b?.();
-		after.press("r", after.rows("skill")[0]?.id, "skill");
+		after.press("x", after.rows("skill")[0]?.id, "skill");
 		deepStrictEqual(after.planned, [{ operation: "remove", ref: "plugin:materio", scope: "user" }]);
 		match(after.status(120), /Installed/);
 	});
@@ -928,7 +928,7 @@ describe("library browser behavior", () => {
 		)(installed.rows("plugin")[0]);
 		deepStrictEqual(
 			installedHints.map((entry) => entry.key),
-			["e", "u", "r", "Enter"],
+			["e", "u", "x", "Enter"],
 		);
 	});
 
@@ -958,7 +958,7 @@ describe("library browser behavior", () => {
 		}
 		equal(body.includes("PgUp/PgDn scroll"), false, "no pane is drawn");
 		const everywhere = `${body}\n${plain(view.getHint(41))}`;
-		for (const key of ["e", "u", "r", "Enter"])
+		for (const key of ["e", "u", "x", "Enter"])
 			equal(everywhere.includes(`[${key}] `), true, `${key} is discoverable with no pane drawn`);
 	});
 

@@ -42,6 +42,7 @@ import {
 	wrapPaths,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
+import { confirmOnceRail } from "./confirm-once.js";
 
 /**
  * Row width at and below which a two-column row draws `narrowLead`. It is the
@@ -168,6 +169,8 @@ export interface ListOverlayOptions {
 	/** Actions that do not require a selected row, such as scope or view mode. */
 	globalActions?: Record<string, () => void>;
 	globalHints?: ReadonlyArray<HintEntry>;
+	/** Global keys that ask once (E-21): the first press arms and shows the rail, the same key again runs it. */
+	confirmGlobal?: Record<string, { verb: string; label: string }>;
 	/**
 	 * An inner level Esc leaves before it closes the overlay, such as a package's
 	 * member list. `active` is asked by the footer so the key it advertises is the
@@ -225,6 +228,8 @@ function groupedByBestMatch(ranked: readonly ListOverlayItem[]): ListOverlayItem
 }
 
 export class ListOverlayView implements Component {
+	/** A confirmGlobal key pressed once and waiting for its second press. */
+	private armedGlobal: string | null = null;
 	private viewportRows = 24;
 	private selectedIndex = 0;
 	private filterText = "";
@@ -538,6 +543,13 @@ export class ListOverlayView implements Component {
 	 */
 	private runAction(data: string, filteredItems: ReadonlyArray<ListOverlayItem>): boolean {
 		const global = this.options.globalActions?.[data];
+		const confirm = this.options.confirmGlobal?.[data];
+		if (global && confirm && this.armedGlobal !== data) {
+			this.armedGlobal = data;
+			this.onChange();
+			return true;
+		}
+		this.armedGlobal = null;
 		if (global) {
 			global();
 			this.onChange();
@@ -662,6 +674,9 @@ export class ListOverlayView implements Component {
 			return { entries: [...(tabEntry ? [tabEntry] : []), ...(this.options.globalHints ?? [])], esc: this.escapeVerb() };
 
 		const hintEntries: HintEntry[] = [];
+		const armed = this.armedGlobal !== null ? this.options.confirmGlobal?.[this.armedGlobal] : undefined;
+		if (this.armedGlobal !== null && armed !== undefined)
+			return { entries: confirmOnceRail(this.armedGlobal, armed.verb, armed.label), esc: this.escapeVerb() };
 		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		// Navigation before actions, which is the order a narrowing footer drops in:
@@ -1421,6 +1436,10 @@ export class ListOverlayView implements Component {
 	}
 	handleInput(data: string): void {
 		data = localKey(data);
+		if (this.armedGlobal !== null && data !== this.armedGlobal) {
+			this.armedGlobal = null;
+			this.onChange();
+		}
 		if (matchesKey(data, "escape")) {
 			this.clearFilterOrClose();
 			return;

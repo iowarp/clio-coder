@@ -443,3 +443,30 @@ it("uses package and entry footer units with singular/plural forms across compon
 	);
 	match(plain(legacy.getHint()), /tab · 1 agents/);
 });
+
+it("a confirmGlobal key asks once: the rail says so, another key keeps it, the same key twice runs it", () => {
+	let restarts = 0;
+	const list = new ListOverlayView(
+		{
+			title: "Extensions",
+			items: [{ id: "one", label: "One" }],
+			globalHints: [{ key: "R", verb: "restart all" }],
+			globalActions: {
+				R: () => {
+					restarts++;
+				},
+			},
+			confirmGlobal: { R: { verb: "restart", label: "every extension" } },
+			onClose() {},
+		},
+		() => {},
+	);
+	list.handleInput("R");
+	equal(restarts, 0, "the first R only asks");
+	match(plain(list.getHint(200)), /R again/);
+	list.handleInput("j");
+	list.handleInput("R");
+	equal(restarts, 0, "another key kept it, so this R asks again");
+	list.handleInput("R");
+	equal(restarts, 1);
+});

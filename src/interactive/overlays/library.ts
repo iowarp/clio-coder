@@ -33,6 +33,7 @@ import {
 import { type OverlayHandle, stripTerminalSequences, type TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
+import { movedKeyNotice } from "./confirm-once.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -584,7 +585,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				verb: subjectEnabled(subject, view.scope, inventory().copies) === false ? "enable" : "disable",
 			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
-		if (actions.remove) entries.push({ key: "r", verb: "remove" });
+		if (actions.remove) entries.push({ key: "x", verb: "remove" });
 		// Enter is named only where it opens members; a pane is Tab's, and at
 		// split width Enter on a component did nothing while the rail said detail.
 		if (actions.open) entries.push({ key: "Enter", verb: "members" });
@@ -637,7 +638,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			{ key: "s", verb: "user/project", short: "scope" },
 			{ key: "n", verb: "notices" },
 			{ key: "o", verb: "import" },
-			{ key: "R", verb: "refresh" },
+			{ key: "r", verb: "refresh" },
 		],
 		globalActions: {
 			n: openNotices,
@@ -659,10 +660,11 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				deps.notice("info", "Import reviews another local agent's resources before anything is written.");
 				deps.openImport();
 			},
-			R: () => {
+			r: () => {
 				redraw();
 				deps.notice("info", "Library re-read from disk.");
 			},
+			R: () => deps.notice("info", movedKeyNotice("R", "r")),
 		},
 		hints,
 		onSelect: open,
@@ -670,7 +672,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			v: use,
 			i: (item) => manage("install", item),
 			u: (item) => manage("update", item),
-			r: (item) => manage("remove", item),
+			x: (item) => manage("remove", item),
 			e: (item) => {
 				const subject = selected(item);
 				manage(subject && subjectEnabled(subject, view.scope, inventory().copies) === false ? "enable" : "disable", item);
