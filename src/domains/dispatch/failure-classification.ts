@@ -152,6 +152,19 @@ export function nodeComponentRemedy(text: string, nodeId: string): string {
 	);
 }
 
+/** A relayed worker frame with every string's missing-component remedy reworded for the node; the input is not mutated. */
+export function nodeComponentRemedyEvent<T>(event: T, nodeId: string): T {
+	const rewrite = (value: unknown): unknown => {
+		if (typeof value === "string") return nodeComponentRemedy(value, nodeId);
+		if (Array.isArray(value)) return value.map(rewrite);
+		if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+			return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, rewrite(inner)]));
+		}
+		return value;
+	};
+	return JSON.stringify(event)?.includes("clio-coder tools install") === true ? (rewrite(event) as T) : event;
+}
+
 /**
  * Whether a deterministic-task class came from the provider's context-overflow
  * verdict rather than an outcome code, a rejected schema, or a rejected worker

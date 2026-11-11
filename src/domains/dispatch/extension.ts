@@ -335,6 +335,7 @@ import {
 	isContextOverflowFailure,
 	isInfrastructureFailure,
 	nodeComponentRemedy,
+	nodeComponentRemedyEvent,
 	type RetryDecision,
 } from "./failure-classification.js";
 import {
@@ -8562,7 +8563,12 @@ export function createDispatchBundle(
 			...(routeWarnings.length > 0
 				? { prelude: routeWarnings.map((message) => ({ type: "route_warning", level: "warning", message })) }
 				: {}),
-			onEvent: (event) => {
+			onEvent: (workerEvent) => {
+				// A node worker words its missing-component remedy for its own machine.
+				const event =
+					placement?.node && placement.node.kind !== "local"
+						? nodeComponentRemedyEvent(workerEvent, placement.node.id)
+						: workerEvent;
 				context.bus.emit("run.progressed", {
 					runId: envelope.id,
 					agentId: req.agentId,
