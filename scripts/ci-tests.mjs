@@ -131,7 +131,6 @@ export const coreTests = [
 	"handbook-discovery",
 	"report-share",
 	"report-dataset",
-	"census-ping",
 	"typecheck-corpus",
 	"anthropic-thread-idle",
 ]

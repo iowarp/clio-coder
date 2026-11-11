@@ -269,32 +269,6 @@ function stripProjectAutonomy(
 	return cleaned;
 }
 
-/** The census sends a request to a host; only the operator's own settings may turn it on or choose the host. */
-function stripProjectReport(
-	blob: Record<string, unknown>,
-	origin: SettingsOrigin,
-	issues: SettingsLayerIssue[],
-): Record<string, unknown> {
-	if (!isRecord(blob.report)) return blob;
-	const report: Record<string, unknown> = { ...blob.report };
-	let stripped = false;
-	for (const key of ["census", "censusEndpoint"]) {
-		if (!Object.hasOwn(report, key)) continue;
-		issues.push({
-			origin,
-			path: `report.${key}`,
-			message: "the census is set only in user settings; project value ignored",
-		});
-		delete report[key];
-		stripped = true;
-	}
-	if (!stripped) return blob;
-	const cleaned = { ...blob };
-	if (Object.keys(report).length === 0) delete cleaned.report;
-	else cleaned.report = report;
-	return cleaned;
-}
-
 /**
  * A repository may lower telemetry capture but never raise it, so opening a
  * cloned project cannot switch the operator into research mode or turn on a
@@ -718,7 +692,7 @@ function prepareProjectLayers(
 		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
 		if (file?.text === null || file === undefined) return { origin, path, blob: undefined };
 		const raw = readRawLayer(origin, path, issues, file.text);
-		const limited =
+		const blob =
 			raw.blob === undefined
 				? undefined
 				: stripProjectLimits(
@@ -741,7 +715,6 @@ function prepareProjectLayers(
 						issues,
 						userBlob,
 					);
-		const blob = limited === undefined ? undefined : stripProjectReport(limited, origin, issues);
 		if (snapshot.verdict !== "trusted") {
 			issues.push({ origin, path, message: projectSurfaceTrustNotice(snapshot, file.path) });
 			return { origin, path, blob: undefined };

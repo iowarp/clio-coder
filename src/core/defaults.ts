@@ -955,8 +955,6 @@ export const DEFAULT_SETTINGS = {
 	} as TelemetrySettings,
 	report: {
 		offers: "ask" as "ask" | "off",
-		census: "off" as "off" | "on",
-		censusEndpoint: "",
 	},
 	prompts: {
 		profile: "v1" as "v1" | "v2",
@@ -1227,10 +1225,6 @@ telemetry:
 # never suggests. Nothing is sent without your keypress.
 report:
   offers: ask
-  # Opt-in census: on sends one request a month with no identifier to censusEndpoint,
-  # only when an endpoint is set. Off (the default) sends nothing.
-  census: off
-  censusEndpoint: ""
 
 # Main-agent system prompt text: v1 (current) or v2 (the D-02 rewrite, under
 # evaluation). Applies to the next session.

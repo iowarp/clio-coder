@@ -122,7 +122,6 @@ problem.
 | `live/`, `peer-inbox/`, `running-builds/`, `fleet-locks/` | Open-session heartbeats, messages between sessions, the builds running processes loaded, and fleet locks |
 | `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
-| `census.json` | The opt-in census stamp: the last UTC month this install was counted, written only when `report.census` is on and an endpoint is set ([census.ts](../../src/domains/lifecycle/census.ts)) |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v9/`, `git-hooks/v9-shim/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hooks and git shim, and the request and tap files shared with the workers dashboard |
 

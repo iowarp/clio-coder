@@ -1,4 +1,3 @@
-export { type CensusOutcome, censusUrl, runCensus } from "./census.js";
 export { type DoctorFinding, formatDoctorReport, runDoctor } from "./doctor.js";
 export { type Installation, inspectInstallation } from "./install-method.js";
 export {

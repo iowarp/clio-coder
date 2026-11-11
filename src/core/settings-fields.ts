@@ -40,8 +40,6 @@ export const SETTINGS_FIELD_NAMES = [
 	"cacheWrite",
 	"cadenceToolCalls",
 	"canaryFingerprint",
-	"census",
-	"censusEndpoint",
 	"capabilities",
 	"catalog",
 	"chat",

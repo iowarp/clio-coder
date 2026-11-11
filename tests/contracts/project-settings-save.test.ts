@@ -199,28 +199,6 @@ test("Edit settings file keeps a trusted project layer trusted and refuses an un
 	}
 });
 
-test("a trusted project layer cannot turn the census on or choose its endpoint", async () => {
-	const home = await isolateClioEnv("clio-project-census-");
-	try {
-		const workspace = join(home.dir, "workspace");
-		const config = join(workspace, ".clio-coder");
-		mkdirSync(config, { recursive: true });
-		writeFileSync(
-			join(config, "settings.yaml"),
-			"report:\n  census: on\n  censusEndpoint: https://repo.example/census\n",
-		);
-		writeFileSync(join(config, "settings.local.yaml"), "report:\n  census: on\n");
-		approve(workspace);
-		const layered = readLayeredSettings(workspace);
-		strictEqual(layered.settings.report.census, "off");
-		strictEqual(layered.settings.report.censusEndpoint, "");
-		ok(layered.issues.some((issue) => issue.path === "report.censusEndpoint" && issue.origin === "project"));
-		ok(layered.issues.some((issue) => issue.path === "report.census" && issue.origin === "project.local"));
-	} finally {
-		home.restore();
-	}
-});
-
 test("Edit settings file creates the project settings file when the project has none", async () => {
 	const { editSettingsFile } = await import("../../src/interactive/settings-file-edit.js");
 	const home = await isolateClioEnv("clio-project-edit-new-");
