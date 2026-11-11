@@ -162,6 +162,12 @@ describe("prompts.profile v2 (S-82)", () => {
 		ok(map.length > 0 && !map.includes('args={"') && !map.includes("Example:"), map);
 	});
 
+	it("keeps the shell last and the check after the last edit", () => {
+		const text = session("headless-default").systemPrompt;
+		ok(text.includes("Run a shell command only when no listed tool fits."), "shell-last rule");
+		ok(text.includes("After your last edit, run the"), "check after the last edit");
+	});
+
 	it("lays sections in the D-02 order and drops the v1 core fragments", () => {
 		const compiled = session("attended-default");
 		const ids = compiled.sections.map((section) => section.id);
