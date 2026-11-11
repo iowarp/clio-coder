@@ -1,0 +1,146 @@
+{
+	"task": "02",
+	"name": "declared-check",
+	"profile": "v2",
+	"target": "litellm",
+	"model": "dynamo/qwopus3.8-27b-flash-v2",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "Done \u2014 both unit tests pass.\n\n**Situation:** `calc.add(a, b)` was returning `a - b` (subtraction) instead of addition; `test_add` expected `add(2, 3) == 5`.\n\n**Actions:** Changed `return a - b` to `return a + b` in `calc.py:2`, then ran the suite.\n\n**Results:**\n- `python3 -m unittest discover -s tests -v` \u2192 `Ran 2 tests ... OK` (both `test_add` and `test_mul` pass).",
+			"tools": [
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "ls -la /scratch/evw-fixture"
+					},
+					"error": false,
+					"text": "[tool-result bounded]\nkind=ok capturedBytes=620 displayedBytes=620 truncated=false\nfacts={\"aborted\":false,\"exitCode\":0,\"outcome\":\"success\",\"outputBytes\":339,\"outputCapped\":false,\"retainedBytes\":339,\"signal\":null,\"stderrBytes\":0,\"stdoutBytes\":339,\"timedOut\":false}\ntotal 24\ndrwx------ 5 eval eval 4096 Nov 10 21:54 .\ndrwxr-xr-x 8 eval eval 4096 Nov 10 21:54 ..\n-rw-r--r-- 1 eval eval   66 Nov 10 21:54 calc.py\ndrwxr-xr-x 2 eval eval 4096 Nov 10 21:54 .clio-coder\ndrwxr-xr-x 8 eval eval 4096 Nov 10 21:54 .git\ndrwxr-xr-x 2 eval eval 4096 Nov 10 21:54 tes"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "/scratch/evw-fixture/calc.py"
+					},
+					"error": false,
+					"text": "def add(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return a * b\n"
+				},
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "ls -la /scratch/evw-fixture/tests"
+					},
+					"error": false,
+					"text": "[tool-result bounded]\nkind=ok capturedBytes=235 displayedBytes=235 truncated=false\nfacts={\"aborted\":false,\"exitCode\":0,\"outcome\":\"success\",\"outputBytes\":235,\"outputCapped\":false,\"retainedBytes\":235,\"signal\":null,\"stderrBytes\":0,\"stdoutBytes\":235,\"timedOut\":false}\ntotal 12\ndrwxr-xr-x 2 eval eval 4096 Nov 10 21:54 .\ndrwx------ 5 eval eval 4096 Nov 10 21:54 ..\n-rw-r--r-- 1 eval eval    0 Nov 10 21:54 __init__.py\n-rw-r--r-- 1 eval eval  195 Nov 10 21:54 test_calc.py\n"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "/scratch/evw-fixture/tests/test_calc.py"
+					},
+					"error": false,
+					"text": "import unittest\nimport calc\n\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(calc.add(2, 3), 5)\n\n    def test_mul(self):\n        self.assertEqual(calc.mul(2, 3), 6)\n"
+				},
+				{
+					"name": "edit",
+					"via": null,
+					"args": {
+						"path": "/scratch/evw-fixture/calc.py",
+						"edits": [
+							{
+								"oldText": "def add(a, b):\n    return a - b",
+								"newText": "def add(a, b):\n    return a + b"
+							}
+						]
+					},
+					"error": false,
+					"text": "edited /scratch/evw-fixture/calc.py: 1 replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits."
+				},
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "cd /scratch/evw-fixture && python -m unittest discover -s tests -v"
+					},
+					"error": true,
+					"text": "[tool-result bounded]\nkind=error capturedBytes=77 displayedBytes=77 truncated=false\nfacts={\"aborted\":false,\"exitCode\":127,\"outcome\":\"nonzero\",\"outputBytes\":45,\"outputCapped\":false,\"retainedBytes\":45,\"signal\":null,\"stderrBytes\":45,\"stdoutBytes\":0,\"timedOut\":false}\n/bin/bash: line 1: python: command not found\n\nbash: command failed (exit 127)"
+				},
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "cd /scratch/evw-fixture && python3 -m unittest discover -s tests -v"
+					},
+					"error": false,
+					"text": "[tool-result bounded]\nkind=ok capturedBytes=176 displayedBytes=176 truncated=false\nfacts={\"aborted\":false,\"exitCode\":0,\"outcome\":\"success\",\"outputBytes\":176,\"outputCapped\":false,\"retainedBytes\":176,\"signal\":null,\"stderrBytes\":176,\"stdoutBytes\":0,\"timedOut\":false}\ntest_add (test_calc.T.test_add) ... ok\ntest_mul (test_calc.T.test_mul) ... ok\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+				}
+			],
+			"rounds": 7,
+			"usage": [
+				{
+					"input": 7015,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 7418,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 7508,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 7787,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 7908,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 8070,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 8251,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				},
+				{
+					"input": 8452,
+					"cacheRead": 0,
+					"cacheReadField": "omitted"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "A unit test in this repo fails. Fix the code (not the test) and confirm the tests pass.",
+			"seconds": 20.2,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": ["__pycache__/calc.cpython-312.pyc", "calc.py", "tests/__pycache__/test_calc.cpython-312.pyc"]
+		}
+	],
+	"verdict": false,
+	"note": "verify ids=[] reported=True",
+	"counters": {
+		"rounds": 7,
+		"tool_calls": 7,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7015,
+		"cached_first": null
+	},
+	"source": "real: dynamo/qwopus3.8-27b-flash-v2 v2 run 0 commit 3d11e1757"
+}

@@ -1,0 +1,86 @@
+{
+	"task": "04",
+	"name": "skill-first",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "Done. `job.sbatch` is written, executable, and passes a `bash -n` syntax check.\n\n```bash\n#!/bin/bash\n#SBATCH --job-name=sim\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=32\n#SBATCH --time=2:00:00\n#SBATCH --partition=compute\n\n./sim\n```\n\nEach requested clause maps to a directive: 4 nodes (`--nodes=4`), 32 tasks per node (`--ntasks-per-node=32`, i.e. 128 total), 2 hours (`--time=2:00:00`), partition compute (`--partition=compute`). The `slurm-jobs` skill was skipped since it only covers submitting a finished script via the Slurm MCP server; this workspace has no such submission step attached. The script has not been submitted anywhere and `./sim` was not run.",
+			"tools": [
+				{
+					"name": "context",
+					"via": "gateway",
+					"args": {
+						"scope": "skills",
+						"name": "slurm-jobs"
+					},
+					"error": false,
+					"text": "How to read this skill:\n- Workspace root: /scratch/evw-fixture. Run every command and resolve every repository path there. /checkout/library/skills/research/slurm-jobs holds only this skill's own resource files; it is never the working directory.\n- This skill may name tools, subagents, or commands from another harness. Use Clio's equivalent from your own tool list; if there is no equivalent, say so and continue without that step. Never invent one, and never substitute repeated calls to a different agent for an agent the skill name"
+				},
+				{
+					"name": "write",
+					"via": null,
+					"args": {
+						"path": "job.sbatch",
+						"content": "#!/bin/bash\n#SBATCH --job-name=sim\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=32\n#SBATCH --time=2:00:00\n#SBATCH --partition=compute\n\n./sim\n"
+					},
+					"error": false,
+					"text": "wrote 140B to job.sbatch"
+				},
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "chmod +x job.sbatch && bash -n job.sbatch && echo OK"
+					},
+					"error": false,
+					"text": "[tool-result bounded]\nkind=ok capturedBytes=3 displayedBytes=3 truncated=false\nfacts={\"aborted\":false,\"exitCode\":0,\"outcome\":\"success\",\"outputBytes\":3,\"outputCapped\":false,\"retainedBytes\":3,\"signal\":null,\"stderrBytes\":0,\"stdoutBytes\":3,\"timedOut\":false}\nOK\n"
+				}
+			],
+			"rounds": 3,
+			"usage": [
+				{
+					"input": 5879,
+					"cacheRead": 2048,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 4040,
+					"cacheRead": 6144,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 2396,
+					"cacheRead": 8192,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 2541,
+					"cacheRead": 8192,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "Write job.sbatch: a Slurm batch script that runs ./sim on 4 nodes, 32 tasks per node, 2 hours, partition compute.",
+			"seconds": 29.1,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": ["job.sbatch"]
+		}
+	],
+	"verdict": true,
+	"note": "load@0 firstEdit@1 catalogQueries=0",
+	"counters": {
+		"rounds": 3,
+		"tool_calls": 3,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7927,
+		"cached_first": 2048
+	},
+	"source": "real: mini/qwen3.8-27b-iq4r-v4 v1 run 0 commit 3d11e1757"
+}

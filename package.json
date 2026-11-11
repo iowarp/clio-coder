@@ -143,6 +143,8 @@
 		"release:preflight": "node scripts/release-candidate.mjs preflight",
 		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
 		"eval:onboarding": "node --import tsx scripts/eval-onboarding.ts",
+		"eval:prompts": "python3 -B scripts/prompt-eval/run.py",
+		"eval:prompts:selftest": "python3 -B scripts/prompt-eval/selftest.py",
 		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts"
 	},
 	"dependencies": {

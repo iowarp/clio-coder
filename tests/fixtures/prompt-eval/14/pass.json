@@ -1,0 +1,41 @@
+{
+	"task": "14",
+	"name": "greeting",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "Hi.",
+			"tools": [],
+			"rounds": 0,
+			"usage": [
+				{
+					"input": 3506,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "hi",
+			"seconds": 4.2,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		}
+	],
+	"verdict": false,
+	"note": "tools=0 words=9 offer=True",
+	"counters": {
+		"rounds": 0,
+		"tool_calls": 0,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7602,
+		"cached_first": 4096
+	},
+	"source": "synthetic: reply without a question (from mini/qwen3.8-27b-iq4r-v4 v1)"
+}

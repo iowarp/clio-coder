@@ -1,0 +1,51 @@
+{
+	"task": "07",
+	"name": "wait-as-job",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "acp",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "Set up. I'm polling for `out/done.flag` every 30 seconds \u2014 it's not there yet (only `log.txt` is in `out/`). The moment it appears, I'll tell you and give you a summary of `out/log.txt` in that turn, then stop polling.\n\nTwo assumptions, easy to change:\n- **Bound:** I'm watching for up to **1 hour**. If the flag hasn't shown by then I'll say so and you can tell me to keep going.\n- **Granularity:** 30s between checks, so I'll report within ~30s of the file appearing.\n\nJob `job-8365915e` is active; the first check runs now.",
+			"tools": [
+				{
+					"name": "job",
+					"via": "gateway",
+					"args": {
+						"op": "call",
+						"capability": "job",
+						"args": {
+							"action": "create",
+							"runner": "command",
+							"argv": ["test", "-f", "out/done.flag"]
+						}
+					},
+					"error": false,
+					"text": ""
+				}
+			],
+			"rounds": 5,
+			"usage": [],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "Tell me when out/done.flag appears, then summarize out/log.txt.",
+			"stop": "end_turn",
+			"error": null,
+			"seconds": 111.8,
+			"stderr_tail": "",
+			"files_changed": []
+		}
+	],
+	"verdict": false,
+	"note": "job=3 failedJob=1 cmdjobOk=0 sleepCalls=0",
+	"counters": {
+		"rounds": 5,
+		"tool_calls": 5,
+		"malformed_gateway": 1
+	},
+	"source": "synthetic: one successful command job, no bash sleep (from mini/qwen3.8-27b-iq4r-v4 v1)"
+}

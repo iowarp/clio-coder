@@ -1,0 +1,106 @@
+{
+	"task": "16",
+	"name": "cross-session-cache",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "`index.js` exports a single CommonJS function that returns the sum of its two arguments (a `module.exports = (a, b) => a + b;`).",
+			"tools": [
+				{
+					"name": "find",
+					"via": "gateway",
+					"args": {
+						"pattern": "**/index.js",
+						"path": ".",
+						"limit": 20
+					},
+					"error": false,
+					"text": "index.js\n[Native fd search: skipped symlinked directories are not counted.]"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "index.js"
+					},
+					"error": false,
+					"text": "module.exports = (a, b) => a + b;\n"
+				}
+			],
+			"rounds": 2,
+			"usage": [
+				{
+					"input": 7634,
+					"cacheRead": 0,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3670,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3740,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "What does index.js export? One sentence.",
+			"seconds": 12.5,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		},
+		{
+			"exit": 0,
+			"final": "package.json names the package **\"plain\"**.",
+			"tools": [
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "package.json"
+					},
+					"error": false,
+					"text": "{\"name\":\"plain\",\"scripts\":{\"test\":\"node --test\"}}\n"
+				}
+			],
+			"rounds": 1,
+			"usage": [
+				{
+					"input": 3510,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3614,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "What does package.json name the package? One sentence.",
+			"seconds": 6.7,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		}
+	],
+	"verdict": true,
+	"note": "firstRequest cacheRead=4096 share=0.54",
+	"counters": {
+		"rounds": 3,
+		"tool_calls": 3,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7634,
+		"cached_first": 0
+	},
+	"source": "real: mini/qwen3.8-27b-iq4r-v4 v1 run 0 commit 3d11e1757"
+}

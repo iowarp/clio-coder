@@ -1,0 +1,164 @@
+{
+	"task": "11",
+	"name": "plan-asks",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "acp",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "## Migration plan: `config.ini` \u2192 `config.toml`\n\nBottom line: this is a small, low-risk migration. One file defines the config, one loader reads it, and exactly one value (`server.port`) is actually consumed. Python here is **3.12.3** with stdlib **`tomllib`**, so no new dependency is needed. The real gotcha is value quoting, not the code.\n\n### Current state (verified)\n- `config.ini` \u2014 two tables: `[server]` (`port = 8080`, `host = 0.0.0.0`), `[db]` (`url = sqlite:///x.db`).\n- `app/settings.py:4-7` \u2014 `load()` builds a `configparser.ConfigParser` and does `c.read('config.ini')` (the only place the filename appears).\n- `app/server.py:3` \u2014 `PORT = int(load()['server']['port'])` (the only value read).\n- `host` and `db.url` are defined but **not read anywhere** in code. No tests, no dependency manifest, no README in the repo.\n\n### Key mapping / gotchas\nTOML is strict about unquoted values, so two keys must gain quotes or the file won't parse:\n\n| ini (current) | toml (target) | why |\n|---|---|---|\n| `port = 8080` | `port = 8080` | int in both \u2014 unchanged |\n| `host = 0.0.0.0` | `host = \"0.0.0.0\"` | unquoted is invalid TOML |\n| `url = sqlite:///x.db` | `url = \"sqlite:///x.db\"` | unquoted is invalid TOML |\n\nTarget `config.toml`:\n```toml\n[server]\nport = 8080\nhost = \"0.0.0.0\"\n\n[db]\nurl = \"sqlite:///x.db\"\n```\n\nI recommend carrying over **all** keys (lossless), including the unused `host`/`db.url`, rather than pruning to only what code reads today.\n\n### Type / behavior change to be aware of\n`configparser` returns everything as `str`; `tomllib` returns real types (`port` \u2192 `int`, strings \u2192 `str`). So `load()['server']['port']` changes from `\"8080\"` to `8080`. `server.py:3`'s `int(...)` wrapper becomes a harmless no-op, so it keeps working as-is. Two minor side effects:\n- The `int()` in `server.py:3` is now redundant \u2014 I'd drop it in the same change (optional).\n- A **missing** config file now raises `FileNotFoundError` at load time instead of `configparser.read()` silently returning an empty parser. Both fail loudly, just at a different line.\n\n### Steps (recommended: big-bang, one commit)\n1. Add `config.toml` (content above).\n2. Rewrite `app/settings.py` to use `tomllib`:\n   ```python\n   import tomllib\n   from pathlib import Path\n\n   CONFIG_PATH = Path('config.toml')\n\n   def load():\n       with CONFIG_PATH.open('rb') as f:\n           return tomllib.load(f)\n   ```\n   (Note: `tomllib.load` requires **binary** mode, `rb`.)\n3. Remove the now-redundant `int()` in `app/server.py:3` \u2192 `PORT = load()['server']['port']`.\n4. Delete `config.ini`.\n\n### Verification\nNo test suite exists. I'd confirm with a one-liner that the loader round-trips:\n`python3 -c \"from app.settings import load; c=load(); print(c['server']['port'], c['server']['host'], c['db']['url'])\"` expecting `8080 0.0.0.0 sqlite:///x.db`, plus a syntax/parse check on `config.toml`. (I can add a small `test_settings.py` if you want a durable guard \u2014 currently there is none.)\n\n### Decision I need from you\n**Rollout strategy** \u2014 this is the one fork that changes the shape of the code:\n- **A (recommended): big-bang.** Replace `config.ini` with `config.toml` in one commit; delete the old file. Cleanest given a single loader and single consumer.\n- **B: transitional dual-read.** `settings.py` prefers `config.toml` and falls back to `config.ini` if it exists, so existing/deployed `.ini` files keep working. Useful only if there are `config.ini` files outside this repo that can't be updated in lockstep \u2014 otherwise it's extra code to delete later, and a `dict`-vs-`ConfigParser` return type makes the fallback path a bit awkward.\n\nThe other choices I'm defaulting to (tell me if you'd change them): stdlib `tomllib` (no dependency), keep `config.toml` as a hardcoded path to match the current hardcoded `config.ini` (no new env-var override), and carry over all keys. Say the word and I'll carry out option A.",
+			"tools": [
+				{
+					"name": "find",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"capability": "find",
+						"args": {
+							"pattern": "**/config.ini",
+							"path": "."
+						}
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "grep",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"capability": "grep",
+						"args": {
+							"pattern": "config\\.ini",
+							"path": ".",
+							"limit": 50
+						}
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "ls",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"capability": "ls",
+						"args": {
+							"path": "."
+						}
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "read",
+					"via": "acp",
+					"args": {
+						"path": "config.ini",
+						"line_numbers": true
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "read",
+					"via": "acp",
+					"args": {
+						"path": "app/settings.py",
+						"line_numbers": true
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "ls",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"capability": "ls",
+						"args": {
+							"path": "app"
+						}
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "read",
+					"via": "acp",
+					"args": {
+						"line_numbers": true,
+						"path": "app/server.py"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "read",
+					"via": "acp",
+					"args": {
+						"line_numbers": true,
+						"path": "app/__init__.py"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "grep",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"args": {
+							"pattern": "settings|load\\(\\)|\\[server\\]|\\[db\\]|get\\(|getint|getboolean|getfloat",
+							"path": "app",
+							"limit": 80
+						},
+						"capability": "grep"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "bash",
+					"via": "acp",
+					"args": {
+						"command": "cd /scratch/evw-fixture && echo \"=== python version ===\" && (python3 --version 2>&1 || echo \"no python3\") && echo \"=== all files (excl .git) ===\" && git ls-files | grep -v '^\\.git/' && echo \"=== dependency manifests ===\" && ls -1 pyproject.toml setup.py setup.cfg requirements*.txt 2>/dev/null || echo \"none found\" && echo \"=== tomllib available? ===\" && python3 -c \"import tomllib; print('tomllib OK (stdlib 3.11+)')\" 2>&1 | head -1"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "bash",
+					"via": "acp",
+					"args": {
+						"command": "cd /scratch/evw-fixture && echo \"=== disk (all, excl .git) ===\" && find . -type f -not -path './.git/*' -print && echo \"=== git status ===\" && git status --porcelain && echo \"=== git ls-files ===\" && git ls-files"
+					},
+					"error": true,
+					"text": "{}"
+				}
+			],
+			"rounds": 5,
+			"usage": [],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "Plan the migration from config.ini to config.toml. Do not change files yet.",
+			"stop": "end_turn",
+			"error": null,
+			"seconds": 86.8,
+			"stderr_tail": "",
+			"files_changed": []
+		}
+	],
+	"verdict": false,
+	"note": "askUser=False closingOffer=False",
+	"counters": {
+		"rounds": 5,
+		"tool_calls": 11,
+		"malformed_gateway": 0
+	},
+	"source": "real: mini/qwen3.8-27b-iq4r-v4 v1 run 0 commit 3d11e1757"
+}

@@ -1,0 +1,182 @@
+{
+	"task": "08",
+	"name": "docs-routing",
+	"profile": "v2",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "You already have two targets configured (`copilot` and `litellm`), so \"a second\" here means adding another one. Three ways, depending on who's driving:\n\n**1. Interactive wizard (operator-driven) \u2014 the usual path**\n- TUI: `/settings` \u2192 **Connections \u2192 Add a target** (reopens Guided setup), or `/config` for the same flow applied to the running session.\n- GUI: **Guided setup** on the home page, or **Connections \u2192 Add a target**.\n- CLI: `clio-coder targets add` (runs the same setup wizard).\n\nThe wizard asks **What do you have?** \u2014 an API key, a subscription (Copilot, Claude, ChatGPT, \u2026), a model server/gateway, or a setup file \u2014 then does a passive reachability/model-list probe (for servers; key/subscription providers get no passive check), picks a model, and you review the evidence before **Save**.\n\n**2. From me, through `configure_clio` (no wizard, exact diff you approve)**\nI can draft the change and show you the diff to approve. A target is saved as a single `targets.<id>` whose value is a JSON object:\n\n```json\n{\n  \"runtime\": \"litellm\",\n  \"url\": \"http://127.0.0.1:11434\",\n  \"defaultModel\": \"some/model\",\n  \"wireModels\": [ ... ],\n  \"auth\": { \"apiKeyEnvVar\": \"MY_API_KEY\" }\n}\n```\n\n`auth.apiKeyEnvVar` is the *name* of an environment variable, not the key. Allowed fields: `runtime`, `url`, `defaultModel`, `wireModels`, `gateway`, `capabilities`, and `auth.apiKeyEnvVar` or `auth.oauthProfile`.\n\n**Key constraints on any route:**\n- **Never put API keys or secrets in settings.** Credentials are stored separately by you with `clio-coder auth login <provider>` (OAuth sign-in or key storage). A target only references the env var name.\n- I (the agent) cannot run `clio-coder configure`, `targets`, or `auth` from the shell, and I can't write settings files directly \u2014 my only sanctioned path is `configure_clio` \u2192 preview \u2192 you approve the diff on a card. In this headless run I could only preview and hand you the diff/steps, not apply.\n- **Timing:** adding a target applies **next turn** for the target catalog but **next session** for saved routing defaults. To route chat/fleet at it, then run `clio-coder targets use <id>` (or set the connection in **Chat** / **Fleet \u2192 Default model**), and start a new session if a routing default was involved.\n- For a one-off run without saving anything, pin it per-dispatch: `dispatch` with `target` and `model`.\n\nIf you want, tell me the target id, runtime, url and model (and the env-var name for its key) and I'll draft the exact `configure_clio` diff for you to approve.",
+			"tools": [
+				{
+					"name": "gateway",
+					"via": null,
+					"args": {
+						"op": "describe",
+						"capability": "configure_clio"
+					},
+					"error": false,
+					"text": "{\"name\":\"configure_clio\",\"kind\":\"builtin\",\"description\":\"Propose a change to Clio's saved user settings, then apply the exact proposal after the operator approves its diff. action=preview with a path and a text value returns the diff; action=apply with that proposalId shows the operator an approval card. Paths: chat routing and model picker, fleet.default.*, fleet.profiles, fleet.agentProfiles, fleet.rosters, fleet.concurrency, fleet.limits.*, fleet.retry.*, context.memory.target/model, interface display settings, and targets.<id> whose value is a JSON object with runtime, url, defaultModel, w"
+				},
+				{
+					"name": "gateway",
+					"via": null,
+					"args": {
+						"op": "find",
+						"query": "targets settings configuration"
+					},
+					"error": false,
+					"text": "{\"capabilities\":[{\"name\":\"clio_docs\",\"kind\":\"builtin\",\"description\":\"Answer how Clio Coder works and how to configure it (commands, settings, targets and models, chat and worker routing, dispatch, skills, sessions, safety): search its bundled documentation for a question or terms and return ranked sections w\",\"actionClass\":\"read\",\"argumentShape\":\"args={\\\"query\\\":\\\"configuration and targets\\\"} args={\\\"query\\\":\\\"memory promotion\\\"}\"},{\"name\":\"configure_clio\",\"kind\":\"builtin\",\"description\":\"Propose a change to Clio's saved user settings, then apply the exact proposal after the operator approves i"
+				},
+				{
+					"name": "clio_docs",
+					"via": "gateway",
+					"args": {
+						"query": "add a second target to targets configuration"
+					},
+					"error": false,
+					"text": "{\"version\":2,\"query\":\"add a second target to targets configuration\",\"guidance\":[{\"id\":\"operating.support-guidance\",\"text\":\"# Answering questions about Clio Coder\\n\\nUse cited sections as evidence and stop once the question is answered. If syntax\\nor admission is unclear, locate the command in the shipped source and read its\\ndefinition. Do not walk a document through small adjacent windows. To correct a\\nprior answer, check the disputed claim without restarting the investigation.\\n\\nWhen explaining a command, verify the exact operator syntax and admission rules, not just that an agent or runti"
+				},
+				{
+					"name": "context",
+					"via": "gateway",
+					"args": {
+						"scope": "settings",
+						"query": "targets"
+					},
+					"error": false,
+					"text": "{\n  \"scope\": \"effective settings for the running session; includes its overrides\",\n  \"routing\": {\n    \"chat\": {\n      \"target\": \"litellm\",\n      \"model\": \"mini/qwen3.8-27b-iq4r-v4\",\n      \"thinkingLevel\": \"low\",\n      \"source\": \"user\"\n    },\n    \"memory\": {\n      \"target\": \"copilot\",\n      \"model\": \"claude-haiku-5.5\",\n      \"source\": \"user\"\n    },\n    \"compaction\": {\n      \"model\": \"copilot/claude-haiku-5.5\",\n      \"source\": \"user\"\n    },\n    \"fleetDefault\": {\n      \"target\": \"litellm\",\n      \"model\": \"mini/qwen3.8-27b-iq4r-v4\",\n      \"thinkingLevel\": \"low\",\n      \"source\": \"user\"\n    },\n    \""
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "/checkout/docs/guide/configuration-and-targets.md",
+						"offset": 421,
+						"limit": 20
+					},
+					"error": false,
+					"text": "## Target management\n\n| Command | Use |\n| --- | --- |\n| `clio-coder targets [--json] [--target <id>]` | List configured targets and status, or only one target. |\n| `clio-coder targets --probe` | Probe configured endpoints and refresh discovery. With `--target <id>` it probes only that target. |\n| `clio-coder targets add` | Run target setup. |\n| `clio-coder targets use <id>` | Without role flags, set chat and fleet to the target default or shared `--model`; preserve memory. With `--orchestrator-model`, `--background-model`, `--fleet-target` or `--fleet-model`, change only the named roles. `--mo"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "/checkout/docs/guide/configuration-and-targets.md",
+						"offset": 126,
+						"limit": 30
+					},
+					"error": false,
+					"text": "## Settings Center\n\nOpen `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` is separate: it runs the configure flow inside the TUI and applies the saved routing to the running session, while `/settings` stays the settings center (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, **Connections**, **Models & Inference**, **Chat**, **Agents & Delegation**, **Fleet**, **Context & Memory**, **Workspace & Files**, **Permissions & Limits**, **Appearance**, **Integrations**, and **Advanced**, in that ord"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"limit": 30,
+						"offset": 29,
+						"path": "/checkout/docs/guide/configuration-and-targets.md"
+					},
+					"error": false,
+					"text": "## First-run flow\n\nFor terminal setup, run `clio-coder configure` or start `clio-coder` in a new home. An interactive start whose home has no chosen model runs setup before anything else, including the question about opening a home or system folder; after setup in such a folder that question offers **Exit, then cd into a project and run clio-coder** first and **Open this folder anyway** second. An existing home with no chat route first tries [chat route detection](#chat-route-detection) and starts configure only when nothing is detected. A saved chat route that cannot be used is kept, and star"
+				}
+			],
+			"rounds": 4,
+			"usage": [
+				{
+					"input": 3139,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 2147,
+					"cacheRead": 6144,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3995,
+					"cacheRead": 8192,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3998,
+					"cacheRead": 10240,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3278,
+					"cacheRead": 12288,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "How do I add a second target to Clio Coder?",
+			"seconds": 32.1,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		},
+		{
+			"exit": 0,
+			"final": "The test command is `npm test`, which runs `node --test` (per `package.json` \u2014 the only script defined).",
+			"tools": [
+				{
+					"name": "bash",
+					"via": null,
+					"args": {
+						"command": "cat package.json 2>/dev/null | head -50; ls"
+					},
+					"error": false,
+					"text": "[tool-result bounded]\nkind=ok capturedBytes=351 displayedBytes=351 truncated=false\nfacts={\"aborted\":false,\"exitCode\":0,\"exitScope\":\"last-command\",\"outcome\":\"success\",\"outputBytes\":70,\"outputCapped\":false,\"retainedBytes\":70,\"signal\":null,\"stderrBytes\":48,\"stdoutBytes\":22,\"timedOut\":false}\nindex.js\npackage.json\n/bin/bash: line 1: /dev/null: Permission denied\n\n\n[middleware:info] prefer the structured observe tools over shell file inspection: read pages files with offset/limit; grep, find, ls and code_nav, direct or through gateway, search and map symbols. Their results are capped and continuable;"
+				},
+				{
+					"name": "read",
+					"via": null,
+					"args": {
+						"path": "package.json"
+					},
+					"error": false,
+					"text": "{\"name\":\"plain\",\"scripts\":{\"test\":\"node --test\"}}\n"
+				}
+			],
+			"rounds": 2,
+			"usage": [
+				{
+					"input": 5146,
+					"cacheRead": 2048,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3350,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3447,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "What is this repository's test command?",
+			"seconds": 11.8,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		}
+	],
+	"verdict": true,
+	"note": "docs(target q)=1 docs(test cmd q)=0",
+	"counters": {
+		"rounds": 6,
+		"tool_calls": 9,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7235,
+		"cached_first": 4096
+	},
+	"source": "real: mini/qwen3.8-27b-iq4r-v4 v2 run 0 commit 3d11e1757"
+}

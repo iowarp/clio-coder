@@ -1,0 +1,75 @@
+{
+	"task": "05",
+	"name": "parallel-review",
+	"profile": "v1",
+	"target": "litellm",
+	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"run": 0,
+	"surface": "headless",
+	"commit": "3d11e1757",
+	"parts": [
+		{
+			"exit": 0,
+			"final": "All three files are byte-identical apart from the function names, so each finding applies to all three; I've noted per-file line references. No tests exist in the workspace and nothing outside `svc/` imports these modules, so the review is source-only.\n\n## Findings\n\n**svc/loader.py** (and identically **svc/cache.py**, **svc/client.py**)\n\n1. **Silent failure: `except Exception: pass` (loader.py:7-8, cache.py:7-8, client.py:7-8).** Every error \u2014 file missing (`FileNotFoundError`), bad permissions, malformed JSON (`json.JSONDecodeError`), encoding errors \u2014 is swallowed and turned into an implicit `None`. Callers can't distinguish \"file absent\" from \"file corrupt,\" nothing is logged or re-raised, and the function's contract (what `None` means, or even that it can return `None`) is undocumented. This is the most consequential defect: in a service, a bad config path would propagate as an opaque downstream `None` error.\n\n2. **File handle leak on error path (loader.py:6, cache.py:6, client.py:6).** `json.load(open(path))` opens a handle that is never closed. On CPython reference counting reclaims it quickly, but that is an implementation detail \u2014 on any other runtime, or if an exception fires mid-parse, the handle escapes until GC. The `_close(h)` functions (loader.py:11-12, cache.py:11-12, client.py:11-12) imply a handle-based API, but `*_run` never returns a handle for the caller to close, so the run/close pairing is inconsistent: the only handle that ever opens is the one that leaks.\n\n3. **`*_close(h)` has no validation (loader.py:12, cache.py:12, client.py:12).** It blindly calls `h.close()`: no guard for a missing or already-closed handle (double-close is mostly harmless on file objects, but `AttributeError` on a non-file-like is not), and no docstring stating what type `h` must be. Since `*_run` never produces a handle, `*_close` as written can only ever be called with a caller-supplied object \u2014 its role should be stated or removed.\n\n4. **Duplication across the three modules.** `svc/loader.py`, `svc/cache.py`, and `svc/client.py` contain the same code with only the function names changed. Error handling fixed in one would silently not propagate to the other two.\n\n## Suggested shape (per module)\n\n```python\ndef loader_run(path):\n    with open(path) as f:\n        return json.load(f)  # let FileNotFoundError/JSONDecodeError propagate, or wrap in a typed error\n```\n\ni.e. use a context manager, drop the blanket `except` (or catch specific `OSError`/`json.JSONDecodeError` and re-raise as a domain error with the path in the message), and decide what `*_close` is for.\n\nUnverified: no runtime test was run; behavior of the leak finding is inferred from the code, as is the CPython refcount note.",
+			"tools": [
+				{
+					"name": "dispatch",
+					"via": "gateway",
+					"args": {
+						"mode": "parallel",
+						"tasks": [
+							{
+								"agent": "scout",
+								"task": "Review svc/loader.py for error handling"
+							},
+							{
+								"agent": "scout",
+								"task": "Review svc/cache.py for error handling"
+							},
+							{
+								"agent": "scout",
+								"task": "Review svc/client.py for error handling"
+							}
+						]
+					},
+					"error": false,
+					"text": ""
+				}
+			],
+			"rounds": 2,
+			"usage": [
+				{
+					"input": 3514,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 3899,
+					"cacheRead": 4096,
+					"cacheReadField": "sent"
+				},
+				{
+					"input": 2142,
+					"cacheRead": 6144,
+					"cacheReadField": "sent"
+				}
+			],
+			"blocked": [],
+			"acp_methods": [],
+			"prompt": "Review these three modules for error handling: svc/loader.py, svc/cache.py, svc/client.py. Report findings per file.",
+			"seconds": 30.1,
+			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
+			"files_changed": []
+		}
+	],
+	"verdict": false,
+	"note": "dispatches=0 preread=3",
+	"counters": {
+		"rounds": 2,
+		"tool_calls": 4,
+		"malformed_gateway": 0,
+		"prompt_tokens_first": 7610,
+		"cached_first": 4096
+	},
+	"source": "synthetic: replaced pre-reads with one parallel dispatch of three tasks (from mini/qwen3.8-27b-iq4r-v4 v1)"
+}

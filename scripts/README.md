@@ -27,6 +27,7 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact; reuse qualification for the same clean commit. |
 | `pnpm release:rehearse` | Exercise qualification/publication checks without publishing a package or release. Uses a temporary remote branch with explicit interactive approval. |
 | `pnpm release` | Qualify, publish npm as the owner, request protected GitHub publication, then offer owner dist-tag forwarding and local cleanup. |
+| `pnpm eval:prompts -- --target <t> --model <m>` / `pnpm eval:prompts:selftest` | Score the main-agent prompt on harness-use tasks from each run's event stream (see `prompt-eval/README.md`), or check the scorers against recorded runs. Calls the model; writes results under `TMPDIR`. Explicit operator use only. |
 | `node --import tsx scripts/decision-probe.ts <fixture> --engine <name>` | Calibrate a System One binding against labeled fixtures. Calls the selected engine; reports results to stdout/stderr without changing settings. Explicit operator use only. |
 
 CI consumes one prepared artifact for the required `ci (22)` and `ci (24)`
