@@ -199,7 +199,10 @@ describe("release decisions", () => {
 			ok(calls.every((call) => call.startsWith("registry ") || call.startsWith("ancestor ")));
 			// The only npm publish in the publisher is the rehearsal's dry run.
 			const source = readFileSync(new URL("../../scripts/release-publish.mjs", import.meta.url), "utf8");
-			deepStrictEqual(source.match(/\[\s*"publish"[^\]]*/gu)?.map((args) => args.includes("--dry-run")), [true]);
+			deepStrictEqual(
+				source.match(/\[\s*"publish"[^\]]*/gu)?.map((args) => args.includes("--dry-run")),
+				[true],
+			);
 		} finally {
 			rmSync(scratch, { recursive: true, force: true });
 		}
