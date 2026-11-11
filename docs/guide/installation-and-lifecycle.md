@@ -824,7 +824,7 @@ the build that lists them. Each long-lived process records its build in
 running the result equals a clean build. A session that outlives a rebuild
 therefore keeps loading its own features; workers, pane viewers and GUI
 sessions started afterwards run the new build.
-`node --import tsx scripts/build.ts --clean` empties `dist/` first. In Clio Coder's
+`node --import tsx scripts/build.ts --clean` empties `dist/` first, and `pnpm run build:release`, which release packages are built with, runs it that way; a session still running from that checkout can then miss a feature it has not loaded yet. In Clio Coder's
 own source tree, running from that tree's build, the model is also told once
 that the code it edited is not what runs and to `/restart` before verifying.
 
