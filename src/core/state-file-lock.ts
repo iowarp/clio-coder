@@ -134,9 +134,13 @@ function createLock(lockPath: string, note?: string): boolean {
 				fd,
 				`${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken(), at: new Date().toISOString(), ...(note !== undefined ? { note } : {}) })}\n`,
 			);
-		} finally {
+		} catch (err) {
+			// A failed write (ENOSPC, EDQUOT) would leave an ownerless empty lock that blocks every waiter until it ages out.
 			closeSync(fd);
+			removeLockFile(lockPath);
+			throw err;
 		}
+		closeSync(fd);
 		return true;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;

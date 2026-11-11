@@ -1,8 +1,9 @@
 import { ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
 import { withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
 
@@ -33,6 +34,20 @@ describe("contracts/state-file-lock", () => {
 			utimesSync(lockPath, past, past);
 		}
 	}
+
+	it("removes the lock it created when writing the owner record fails, such as on ENOSPC", () => {
+		const write = mock.method(fs, "writeSync", () => {
+			throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+		});
+		syncBuiltinESMExports();
+		try {
+			throws(() => withStateFileLockSync(target, () => undefined), /no space left/);
+		} finally {
+			write.mock.restore();
+			syncBuiltinESMExports();
+		}
+		strictEqual(existsSync(lockPath), false);
+	});
 
 	it("takes and releases the lock around the critical section", () => {
 		const seen = withStateFileLockSync(target, () => {
