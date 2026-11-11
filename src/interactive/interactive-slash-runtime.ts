@@ -234,7 +234,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openModel: () => void;
 	/** Apply a resolved `/model <pattern>` swap for this session the way Enter in the picker does, notice included. */
 	applyModelSession?: (ref: PendingModelScope) => void;
-	openSettings: (area?: SettingsAreaId, group?: "model-picker") => void;
+	openSettings: (area?: SettingsAreaId) => void;
 	openFleetRuns?: () => void;
 	openResume: (target?: string) => void;
 	startNewSession: () => void;

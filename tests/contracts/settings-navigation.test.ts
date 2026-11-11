@@ -88,11 +88,7 @@ test("slash links use the same canonical areas and keep previous section names r
 	// Model choice moved out of Chat into Models; only retry stayed in Chat.
 	for (const name of ["orchestrator", "models", "model", "thinking"]) strictEqual(resolveSettingsArea(name), "models");
 	strictEqual(resolveSettingsArea("retry"), "chat");
-	deepStrictEqual(parseSlashCommand("/settings chat model-picker"), {
-		kind: "settings",
-		area: "chat",
-		group: "model-picker",
-	});
+	strictEqual(parseSlashCommand("/settings chat model-picker").kind, "usage-error");
 });
 
 test("every area renders within narrow and wide terminals, and headings are skipped during navigation", () => {

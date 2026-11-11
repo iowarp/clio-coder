@@ -1485,11 +1485,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(loopJobs ? { jobs: loopJobs.jobs } : {}),
 		openModel: () => openModelOverlayState(),
 		applyModelSession: (ref) => applyModelSessionState(ref),
-		openSettings: (area, group) => {
+		openSettings: (area) => {
 			if (!area) return openSettingsOverlayState();
-			// The quick-switch list lives under Models & Inference; `/settings chat model-picker` predates that area.
-			if ((area === "chat" || area === "models") && group === "model-picker")
-				return openSettingsOverlayState("models", "scope");
 			openSettingsOverlayState(area);
 		},
 		openResume: (target) => openResumeOverlayState(target),
@@ -1806,12 +1803,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	/**
 	 * Explicit model-cycle bindings with nothing to step to. The help center documents both
 	 * keys, so a keypress that changes no pixel reads as a broken binding rather
-	 * than as an empty set; the set itself is chosen in `/settings chat model-picker`.
+	 * than as an empty set; the set itself is chosen under Quick switch in `/settings models`.
 	 */
 	const announceEmptyScopedSet = (): void => {
 		notify(
 			"info",
-			"scoped models: nothing to cycle to; run /settings chat model-picker to choose the configured cycle set",
+			"scoped models: nothing to cycle to; choose the cycle set under Quick switch in /settings models",
 			"scoped-models:empty",
 		);
 	};

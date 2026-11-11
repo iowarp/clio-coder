@@ -274,7 +274,7 @@ type SlashCommandVariant =
 	| { kind: "thinking-picker" }
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
-	| { kind: "settings"; area?: SettingsAreaId; group?: "model-picker" }
+	| { kind: "settings"; area?: SettingsAreaId }
 	/** `target` is an id, unique id prefix, or exact name; absent opens the picker. */
 	| { kind: "resume"; target?: string }
 	| { kind: "rename"; name?: string }
@@ -1310,7 +1310,7 @@ export interface SessionCommandContext {
 	 * host applied it and already said what landed, so no second notice is due.
 	 */
 	applyModelRef?: (ref: ResolvedModelRef) => "applied" | "reported";
-	openSettings?: (area?: SettingsAreaId, group?: "model-picker") => void;
+	openSettings?: (area?: SettingsAreaId) => void;
 	openFleetRuns?: () => void;
 	/** Resume `target` (an id, unique id prefix or exact name) directly, or open the picker. */
 	openResume?: (target?: string) => void;
@@ -3277,14 +3277,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			const group = parsed.positionals[1];
 			if (group === undefined) return { kind: "settings", area };
-			// `/settings chat model-picker` predates the Models & Inference area; it is the only second word kept.
-			if (group === "model-picker" && (area === "chat" || area === "models")) {
-				return { kind: "settings", area, group };
-			}
 			return { kind: "usage-error", command: "settings", reason: `Use /settings [area]; ${group} is not an area option` };
 		},
 		handle(command, ctx) {
-			if (command.kind === "settings") ctx.openSettings?.(command.area, command.group);
+			if (command.kind === "settings") ctx.openSettings?.(command.area);
 		},
 	},
 	{
