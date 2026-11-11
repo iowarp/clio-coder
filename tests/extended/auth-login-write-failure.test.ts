@@ -11,6 +11,18 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { readApiKey, runAuthCommand } from "../../src/cli/auth.js";
+
+const LOGOUT_SETTINGS = [
+	"version: 2",
+	"targets:",
+	"  - id: work-openai",
+	"    runtime: openai",
+	"    defaultModel: gpt-5",
+	"    auth:",
+	"      apiKeyRef: target:work-openai",
+	"",
+].join("\n");
+
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const RUNTIME = "openai";
@@ -136,6 +148,28 @@ describe("contracts/auth login key prompt on a dumb terminal", () => {
 		} finally {
 			if (term === undefined) delete process.env.TERM;
 			else process.env.TERM = term;
+		}
+	});
+});
+
+describe("contracts/auth logout <runtime> with only a target key stored", () => {
+	it("names the target that holds a key instead of saying nothing is stored", async () => {
+		const scratch = await isolateClioEnv("clio-coder-auth-logout-runtime-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(join(configDir, "settings.yaml"), LOGOUT_SETTINGS);
+			writeFileSync(
+				join(configDir, "credentials.yaml"),
+				["version: 2", "entries:", "  target:work-openai:", "    type: api_key", `    key: "${STORED_KEY}"`, ""].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const { code, stderr } = await captureAuth(["logout", RUNTIME]);
+			strictEqual(code, 1);
+			ok(stderr.includes("work-openai"), stderr);
+			ok(stderr.includes("auth logout <target-id>"), stderr);
+		} finally {
+			scratch.restore();
 		}
 	});
 });

@@ -601,6 +601,20 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 	if (!status.available) {
 		// A damaged store reads as zero credentials, so "no stored credential"
 		// would be the same understatement the warning above exists to remove.
+		// Logout by runtime id never drops a target's own key; name those targets.
+		const keyed =
+			resolved.target === null && auth.damageReason() === null
+				? readSettings()
+						.targets.filter((t) => t.runtime === resolved.runtime.id && targetRequiresAuth(t, resolved.runtime))
+						.filter((t) => auth.statusForTarget(resolveAuthTarget(t, resolved.runtime), { includeFallback: false }).available)
+						.map((t) => t.id)
+				: [];
+		if (keyed.length > 0) {
+			printError(
+				`no stored credential for runtime ${resolved.authTarget.providerId}; target keys are stored for ${keyed.join(", ")}. Run \`clio-coder auth logout <target-id>\` to drop one`,
+			);
+			return 1;
+		}
 		printError(
 			auth.damageReason() === null
 				? `no stored credential for ${resolved.authTarget.providerId}`
