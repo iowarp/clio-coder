@@ -2328,6 +2328,18 @@ describe("tool classes", () => {
 		for (const [toolName, args, expected] of cases) strictEqual(head(toolName, args), `${expected} · 42ms`, toolName);
 	});
 
+	it("never marks a monitor wait or collect that timed out as a success", () => {
+		for (const args of [
+			{ mode: "wait", run_id: "r1" },
+			{ mode: "collect", batch_id: "b7" },
+		]) {
+			const call = settled("monitor", args, text("wait timed out after 30000ms", { mode: args.mode, timedOut: true }));
+			const head = stripTerminalSequences(renderToolSubline(call, 200)[0] ?? "");
+			doesNotMatch(head, /✓/u, head);
+			ok(head.endsWith(` · timed out ${GLYPH.warn} · 42ms`), head);
+		}
+	});
+
 	it("does not repeat a monitor run id at the start of its result preview", () => {
 		const call = settled("monitor", { run_id: "k2m9x4" }, text("k2m9x4 · completed · 7 tool calls"));
 		const preview = rows(call, "detailed").join("\n");

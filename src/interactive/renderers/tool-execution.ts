@@ -902,11 +902,12 @@ function approvalReceiptRows(
 
 /**
  * Header status follows Pi's call lifecycle before and during execution, then
- * becomes `"ok"` or `"error"` at settlement. The
+ * becomes `"ok"` or `"error"` at settlement, or `"unfinished"` for a call that
+ * returned without failing but ran out its own wait. The
  * glyph hangs off the right of the header line so the tool name + args read
  * left-to-right without extra punctuation.
  */
-type HeaderStatus = "forming" | "ready" | "running" | "ok" | "cancelled" | "error" | undefined;
+type HeaderStatus = "forming" | "ready" | "running" | "ok" | "unfinished" | "cancelled" | "error" | undefined;
 
 /** Keeps a refusal reason to one scannable clause on the status tail. */
 const BLOCK_REASON_LIMIT = 72;
@@ -966,6 +967,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? toolMeta(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
+	if (status === "unfinished") return ` ${yellow(GLYPH.warn)}${durationSuffix}`;
 	if (status === "cancelled") return ` ${toolMeta(GLYPH.cancelled)}${durationSuffix}`;
 	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
 	// its outcome here. The exit status is a fact on the row, never a suffix.
@@ -1263,7 +1265,7 @@ function sublineParts(
 		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
-	const settled = status === "ok" || status === "cancelled" || status === "error";
+	const settled = status === "ok" || status === "unfinished" || status === "cancelled" || status === "error";
 	const notRun = didNotRun(finished);
 	// A change the tool refused or failed to apply never landed, so the row
 	// must not read "edited" beside its error glyph.
@@ -1852,9 +1854,11 @@ function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
 			return "cancelled";
 		return "error";
 	}
-	return resolveRow(finished).spec.class === "interaction" && detailsOf(finished.result)?.cancelled === true
-		? "cancelled"
-		: "ok";
+	const details = detailsOf(finished.result);
+	if (resolveRow(finished).spec.class === "interaction" && details?.cancelled === true) return "cancelled";
+	// A wait that ran out its own timeout (monitor wait or collect, a pane wait) returned, but what it waited on has
+	// not settled: `timed out ✓` read as the work being done.
+	return details?.timedOut === true ? "unfinished" : "ok";
 }
 
 function sublineStatus(call: ToolExecutionStart | ToolExecutionFinished): HeaderStatus {
@@ -2608,7 +2612,7 @@ function chainSublineParts(
 	status: HeaderStatus,
 	meta: StatusMeta,
 ): SublineParts {
-	const settled = status === "ok" || status === "cancelled" || status === "error";
+	const settled = status === "ok" || status === "unfinished" || status === "cancelled" || status === "error";
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(call.toolName)

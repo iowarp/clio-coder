@@ -1179,7 +1179,8 @@ and suppresses later attempts. `mode="collect"` is the barrier over a batch id
 or assignment-id list. It blocks while assignments are in flight, polling every
 second for 30 seconds by default (at most 10 minutes), and then returns each assignment's
 terminal attempt plus `attemptRunIds` history. When the wait runs out it returns the
-pending snapshot and says the runs keep running. Collect also stops early when a worker in
+pending snapshot and says the runs keep running. A `wait` or `collect` that ran out its time is not a success, so its transcript row ends with
+`timed out !` rather than `✓`. Collect also stops early when a worker in
 the batch waits for a main-agent permission decision, and it returns that request.
 Collecting marks the batch so the turn-end nudge stops firing. `wait` observes
 without collecting; `collect` is the authoritative terminal batch operation.
