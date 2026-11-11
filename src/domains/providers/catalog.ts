@@ -167,7 +167,7 @@ export function resolveEffectivePricing(
 		const rates = {
 			input: target.pricing.input,
 			output: target.pricing.output,
-			cacheRead: target.pricing.cacheRead ?? 0,
+			cacheRead: target.pricing.cacheRead ?? target.pricing.input,
 			cacheWrite: target.pricing.cacheWrite ?? 0,
 		};
 		return Object.values(rates).every((rate) => rate === 0)
@@ -299,7 +299,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 			? {
 					input: pricing.input,
 					output: pricing.output,
-					cacheRead: pricing.cacheRead ?? 0,
+					cacheRead: pricing.cacheRead ?? pricing.input,
 					cacheWrite: pricing.cacheWrite ?? 0,
 				}
 			: structuredClone(builtin?.cost ?? FREE_RATES),

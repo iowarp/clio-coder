@@ -541,7 +541,7 @@ Pricing is declared per target in `targets[].pricing` ([`src/core/config.ts`](..
         url: http://lab.example:8000/v1
         pricing: free
 
-`input` and `output` are required nonnegative numbers. `cacheRead` and `cacheWrite` are optional and read as 0 when omitted. Any other key is rejected. `configure` has no pricing flag, so set it in `settings.yaml` directly or through `clio-coder configure --edit`.
+`input` and `output` are required nonnegative numbers. `cacheRead` and `cacheWrite` are optional: an omitted `cacheRead` bills cache reads at the `input` price, and an omitted `cacheWrite` reads as 0. Any other key is rejected. `configure` has no pricing flag, so set it in `settings.yaml` directly or through `clio-coder configure --edit`.
 
 [`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates. It takes the first rule that matches, and the rule decides the `pricing` each `call.settled` record carries: a `usd` fact, a `pricedBy` source and, for `free`, a `freeRule` naming the rule ([`call-facts.ts`](../../src/domains/telemetry/call-facts.ts)).
 

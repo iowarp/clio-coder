@@ -157,8 +157,15 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 				freeRule: rates === "free" ? ("declared" as const) : ("zero-rates" as const),
 			},
 		};
+	// An unpriced cache read bills at the input price, as resolveEffectivePricing does.
+	const effective = {
+		input: rates.input,
+		output: rates.output,
+		cacheRead: rates.cacheRead ?? rates.input,
+		cacheWrite: rates.cacheWrite ?? 0,
+	};
 	const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;
-	if (keys.some((key) => (rates[key] ?? 0) !== 0 && facts.usage[key].kind !== "measured")) return facts;
+	if (keys.some((key) => effective[key] !== 0 && facts.usage[key].kind !== "measured")) return facts;
 	const counts = Object.fromEntries(
 		keys.map((key) => [key, facts.usage[key].kind === "measured" ? facts.usage[key].value : 0]),
 	) as Record<(typeof keys)[number], number>;
@@ -167,10 +174,7 @@ function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): E
 		pricing: {
 			usd: {
 				kind: "measured" as const,
-				value: calculatePricingCostUsd(
-					{ input: rates.input, output: rates.output, cacheRead: rates.cacheRead ?? 0, cacheWrite: rates.cacheWrite ?? 0 },
-					counts,
-				),
+				value: calculatePricingCostUsd(effective, counts),
 				source: "local-count" as const,
 			},
 			pricedBy: "target-rates" as const,

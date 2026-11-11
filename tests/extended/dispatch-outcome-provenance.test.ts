@@ -59,7 +59,7 @@ describe("resolveEffectivePricing", () => {
 		const priced = { ...target, pricing: { input: 1, output: 2 } };
 		const pricing = resolveEffectivePricing(priced, litellm, modelId);
 		deepStrictEqual(pricing, {
-			rates: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+			rates: { input: 1, output: 2, cacheRead: 1, cacheWrite: 0 },
 			pricedBy: "target-rates",
 		});
 		deepStrictEqual(litellm.synthesizeModel(priced, modelId, null).cost, pricing.rates);

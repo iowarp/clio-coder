@@ -32,7 +32,7 @@ test("catalog synthesis preserves SDK context price tiers and explicit target pr
 	);
 	const priced = openai.synthesizeModel({ ...target, pricing: { input: 1, output: 2 } }, catalog.id, null);
 	strictEqual(priced.cost.tiers, undefined, "an operator flat rate must not inherit unrelated catalog tiers");
-	deepStrictEqual(priced.cost, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+	deepStrictEqual(priced.cost, { input: 1, output: 2, cacheRead: 1, cacheWrite: 0 });
 	const haiku = anthropic.synthesizeModel({ id: "api", runtime: "anthropic" }, "claude-haiku-5-5", null);
 	deepStrictEqual(haiku.cost, {
 		input: 0.1,
@@ -57,7 +57,7 @@ test("catalog synthesis preserves SDK context price tiers and explicit target pr
 		haiku.id,
 		null,
 	);
-	deepStrictEqual(flatHaiku.cost, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+	deepStrictEqual(flatHaiku.cost, { input: 1, output: 2, cacheRead: 1, cacheWrite: 0 });
 	const pricing = resolveEffectivePricing({ id: "api", runtime: "anthropic" }, anthropic, haiku.id);
 	ok(pricing.rates);
 	deepStrictEqual(pricing.rates, haiku.cost);
@@ -74,6 +74,7 @@ test("catalog synthesis preserves SDK context price tiers and explicit target pr
 	);
 	ok(explicit.rates);
 	strictEqual(explicit.rates.tiers, undefined);
+	strictEqual(explicit.rates.cacheRead, 1, "an unpriced cache read bills at the input price");
 	ok(Math.abs(calculatePricingCostUsd(explicit.rates, { input: 100_001, output: 100 }) - 0.100201) < 1e-12);
 	const longWriteUsage = { ...usage, input: 92_001, cacheWrite1h: 2000, cost: { ...usage.cost } };
 	ok(

@@ -101,7 +101,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 		cost: {
 			input: pricing?.input ?? 0,
 			output: pricing?.output ?? 0,
-			cacheRead: pricing?.cacheRead ?? 0,
+			cacheRead: pricing?.cacheRead ?? pricing?.input ?? 0,
 			cacheWrite: pricing?.cacheWrite ?? 0,
 		},
 		contextWindow: caps.contextWindow,
