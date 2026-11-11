@@ -3,23 +3,25 @@
  * checkers, the verified rules of other harnesses' handbooks, its verification
  * commands and its tree facts, with no model call (`compileHandbookFromTree`).
  *
- * The compile reads the tree, so it is cached twice. On disk under
- * `.clio-coder/state/`, keyed by a fingerprint of its inputs, so a new session
- * over an unchanged tree reuses it; in process per repository root, revalidated
- * by the size and mtime of the files it read, so prompt assembly and every
- * bounded dispatch pay a few stat calls. The Markdown file is what the prompt
- * names as the handbook's path, so a read of an omitted line resolves.
+ * The compile lists and reads the tree, so it never runs on the prompt or
+ * dispatch path. `refreshCompiledHandbook` runs it on a worker thread, which
+ * leaves the result under `.clio-coder/state/` keyed by a fingerprint of its
+ * inputs; a session starts one for its directory. `compiledProjectHandbook`
+ * only reads that cache, and serves it while the files the compile read keep
+ * the size and mtime it recorded, so prompt assembly and every bounded dispatch
+ * pay a few stat calls. Until a cache exists the session runs as a repository
+ * without a handbook. The Markdown file is what the prompt names as the
+ * handbook's path, so a read of an omitted line resolves.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { clioProjectRoot } from "../../core/project-root.js";
-import { safeResourceWrite } from "../../core/safe-resource-write.js";
-import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
-import { scanAgentConfigs } from "./adoption.js";
-import { compileHandbookFromTree } from "./bootstrap.js";
 import type { ProjectPromptContext } from "./contract.js";
-import { collectEnforcementInventory } from "./enforcement-inventory.js";
 import { renderPromptContext } from "./prompt-context.js";
 
 export interface CompiledProjectHandbook {
@@ -32,39 +34,43 @@ export interface CompiledProjectHandbook {
 }
 
 /** Bumped when the compile's output changes for the same inputs, so an older cache is not reused. */
-const COMPILE_VERSION = 1;
+export const COMPILE_VERSION = 1;
 
-/** Root files whose content the compile reads beyond the checkers and handbooks. */
-const MANIFESTS: ReadonlyArray<string> = [
-	"package.json",
-	"tsconfig.json",
-	"biome.json",
-	"biome.jsonc",
-	".prettierrc",
-	".prettierrc.json",
-	"Cargo.toml",
-	"go.mod",
-	"pyproject.toml",
-	"setup.cfg",
-	"CMakeLists.txt",
-];
-
-interface Stamp {
+/** A file the compile read, with the size and mtime it had when it was read. */
+export interface InputStamp {
 	path: string;
 	stamp: string;
 }
 
-const memo = new Map<string, { stamps: Stamp[]; value: CompiledProjectHandbook | null }>();
+export interface CompiledHandbookSidecar {
+	version: number;
+	fingerprint: string;
+	contentSha256: string;
+	sources: string[];
+	rules: number;
+	/** Repository-relative files the compile read; a change to one retires the cache until the next compile. */
+	inputs: InputStamp[];
+}
 
-function compiledHandbookPath(root: string): string {
+export interface HandbookCompileWorkerData {
+	root: string;
+}
+
+/** `inputs` are absolute and end with the root itself, whose entry list changes when a file is added beside it. */
+export type HandbookCompileWorkerMessage = { ok: true; inputs: InputStamp[] } | { ok: false; error: string };
+
+const COMPILE_TIMEOUT_MS = 120_000;
+const require = createRequire(import.meta.url);
+
+export function compiledHandbookPath(root: string): string {
 	return join(root, ".clio-coder", "state", "compiled-handbook.md");
 }
 
-function sidecarPath(root: string): string {
+export function compiledHandbookSidecarPath(root: string): string {
 	return join(root, ".clio-coder", "state", "compiled-handbook.json");
 }
 
-function stampOf(path: string): string {
+export function stampOf(path: string): string {
 	try {
 		const stat = statSync(path);
 		return `${stat.size}:${stat.mtimeMs}`;
@@ -73,101 +79,197 @@ function stampOf(path: string): string {
 	}
 }
 
-function readCache(root: string, fingerprint: string): CompiledProjectHandbook | null {
+function isStamp(entry: unknown): entry is InputStamp {
+	const value = entry as Partial<InputStamp> | null;
+	return typeof value?.path === "string" && typeof value.stamp === "string";
+}
+
+/** The cache as written by the last compile, or null when it is missing, from another version, or torn. */
+export function readCompiledHandbookCache(
+	root: string,
+): { sidecar: CompiledHandbookSidecar; value: CompiledProjectHandbook } | null {
 	try {
-		const meta = JSON.parse(readFileSync(sidecarPath(root), "utf8")) as Record<string, unknown>;
-		if (meta.fingerprint !== fingerprint || !Array.isArray(meta.sources) || typeof meta.rules !== "number") return null;
+		const meta = JSON.parse(readFileSync(compiledHandbookSidecarPath(root), "utf8")) as Partial<CompiledHandbookSidecar>;
+		if (
+			meta.version !== COMPILE_VERSION ||
+			typeof meta.fingerprint !== "string" ||
+			typeof meta.contentSha256 !== "string" ||
+			!Array.isArray(meta.sources) ||
+			typeof meta.rules !== "number" ||
+			!Array.isArray(meta.inputs) ||
+			!meta.inputs.every(isStamp)
+		)
+			return null;
 		const path = compiledHandbookPath(root);
 		const source = readFileSync(path, "utf8");
 		if (createHash("sha256").update(source).digest("hex") !== meta.contentSha256) return null;
-		return { path, source, sources: meta.sources.filter((entry) => typeof entry === "string"), rules: meta.rules };
+		const sources = meta.sources.filter((entry): entry is string => typeof entry === "string");
+		const sidecar: CompiledHandbookSidecar = {
+			version: meta.version,
+			fingerprint: meta.fingerprint,
+			contentSha256: meta.contentSha256,
+			sources,
+			rules: meta.rules,
+			inputs: meta.inputs,
+		};
+		return { sidecar, value: { path, source, sources, rules: meta.rules } };
 	} catch {
 		return null;
 	}
 }
 
-/**
- * Only `.clio-coder/state/` is written. A repository without `.clio-coder/`
- * has no ignore file there, so the state directory ignores itself rather than
- * adding one beside the operator's files.
- */
-function writeCache(root: string, fingerprint: string, value: CompiledProjectHandbook): void {
-	try {
-		const ignore = join(root, ".clio-coder", "state", ".gitignore");
-		if (!existsSync(join(root, ".clio-coder", ".gitignore")) && !existsSync(ignore))
-			safeResourceWrite(ignore, "*\n", { encoding: "utf8" });
-		safeResourceWrite(value.path, value.source, { encoding: "utf8" });
-		const meta = {
-			version: COMPILE_VERSION,
-			fingerprint,
-			contentSha256: createHash("sha256").update(value.source).digest("hex"),
-			sources: value.sources,
-			rules: value.rules,
-		};
-		safeResourceWrite(sidecarPath(root), `${JSON.stringify(meta, null, 2)}\n`, { encoding: "utf8" });
-	} catch {
-		// The cache saves the next session a compile; the compiled text is still delivered.
+/** Per repository root: the cache as last parsed, keyed by the stamps of its two files. */
+const memo = new Map<string, { files: string; value: CompiledProjectHandbook | null; inputs: InputStamp[] }>();
+
+interface Refresh {
+	running: Promise<void> | null;
+	queued: Promise<void> | null;
+	worker: Worker | null;
+	/** What the last compile read; a later change to one schedules the next compile. Null after a failure. */
+	observed: InputStamp[] | null;
+	closed: boolean;
+}
+
+/** Roots a session asked to keep compiled; only these recompile when an input changes. */
+const owned = new Map<string, Refresh>();
+
+function cachedHandbook(root: string): CompiledProjectHandbook | null {
+	const files = `${stampOf(compiledHandbookSidecarPath(root))}|${stampOf(compiledHandbookPath(root))}`;
+	let known = memo.get(root);
+	if (known?.files !== files) {
+		const cache = readCompiledHandbookCache(root);
+		known = { files, value: cache?.value ?? null, inputs: cache?.sidecar.inputs ?? [] };
+		memo.set(root, known);
 	}
-}
-
-function dropCache(root: string): void {
-	for (const path of [compiledHandbookPath(root), sidecarPath(root)]) rmSync(path, { force: true });
+	// An input changed since the compile: its rules may no longer hold, so none is served until the next compile.
+	return known.value && known.inputs.every(({ path, stamp }) => stampOf(join(root, path)) === stamp)
+		? known.value
+		: null;
 }
 
 /**
- * The compiled handbook for the repository holding `cwd`, or null when it has
- * nothing checkable to say. Callers ask only when no CLIO-CODER.md loaded.
+ * The compiled handbook for the repository holding `cwd`, read from the cache
+ * the background compile left, or null when there is none or it no longer
+ * matches its inputs. Callers ask only when no CLIO-CODER.md loaded.
  */
 export function compiledProjectHandbook(cwd: string): CompiledProjectHandbook | null {
 	const root = clioProjectRoot(cwd);
-	const known = memo.get(root);
-	if (known?.stamps.every(({ path, stamp }) => stampOf(path) === stamp)) return known.value;
-	let files: string[];
-	try {
-		files = enumerateWorkspaceFiles(root);
-	} catch {
-		files = [];
+	const refresh = owned.get(root);
+	if (
+		refresh?.observed &&
+		!refresh.running &&
+		!refresh.queued &&
+		refresh.observed.some(({ path, stamp }) => stampOf(path) !== stamp)
+	)
+		void scheduleRefresh(root, refresh);
+	return cachedHandbook(root);
+}
+
+function buildWorkerUrl(): URL {
+	if (!import.meta.url.endsWith(".ts")) return new URL("./context/handbook-compile-worker.js", import.meta.url);
+	// Source execution: the same absolute-loader bootstrap as the codewiki build worker.
+	const loaderApi = pathToFileURL(require.resolve("tsx/esm/api")).href;
+	const source = new URL("./handbook-compile-worker.ts", import.meta.url).href;
+	return new URL(
+		`data:text/javascript,${encodeURIComponent(`const { tsImport } = await import(${JSON.stringify(loaderApi)}); await tsImport(${JSON.stringify(source)}, import.meta.url);`)}`,
+	);
+}
+
+function compileInWorker(root: string, refresh: Refresh): Promise<InputStamp[]> {
+	return new Promise((resolve, reject) => {
+		const workerData: HandbookCompileWorkerData = { root };
+		// A runaway walk fails the worker, not the host process.
+		const worker = new Worker(buildWorkerUrl(), {
+			workerData,
+			execArgv: [],
+			resourceLimits: { maxOldGenerationSizeMb: 512 },
+		});
+		refresh.worker = worker;
+		let settled = false;
+		const finish = (callback: () => void): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			callback();
+		};
+		const timer = setTimeout(() => {
+			finish(() => reject(new Error(`exceeded ${COMPILE_TIMEOUT_MS} ms`)));
+			void worker.terminate();
+		}, COMPILE_TIMEOUT_MS);
+		timer.unref();
+		worker.once("message", (message: HandbookCompileWorkerMessage) =>
+			finish(() => (message.ok ? resolve(message.inputs) : reject(new Error(message.error)))),
+		);
+		worker.once("error", (error) => finish(() => reject(error)));
+		worker.once("exit", (code) => {
+			if (refresh.worker === worker) refresh.worker = null;
+			finish(() => reject(new Error(`worker exited with code ${code} before returning a result`)));
+		});
+	});
+}
+
+function startRefresh(root: string, refresh: Refresh): Promise<void> {
+	if (refresh.closed) return Promise.resolve();
+	const run = compileInWorker(root, refresh)
+		.then(
+			(inputs) => {
+				refresh.observed = inputs;
+			},
+			(error: unknown) => {
+				// Failing again on every prompt helps nobody; the next session start tries again.
+				refresh.observed = null;
+				if (!refresh.closed)
+					writeDiagnostic(
+						`clio-coder: compiling the project handbook failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+			},
+		)
+		.finally(() => {
+			memo.delete(root);
+			refresh.running = null;
+		});
+	refresh.running = run;
+	return run;
+}
+
+function scheduleRefresh(root: string, refresh: Refresh): Promise<void> {
+	if (refresh.queued) return refresh.queued;
+	if (!refresh.running) return startRefresh(root, refresh);
+	// The running compile may have read a file before an edit; one follow-up covers every ask made meanwhile.
+	const queued = refresh.running.then(() => {
+		refresh.queued = null;
+		return startRefresh(root, refresh);
+	});
+	refresh.queued = queued;
+	return queued;
+}
+
+/**
+ * Compile the handbook for the repository holding `cwd` on a worker thread and
+ * keep it compiled while this process runs; settles when the compile has
+ * landed or failed. A compile already running is followed by one more, since
+ * it may have read the tree before the caller's change.
+ */
+export function refreshCompiledHandbook(cwd: string): Promise<void> {
+	const root = clioProjectRoot(cwd);
+	let refresh = owned.get(root);
+	if (!refresh) {
+		refresh = { running: null, queued: null, worker: null, observed: null, closed: false };
+		owned.set(root, refresh);
 	}
-	const adoption = scanAgentConfigs({ cwd: root, includeGlobal: false, workspaceFiles: files });
-	const enforcement = collectEnforcementInventory(root, files);
-	const read = [
-		...new Set([
-			...adoption.sources.map((source) => source.path),
-			...enforcement.checkFiles.map((file) => join(root, file.path)),
-			...MANIFESTS.map((name) => join(root, name)),
-		]),
-	].sort();
-	const hash = createHash("sha256").update(`v${COMPILE_VERSION}\0${files.join("\n")}\0${adoption.sourceHash}\0`);
-	hash.update(JSON.stringify(enforcement));
-	for (const path of read) {
-		hash.update(`\0${relative(root, path)}\0`);
-		try {
-			hash.update(readFileSync(path));
-		} catch {
-			hash.update("absent");
-		}
+	return scheduleRefresh(root, refresh);
+}
+
+/** Stop every compile this process started; a cut-off compile leaves the previous cache. */
+export async function stopCompiledHandbookRefreshes(): Promise<void> {
+	const pending: Array<Promise<void>> = [];
+	for (const refresh of owned.values()) {
+		refresh.closed = true;
+		void refresh.worker?.terminate();
+		for (const run of [refresh.running, refresh.queued]) if (run) pending.push(run);
 	}
-	const fingerprint = hash.digest("hex");
-	// Stamped before the compile reads, so an edit made while it runs triggers the next one.
-	const stamps = read.map((path) => ({ path, stamp: stampOf(path) }));
-	let value = readCache(root, fingerprint);
-	if (!value) {
-		const compiled = compileHandbookFromTree({ cwd: root, repositoryFiles: files, adoption, enforcement });
-		if (compiled) {
-			value = {
-				path: compiledHandbookPath(root),
-				source: compiled.markdown,
-				sources: compiled.sources,
-				rules: compiled.rules,
-			};
-			writeCache(root, fingerprint, value);
-		} else if (existsSync(sidecarPath(root))) {
-			dropCache(root);
-		}
-	}
-	// The root's own entry list catches a handbook or checker added beside it; stamped after the cache write lands.
-	memo.set(root, { stamps: [...stamps, { path: root, stamp: stampOf(root) }], value });
-	return value;
+	owned.clear();
+	await Promise.all(pending);
 }
 
 /** The project prompt context every session surface and dispatch shares: the authored handbook, else the compiled one. */

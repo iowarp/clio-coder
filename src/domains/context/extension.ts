@@ -18,7 +18,12 @@ import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
-import { compiledProjectHandbook, renderEffectivePromptContext } from "./compiled-handbook.js";
+import {
+	compiledProjectHandbook,
+	refreshCompiledHandbook,
+	renderEffectivePromptContext,
+	stopCompiledHandbookRefreshes,
+} from "./compiled-handbook.js";
 import type { ContextContract, ContextState, StartupHint } from "./contract.js";
 import { readHandbookFreshness } from "./handbook-ledger.js";
 import {
@@ -155,7 +160,11 @@ export interface ContextBundleOptions {
 	startupHintHost?: StartupHintHost;
 }
 
-export function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): StartupHint[] {
+function collectStartupHints(
+	cwd: string,
+	options: ContextBundleOptions = {},
+	clio = loadProjectClioMd(cwd),
+): StartupHint[] {
 	const { initCommand, suggest } = options.startupHintHost ?? { initCommand: "/context init", suggest: true };
 	const hints: StartupHint[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
@@ -168,7 +177,6 @@ export function collectStartupHints(cwd: string, options: ContextBundleOptions =
 	} catch {
 		projectType = "unknown";
 	}
-	const clio = loadProjectClioMd(cwd);
 	const absent = clio.files.length === 0 && clio.errors.length === 0 && options.noContextFiles !== true && suggest;
 	// Never written without the command: the session runs on the compile and the operator is told once.
 	const compiled = absent ? compiledProjectHandbook(cwd) : null;
@@ -235,7 +243,11 @@ export function createContextBundle(
 			.catch(() => {
 				// Indexing is best-effort; a failed refresh must not block session start.
 			});
-		startupHints = collectStartupHints(lastCwd, options);
+		const clio = loadProjectClioMd(lastCwd);
+		// Compiled off the event loop; this session's prompt reads whatever cache is already on disk.
+		if (clio.files.length === 0 && clio.errors.length === 0 && options.noContextFiles !== true)
+			void refreshCompiledHandbook(lastCwd);
+		startupHints = collectStartupHints(lastCwd, options, clio);
 		const sink = options.startupHintHost?.sink;
 		if (sink) for (const hint of startupHints) sink(hint);
 	};
@@ -297,7 +309,7 @@ export function createContextBundle(
 		},
 		async stop() {
 			stopping = true;
-			await semanticBackground.stop();
+			await Promise.all([semanticBackground.stop(), stopCompiledHandbookRefreshes()]);
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			// Everything the session changed already went through noteFileChanges,

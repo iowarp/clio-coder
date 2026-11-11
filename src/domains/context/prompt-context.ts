@@ -36,9 +36,9 @@ function codewikiArtifactPresent(cwd: string): boolean {
 
 export interface PromptContextOptions {
 	/**
-	 * The handbook to compile when no CLIO-CODER.md loads. Injected rather than
-	 * imported: the compiler reads through the bootstrap, which measures its
-	 * written handbook with this renderer.
+	 * The compiled handbook to serve when no CLIO-CODER.md loads, read from its
+	 * cache and never compiled here. Injected rather than imported, so the
+	 * bootstrap measures a handbook it writes without a compiled one standing in.
 	 */
 	compile?: (cwd: string) => CompiledProjectHandbook | null;
 }

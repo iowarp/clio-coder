@@ -1,13 +1,14 @@
 import { deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
-import { renderEffectivePromptContext } from "../../src/domains/context/compiled-handbook.js";
-import type { ContextContract } from "../../src/domains/context/contract.js";
-import { collectStartupHints } from "../../src/domains/context/extension.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { refreshCompiledHandbook, renderEffectivePromptContext } from "../../src/domains/context/compiled-handbook.js";
+import type { ContextContract, StartupHint } from "../../src/domains/context/contract.js";
+import { createContextBundle, type StartupHintHost } from "../../src/domains/context/extension.js";
 import { HANDBOOK_ABSENT_FRAGMENT, renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
@@ -131,7 +132,7 @@ function untracked(repo: string): string[] {
 		.map((line) => line.slice(3));
 }
 
-async function capturedWorkerContext(repo: string, peer: boolean): Promise<string> {
+async function capturedWorkerContext(repo: string, peer: boolean, worktree = false): Promise<string> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	if (peer) {
@@ -168,6 +169,7 @@ async function capturedWorkerContext(repo: string, peer: boolean): Promise<strin
 				executionRole: "builder",
 				requestOrigin: "internal",
 				cwd: repo,
+				...(worktree ? { worktree: true } : {}),
 			}),
 			/captured prompt/,
 		);
@@ -178,7 +180,27 @@ async function capturedWorkerContext(repo: string, peer: boolean): Promise<strin
 	return delivered.map(({ body }) => body).join("\n\n");
 }
 
-test("a repository without a handbook gets one compiled from its checkers and verified handbook rules", async () => {
+/** The hints a session starting in `repo` shows; the handbook compile it starts has landed when this returns. */
+async function sessionStartHints(repo: string, host: StartupHintHost): Promise<StartupHint[]> {
+	const bus = createTelemetryHub();
+	const context = createContextBundle({ bus, getContract: () => undefined }, { startupHintHost: host });
+	const previous = process.cwd();
+	await context.extension.start();
+	try {
+		process.chdir(repo);
+		bus.emit("session.started", { at: Date.now() });
+		const hints = context.contract.startupHints();
+		await refreshCompiledHandbook(repo);
+		return hints;
+	} finally {
+		process.chdir(previous);
+		await context.extension.stop?.();
+	}
+}
+
+const attended: StartupHintHost = { initCommand: "clio-coder context init", suggest: true };
+
+test("a repository without a handbook gets one compiled off the prompt path from its checkers and verified rules", async () => {
 	const env = await isolateClioEnv("clio-coder-compiled-handbook-");
 	try {
 		const repo = fixtureRepo(env.dir, {
@@ -188,6 +210,16 @@ test("a repository without a handbook gets one compiled from its checkers and ve
 			"src/ui/view.ts": "export const view = 1;\n",
 			"AGENTS.md": agents,
 		});
+		// The prompt and dispatch paths read the cache and never list or compile the tree themselves.
+		const cold = renderEffectivePromptContext(repo);
+		equal(cold.compiledHandbook, undefined);
+		ok(cold.text.includes(HANDBOOK_ABSENT_FRAGMENT), cold.text);
+		deepStrictEqual(untracked(repo), []);
+
+		// A session start compiles in the background; that session still runs as one without a handbook.
+		const first = await sessionStartHints(repo, attended);
+		ok(!first.some(({ text }) => text.includes("No project handbook")), JSON.stringify(first));
+
 		const main = renderEffectivePromptContext(repo);
 		ok(main.compiledHandbook, main.text);
 		ok(main.text.includes("no CLIO-CODER.md in this repository"), main.text);
@@ -202,14 +234,11 @@ test("a repository without a handbook gets one compiled from its checkers and ve
 			const worker = await capturedWorkerContext(repo, peer);
 			ok(worker.includes("Checked as `rule1`"), `${peer ? "peer" : "native"}: ${worker}`);
 		}
-		ok(
-			untracked(repo).every((path) => path.startsWith(".clio-coder/state/")),
-			JSON.stringify(untracked(repo)),
-		);
+		// A fresh task worktree has no compile of its own; the source checkout's stands in.
+		const inWorktree = await capturedWorkerContext(repo, false, true);
+		ok(inWorktree.includes("Checked as `rule1`"), `worktree: ${inWorktree}`);
 
-		const hints = collectStartupHints(repo, {
-			startupHintHost: { initCommand: "clio-coder context init", suggest: true },
-		});
+		const hints = await sessionStartHints(repo, attended);
 		ok(
 			hints.some(({ text }) =>
 				text.includes(
@@ -218,8 +247,21 @@ test("a repository without a handbook gets one compiled from its checkers and ve
 			),
 			JSON.stringify(hints),
 		);
-		const unattended = collectStartupHints(repo, { startupHintHost: { initCommand: "x", suggest: false } });
+		const unattended = await sessionStartHints(repo, { initCommand: "x", suggest: false });
 		ok(!unattended.some(({ text }) => text.includes("No project handbook")), JSON.stringify(unattended));
+
+		// An edited input retires the cache until the next compile, which picks the edit up.
+		writeFileSync(join(repo, "AGENTS.md"), `${agents}- Keep \`src/ui/\` free of state; see \`src/ui/view.ts\`.\n`);
+		equal(renderEffectivePromptContext(repo).compiledHandbook, undefined);
+		await refreshCompiledHandbook(repo);
+		const edited = renderEffectivePromptContext(repo);
+		ok(edited.text.includes("Keep `src/ui/` free of state"), edited.text);
+		ok(readFileSync(join(repo, ".clio-coder", ".gitignore"), "utf8").includes("/*"));
+		const written = untracked(repo).filter((path) => path !== "AGENTS.md");
+		ok(
+			written.every((path) => path.startsWith(".clio-coder/")),
+			JSON.stringify(written),
+		);
 	} finally {
 		env.restore();
 	}
@@ -229,12 +271,13 @@ test("an empty repository compiles no handbook and says nothing about one", asyn
 	const env = await isolateClioEnv("clio-coder-compiled-handbook-empty-");
 	try {
 		const repo = fixtureRepo(env.dir, { "README.md": "# Fixture\n" });
+		await refreshCompiledHandbook(repo);
 		const main = renderEffectivePromptContext(repo);
 		equal(main.compiledHandbook, undefined);
 		ok(main.text.includes(HANDBOOK_ABSENT_FRAGMENT));
-		const hints = collectStartupHints(repo, { startupHintHost: { initCommand: "x", suggest: true } });
-		ok(!hints.some(({ text }) => text.includes("No project handbook")), JSON.stringify(hints));
 		deepStrictEqual(untracked(repo), []);
+		const hints = await sessionStartHints(repo, attended);
+		ok(!hints.some(({ text }) => text.includes("No project handbook")), JSON.stringify(hints));
 	} finally {
 		env.restore();
 	}

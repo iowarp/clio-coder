@@ -1478,7 +1478,9 @@ const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
  * handbook walk stops at the worktree's own `.git` file: such a worker got no
  * project rules at all. When the worktree yields no handbook, read the one at
  * the same relative directory of the source checkout. A handbook committed to
- * the worktree still wins, because it matches the tree the worker edits.
+ * the worktree still wins, because it matches the tree the worker edits. A
+ * fresh worktree has no compiled handbook either, since only a session compiles
+ * one, so the source checkout's compiled handbook stands in for none at all.
  */
 function workerProjectPrompt(
 	context: Pick<ContextContract, "renderPromptContext">,
@@ -1491,7 +1493,7 @@ function workerProjectPrompt(
 	const inside = relative(remap.workerRoot, cwd);
 	if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return own;
 	const source = context.renderPromptContext(resolvePath(remap.sourceRoot, inside));
-	return source.handbookFiles.length > 0
+	return source.handbookFiles.length > 0 || (own.compiledHandbook === undefined && source.compiledHandbook !== undefined)
 		? {
 				...source,
 				supportFragments: own.supportFragments,
