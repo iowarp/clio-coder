@@ -561,7 +561,7 @@ show equal percentages are never merged.
 | --- | --- |
 | `/model` and `/thinking` | Choose a model for this session (Enter), or press `s` on a picker row to save it for the project or globally. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md). |
 | `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
-| `/council` | Runs a roster declared under `fleet.rosters` of two to five read-only members: the roster named `default`, or the one `--roster` names. With no `--roster` and no `default` roster, the notice points at `fleet.rosters` in `settings.yaml`. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
+| `/council` | Runs a roster declared under `fleet.rosters` of two to five read-only members: the roster named `default`, or the one `--roster` names. With no `--roster` and no `default` roster, the notice points at `fleet.rosters` in `settings.yaml`. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/fleet share <runId>`. |
 | `/run` and `/delegate` | Start a worker or ACP peer as a managed run with a sealed run record. Its answer is separate from main-agent context until shared with `--share` or `/fleet share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
 | `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
@@ -916,7 +916,7 @@ safety:
 
 ## Dispatch and Built-In Agents
 
-Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and run records are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
+Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/panes peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and run records are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
 
 ## Environment Variables
 
