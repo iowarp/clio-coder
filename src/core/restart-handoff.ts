@@ -38,7 +38,7 @@ type Execve = (file: string, args?: readonly string[], env?: NodeJS.ProcessEnv) 
  * process.execve) or fails before replacing the image; the caller then falls
  * back to the spawned guardian.
  */
-export function execRestart(
+function execRestart(
 	execve: Execve | undefined = (process as { execve?: Execve }).execve,
 	platform: NodeJS.Platform = process.platform,
 ): boolean {
