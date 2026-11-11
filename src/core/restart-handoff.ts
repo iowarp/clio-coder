@@ -34,7 +34,7 @@ type Execve = (file: string, args?: readonly string[], env?: NodeJS.ProcessEnv) 
 /**
  * Replaces this process with the restarted build, keeping its pid, process
  * group and terminal, so the parent is gone instead of guarding a nested child
- * (Q-M5). Returns false when exec is unavailable (Windows, a Node without
+ * Returns false when exec is unavailable (Windows, a Node without
  * process.execve) or fails before replacing the image; the caller then falls
  * back to the spawned guardian.
  */

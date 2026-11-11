@@ -24,7 +24,7 @@ import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { createRestartSessionTool, restartSessionWorkspaceRefusal } from "../../src/tools/restart-session.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
-test("/restart replaces the process instead of nesting a child under it (Q-M5)", async () => {
+test("/restart replaces the process instead of nesting a child under it", async () => {
 	let handoff: (() => Promise<number>) | undefined;
 	const termination = {
 		setExitHandoff(fn: () => Promise<number>) {
