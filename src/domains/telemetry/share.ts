@@ -463,7 +463,12 @@ const UNLINKABLE_CLOCK = { pid: 1, birthToken: null, monoEpochWallMs: 0 } as con
 function rekeyFingerprint(value: unknown, shareKey: Buffer): unknown {
 	const mac = (text: string) => createHmac("sha256", shareKey).update(`settingsFingerprint\0${text}`).digest("hex");
 	if (typeof value === "string") return value.startsWith("anon_") ? `anon_${mac(value).slice(0, 16)}` : mac(value);
-	if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as { hash?: unknown }).hash === "string")
+	if (
+		value &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		typeof (value as { hash?: unknown }).hash === "string"
+	)
 		return { ...value, hash: mac((value as { hash: string }).hash) };
 	return value;
 }
@@ -669,7 +674,8 @@ function filterScope(
 				dropped.unlisted += 1;
 				continue;
 			}
-			if (projected && projected !== redacted && canonicalJson(projected.data) !== canonicalJson(redacted.data)) dropped.projected += 1;
+			if (projected && projected !== redacted && canonicalJson(projected.data) !== canonicalJson(redacted.data))
+				dropped.projected += 1;
 			kept.push(record.origin ? { ...record, origin: { ...record.origin, host: installId } } : record);
 		}
 	}
