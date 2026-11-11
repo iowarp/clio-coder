@@ -3,19 +3,19 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { newProcessId } from "../../../src/core/telemetry/ids.js";
-import { settingsFingerprintCommitment } from "../../../src/core/telemetry/schemas.js";
-import { scanTelemetrySegment } from "../../../src/core/telemetry/segment.js";
-import { openCallJournal } from "../../../src/domains/telemetry/call-journal.js";
-import { telemetryCommitment } from "../../../src/domains/telemetry/objects.js";
-import { telemetryProcessDirectory } from "../../../src/domains/telemetry/paths.js";
+import { newProcessId } from "../../src/core/telemetry/ids.js";
+import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
+import { scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryCommitment } from "../../src/domains/telemetry/objects.js";
+import { telemetryProcessDirectory } from "../../src/domains/telemetry/paths.js";
 import {
 	packShare,
 	planShare,
 	resolveShareScopes,
 	telemetryShareSource,
 	verifyShareArchive,
-} from "../../../src/domains/telemetry/share.js";
+} from "../../src/domains/telemetry/share.js";
 
 const writer = { clioCoderVersion: "0.0.0-test", piVersion: "test" };
 

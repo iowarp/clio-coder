@@ -18,6 +18,7 @@ export const coreTests = [
 	"check-lane-selection",
 	"handbook-bench",
 	"reload-prompts",
+	"telemetry-share-linkability",
 	"memory-off-marker",
 	"headless-observed",
 	"prompt-preconditions",
