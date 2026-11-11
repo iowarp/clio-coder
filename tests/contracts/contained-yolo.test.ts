@@ -103,7 +103,10 @@ function containedRegistry(
 	return { registry, ran, parks, judged: () => judged };
 }
 
-test("confinement resolves to contained unless unconfined is both chosen and accepted", () => {
+test("confinement resolves to contained unless unconfined is both chosen and accepted", async (t) => {
+	// A Clio bash child exports the confinement pin; isolate so the case reads only settings.
+	const home = await isolateClioEnv("clio-yolo-confinement-resolve-");
+	t.after(() => home.restore());
 	const safety = DEFAULT_SETTINGS.safety;
 	strictEqual(effectiveYoloConfinement(safety), "contained");
 	strictEqual(effectiveYoloConfinement({ ...safety, yoloConfinement: "unconfined" }), "contained");
