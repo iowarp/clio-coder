@@ -33,6 +33,8 @@ export interface ProjectSurfaceSnapshot {
 	/** Null if any file could not be read. Missing files are part of the digest. */
 	contentHash: string | null;
 	verdict: WorkspaceTrustVerdict;
+	/** Hooks only: the repository scripts the hooks files name, captured with the bytes their hashes pin. */
+	scripts?: ProjectSurfaceFile[];
 }
 
 type PackageTrustSurface = "extensions" | "plugins";
@@ -321,8 +323,8 @@ function surfacePaths(root: string, surface: ProjectTrustSurface): string[] {
  * scripts it runs, so an edit to one asks again. Only regular files inside
  * the root count; a declaration naming none keeps its plain hash.
  */
-function hookScriptEntries(root: string, files: ReadonlyArray<ProjectSurfaceFile>): Array<[string, string]> {
-	const entries = new Map<string, string>();
+function hookScripts(root: string, files: ReadonlyArray<ProjectSurfaceFile>): ProjectSurfaceFile[] {
+	const entries = new Map<string, ProjectSurfaceFile>();
 	let realRoot = root;
 	try {
 		realRoot = realpathSync(root);
@@ -345,14 +347,15 @@ function hookScriptEntries(root: string, files: ReadonlyArray<ProjectSurfaceFile
 					const real = realpathSync(target);
 					const rel = relative(realRoot, real);
 					if (rel.startsWith("..") || isAbsolute(rel) || !statSync(real).isFile()) continue;
-					entries.set(target, sha256(readFileSync(real)));
+					const bytes = readFileSync(real);
+					entries.set(target, { path: target, text: bytes.toString("utf8"), hash: sha256(bytes) });
 				} catch {
 					// A word that names no readable file pins nothing.
 				}
 			}
 		}
 	}
-	return [...entries.entries()].sort(([a], [b]) => a.localeCompare(b));
+	return [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /** Safety entries resolve relative to their canonical source, so provenance is authority too. */
@@ -431,6 +434,7 @@ function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSu
 			return { path, text: null, hash: null, error: `cannot read ${path}` };
 		}
 	});
+	const scripts = surface === "hooks" ? hookScripts(root, files) : [];
 	const contentHash = files.some((file) => file.error !== undefined)
 		? null
 		: surface === "safety"
@@ -440,7 +444,7 @@ function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSu
 			: sha256(
 					JSON.stringify([
 						...files.map((file) => [file.path, file.hash]),
-						...(surface === "hooks" ? hookScriptEntries(root, files) : []),
+						...scripts.map((script) => [script.path, script.hash]),
 					]),
 				);
 	return {
@@ -448,6 +452,7 @@ function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSu
 		surface,
 		files,
 		contentHash,
+		...(surface === "hooks" ? { scripts } : {}),
 		verdict:
 			contentHash === null
 				? "untrusted"
@@ -630,5 +635,10 @@ export function projectPackageEntries(snapshot: ProjectSurfaceSnapshot): Project
 }
 
 export function projectSurfaceTrustNotice(snapshot: ProjectSurfaceSnapshot, filePath: string): string {
-	return `${filePath} is ${snapshot.verdict}; project ${snapshot.surface} ignored. Review with clio-coder config trust ${snapshot.surface}.`;
+	// A hooks approval pins the scripts it runs too; name them, since the edit may be in one of them.
+	const scripts =
+		snapshot.verdict === "changed" && snapshot.scripts !== undefined && snapshot.scripts.length > 0
+			? ` (or a script it runs: ${snapshot.scripts.map((script) => relative(snapshot.workspaceRoot, script.path)).join(", ")})`
+			: "";
+	return `${filePath}${scripts} is ${snapshot.verdict}; project ${snapshot.surface} ignored. Review with clio-coder config trust ${snapshot.surface}.`;
 }

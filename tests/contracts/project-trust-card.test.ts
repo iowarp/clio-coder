@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
 	buildProjectTrustCard,
 	projectTrustCardChoice,
+	projectTrustCardReviewFiles,
 	renderProjectTrustCard,
 	trustProjectCard,
 } from "../../src/cli/project-trust-card.js";
@@ -101,4 +102,29 @@ test("trust card: q and Ctrl+C quit as the legend says; Esc still opens without 
 	strictEqual(projectTrustCardChoice({ kind: "quit" }), "quit");
 	strictEqual(projectTrustCardChoice({ kind: "back" }), "skip");
 	strictEqual(projectTrustCardChoice({ kind: "selected", value: "trust" }), "trust");
+});
+
+test("trust card: Review shows the hook scripts the hooks file pins, so a changed script can be read", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-card-");
+	try {
+		const workspace = fixture(home.dir);
+		mkdirSync(join(workspace, "scripts"), { recursive: true });
+		writeFileSync(join(workspace, "scripts", "fmt.sh"), "#!/bin/sh\necho one\n");
+		const first = buildProjectTrustCard(workspace);
+		ok(first);
+		trustProjectCard(first);
+		writeFileSync(join(workspace, "scripts", "fmt.sh"), "#!/bin/sh\necho two\n");
+		const again = buildProjectTrustCard(workspace);
+		deepStrictEqual(
+			again?.surfaces.map((item) => [item.surface, item.changed]),
+			[["hooks", true]],
+		);
+		const reviewed = projectTrustCardReviewFiles(again);
+		const script = reviewed.find((file) => file.path.endsWith(join("scripts", "fmt.sh")));
+		ok(script, reviewed.map((file) => file.path).join(", "));
+		ok(script.text.includes("echo two"));
+		ok(renderProjectTrustCard(again).join("\n").includes("scripts/fmt.sh"));
+	} finally {
+		home.restore();
+	}
 });

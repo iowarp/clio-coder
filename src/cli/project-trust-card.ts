@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
 	captureProjectSurface,
@@ -92,6 +93,8 @@ function hooksSummary(snapshot: ProjectSurfaceSnapshot): string[] {
 			: `${clean(hook.on)}: ${hook.spec.kind} ${clean(hook.id)}`,
 	);
 	for (const issue of loaded.issues) lines.push(`not loaded: ${clean(issue.issues.join("; "))}`);
+	for (const script of snapshot.scripts ?? [])
+		lines.push(`script: ${clean(relative(snapshot.workspaceRoot, script.path))}`);
 	return lines.length > 0 ? lines : ["(no hooks)"];
 }
 
@@ -142,6 +145,15 @@ export function trustProjectCard(model: ProjectTrustCardModel): void {
 	}
 }
 
+/** What Review prints: every captured file, and for hooks the scripts its approval pins. */
+export function projectTrustCardReviewFiles(model: ProjectTrustCardModel): Array<{ path: string; text: string }> {
+	return model.surfaces.flatMap(({ snapshot }) =>
+		[...snapshot.files, ...(snapshot.scripts ?? [])].flatMap((file) =>
+			file.text === null ? [] : [{ path: file.path, text: file.text }],
+		),
+	);
+}
+
 export type ProjectTrustCardOutcome = "trusted" | "skipped" | "quit" | "none";
 
 type CardChoice = "review" | "trust" | "skip";
@@ -181,16 +193,13 @@ export async function runProjectTrustCard(cwd: string = process.cwd()): Promise<
 			}
 		}
 		reviewed = true;
-		for (const { snapshot } of model.surfaces) {
-			for (const file of snapshot.files) {
-				if (file.text === null) continue;
-				process.stdout.write(
-					`\n── ${clean(file.path)}\n${file.text
-						.split(/\r?\n/)
-						.map((line) => `${/^[ \t]*/.exec(line)?.[0] ?? ""}${clean(line)}`)
-						.join("\n")}\n`,
-				);
-			}
+		for (const file of projectTrustCardReviewFiles(model)) {
+			process.stdout.write(
+				`\n── ${clean(file.path)}\n${file.text
+					.split(/\r?\n/)
+					.map((line) => `${/^[ \t]*/.exec(line)?.[0] ?? ""}${clean(line)}`)
+					.join("\n")}\n`,
+			);
 		}
 	}
 }
