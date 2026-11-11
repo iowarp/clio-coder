@@ -266,11 +266,14 @@ function str(value: unknown): string | undefined {
 }
 
 /** Keep terminal control bytes and line breaks out of approval artifacts without losing their identity. */
-function safeField(value: string, bindChangedValue = true): string {
+function safeField(value: string, bindChangedValue = true, keepLines = false): string {
 	let result = "";
 	for (const character of value) {
 		const code = character.codePointAt(0) ?? 0;
-		result += code < 32 || (code >= 127 && code <= 159) ? "?" : character;
+		// A JSON-quoted preview keeps its line breaks escaped on the plan line, so a reader can show them as rows.
+		if (keepLines && character === "\n") result += "\n";
+		else if (keepLines && character === "\t") result += " ";
+		else result += code < 32 || (code >= 127 && code <= 159) ? "?" : character;
 		if (result.length >= 256) {
 			result = `${result.slice(0, 255)}…`;
 			break;
@@ -462,7 +465,7 @@ function renderPlanText(
 				? ""
 				: ` posture=${routing.posture} maxCostUsd=${routing.maxCostUsd ?? "none"} deadlineMs=${routing.deadlineMs ?? "none"} minimumQuality=${routing.minimumQuality ?? "none"} locality=${routing.locality}`;
 		lines.push(
-			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task_bytes=${Buffer.byteLength(task.task, "utf8")} task_sha256=${createHash("sha256").update(task.task, "utf8").digest("hex")} task_preview=${JSON.stringify(safeField(task.task, false))}`,
+			`  ${index + 1}.${role} agent=${safeField(task.agent)}${target}${model}${node}${failover}${routingText} task_bytes=${Buffer.byteLength(task.task, "utf8")} task_sha256=${createHash("sha256").update(task.task, "utf8").digest("hex")} task_preview=${JSON.stringify(safeField(task.task, false, true))}`,
 		);
 		if (task.council !== undefined) {
 			lines.push(
@@ -516,7 +519,7 @@ function renderPlanText(
 			);
 		if (task.briefing !== undefined) {
 			lines.push(
-				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing, false))}`,
+				`    briefing_bytes=${Buffer.byteLength(task.briefing, "utf8")} briefing_sha256=${createHash("sha256").update(task.briefing, "utf8").digest("hex")} briefing_preview=${JSON.stringify(safeField(task.briefing, false, true))}`,
 			);
 		}
 		if (task.intent !== undefined) {
