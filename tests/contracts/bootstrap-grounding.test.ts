@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it, mock } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
@@ -1157,6 +1157,7 @@ interface LedgerEntryShape {
 	origin: string;
 	source: { file: string; line: number };
 	verdict: string;
+	reason: string;
 	kept: boolean;
 }
 
@@ -1286,4 +1287,66 @@ it("does not let a rule stated only in a sibling handbook ground a model line", 
 	ok(handbook.includes(grounded), handbook);
 	strictEqual(handbook.includes("vendor-cache"), false, handbook);
 	strictEqual(readHandbookLedger().find((found) => found.text.includes("vendor-cache"))?.verdict, "stale");
+});
+
+it("reports the rejected sibling rules with their source line and reason, in the summary and in --json", async () => {
+	writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+	writeFileSync(
+		join(cwd, "CLAUDE.md"),
+		[
+			"# Rules",
+			"",
+			"- Always run `npm run test:unit` before pushing.",
+			"- Always use yarn for installs.",
+			"- Never import from `src/legacy/` in new code.",
+			"- Never edit `src/widgets/render.ts` without updating `src/index.ts`.",
+			"",
+		].join("\n"),
+	);
+	let text = "";
+	await runBootstrap({
+		cwd,
+		io: {
+			stdout: (chunk: string) => {
+				text += chunk;
+			},
+			stderr: () => {},
+		},
+	});
+	const reasons = new Map(readHandbookLedger().map((found) => [`${found.source.file}:${found.source.line}`, found]));
+	const rejected = [
+		["dropped", "CLAUDE.md:3"],
+		["contradicted", "CLAUDE.md:4"],
+		["dropped", "CLAUDE.md:5"],
+	];
+	for (const [status, at] of rejected) {
+		const line = text.split("\n").find((candidate) => candidate.includes(` ${at} `));
+		ok(line?.trim().startsWith(`${status} `), text);
+		ok(line?.includes(reasons.get(at ?? "")?.reason.slice(0, 40) ?? "\u0000"), text);
+	}
+	ok(text.includes("absorbed rules: 1 verified, 2 stale, 1 contradicted, 0 unverifiable"), text);
+	ok(text.includes("absorbed handbooks: CLAUDE.md; Clio did not modify them"), text);
+
+	rmSync(join(cwd, "CLIO-CODER.md"));
+	const previous = process.cwd();
+	process.chdir(cwd);
+	let stdout = "";
+	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+		if (typeof chunk === "string") stdout += chunk;
+		return true;
+	});
+	try {
+		strictEqual(await runInitCommand(["--heuristic", "--json"]), 0);
+	} finally {
+		write.mock.restore();
+		process.chdir(previous);
+	}
+	const report = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as {
+		absorb?: { rules: { status: string; file: string; line: number; reason: string }[]; handbooks: string[] };
+	};
+	deepStrictEqual(
+		report.absorb?.rules.map((rule) => [rule.status, `${rule.file}:${rule.line}`, rule.reason]),
+		rejected.map(([status, at]) => [status, at, reasons.get(at ?? "")?.reason]),
+	);
+	deepStrictEqual(report.absorb?.handbooks, ["CLAUDE.md"]);
 });

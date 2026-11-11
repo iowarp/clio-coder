@@ -253,6 +253,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 					statePath: result.statePath,
 					preload: result.preload,
 					adoption: result.summary.adoption,
+					...(result.summary.absorb ? { absorb: result.summary.absorb } : {}),
 					generation: result.telemetry.generation,
 					timings: {
 						wallMs: Math.max(0, performance.now() - startedAt),

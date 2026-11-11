@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, parse, posix, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, posix, relative, resolve } from "node:path";
 import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -243,6 +243,70 @@ export interface RunBootstrapSummary {
 	proposalPath?: string;
 	/** Restated rules merged and checker ids corrected while compiling, when there were any. */
 	compile?: HandbookCompileReport;
+	/** What the generated handbook absorbed from sibling handbooks, when a draft judged their rules. */
+	absorb?: AbsorbReport;
+}
+
+/** Verdict counts from the handbook ledger and every rule that did not enter CLIO-CODER.md as written. */
+export interface AbsorbReport {
+	counts: Record<HandbookLedgerEntry["verdict"], number>;
+	rules: { status: "dropped" | "contradicted" | "merged"; file: string; line: number; text: string; reason: string }[];
+	/** Sibling handbooks read as sources; Clio never modifies them. */
+	handbooks: string[];
+}
+
+function buildAbsorbReport(
+	ledger: ReadonlyArray<HandbookLedgerEntry>,
+	compile: HandbookCompileReport,
+	handbooks: ReadonlyArray<string>,
+): AbsorbReport {
+	const counts: AbsorbReport["counts"] = { verified: 0, stale: 0, unverifiable: 0, contradicted: 0 };
+	const rules: AbsorbReport["rules"] = [];
+	for (const entry of ledger) {
+		counts[entry.verdict] += 1;
+		if (entry.kept) continue;
+		rules.push({
+			status: entry.verdict === "contradicted" ? "contradicted" : "dropped",
+			file: entry.source.file,
+			line: entry.source.line,
+			text: entry.text,
+			reason: entry.reason,
+		});
+	}
+	for (const pair of compile.merged) {
+		const source = ledger.find((entry) => pair.dropped.includes(entry.text));
+		if (!source) continue;
+		rules.push({
+			status: "merged",
+			file: source.source.file,
+			line: source.source.line,
+			text: source.text,
+			reason: `restates: ${pair.kept.replace(/\s+/g, " ").trim()}`,
+		});
+	}
+	return { counts, rules, handbooks: [...handbooks] };
+}
+
+const ABSORB_LINE_CAP = 20;
+
+function formatAbsorbLines(summary: RunBootstrapSummary): string[] {
+	const absorb = summary.absorb;
+	if (!absorb) return [];
+	const clip = (text: string): string => {
+		const flat = text.replace(/\s+/g, " ").trim();
+		return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat;
+	};
+	const { counts } = absorb;
+	const lines = [
+		`  absorbed rules: ${counts.verified} verified, ${counts.stale} stale, ${counts.contradicted} contradicted, ${counts.unverifiable} unverifiable`,
+	];
+	for (const rule of absorb.rules.slice(0, ABSORB_LINE_CAP))
+		lines.push(`    ${rule.status} ${rule.file}:${rule.line} ${clip(rule.text)} (${clip(rule.reason)})`);
+	if (absorb.rules.length > ABSORB_LINE_CAP)
+		lines.push(`    and ${absorb.rules.length - ABSORB_LINE_CAP} more in the ledger`);
+	if (absorb.handbooks.length > 0)
+		lines.push(`  absorbed handbooks: ${absorb.handbooks.join(", ")}; Clio did not modify them`);
+	return lines;
 }
 
 export interface RunBootstrapAdoptionSummary {
@@ -2494,6 +2558,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 			`  ${contextLine}; codemap would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
 			...formatCompileLines(summary),
+			...formatAbsorbLines(summary),
 			"",
 		].join("\n");
 	}
@@ -2516,6 +2581,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
 			...(adoptionLine ? [adoptionLine] : []),
 			...formatCompileLines(summary),
+			...formatAbsorbLines(summary),
 			"",
 		].join("\n");
 	}
@@ -2526,6 +2592,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
 		...formatCompileLines(summary),
+		...formatAbsorbLines(summary),
 		"",
 	].join("\n");
 }
@@ -2765,6 +2832,7 @@ function writeClioMdProposal(
 	output: BootstrapStructuredOutput,
 	generation: BootstrapGenerationTelemetry,
 	existingSource: string | null,
+	absorb: AbsorbReport | undefined,
 ): string {
 	const dir = join(cwd, ".clio-coder", "proposals");
 	ensureProjectIgnore(cwd);
@@ -2782,6 +2850,7 @@ function writeClioMdProposal(
 			sourceHash: existingSource === null ? null : createHash("sha256").update(existingSource).digest("hex"),
 			proposalHash: createHash("sha256").update(serialized).digest("hex"),
 			generation: durableGenerationTelemetry(generation),
+			...(absorb ? { absorb } : {}),
 		})}\n`,
 		{ encoding: "utf8", flag: "wx" },
 	);
@@ -3263,6 +3332,14 @@ async function runBootstrapWork(
 		}
 	}
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
+	const absorb = handbookLedger
+		? buildAbsorbReport(
+				handbookLedger,
+				compileReport,
+				readNames.map((path) => (isAbsolute(path) ? relative(cwd, path) : path)),
+			)
+		: undefined;
+	const absorbed = (): { absorb?: AbsorbReport } => (absorb ? { absorb } : {});
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
 		progress(input, { phase: "clio-md", status: "completed", message: "preview ready; no files written" });
@@ -3274,6 +3351,7 @@ async function runBootstrapWork(
 			dirtyFiles: countStatusLines(previewStatus),
 			adoption: summarizeAdoption(adoption, "preview"),
 			...compiled(),
+			...absorbed(),
 		};
 		out(input.io, formatBootstrapSummary(summary));
 		progress(input, { phase: "done", status: "completed", message: "context preview ready; no files written" });
@@ -3304,7 +3382,7 @@ async function runBootstrapWork(
 				!hadClioMd || (replaceClioMd && generation.mode !== "existing") || (input.adopt && existingParsed);
 			const sourceChanged = hadClioMd !== existsSync(clioMdPath) || originalClioMdText !== readExistingClioMdText(cwd);
 			if (shouldPropose || (wouldPublish && sourceChanged)) {
-				proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText);
+				proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText, absorb);
 				if (sourceChanged)
 					warn(input.io, "CLIO-CODER.md changed during initialization; the generated draft was saved as a proposal.\n");
 				return "proposed";
@@ -3362,6 +3440,7 @@ async function runBootstrapWork(
 		adoption: summarizeAdoption(adoption, adoptionApplied ? "adopt" : "scan"),
 		...(proposalPath ? { proposalPath } : {}),
 		...compiled(),
+		...absorbed(),
 	};
 	out(input.io, formatBootstrapSummary(summary));
 	if (action === "wrote" || action === "refreshed") {
