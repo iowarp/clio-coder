@@ -329,7 +329,9 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
 - **Afterwards.** `/report status` and `clio-coder report status` list your
   reports and saved drafts with each sent report's GitHub state and comment
   count, `clio-coder report show <id>` prints one, `send <id>` reviews and sends
-  a saved draft, and `forget <id>` deletes a draft that was never posted. A
+  a saved draft, and `forget <id>` deletes a draft that was never posted. In the
+  TUI list, `r` on a sent report turns its reply check off; the list updates in
+  place, and the cursor stays on the same report when GitHub's state arrives. A
   posted report cannot be withdrawn from Clio Coder; edit or close it on GitHub.
   `forget` on it deletes only its local bundle. When the report shared an
   encrypted bundle, `clio-coder report forget <id>` first deletes that secret

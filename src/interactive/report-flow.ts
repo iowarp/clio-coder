@@ -46,7 +46,7 @@ import type { TUI } from "../engine/tui.js";
 import type { SlashReportRequest } from "../session-control/slash-commands.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
-import { openListOverlay } from "./overlays/list-overlay.js";
+import { type ListOverlayItem, openListOverlay } from "./overlays/list-overlay.js";
 import {
 	openReportReviewOverlay,
 	type ReportBundleChoice,
@@ -279,22 +279,15 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 		});
 	}
 
-	function status(options: { refresh?: boolean } = {}): void {
+	function status(): void {
 		const refused = refusal(deps.transitions);
 		if (refused !== null) {
 			deps.notify("warning", `report: ${refused}`, "report:refused");
 			return;
 		}
-		const rows = reportRows(deps.stateDir);
-		deps.transitions.state = "report-status";
-		const handle = openListOverlay(deps.tui, {
-			markerId: "report-status",
-			title: "Your reports",
-			unit: "reports",
-			layout: "split",
-			emptyMessage: "No reports yet.",
-			emptyRemedy: "/report bug <summary> starts one.",
-			items: rows.map((row) => ({
+		let rows = reportRows(deps.stateDir);
+		const items = (): ListOverlayItem[] =>
+			rows.map((row) => ({
 				id: row.id,
 				label: row.title.length > 0 ? row.title : "(no title yet)",
 				meta: row.state,
@@ -311,7 +304,16 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 					...(row.replyCheck ? ["", "r turns the daily reply check off."] : []),
 				],
 				detailFormat: "rows" as const,
-			})),
+			}));
+		deps.transitions.state = "report-status";
+		const handle = openListOverlay(deps.tui, {
+			markerId: "report-status",
+			title: "Your reports",
+			unit: "reports",
+			layout: "split",
+			emptyMessage: "No reports yet.",
+			emptyRemedy: "/report bug <summary> starts one.",
+			items: items(),
 			hints: (selected) => [
 				...(selected?.meta === "draft" ? [{ key: "Enter", verb: "review and send", short: "review", critical: true }] : []),
 				...(selected !== undefined && rows.find((row) => row.id === selected.id)?.replyCheck
@@ -323,8 +325,7 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 					if (!rows.find((row) => row.id === item.id)?.replyCheck) return;
 					setReplyCheck(deps.stateDir, item.id, false);
 					deps.notify("info", `report: no more reply checks for ${item.id}`, "report:reply-check");
-					deps.transitions.close();
-					status({ refresh: false });
+					reread();
 				},
 			},
 			onSelect: (item) => {
@@ -335,15 +336,18 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			onClose: () => deps.transitions.close(),
 		});
 		deps.transitions.handle = handle;
-		if (options.refresh === false) return;
-		// The operator asked, so this reads GitHub with no further consent; the list reopens with what it said.
+		// The open list takes the new rows in place, so the cursor stays on the report it was on.
+		function reread(): void {
+			rows = reportRows(deps.stateDir);
+			handle.setItems(items());
+		}
+		// The operator asked, so this reads GitHub with no further consent; the list then shows what it said.
 		void (async () => {
 			const gh = await findGh();
 			if (gh === null || !rows.some((row) => row.state === "sent")) return;
 			await refreshReportStatus(deps.stateDir, { findGh: () => gh, env });
 			if (deps.transitions.handle !== handle) return;
-			deps.transitions.close();
-			status({ refresh: false });
+			reread();
 		})().catch(() => {
 			// The stored state is already on screen; a failed read leaves it there.
 		});
@@ -359,5 +363,5 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			);
 	}
 
-	return { open, status: () => status(), forget };
+	return { open, status, forget };
 }
