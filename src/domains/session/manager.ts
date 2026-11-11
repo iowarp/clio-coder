@@ -112,10 +112,10 @@ export function resumeSessionState(sessionId: string): {
 		// The ledger needed no transformation; only the stamp moves, so the next
 		// reader does not re-run the same no-op. It lands in the same metadata
 		// publication that reopens the session.
-		const { meta, writer, tree } = engineResumeSession(
-			sessionId,
-			migration.migrated ? { sessionFormatVersion: migration.to } : {},
-		);
+		const { meta, writer, tree } = engineResumeSession(sessionId, {
+			fileEntries: candidate.fileEntries(),
+			...(migration.migrated ? { sessionFormatVersion: migration.to } : {}),
+		});
 		const state: SessionManagerState = { meta: meta as SessionMeta, writer: withHeartbeat(meta, writer) };
 		return { state, nodes: tree };
 	});

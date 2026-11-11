@@ -1090,7 +1090,11 @@ export function openSession(id: string): ClioSessionReader {
 
 export function resumeSession(
 	id: string,
-	options: { sessionFormatVersion?: number } = {},
+	options: {
+		sessionFormatVersion?: number;
+		/** The ledger as `openSession(id).fileEntries()` just read it, under the same claim, so it is not parsed twice. */
+		fileEntries?: ReadonlyArray<unknown>;
+	} = {},
 ): {
 	meta: ClioSessionMeta;
 	writer: ClioSessionWriter;
@@ -1099,7 +1103,7 @@ export function resumeSession(
 	const dir = findSessionDir(id);
 	const metaPath = join(dir, "meta.json");
 	const meta = readMetaFile(metaPath);
-	const existingFileEntries = readSessionFileEntries(join(dir, "current.jsonl"));
+	const existingFileEntries = options.fileEntries ?? readSessionFileEntries(join(dir, "current.jsonl"));
 	const existingTree = recoverTreeFromJsonl(readTreeFile(join(dir, "tree.json")), existingFileEntries);
 	const writer = createWriter(meta, existingTree, existingFileEntries);
 	// Prepare headerless ledgers before publishing that a closed session has
