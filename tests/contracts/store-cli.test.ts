@@ -14,7 +14,7 @@ import {
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-/** Creates the tag first, as put no longer does. */
+/** Puts into a tag created beforehand, so a test isolates put from tag creation. */
 async function storePut(root: string, tag: string, file: string) {
 	await (await openStoreBackend(root)).getOrCreateTag(tag);
 	return cliPut(root, tag, file);
@@ -77,12 +77,13 @@ describe("clio-coder store", () => {
 			deepStrictEqual(await backend.listTags(), []);
 		}));
 
-	it("put refuses a missing tag, as the store tool does", () =>
+	it("put creates a missing tag as an input tag", () =>
 		withWorkspace(async (root) => {
 			writeFileSync(join(root, "a.dat"), "x");
-			await rejects(cliPut(root, "nope", "a.dat"), /no tag named nope/u);
+			const result = await cliPut(root, "fresh", "a.dat");
+			strictEqual(result.createdTag, true);
 			const backend = await openStoreBackend(root);
-			strictEqual(await backend.tagExists("nope"), false);
+			strictEqual(await backend.tagExists("fresh"), true);
 		}));
 
 	it("rm-tag dry run exits 0 and a missing tag exits non-zero", () =>

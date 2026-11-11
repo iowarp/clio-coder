@@ -68,7 +68,7 @@ pattern is a regular expression matched against the whole blob name.
 verify compares each recorded blob's size and mtime with its record, and its
 sha256 when the record holds one; --hash-large also hashes blobs whose record
 omitted the hash and records the digest as a note. Exit 1 unless every blob is ok.
-put refuses a tag that does not exist, as the store tool does.
+put creates the tag (class input) when it does not exist.
 rm and rm-tag without --yes delete nothing, print what they would delete and
 exit 0; a missing tag or blob exits 1.
 adopt without a key lists store directories whose project root no longer
@@ -312,7 +312,12 @@ export async function storePut(
 	const problem = validateBlobName(blob);
 	if (problem !== null) throw new UsageError(problem);
 	const backend = await openStoreBackend(cwd);
-	await requireTag(backend, tag);
+	const { created } = await backend.getOrCreateTag(tag);
+	if (created) {
+		await backend.setTagXattr(tag, "clio.description", "");
+		await backend.setTagXattr(tag, "clio.class", "input");
+		await backend.setTagXattr(tag, "clio.createdAt", new Date().toISOString());
+	}
 	const replaced = (await backend.statBlob(tag, blob)) !== null;
 	const stored: StoreBlobStat = await backend.putBlobFromFile(tag, blob, sourceAbs, options.signal);
 	const { path: blobPath } = await backend.getBlobAsPath(tag, blob, options.signal);
@@ -335,7 +340,7 @@ export async function storePut(
 		const reason = error instanceof Error ? error.message : String(error);
 		throw new StoreRefusal("io", `${tag}:${blob} is stored but unrecorded (stat shows drift unrecorded): ${reason}`);
 	}
-	return { ...(await storeStat(cwd, tag, blob)), replaced, source: { path: sourceAbs } };
+	return { ...(await storeStat(cwd, tag, blob)), createdTag: created, replaced, source: { path: sourceAbs } };
 }
 
 async function storeGet(cwd: string, tag: string, blob: string, to?: string) {
@@ -355,7 +360,7 @@ async function storeGet(cwd: string, tag: string, blob: string, to?: string) {
 }
 
 /** Removes one blob and records the removal, as the store tool's remove does; without yes it only reports. */
-export async function storeRemoveBlob(cwd: string, tag: string, blob: string, yes: boolean) {
+async function storeRemoveBlob(cwd: string, tag: string, blob: string, yes: boolean) {
 	const backend = await openStoreBackend(cwd);
 	const info = await backend.statBlob(tag, blob);
 	if (info === null) throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store.`);
