@@ -836,7 +836,6 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 					{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
 					{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
-					{ waitFor: "Where is the server?", keys: [ENTER] },
 					{ waitFor: "Which model?", keys: [ENTER] },
 					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				],
@@ -853,6 +852,33 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 			match(settings, /runtime: litellm/u);
 			match(settings, /defaultModel: gateway-a/u, "the corrected credential retrieves the real catalog");
 			ok(!screen.includes("answered no model list"));
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("after a server asks for a key, offers to store one and does not ask for the address again", async () => {
+		const testEnv = unconfiguredEnv();
+		const key = "sk-server-path-key";
+		const server = await litellmServer(key);
+		try {
+			const result = await runWizard(testEnv.env, [
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
+				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Paste the API key", keys: [...key.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			const screen = plainText(result.transcript());
+			const failed = screen.indexOf("Authentication failed");
+			ok(failed >= 0, screen);
+			const pasted = screen.indexOf("Paste the API key");
+			match(screen.slice(failed, pasted), /❯ Store the key/u, "the refused request preselects a key, not No key");
+			ok(!screen.slice(pasted).includes("What is the server's address?"), `the address was asked again:\n${screen}`);
+			ok(screen.includes("reachable, 3 models"), screen);
 		} finally {
 			await server.close();
 			testEnv.cleanup();

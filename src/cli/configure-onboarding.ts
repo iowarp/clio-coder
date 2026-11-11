@@ -146,6 +146,8 @@ interface Answers {
 	credential?: CredentialSource | undefined;
 	/** A local server answered 401 or 403, so the credential question it skipped is now asked. */
 	keyRequested?: boolean | undefined;
+	/** The address step sent the operator to the credential step; its address is checked again, not asked again. */
+	recheckUrl?: boolean | undefined;
 	apiKeyEnv?: string | undefined;
 	apiKeyLiteral?: string | undefined;
 	inventory?: WireModelInventory | undefined;
@@ -749,38 +751,42 @@ const URL_STEP: Step = {
 		const gateway = runtime.gatewayUrl;
 		const offered = serverPath ? undefined : offeredUrlFor(runtime);
 		const found = serverPath ? answers.offered.filter((route) => route.kind === "local-server") : [];
-		const result = await wizard.text({
-			heading: [
-				"",
-				chalk.bold(
-					serverPath ? "What is the server's address?" : (gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
-				),
-				...(serverPath ? [] : gatewayUrlGuidance(runtime).map((line) => chalk.dim(line))),
-				...found.map((route) => chalk.dim(`found: ${route.target.url ?? route.source} (${route.runtime.displayName})`)),
-			],
-			// An offered address is a placeholder, so a typed one replaces it instead of being appended to it.
-			...(answers.url !== undefined
-				? { initial: answers.url }
-				: offered !== undefined
-					? wizard.host
-						? { initial: offered }
-						: { placeholder: offered }
-					: {}),
-			hint: gateway
-				? "paste the whole URL, scheme and path included"
-				: "host:port is enough; Clio fills in the scheme and the port it knows",
-			railPrefix: wizard.rail,
-			backLabel: "back",
-			clearOnExit: true,
-			validate: (value) =>
-				value.length === 0
-					? gateway
-						? `the ${gateway.label} is required`
-						: "a URL is required for this runtime"
-					: targetUrlProblem(value),
-			input: wizard.input,
-			output: wizard.output,
-		});
+		const recheck = answers.recheckUrl === true && !wizard.goingBack && answers.url !== undefined;
+		answers.recheckUrl = undefined;
+		const result: Awaited<ReturnType<Wizard["text"]>> = recheck
+			? { kind: "value", value: answers.url ?? "" }
+			: await wizard.text({
+					heading: [
+						"",
+						chalk.bold(
+							serverPath ? "What is the server's address?" : (gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
+						),
+						...(serverPath ? [] : gatewayUrlGuidance(runtime).map((line) => chalk.dim(line))),
+						...found.map((route) => chalk.dim(`found: ${route.target.url ?? route.source} (${route.runtime.displayName})`)),
+					],
+					// An offered address is a placeholder, so a typed one replaces it instead of being appended to it.
+					...(answers.url !== undefined
+						? { initial: answers.url }
+						: offered !== undefined
+							? wizard.host
+								? { initial: offered }
+								: { placeholder: offered }
+							: {}),
+					hint: gateway
+						? "paste the whole URL, scheme and path included"
+						: "host:port is enough; Clio fills in the scheme and the port it knows",
+					railPrefix: wizard.rail,
+					backLabel: "back",
+					clearOnExit: true,
+					validate: (value) =>
+						value.length === 0
+							? gateway
+								? `the ${gateway.label} is required`
+								: "a URL is required for this runtime"
+							: targetUrlProblem(value),
+					input: wizard.input,
+					output: wizard.output,
+				});
 		if (result.kind === "quit") return "quit";
 		if (result.kind === "back") return "back";
 		const url = normalizeUrl(result.value, runtime.id);
@@ -790,10 +796,11 @@ const URL_STEP: Step = {
 			answers.detected = undefined;
 		}
 		answers.url = url;
-		wizard.answer("URL", url);
+		if (!recheck) wizard.answer("URL", url);
 		const authenticated = await reportReachability(wizard, answers, runtime, url, bareHost);
 		if (!authenticated && runtime.auth === "api-key") {
 			answers.keyRequested = true;
+			answers.recheckUrl = true;
 			answers.inventoryKey = undefined;
 			if (answers.credential === "skip") answers.credential = undefined;
 			return "credential";
@@ -1068,7 +1075,9 @@ const CREDENTIAL_STEP: Step = {
 				hint: "only for servers that accept unauthenticated requests",
 			},
 		];
-		const current = answers.credential ?? defaultCredentialSource(runtime, answers.targetId ?? runtime.id);
+		const fallback = defaultCredentialSource(runtime, answers.targetId ?? runtime.id);
+		// The server just refused a request without a key, so No key is the one answer known to be wrong.
+		const current = answers.credential ?? (answers.keyRequested && fallback === "skip" ? "stored" : fallback);
 		const initial = Math.max(
 			0,
 			choices.findIndex((choice) => choice.value === current),
