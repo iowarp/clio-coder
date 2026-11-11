@@ -185,6 +185,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - A damaged line inside a call journal no longer stops the session's metering or hides later records: the journal is retired, a fresh segment continues, and cost shows `+?`.
 - Telemetry prunes itself daily, a killed process's journal lock no longer blocks pruning, and emptied scope directories are removed. Route history reads only the newest 2,000 runs from the last 30 days, and a dispatch no longer re-stats every file of every sealed run.
 - `clio-coder telemetry share --live` shares a running session, run or process as a verified snapshot without touching it, and `--process <id>` shares a process scope. `--profile report` anonymizes target ids, uses a fresh install id and key for each archive, and previews the names left readable. Older Clio Coder versions refuse to import `process` archives and the `report` profile.
+- A diagnostic bundle, `report selftest` or `telemetry share` of a session where a check fired (for example "changed files but ran no check" or the citation check) no longer fails with "holds a line this version cannot read": a built-in check's evidence is shared as is, and an operator rule's evidence keeps its matcher and scope with the subject anonymized. A record that fails its schema is now named as a Clio Coder bug to report.
 
 ### Install, upgrade and uninstall
 
