@@ -962,14 +962,20 @@ function helperRow(
 	].map((row) => redactedRow(row, width));
 }
 
-/** The card body lists a validation the worker itself reported as passing. */
-function reportsPassingCheck(entry: WorkerEntryState): boolean {
+/**
+ * The first validation the worker itself reported as passing, by name, or null when the card lists none. An unnamed
+ * passing row still counts, so the verdict line can name whose word it is.
+ */
+function reportedPassingCheck(entry: WorkerEntryState): string | null {
 	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
 	const validations = structured?.validations;
-	return (
-		Array.isArray(validations) &&
-		validations.some((check) => typeof check === "object" && check !== null && check.passed === true)
-	);
+	if (!Array.isArray(validations)) return null;
+	for (const check of validations) {
+		if (typeof check !== "object" || check === null || check.passed !== true) continue;
+		const name = typeof check.name === "string" ? check.name.replace(/\s+/gu, " ").trim() : "";
+		return name.length > 0 ? name : "the check";
+	}
+	return null;
 }
 
 /**
@@ -981,7 +987,7 @@ function qualityRow(
 	result: WorkerRunResultSummary | undefined,
 	runId: string,
 	inspect: boolean,
-	reportsPassingCheck = false,
+	passingCheck: string | null = null,
 ): string | null {
 	// A cancelled run checked nothing by design, so a validation verdict under it says nothing the cancel did not.
 	if (!inspect && result?.outcome === "canceled") return null;
@@ -1005,10 +1011,11 @@ function qualityRow(
 		return `${trustStateWord("validationGrounding", entry.state)}${why}`;
 	// The folded card says whether anything checked the work in plain words; the record's axis wording is for /view.
 	// A worker's own passing check row stays above this line, so the record's verdict names whose word that row is
-	// instead of denying it ran: an ad-hoc command such as `python3 -c` is not one Clio credits as a check.
+	// instead of denying it ran: an ad-hoc command such as `python3 -c` is not one Clio credits as a check, but it did
+	// run and pass, so the line names it rather than claiming no test was recognized.
 	if (!inspect && entry.state === "absent")
-		return reportsPassingCheck
-			? "the checks above are the worker's own report; Clio recognized no test or lint run"
+		return passingCheck !== null
+			? `${passingCheck} passed on the worker's own report; Clio graded no check of its own`
 			: "no check ran on this work";
 	return `quality ${validationClause(trust)}${why}`;
 }
@@ -1073,7 +1080,7 @@ export function renderWorkerEntryLines(
 	const qualityText =
 		isPending(entry) || stopping || ((collected || unchecked) && !inspect)
 			? null
-			: qualityRow(entry.result, entry.runId, inspect, reportsPassingCheck(entry));
+			: qualityRow(entry.result, entry.runId, inspect, reportedPassingCheck(entry));
 	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);
 	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps

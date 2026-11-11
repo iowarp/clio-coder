@@ -3093,6 +3093,31 @@ describe("agent invocations", () => {
 		doesNotMatch(plain, /no tools|no check ran/u, plain);
 	});
 
+	it("names the passing check a worker ran instead of saying Clio recognized no test", () => {
+		const worker = card({
+			assignmentId: "v1",
+			agentId: "coder",
+			origin: "user",
+			text: JSON.stringify({
+				mutatedPaths: [],
+				validations: [{ name: "python3 -c import calc", passed: true, evidence: "exitCode=0" }],
+				summary: "checked calc",
+			}),
+			result: {
+				outcome: "succeeded",
+				durationMs: 4_000,
+				toolCalls: 1,
+				trust: settledRunTrust(fixtureReceiptDraft(fixtureEnvelope("v1"))),
+			},
+		});
+		strictEqual(worker.result?.trust?.validationGrounding.state, "absent");
+		const plain = renderWorkerEntryLines(worker, 160, { detail: transcriptDetail("standard") })
+			.map(stripTerminalSequences)
+			.join("\n");
+		doesNotMatch(plain, /recognized no test|no check ran/u, plain);
+		match(plain, /python3 -c import calc passed on the worker's own report/u, plain);
+	});
+
 	it("names a council that only collected by its size, not by a member's route", () => {
 		const report = {
 			members: [
