@@ -498,7 +498,7 @@ export const EVENTS = {
 	"context.activity_changed": live<ContextActivityPayload>(),
 	"context.sources_changed": live<ContextSourcesChangedPayload>(),
 	/** `/reload prompts`: re-read fragments, recipes and session prompt sources now. */
-	"prompts.reload_requested": live<{ cwd: string }>(),
+	"prompts.reload_requested": live<{ cwd: string; failures?: string[] }>(),
 	"context.warning_raised": journal(S.ContextWarningRaisedSchema, {
 		tier: "operational",
 		cc: "content-free",

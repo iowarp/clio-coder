@@ -130,6 +130,9 @@ for (const mutation of ["disable", "remove"] as const) {
 			ok(!agents.contract.listSpecs().some((spec) => spec.id === "reload-active-agent"));
 			ok(agents.contract.get("coder"));
 			ok(agents.contract.get("user-survivor"));
+			const requested: string[] = [];
+			bus.emit("prompts.reload_requested", { cwd, failures: requested });
+			ok(requested.some((message) => message.includes("reload-clash")));
 			const failedRevision = agents.contract.revision();
 			reload();
 			strictEqual(events.at(-1)?.changed, false);

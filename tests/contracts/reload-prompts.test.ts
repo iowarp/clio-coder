@@ -45,3 +45,35 @@ test("/reload prompts reports a modified fragment by id and keeps the old table 
 	match(broken.text, /broken\.md/u);
 	strictEqual(requested, 1);
 });
+
+test("/reload prompts reports a failed recipe rediscovery instead of failed: none", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "clio-reload-recipes-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	mkdirSync(join(root, "identity"));
+	writeFileSync(join(root, "identity", "main.md"), fragment("identity.main", "One."));
+	const bus = createTelemetryHub();
+	bus.subscribe("prompts.reload_requested", (payload) => {
+		(payload as { failures?: string[] }).failures?.push("agent id collides with plugin recipe x");
+	});
+	const reloads = createReloadClasses({
+		config: undefined,
+		bus,
+		cwd: () => root,
+		library: () => undefined,
+		reloadLibrary: () => {
+			throw new Error("unused");
+		},
+		extensions: () => [],
+		fragmentsRoot: root,
+	});
+	const result = await reloads.run("prompts", async () => ({
+		status: "ok",
+		message: "",
+		failures: [],
+		nextSession: [],
+	}));
+	strictEqual(result.failed, true);
+	match(result.text, /Agent recipes .*collides with plugin recipe x/u);
+	ok(!result.text.includes("failed: none"));
+	ok(!result.text.includes("recipes: rediscovered"));
+});

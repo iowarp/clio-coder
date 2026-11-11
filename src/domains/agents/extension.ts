@@ -56,11 +56,12 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 			// The first reload after boot always reports a change, because no
 			// generation was committed before it. When it commits the projection
 			// start() already discovered from, the cached recipes are current.
-			const onResourceReload = (payload: unknown) => {
+			const onResourceReload = (payload: unknown): string | null => {
 				const event = payload as { changed?: unknown; digest?: unknown } | undefined;
-				if (!rediscoveryPending && (event?.changed !== true || event.digest === discoveredPluginDigest)) return;
+				if (!rediscoveryPending && (event?.changed !== true || event.digest === discoveredPluginDigest)) return null;
 				try {
 					discover();
+					return null;
 				} catch (error) {
 					// Snapshot admission may already have revoked packages. Never retain
 					// their cached authority when namespace or filesystem discovery fails.
@@ -78,15 +79,19 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					recipes = recipes.filter((recipe) => recipe.source !== "plugin" && !conflictingIds.has(recipe.id));
 					specs = recipes.map(normalizeAgentSpec);
 					revision += 1;
-					writeDiagnostic(
-						`[clio-coder:agents] rediscovery after resource reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
-					);
+					const message = error instanceof Error ? error.message : String(error);
+					writeDiagnostic(`[clio-coder:agents] rediscovery after resource reload failed: ${message}\n`);
+					return message;
 				}
 			};
-			const unsubscribePlugins = _context.bus.subscribe("plugin.reloaded", onResourceReload);
-			const unsubscribeRequested = _context.bus.subscribe("prompts.reload_requested", () => {
+			const unsubscribePlugins = _context.bus.subscribe("plugin.reloaded", (payload) => {
+				onResourceReload(payload);
+			});
+			const unsubscribeRequested = _context.bus.subscribe("prompts.reload_requested", (payload) => {
 				rediscoveryPending = true;
-				onResourceReload(undefined);
+				const failure = onResourceReload(undefined);
+				// The reload report reads this slot: a failed rediscovery is not "failed: none".
+				if (failure !== null) (payload as { failures?: string[] } | undefined)?.failures?.push(failure);
 			});
 			unsubscribePluginsReload = () => {
 				unsubscribePlugins();

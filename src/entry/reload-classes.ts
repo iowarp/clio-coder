@@ -184,13 +184,15 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 						const before = reportedFragments ?? fragmentInventory(deps.fragmentsRoot);
 						// Validate first: a broken fragment fails here and the domains keep their tables.
 						const after = fragmentInventory(deps.fragmentsRoot);
-						deps.bus.emit("prompts.reload_requested", { cwd: deps.cwd() });
+						const recipeFailures: string[] = [];
+						deps.bus.emit("prompts.reload_requested", { cwd: deps.cwd(), failures: recipeFailures });
 						reportedFragments = after;
 						lines.push(...summary("Prompt fragments", before, after));
-						lines.push("  recipes: rediscovered");
+						if (recipeFailures.length === 0) lines.push("  recipes: rediscovered");
+						else failure("  Agent recipes (plugin recipes withdrawn)", recipeFailures.join("; "));
 						lines.push("  session sources (handbook, project rules, catalogs): re-read on the next request");
 						lines.push("  prompt prefix changed; the next request re-sends it uncached");
-						lines.push("  failed: none");
+						if (recipeFailures.length === 0) lines.push("  failed: none");
 					} catch (error) {
 						failure("Prompt fragments (previous table kept)", error);
 					}
