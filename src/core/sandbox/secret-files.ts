@@ -367,6 +367,7 @@ interface CachedScan {
 	at: number;
 	stamp: number | null;
 	index: string | null;
+	workspace: boolean;
 	scan: RootScan;
 }
 
@@ -409,8 +410,17 @@ function cachedScan(root: string, workspace: boolean, exclude: ReadonlySet<strin
 		if (now - cached.at < ttl) return cached.scan;
 	}
 	const scan = scanRoot(root, exclude);
-	scanCache.set(key, { at: now, stamp, index, scan });
+	scanCache.set(key, { at: now, stamp, index, workspace, scan });
 	return scan;
+}
+
+/**
+ * Drop every cached workspace scan. Called when one of Clio's own tools may
+ * have written in the workspace, so a secret the agent just created is never
+ * served from a scan the 60 s reuse would otherwise keep.
+ */
+export function invalidateWorkspaceSecretScans(): void {
+	for (const [key, cached] of scanCache) if (cached.workspace) scanCache.delete(key);
 }
 
 export interface SecretMaskScan {

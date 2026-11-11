@@ -21,6 +21,7 @@ import {
 	readOnlyScratchDir,
 	type YoloScriptSandboxState,
 } from "../core/sandbox/main-session.js";
+import { invalidateWorkspaceSecretScans } from "../core/sandbox/secret-files.js";
 import type { SandboxEnvPolicy, UnixSocketMode } from "../core/sandbox/types.js";
 import type { PendingSkillToolPolicy, SkillToolSurfaceViolation } from "../core/skill-activation.js";
 import { withToolTelemetryContext } from "../core/telemetry/context.js";
@@ -98,6 +99,14 @@ import { pathToolLanding } from "./tool-landing.js";
  * other tool in the batch from running in parallel with them. Leaving this
  * undefined defers to the agent loop's global `toolExecution` setting.
  */
+/** Tools whose completion may have written in the workspace, so the cached secret-mask scan is renewed. */
+const WORKSPACE_WRITING_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Write,
+	ToolNames.Edit,
+	ToolNames.Bash,
+	ToolNames.RunScript,
+]);
+
 export type ToolExecutionMode = "sequential" | "parallel";
 export type ToolSourceScope = "core" | "domain";
 export type ToolRetrySafety = "idempotent" | "retry_safe" | "not_retry_safe" | "unknown";
@@ -1296,6 +1305,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				bodyStartedAt = performance.now();
 				execution = { executionStarted: true };
 				const result = await spec.run(preparedArgs, executionOptions);
+				if (WORKSPACE_WRITING_TOOLS.has(spec.name)) invalidateWorkspaceSecretScans();
 				// A body that delegated to a nested invocation the registry refused
 				// (the gateway calling a denied capability) hands the refusal back
 				// whole, and this call settles as that same blocked verdict: the

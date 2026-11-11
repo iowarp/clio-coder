@@ -12,6 +12,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // Every value below is a fake the test sets itself, built from parts so secret scanners do not read it as a leak.
@@ -153,6 +154,34 @@ test("a workspace scan is reused past 10 s while the git index is unchanged, and
 	// Past the stable-index ceiling the scan is redone anyway.
 	writeFileSync(join(root, "sub", "y.pem"), FAKE_PRIVATE_KEY);
 	strictEqual(discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 82_000).masks.length, 2);
+});
+
+test("a secret the write tool creates is masked on the next scan inside the reuse window", async (t) => {
+	const isolated = await isolateClioEnv("clio-secret-write-");
+	t.after(() => isolated.restore());
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-write-ws-")));
+	execFileSync("git", ["init", "-q"], { cwd: root });
+	mkdirSync(join(root, "sub"));
+	const saved = process.cwd();
+	process.chdir(root);
+	t.after(() => process.chdir(saved));
+	const t0 = Date.now();
+	strictEqual(discoverSecretMasks({ workspaceRoots: [root] }, [], t0).masks.length, 0);
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
+	// Path policy refuses a typed write to a key file, so the body stands in for any write the tool name covers.
+	registry.register({
+		...writeTool,
+		run: async () => {
+			writeFileSync(join(root, "sub", "x.pem"), FAKE_PRIVATE_KEY);
+			return { kind: "ok", output: "wrote" };
+		},
+	} as typeof writeTool);
+	const verdict = await registry.invoke({ tool: ToolNames.Write, args: { path: "sub/notes.txt", content: "x" } });
+	strictEqual(verdict.kind, "ok", verdict.kind === "blocked" ? verdict.reason : "");
+	deepStrictEqual(
+		discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 1_000).masks.map((mask) => mask.path.slice(root.length + 1)),
+		["sub/x.pem"],
+	);
 });
 
 test("under bwrap a contained command cannot read .env or credential variables, and an unsandboxed one still can", async (t) => {
