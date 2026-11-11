@@ -16,7 +16,7 @@ import {
 } from "../../core/settings-controls.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
 import { editSettingsFile } from "../settings-file-edit.js";
-import { openTargetWizard } from "../target-wizard.js";
+import { openTargetWizard, type TargetWizardOptions } from "../target-wizard.js";
 
 export { SETTINGS_LABELS_BY_ID } from "../../core/settings-controls.js";
 
@@ -201,7 +201,7 @@ type EntrySettingId =
 	| `fleet.endpoints.${string}`;
 export type EditableSettingId = keyof typeof SETTINGS_LABELS_BY_ID | EntrySettingId;
 type GroupHeaderId = `settings.group.${string}`;
-type TargetsCtaId = "targets.add-cta";
+type TargetsCtaId = "targets.add-cta" | "targets.url-cta";
 export type SettingsCenterRowId =
 	| EditableSettingId
 	| GroupHeaderId
@@ -1084,6 +1084,23 @@ function targetAddCta(): SettingsCenterItem {
 	};
 }
 
+function targetUrlCta(): SettingsCenterItem {
+	return {
+		id: "targets.url-cta",
+		label: "Connect by URL",
+		currentValue: "Enter an endpoint URL",
+		description:
+			"Connect a model server or API by its URL: Clio reads its model list, asks for a key only when the endpoint needs one, and uses the model you choose for chat.",
+		section: "models",
+		configPath: "targets.url-cta",
+		affordance: "Enter: connect by URL",
+		scope: "live",
+		readOnly: false,
+		presentationKind: "action",
+		valueSegments: [{ text: "Enter an endpoint URL", tone: "neutral" }],
+	};
+}
+
 const TURN_PREPARATION_LABELS: Readonly<Record<(typeof TURN_CONTROL_WORKFLOWS)[number], string>> = {
 	"detached-collection": "Collect finished background runs",
 };
@@ -1513,6 +1530,7 @@ export function buildSettingItems(
 		}),
 		...targetRows(settings, options),
 		targetAddCta(),
+		targetUrlCta(),
 		settingItem("scope", scopeText, {
 			submenu: scopedModelsSubmenu(scopeList, options?.providers),
 			affordance: "opens provider-backed checklist",
@@ -2760,6 +2778,8 @@ export interface SettingsCenterOptions {
 	onApply: (plan: SettingsChangePlan, scope: "session" | "project" | "global") => void;
 	onCancel: () => void;
 	onAddTarget?: () => void;
+	/** "Connect by URL": Quick Connect in the docked wizard surface. */
+	onConnectByUrl?: () => void;
 	/** "Edit settings file": open the chosen settings file in the operator's editor. */
 	onEditSettingsFile?: (file: "user" | "project") => void;
 	/** "Check setup": close settings and run the doctor. */
@@ -3340,6 +3360,10 @@ export class SettingsCenter implements Component {
 		if (!item || item.readOnly) return;
 		if (item.id === "targets.add-cta") {
 			this.options.onAddTarget?.();
+			return;
+		}
+		if (item.id === "targets.url-cta") {
+			this.options.onConnectByUrl?.();
 			return;
 		}
 		if (item.id === "maintenance.diagnostics") {
@@ -4035,11 +4059,16 @@ function settingsBodyHeight(tui: TUI): number {
 
 export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): SettingsOverlayHandle {
 	let wizard: OverlayHandle | null = null;
-	const launchWizard = (targetId?: string): void => {
+	const launchWizard = (targetId?: string, byUrl = false): void => {
 		const target = targetId ? deps.getSettings().targets.find((entry) => entry.id === targetId) : undefined;
 		if (targetId && !target) return;
 		wizard?.hide();
-		wizard = openTargetWizard(tui, target ? { mode: "edit", target: structuredClone(target) } : { mode: "add" }, () => {
+		const options: TargetWizardOptions = target
+			? { mode: "edit", target: structuredClone(target) }
+			: byUrl
+				? { mode: "url" }
+				: { mode: "add" };
+		wizard = openTargetWizard(tui, options, () => {
 			wizard = null;
 			refreshRows();
 			// A target just added reads `? unknown` until probed, which the wizard already showed was reachable.
@@ -4094,6 +4123,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			refreshRows();
 		},
 		onAddTarget: () => launchWizard(),
+		onConnectByUrl: () => launchWizard(undefined, true),
 		onEditSettingsFile: (file) => {
 			editSettingsFile(file, {
 				cwd: process.cwd(),

@@ -1,4 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "../../src/cli/select.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
@@ -29,6 +31,16 @@ test("Add target is an actionable in-TUI wizard (#385)", () => {
 	ok(add);
 	strictEqual(add.readOnly, false);
 	ok(!add.currentValue.includes("clio-coder"));
+});
+
+test("Connect by URL sits beside Add a target as an actionable row", () => {
+	const items = buildSettingItems(structuredClone(DEFAULT_SETTINGS));
+	const ids = items.map((item) => item.id);
+	const url = items.find((item) => item.id === "targets.url-cta");
+	ok(url);
+	strictEqual(url.label, "Connect by URL");
+	strictEqual(url.readOnly, false);
+	strictEqual(ids.indexOf("targets.url-cta"), ids.indexOf("targets.add-cta") + 1);
 });
 
 function fixtures(): void {
@@ -84,7 +96,7 @@ class ScriptedWizard extends TargetWizardSurface {
 		let value: unknown;
 		if (heading.includes("Where does your model")) value = "local-server";
 		else if (heading.includes("Which provider")) value = this.runtime;
-		else if (heading.includes("Which model")) value = this.model;
+		else if (heading.includes("Which model") || heading.includes("Choose the model")) value = this.model;
 		else if (heading.includes("Review what Clio could verify")) {
 			for (const width of [40, 60, 80]) {
 				const screen = this.render(width).map(stripTerminalSequences).join("\n");
@@ -273,6 +285,38 @@ test("closing setup during a probe cannot save a late target (#385)", async () =
 			else delete runtime.probe;
 		}
 	} finally {
+		env.restore();
+	}
+});
+
+test("Connect by URL saves a connection from a URL and a model inside the hosted surface", async () => {
+	const env = await isolateClioEnv("clio-coder-target-url-");
+	const server = createServer((request, response) => {
+		if (request.url === "/v1/models") {
+			response.writeHead(200, { "content-type": "application/json" });
+			response.end(JSON.stringify({ object: "list", data: [{ id: "model-a" }, { id: "model-b" }] }));
+			return;
+		}
+		response.writeHead(404);
+		response.end();
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		registerBuiltinRuntimes(getRuntimeRegistry());
+		initializeClioHome();
+		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const wizard = new ScriptedWizard("", url, "model-b");
+		strictEqual(await wizard.start({ mode: "url" }), 0, wizard.render(200).map(stripTerminalSequences).join("\n"));
+		const settings = readSettings();
+		const target = settings.targets.find((entry) => entry.url === url);
+		ok(target, JSON.stringify({ targets: settings.targets, seen: wizard.seen }));
+		strictEqual(settings.chat.target, target.id);
+		strictEqual(settings.chat.model, "model-b");
+		const screen = wizard.render(200).map(stripTerminalSequences).join("\n");
+		match(screen, new RegExp(`Connected: ${target.id} / model-b`));
+		ok(!screen.includes("Start Clio"), screen);
+	} finally {
+		server.close();
 		env.restore();
 	}
 });

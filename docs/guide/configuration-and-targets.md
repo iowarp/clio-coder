@@ -9,7 +9,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Connect a model | [First-run flow](#first-run-flow), or `clio-coder configure --quick` when you already know the endpoint |
 | Understand how an existing home picks a chat route | [Chat route detection](#chat-route-detection) |
 | Apply a lab or site setup file | [Setup files](#setup-files): `clio-coder configure --import <path-or-https-url>` |
-| Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` opens Connections, where **Add a target** adds one |
+| Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` opens Connections, where **Add a target** or **Connect by URL** adds one |
 | Inspect or probe targets | `clio-coder targets` |
 | Check a model list | `clio-coder models --target <id>` |
 | Make a target report cost | [Pricing and cost provenance](#pricing-and-cost-provenance) |
@@ -394,7 +394,7 @@ Renamed version-1 paths and retired keys, including the version-2 keys `fleet.de
 
 A target is a named connection to a model provider or server. It combines a runtime, endpoint and authentication with model defaults; a model ID alone does not describe that connection.
 
-In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
+In the TUI, open `/settings connections` (or `/settings targets`), choose **Add a target**, or open a connection and choose **Edit URL, runtime and default model**. **Connect by URL** asks only for an endpoint URL, a key when the endpoint needs one, and a model from its live list; it saves the connection and makes that model the chat model. The configure wizard runs in the composer dock, with the same probing, model validation and review-before-save behavior. Enter advances, Esc goes back, and Ctrl+C cancels target setup. **Save target** writes global target settings and keeps explicit chat, fleet and memory route defaults. Browser sign-in stores credentials immediately; other target settings wait for Save.
 
 Use guided `clio-coder configure` for source-led setup, `clio-coder configure --quick` for the URL-first shortcut, `clio-coder configure --section targets` for the target console, or `clio-coder targets add` for the target wizard. The non-interactive flag surface is documented by `clio-coder configure --help` and implemented in [`src/cli/configure.ts`](../../src/cli/configure.ts).
 

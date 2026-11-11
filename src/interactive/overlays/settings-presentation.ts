@@ -168,13 +168,18 @@ export function settingsPathLabel(path: string): string {
 	return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
 }
 
+/** The two action rows under the connections table: Add a target and Connect by URL. */
+function isTargetsCta(item: SettingsCenterItem): boolean {
+	return item.id === "targets.add-cta" || item.id === "targets.url-cta";
+}
+
 /**
  * When a change to this row reaches the running system, in the vocabulary of
  * the config-change classification: the same answer the change plan gives
  * after a value is chosen, stated before the operator opens the row.
  */
 export function effectTiming(item: SettingsCenterItem): string | null {
-	if (item.presentationKind === "group-header" || item.id === "targets" || item.id === "targets.add-cta") return null;
+	if (item.presentationKind === "group-header" || item.id === "targets" || isTargetsCta(item)) return null;
 	if (item.id.startsWith("maintenance.")) return null;
 	if (item.scope === "restart") return "after restart";
 	if (item.id.startsWith("targets.")) return "chat now · workers next dispatch";
@@ -321,7 +326,7 @@ export function clippedSettingValue(
 	labelWidth: number,
 	state: SettingRowState,
 ): string | null {
-	if (item.presentationKind === "group-header" || item.id === "targets.add-cta" || item.targetConsole) return null;
+	if (item.presentationKind === "group-header" || isTargetsCta(item) || item.targetConsole) return null;
 	const shown = stripTerminalSequences(settingValueText(theme, item, state));
 	const { valueWidth } = valueRowLayout({ labelWidth, width });
 	// A row built from segments (a profile, a node) may arrive already
@@ -343,7 +348,7 @@ export function renderSettingRow(
 ): string {
 	// A group rule names a block of rows; the lane's title is the one orange anchor, so the rule stays ivory.
 	if (item.presentationKind === "group-header") return sectionRule(theme, width, item.label, { token: "groupHeading" });
-	if (item.id === "targets.add-cta") {
+	if (isTargetsCta(item)) {
 		return valueRow(theme, {
 			focused: state.selected,
 			label: state.selected ? item.label : theme.style("commandHint", item.label, { bold: true }),
@@ -532,6 +537,7 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	const facts: Array<string | null> = [];
 	if (item.id.startsWith("maintenance.")) facts.push(chip(theme, `Enter ${item.currentValue}`, "muted"));
 	else if (item.id === "targets.add-cta") facts.push(chip(theme, "Enter opens the guided setup", "muted"));
+	else if (item.id === "targets.url-cta") facts.push(chip(theme, "Enter asks for the endpoint URL", "muted"));
 	else if (item.readOnly) facts.push(chip(theme, `read-only here · ${item.affordance}`, "muted"));
 	else if (item.presentationKind === "status" || item.presentationKind === "action")
 		facts.push(chip(theme, item.affordance, "muted"));
@@ -679,6 +685,8 @@ function scopeNote(item: SettingsCenterItem, context: InspectorContext): string 
 	if (item.id.startsWith("maintenance.")) return `Enter ${item.currentValue}`;
 	if (item.id === "targets.add-cta")
 		return "Opens the guided setup for a new connection; its last step saves it to your global settings";
+	if (item.id === "targets.url-cta")
+		return "Saves the connection to your global settings and uses the chosen model for chat";
 	if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
 		return `${item.affordance} · nothing changes until an action is confirmed`;
 	if (item.readOnly) return `Read-only here · ${item.affordance}`;

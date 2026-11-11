@@ -626,7 +626,7 @@ The command line has no resume flag. `clio-coder --resume`, `--continue`, `-r` a
 
 ### Running setup with /config
 
-`/config` opens `/settings connections`: the settings overlay on Models, with the connections table first and the chat connection selected. It works during a turn and never leaves the TUI. **Add a target** and a connection's edit action run the setup wizard in the composer dock. The full-screen flow, including Quick Connect, is `clio-coder configure` in a terminal.
+`/config` opens `/settings connections`: the settings overlay on Models, with the connections table first and the chat connection selected. It works during a turn and never leaves the TUI. **Add a target** and a connection's edit action run the setup wizard in the composer dock, and **Connect by URL** runs Quick Connect there: an endpoint URL, a key only when the endpoint needs one, and a model from its live list, which chat then uses. The full-screen flow is `clio-coder configure` in a terminal.
 
 
 ## Keybindings

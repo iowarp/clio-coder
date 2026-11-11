@@ -95,6 +95,9 @@ function questionFirst(
 	];
 }
 
+/** What the docked surface runs: the shared target wizard, or Quick Connect from an endpoint URL. */
+export type TargetWizardOptions = HostedTargetOptions | { mode: "url" };
+
 interface PendingChoice {
 	kind: "select";
 	options: SelectOptions<unknown>;
@@ -232,10 +235,16 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		});
 	}
 
-	async start(options: HostedTargetOptions): Promise<number> {
+	async start(options: TargetWizardOptions): Promise<number> {
 		try {
-			const { runHostedTargetWizard } = await import("../cli/configure-host.js");
-			const code = await runHostedTargetWizard(this, options);
+			let code: number;
+			if (options.mode === "url") {
+				const { runHostedQuickConnect } = await import("./quick-connect-host.js");
+				code = await runHostedQuickConnect(this);
+			} else {
+				const { runHostedTargetWizard } = await import("../cli/configure-host.js");
+				code = await runHostedTargetWizard(this, options);
+			}
 			this.complete = true;
 			this.requestRender();
 			return code;
@@ -517,7 +526,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 	}
 }
 
-export function openTargetWizard(tui: TUI, options: HostedTargetOptions, onClose: () => void): OverlayHandle {
+export function openTargetWizard(tui: TUI, options: TargetWizardOptions, onClose: () => void): OverlayHandle {
 	let handle: OverlayHandle | undefined;
 	const close = (): void => {
 		handle?.hide();
@@ -528,7 +537,12 @@ export function openTargetWizard(tui: TUI, options: HostedTargetOptions, onClose
 	handle = showClioOverlayFrame(tui, body, {
 		title: () => {
 			const step = body.stepNumber();
-			const name = options.mode === "edit" ? `Edit target: ${options.target.id}` : "Add target";
+			const name =
+				options.mode === "edit"
+					? `Edit target: ${options.target.id}`
+					: options.mode === "url"
+						? "Connect by URL"
+						: "Add target";
 			return step === null ? name : `${name} · step ${step}`;
 		},
 		markerId: "target-wizard",
