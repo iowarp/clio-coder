@@ -373,6 +373,14 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | --- | --- | --- |
 | `report.offers` | `ask` | immediately |
 
+### Prompts
+
+`prompts.profile` selects the main agent's system prompt text: `v1` is the current text, `v2` the D-02 rewrite under evaluation. Workers follow it for their operating contract.
+
+| Key | Default | When it applies |
+| --- | --- | --- |
+| `prompts.profile` | `v1` | restart |
+
 Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A renamed version-1 path, or a version-1-only root, in a user `settings.yaml` is refused with a message naming its version-2 replacement or `clio-coder upgrade`. A retired key never blocks loading. That covers the four keys above, `context.compaction.excludeLastTurns` and the retired System One, speculative dispatch and orientation keys. The file loads, the key is ignored, `clio-coder doctor` warns that it is retired and ignored, and `clio-coder doctor --fix` removes it from the user `settings.yaml`. The [System One guide](system-one.md#retired-settings) lists the System One keys.
 
 ---

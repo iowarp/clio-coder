@@ -123,6 +123,8 @@ const NEXT_TURN_FIELDS = new Set<string>([
 ]);
 
 const RESTART_REQUIRED_FIELDS = new Set<string>([
+	// The prompt profile is fixed when a session compiles its prefix.
+	"prompts.profile",
 	"fleet.concurrency",
 	"systemOne.use",
 	"interface.mode",

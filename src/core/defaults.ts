@@ -956,6 +956,9 @@ export const DEFAULT_SETTINGS = {
 	report: {
 		offers: "ask" as "ask" | "off",
 	},
+	prompts: {
+		profile: "v1" as "v1" | "v2",
+	},
 };
 
 /**
@@ -1222,6 +1225,11 @@ telemetry:
 # never suggests. Nothing is sent without your keypress.
 report:
   offers: ask
+
+# Main-agent system prompt text: v1 (current) or v2 (the D-02 rewrite, under
+# evaluation). Applies to the next session.
+prompts:
+  profile: v1
 `;
 
 /**

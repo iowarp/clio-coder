@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -66,4 +66,69 @@ describe("prompt tiers", () => {
 			strictEqual(actual, readFileSync(expectedPath, "utf8"));
 		});
 	}
+});
+
+describe("prompts.profile v2 (S-82)", () => {
+	const session = (name: string, extra: Record<string, unknown> = {}) => {
+		const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as Tier;
+		if (tier.kind !== "session") throw new Error(`${name} is not a session tier`);
+		const inputs = { ...tier.inputs, sessionInputs: { ...tier.inputs.sessionInputs, promptProfile: "v2", ...extra } };
+		return compile(loadFragments(), inputs as CompileInputs);
+	};
+
+	it("fits the D-02 size bounds on the reference fixture", () => {
+		const attended = session("attended-default").systemPrompt.length;
+		const headless = session("headless-default").systemPrompt.length;
+		ok(attended <= 26_000, `attended ${attended}`);
+		ok(headless <= 19_000, `headless ${headless}`);
+	});
+
+	it("lays sections in the D-02 order and drops the v1 core fragments", () => {
+		const compiled = session("attended-default");
+		const ids = compiled.sections.map((section) => section.id);
+		const order = ["identity", "operating-contract", "harness", "tool-contract", "safety", "operator"];
+		deepStrictEqual(
+			ids.filter((id) => order.includes(id)),
+			order,
+		);
+		const manifest = compiled.fragmentManifest.map((fragment) => fragment.id);
+		for (const gone of [
+			"identity.clio",
+			"identity.clio-attended",
+			"identity.self-awareness-attended",
+			"operating.contract",
+			"operating.contract-attended",
+			"operating.user-control",
+			"operating.coordinator",
+			"operating.discovered-skills",
+		])
+			ok(!manifest.includes(gone), gone);
+		for (const name of ["attended-default", "attended-yolo", "headless-default", "headless-yolo"]) {
+			const text = session(name).systemPrompt;
+			for (const banned of ["If you want", "Offer setup", "## Ending a turn", "# Demo guidance"])
+				ok(!text.includes(banned), `${name}: ${banned}`);
+		}
+	});
+
+	it("renders each harness row only with its capability", () => {
+		const base = session("attended-default").systemPrompt;
+		const rows: Record<string, string> = {
+			job: "create a `job` that polls",
+			decide: "record it with `decide`",
+			tasks: "on the `tasks` board",
+		};
+		for (const [tool, text] of Object.entries(rows)) {
+			const tier = JSON.parse(readFileSync(join(dir, "attended-default.inputs.json"), "utf8")) as Tier;
+			if (tier.kind !== "session") throw new Error("not a session tier");
+			const without = session("attended-default", {
+				toolNames: (tier.inputs.sessionInputs.toolNames ?? []).filter((name) => name !== tool),
+				coordinatorCapabilities: tier.inputs.sessionInputs.coordinatorCapabilities.filter((name) => name !== tool),
+				...(tier.inputs.sessionInputs.capabilityMap
+					? { capabilityMap: tier.inputs.sessionInputs.capabilityMap.filter((entry) => entry.tool !== tool) }
+					: {}),
+			}).systemPrompt;
+			ok(base.includes(text), `${tool} row missing`);
+			ok(!without.includes(text), `${tool} row survives without ${tool}`);
+		}
+	});
 });

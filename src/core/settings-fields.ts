@@ -175,6 +175,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"prewarm",
 	"pricing",
 	"profile",
+	"prompts",
 	"profiles",
 	"project",
 	"projectContext",

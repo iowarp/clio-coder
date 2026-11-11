@@ -2903,6 +2903,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(toolDiscoveryHints.length > 0 ? { toolDiscoveryHints } : {}),
 				...(capabilityMap.length > 0 ? { capabilityMap } : {}),
 				...(declaredChecks.length > 0 ? { declaredChecks } : {}),
+				...(deps.getSettings().prompts?.profile === "v2" ? { promptProfile: "v2" as const } : {}),
 				...(guidance ? { thinkingGuidance: guidance } : {}),
 				...(deps.toolRegistry?.get(ToolNames.ConfigureClio) ? { canConfigureClio: true } : {}),
 				...(deps.headless === true ? { headless: true } : {}),

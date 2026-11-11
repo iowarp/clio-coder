@@ -1500,6 +1500,18 @@ function validateTelemetry(issues: Issues, raw: unknown, settings: ClioSettings)
 	}
 }
 
+function validatePrompts(issues: Issues, raw: unknown, settings: ClioSettings): void {
+	if (!isPlainObject(raw)) {
+		issues.add("prompts", `expected a map, got ${describe(raw)}`);
+		return;
+	}
+	issues.unknownKeys("prompts", raw, ["profile"]);
+	if ("profile" in raw) {
+		const parsed = expectEnum(issues, "prompts.profile", raw.profile, ["v1", "v2"] as const);
+		if (parsed !== undefined) settings.prompts.profile = parsed;
+	}
+}
+
 function validateReport(issues: Issues, raw: unknown, settings: ClioSettings): void {
 	if (!isPlainObject(raw)) {
 		issues.add("report", `expected a map, got ${describe(raw)}`);
@@ -1525,6 +1537,7 @@ const TOP_LEVEL_KEYS = [
 	"integrations",
 	"telemetry",
 	"report",
+	"prompts",
 	...V1_ONLY_ROOTS,
 ] as const;
 
@@ -2739,6 +2752,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 
 	if ("telemetry" in raw) validateTelemetry(issues, raw.telemetry, settings);
 	if ("report" in raw) validateReport(issues, raw.report, settings);
+	if ("prompts" in raw) validatePrompts(issues, raw.prompts, settings);
 
 	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 }

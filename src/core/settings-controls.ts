@@ -476,6 +476,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"telemetry.mode": ["standard", "research"],
 	"report.offers": ["ask", "off"],
+	"prompts.profile": ["v1", "v2"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.yoloConfinement": ["contained", "unconfined"],
 	"safety.sandbox": ["auto", "required", "off"],
@@ -716,6 +717,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
+	],
+	"prompts.profile": [
+		"Prompt profile",
+		"Main-agent system prompt text: v1 is the current text, v2 the D-02 rewrite under evaluation. Applies to the next session.",
 	],
 	"report.offers": [
 		"Suggest reports",

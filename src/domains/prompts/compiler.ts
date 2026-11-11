@@ -107,6 +107,8 @@ export interface SessionPromptInputs {
 	capabilityMap?: ReadonlyArray<CapabilityMapEntry>;
 	/** Check ids `verify({})` lists for this project, in its order; rendered in Project and the verify example. */
 	declaredChecks?: ReadonlyArray<string>;
+	/** `prompts.profile`: v2 renders the D-02 core text (S-82); absent means v1. */
+	promptProfile?: "v1" | "v2";
 	contextFiles?: string;
 	memorySection?: string;
 	/** Bounded host facts from completed operator context operations; never a user message. */
@@ -127,6 +129,8 @@ export interface CompileInputs {
 
 /** Stable inputs for one mediated fleet worker's canonical system prompt. */
 export interface WorkerPromptInputs {
+	/** `prompts.profile`: v2 swaps operating.contract for operating.work (S-82). */
+	promptProfile?: "v1" | "v2";
 	/** False when nothing can steer this worker; its prompt then omits steering guidance. */
 	liveSteering?: boolean;
 	/** The same inherited constraints enforced by worker admission. */
@@ -344,12 +348,19 @@ function renderSafetySection(
 	headless: boolean,
 	confinement?: YoloConfinement,
 	askUserAttached = false,
+	headlessApprovalInContract = false,
 ): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level, confinement)}`;
 	const body = sessionSafetyBody(safetyFragment.body.trim(), headless, askUserAttached);
 	// Nothing parks under yolo of either confinement (#407): contained yolo
 	// refuses what would park, which its body says, so no line says what parking means.
-	const approval = level === "yolo" ? null : headless ? HEADLESS_SESSION_APPROVAL_SEMANTICS : SESSION_APPROVAL_SEMANTICS;
+	// Under v2 the headless contract carries this sentence instead (D-02 4.4).
+	const approval =
+		level === "yolo" || (headless && headlessApprovalInContract)
+			? null
+			: headless
+				? HEADLESS_SESSION_APPROVAL_SEMANTICS
+				: SESSION_APPROVAL_SEMANTICS;
 	if (body.length === 0) return oneLine;
 	return approval === null ? `${oneLine}\n\n${body}` : `${oneLine}\n${approval}\n\n${body}`;
 }
@@ -826,7 +837,9 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 			: hasGateway
 				? ["", GATEWAY_CALLING_RULE]
 				: []),
-		...(askUser ? ["", ...renderTurnEndingContract(admitted.has("ask_user"), autonomyLevel === "yolo")] : []),
+		...(askUser && inputs.promptProfile !== "v2"
+			? ["", ...renderTurnEndingContract(admitted.has("ask_user"), autonomyLevel === "yolo")]
+			: []),
 		"",
 		...(reachable("verify") && inputs.turnConstraints?.mode !== "answer" && inputs.turnConstraints?.mode !== "proposal"
 			? [
@@ -1056,6 +1069,25 @@ export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"memory",
 ];
 
+/** D-02 section 4.2 order, used under prompts.profile v2 (S-82). */
+const SESSION_PROMPT_SECTION_ORDER_V2: ReadonlyArray<string> = [
+	"identity",
+	"operating-contract",
+	"harness",
+	"delegation",
+	"tool-contract",
+	"safety",
+	"operator",
+	"harness-awareness",
+	"retrieval-hints",
+	"project-context",
+	"runtime",
+	"memory",
+];
+
+const V2_HEADLESS_APPROVAL =
+	"Nobody is attached to this run: a call that would need approval is denied, so use recognized commands and typed checks and report what could not run.";
+
 /**
  * How long a compiled section's bytes stay unchanged, which decides how much
  * of the prompt a provider's prefix cache can reuse:
@@ -1081,6 +1113,8 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 	"tool-contract": "pinned",
 	"retrieval-hints": "turn",
 	"harness-awareness": "pinned",
+	harness: "pinned",
+	operator: "pinned",
 	"project-context": "session",
 	memory: "turn",
 	runtime: "session",
@@ -1112,8 +1146,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 				: posture.id;
 	const session = inputs.sessionInputs;
 	const picker = new FragmentPicker(table, sessionFacts(session, autonomyLevel));
-	const identity = picker.require(inputs.identity, "identity");
-	const operatingContract = picker.require(inputs.operatingContract, "operating contract");
+	// prompts.profile v2 swaps the core text for the D-02 drafts (S-82); v1 is untouched.
+	const v2 = session.promptProfile === "v2" && inputs.identity === "identity.clio";
+	const identity = picker.require(v2 ? "identity.clio-v2" : inputs.identity, "identity");
+	const operatingContract = picker.require(v2 ? "operating.work" : inputs.operatingContract, "operating contract");
 	const safety =
 		posture === undefined
 			? (picker.pick(defaultSafetyId(session.sandbox === true)) ??
@@ -1138,15 +1174,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// an attended session. A headless run carried about 7 KB of it on every
 	// request. The flag is fixed for a session, so its prefix stays byte-stable.
 	const attended = session.headless !== true;
-	const clioIdentity = identity.id === "identity.clio";
+	const clioIdentity = identity.id === "identity.clio" || identity.id === "identity.clio-v2";
 	const selfAwareness = clioIdentity ? picker.pick("identity.self-awareness") : undefined;
 	// Conversation manners, in-chat memory, multi-turn and decision-board rules
 	// and skill installation only arise with an operator attached; a headless
 	// run is one task and its report, so it keeps the core rules alone. Each of
 	// these fragments declares `surfaces` in its frontmatter.
-	const attendedIdentity = clioIdentity ? picker.pick("identity.clio-attended") : undefined;
-	const attendedSelfAwareness = selfAwareness ? picker.pick("identity.self-awareness-attended") : undefined;
-	const attendedContract = picker.pick("operating.contract-attended");
+	const attendedIdentity = clioIdentity && !v2 ? picker.pick("identity.clio-attended") : undefined;
+	const attendedSelfAwareness = selfAwareness && !v2 ? picker.pick("identity.self-awareness-attended") : undefined;
+	const attendedContract = v2 ? undefined : picker.pick("operating.contract-attended");
+	const harnessGuide = v2 ? picker.pick("operating.harness") : undefined;
+	const operatorGuide = v2 ? picker.pick("operating.attended") : undefined;
 	// Every harness in the 2026-10 campaign lost T3 by finishing with a
 	// performance clause unaddressed; a headless run has no operator to catch it.
 	const headlessContract = picker.pick("operating.contract-headless");
@@ -1158,7 +1196,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// about Clio listed and grepped the docs tree for several turns.
 	// It names clio_docs only where the capability map lists it: a headless map
 	// leaves clio_docs out unless it is attached directly (S-89).
+	// Under v2 the clio_docs row of operating.harness carries this lookup.
 	const docsLookup =
+		!v2 &&
 		selfAwareness &&
 		(attended || toolSurfaceHasTool(session.toolNames, "clio_docs")) &&
 		session.providerSupportsTools !== false &&
@@ -1176,6 +1216,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		identity.id === "identity.clio" && attended && !docsRouting
 			? ["operating.memory-guidance", "operating.support-guidance"].map((id) => picker.require(id, "guidance"))
 			: [];
+	let v2RuntimePaths = "";
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
 		// The live home, not the XDG default: an isolated CLIO_CODER_HOME or a
@@ -1193,21 +1234,30 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			)
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		harnessAwareness = [
-			rendered.trim(),
-			...(attendedSelfAwareness && !docsRouting ? [attendedSelfAwareness.body.trim()] : []),
-			...(docsLookup && !docsRouting ? [docsLookup.body.trim()] : []),
-			...(docsRouting ? [HARNESS_ROUTING_ROW] : []),
-			...(!docsRouting && attended && toolSurfaceHasTool(session.toolNames, "context") ? [SETTINGS_ROUTING_ROW] : []),
-		].join("\n\n");
+		// v2 keeps two Runtime lines for where Clio's own docs, source and settings live (D-02 4.4).
+		if (v2) {
+			v2RuntimePaths = rendered
+				.split("\n")
+				.filter((line) => line.startsWith("Documentation and source") || line.startsWith("User settings"))
+				.join("\n");
+		}
+		harnessAwareness = v2
+			? ""
+			: [
+					rendered.trim(),
+					...(attendedSelfAwareness && !docsRouting ? [attendedSelfAwareness.body.trim()] : []),
+					...(docsLookup && !docsRouting ? [docsLookup.body.trim()] : []),
+					...(docsRouting && !v2 ? [HARNESS_ROUTING_ROW] : []),
+					...(!docsRouting && attended && toolSurfaceHasTool(session.toolNames, "context") ? [SETTINGS_ROUTING_ROW] : []),
+				].join("\n\n");
 	}
 
 	// Role guidance requires a reachable tool so it never teaches an unavailable call.
 	const delegation =
 		sessionCanDispatch(session) && session.turnConstraints?.mode !== "answer"
-			? picker.pick("operating.coordinator")
+			? picker.pick(v2 ? "operating.delegating" : "operating.coordinator")
 			: undefined;
-	const skills = sessionCanUseSkills(session) ? picker.pick("operating.discovered-skills") : undefined;
+	const skills = sessionCanUseSkills(session) && !v2 ? picker.pick("operating.discovered-skills") : undefined;
 	const resolvedSkillActivation =
 		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills()
 			? 'Load a matching ready skill through gateway(op="call", capability="context", args={scope:"skills",name:"<name>"}); honor its workflow and tool restrictions. Load the next skill only when its step is reached.'
@@ -1218,20 +1268,22 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// call tools gets none, since the notes are about acting between tool calls.
 	const modelNotesId = session.providerSupportsTools === false ? null : modelGuidanceFragmentId(session.model);
 	const modelNotes = modelNotesId === null ? undefined : picker.pick(modelNotesId);
-	const userControl = picker.pick("operating.user-control");
+	const userControl = v2 ? undefined : picker.pick("operating.user-control");
 	// Steering guidance rides the operating contract: the queue delivers several
 	// operator messages at one slot, and the model needs to know how they rank.
-	const steering = session.liveSteering === false ? undefined : picker.pick("operating.steering");
+	// v2 carries steering in operating.attended; a headless run keeps the v1 fragment.
+	const steering = session.liveSteering === false || (v2 && attended) ? undefined : picker.pick("operating.steering");
 	// Decision-record guidance only where `decide` is on this session's map; a
 	// headless run leaves it off (S-89). The report guidance follows the same
 	// rule (R-12). Both declare it in frontmatter.
-	const decisions = picker.pick("operating.decisions");
+	const decisions = v2 ? undefined : picker.pick("operating.decisions");
 	const reportGuidance = picker.pick("operating.report-guidance");
 	const mainOperatingContract = [
 		withDecisions(operatingContract.body, decisions),
 		attendedContract?.body,
 		reportGuidance?.body,
 		headlessContract?.body,
+		v2 && headlessContract ? V2_HEADLESS_APPROVAL : undefined,
 		userControl?.body,
 		steering?.body,
 	]
@@ -1242,7 +1294,12 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		.join("\n\n");
 	const rendered = new Map<string, string>([
 		["identity", identityBody],
-		["operating-contract", [mainOperatingContract, session.demo ? DEMO_GUIDANCE : ""].filter(Boolean).join("\n\n")],
+		[
+			"operating-contract",
+			[mainOperatingContract, session.demo && !v2 ? DEMO_GUIDANCE : ""].filter(Boolean).join("\n\n"),
+		],
+		["harness", harnessGuide?.body ?? ""],
+		["operator", operatorGuide?.body ?? ""],
 		["harness-awareness", harnessAwareness],
 		[
 			"delegation",
@@ -1266,16 +1323,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 				session.headless === true,
 				session.yoloConfinement,
 				toolSurfaceHasTool(session.toolNames, "ask_user"),
+				v2,
 			),
 		],
-		["runtime", [renderRuntimeBlock(session), modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
+		["runtime", [renderRuntimeBlock(session), v2RuntimePaths, modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
 		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],
 		["memory", renderMemoryBlock(session.memorySection)],
 		["project-context", renderProjectBlock(session.contextFiles, declaredChecksLine(session))],
 	]);
 	let pinnedChars = 0;
-	for (const id of SESSION_PROMPT_SECTION_ORDER) {
+	for (const id of v2 ? SESSION_PROMPT_SECTION_ORDER_V2 : SESSION_PROMPT_SECTION_ORDER) {
 		if (id === "memory") continue;
 		push(id, rendered.get(id) ?? "");
 		if (id === "harness-awareness") pinnedChars = parts.join("\n\n").length;
@@ -1300,6 +1358,8 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		...(decisions ? [decisions] : []),
 		...(attendedContract ? [attendedContract] : []),
 		...(headlessContract ? [headlessContract] : []),
+		...(harnessGuide ? [harnessGuide] : []),
+		...(operatorGuide ? [operatorGuide] : []),
 		...(userControl ? [userControl] : []),
 		...(steering ? [steering] : []),
 		...(delegation ? [delegation] : []),
@@ -1354,7 +1414,10 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	}
 	const picker = new FragmentPicker(table, workerFacts(inputs));
 	const identity = picker.require("identity.clio-coder-worker", "worker identity");
-	const operatingContract = picker.require("operating.contract", "operating contract");
+	const operatingContract = picker.require(
+		inputs.promptProfile === "v2" ? "operating.work" : "operating.contract",
+		"operating contract",
+	);
 	const workerContract = picker.require("operating.worker", "worker contract");
 	const decisions = picker.pick("operating.decisions");
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.

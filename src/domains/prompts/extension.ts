@@ -338,8 +338,10 @@ export function createPromptsBundle(
 			const { cwd: inputCwd, workingContextPaths, ...workerInputs } = input;
 			const cwd = inputCwd ?? process.cwd();
 			const customization = customizationFragments(cwd, workingContextPaths ?? []);
+			const profile = config()?.get().prompts?.profile;
 			const compiled = compileWorker(table, {
 				...workerInputs,
+				...(profile === "v2" && workerInputs.promptProfile === undefined ? { promptProfile: "v2" as const } : {}),
 				additionalFragments: customization.fragments,
 			});
 			return {
