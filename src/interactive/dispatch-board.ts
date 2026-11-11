@@ -2328,6 +2328,9 @@ export function createDispatchBoardView(
 ): DispatchBoardView {
 	let armedCancelRunId: string | null = null;
 	let selectedRunId: string | null = null;
+	// Until the operator moves the cursor, the pick is the board's own, so a live run that registers after the board
+	// opened takes it over from a finished one.
+	let chosen = false;
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded: boolean | null = null;
@@ -2346,8 +2349,14 @@ export function createDispatchBoardView(
 			return null;
 		}
 		const previous = currentRows.find((row) => row.runId === selectedRunId);
+		const held = visibleRows.find((row) => row.runId === selectedRunId);
+		const live =
+			chosen || (held !== undefined && isDispatchBoardRowCancellable(held))
+				? undefined
+				: visibleRows.find(isDispatchBoardRowCancellable);
 		const selected =
-			visibleRows.find((row) => row.runId === selectedRunId) ??
+			live ??
+			held ??
 			visibleRows.find(
 				(row) =>
 					previous?.council !== undefined &&
@@ -2369,6 +2378,7 @@ export function createDispatchBoardView(
 		const index = visibleRows.findIndex((row) => row.runId === selected.runId);
 		const nextIndex = (index + delta + visibleRows.length) % visibleRows.length;
 		selectedRunId = visibleRows[nextIndex]?.runId ?? selected.runId;
+		chosen = true;
 		detailWindow.offset = 0;
 	};
 
@@ -2420,6 +2430,7 @@ export function createDispatchBoardView(
 		},
 		resetSelection(): void {
 			selectedRunId = null;
+			chosen = false;
 			expanded = null;
 			detailWindow.offset = 0;
 			normalizeSelection(rows());

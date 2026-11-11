@@ -863,3 +863,32 @@ it("keeps a council's settled member in its live card so the count is the whole 
 	doesNotMatch(dock, /council of 1/u);
 	board.unsubscribe();
 });
+
+it("Fleet Runs moves off a finished run when a live one appears, unless the operator moved the cursor", () => {
+	const base = (runId: string, status: DispatchBoardRow["status"]): DispatchBoardRow => ({
+		runId,
+		agentId: "coder",
+		runtimeKind: "http",
+		runtimeId: "test",
+		targetId: "test",
+		wireModelId: "test",
+		status,
+		elapsedMs: 0,
+		usage: { kind: "pending" },
+		lastContextTokens: null,
+		ttft: null,
+	});
+	let rows: DispatchBoardRow[] = [base("old-cancelled", "aborted")];
+	const view = createDispatchBoardView(
+		() => rows,
+		() => undefined,
+	);
+	view.resetSelection();
+	strictEqual(view.selectedRow()?.runId, "old-cancelled");
+	rows = [...rows, base("fresh", "running")];
+	strictEqual(view.selectedRow()?.runId, "fresh", "a live run outranks the default pick of a finished one");
+	view.selectNext();
+	strictEqual(view.selectedRow()?.runId, "old-cancelled");
+	rows = [...rows, base("fresher", "enqueued")];
+	strictEqual(view.selectedRow()?.runId, "old-cancelled", "a row the operator chose stays chosen");
+});
