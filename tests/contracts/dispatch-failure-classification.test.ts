@@ -1,5 +1,6 @@
-import { match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import {
 	affectsTargetBreaker,
@@ -16,7 +17,12 @@ import {
 } from "../../src/domains/dispatch/tool-stats.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 import type { ActionClass } from "../../src/domains/safety/action-classifier.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { WORKER_PROVIDER_HTTP_STATUS_MARKER } from "../../src/worker/spec-contract.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 const evidence: RunTerminationEvidence = {
 	exitCode: 1,
@@ -65,6 +71,24 @@ describe("dispatch failure classification", () => {
 		recordToolFinish(readOnly, { tool: "limitation", outcome: "ok", actionClass: "read" });
 		const idle = summarizeToolActivity(readOnly, () => "read");
 		match(workerNoWorkDetail({ activity: idle, limitationRecorded: true, mutatedPathCount: 0 }) ?? "", /changed nothing/);
+	});
+
+	it("journals a store-only worker's settled run with its store write in the tool activity", async () => {
+		const env = await isolateClioEnv("clio-coder-store-settled-");
+		try {
+			const stats = new Map<string, ToolCallStat>();
+			recordToolFinish(stats, { tool: "store", outcome: "ok", actionClass: "write" });
+			const toolActivity = summarizeToolActivity(stats, () => "read");
+			strictEqual(toolActivity.storeWritten, true);
+			const runId = "store-worker-1";
+			await writeSettledRun(clioStateDir(), { ...fixtureReceiptDraft(fixtureEnvelope(runId)), toolActivity });
+			const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), runId));
+			strictEqual(journal.skipped, 0);
+			const settled = journal.records.map(({ record }) => record).find((record) => record.k === "run.settled");
+			deepStrictEqual((settled?.data as { toolActivity?: unknown } | undefined)?.toolActivity, toolActivity);
+		} finally {
+			env.restore();
+		}
 	});
 
 	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {

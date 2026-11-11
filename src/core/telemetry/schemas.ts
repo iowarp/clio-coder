@@ -784,7 +784,15 @@ export const RunSettledSchema = Type.Object(
 		/** The run's tool calls as the finalizer classified them; null for a run with no tool telemetry. */
 		toolActivity: nullable(
 			Type.Object(
-				{ calls: count, succeeded: count, failed: count, blocked: count, mutatingSucceeded: Type.Boolean() },
+				{
+					calls: count,
+					succeeded: count,
+					failed: count,
+					blocked: count,
+					mutatingSucceeded: Type.Boolean(),
+					/** The worker wrote at least one blob into a granted store tag; absent when it wrote none. */
+					storeWritten: Type.Optional(Type.Boolean()),
+				},
 				closed,
 			),
 		),
