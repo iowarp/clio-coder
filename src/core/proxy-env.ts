@@ -18,6 +18,72 @@ const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 
 let active: ActiveProxy | null = null;
 
+/** An IPv4 literal as a 32-bit unsigned number, or null. */
+function ipv4ToNumber(host: string): number | null {
+	const parts = host.split(".");
+	if (parts.length !== 4) return null;
+	let value = 0;
+	for (const part of parts) {
+		if (!/^\d{1,3}$/u.test(part)) return null;
+		const octet = Number(part);
+		if (octet > 255) return null;
+		value = value * 256 + octet;
+	}
+	return value;
+}
+
+/** An IPv6 literal (brackets allowed) as a bigint, or null. Embedded IPv4 tails are not parsed. */
+function ipv6ToBigInt(host: string): bigint | null {
+	const raw = host.replace(/^\[|\]$/gu, "");
+	if (!raw.includes(":") || !/^[0-9a-f:]+$/iu.test(raw)) return null;
+	const halves = raw.split("::");
+	if (halves.length > 2) return null;
+	const head = halves[0] ? halves[0].split(":") : [];
+	const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+	const missing = 8 - head.length - tail.length;
+	if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+	const groups = [...head, ...new Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+	let value = 0n;
+	for (const group of groups) {
+		if (!/^[0-9a-f]{1,4}$/iu.test(group)) return null;
+		value = (value << 16n) | BigInt(Number.parseInt(group, 16));
+	}
+	return value;
+}
+
+/** Whether `entry` is a CIDR range or an IPv4 wildcard such as `192.168.*`, which name matching cannot honour. */
+function isAddressPattern(entry: string): boolean {
+	return entry.includes("/") || /^(\d{1,3}\.){1,3}\*$/u.test(entry);
+}
+
+/** Whether the IP literal `host` falls inside a CIDR or IPv4 wildcard `entry`. Host names never match. */
+function addressMatches(host: string, entry: string): boolean {
+	if (entry.endsWith("*")) return ipv4ToNumber(host) !== null && host.startsWith(entry.slice(0, -1));
+	const [base = "", bitsRaw = ""] = entry.split("/");
+	if (!/^\d{1,3}$/u.test(bitsRaw)) return false;
+	const bits = Number(bitsRaw);
+	const v4Base = ipv4ToNumber(base);
+	if (v4Base !== null) {
+		const v4Host = ipv4ToNumber(host);
+		if (v4Host === null || bits > 32) return false;
+		const shift = 32 - bits;
+		return Math.floor(v4Host / 2 ** shift) === Math.floor(v4Base / 2 ** shift);
+	}
+	const v6Base = ipv6ToBigInt(base);
+	const v6Host = ipv6ToBigInt(host);
+	if (v6Base === null || v6Host === null || bits > 128) return false;
+	const shift = BigInt(128 - bits);
+	return v6Host >> shift === v6Base >> shift;
+}
+
+function hostOf(origin: unknown): string | null {
+	try {
+		return new URL(String(origin)).hostname.toLowerCase();
+	} catch {
+		return null;
+	}
+}
+
 function firstSet(env: ProxyEnv, names: ReadonlyArray<string>): string | null {
 	for (const name of names) {
 		const value = env[name]?.trim();
@@ -54,28 +120,44 @@ export async function installProxyFromEnv(env: ProxyEnv = process.env): Promise<
 	if (userNoProxy.includes("*")) return;
 	const http = httpRaw === null ? null : withScheme(httpRaw);
 	const https = httpsRaw === null ? http : withScheme(httpsRaw);
-	// undici and proxyForUrl match host names and suffixes only, so a CIDR range never bypasses the proxy.
-	const cidr = userNoProxy.filter((entry) => entry.includes("/"));
-	const noProxy = [...new Set([...userNoProxy.filter((entry) => !entry.includes("/")), ...LOOPBACK_HOSTS])];
+	// undici matches host names and suffixes only, so CIDR ranges and IP wildcards are matched here and their
+	// requests go through a direct agent.
+	const addressPatterns = userNoProxy.filter(isAddressPattern);
+	const noProxy = [...new Set([...userNoProxy, ...LOOPBACK_HOSTS])];
 	try {
-		const { EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
-		setGlobalDispatcher(
-			new EnvHttpProxyAgent({
-				...(http !== null ? { httpProxy: http } : {}),
-				...(https !== null ? { httpsProxy: https } : {}),
-				noProxy: noProxy.join(","),
-			}),
-		);
+		const { Agent, Dispatcher, EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
+		const proxied = new EnvHttpProxyAgent({
+			...(http !== null ? { httpProxy: http } : {}),
+			...(https !== null ? { httpsProxy: https } : {}),
+			noProxy: noProxy.filter((entry) => !isAddressPattern(entry)).join(","),
+		});
+		if (addressPatterns.length === 0) setGlobalDispatcher(proxied);
+		else {
+			const direct = new Agent();
+			class AddressBypassDispatcher extends Dispatcher {
+				override dispatch(
+					options: Parameters<InstanceType<typeof Dispatcher>["dispatch"]>[0],
+					handler: Parameters<InstanceType<typeof Dispatcher>["dispatch"]>[1],
+				): boolean {
+					const host = hostOf(options.origin);
+					const bypass = host !== null && addressPatterns.some((entry) => addressMatches(host, entry));
+					return (bypass ? direct : proxied).dispatch(options, handler);
+				}
+				override async close(): Promise<void> {
+					await Promise.all([direct.close(), proxied.close()]);
+				}
+				override async destroy(): Promise<void> {
+					await Promise.all([direct.destroy(), proxied.destroy()]);
+				}
+			}
+			setGlobalDispatcher(new AddressBypassDispatcher());
+		}
 	} catch (err) {
 		process.stderr.write(
 			`clio-coder: proxy variables ignored (${err instanceof Error ? err.message : String(err)}); requests go direct\n`,
 		);
 		return;
 	}
-	if (cidr.length > 0)
-		process.stderr.write(
-			`clio-coder: NO_PROXY CIDR entries are not honoured (${cidr.join(",")}); name those hosts in NO_PROXY to reach them directly\n`,
-		);
 	active = {
 		http: http === null ? null : displayProxy(http),
 		https: https === null ? null : displayProxy(https),
@@ -103,6 +185,10 @@ export function proxyForUrl(url: string | undefined): string | null {
 	const host = target.host.replace(/:\d*$/, "").toLowerCase();
 	const port = Number.parseInt(target.port, 10) || (target.protocol === "https:" ? 443 : 80);
 	for (const entry of active.noProxy) {
+		if (isAddressPattern(entry)) {
+			if (addressMatches(host, entry)) return null;
+			continue;
+		}
 		const parsed = entry.match(/^(.+):(\d+)$/);
 		if (parsed && Number.parseInt(parsed[2] ?? "", 10) !== port) continue;
 		const name = (parsed ? (parsed[1] ?? "") : entry).replace(/^\*?\./, "").toLowerCase();
