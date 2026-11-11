@@ -98,8 +98,8 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - An experimental `prompts.profile: v2` setting (restart to apply) uses a leaner main prompt, about 24 KB attended against 33 KB; `v1` stays the default.
 - The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
 - A missing key, an unreachable model server or a missing model reads as one sentence that names the fix, the same in `doctor`, `run`, the TUI banner, a failed prompt and the desktop app.
-- First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first.
-- A lab or site can publish one setup file. `clio-coder configure --import <path-or-https-url>` shows where prompts will go, asks once and connects; first-run setup offers the same as "A setup file from my lab or team". The file may name only targets, the variable or sign-in profile each reads its key from, and the chat and fleet routes; a literal key or any other setting is refused.
+- First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first. When a model server refuses without a key, setup offers to store one and rechecks the same address, and long model names use the terminal's width.
+- A lab or site can publish one setup file. `clio-coder configure --import <path-or-https-url>` shows where prompts will go, asks once and connects (without a terminal it prints the changes and asks for `--yes`); first-run setup offers the same as "A setup file from my lab or team". The file may name only targets, the variable or sign-in profile each reads its key from, and the chat and fleet routes; a literal key or any other setting is refused.
 - The first launch sets up a model before it asks about the folder. The installer ends with the next step for your machine (a key or model server it found) and, while the launcher is not on `PATH`, a command that runs as printed.
 
 ### Shared folders and sessions
@@ -223,6 +223,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - A run on a node that lacks an optional SDK fails once instead of retrying and names `clio-coder fleet nodes tools install <node> copilot-sdk|claude-sdk`, which now installs those SDKs on the node.
 - On a state directory shared by several hosts, starting Clio Coder on another host no longer expires a running fleet plan's reservation; another host's reservations expire only 15 minutes past their estimate. The `local` node and loopback endpoints are counted per host, a dead host's leases are reclaimed after five minutes, capacity denials name the holding host, and `session terminate --force` releases them.
 - A worker that ran `node --check` and reported it passed is credited with that check instead of sealing as an unmatched validation.
+- A worker card no longer reads "no check ran on this work" under checks the worker reported; it says those rows are the worker's own report and that Clio Coder recognized no test or lint run.
 - When a scout cites a location that does not exist, the worker row names that location and suggests another scout model instead of saying the answer was in the wrong format, and the scout prompt says how to cite a search that found nothing.
 - A council can seat a different agent per member (a roster or inline `agent`, or `/council --agent`), and members default to scout so they can search code; every member stays read-only. `/council --deadline` (`member_deadline_ms`) returns a partial council when a member is too slow; it names the members the deadline cut off and counts only real answers. Member columns show elapsed time and streamed output. An operator `/council` runs under contained yolo.
 - Clio Coder says when a worker's change merged onto your branch: the TUI shows a Fleet row `<agent> <run> merged <sha> onto <branch>`, headless `run` prints it to stderr, and `--json` and ACP carry it as a `worker_merged` notice, detached runs included.
@@ -246,6 +247,10 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 
 ### Fixes
 
+- `clio-coder run` no longer prints a reminder written for the model (such as the citation check) on stderr; it prints a one-line "reminder to the model: <gist>", matching the TUI row.
+- A mistyped slash command left in the composer no longer turns the next command into a prompt: `/modle/thinking` is refused like `/modle`.
+- A settings file that fails to load prints its problem once instead of twice.
+- `clio-coder --help` lists `clio-coder gui`.
 - A quoted credential that holds spaces in an assignment, flag or header, such as `PASSWORD="first second"`, `--token 'a b'` or `"Authorization: Basic a b"`, no longer shows the words after its first on worker and tool cards, the thinking rail, the dispatch board or provider errors, including while it streams. A long run of dashes, spaces or name characters after a quoted secret no longer stalls a card for seconds.
 - A model on the Copilot route that calls a Clio Coder capability by name (such as `monitor` after a detached dispatch) no longer leaves the route waiting until the run times out; the next call starts a fresh Copilot session from Clio Coder's transcript.
 - A slash command typed in full, such as `/model claude-sonnet-5.5`, runs on the first Enter.
