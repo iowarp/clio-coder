@@ -990,3 +990,18 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("a settled call's journaled request structure digests leave no share below research", () => {
+	const generated = generate(asSchema(journalDefinition("call.settled").schema), 0) as {
+		cache?: Record<string, unknown>;
+	};
+	const structure = { system: "a".repeat(16), tools: "b".repeat(16), base: 1, entries: [`user:${"c".repeat(16)}`] };
+	const payload = { ...generated, cache: { ...generated.cache, structure } };
+	for (const { label, projection } of PROJECTIONS) {
+		const projected = projectSharedPayload("call.settled", payload, anonymize, projection) as {
+			cache?: Record<string, unknown>;
+		};
+		ok(projected.cache !== undefined, label);
+		strictEqual(Object.hasOwn(projected.cache, "structure"), false, label);
+	}
+});
