@@ -200,3 +200,68 @@ describe("contracts/auth logout listing", () => {
 		}
 	});
 });
+
+describe("contracts/auth logout when a target is named after its runtime", () => {
+	it("lists each stored key once under a spelling that removes exactly that key", async () => {
+		const scratch = await isolateClioEnv("clio-coder-auth-logout-shadow-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(
+				join(configDir, "settings.yaml"),
+				[
+					"version: 2",
+					"targets:",
+					"  - id: openai",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: target:openai",
+					"  - id: mirror",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: openai",
+					"",
+				].join("\n"),
+			);
+			const credentials = join(configDir, "credentials.yaml");
+			writeFileSync(
+				credentials,
+				[
+					"version: 2",
+					"entries:",
+					"  openai:",
+					"    type: api_key",
+					'    key: "sk-runtime-not-real"',
+					"  target:openai:",
+					"    type: api_key",
+					`    key: "${STORED_KEY}"`,
+					"",
+				].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const ids = (stdout: string): string[] =>
+				stdout
+					.split("\n")
+					.filter((line) => line.startsWith("  "))
+					.map((line) => line.trim().split(/\s+/u)[0] ?? "");
+			const listing = await captureAuth(["logout"]);
+			strictEqual(ids(listing.stdout).join(","), "runtime:openai,openai", listing.stdout);
+			ok(listing.stdout.includes("mirror"), listing.stdout);
+
+			const runtime = await captureAuth(["logout", "runtime:openai"]);
+			strictEqual(runtime.code, 0, runtime.stderr);
+			const left = readFileSync(credentials, "utf8");
+			ok(left.includes("target:openai"), left);
+			ok(!/^\s+openai:/mu.test(left), left);
+			strictEqual(ids((await captureAuth(["logout"])).stdout).join(","), "openai");
+
+			const target = await captureAuth(["logout", "openai"]);
+			strictEqual(target.code, 0, target.stderr);
+			ok(!readFileSync(credentials, "utf8").includes("target:openai"));
+		} finally {
+			scratch.restore();
+		}
+	});
+});

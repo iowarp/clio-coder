@@ -36,9 +36,11 @@ import {
 	type LogoutChoice,
 	listConnectableProviderRows,
 	listLogoutChoices,
+	RUNTIME_LOGOUT_PREFIX,
 	renderConnectableProviderRows,
 	renderLogoutChoices,
 	resolveCliProviderReference,
+	resolveLogoutReference,
 } from "./provider-target.js";
 import { promptText } from "./select.js";
 import {
@@ -240,35 +242,36 @@ function statusForResolvedTarget(
 	return auth.statusForTarget(resolved.authTarget, { includeFallback: false });
 }
 
-/** The active chat target when it holds a key, else its runtime, else the first choice. */
-function defaultLogoutChoice(choices: ReadonlyArray<LogoutChoice>): string {
+/** The row holding the active chat target's key, else its runtime's row, else the first choice. */
+function defaultLogoutChoice(choices: ReadonlyArray<LogoutChoice>): LogoutChoice | undefined {
 	const settings = readSettings();
-	const active = settings.chat.target ? settings.targets.find((entry) => entry.id === settings.chat.target) : undefined;
-	const ids = new Set(choices.map((choice) => choice.id));
-	if (active && ids.has(active.id)) return active.id;
-	if (active && ids.has(active.runtime)) return active.runtime;
-	return choices[0]?.id ?? "";
+	const active = settings.chat.target ? resolveCliProviderReference(settings.chat.target) : null;
+	const runtime = active ? resolveLogoutReference(`${RUNTIME_LOGOUT_PREFIX}${active.runtime.id}`) : null;
+	const holds = (reference: typeof active) =>
+		reference ? choices.find((choice) => choice.authTarget.providerId === reference.authTarget.providerId) : undefined;
+	return holds(active) ?? holds(runtime) ?? choices[0];
 }
 
-async function promptForLogoutTarget(choices: ReadonlyArray<LogoutChoice>): Promise<string | null> {
+async function promptForLogoutChoice(choices: ReadonlyArray<LogoutChoice>): Promise<LogoutChoice | null> {
 	if (choices.length === 0) {
 		printError("no stored target credentials");
 		return null;
 	}
 	const rl = createInterface({ input, output });
-	const defaultTarget = defaultLogoutChoice(choices);
+	const defaultChoice = defaultLogoutChoice(choices);
 	try {
 		process.stdout.write("Remove stored credentials:\n");
 		process.stdout.write(renderLogoutChoices(choices, true).replace(/^/gmu, "  ").replace(/ +$/u, ""));
 		process.stdout.write("\n");
 		for (;;) {
-			const answer = (await rl.question(`Selection (number, runtime or target id) [${defaultTarget}]: `)).trim();
-			const value = answer.length > 0 ? answer : defaultTarget;
+			const answer = (await rl.question(`Selection (number, runtime or target id) [${defaultChoice?.id ?? ""}]: `)).trim();
+			const value = answer.length > 0 ? answer : (defaultChoice?.id ?? "");
 			const numeric = Number(value);
 			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= choices.length) {
-				return choices[numeric - 1]?.id ?? null;
+				return choices[numeric - 1] ?? null;
 			}
-			if (choices.some((choice) => choice.id === value)) return value;
+			const named = choices.find((choice) => choice.id === value);
+			if (named) return named;
 			process.stderr.write(`unknown selection: ${value}\n`);
 		}
 	} catch {
@@ -276,6 +279,51 @@ async function promptForLogoutTarget(choices: ReadonlyArray<LogoutChoice>): Prom
 	} finally {
 		rl.close();
 	}
+}
+
+/** Remove the stored credential `providerId` names, refusing one the environment supplies. */
+function removeStoredCredential(
+	auth: ReturnType<typeof openAuthStorage>,
+	providerId: string,
+	status: AuthStatus,
+): number {
+	if (!status.available) {
+		// A damaged store reads as zero credentials, so "no stored credential"
+		// would be the same understatement the damage warning exists to remove.
+		printError(
+			auth.damageReason() === null
+				? `no stored credential for ${providerId}`
+				: `cannot tell whether ${providerId} is stored: the credentials file could not be fully read`,
+		);
+		return 1;
+	}
+	if (status.source === "environment") {
+		printError(
+			`credential for ${providerId} comes from ${status.detail ?? "the environment"}; clear the env var to log out`,
+		);
+		return 1;
+	}
+	if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
+		printError(`cannot remove credential for ${providerId} from source ${status.source}`);
+		return 1;
+	}
+	try {
+		auth.logout(providerId);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+	if (credentialWriteFailed(auth, `credential for ${providerId} was not removed`)) return 1;
+	printOk(`removed credential for ${providerId}`);
+	return 0;
+}
+
+/** Remove exactly the key the picked row lists, without resolving its id again. */
+function logoutChoice(choice: LogoutChoice): number {
+	const auth = openAuthStorage();
+	warnIfCredentialsDamaged(auth);
+	const status = auth.statusForTarget(choice.authTarget, { includeFallback: false });
+	return removeStoredCredential(auth, choice.authTarget.providerId, status);
 }
 
 async function runLogin(args: ReadonlyArray<string>): Promise<number> {
@@ -581,7 +629,7 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 			process.stderr.write(USAGE);
 			return 2;
 		}
-		return promptForLogoutTarget(choices).then((picked) => (picked ? runLogout([picked]) : 1));
+		return promptForLogoutChoice(choices).then((picked) => (picked ? logoutChoice(picked) : 1));
 	}
 	if (args.length > 1) {
 		printError("auth logout accepts at most one target or runtime");
@@ -589,7 +637,7 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 		return 2;
 	}
 
-	const resolved = resolveCliProviderReference(target);
+	const resolved = resolveLogoutReference(target);
 	if (!resolved) {
 		printError(`unknown target or runtime: ${target}`);
 		process.stderr.write(USAGE);
@@ -598,49 +646,20 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 	const auth = openAuthStorage();
 	warnIfCredentialsDamaged(auth);
 	const status = statusForResolvedTarget(resolved, auth);
-	if (!status.available) {
-		// A damaged store reads as zero credentials, so "no stored credential"
-		// would be the same understatement the warning above exists to remove.
+	if (!status.available && auth.damageReason() === null && resolved.target === null) {
 		// Logout by runtime id never drops a target's own key; name those targets.
-		const keyed =
-			resolved.target === null && auth.damageReason() === null
-				? readSettings()
-						.targets.filter((t) => t.runtime === resolved.runtime.id && targetRequiresAuth(t, resolved.runtime))
-						.filter((t) => auth.statusForTarget(resolveAuthTarget(t, resolved.runtime), { includeFallback: false }).available)
-						.map((t) => t.id)
-				: [];
+		const keyed = readSettings()
+			.targets.filter((t) => t.runtime === resolved.runtime.id && targetRequiresAuth(t, resolved.runtime))
+			.filter((t) => auth.statusForTarget(resolveAuthTarget(t, resolved.runtime), { includeFallback: false }).available)
+			.map((t) => t.id);
 		if (keyed.length > 0) {
 			printError(
 				`no stored credential for runtime ${resolved.authTarget.providerId}; target keys are stored for ${keyed.join(", ")}. Run \`clio-coder auth logout <target-id>\` to drop one`,
 			);
 			return 1;
 		}
-		printError(
-			auth.damageReason() === null
-				? `no stored credential for ${resolved.authTarget.providerId}`
-				: `cannot tell whether ${resolved.authTarget.providerId} is stored: the credentials file could not be fully read`,
-		);
-		return 1;
 	}
-	if (status.source === "environment") {
-		printError(
-			`credential for ${resolved.authTarget.providerId} comes from ${status.detail ?? "the environment"}; clear the env var to log out`,
-		);
-		return 1;
-	}
-	if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
-		printError(`cannot remove credential for ${resolved.authTarget.providerId} from source ${status.source}`);
-		return 1;
-	}
-	try {
-		auth.logout(resolved.authTarget.providerId);
-	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
-		return 1;
-	}
-	if (credentialWriteFailed(auth, `credential for ${resolved.authTarget.providerId} was not removed`)) return 1;
-	printOk(`removed credential for ${resolved.authTarget.providerId}`);
-	return 0;
+	return removeStoredCredential(auth, resolved.authTarget.providerId, status);
 }
 
 /**

@@ -1,5 +1,10 @@
 import { readSettings } from "../core/config.js";
-import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import {
+	type AuthTarget,
+	openAuthStorage,
+	resolveAuthTarget,
+	targetRequiresAuth,
+} from "../domains/providers/auth/index.js";
 import {
 	type AuthStatus,
 	EMPTY_CAPABILITIES,
@@ -98,44 +103,76 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 		});
 }
 
-/** One credential `auth logout` can remove, named by the id that removes it. */
+/** The spelling `auth logout` accepts for a runtime whose id a target also uses. */
+export const RUNTIME_LOGOUT_PREFIX = "runtime:";
+
+/**
+ * Resolve an `auth logout` argument. A bare id names the target when a target
+ * has that id; `runtime:<id>` always names the runtime's own credential.
+ */
+export function resolveLogoutReference(input: string): ResolvedProviderReference | null {
+	if (!input.startsWith(RUNTIME_LOGOUT_PREFIX)) return resolveCliProviderReference(input);
+	ensureSetupRuntimeRegistry();
+	const runtime = getRuntimeRegistry().get(input.slice(RUNTIME_LOGOUT_PREFIX.length));
+	if (!runtime) return null;
+	return { input, target: null, runtime, authTarget: resolveRuntimeAuthTarget(runtime) };
+}
+
+/** One stored credential `auth logout` can remove, named by an id that removes exactly it. */
 export interface LogoutChoice {
-	/** A runtime id for the runtime's own credential, a target id for a key stored under `target:<id>`. */
+	/** A runtime id (`runtime:<id>` when a target has the same id) or a target id. */
 	id: string;
 	label: string;
 	group: ProviderSupportEntry["group"];
 	source: "stored-api-key" | "stored-oauth";
+	/** The credential removing this choice drops; `authTarget.providerId` is its storage key. */
+	authTarget: AuthTarget;
 }
 
 /**
- * The stored credentials `auth logout` can remove. A target's own key is listed
- * under the target id, because logout by runtime id removes only the runtime's
- * credential; listing the runtime would offer a choice that removes nothing.
+ * The stored credentials `auth logout` can remove, one row per stored key. A
+ * key several targets point at is listed once and names the targets that also
+ * use it, because removing it signs all of them out.
  */
 export function listLogoutChoices(): LogoutChoice[] {
 	ensureSetupRuntimeRegistry();
 	const settings = readSettings();
 	const auth = openAuthStorage();
+	const targetIds = new Set(settings.targets.map((target) => target.id));
 	const stored = (status: AuthStatus): LogoutChoice["source"] | null =>
 		status.available && (status.source === "stored-api-key" || status.source === "stored-oauth") ? status.source : null;
-	return listProviderSupportEntries(getRuntimeRegistry().list())
-		.filter((entry) => entry.connectable)
-		.flatMap((entry) => {
-			const runtime = getRuntimeRegistry().get(entry.runtimeId);
-			if (!runtime) return [];
-			const choices: LogoutChoice[] = [];
-			const runtimeAuth = resolveRuntimeAuthTarget(runtime);
-			const own = stored(auth.statusForTarget(runtimeAuth, { includeFallback: false }));
-			if (own) choices.push({ id: entry.runtimeId, label: entry.label, group: entry.group, source: own });
-			for (const target of settings.targets) {
-				if (target.runtime !== entry.runtimeId || !targetRequiresAuth(target, runtime)) continue;
-				const targetAuth = resolveAuthTarget(target, runtime);
-				if (targetAuth.providerId === runtimeAuth.providerId) continue;
-				const source = stored(auth.statusForTarget(targetAuth, { includeFallback: false }));
-				if (source) choices.push({ id: target.id, label: `${entry.label} target`, group: entry.group, source });
-			}
-			return choices;
-		});
+	const byKey = new Map<string, { choice: LogoutChoice; sharedWith: string[] }>();
+	const add = (choice: Omit<LogoutChoice, "source">, status: AuthStatus): void => {
+		const existing = byKey.get(choice.authTarget.providerId);
+		if (existing) {
+			existing.sharedWith.push(choice.id);
+			return;
+		}
+		const source = stored(status);
+		if (source) byKey.set(choice.authTarget.providerId, { choice: { ...choice, source }, sharedWith: [] });
+	};
+	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list())) {
+		if (!entry.connectable) continue;
+		const runtime = getRuntimeRegistry().get(entry.runtimeId);
+		if (!runtime) continue;
+		const runtimeAuth = resolveRuntimeAuthTarget(runtime);
+		const id = targetIds.has(entry.runtimeId) ? `${RUNTIME_LOGOUT_PREFIX}${entry.runtimeId}` : entry.runtimeId;
+		add(
+			{ id, label: entry.label, group: entry.group, authTarget: runtimeAuth },
+			auth.statusForTarget(runtimeAuth, { includeFallback: false }),
+		);
+		for (const target of settings.targets) {
+			if (target.runtime !== entry.runtimeId || !targetRequiresAuth(target, runtime)) continue;
+			const targetAuth = resolveAuthTarget(target, runtime);
+			add(
+				{ id: target.id, label: `${entry.label} target`, group: entry.group, authTarget: targetAuth },
+				auth.statusForTarget(targetAuth, { includeFallback: false }),
+			);
+		}
+	}
+	return [...byKey.values()].map(({ choice, sharedWith }) =>
+		sharedWith.length === 0 ? choice : { ...choice, label: `${choice.label}, also ${sharedWith.join(", ")}` },
+	);
 }
 
 export function renderLogoutChoices(choices: ReadonlyArray<LogoutChoice>, numbered = false): string {
