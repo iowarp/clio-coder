@@ -412,6 +412,16 @@ test("host rejects forged protocol identity, oversized documents and undeclared 
 	throws(() => parseExtensionOutput({ text: "", session: {} }, schema), /unknown/);
 });
 
+test("a rejected typo with a command typed after it is refused, while a path stays prose", () => {
+	deepStrictEqual(parseSlashCommand("/modle/thinking"), {
+		kind: "unknown-command",
+		token: "modle/thinking",
+		text: "/modle/thinking",
+	});
+	equal(parseSlashCommand("/tmp/x is broken").kind, "unknown");
+	equal(parseSlashCommand("/home/user/file").kind, "unknown");
+});
+
 test("canonical IDs coexist with prompt ownership and preserve escaped/path prose", async (t) => {
 	const f = await fixture(t);
 	await f.runtime.reload();

@@ -3695,6 +3695,19 @@ function sessionNameArgument(raw: string): string {
 		: text;
 }
 
+/**
+ * A rejected `/modle` stays in the composer as an editable draft, so typing
+ * `/thinking` after it submits `/modle/thinking`. Every segment of that token is
+ * command-shaped and the last one is a command, which a path such as
+ * `/tmp/x is broken` is not; the line is refused like the typo, not sent to the model.
+ */
+function isComposedCommandToken(token: string): boolean {
+	const segments = token.split("/");
+	if (segments.length < 2 || !segments.every((segment) => COMMAND_SHAPED_TOKEN.test(segment))) return false;
+	const kind = parseSlashCommand(`/${segments[segments.length - 1]}`).kind;
+	return kind !== "unknown" && kind !== "unknown-command" && kind !== "empty";
+}
+
 export function parseSlashCommand(input: string): SlashCommand {
 	if (/^\s*\/rename\s+$/u.test(input)) {
 		return { kind: "usage-error", command: "rename", reason: "Session name must not be empty or whitespace-only" };
@@ -3713,7 +3726,7 @@ export function parseSlashCommand(input: string): SlashCommand {
 	if (retired) return retired;
 	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
-		if (COMMAND_SHAPED_TOKEN.test(token) || isExtensionCommandToken(token))
+		if (COMMAND_SHAPED_TOKEN.test(token) || isExtensionCommandToken(token) || isComposedCommandToken(token))
 			return { kind: "unknown-command", token, text: trimmed };
 	}
 	return { kind: "unknown", text: trimmed };
