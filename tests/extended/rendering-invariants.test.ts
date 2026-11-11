@@ -1818,6 +1818,38 @@ describe("transcript block grammar", () => {
 		}
 	});
 
+	it("ends a turn whose detached workers still run as ended with them running, never as done", () => {
+		const view = telemetryViewOf(
+			"detached",
+			telemetryCall("detached", { turnId: "fanout", usage: { input: 10, output: 5 }, usd: null }),
+		);
+		const panel = createChatPanel({ getOutputStyle: () => "standard", getTelemetry: () => view });
+		panel.appendUser("Fan out the fixes");
+		panel.applyEvent({ type: "agent_start", turnId: "fanout" } as never);
+		act(panel, "d1", "dispatch", { tasks: ["a", "b"], detach: true }, "2 tasks dispatched");
+		for (const id of ["a1", "a2"])
+			panel.applyWorkerState({
+				assignmentId: id,
+				runId: `run-${id}`,
+				origin: "agent",
+				agentId: "coder",
+				runtime: { kind: "clio", targetId: "mini", wireModelId: "coder" },
+				text: "",
+				droppedLines: 0,
+				tools: [],
+				attempts: [{ runId: `run-${id}`, targetLabel: "mini" }],
+				pending: true,
+				startedAtMs: 0,
+				parentToolCallId: "d1",
+			} as WorkerEntryState);
+		say(panel, "Two workers are fixing it.");
+		panel.applyEvent({ type: "agent_end", messages: [assistantMessage("Two workers are fixing it.")] } as never);
+		const plain = plainRender(panel, 100);
+		doesNotMatch(plain, /Done/u, plain);
+		doesNotMatch(plain, new RegExp(`^${GLYPH.ok} `, "mu"), plain);
+		match(plain, /Turn ended · 2 workers running/u, plain);
+	});
+
 	it("puts a card that arrives after its dispatch settled under that call, and one from an earlier turn at the tail", () => {
 		const reviewer = (assignmentId: string, parentToolCallId: string) =>
 			({

@@ -1795,8 +1795,16 @@ function receiptDuration(usage: ChatPanelTurnUsage): string {
 
 const PROMPT_RECALL_FACT = `${GLYPH.up} recalls your prompt`;
 
+const TURN_ENDED = "Turn ended";
+
+function turnEndedWithWorkers(count: number): string {
+	return `${TURN_ENDED} · ${count} worker${count === 1 ? "" : "s"} running`;
+}
+
 function receiptGlyph(outcome: string): string {
 	if (outcome === "Done") return `${GREEN_OK()}${GLYPH.ok}${RESET} `;
+	// Nothing went wrong, and the work is not done either: the dispatch mark says where it went.
+	if (outcome.startsWith(TURN_ENDED)) return `${SECONDARY()}${GLYPH.phaseDispatch}${RESET} `;
 	if (outcome === "Failed") return `${RED_CRIT()}${GLYPH.error}${RESET} `;
 	if (outcome === "Cancelled") return `${SECONDARY()}${GLYPH.cancelled}${RESET} `;
 	return `${AMBER_WARN()}${GLYPH.warn}${RESET} `;
@@ -2803,6 +2811,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							: Math.max(0, now() - runStartedAt);
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
+				// Workers a turn detached keep running past its end, so the turn ended but the work is not done. A replay
+				// cannot know which of them were still running then.
+				const workersRunning =
+					replayed === undefined ? [...workerEntries.values()].filter((entry) => entry.state.pending).length : 0;
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
@@ -2833,7 +2845,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 											? "Cancelled"
 											: endedWithFailedChange(messages)
 												? "Done, last change failed"
-												: "Done"),
+												: workersRunning > 0
+													? turnEndedWithWorkers(workersRunning)
+													: "Done"),
 				};
 				// Only the newest failure is one ↑ away; a later turn's prompt sits in front of an older one.
 				if (promptRecallReceipt?.turnUsage) {
