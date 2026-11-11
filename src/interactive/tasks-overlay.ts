@@ -20,6 +20,7 @@ import {
 	selectionMark,
 	showClioOverlayFrame,
 } from "./overlay-frame.js";
+import { confirmOnceRail } from "./overlays/confirm-once.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, fitUnits, GLYPH } from "./theme/index.js";
 
@@ -521,6 +522,8 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 	private artifacts: ReadonlyArray<SessionArtifact> = [];
 	private userTasks: ReadonlyArray<UserTask> = [];
 	private selectedIndex = 0;
+	/** The operator task `x` was pressed on once; the next `x` on it drops it. */
+	private armedDrop: string | null = null;
 	private addInput: Input | null = null;
 	private status = "";
 	/**
@@ -616,6 +619,13 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 			this.options.onClose?.();
 			return;
 		}
+		// A drop asks once: the first `x` arms the row, a second drops it, and any other key keeps it.
+		const armed = this.armedDrop;
+		this.armedDrop = null;
+		if (armed !== null && !matchesKey(data, "x")) {
+			this.requestRender();
+			return;
+		}
 		if (matchesKey(data, "r")) {
 			this.refreshCaptured();
 			this.requestRender();
@@ -654,7 +664,14 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 		if (selected?.kind !== "user") return;
 		if (matchesKey(data, "h")) this.mutateUserTask("handed", selected.task.id, this.options.onHandUserTask);
 		else if (matchesKey(data, "d")) this.mutateUserTask("done", selected.task.id, this.options.onDoneUserTask);
-		else if (matchesKey(data, "x")) this.mutateUserTask("dropped", selected.task.id, this.options.onDropUserTask);
+		else if (matchesKey(data, "x")) {
+			if (armed !== selected.task.id) {
+				this.armedDrop = selected.task.id;
+				this.requestRender();
+				return;
+			}
+			this.mutateUserTask("dropped", selected.task.id, this.options.onDropUserTask);
+		}
 	}
 
 	invalidate(): void {
@@ -665,6 +682,8 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 		if (this.addInput) return buildHint([{ key: "Enter", verb: "add" }], "back, keeps draft");
 		// Only the keys the selected row answers: Enter opens an artifact, and h, d and x act on operator tasks.
 		const selected = selectableRows(this.state())[this.selectedIndex];
+		if (this.armedDrop !== null && selected?.kind === "user" && selected.task.id === this.armedDrop)
+			return buildHint(confirmOnceRail("x", "drop", selected.task.title));
 		return buildHint([
 			{ key: "↑↓", verb: "select" },
 			...(this.windowRows > 0 ? [{ key: "PgUp/PgDn", verb: "page" }] : []),

@@ -53,6 +53,7 @@ interface Harness {
 	render(): string[];
 	press(key: string, times?: number): string[];
 	done: string[];
+	dropped: string[];
 }
 
 function mount(board: TaskBoardSnapshot = BOARD, userTasks: UserTask[] = USER_TASKS): Harness {
@@ -62,10 +63,12 @@ function mount(board: TaskBoardSnapshot = BOARD, userTasks: UserTask[] = USER_TA
 		showOverlay: () => ({ hide: () => {} }),
 	} as unknown as TUI;
 	const done: string[] = [];
+	const dropped: string[] = [];
 	const handle = openTasksOverlay(tui, () => board, {
 		getSessionSnapshot: () => ({ history: [], artifacts: ARTIFACTS }),
 		getUserTasks: () => userTasks,
 		onDoneUserTask: (id) => done.push(id),
+		onDropUserTask: (id) => dropped.push(id),
 		workspace: "/work",
 	});
 	// The board's one-second repaint ticker would keep the test process alive.
@@ -85,6 +88,7 @@ function mount(board: TaskBoardSnapshot = BOARD, userTasks: UserTask[] = USER_TA
 			return render();
 		},
 		done,
+		dropped,
 	};
 }
 
@@ -169,4 +173,19 @@ test("a board that fits renders whole, with no position row and no page hint (BT
 	const large = mount();
 	large.render();
 	match(large.frame.dockHint(200) ?? "", /\[PgUp\/PgDn\] page/u);
+});
+
+test("x asks once before it drops an operator task, and any other key keeps the task", () => {
+	const board = mount();
+	let screen = board.render();
+	for (let step = 0; step < 40 && !selectedRow(screen)?.includes("Document the rounding"); step++)
+		screen = board.press(DOWN);
+	match(selectedRow(screen) ?? "", /Document the rounding/u);
+	board.press("x");
+	deepStrictEqual(board.dropped, [], "the first x only asks");
+	board.press("k");
+	board.press("x");
+	deepStrictEqual(board.dropped, [], "a key between the two presses kept the task");
+	board.press("x");
+	deepStrictEqual(board.dropped, ["u2"], "the second x drops it");
 });

@@ -31,6 +31,7 @@ import {
 	sectionRule,
 	selectionRow,
 } from "../theme/index.js";
+import { confirmOnceRail } from "./confirm-once.js";
 
 export const QUEUE_NAVIGATOR_OVERLAY_WIDTH = 88;
 
@@ -104,6 +105,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 	private selectedId: string | null = null;
 	/** The message the cursor was on went to Clio; the next acting key only re-aims. */
 	private taken: { position: number } | null = null;
+	/** The id `x` was pressed on once; a second `x` on it removes, any other key keeps it. */
+	private armed: string | null = null;
 	/** Entries the operator removed here, which leave the queue on purpose rather than to Clio. */
 	private readonly removed = new Set<string>();
 	private rows = 0;
@@ -260,6 +263,8 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		if (entries.length === 0) return [esc];
 		if (this.taken !== null) return [{ key: "any key", verb: "select again", critical: true }, esc];
 		const selected = entries[this.selected];
+		if (this.armed !== null && selected?.id === this.armed)
+			return confirmOnceRail("x", "remove", selected.display?.text ?? selected.text);
 		const send = this.sendEntry(selected);
 		return [
 			...(send ? [send] : []),
@@ -307,6 +312,12 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		}
 		const entry = entries[this.selected];
 		if (!entry) return;
+		const armed = this.armed === entry.id;
+		this.armed = null;
+		if (armed && !matchesKey(data, "x")) {
+			this.deps.requestRender();
+			return;
+		}
 		if (matchesKey(data, "up") || matchesKey(data, "k")) {
 			this.selected = Math.max(0, this.selected - 1);
 		} else if (matchesKey(data, "down") || matchesKey(data, "j")) {
@@ -316,6 +327,11 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 		} else if (matchesKey(data, "shift+down")) {
 			if (this.deps.move(entry.id, 1)) this.selected += 1;
 		} else if (matchesKey(data, "x")) {
+			if (!armed) {
+				this.armed = entry.id;
+				this.deps.requestRender();
+				return;
+			}
 			this.removed.add(entry.id);
 			this.deps.remove(entry.id);
 		} else if (matchesKey(data, "t")) {
