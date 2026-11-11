@@ -184,6 +184,11 @@ function addBufferFile(
 	});
 }
 
+/** A dotenv file holds an extension's local credentials; a template (`.env.example`) is shareable. */
+function isEnvFile(name: string): boolean {
+	return name === ".env" || (name.startsWith(".env.") && !/\.(?:example|sample|template)$/u.test(name));
+}
+
 function addTree(
 	files: ShareArchiveFile[],
 	type: ShareEntryType,
@@ -352,7 +357,10 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 				scope,
 				root,
 				`${scope}/extensions`,
-				(relativePath) => !relativePath.split("/")[0]?.startsWith(".") && path.basename(relativePath) !== "state.json",
+				(relativePath) =>
+					!relativePath.split("/")[0]?.startsWith(".") &&
+					path.basename(relativePath) !== "state.json" &&
+					!isEnvFile(path.basename(relativePath)),
 			);
 		}
 	}
@@ -383,7 +391,8 @@ export function createShareArchive(options: ShareExportOptions = {}): ClioShareA
 
 export function writeShareArchive(outPath: string, options: ShareExportOptions = {}): ClioShareArchive {
 	const archive = createShareArchive(options);
-	safeResourceWrite(path.resolve(outPath), `${stableJson(archive)}\n`, { encoding: "utf8" });
+	// Owner-only: an archive carries settings and extension files a reader on the host should not see.
+	safeResourceWrite(path.resolve(outPath), `${stableJson(archive)}\n`, { encoding: "utf8", mode: 0o600 });
 	return archive;
 }
 

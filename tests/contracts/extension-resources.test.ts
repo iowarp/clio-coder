@@ -11,6 +11,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -32,7 +33,12 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
-import { createShareArchive, importShareArchive, planShareImport } from "../../src/domains/share/archive.js";
+import {
+	createShareArchive,
+	importShareArchive,
+	planShareImport,
+	writeShareArchive,
+} from "../../src/domains/share/archive.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 
 const roots: string[] = [];
@@ -597,6 +603,19 @@ describe("harness extension package boundary", () => {
 		strictEqual(installed?.loadable, true);
 		ok(installed?.provenance?.contentDigest);
 		strictEqual(installed?.observedContentDigest, installed?.provenance?.contentDigest);
+	});
+
+	it("leaves an extension's .env out of a share archive and writes the archive owner-only", () => {
+		const exporter = scratch();
+		const source = scratch();
+		writeManifest(source, "env-extension");
+		strictEqual(installTrusted(source, exporter).extension?.loadable, true);
+		writeFileSync(join(exporter, ".clio-coder", "extensions", "env-extension", ".env"), "API_KEY=shh\n", "utf8");
+		const archivePath = join(scratch(), "env.clio-coder-share.json");
+		const archive = writeShareArchive(archivePath, { cwd: exporter, scope: "project", includeExtensions: true });
+		ok(archive.files.length > 0);
+		ok(archive.files.every((file) => !file.relativePath.endsWith(".env")));
+		if (process.platform !== "win32") strictEqual(statSync(archivePath).mode & 0o777, 0o600);
 	});
 
 	it("refuses invalid shared packages and force-recovers an unverified destination transactionally", () => {
