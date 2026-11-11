@@ -40,6 +40,36 @@ function chatRouteChosen(): boolean {
 	return issues.length > 0 || Boolean(settings.chat.target);
 }
 
+/**
+ * Whether a non-terminal stdin carries bytes: a regular file with content, or a pipe whose first chunk arrives
+ * before it ends or a short wait passes. A closed or silent pipe, /dev/null and a terminal carry none.
+ */
+async function stdinHasData(waitMs = 150): Promise<boolean> {
+	if (process.stdin.isTTY) return false;
+	let stat: import("node:fs").Stats;
+	try {
+		stat = (await import("node:fs")).fstatSync(0);
+	} catch {
+		return false;
+	}
+	if (stat.isFile()) return stat.size > 0;
+	if (!stat.isFIFO()) return false;
+	return new Promise<boolean>((resolve) => {
+		const done = (value: boolean): void => {
+			clearTimeout(timer);
+			process.stdin.off("readable", onReadable);
+			process.stdin.off("end", onEnd);
+			process.stdin.pause();
+			resolve(value);
+		};
+		const onReadable = (): void => done(process.stdin.readableLength > 0);
+		const onEnd = (): void => done(false);
+		const timer = setTimeout(() => done(false), waitMs);
+		process.stdin.on("readable", onReadable);
+		process.stdin.on("end", onEnd);
+	});
+}
+
 export interface ClioCommandDependencies {
 	bootOrchestrator: typeof import("../entry/orchestrator.js").bootOrchestrator;
 }
@@ -63,6 +93,11 @@ export async function runClioCommand(
 	// Explicit CLIO_CODER_INTERACTIVE=1 still forces interactive mode.
 	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_CODER_INTERACTIVE = "1";
+	}
+	// A task piped to bare `clio-coder` would be discarded by the bannered boot; point at `run` instead.
+	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && (await stdinHasData())) {
+		process.stderr.write('clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"\n');
+		return 2;
 	}
 	// ACP (and the GUI's sessions over it) and the interactive TUI have an operator to answer a keychain
 	// prompt; headless runs and the non-interactive boot keep the Copilot runtime's keychain closed.
