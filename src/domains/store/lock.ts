@@ -16,6 +16,7 @@ import { StoreRefusal } from "./types.js";
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_WAIT_MS = 30 * 1000;
 const LOCK_POLL_MS = 25;
+const BREAK_STALE_MS = 10 * 1000;
 
 interface LockOwner {
 	pid: number;
@@ -54,6 +55,35 @@ async function isStale(file: string): Promise<boolean> {
 	return owner?.host === hostname() && typeof owner.pid === "number" && !pidAlive(owner.pid);
 }
 
+/**
+ * Remove a stale lock. A verdict reached without holding anything can be out
+ * of date by the time it acts: another breaker may already have replaced the
+ * stale lock with its own fresh one. So breakers take turns through an O_EXCL
+ * `.break` file and judge the lock again while they hold it. A `.break` file
+ * left by a breaker that died is cleared after BREAK_STALE_MS.
+ */
+async function breakStale(file: string): Promise<boolean> {
+	const breaker = `${file}.break`;
+	try {
+		await (await open(breaker, "wx", 0o600)).close();
+	} catch (error) {
+		if (errnoOf(error) !== "EEXIST") throw error;
+		try {
+			if (Date.now() - (await stat(breaker)).mtimeMs > BREAK_STALE_MS) await rm(breaker, { force: true });
+		} catch (statError) {
+			if (errnoOf(statError) !== "ENOENT") throw statError;
+		}
+		return false;
+	}
+	try {
+		if (!(await isStale(file))) return false;
+		await rm(file, { force: true });
+		return true;
+	} finally {
+		await rm(breaker, { force: true });
+	}
+}
+
 function lockFile(cwd: string, key: string): string {
 	const digest = createHash("sha256").update(key).digest("hex").slice(0, 32);
 	return path.join(storeProjectDir(cwd), "locks", `${digest}.lock`);
@@ -76,10 +106,7 @@ async function acquire(file: string, key: string): Promise<string> {
 		} catch (error) {
 			if (errnoOf(error) !== "EEXIST") throw error;
 		}
-		if (await isStale(file)) {
-			await rm(file, { force: true });
-			continue;
-		}
+		if ((await isStale(file)) && (await breakStale(file))) continue;
 		if (Date.now() >= deadline) {
 			throw new StoreRefusal("unavailable", `Another writer holds the store lock for ${key}; try again shortly.`);
 		}

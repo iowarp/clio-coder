@@ -143,4 +143,31 @@ describe("store tool", () => {
 			strictEqual(await withStoreLock(root, key, async () => "ran"), "ran");
 			strictEqual(existsSync(file), false);
 		}));
+
+	it("lets only one of several writers that break the same stale lock hold it", () =>
+		withWorkspace(async (root) => {
+			const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+			const key = "blob\0results\0race.bin";
+			const digest = createHash("sha256").update(key).digest("hex").slice(0, 32);
+			const file = join(storeProjectDir(root), "locks", `${digest}.lock`);
+			mkdirSync(dirname(file), { recursive: true });
+			let holders = 0;
+			let most = 0;
+			for (let round = 0; round < 20; round++) {
+				writeFileSync(file, JSON.stringify({ pid: dead, host: hostname(), token: "old", at: Date.now() }));
+				await Promise.all(
+					Array.from({ length: 16 }, async (_, i) => {
+						// Staggered starts spread the stale verdicts across the break of the first writer.
+						await new Promise((resolve) => setTimeout(resolve, i % 4));
+						await withStoreLock(root, key, async () => {
+							holders++;
+							most = Math.max(most, holders);
+							await new Promise((resolve) => setTimeout(resolve, 5));
+							holders--;
+						});
+					}),
+				);
+			}
+			strictEqual(most, 1);
+		}));
 });
