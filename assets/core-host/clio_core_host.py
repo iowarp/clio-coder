@@ -36,7 +36,6 @@ LIVENESS_TAG = "^clio-core-host-liveness$"
 ATTACH_SECONDS = 10.0
 EXIT_ATTACH_FAILED = 3
 EXIT_PROTOCOL = 2
-RECORDS_SUFFIX = "/.records"
 XATTR_METHODS = ("AsyncTagSetXattr", "AsyncTagGetXattr", "AsyncTagListXattr")
 PUT_IF_ABSENT = "AsyncPutBlobIfAbsent"
 SYNC_TAG = "AsyncSyncTag"
@@ -555,7 +554,7 @@ class Core:
         return {"path": target, "copied": True}
 
     def stat_blob(self, args):
-        if args["tag"].endswith(RECORDS_SUFFIX):
+        if args.get("records") is True:
             tag_id = self.existing_tag_id(args["tag"])
             size = 0 if tag_id is None else self.record_size(tag_id, args["blob"])
             return {"stat": {"bytes": size, "modifiedMs": 0, "version": None} if size else None}
@@ -572,7 +571,7 @@ class Core:
 
     def list_blobs(self, args):
         names = []
-        if args["tag"].endswith(RECORDS_SUFFIX):
+        if args.get("records") is True:
             tag_id = self.existing_tag_id(args["tag"])
             if tag_id is not None:
                 names = list(result_of(self.client.AsyncGetContainedBlobs(tag_id), "GetContainedBlobs"))
@@ -593,7 +592,7 @@ class Core:
         return {"names": names[offset : offset + limit], "hasMore": len(names) > offset + limit}
 
     def del_blob(self, args):
-        if args["tag"].endswith(RECORDS_SUFFIX):
+        if args.get("records") is True:
             tag_id = self.existing_tag_id(args["tag"])
             if tag_id is None or self.record_size(tag_id, args["blob"]) == 0:
                 return {"deleted": False}

@@ -160,7 +160,7 @@ export async function createClioCoreStoreBackend(
 	async function statBlob(tag: string, blob: string): Promise<StoreBlobStat | null> {
 		const tagName = physical(tag);
 		checkBlob(tag, blob);
-		return (await host.call("statBlob", { tag: tagName, blob })).stat;
+		return (await host.call("statBlob", { tag: tagName, blob, records: isRecordsTag(tag) })).stat;
 	}
 
 	const cacheTagDir = (tag: string): string => path.join(cacheRoot, projectKey, encodeTagSegment(tag));
@@ -363,7 +363,12 @@ export async function createClioCoreStoreBackend(
 				const wanted = offset + limit + 1;
 				const matches: string[] = [];
 				for (let page = 0; matches.length < wanted; page += HOST_LIST_PAGE) {
-					const { names, hasMore } = await host.call("listBlobs", { tag: tagName, offset: page, limit: HOST_LIST_PAGE });
+					const { names, hasMore } = await host.call("listBlobs", {
+						tag: tagName,
+						records: isRecordsTag(tag),
+						offset: page,
+						limit: HOST_LIST_PAGE,
+					});
 					for (const name of names) {
 						if (!isRecordsTag(tag) && PUT_TEMP.test(name)) continue;
 						if (matcher === null || matcher.test(name)) matches.push(name);
@@ -379,7 +384,7 @@ export async function createClioCoreStoreBackend(
 				const tagName = physical(tag);
 				checkBlob(tag, blob);
 				writable();
-				return (await host.call("delBlob", { tag: tagName, blob })).deleted;
+				return (await host.call("delBlob", { tag: tagName, blob, records: isRecordsTag(tag) })).deleted;
 			}),
 
 		blobRefOfPath: async (realPath) => {

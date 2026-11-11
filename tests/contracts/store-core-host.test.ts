@@ -183,6 +183,10 @@ out["oldPut"] = core.put_record_if_absent({"tag": "t", "blob": "r3", "data": "eA
 core.client = Client()
 out["synced"] = synced
 out["refuseBy"] = host.STALL_SECONDS + host.PROBE_SECONDS
+Client.AsyncGetContainedBlobs = lambda self, tag_id: Future(["b#00000001"])
+core.tag_exists = lambda tag: True
+core.tag_ids["agentspace/pk/s4c%2F.records"] = 9
+out["records"] = core.list_blobs({"tag": "agentspace/pk/s4c%2F.records", "records": True, "offset": 0, "limit": 10})["names"]
 core.del_tag({"tag": "t"})
 out["deleted"], out["cached"] = deleted, "t" in core.tag_ids
 open(sys.argv[2], "w").write(json.dumps(out))
@@ -202,6 +206,7 @@ test("the Python host names a record lost at a restart and deletes tags through 
 		synced: number[];
 		oldPut: string;
 		refuseBy: number;
+		records: string[];
 	};
 	strictEqual(out.get[0], "io");
 	ok(/t:r1 was lost at a clio-core restart/u.test(out.get[1]), out.get[1]);
@@ -209,5 +214,6 @@ test("the Python host names a record lost at a restart and deletes tags through 
 	strictEqual(out.cached, false);
 	strictEqual(JSON.stringify(out.synced), "[5]", "a record put syncs its tag once; an older wheel skips it");
 	strictEqual(out.oldPut, "written");
+	strictEqual(JSON.stringify(out.records), '["b#00000001"]', "a physical (encoded) records tag lists its records");
 	ok(out.refuseBy < 3, `a stopped runtime is refused as unavailable within 3 s, not ${out.refuseBy} s`);
 });

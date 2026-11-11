@@ -13,8 +13,9 @@ export const CORE_HOST_MAX_RECORD_BYTES = 64 * 1024;
 /**
  * The ops are exactly the `StoreBackend` methods plus `ping`. Records travel base64.
  * `tag` is the physical CTE tag name (`agentspace/<projectKey>/<tag>`); the host
- * maps data ops on a tag to filesystem-module files under `/<tag>/` and, for a
- * tag ending in `/.records`, to plain CTE blobs. `listBlobs` pages come back
+ * maps data ops on a tag to filesystem-module files under `/<tag>/` and, when
+ * `records` is true, to plain CTE blobs. The caller decides `records`: an encoded
+ * tag name no longer ends in `/.records`. `listBlobs` pages come back
  * sorted; `listTags` returns the tag names that fully match `pattern`.
  */
 export interface CoreHostOps {
@@ -30,12 +31,12 @@ export interface CoreHostOps {
 	getBlobAsPath: { args: { tag: string; blob: string; destDir: string }; result: { path: string; copied: boolean } };
 	putRecordIfAbsent: { args: { tag: string; blob: string; data: string }; result: { outcome: "written" | "exists" } };
 	getRecord: { args: { tag: string; blob: string }; result: { data: string | null } };
-	statBlob: { args: { tag: string; blob: string }; result: { stat: StoreBlobStat | null } };
+	statBlob: { args: { tag: string; blob: string; records: boolean }; result: { stat: StoreBlobStat | null } };
 	listBlobs: {
-		args: { tag: string; pattern?: string; offset: number; limit: number };
+		args: { tag: string; records: boolean; pattern?: string; offset: number; limit: number };
 		result: { names: string[]; hasMore: boolean };
 	};
-	delBlob: { args: { tag: string; blob: string }; result: { deleted: boolean } };
+	delBlob: { args: { tag: string; blob: string; records: boolean }; result: { deleted: boolean } };
 }
 
 export type CoreHostOp = keyof CoreHostOps;
