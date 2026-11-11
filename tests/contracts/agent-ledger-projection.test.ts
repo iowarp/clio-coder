@@ -179,6 +179,8 @@ test("members of one board batch share their prompt prefix, so the stagger holds
 			// The leader never streams, so only its exit releases a held follower. Unheld followers end it at once.
 			if (index === 0) setTimeout(end, 1_000);
 			if (index === 2) spawned[0]?.finish();
+			// A follower spawns after the batch returns, so it ends itself.
+			if (index > 0) setImmediate(end);
 			const worker: SpawnedWorker = {
 				pid: 6_000 + index,
 				promise,
