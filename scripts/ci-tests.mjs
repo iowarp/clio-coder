@@ -128,6 +128,7 @@ export const coreTests = [
 	"provider-error-presentation",
 	"handbook-discovery",
 	"report-share",
+	"report-dataset",
 	"typecheck-corpus",
 	"anthropic-thread-idle",
 ]
