@@ -24,6 +24,11 @@ Call it with `gateway(op="call", capability="store", args={...})`.
 - Make anything worth keeping with `run_script`, declaring its `inputs` and
   `outputs`, then `op="put"` the output with a one-line `note`. A file made
   with `bash` has no producing run on record.
+- A store blob goes into `run_script` as itself: declare it in `inputs` as
+  `<tag>:<blob>` (or the path `op="get"` returned) and pass the same string
+  in `args`; the script receives the blob's readable path. Never copy a blob
+  into the working tree. The put's record then names the blob it used, such
+  as `sim:run042.h5`, with its hash.
 - Keep intermediates in a tag of class `cache` and results in a tag of class
   `output` (`op="create"` with `class` and a `description`).
 - When dispatching workers on data, name each blob as `<tag>:<blob>` in the
@@ -91,8 +96,8 @@ file. Request `mode="r"` and say so. `close_file` when done.
 
 When no tool above can answer, for example `data`'s reader is offline and not
 cached, write a short read-only script that opens the file in read mode (`"r"`)
-and run it with `run_script`, declaring the file in `inputs`. That records the
-command and the file's hash. Never open the file in a writable mode.
+and run it with `run_script`, declaring the file in `inputs` (a store blob as
+`<tag>:<blob>`). That records the command and the file's hash. Never open the file in a writable mode.
 
 ## Final answer
 

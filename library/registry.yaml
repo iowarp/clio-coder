@@ -816,7 +816,7 @@ entries:
       to build its environment before it runs offline."
     version: 0.2.1
     sourceUrl: plugins/science-data
-    sha256: 50d6029a6678faf7823b16f6c58a1accc9fe27c70cc7fd1574ed23c64d8c3d9f
+    sha256: 7ced797c12420270958debc7fcd03390ad459d219ea1c1abb08983ced4a80105
     provides:
       - kind: skill
         name: science-data
