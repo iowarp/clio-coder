@@ -1710,3 +1710,36 @@ describe("production compaction controls", () => {
 		strictEqual(portableCalls, 3);
 	});
 });
+
+describe("compaction cut inside a tool batch", () => {
+	it("never lands on a bashExecution row between an assistant's tool calls and their results", () => {
+		const base = (turnId: string) => ({ turnId, parentTurnId: null, timestamp: "2026-11-10T00:00:00.000Z" });
+		const big = "x".repeat(4000);
+		const entries: SessionEntry[] = [
+			{ ...base("u1"), kind: "message", role: "user", payload: { text: big } },
+			{
+				...base("a1"),
+				kind: "message",
+				role: "assistant",
+				payload: {
+					content: [
+						{ type: "text", text: big },
+						{ type: "toolCall", id: "c1", name: "read", arguments: {} },
+					],
+				},
+			},
+			{
+				...base("x1"),
+				kind: "bashExecution",
+				command: "ls",
+				output: big,
+				exitCode: 0,
+				cancelled: false,
+				truncated: false,
+			},
+			{ ...base("r1"), kind: "message", role: "tool_result", payload: { toolCallId: "c1", content: "ok" } },
+		];
+		const cut = findCutPoint(entries, 1000).firstKeptEntryIndex;
+		ok(cut !== 2, "the cut splits the tool batch");
+	});
+});

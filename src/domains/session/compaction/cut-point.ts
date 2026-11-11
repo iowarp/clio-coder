@@ -84,11 +84,29 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 	}
 }
 
+/**
+ * Valid cuts outside an open tool batch. A `custom`, `bashExecution` or `skillActivation` row written between an
+ * assistant's tool calls and their results is not a boundary: cutting there splits the batch, and replay repairs it by
+ * synthesizing the assistant message without its text or signed thinking.
+ */
 function findValidCutPoints(entries: ReadonlyArray<SessionEntry>, startIndex: number, endIndex: number): number[] {
 	const cuts: number[] = [];
+	const pending = new Set<string>();
 	for (let i = startIndex; i < endIndex; i++) {
 		const entry = entries[i];
 		if (!entry) continue;
+		if (entry.kind === "message") {
+			if (entry.role === "tool_result") {
+				const id = (entry.payload as { toolCallId?: unknown } | null)?.toolCallId;
+				if (typeof id === "string") pending.delete(id);
+			} else if (entry.role === "user" || entry.role === "assistant") {
+				pending.clear();
+				const content = (entry.payload as { content?: unknown } | null)?.content;
+				if (entry.role === "assistant" && Array.isArray(content))
+					for (const block of content) if (block?.type === "toolCall" && typeof block.id === "string") pending.add(block.id);
+			}
+		}
+		if (pending.size > 0 && !(entry.kind === "message" && entry.role === "assistant")) continue;
 		if (isValidCutPoint(entry)) cuts.push(i);
 	}
 	return cuts;
@@ -173,6 +191,10 @@ export function findCutPoint(
 			// checks whether summarizing older work actually made the request fit.
 			if (cutIndex === -1 && entry.kind === "message" && (entry.role === "tool_result" || entry.role === "tool_call")) {
 				cutIndex = findToolBatchStart(entries, i, startIndex, endIndex);
+			}
+			// A row written inside an open tool batch is no boundary: keep the whole batch from its assistant.
+			if (cutIndex === -1 && isValidCutPoint(entry) && !cutPoints.includes(i)) {
+				for (const candidate of cutPoints) if (candidate < i) cutIndex = candidate;
 			}
 			break;
 		}
