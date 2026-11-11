@@ -157,3 +157,9 @@ test("the rendered block parses back to the draft's facts", () => {
 		credit: "no",
 	});
 });
+
+test("a target name inside a runtime id or billing provider word is not masked in report text", () => {
+	const withTarget: LocalIdentity = { ...identity, names: [...identity.names, { kind: "target", value: "copilot" }] };
+	const { text } = scrubText("the copilot-sdk runtime and github-copilot billing failed on copilot", withTarget);
+	strictEqual(text, "the copilot-sdk runtime and github-copilot billing failed on <target>");
+});

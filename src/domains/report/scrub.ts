@@ -4,6 +4,7 @@ import { homedir, hostname, userInfo } from "node:os";
 import { basename, sep } from "node:path";
 import { knownSecretValues } from "../../core/sandbox/env-scrub.js";
 import { FailureCause } from "../../core/telemetry/enums.js";
+import { BILLING_PROVIDERS } from "../../core/telemetry/schemas.js";
 import { createRedactionTally, redactKnownSecrets, redactSecretsText } from "../evidence/index.js";
 import { inspectInstallation } from "../lifecycle/index.js";
 import { isBuiltinRuntimeId } from "../telemetry/index.js";
@@ -144,6 +145,23 @@ const RESERVED_WORDS: ReadonlySet<string> = new Set(
 		].flatMap((text) => text.match(/[A-Za-z][A-Za-z0-9_'-]*/gu) ?? []),
 	].map((word) => word.toLowerCase()),
 );
+
+const RUNTIME_ID_CHAR = /[A-Za-z0-9_-]/u;
+const BILLING_PROVIDER_WORDS: ReadonlySet<string> = new Set(BILLING_PROVIDERS);
+
+/** Whether a word is a harness word (a runtime id such as `copilot-sdk`, a billing provider such as `github-copilot`). */
+function isHarnessCompound(word: string): boolean {
+	return isBuiltinRuntimeId(word) || BILLING_PROVIDER_WORDS.has(word);
+}
+
+/** Whether the name matched at `start..end` is only part of a harness word, which is that word, not the name. */
+export function insideHarnessWord(text: string, start: number, end: number): boolean {
+	let from = start;
+	let to = end;
+	while (from > 0 && RUNTIME_ID_CHAR.test(text.charAt(from - 1))) from -= 1;
+	while (to < text.length && RUNTIME_ID_CHAR.test(text.charAt(to))) to += 1;
+	return isHarnessCompound(text.slice(from, to));
+}
 
 /** Where a long name may start: not after a letter or digit, except the letter of a `\n` escape or a `%2F`. */
 const NAME_START = "(?:(?<![A-Za-z0-9])|(?<=\\\\[ntr]|%2[Ff]))";
@@ -290,7 +308,11 @@ function scrubOnce(
 	// `webapp.config.ts`, `id_jdoe`, and after a `\n` escape or a `%2F`. It is masked on screen (and unmaskable) instead
 	// of refused at Send. A shorter name the canary skips keeps the stricter boundaries, so a compound word keeps it.
 	if (long.length > 0)
-		out = out.replace(new RegExp(`${NAME_START}(?:${long.map(escapeRegExp).join("|")})(?![A-Za-z0-9])`, "giu"), maskName);
+		out = out.replace(
+			new RegExp(`${NAME_START}(?:${long.map(escapeRegExp).join("|")})(?![A-Za-z0-9])`, "giu"),
+			(match: string, offset: number, whole: string) =>
+				insideHarnessWord(whole, offset, offset + match.length) ? match : maskName(match),
+		);
 	if (short.length > 0)
 		out = out.replace(
 			new RegExp(`(?<![A-Za-z0-9_.-])(?:${short.map(escapeRegExp).join("|")})(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, "giu"),

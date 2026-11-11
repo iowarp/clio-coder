@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
-import { BILLING_PROVIDERS } from "../../core/telemetry/schemas.js";
-import { isBuiltinRuntimeId, telemetryInstallPath, unpackTelemetryArchive } from "../telemetry/index.js";
+import { telemetryInstallPath, unpackTelemetryArchive } from "../telemetry/index.js";
 import type { RenderedReport } from "./body.js";
-import { CANARY_MIN_LENGTH, type IdentityKind, isReservedName, type LocalIdentity, scrubText } from "./scrub.js";
+import {
+	CANARY_MIN_LENGTH,
+	type IdentityKind,
+	insideHarnessWord,
+	isReservedName,
+	type LocalIdentity,
+	scrubText,
+} from "./scrub.js";
 
 /**
  * The second, independent proof that a bundle carries none of this machine's identifiers (R-19). The projection
@@ -98,20 +104,10 @@ function matchKind(text: string, m: Matcher): CanaryKind | null {
 	const words = m.words;
 	words.lastIndex = 0;
 	for (let word = words.exec(text); word !== null; word = words.exec(text)) {
-		let start = word.index;
-		let end = start + word[0].length;
-		while (start > 0 && RUNTIME_ID_CHAR.test(text.charAt(start - 1))) start -= 1;
-		while (end < text.length && RUNTIME_ID_CHAR.test(text.charAt(end))) end += 1;
-		if (!isHarnessCompound(text.slice(start, end))) return m.wordKinds.get(word[0].toLowerCase()) ?? "user";
+		if (!insideHarnessWord(text, word.index, word.index + word[0].length))
+			return m.wordKinds.get(word[0].toLowerCase()) ?? "user";
 	}
 	return null;
-}
-
-const RUNTIME_ID_CHAR = /[A-Za-z0-9_-]/u;
-const BILLING_PROVIDER_WORDS: ReadonlySet<string> = new Set(BILLING_PROVIDERS);
-
-function isHarnessCompound(word: string): boolean {
-	return isBuiltinRuntimeId(word) || BILLING_PROVIDER_WORDS.has(word);
 }
 
 /** JSON string escapes undone, so `\/home\/x` and `\u002fhome` are found in text that is not parsed. */
