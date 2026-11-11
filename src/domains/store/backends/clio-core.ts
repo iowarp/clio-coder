@@ -127,7 +127,8 @@ async function pruneCache(root: string, maxBytes: number, keep: string): Promise
  * file `/agentspace/<projectKey>/T/B`; records are plain CTE blobs in the
  * records tag. The host receives physical tag names and owns the CTE calls;
  * names, the durability gate and the materialization cache live here. Nothing
- * is written under Clio Coder's data directory.
+ * is written under Clio Coder's data directory. A clio-core space reserved
+ * over `agentspace/<projectKey>/` charges both the records and the data blobs.
  */
 export async function createClioCoreStoreBackend(
 	cwd: string,
