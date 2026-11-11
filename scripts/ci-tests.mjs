@@ -19,6 +19,8 @@ export const coreTests = [
 	"handbook-bench",
 	"reload-prompts",
 	"telemetry-share-linkability",
+	"mcp-extension-secret-mask",
+	"runtime-plugin-env-key",
 	"memory-off-marker",
 	"headless-observed",
 	"prompt-preconditions",
