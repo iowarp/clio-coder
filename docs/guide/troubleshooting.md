@@ -290,6 +290,13 @@ feature request or a question for Clio Coder's maintainers and post it on
 clio-coder report bug --title "footer flickers on resize" --last --dry-run
 ```
 
+In the desktop app, **Report a problem** (in the command palette, the help
+dialog and the `/report` slash palette) opens a dialog over the same report
+plan. It walks through Review, Attach and Send: you edit the title and text,
+see what Clio masked, and only the **Send report** button sends; Enter in a
+field sends nothing. An optional box checks daily for a reply. The dialog never
+builds a diagnostic bundle; sharing one needs `report --share` in a shell.
+
 - **Draft.** `/report bug|feature|question [summary]` uses the summary as the
   title and adds what Clio Coder observed in the current session. In a shell,
   `--title` and `--body-file <file>` (or `-` for stdin) supply the text, and in
@@ -351,7 +358,11 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   join only with `--with-tool-output`, and `--anonymize-models` hides model ids.
   `debug` lets the maintainers read it to fix this report, `dataset` also lets
   its mechanics go into public datasets, and the consent text prints with the
-  bundle. Every byte is checked for this machine's identifiers; a hit names the
+  bundle. A dataset release (built by the maintainers with
+  `scripts/report-dataset.ts`, which publishes nothing itself) takes only
+  bundles that granted `dataset`, re-keys their ids, shifts each trace's times
+  to start at 2000-01-01, drops rare values, needs at least 20 traces and
+  leaves out withdrawn reports. Every byte is checked for this machine's identifiers; a hit names the
   member and the kind of identifier and exits 1. The bundle is kept at 0600
   under the state directory's `reports/bundles/` only once the report is sent
   or saved. Without `--share` the bundle stays on this machine and the issue
