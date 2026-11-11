@@ -323,7 +323,7 @@ const EXTENSION_REFRESH_TEXT = {
 /** The refresh as one sentence for a notice, in what the operator will see next. */
 export function libraryRefreshSummary(refresh: LibraryRefreshResult): string {
 	if (refresh.status === "failed")
-		return `The session refresh failed (${refresh.error}); reopen the Library and press R.`;
+		return `The session refresh failed (${refresh.error}); reopen the Library and press r.`;
 	if (refresh.status === "not-applicable") return "";
 	if (refresh.extensions) return EXTENSION_REFRESH_TEXT[refresh.extensions];
 	return "This session already sees the change.";

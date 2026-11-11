@@ -601,7 +601,7 @@ function statusLine(
 		"",
 		units([
 			// The scope in effect, then the key that picks the other one.
-			`${theme.fg("annotation", wide ? "Adopts into" : "Scope")} ${theme.fg("fieldValue", settings.scope)} ${keyCap(theme, settings.scope === "user" ? "p" : "u")} ${theme.fg("annotation", settings.scope === "user" ? "project" : "user")}`,
+			`${theme.fg("annotation", wide ? "Adopts into" : "Scope")} ${theme.fg("fieldValue", settings.scope)} ${keyCap(theme, "s")} ${theme.fg("annotation", settings.scope === "user" ? "project" : "user")}`,
 			`${keyCap(theme, "c")} ${theme.fg("fieldValue", settings.filter ? `${settings.filter}s only` : "all kinds")}`,
 			chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted"),
 			chip(theme, `${counts.connected} connected`, counts.connected > 0 ? "success" : "muted"),

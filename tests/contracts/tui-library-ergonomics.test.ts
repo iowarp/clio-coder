@@ -470,3 +470,14 @@ it("a confirmGlobal key asks once: the rail says so, another key keeps it, the s
 	list.handleInput("R");
 	equal(restarts, 1);
 });
+
+it("moved-key texts name the live letter: Library refresh is r, Extensions restart is R, Interop scope is s", async () => {
+	const { readFileSync } = await import("node:fs");
+	const { libraryRefreshSummary } = await import("../../src/interactive/overlays/library-review.js");
+	match(libraryRefreshSummary({ status: "failed", error: "boom" } as never), /press r\.$/);
+	const extensions = readFileSync(new URL("../../src/interactive/overlays/extensions.ts", import.meta.url), "utf8");
+	ok(!/[Pp]ress r to start/.test(extensions), "extensions detail still names r for restart");
+	match(extensions, /Press R to start installed extensions now/);
+	const interop = readFileSync(new URL("../../src/interactive/overlays/interop.ts", import.meta.url), "utf8");
+	ok(!/keyCap\(theme, settings\.scope === "user" \? "p" : "u"\)/.test(interop), "interop scope chip still shows p/u");
+});

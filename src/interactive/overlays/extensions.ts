@@ -206,8 +206,8 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					return `Disabled. clio-coder extensions enable ${ext.id} --${ext.scope} turns it back on.`;
 				if (!hasRuntime || state !== "eligible") return undefined;
 				if (runtimeWord === "not started")
-					return operator ? "Not started in this session yet. Press r to start installed extensions now." : undefined;
-				if (runtimeWord === "failed") return operator ? "Fix the cause below, then press r to start it again." : undefined;
+					return operator ? "Not started in this session yet. Press R to start installed extensions now." : undefined;
+				if (runtimeWord === "failed") return operator ? "Fix the cause below, then press R to start it again." : undefined;
 				if (runnable.has(ext.id)) return `Press v to put /${runnable.get(ext.id)} in the composer.`;
 				return undefined;
 			};
