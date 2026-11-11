@@ -417,12 +417,14 @@ describe("mandatory request-fit compaction", () => {
 		});
 	}
 
-	it("recovers output overflow below the automatic threshold while manual force keeps its default", async () => {
+	it("recovers output overflow the automatic pass did not take while manual force keeps its default", async () => {
 		const f = overflowFixture();
 		const pending = "Create the exact source-backed map; keep tracked source unchanged.";
 		f.priceAt(25000, pending);
-		ok(25000 < 32768 * f.settings.context.compaction.threshold);
 		ok(25000 + 8192 > 32768);
+		// The automatic trigger counts the summary's output reservation, so with the same 8192-token
+		// limit it fires before any request overflows; the overflow path is the one left when it is off.
+		f.settings.context.compaction.auto = false;
 		strictEqual(await f.context.runAutoCompact(f.runtime, false, undefined, undefined, pending), false);
 		strictEqual(f.budgets.length, 0);
 		strictEqual(await f.context.runAutoCompact(f.runtime, true, undefined, "force", pending), false);
@@ -452,11 +454,12 @@ describe("mandatory request-fit compaction", () => {
 	it("prices the freshly compiled prompt when the first automatic precheck did not need compaction", async () => {
 		const f = overflowFixture();
 		const pending = "Map the current source with the loaded skill.";
-		f.priceAt(21000, pending);
-		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 < 32768);
+		f.priceAt(17500, pending);
+		// Below the trigger with the summary's 8192-token output reservation counted.
+		ok(f.context.liveContextEstimate(f.runtime, pending).tokens + 8192 < 32768 * f.settings.context.compaction.threshold);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false, undefined, undefined, pending), false);
 		strictEqual(f.budgets.length, 0);
-		f.compileNext(`${f.runtime.agent.state.systemPrompt}${"new context ".repeat(1400)}`);
+		f.compileNext(`${f.runtime.agent.state.systemPrompt}${"new context ".repeat(3000)}`);
 		ok(await f.context.ensureSessionPrompt(f.runtime));
 		const before = f.context.liveContextEstimate(f.runtime, pending);
 		ok(before.tokens + 8192 > 32768);

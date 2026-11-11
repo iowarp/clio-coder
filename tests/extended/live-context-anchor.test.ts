@@ -138,18 +138,20 @@ describe("live measured context anchor", () => {
 
 	it("counts the measured schema once and avoids the reproduced false pressure without losing pending or trailing text", async () => {
 		const f = fixture();
+		// The trigger counts the summary's 8192-token output reservation; this request still fits below it.
+		f.settings.context.compaction.threshold = 0.95;
 		f.context.reconcileUsage(usage());
 		const tail = result("source".repeat(660));
 		f.runtime.agent.state.messages.push(tail);
 		const raw = structuredClone(f.runtime.agent.state.messages);
 		const expected = 20342 + estimateAgentMessageTokens(tail);
 		ok(
-			estimateAgentContextTokens(f.runtime.agent.state) > 32768 * 0.85,
+			estimateAgentContextTokens(f.runtime.agent.state) + 8192 > 32768 * 0.95,
 			"legacy duplicate schema charge crosses pressure threshold",
 		);
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, expected);
 		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 20);
-		ok(expected + 8192 < 32768);
+		ok(expected + 8192 < 32768 * 0.95);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false), false);
 		strictEqual(f.summaries(), 0);
 		deepStrictEqual(f.runtime.agent.state.messages, raw);
@@ -217,7 +219,7 @@ describe("live measured context anchor", () => {
 			}),
 			entry("a", "old", "assistant", {
 				content: [{ type: "toolCall", id: "read1", name: "read", arguments: { path: "current.ts" } }],
-				usage: usage(27500, 100),
+				usage: usage(19500, 100),
 			}),
 		];
 		const meta = { id: "anchor-session", cwdHash: "anchor-fixture", cwd: isolated.dir } as SessionMeta;
@@ -245,7 +247,7 @@ describe("live measured context anchor", () => {
 		f.settings.context.workingSet.enabled = true;
 		f.state.lastTurnId = "a";
 		f.runtime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(entries);
-		f.context.reconcileUsage(usage(27500, 100));
+		f.context.reconcileUsage(usage(19500, 100));
 		entries.push(
 			entry("tail", "a", "tool_result", {
 				toolCallId: "read1",
@@ -261,7 +263,9 @@ describe("live measured context anchor", () => {
 		ok(tool);
 		tool.description += "g".repeat(400);
 		const original = structuredClone(entries);
-		const expected = 27600 + estimateAgentMessageTokens(tail) + 100 - 1000;
+		const expected = 19600 + estimateAgentMessageTokens(tail) + 100 - 1000;
+		// With the summary's 8192-token output reservation counted, the eviction alone clears the 0.85 trigger.
+		ok(expected + 1000 + 8192 > 32768 * 0.85 && expected + 8192 <= 32768 * 0.85);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false), true);
 		strictEqual(evictions, 1);
 		strictEqual(f.summaries(), 0);
