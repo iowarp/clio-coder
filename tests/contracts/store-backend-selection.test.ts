@@ -6,10 +6,13 @@ import net from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storeFindings } from "../../src/cli/doctor-store.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { storeProjectKey, storeProjectRoot, storeReadRoots, storeRoot } from "../../src/core/store-paths.js";
-import { openStoreBackend, storeBackendIsLocal } from "../../src/domains/store/index.js";
+import { openStoreBackend } from "../../src/domains/store/index.js";
 import { readStoreBackendSelection } from "../../src/domains/store/selection.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
+import { makeDispatchBundle } from "../harness/dispatch.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function withHome(fn: (dir: string, root: string) => Promise<void>): Promise<void> {
@@ -37,13 +40,64 @@ describe("store backend selection", () => {
 			strictEqual((await openStoreBackend(root)).kind, "local");
 		}));
 
-	it("only a clio-core selection lifts the remote-node tag grant refusal (M-31 item 6)", () =>
-		withHome(async () => {
-			strictEqual(await storeBackendIsLocal(), true);
-			writeRecord(JSON.stringify({ v: 1, backend: "local" }));
-			strictEqual(await storeBackendIsLocal(), true);
-			writeRecord(JSON.stringify({ v: 1, backend: "clio-core" }));
-			strictEqual(await storeBackendIsLocal(), false);
+	it("refuses a tag grant to a remote node on the clio-core backend too, since the worker there opens its own store", () =>
+		withHome(async (dir, root) => {
+			// A daemon answers the probe and a scripted host attaches, so admission sees the tag exist on clio-core.
+			const daemon = net.createServer((socket) => socket.destroy());
+			await new Promise<void>((resolve) => daemon.listen(0, "127.0.0.1", resolve));
+			const savedPath = process.env.PATH;
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.safety.sandbox = "off";
+			let spawned = 0;
+			const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+				spawnWorker: () => {
+					spawned += 1;
+					throw new Error("admission should have refused before any worker started");
+				},
+				resolveNode: () => ({ node: { id: "loopnode", kind: "ssh", host: "127.0.0.1" } }),
+			});
+			try {
+				const { port } = daemon.address() as net.AddressInfo;
+				const config = join(dir, "clio.yaml");
+				writeFileSync(config, `networking:\n  port: ${port}\n`);
+				const python = join(dir, "python3");
+				writeFileSync(
+					python,
+					`#!${process.execPath}\n` +
+						"const send = (value) => { const body = Buffer.from(JSON.stringify(value)); const head = Buffer.alloc(4); head.writeUInt32BE(body.length); process.stdout.write(Buffer.concat([head, body])); };\n" +
+						'send({ hello: { host: "python", hostVersion: "0", coreVersion: "2.4.0", pool: "563.0", transport: "shm" } });\n' +
+						"let pending = Buffer.alloc(0);\n" +
+						"process.stdin.on('data', (chunk) => { pending = Buffer.concat([pending, chunk]);\n" +
+						"  while (pending.length >= 4 && pending.length >= 4 + pending.readUInt32BE(0)) {\n" +
+						"    const { id, op } = JSON.parse(pending.subarray(4, 4 + pending.readUInt32BE(0)).toString());\n" +
+						"    pending = pending.subarray(4 + pending.readUInt32BE(0));\n" +
+						"    if (op === 'shutdown') process.exit(0);\n" +
+						"    send({ id, ok: true, result: op === 'facts' ? { durable: true } : op === 'tagExists' ? { exists: true } : {} });\n" +
+						"  } });\n",
+				);
+				chmodSync(python, 0o755);
+				const emptyBin = join(dir, "bin");
+				mkdirSync(emptyBin);
+				process.env.PATH = emptyBin;
+				writeRecord(JSON.stringify({ v: 1, backend: "clio-core", python, config }));
+				strictEqual((await openStoreBackend(root)).kind, "clio-core");
+				await bundle.extension.start();
+				await rejects(
+					bundle.contract.dispatch({
+						agentId: "coder",
+						executionRole: "builder",
+						task: "Write results.",
+						cwd: root,
+						storeTags: ["results"],
+					}),
+					/node 'loopnode' is remote.*cannot be granted tags \["results"\]; run this task on the local node or drop tags/,
+				);
+				strictEqual(spawned, 0);
+			} finally {
+				await bundle.extension.stop?.();
+				process.env.PATH = savedPath;
+				daemon.close();
+			}
 		}));
 
 	it("a clio-core mount's project directory is a store read root, since get hands back paths in it", () =>

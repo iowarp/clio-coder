@@ -35,7 +35,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
-import { openStoreBackend, storeBackendIsLocal } from "../store/index.js";
+import { openStoreBackend } from "../store/index.js";
 import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 import { readToolRounds } from "./types.js";
@@ -7331,15 +7331,12 @@ export function createDispatchBundle(
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
-		if (
-			placement?.node.kind === "ssh" &&
-			req.storeTags !== undefined &&
-			req.storeTags.length > 0 &&
-			(await storeBackendIsLocal())
-		) {
-			// The local backend lives in this host's data directory, which a fleet node cannot reach.
+		if (placement?.node.kind === "ssh" && req.storeTags !== undefined && req.storeTags.length > 0) {
+			// The grant's write boundaries are this host's store directories, and the worker on the
+			// node opens its own home's store; neither the backend selection nor the project key
+			// travels with the assignment, so on any backend its puts cannot reach this store.
 			throw new Error(
-				`dispatch: admission denied: node '${placement.node.id}' is remote and the store backend is local, so it cannot be granted tags ${JSON.stringify(req.storeTags)}; run this task on the local node or drop tags`,
+				`dispatch: admission denied: node '${placement.node.id}' is remote and a worker there cannot reach this host's store, so it cannot be granted tags ${JSON.stringify(req.storeTags)}; run this task on the local node or drop tags`,
 			);
 		}
 		let remoteReturn: FleetChangeReturn | undefined;
