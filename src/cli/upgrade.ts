@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { initializeClioHome } from "../core/init.js";
+import { initializeClioHome, recordHomeDowngrade } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
 import { createUpdateLog, deferredUpdateTarget, installHold } from "../domains/lifecycle/deferred-update.js";
@@ -576,6 +576,8 @@ export async function runUpgradeCommand(
 			presenter.finish();
 			return 1;
 		}
+		// The older binary refuses a home a newer version stamped; record the rollback as an accepted downgrade.
+		if (installedVersionAt(record.previous) !== null) recordHomeDowngrade(previousVersion);
 		// The installer's own lines, without its tag, are the record of what changed.
 		for (const line of result.stdout.split(/\r?\n/)) {
 			const text = line.replace(/^\[install\]\s*/, "").trim();

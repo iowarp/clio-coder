@@ -313,17 +313,19 @@ export function detectNewerHome(): NewerHome | null {
 }
 
 /**
- * The operator accepted running this older Clio on a newer home: record the
- * downgrade so later boots do not ask, and the home is this version's again.
+ * The operator accepted running an older Clio on a newer home: record the
+ * downgrade so later boots do not ask, and the home is that version's again.
+ * `version` defaults to the running one; `upgrade --rollback` passes the
+ * version it switched the launcher to, whose binary reads this record.
  */
-export function recordHomeDowngrade(): void {
+export function recordHomeDowngrade(version: string = readClioVersion()): void {
 	const stateDir = clioStateDir();
 	const installPath = join(stateDir, "home.json");
 	withStateFileLockSync(installPath, () => {
 		const metadata = readInstallMetadata(installPath);
 		if (!metadata) return;
 		const payload: InstallMetadata = {
-			version: readClioVersion(),
+			version,
 			...(metadata.installedAt !== undefined ? { installedAt: metadata.installedAt } : {}),
 			...(metadata.repairedAt !== undefined ? { repairedAt: metadata.repairedAt } : {}),
 			downgradedFrom: metadata.version,

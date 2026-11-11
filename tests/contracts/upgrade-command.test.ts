@@ -375,6 +375,44 @@ test("rollback refuses manager-owned installs before any child command", (t) => 
 	assert.match(named.stdout, /npm install -g --prefix .* @iowarp\/clio-coder@0\.6\.9/);
 });
 
+test("a native rollback leaves the older version able to open the home the newer one used", {
+	skip: process.platform === "win32",
+}, async (t) => {
+	const home = await isolateClioEnv("clio-rollback-home-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const root = join(home.dir, "install");
+	const previous = join(root, "versions", "0.7.0");
+	mkdirSync(join(previous, "lib/node_modules/@iowarp/clio-coder"), { recursive: true });
+	writeFileSync(join(previous, "lib/node_modules/@iowarp/clio-coder/package.json"), '{"version":"0.7.0"}');
+	mkdirSync(join(root, "scripts"), { recursive: true });
+	writeFileSync(join(root, "scripts", "install.sh"), "echo '[install] switched'\n");
+	const code = await runUpgradeCommand(["--rollback", "--json"], {
+		inspectInstallation: () => ({
+			kind: "installer",
+			root,
+			entry: join(root, "versions", "current", "dist/cli/index.js"),
+			prefix: join(root, "versions", "current"),
+			installer: {
+				root,
+				node: process.execPath,
+				nodeVersion: "24",
+				nodeBuild: "linux-x64",
+				current: join(root, "versions", "current"),
+				previous,
+				launcher: join(home.dir, "bin", "clio-coder"),
+				channel: "latest",
+			},
+		}),
+	});
+	assert.equal(code, 0);
+	const stamped = JSON.parse(readFileSync(join(home.dir, "state", "home.json"), "utf8")) as {
+		version: string;
+		downgradedFrom?: string;
+	};
+	assert.deepEqual([stamped.version, stamped.downgradedFrom], ["0.7.0", readClioVersion()]);
+});
+
 test("upgrade refuses while another registered session runs from an npm prefix the deferred wrapper owns", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
