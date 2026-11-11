@@ -223,6 +223,7 @@ test("a repository without a handbook gets one compiled off the prompt path from
 		const main = renderEffectivePromptContext(repo);
 		ok(main.compiledHandbook, main.text);
 		ok(main.text.includes("no CLIO-CODER.md in this repository"), main.text);
+		ok(!main.text.includes("Every rule in it was checked"), main.text);
 		ok(main.text.includes("Checked as `rule1` by `tests/boundaries/check-imports.mjs`"), main.text);
 		ok(main.text.includes("after every change to `src/core/`"), main.text);
 		ok(!main.text.includes("old-api"), "a rule citing a missing file is not compiled");
@@ -242,7 +243,7 @@ test("a repository without a handbook gets one compiled off the prompt path from
 		ok(
 			hints.some(({ text }) =>
 				text.includes(
-					`No project handbook; using ${main.compiledHandbook?.rules} verified rules compiled from AGENTS.md, tests/boundaries/check-imports.mjs. Run clio-coder context init to write one.`,
+					`No project handbook; using ${main.compiledHandbook?.rules} rules compiled from AGENTS.md, tests/boundaries/check-imports.mjs. Run clio-coder context init to write one.`,
 				),
 			),
 			JSON.stringify(hints),

@@ -183,7 +183,7 @@ function collectStartupHints(
 	if (compiled) {
 		hints.push({
 			level: "info",
-			text: `clio-coder: No project handbook; using ${compiled.rules} verified rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")}. Run ${initCommand} to write one.`,
+			text: `clio-coder: No project handbook; using ${compiled.rules} rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")}. Run ${initCommand} to write one.`,
 		});
 	} else if (absent && projectType !== "unknown") {
 		hints.push({

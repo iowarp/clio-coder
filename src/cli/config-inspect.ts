@@ -22,9 +22,9 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 // C-3: domain barrels also load execution and indexing code. Keep inspection
 // on the readers so source clients do not wait for that unrelated module graph.
 import { loadProjectClioMd } from "../domains/context/clio-md.js";
+import { renderEffectivePromptContext } from "../domains/context/compiled-handbook.js";
 import { loadOperatorProfile, renderOperatorProfile } from "../domains/context/operator-profile.js";
 import { loadProjectRules } from "../domains/context/project-rules.js";
-import { renderPromptContext } from "../domains/context/prompt-context.js";
 import { extensionSnapshotFor } from "../domains/extensions/snapshot-access.js";
 import { listInstalledExtensions } from "../domains/extensions/state.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/store.js";
@@ -110,9 +110,11 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 	const loaded = loadProjectClioMd(cwd);
 	for (const issue of loaded.errors) graph.issues.push(`clio-md ${issue.path}: ${issue.error}`);
-	if (loaded.files.length === 0) return;
+	if (loaded.errors.length > 0 && loaded.files.length === 0) return;
 	try {
-		const promptContext = renderPromptContext(cwd);
+		// Without CLIO-CODER.md the one layer is the compiled handbook sessions run on, when its cache holds one.
+		const promptContext = renderEffectivePromptContext(cwd);
+		const compiled = promptContext.compiledHandbook;
 		const preload = selectProjectPreload(promptContext, null).classification;
 		for (const [index, file] of promptContext.handbookSources.entries()) {
 			const text = file.source;
@@ -137,6 +139,7 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 					preloadSourceIncludedChars: preload.sources?.[index]?.includedChars ?? 0,
 					preloadSourceHash: preload.sources?.[index]?.contentHash ?? "",
 					...(preload.nearLimit ? { preloadNearLimit: true } : {}),
+					...(compiled ? { compiledFrom: compiled.sources, compiledRules: compiled.rules } : {}),
 				},
 			});
 		}

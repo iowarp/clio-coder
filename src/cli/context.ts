@@ -98,14 +98,17 @@ async function printContextStatus(): Promise<number> {
 
 	const clio = context.loadProjectClioMd(cwd);
 	const state = context.readClioState(cwd);
+	const prompt = context.renderEffectivePromptContext(cwd);
+	const compiled = prompt.compiledHandbook;
 	const clioMdState =
 		clio.files.length === 0 && clio.errors.length === 0
-			? "none"
+			? compiled
+				? `none; sessions use ${compiled.rules} rule${compiled.rules === 1 ? "" : "s"} compiled from ${compiled.sources.join(", ")} (${compiled.path})`
+				: "none"
 			: clio.errors.length > 0
 				? "malformed"
 				: context.describeHandbookFreshness(cwd);
 
-	const prompt = context.renderPromptContext(cwd);
 	const preloadClass = preload.selectProjectPreload(prompt, null).classification;
 
 	const codewiki = context.readCodewiki(cwd);

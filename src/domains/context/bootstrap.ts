@@ -2713,7 +2713,7 @@ export interface TreeCompiledHandbook {
 	markdown: string;
 	/** Repository-relative files its rules came from, sorted. */
 	sources: string[];
-	/** Rules it states; each was checked against the tree. */
+	/** Rules it states: checker rules, adopted rules whose citations resolve, and manifest facts. */
 	rules: number;
 }
 
@@ -2799,7 +2799,7 @@ export function compileHandbookFromTree(input: {
 	const overflowLines = overflow ? overflow.body.split("\n").filter((line) => line.startsWith("- ")).length : 0;
 	const markdown = serializeClioMd({
 		projectName: projectName(cwd, tomlFiles),
-		identity: `This handbook was compiled from ${sources.map((source) => `\`${source}\``).join(", ")}; no CLIO-CODER.md in this repository. Every rule in it was checked against this tree.`,
+		identity: `This handbook was compiled without a model from ${sources.map((source) => `\`${source}\``).join(", ")}; no CLIO-CODER.md in this repository. Its invariants are what those checkers fail on, its adopted rules are kept only where every file they cite exists here, and its conventions and commands are read from the manifests. Nothing in it was run or reviewed.`,
 		invariants,
 		conventions,
 		sections: [...adopted, ...(overflow ? [overflow] : []), ...(verification ? [verification] : [])],
