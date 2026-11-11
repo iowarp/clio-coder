@@ -349,13 +349,13 @@ class DecisionsOverlayBody implements Component {
 		}
 		if (rows.length === 0) return;
 		if (this.status !== null && this.status.kind === "warning") this.status = null;
-		if (matchesKey(data, "up")) {
+		if (matchesKey(data, "up") || data === "k") {
 			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
 			this.expandedKey = null;
 			this.requestRender();
 			return;
 		}
-		if (matchesKey(data, "down")) {
+		if (matchesKey(data, "down") || data === "j") {
 			this.selectedIndex = Math.min(rows.length - 1, this.selectedIndex + 1);
 			this.expandedKey = null;
 			this.requestRender();

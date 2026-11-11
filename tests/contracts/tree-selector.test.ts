@@ -159,3 +159,13 @@ it("pages with PgDn and PgUp and jumps with End and Home, clamped at either end"
 	f.view.handleInput("\u001b[H");
 	match(f.text(), /❯.*oldest/u);
 });
+
+it("j and k move the selection like Down and Up (E-13)", () => {
+	const f = fixture();
+	f.view.handleInput("j");
+	f.view.handleInput("\r");
+	f.view.handleInput("k");
+	f.view.handleInput("\r");
+	strictEqual(f.switched.length, 2);
+	strictEqual(f.switched[0] !== f.switched[1], true, "j and k selected different turns");
+});

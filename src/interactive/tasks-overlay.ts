@@ -643,11 +643,11 @@ class TasksOverlayBody implements Component, RowBudgetedBody {
 			return;
 		}
 		if (rows.length === 0) return;
-		if (matchesKey(data, "up")) {
+		if (matchesKey(data, "up") || data === "k") {
 			this.select(this.selectedIndex - 1, rows.length);
 			return;
 		}
-		if (matchesKey(data, "down")) {
+		if (matchesKey(data, "down") || data === "j") {
 			this.select(this.selectedIndex + 1, rows.length);
 			return;
 		}

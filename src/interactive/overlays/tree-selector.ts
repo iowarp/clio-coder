@@ -463,11 +463,11 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		// Filtering and sorting remain available when the visible list is empty.
 		if (this.rows.length === 0) return;
 		// Arrows: CSI A/B for up/down.
-		if (matchesKey(data, "up")) {
+		if (matchesKey(data, "up") || data === "k") {
 			this.moveHighlight(-1);
 			return;
 		}
-		if (matchesKey(data, "down")) {
+		if (matchesKey(data, "down") || data === "j") {
 			this.moveHighlight(1);
 			return;
 		}

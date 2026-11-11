@@ -123,15 +123,16 @@ class ResearchOverlayBody implements Component {
 		}
 		const campaigns = this.read();
 		if (this.openId !== null) {
-			if (matchesKey(data, "up")) this.scroll = Math.max(0, this.scroll - 1);
-			else if (matchesKey(data, "down")) this.scroll += 1;
+			if (matchesKey(data, "up") || data === "k") this.scroll = Math.max(0, this.scroll - 1);
+			else if (matchesKey(data, "down") || data === "j") this.scroll += 1;
 			else return;
 			this.options.requestRender();
 			return;
 		}
 		if (campaigns.length === 0) return;
-		if (matchesKey(data, "up")) this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-		else if (matchesKey(data, "down")) this.selectedIndex = Math.min(campaigns.length - 1, this.selectedIndex + 1);
+		if (matchesKey(data, "up") || data === "k") this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+		else if (matchesKey(data, "down") || data === "j")
+			this.selectedIndex = Math.min(campaigns.length - 1, this.selectedIndex + 1);
 		else if (matchesKey(data, "enter") || data === "\n") {
 			const selected = campaigns[this.selectedIndex];
 			if (selected === undefined) return;
