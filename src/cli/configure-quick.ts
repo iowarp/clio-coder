@@ -2,7 +2,7 @@ import { readSettings, SettingsValidationError, updateSettings, validateSettings
 import { initializeClioHome } from "../core/init.js";
 import { renderUsdLimit } from "../core/telemetry/render.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
-import { isOrchestratorEligibleRuntime, resolveAuthTarget } from "../domains/providers/index.js";
+import { isOrchestratorEligibleRuntime, offeredAsChatModel, resolveAuthTarget } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
 import { probeJson } from "../domains/providers/probe/http.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
@@ -109,7 +109,7 @@ async function connect(url: string, key: string | undefined): Promise<Connection
 			}
 		}
 	}
-	models = [...new Set(models)].filter((id) => probe.modelCapabilities?.[id]?.chat !== false);
+	models = [...new Set(models)].filter((id) => offeredAsChatModel(id, probe.modelCapabilities?.[id]));
 	return { runtime, target, existing, probe, models };
 }
 

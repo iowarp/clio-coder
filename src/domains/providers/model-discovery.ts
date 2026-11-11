@@ -1,5 +1,6 @@
 import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
+import type { CapabilityFlags } from "./types/capability-flags.js";
 import type { ContextWindowSlots } from "./types/context-window-slots.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
@@ -185,6 +186,34 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 
 	if (defaultModel) add(defaultModel, "default");
 	return out;
+}
+
+const NON_CHAT_MODEL_NAME = /embed|rerank/iu;
+
+/**
+ * Whether a chat-model picker should offer this id. Discovery metadata decides
+ * when it says anything (LiteLLM `mode`, LM Studio type labels); without it an
+ * id naming embed or rerank is taken for the non-chat model it almost always
+ * is. Pickers only: an operator who names such a model explicitly still gets it.
+ */
+export function offeredAsChatModel(id: string, caps?: Partial<CapabilityFlags> | null): boolean {
+	if (caps?.chat === false) return false;
+	if (caps?.chat === true) return true;
+	if (caps?.embeddings === true || caps?.rerank === true) return false;
+	return !NON_CHAT_MODEL_NAME.test(id);
+}
+
+/**
+ * The candidates a chat-model picker lists: `modelCandidatesForStatus` without
+ * embedding and rerank models, keeping the target's configured default even
+ * when it is one, because the operator chose it.
+ */
+export function chatModelCandidatesForStatus(status: TargetStatus): ProviderModelCandidate[] {
+	const kept = status.target.defaultModel?.trim();
+	return modelCandidatesForStatus(status).filter(
+		(candidate) =>
+			candidate.id === kept || offeredAsChatModel(candidate.id, status.probeModelCapabilities?.[candidate.id]),
+	);
 }
 
 export function modelIdsForStatus(status: TargetStatus): string[] {

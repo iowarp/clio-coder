@@ -14,9 +14,9 @@ import type {
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	acceptsImageInput,
+	chatModelCandidatesForStatus,
 	hasLiveModelCatalog,
 	isOrchestratorEligibleRuntime,
-	modelCandidatesForStatus,
 	modelIdsForStatus,
 	modelListNoteForStatus,
 	modelResidencyForStatus,
@@ -446,7 +446,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 		const { target } = status;
 		const runtimeName = status.runtime?.displayName ?? target.runtime;
 		const runtimeShortName = shortRuntimeName(runtimeName);
-		const candidates = modelCandidatesForStatus(status);
+		const candidates = chatModelCandidatesForStatus(status);
 		const sourceNote = modelListNoteForStatus(status);
 		const authText = authLabel({ providers: deps.providers, status });
 		const bucket = modelBucket(status);

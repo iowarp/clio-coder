@@ -8,7 +8,7 @@ import { isOrchestratorEligibleRuntime } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import type { ConfigurePrompts } from "./configure-prompts.js";
-import { inventoryNote, resolveSupportedWireModels } from "./configure-target.js";
+import { chatPickerModels, inventoryNote, resolveSupportedWireModels } from "./configure-target.js";
 
 interface RouteSelectionIo {
 	rl: Pick<ConfigurePrompts, "choose">;
@@ -105,7 +105,7 @@ export async function assignTarget(io: RouteSelectionIo, role: "chat" | "fleet" 
 		return;
 	}
 	const useDefault = `Use connection default · ${target.defaultModel ?? "automatic"}`;
-	const modelChoices = inventory.models.map((model) => {
+	const modelChoices = chatPickerModels(inventory).map((model) => {
 		const display = inventory.labels?.[model];
 		return display && display !== model ? `${model} — ${display}` : model;
 	});

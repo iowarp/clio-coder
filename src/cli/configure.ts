@@ -72,6 +72,7 @@ import {
 	applyTarget,
 	assertOrchestratorReplacementEligible,
 	buildDescriptor,
+	chatPickerModels,
 	defaultUrlFor,
 	deriveTargetId,
 	describeAuthStatus,
@@ -998,7 +999,7 @@ async function runTargetSetupInteractive(
 	if (runtime.kind === "http" || runtime.externalAgentLoop?.modelCatalog === "live-authoritative") {
 		inventory = await resolveSupportedWireModels(runtime, tentative, existing ?? undefined, apiKeyLiteral);
 	}
-	const wireModels = inventory.models;
+	const wireModels = chatPickerModels(inventory);
 	// The wizard shows the whole list, so a catalog-ordered runtime does not need
 	// --model here the way the non-interactive path does. It does need to stop
 	// offering the alphabetically first id as though it were the recommended one.

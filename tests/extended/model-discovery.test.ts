@@ -1,8 +1,12 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { chatPickerModels } from "../../src/cli/configure-target.js";
 import type { TargetStatus } from "../../src/domains/providers/contract.js";
-import { hasLiveModelCatalog } from "../../src/domains/providers/model-discovery.js";
+import {
+	canonicalizeWireModelId,
+	chatModelCandidatesForStatus,
+	hasLiveModelCatalog,
+} from "../../src/domains/providers/model-discovery.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 
 function makeStatus(source?: TargetStatus["discoveredModelsSource"], models: string[] = ["model-a"]): TargetStatus {
@@ -31,5 +35,26 @@ describe("contracts/model-discovery", () => {
 	it("does not treat none or runtime sources as live catalogs", () => {
 		strictEqual(hasLiveModelCatalog(makeStatus("none")), false);
 		strictEqual(hasLiveModelCatalog(makeStatus("runtime")), false);
+	});
+
+	it("keeps embedding models out of chat pickers but accepts one named explicitly", () => {
+		const models = [
+			"dynamo/qwen3.8-27b",
+			"dynamo/text-embedding-nomic-embed-text-v2",
+			"bge-m3",
+			"zbook/nomic-embed-text-GGUF",
+		];
+		const modelCapabilities = { "bge-m3": { chat: false, embeddings: true }, "dynamo/qwen3.8-27b": { chat: true } };
+		deepStrictEqual(chatPickerModels({ models, modelCapabilities }), ["dynamo/qwen3.8-27b"]);
+		const status: TargetStatus = {
+			...makeStatus("probe", models),
+			target: { id: "gw", runtime: "litellm", defaultModel: "zbook/nomic-embed-text-GGUF" },
+			probeModelCapabilities: modelCapabilities,
+		};
+		deepStrictEqual(
+			chatModelCandidatesForStatus(status).map((candidate) => candidate.id),
+			["dynamo/qwen3.8-27b", "zbook/nomic-embed-text-GGUF"],
+		);
+		strictEqual(canonicalizeWireModelId(status, "bge-m3"), "bge-m3");
 	});
 });

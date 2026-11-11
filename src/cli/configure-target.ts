@@ -26,9 +26,10 @@ import {
 	unverifiedModelListNote,
 } from "../domains/providers/index.js";
 import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
-import { loadedContextWindowForModel } from "../domains/providers/model-discovery.js";
+import { loadedContextWindowForModel, offeredAsChatModel } from "../domains/providers/model-discovery.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
+import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type {
 	ProbeContext,
 	ProbeModelStatus,
@@ -587,6 +588,13 @@ export interface WireModelInventory {
 	probeError?: string;
 	/** Per-model load state when the probe reported it. */
 	modelStates?: Readonly<Record<string, ProbeModelStatus>> | undefined;
+	/** Per-model capabilities when the probe reported them, so pickers can leave out embedding models. */
+	modelCapabilities?: Readonly<Record<string, Partial<CapabilityFlags>>> | undefined;
+}
+
+/** The inventory ids a chat-model picker offers: no embedding or rerank models. */
+export function chatPickerModels(inventory: Pick<WireModelInventory, "models" | "modelCapabilities">): string[] {
+	return inventory.models.filter((model) => offeredAsChatModel(model, inventory.modelCapabilities?.[model]));
 }
 
 /**
@@ -645,6 +653,7 @@ export async function resolveSupportedWireModels(
 				source: probe.modelsSource ?? "probe",
 				modelStates: probe.modelStates,
 				...(probe.modelLabels ? { labels: probe.modelLabels } : {}),
+				...(probe.modelCapabilities ? { modelCapabilities: probe.modelCapabilities } : {}),
 			};
 		}
 		probeError = probe?.error ?? (probe?.ok ? "the provider listed no models" : undefined);

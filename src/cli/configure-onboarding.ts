@@ -63,6 +63,7 @@ import {
 	applyTarget,
 	assertOrchestratorReplacementEligible,
 	buildDescriptor,
+	chatPickerModels,
 	contextWindowUndiscovered,
 	deriveTargetId,
 	describeAuthStatus,
@@ -1275,18 +1276,15 @@ const MODEL_STEP: Step = {
 		}
 
 		// The curated default leads the list, marked, so a long catalog does not rest on whatever sorts first.
+		const offered = chatPickerModels(inventory);
 		const recommended =
-			support.defaultModel !== undefined && inventory.models.includes(support.defaultModel)
-				? support.defaultModel
-				: undefined;
+			support.defaultModel !== undefined && offered.includes(support.defaultModel) ? support.defaultModel : undefined;
 		const models =
-			recommended !== undefined
-				? [recommended, ...inventory.models.filter((model) => model !== recommended)]
-				: inventory.models;
+			recommended !== undefined ? [recommended, ...offered.filter((model) => model !== recommended)] : offered;
 		// The first run takes the recommended model, or the only one a server lists; the review offers the list.
 		const automatic =
 			firstRunFlow(answers) && !answers.chooseModel
-				? (recommended ?? (inventory.models.length === 1 ? inventory.models[0] : undefined))
+				? (recommended ?? (offered.length === 1 ? offered[0] : undefined))
 				: undefined;
 		if (
 			automatic !== undefined &&
@@ -1325,7 +1323,7 @@ const MODEL_STEP: Step = {
 				};
 			}),
 			initialIndex: selected >= 0 ? selected : 0,
-			searchable: inventory.models.length > 8,
+			searchable: models.length > 8,
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,

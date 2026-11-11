@@ -78,6 +78,7 @@ export {
 } from "./model-capabilities.js";
 export {
 	canonicalizeWireModelId,
+	chatModelCandidatesForStatus,
 	contextSlotsForModel,
 	hasLiveModelCatalog,
 	loadedContextWindowForModel,
@@ -86,6 +87,7 @@ export {
 	modelIdsForStatus,
 	modelListNoteForStatus,
 	modelResidencyForStatus,
+	offeredAsChatModel,
 	type ProviderModelCandidate,
 	type ProviderModelSource,
 	runtimeListsModelsLive,
