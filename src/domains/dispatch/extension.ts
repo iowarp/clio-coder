@@ -7726,6 +7726,8 @@ export function createDispatchBundle(
 		let onFollowerStarted: ((started: SpawnedWorker) => void) | null = null;
 		// Kept so a follower released before its run row exists still gets that row's start bookkeeping.
 		let followerWorker: SpawnedWorker | null = null;
+		// A held follower joins its batch's board once its worker can take deliveries.
+		let subscribeHeldBoard: (() => void) | null = null;
 		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
@@ -8445,33 +8447,41 @@ export function createDispatchBundle(
 				};
 				agentLedgerAttribution = attribution;
 				// The hub replays the whole board on subscription, so this mirror is
-				// complete whatever this run's spawn timing was.
-				unsubscribeAgentLedger =
-					lifecycle.runtimeKind !== "http"
-						? null
-						: subscribeAgentLedger(agentLedgerId, envelope.id, (entries) =>
-								sendToWorker === undefined
-									? false
-									: sendToWorker({
-											type: "ledger_delta",
-											entries: entries.filter((entry) => {
-												if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
-												if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
-												return (
-													flowTransferRefusal(
-														compileWorkerFlowPolicy(spec.flowPolicy),
-														entry.flowRestrictions ?? null,
-														resolveModelDestination({
-															targetId: lifecycle.target.target.id,
-															runtimeId: lifecycle.target.runtime.id,
-															url: lifecycle.target.target.url,
-															model: lifecycle.target.wireModelId,
-														}),
-													) === null
-												);
+				// complete whatever this run's spawn timing was. A held follower's
+				// handle refuses deliveries until its worker exists, and the hub drops a
+				// subscriber that refuses one, so that run subscribes when it starts.
+				const ledgerId = agentLedgerId;
+				const boardRunId = envelope.id;
+				const subscribeBoard = (): void => {
+					unsubscribeAgentLedger =
+						lifecycle.runtimeKind !== "http"
+							? null
+							: subscribeAgentLedger(ledgerId, boardRunId, (entries) =>
+									sendToWorker === undefined
+										? false
+										: sendToWorker({
+												type: "ledger_delta",
+												entries: entries.filter((entry) => {
+													if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
+													if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
+													return (
+														flowTransferRefusal(
+															compileWorkerFlowPolicy(spec.flowPolicy),
+															entry.flowRestrictions ?? null,
+															resolveModelDestination({
+																targetId: lifecycle.target.target.id,
+																runtimeId: lifecycle.target.runtime.id,
+																url: lifecycle.target.target.url,
+																model: lifecycle.target.wireModelId,
+															}),
+														) === null
+													);
+												}),
 											}),
-										}),
-							);
+								);
+				};
+				if (heldFollower) subscribeHeldBoard = subscribeBoard;
+				else subscribeBoard();
 				for (const post of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, post.body, post.flowRestrictions);
 			}
 			identity = detectRunIdentity();
@@ -8572,11 +8582,14 @@ export function createDispatchBundle(
 			}
 			if (heldFollower) {
 				onFollowerStarted = (started) => {
-					// Replace only this process's own vouch; a row that settled meanwhile keeps what it recorded.
-					if (ledgerRef.get(runId)?.pid !== process.pid) return;
 					try {
-						ledgerRef.update(runId, { pid: started.pid });
-						void persistLedgerInBackground(ledgerRef, runId);
+						// Replace only this process's own vouch: a row written after the start already names the
+						// worker, and one that settled meanwhile keeps what it recorded.
+						if (ledgerRef.get(runId)?.pid === process.pid) {
+							ledgerRef.update(runId, { pid: started.pid });
+							void persistLedgerInBackground(ledgerRef, runId);
+						}
+						subscribeHeldBoard?.();
 						publishStarted(started);
 					} catch (error) {
 						// The worker is already live; its run settles through the worker as any other does.

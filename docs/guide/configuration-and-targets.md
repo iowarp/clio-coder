@@ -210,7 +210,7 @@ explains worker route selection.
 | `fleet.permissions.escalation.timeoutMs` | `120000` | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | next dispatch |
 | `fleet.concurrency` | `auto` | restart |
-| `fleet.staggerSharedPrefix` | `true` | next dispatch; held workers start after the leader streams (at most 15 s); batch handles return at once; a held worker's run row records the dispatching Clio's pid until its own process starts, so another Clio's recovery does not settle it; it publishes `run.enqueued` at admission and `run.started` once its process is live |
+| `fleet.staggerSharedPrefix` | `true` | next dispatch; held workers start after the leader streams (at most 15 s); batch handles return at once; a held worker's run row records the dispatching Clio's pid until its own process starts, so another Clio's recovery does not settle it; it publishes `run.enqueued` at admission and `run.started` once its process is live, and joins its batch's agent board then |
 | `fleet.retry.maxRetries` | `2` | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | next dispatch |

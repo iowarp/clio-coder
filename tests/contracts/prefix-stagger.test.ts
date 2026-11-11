@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { publishAgentLedgerEntry } from "../../src/domains/dispatch/agent-ledger-hub.js";
+import { appendAgentLedgerEntry, openAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import type { DispatchPrefixGroup } from "../../src/domains/dispatch/contract.js";
 import {
 	claimSharedPrefix,
@@ -101,6 +103,17 @@ test("abort during the hold ends the follower cleanly without starting its worke
 	strictEqual(starts.join(","), "lead");
 });
 
+test("the hold's cap timer keeps the process alive until the group releases", () => {
+	const before = liveTimeouts();
+	const groups = new Map<string, DispatchPrefixGroup>();
+	const lead = claimSharedPrefix(groups, "shared", "lead");
+	ok(lead);
+	// A hold whose cap could not fire would strand its followers if nothing else kept the loop alive.
+	strictEqual(liveTimeouts(), before + 1);
+	lead.group.release();
+	strictEqual(liveTimeouts(), before);
+});
+
 test("the cap releases a follower whose leader never streams", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const groups = new Map<string, DispatchPrefixGroup>();
@@ -168,6 +181,60 @@ test("a held follower's run row names a live process, then its worker's pid once
 		deepStrictEqual(started[1], { pid: 4_002, processCommand: '["worker","4002"]' });
 		strictEqual(started.length, 2);
 		spawned[1]?.finish();
+		await batch.finalPromise.catch(() => undefined);
+	} finally {
+		for (const worker of spawned) worker.finish();
+		await bundle.extension.stop?.();
+		restoreDispatchState();
+	}
+});
+
+test("every member of a board batch receives a post made after admission", async () => {
+	await isolateDispatchState();
+	const spawned: Array<{ worker: SpawnedWorker; finish: () => void; sent: unknown[] }> = [];
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		spawnWorker: () => {
+			const next = { ...fakeWorker(), sent: [] as unknown[] };
+			spawned.push(next);
+			return {
+				...next.worker,
+				pid: 5_000 + spawned.length,
+				send: (value: unknown) => {
+					next.sent.push(value);
+					return true;
+				},
+			};
+		},
+	});
+	await bundle.extension.start();
+	try {
+		const ledgerId = "ledger-board-batch";
+		await openAgentLedger(ledgerId);
+		const request = {
+			agentId: "scout",
+			executionRole: "researcher" as const,
+			task: "Inspect the fixture.",
+			requestOrigin: "internal" as const,
+			ledger: { id: ledgerId, sequence: 0 },
+		};
+		const batch = await bundle.contract.dispatchBatch([request, request]);
+		// Each member's prompt lists the board roster as it stood at admission, so the members never share a
+		// prefix and none is held; a held follower would still subscribe only once its worker starts.
+		strictEqual(spawned.length, 2);
+		const posted = await appendAgentLedgerEntry(
+			ledgerId,
+			{ runId: "other-run", assignmentId: "other-run", agentId: "coder", nodeId: "local" },
+			{ kind: "message", to: "all", text: "posted after admission" },
+		);
+		ok(posted.ok);
+		publishAgentLedgerEntry(ledgerId, posted.entry);
+		for (const member of spawned) {
+			const delivered = JSON.stringify(member.sent);
+			ok(delivered.includes("posted after admission"), `a member never received the board: ${delivered}`);
+			member.finish();
+		}
 		await batch.finalPromise.catch(() => undefined);
 	} finally {
 		for (const worker of spawned) worker.finish();
