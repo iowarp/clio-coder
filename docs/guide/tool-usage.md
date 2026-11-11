@@ -844,7 +844,10 @@ gateway(op="call", capability="clio_library", args={ref: "plugin:materio"})
 
 Structural navigation over the persisted codemap index (`.clio-coder/codemap.json`)
 and the optional Markdown wiki metadata. The index is built by context init,
-refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
+refresh, or index commands and can be rebuilt/backfilled on tool demand. A file
+larger than 2 MiB is indexed as present with no symbols, and a file whose
+parse runs past one second falls back to the regex extractor, so generated or
+pathological sources never stall a build. Source:
 [code-nav.ts](../../src/tools/codewiki/code-nav.ts).
 
 Arguments:

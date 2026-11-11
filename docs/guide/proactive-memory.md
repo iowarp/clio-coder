@@ -176,7 +176,11 @@ a rejection keeps its authority over rewordings, and which one stands is the
 operator's call. A quote from a repository file is provenance only: the file
 can vouch for any sentence it contains, so a lesson backed by `source:` refs
 and no `command:` ref waits for the operator, and automatic approval needs a
-command that could have failed. Procedural proposals still wait for an
+command that could have failed. A lesson that quotes a source and names a
+command Clio has not seen succeed carries that command as a
+`command-claimed:` ref instead: it grants no approval, but it counts as the
+lesson's claim on the command, so a rejected lesson still holds back a later
+rewording that names the same command. Procedural proposals still wait for an
 operator. Global, runtime and agent scopes also require operator approval.
 The guardian never reverses an operator approval or rejection. A later
 contradiction demotes a guardian-approved lesson. The `held` observation is an
