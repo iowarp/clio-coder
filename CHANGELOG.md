@@ -96,6 +96,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An opt-in census (`report.census`, off by default, and only with `report.censusEndpoint` set) lets the terminal UI count the install with one request a month that carries no identifier, query or body. In CI or with the update check switched off nothing is read, written or sent.
 - Maintainers can build a consented dataset release from report bundles with `scripts/report-dataset.ts`: only bundles whose sender granted the dataset scope, ids re-keyed, times (strings and epoch numbers) shifted to 2000-01-01, rare values removed, at least 20 traces, and withdrawals honoured. It publishes nothing.
 - `/report` previews over ACP keep the send instruction and gates for long reports, showing the first 150 body lines, and `/report send --comment` or `--new` in the terminal says the review asks about a matching issue instead of ignoring the flag.
+- `clio-coder report forget <id>` on a report filed as an issue, after deleting the encrypted share, offers to post one line asking the maintainers to delete their copy of the bundle. It posts only after you confirm in a terminal; a failed post still finishes the local forget and exits 1.
 
 ### Commands and the TUI
 
@@ -117,8 +118,11 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `/settings` has seven areas named for what they hold (Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, Advanced). Old area names still open them, typing always filters and `*` pins a row.
 - Alt+U opens a one-page dashboard and closes it on the next press; the machine readings moved to the Health tab of `/usage`.
 - Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, and PgUp, PgDn, Home and End move through `/tree`.
-- `x` in Tasks, the steering queue and Memory, and `s` in Decisions, ask once before they act.
+- `x` in Tasks, the steering queue, Memory and Fleet Runs, and `s` in Decisions, ask once before they act.
 - `/config` opens Settings on Connections in place, also during a turn, instead of suspending the terminal UI; `clio-coder configure` is unchanged.
+- `/reload prompts` (and bare `/reload`) re-reads prompt fragments, agent recipes, the project handbook and project rules in a running session and says which fragments changed. The safety rule pack still needs a restart.
+- `/restart` first checks that the build on disk can start and refuses, keeping the session, when it cannot. `/restart <text>` hands the text to the restarted session as its first turn. If the new build dies before resuming, the old process prints the exit code and how to `/resume` instead of exiting silently.
+- A running session warns once when the build it was started from is replaced on disk.
 
 ### Sign-in, setup and providers
 
@@ -163,6 +167,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Contained yolo runs dispatch plans (several tasks, compete, council, a Scout or Documenter pipeline, remote placement) with yolo authority instead of refusing them as needing you. Workers keep default's permits, ask routes and sandbox, and the main session keeps its sandbox, snapshots and safety judge.
 - Pressing Esc before the loop guard's hard stop leaves the turn stopped; yolo no longer continues it.
 - Headless runs and yolo sessions tell the model to open its final reply with where the task stands against the request (done, partly done or not done) and to name any unmet part; "Done" is reserved for a fully met request.
+- Yolo's floor refuses deleting your home directory spelled `~yourname`, as it already did for `~` and `$HOME`.
 
 ### Security and sandbox
 
@@ -326,6 +331,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The release scripts read GitHub with a 64 MiB buffer; the releases list had outgrown the 1 MiB default.
 - `release:next` finishes a release whose version branch moved after npm accepted it, cancels the old candidate's waiting release run when the candidate moves, and refuses to publish when the qualified CI artifact's digest changed.
 - Releases from version branches with more than three digits (0.7.10, 0.10.0) are accepted.
+- Release notes and CHAMPIONS.md credit a report's author only when they opted in on the report (or a maintainer wrote `credit: @handle`), and an explicit no always wins.
 
 ### Fixes
 
