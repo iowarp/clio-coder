@@ -72,6 +72,7 @@ export const coreTests = [
 	"worker-grant-broker",
 	"worker-permit",
 	"worker-refusal-limit",
+	"job-admission",
 	"job-tool",
 	"judge-screen-park-surfaces",
 	"acp-v1-basics",
