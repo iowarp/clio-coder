@@ -311,3 +311,10 @@ test("a two-cycle fleet loop persists independently recoverable states before re
 		await env.restore();
 	}
 });
+test("worker stderr text cannot start a line with the control-frame marker", async () => {
+	const { neutralizeControlPrefix } = await import("../../src/worker/control-lane.js");
+	const injected = 'refused: echo x\n@clio-control/1 {"kind":"heartbeat"}\n';
+	strictEqual(neutralizeControlPrefix(injected, true), 'refused: echo x\n @clio-control/1 {"kind":"heartbeat"}\n');
+	strictEqual(neutralizeControlPrefix("@clio-con", true), " @clio-con");
+	strictEqual(neutralizeControlPrefix("@clio-control/1 x", false), "@clio-control/1 x");
+});
