@@ -241,6 +241,12 @@ function isSynthesis(entry: WorkerEntryState): boolean {
 	return entry.council?.label === COUNCIL_SYNTHESIS_LABEL;
 }
 
+/** A council synthesis that settled with some members unanswered: its own run succeeded, the council did not in full. */
+function councilShortfall(entry: WorkerEntryState): boolean {
+	if (!isSynthesis(entry) || entry.result?.outcome !== "succeeded") return false;
+	return parseCouncilReport(entry.text)?.members.some((member) => member.failed !== undefined) === true;
+}
+
 function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {
 	const mark = completedRunMark(settledRunCaveat(result, synthesizes));
 	return theme.fg(mark.token, mark.glyph);
@@ -550,7 +556,9 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 			? pendingUnit(entry)
 			: workerNeedsInput(entry)
 				? needsInputUnit()
-				: outcomeUnit(entry.result, isSynthesis(entry));
+				: councilShortfall(entry)
+					? theme.fg("warning", `${GLYPH.warn} partial`)
+					: outcomeUnit(entry.result, isSynthesis(entry));
 	const elapsed =
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
@@ -673,6 +681,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "stalled") return "stopped responding";
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
+	if (councilShortfall(entry)) return "partial";
 	return settledRunCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
 }
 
@@ -702,7 +711,9 @@ function alignedHeader(
 				? theme.fg(isStopping(entry.result) ? "warning" : "toolMetadata", GLYPH.cancelled)
 				: entry.result?.outcome !== "succeeded"
 					? theme.fg("error", GLYPH.error)
-					: settledMark(entry.result, isSynthesis(entry));
+					: councilShortfall(entry)
+						? theme.fg("warning", GLYPH.warn)
+						: settledMark(entry.result, isSynthesis(entry));
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.

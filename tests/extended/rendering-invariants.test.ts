@@ -3078,6 +3078,28 @@ describe("agent invocations", () => {
 		doesNotMatch(head ?? "", /dynamo\/qwen/u);
 	});
 
+	it("a council whose members failed does not head its card with a plain done", () => {
+		const report = {
+			members: [
+				{ label: "p1", runId: "m1-r1", round: 1, answer: "", failed: { reason: "outcome=failed" } },
+				{ label: "p2", runId: "m2-r1", round: 1, answer: "red" },
+			],
+			synthesis: { kind: "vote", verdict: "red" },
+		};
+		const synthesis = card({
+			assignmentId: "s2",
+			agentId: "council-synthesis",
+			origin: "user",
+			council: { group: "g2", label: "synthesis", round: 1 },
+			text: JSON.stringify(report),
+		});
+		const head = renderWorkerEntryLines(synthesis, 160, { detail: transcriptDetail("standard") })
+			.map(stripTerminalSequences)
+			.find((row) => row.startsWith("  council"));
+		match(head ?? "", /council of 2 .*! partial/u);
+		doesNotMatch(head ?? "", /✓/u);
+	});
+
 	it("names a failover's attempt in the card header as well as on its rail row", () => {
 		const entry = card({
 			assignmentId: "b1",
