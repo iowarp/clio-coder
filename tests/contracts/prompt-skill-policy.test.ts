@@ -19,7 +19,7 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { createLocalStoreBackend } from "../../src/domains/store/backends/local.js";
-import { workspaceCapabilitySignals } from "../../src/domains/store/workspace-signal.js";
+import { workspaceCapabilitySignals } from "../../src/domains/store/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { mainPromptCacheIdentity } from "../../src/session-control/prompt-cache-identity.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -260,18 +260,11 @@ it("names store and data on a data question once the project store holds a tag, 
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
 	registerAllTools(registry, { mcpCapabilities: false });
 	const candidates = registry.listGateway().map((spec) => ({ id: spec.name, description: spec.description }));
-	const gate = createCapabilityGate();
+	const gate = createCapabilityGate({ cwd: () => env.dir });
 	const note = (task: string): string => {
 		const reminder = createSkillsReminderRegistration({
 			countModelVisibleSkills: () => 0,
-			rankCapabilities: (text) =>
-				gate.rank({
-					kind: "capabilities",
-					task: text,
-					limit: 3,
-					candidates,
-					signalled: workspaceCapabilitySignals(env.dir),
-				}),
+			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates }),
 		});
 		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });
 		return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
@@ -298,4 +291,15 @@ it("names store and data on a data question once the project store holds a tag, 
 		[],
 		"the tag names store and data, not anything below the floor",
 	);
+	const skills = gate.rank({ kind: "skills", task: question, limit: 3, candidates });
+	assert.ok(!skills.some((match) => match.workspaceSignal), "a skill ranking carries no store signal");
+});
+
+it("reads the store signal again only when the store or its tag list changed", async (t) => {
+	const env = await isolateClioEnv("clio-coder-capability-store-cache-");
+	t.after(() => env.restore());
+	const first = workspaceCapabilitySignals(env.dir);
+	assert.equal(workspaceCapabilitySignals(env.dir), first, "an unchanged store answers from the cache");
+	await createLocalStoreBackend(env.dir).getOrCreateTag("sim");
+	assert.deepEqual(workspaceCapabilitySignals(env.dir), [ToolNames.Store, ToolNames.Data]);
 });

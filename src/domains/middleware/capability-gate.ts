@@ -1,3 +1,5 @@
+import { workspaceCapabilitySignals } from "../store/index.js";
+
 export type CapabilityKind = "skills" | "capabilities" | "agents";
 
 export interface CapabilityCandidate {
@@ -102,9 +104,19 @@ function rankCapabilitiesLexically(
 		.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-/** One session-owned gate: synchronous lexical advice with a bounded usage prior. */
-export function createCapabilityGate(): CapabilityGate {
+export interface CapabilityGateOptions {
+	/** The workspace whose project store a capability ranking consults; the process cwd by default. */
+	readonly cwd?: () => string;
+}
+
+/**
+ * One session-owned gate: synchronous lexical advice with a bounded usage prior.
+ * A capability ranking keeps what the workspace itself points at (a project store
+ * holding a tag keeps store and data) unless the request names its own signals.
+ */
+export function createCapabilityGate(options: CapabilityGateOptions = {}): CapabilityGate {
 	const history = new Map<CapabilityKind, Map<string, number>>();
+	const cwd = options.cwd ?? (() => process.cwd());
 	return {
 		used(kind, id) {
 			const counts = history.get(kind) ?? new Map<string, number>();
@@ -119,7 +131,9 @@ export function createCapabilityGate(): CapabilityGate {
 				.filter((hit) => hit.score >= best * 0.22)
 				.map((hit) => ({ ...hit, score: hit.score / Math.max(1, best) }))
 				.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-			const signalled = new Set(request.signalled ?? []);
+			const signalled = new Set(
+				request.signalled ?? (request.kind === "capabilities" ? workspaceCapabilitySignals(cwd()) : []),
+			);
 			if (signalled.size === 0) return ranked.slice(0, limit);
 			// A signalled candidate keeps its own rank when the task reached it and holds a place within the limit when not.
 			const kept = request.candidates

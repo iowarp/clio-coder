@@ -648,12 +648,14 @@ const COMPOSITION_ROOT_FORBIDDEN_MODULES: ReadonlyArray<string> = [
 	"src/domains/telemetry/call-scope.ts",
 	"src/domains/telemetry/call-facts.ts",
 	"src/domains/quota/observed.ts",
+	"src/domains/store/workspace-signal.ts",
 	"src/engine/ai.ts",
 ];
 
 /** The same internals by name, since a barrel can re-export them. */
 const COMPOSITION_ROOT_FORBIDDEN_NAMES: ReadonlySet<string> = new Set([
 	"compact",
+	"workspaceCapabilitySignals",
 	"openCallScope",
 	"completeEngineText",
 	"streamSimple",

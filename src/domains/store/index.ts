@@ -25,3 +25,4 @@ export async function openStoreBackend(cwd: string): Promise<StoreBackend> {
 	return createLocalStoreBackend(cwd);
 }
 export { withStoreLock } from "./lock.js";
+export { workspaceCapabilitySignals } from "./workspace-signal.js";
