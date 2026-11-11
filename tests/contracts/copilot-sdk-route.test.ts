@@ -24,7 +24,7 @@ import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../s
 import { endpointCapacityFor, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
-import { copilotSdkAccount } from "../../src/engine/ai.js";
+import { copilotSdkAccount, listCopilotSdkModels } from "../../src/engine/ai.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
@@ -504,6 +504,26 @@ test("onboarding picks the curated Copilot model when the account lists it, else
 	models.push({ ...original[0], id: "gpt-6-luna", name: "GPT-6 Luna" });
 	try {
 		strictEqual((await detectCopilotLogin(5_000))?.model, "gpt-6-luna");
+	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a listed prompt budget below the context window is the window Clio compacts against", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "budgeted",
+		capabilities: {
+			supports: { vision: false, reasoningEffort: false },
+			limits: { max_context_window_tokens: 1_000_000, max_prompt_tokens: 200_000 },
+		},
+	});
+	try {
+		const rows = await listCopilotSdkModels();
+		strictEqual(rows.find((row) => row.id === "budgeted")?.contextWindow, 200_000);
+		strictEqual(rows.find((row) => row.id === "fake-model")?.contextWindow, 64_000);
 	} finally {
 		models.splice(0, models.length, ...original);
 	}

@@ -305,6 +305,16 @@ export function listCopilotModels(): Promise<CopilotModelRow[]> {
 	return held(() => listHeld());
 }
 
+/** The prompt budget Copilot enforces sits under the context window; compaction must trip below it. */
+function promptWindow(
+	limits: { max_context_window_tokens?: number; max_prompt_tokens?: number } | undefined,
+): number | undefined {
+	const window = limits?.max_context_window_tokens;
+	const prompt = limits?.max_prompt_tokens;
+	if (prompt === undefined) return window;
+	return window === undefined ? prompt : Math.min(window, prompt);
+}
+
 async function listHeld(): Promise<CopilotModelRow[]> {
 	await copilotAccount();
 	const client = await copilotClient();
@@ -315,7 +325,7 @@ async function listHeld(): Promise<CopilotModelRow[]> {
 			(model): CopilotModelRow => ({
 				id: model.id,
 				label: model.name || model.id,
-				contextWindow: model.capabilities?.limits?.max_context_window_tokens,
+				contextWindow: promptWindow(model.capabilities?.limits),
 				maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
 				vision: model.capabilities?.supports?.vision === true,
 				reasoning: model.capabilities?.supports?.reasoningEffort === true,
