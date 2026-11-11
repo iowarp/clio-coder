@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readSetupStatus } from "../../apps/clio-coder-gui/server/clio/adapters/setup-status.js";
 import { firstMissing } from "../../src/cli/default-target.js";
 import { chatReadinessFinding } from "../../src/cli/doctor.js";
 import { assistantError } from "../../src/cli/modes/print.js";
@@ -195,4 +196,5 @@ test("a project-chosen address never gets a well-known key variable suggested fo
 		sentence,
 		`gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`,
 	);
+	assert.equal(readSetupStatus().message, sentence, "the desktop app says the terminal's sentence");
 });
