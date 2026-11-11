@@ -2,9 +2,23 @@ import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { storeAdopt, storePut, storeRemoveTag, storeTags, storeVerify, storeWhere } from "../../src/cli/store.js";
+import {
+	storePut as cliPut,
+	storeAdopt,
+	storeCommandResult,
+	storeRemoveTag,
+	storeTags,
+	storeVerify,
+	storeWhere,
+} from "../../src/cli/store.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+/** Creates the tag first, as put no longer does. */
+async function storePut(root: string, tag: string, file: string) {
+	await (await openStoreBackend(root)).getOrCreateTag(tag);
+	return cliPut(root, tag, file);
+}
 
 async function withWorkspace(fn: (root: string, dir: string) => Promise<void>): Promise<void> {
 	const env = await isolateClioEnv("clio-coder-store-cli-");
@@ -61,6 +75,37 @@ describe("clio-coder store", () => {
 			strictEqual((await storeRemoveTag(root, "sim", true)).deleted, true);
 			const backend = await openStoreBackend(root);
 			deepStrictEqual(await backend.listTags(), []);
+		}));
+
+	it("put refuses a missing tag, as the store tool does", () =>
+		withWorkspace(async (root) => {
+			writeFileSync(join(root, "a.dat"), "x");
+			await rejects(cliPut(root, "nope", "a.dat"), /no tag named nope/u);
+			const backend = await openStoreBackend(root);
+			strictEqual(await backend.tagExists("nope"), false);
+		}));
+
+	it("rm-tag dry run exits 0 and a missing tag exits non-zero", () =>
+		withWorkspace(async (root) => {
+			writeFileSync(join(root, "a.dat"), "x");
+			await storePut(root, "sim", "a.dat");
+			strictEqual((await storeCommandResult(["rm-tag", "sim"], root)).code, 0);
+			await rejects(storeCommandResult(["rm-tag", "absent"], root), /no tag named absent/u);
+		}));
+
+	it("rm removes one blob only with --yes", () =>
+		withWorkspace(async (root) => {
+			for (const name of ["a.dat", "b.dat"]) {
+				writeFileSync(join(root, name), name);
+				await storePut(root, "sim", name);
+			}
+			const backend = await openStoreBackend(root);
+			strictEqual((await storeCommandResult(["rm", "sim:a.dat"], root)).code, 0);
+			ok((await backend.statBlob("sim", "a.dat")) !== null);
+			strictEqual((await storeCommandResult(["rm", "sim:a.dat", "--yes"], root)).code, 0);
+			strictEqual(await backend.statBlob("sim", "a.dat"), null);
+			ok((await backend.statBlob("sim", "b.dat")) !== null);
+			await rejects(storeCommandResult(["rm", "sim:a.dat"], root), /not in the store/u);
 		}));
 
 	it("adopt moves a moved repository's store and refuses a clash", () =>

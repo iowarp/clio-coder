@@ -13,7 +13,13 @@ import {
 	validateBlobName,
 	validateTagName,
 } from "../core/store-paths.js";
-import { openStoreBackend, type StoreBackend, type StoreBlobStat, StoreRefusal } from "../domains/store/index.js";
+import {
+	openStoreBackend,
+	type StoreBackend,
+	type StoreBlobStat,
+	StoreRefusal,
+	withStoreLock,
+} from "../domains/store/index.js";
 import { buildPutRecord } from "../domains/store/provenance.js";
 import {
 	appendRecord,
@@ -49,6 +55,7 @@ Commands:
   clio-coder store verify <tag> [pattern] [--hash-large] [--json]
   clio-coder store put <tag> <file> [--blob <name>] [--note <text>] [--json]
   clio-coder store get <tag>:<blob> [--to <path>] [--json]
+  clio-coder store rm <tag>:<blob> --yes [--json]
   clio-coder store rm-tag <tag> --yes [--json]
   clio-coder store adopt [<projectKey>] [--json]
   clio-coder store where [--json]
@@ -61,8 +68,9 @@ pattern is a regular expression matched against the whole blob name.
 verify compares each recorded blob's size and mtime with its record, and its
 sha256 when the record holds one; --hash-large also hashes blobs whose record
 omitted the hash and records the digest as a note. Exit 1 unless every blob is ok.
-put creates the tag (class input) when it does not exist.
-rm-tag without --yes deletes nothing and prints what it would delete.
+put refuses a tag that does not exist, as the store tool does.
+rm and rm-tag without --yes delete nothing, print what they would delete and
+exit 0; a missing tag or blob exits 1.
 adopt without a key lists store directories whose project root no longer
 exists; with a key it moves that store to this project, refusing when this
 project already has one.
@@ -304,12 +312,7 @@ export async function storePut(
 	const problem = validateBlobName(blob);
 	if (problem !== null) throw new UsageError(problem);
 	const backend = await openStoreBackend(cwd);
-	const { created } = await backend.getOrCreateTag(tag);
-	if (created) {
-		await backend.setTagXattr(tag, "clio.description", "");
-		await backend.setTagXattr(tag, "clio.class", "input");
-		await backend.setTagXattr(tag, "clio.createdAt", new Date().toISOString());
-	}
+	await requireTag(backend, tag);
 	const replaced = (await backend.statBlob(tag, blob)) !== null;
 	const stored: StoreBlobStat = await backend.putBlobFromFile(tag, blob, sourceAbs, options.signal);
 	const { path: blobPath } = await backend.getBlobAsPath(tag, blob, options.signal);
@@ -332,7 +335,7 @@ export async function storePut(
 		const reason = error instanceof Error ? error.message : String(error);
 		throw new StoreRefusal("io", `${tag}:${blob} is stored but unrecorded (stat shows drift unrecorded): ${reason}`);
 	}
-	return { ...(await storeStat(cwd, tag, blob)), createdTag: created, replaced, source: { path: sourceAbs } };
+	return { ...(await storeStat(cwd, tag, blob)), replaced, source: { path: sourceAbs } };
 }
 
 async function storeGet(cwd: string, tag: string, blob: string, to?: string) {
@@ -349,6 +352,29 @@ async function storeGet(cwd: string, tag: string, blob: string, to?: string) {
 		throw error;
 	}
 	return { ref: `${tag}:${blob}`, path: target, copied: true };
+}
+
+/** Removes one blob and records the removal, as the store tool's remove does; without yes it only reports. */
+export async function storeRemoveBlob(cwd: string, tag: string, blob: string, yes: boolean) {
+	const backend = await openStoreBackend(cwd);
+	const info = await backend.statBlob(tag, blob);
+	if (info === null) throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store.`);
+	if (yes) {
+		await withStoreLock(cwd, `blob\0${tag}\0${blob}`, async () => {
+			const last = currentState((await readBlobHistory(backend, tag, blob)).records).put;
+			if (!(await backend.delBlob(tag, blob))) {
+				throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store.`);
+			}
+			await appendRecord(backend, {
+				kind: "remove",
+				tag,
+				blob,
+				producedBy: { actor: "main" },
+				...(last?.identity !== undefined ? { identity: last.identity } : {}),
+			});
+		});
+	}
+	return { ref: `${tag}:${blob}`, bytes: info.bytes, deleted: yes };
 }
 
 export async function storeRemoveTag(cwd: string, tag: string, yes: boolean) {
@@ -630,6 +656,16 @@ async function storeBackendCommand(cwd: string, choice: string | undefined, args
 }
 
 async function execute(sub: string, args: ParsedArgs, cwd: string, signal: AbortSignal): Promise<Output> {
+	return executeStore(sub, args, cwd, signal);
+}
+
+/** One store subcommand's exit code and output, from argv already split at the subcommand. */
+export async function storeCommandResult(argv: ReadonlyArray<string>, cwd: string): Promise<{ code: number }> {
+	const args = parseArgs(argv);
+	return executeStore(args.positional[0] ?? "", args, cwd, new AbortController().signal);
+}
+
+async function executeStore(sub: string, args: ParsedArgs, cwd: string, signal: AbortSignal): Promise<Output> {
 	const [first, second] = args.positional.slice(1);
 	switch (sub) {
 		case "tags": {
@@ -722,10 +758,17 @@ async function execute(sub: string, args: ParsedArgs, cwd: string, signal: Abort
 			const data = await storeGet(cwd, tag, blob, args.values.get("to"));
 			return { code: 0, data, text: data.path };
 		}
+		case "rm": {
+			const { tag, blob } = parseRef(first);
+			const data = await storeRemoveBlob(cwd, tag, blob, args.yes);
+			const what = `${data.ref} (${bytesLabel(data.bytes)})`;
+			if (!data.deleted) return { code: 0, data, text: `Would delete ${what}. Nothing deleted; rerun with --yes.` };
+			return { code: 0, data, text: `Deleted ${what}; its records remain.` };
+		}
 		case "rm-tag": {
 			const data = await storeRemoveTag(cwd, checkTagArg(first), args.yes);
 			const what = `tag ${data.tag}: ${data.blobs} blob(s), ${bytesLabel(data.bytes)}${data.records ? ", and its records" : ""}`;
-			if (!data.deleted) return { code: 1, data, text: `Would delete ${what}. Nothing deleted; rerun with --yes.` };
+			if (!data.deleted) return { code: 0, data, text: `Would delete ${what}. Nothing deleted; rerun with --yes.` };
 			return { code: 0, data, text: `Deleted ${what}.` };
 		}
 		case "adopt": {
