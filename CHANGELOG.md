@@ -350,6 +350,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - When a detached dispatch batch settles after its turn ended, or one of its workers waits on the main agent's permission decision, the interactive terminal wakes the agent with a turn of its own once the session is idle and the composer is clear, with the batch's results collected into it. Coordinators no longer poll `monitor` collect.
 - A turn that ends while dispatched workers still run closes with "Turn ended · N workers running" instead of "✓ Done", and a `monitor` wait or collect that runs out its time ends "timed out !" instead of showing a success mark.
 - The fleet dispatch guide no longer says Clio Coder reruns the whole-repo lint when a task branch merges; it does not.
+- A dispatched coder that needs to write outside its write roots can ask for them instead of giving up: approving the request (the main agent's steer at yolo, otherwise the operator's approval card) continues the same assignment as a new attempt with the wider roots, an idle interactive session is woken to answer it, and a denial, expiry or shutdown ends the assignment saying why.
 
 ### Extensions and MCP
 
