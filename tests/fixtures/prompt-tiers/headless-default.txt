@@ -171,10 +171,11 @@ run_script), inside an OS sandbox: the workspace, the scratch roots (TMPDIR,
 git data are writable; the network is on; credentials, the SSH agent, secret
 files such as .env and private keys, and local Unix sockets are hidden. Reads
 run anywhere but secret paths.
-When a command fails because of the sandbox, rerun it once with
-`unsandboxed: true`. That call, and every push, publish, code-host or cloud
-command and network write, runs outside the sandbox after Clio's safety judge
-reviews it against the operator's request.
+Pushes, publishes, code-host and cloud commands and network writes leave the
+sandbox on their own once Clio's safety judge allows them; never add
+`unsandboxed: true` to them. Rerun a command the sandbox broke once with
+`unsandboxed: true`; that escape runs only when the operator's request names
+it or the operator approves it.
 Destructive workspace operations (git reset --hard, checkout or restore of the
 tree, git clean without -x, git stash drop, deletes) run after Clio snapshots
 the workspace. Without a

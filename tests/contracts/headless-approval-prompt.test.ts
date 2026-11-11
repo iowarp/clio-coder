@@ -79,6 +79,18 @@ describe("headless approval wording in the session prompt", () => {
 			match(section, /nothing waits for the operator, and a call the judge does not allow is refused instead of asked/);
 		}
 	});
+
+	// A push already leaves the sandbox after review; `unsandboxed: true` on it adds an escape the operator must name.
+	it("keeps unsandboxed: true for sandbox failures, off pushes, and says the escape needs a request that names it", () => {
+		const section = (headless: boolean) => safetySection("default", { headless, sandbox: true });
+		for (const headless of [true, false]) {
+			match(section(headless), /leave the\s+sandbox on their own[^.]*; never add\s+`unsandboxed: true` to them/);
+			match(
+				section(headless),
+				/broke once with\s+`unsandboxed: true`; that escape runs only when the operator's request names\s+it or the operator approves it/,
+			);
+		}
+	});
 });
 
 describe("interactive-only guidance in the session prompt", () => {
