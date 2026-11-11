@@ -2,7 +2,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 import type { Hono } from "hono";
 import { isPagePath } from "../../contracts/pages.js";
-import { AppProblem } from "../services/problem.js";
+import { AppProblem, decodeRequestPath } from "../services/problem.js";
 
 export function staticClient(app: Hono, directory: string, pwa = false) {
 	app.all("*", async (context) => {
@@ -14,7 +14,7 @@ export function staticClient(app: Hono, directory: string, pwa = false) {
 			["/manifest.webmanifest", "/sw.js", "/offline.html", "/offline.js", "/offline.css"].includes(context.req.path)
 		)
 			throw new AppProblem("not_found", "Installable app assets require background mode.");
-		const path = isPagePath(context.req.path) ? "index.html" : decodeURIComponent(context.req.path).slice(1);
+		const path = isPagePath(context.req.path) ? "index.html" : decodeRequestPath(context.req.path).slice(1);
 		let file: string;
 		try {
 			file = await realpath(resolve(root, path));

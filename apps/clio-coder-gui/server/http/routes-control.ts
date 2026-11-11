@@ -1,6 +1,7 @@
 import type { Hono, MiddlewareHandler } from "hono";
 import { routes } from "../../contracts/routes.js";
 import type { EventHub } from "../services/event-hub.js";
+import { decodeRequestPath } from "../services/problem.js";
 import type { SessionControls } from "../services/session-control.js";
 import { requestClient } from "./auth.js";
 import { problemResponse } from "./problem.js";
@@ -31,7 +32,7 @@ export function controlGuard(controls: SessionControls): MiddlewareHandler {
 		const rest = match?.[2] ?? "";
 		if (viewerPaths.some((path) => path.test(rest))) return next();
 		try {
-			controls.admit(decodeURIComponent(sessionId), requestClient(context).clientId);
+			controls.admit(decodeRequestPath(sessionId), requestClient(context).clientId);
 		} catch (error) {
 			return problemResponse(error, context);
 		}

@@ -39,6 +39,7 @@ test("static assets and install paths refuse symlink escape", async (t) => {
 	app.onError(problemResponse);
 	staticClient(app, join(root, "client"));
 	assert.equal((await app.request("/leak")).status, 404);
+	assert.equal((await app.request("/%E0.js")).status, 400);
 	assert.equal((await app.request("/toolchain")).status, 200);
 	assert.equal(await (await app.request("/toolchain", { method: "HEAD" })).text(), "");
 	assert.equal((await app.request("/toolchain", { method: "POST" })).status, 405);

@@ -39,3 +39,12 @@ export function problemOf(error: unknown): Problem {
 	console.error(`[clio-coder:gui] ${problem.instance}`, error);
 	return problem;
 }
+
+/** A request path or path segment, percent-decoded; malformed encoding is the caller's error (400), not ours. */
+export function decodeRequestPath(raw: string): string {
+	try {
+		return decodeURIComponent(raw);
+	} catch {
+		throw new AppProblem("validation", "The request path has malformed percent-encoding.", 400);
+	}
+}
