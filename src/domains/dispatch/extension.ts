@@ -8452,36 +8452,39 @@ export function createDispatchBundle(
 				// subscriber that refuses one, so that run subscribes when it starts.
 				const ledgerId = agentLedgerId;
 				const boardRunId = envelope.id;
-				const subscribeBoard = (): void => {
-					unsubscribeAgentLedger =
-						lifecycle.runtimeKind !== "http"
-							? null
-							: subscribeAgentLedger(ledgerId, boardRunId, (entries) =>
-									sendToWorker === undefined
-										? false
-										: sendToWorker({
-												type: "ledger_delta",
-												entries: entries.filter((entry) => {
-													if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
-													if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
-													return (
-														flowTransferRefusal(
-															compileWorkerFlowPolicy(spec.flowPolicy),
-															entry.flowRestrictions ?? null,
-															resolveModelDestination({
-																targetId: lifecycle.target.target.id,
-																runtimeId: lifecycle.target.runtime.id,
-																url: lifecycle.target.target.url,
-																model: lifecycle.target.wireModelId,
-															}),
-														) === null
-													);
-												}),
+				const subscribeBoard = (): (() => void) | null =>
+					lifecycle.runtimeKind !== "http"
+						? null
+						: subscribeAgentLedger(ledgerId, boardRunId, (entries) =>
+								sendToWorker === undefined
+									? false
+									: sendToWorker({
+											type: "ledger_delta",
+											entries: entries.filter((entry) => {
+												if ((entry.flowRestrictions?.restrictions.length ?? 0) === 0) return true;
+												if (spec.flowPolicy === undefined || lifecycle.runtimeKind !== "http") return false;
+												return (
+													flowTransferRefusal(
+														compileWorkerFlowPolicy(spec.flowPolicy),
+														entry.flowRestrictions ?? null,
+														resolveModelDestination({
+															targetId: lifecycle.target.target.id,
+															runtimeId: lifecycle.target.runtime.id,
+															url: lifecycle.target.target.url,
+															model: lifecycle.target.wireModelId,
+														}),
+													) === null
+												);
 											}),
-								);
-				};
-				if (heldFollower) subscribeHeldBoard = subscribeBoard;
-				else subscribeBoard();
+										}),
+							);
+				if (heldFollower) {
+					subscribeHeldBoard = () => {
+						unsubscribeAgentLedger = subscribeBoard();
+					};
+				} else {
+					unsubscribeAgentLedger = subscribeBoard();
+				}
 				for (const post of heldLedgerPosts.splice(0)) appendLedgerPost(attribution, post.body, post.flowRestrictions);
 			}
 			identity = detectRunIdentity();
