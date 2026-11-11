@@ -267,7 +267,8 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			// A failed cancel receipt must not leave effects running (#411).
 			if (reason !== "stopped") abortLive(id, reason, reason === "deadline" ? "timed_out" : "canceled");
 		}
-		if (result.delivery?.continuation === "job_deadline")
+		// Only the call that queued the wake announces it; a later cancel or close keeps the old delivery.
+		if (wake && result.delivery?.continuation === "job_deadline")
 			try {
 				options.continuation?.resumed(copy(result), jobExecutionTimeoutMs(result.spec, "delivery"), "job_deadline");
 			} catch (error) {

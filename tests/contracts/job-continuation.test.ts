@@ -341,6 +341,16 @@ describe("job continuation at yolo (#445)", () => {
 		strictEqual(final?.delivery?.state, "delivered");
 	});
 
+	it("does not announce the deadline wake again when the host closes behind it", async () => {
+		const host = make(polls([{ state: "pending" }], []));
+		const { count: _count, ...unbounded } = pollJob;
+		await host.create({ ...unbounded, deadlineAt: clock + 2500 }, owner);
+		for (let i = 0; i < 3; i++) await advance(host, 1000);
+		deepStrictEqual(resumed, [{ cause: "job_deadline", attempt: 0 }]);
+		await controller?.close();
+		deepStrictEqual(resumed, [{ cause: "job_deadline", attempt: 0 }]);
+	});
+
 	it("runs the continuation of a deadline wake that stopped on the tool budget", async () => {
 		const delivered: string[] = [];
 		const host = make({
