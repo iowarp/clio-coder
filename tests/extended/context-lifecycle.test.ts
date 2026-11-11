@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
@@ -23,6 +23,7 @@ import { getLatestContextSnapshot, lastLoadedContextWindow } from "../../src/dom
 import type { SessionMeta } from "../../src/domains/session/contract.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import type { Usage } from "../../src/engine/types.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const fingerprint = { treeHash: "a".repeat(64), gitHead: null, loc: 1 };
@@ -193,6 +194,7 @@ describe("contracts/context lifecycle", () => {
 		ok(result.summary.proposalPath && existsSync(result.summary.proposalPath));
 		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
 		strictEqual(readClioState(cwd)?.lastBootstrap, undefined);
+		strictEqual(result.summary.absorb, undefined);
 	});
 
 	it("accepts a proposal byte for byte, and refuses once the handbook changed after the draft", async () => {
@@ -220,6 +222,38 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(refused.ok, false);
 		ok(!refused.ok && refused.reason.includes("CLIO-CODER.md changed since the proposal was written"));
 		strictEqual(readFileSync(path, "utf8"), "# Project\n\nEdited after the draft.\n");
+	});
+
+	it("records the accepted draft's generation, and refuses a handbook it cannot read or whose bytes changed", async () => {
+		const cwd = isolated.dir;
+		const path = join(cwd, "CLIO-CODER.md");
+		writeFileSync(join(cwd, "index.py"), "value = 1\n");
+		writeFileSync(path, Buffer.from([0x23, 0x20, 0x50, 0x0a, 0xff, 0x0a]));
+		const first = await runBootstrap({ cwd, proposeClioMd: true });
+		strictEqual(readClioState(cwd)?.lastBootstrap, undefined);
+		writeFileSync(path, Buffer.from([0x23, 0x20, 0x50, 0x0a, 0xfe, 0x0a]));
+		const changed = acceptHandbookProposal(cwd, first.summary.proposalPath);
+		ok(!changed.ok && changed.reason.includes("changed since the proposal was written"), JSON.stringify(changed));
+
+		const second = await runBootstrap({ cwd, proposeClioMd: true });
+		strictEqual(acceptHandbookProposal(cwd, second.summary.proposalPath).ok, true);
+		strictEqual(readClioState(cwd)?.lastBootstrap?.mode, "heuristic");
+
+		const third = await runBootstrap({ cwd, proposeClioMd: true });
+		rmSync(path);
+		mkdirSync(path);
+		const unreadable = acceptHandbookProposal(cwd, third.summary.proposalPath);
+		ok(!unreadable.ok && unreadable.reason.includes("cannot be read"), JSON.stringify(unreadable));
+	});
+
+	it("parses /context init --accept with an optional proposal id and refuses it beside other flags", () => {
+		deepStrictEqual(parseSlashCommand("/context init --accept 20260101T000000Z-x"), {
+			kind: "init",
+			options: { accept: true, acceptRef: "20260101T000000Z-x" },
+		});
+		deepStrictEqual(parseSlashCommand("/context init --accept"), { kind: "init", options: { accept: true } });
+		strictEqual(parseSlashCommand("/context init --accept --apply").kind, "usage-error");
+		strictEqual(parseSlashCommand("/context init 20260101T000000Z-x").kind, "usage-error");
 	});
 
 	it("resumes from the latest persisted snapshot and bounds loaded-window recall to its target", async () => {

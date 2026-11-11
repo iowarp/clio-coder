@@ -8,6 +8,7 @@ import { type InitCommandIo, runInitCommand } from "../../src/cli/init.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { fitGeneratedHandbook } from "../../src/domains/context/handbook-budget.js";
+import { readHandbookFreshness } from "../../src/domains/context/handbook-ledger.js";
 import {
 	compileHandbook,
 	selectWorkerHandbook,
@@ -1284,7 +1285,9 @@ it("context init --verify flags a missing path and a wrong rule id, and --apply 
 		strictEqual(await runInitCommand(["--verify", "--apply", "--json"], io), 1);
 		const proposed = JSON.parse(io.out) as { proposals: { id: string; diff: string }[] };
 		ok(proposed.proposals[0]?.diff.includes("-- Never edit `src/legacy/old.ts` by hand."), io.out);
+		strictEqual(readHandbookFreshness(cwd).attention, 2);
 		strictEqual(await runInitCommand(["--accept", proposed.proposals[0]?.id ?? ""], io), 0, io.err);
+		strictEqual(readHandbookFreshness(cwd).attention, 0);
 		const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		strictEqual(handbook.includes("src/legacy"), false, handbook);
 		ok(handbook.includes("suite directory (rule1)."), handbook);

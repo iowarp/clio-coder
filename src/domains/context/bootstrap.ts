@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, parse, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, posix, relative, resolve, sep } from "node:path";
 import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -70,6 +70,7 @@ import {
 	type BootstrapGenerationMode,
 	type BootstrapGenerationState,
 	type BootstrapParserOutcome,
+	isBootstrapGenerationState,
 	readClioState,
 	statePath as resolveStatePath,
 	writeClioState,
@@ -2407,6 +2408,20 @@ export function fallbackBootstrapOutput(input: BootstrapGenerateInput): Bootstra
 	return { mode: "heuristic", output: heuristicBootstrapOutputSync(input) };
 }
 
+function sha256(data: string | Buffer): string {
+	return createHash("sha256").update(data).digest("hex");
+}
+
+/** The hash of a file's bytes as they are on disk, or null when it does not exist. */
+function hashExistingFile(path: string): string | null {
+	try {
+		return sha256(readFileSync(path));
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw err;
+	}
+}
+
 function readExistingClioMdText(cwd: string): string | null {
 	try {
 		return readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
@@ -2867,8 +2882,8 @@ export function proposeHandbookVerification(
 			.sort((a, b) => b.source.line - a.source.line);
 		if (flagged.length === 0) continue;
 		const path = join(root, file);
-		const source = readFileSync(path, "utf8");
-		const lines = source.split("\n");
+		const bytes = readFileSync(path);
+		const lines = bytes.toString("utf8").split("\n");
 		const hunks: string[] = [];
 		for (const entry of flagged) {
 			const start = entry.source.line - 1;
@@ -2890,7 +2905,7 @@ export function proposeHandbookVerification(
 				].join("\n"),
 			);
 		}
-		const proposalPath = writeProposalFile(root, now, lines.join("\n"), path, source, { origin: "verify" });
+		const proposalPath = writeProposalFile(root, now, lines.join("\n"), path, sha256(bytes), { origin: "verify" });
 		results.push({
 			file,
 			proposalPath,
@@ -2921,10 +2936,10 @@ function writeClioMdProposal(
 	now: Date,
 	output: BootstrapStructuredOutput,
 	generation: BootstrapGenerationTelemetry,
-	existingSource: string | null,
+	sourceHash: string | null,
 	absorb: AbsorbReport | undefined,
 ): string {
-	return writeProposalFile(cwd, now, serializeBootstrapOutput(output), join(cwd, "CLIO-CODER.md"), existingSource, {
+	return writeProposalFile(cwd, now, serializeBootstrapOutput(output), join(cwd, "CLIO-CODER.md"), sourceHash, {
 		generation: durableGenerationTelemetry(generation),
 		...(absorb ? { absorb } : {}),
 	});
@@ -2940,7 +2955,7 @@ function writeProposalFile(
 	now: Date,
 	content: string,
 	handbookPath: string,
-	existingSource: string | null,
+	sourceHash: string | null,
 	extra: Record<string, unknown>,
 ): string {
 	const dir = proposalsDir(cwd);
@@ -2955,8 +2970,8 @@ function writeProposalFile(
 			version: 1,
 			createdAt: now.toISOString(),
 			handbookPath,
-			sourceHash: existingSource === null ? null : createHash("sha256").update(existingSource).digest("hex"),
-			proposalHash: createHash("sha256").update(content).digest("hex"),
+			sourceHash,
+			proposalHash: sha256(content),
 			...extra,
 		})}\n`,
 		{ encoding: "utf8", flag: "wx" },
@@ -3023,11 +3038,35 @@ export type AcceptProposalResult =
  * was written is never overwritten. `ref` is a proposal path, file name or id;
  * without it the newest proposal is taken.
  */
+/**
+ * What an accepted proposal changes besides the handbook: the generation that
+ * drafted a new CLIO-CODER.md becomes state.lastBootstrap, and the last
+ * `--verify` verdicts for the replaced file are dropped, since they judged text
+ * that is gone. `--verify` judges the new text.
+ */
+function recordAcceptedProposal(cwd: string, handbookPath: string, generation: unknown): void {
+	const root = handbookRoot(cwd);
+	const file = relative(root, handbookPath).split(sep).join("/");
+	const ledger = readLedgerFile(root);
+	if (Array.isArray(ledger.verification) && ledger.verification.some((entry) => entry.source.file === file))
+		writeLedgerFile(root, {
+			version: 1,
+			commit: ledger.commit ?? null,
+			entries: ledger.entries ?? [],
+			...(ledger.verifiedCommit ? { verifiedCommit: ledger.verifiedCommit } : {}),
+			...(ledger.verifiedAt ? { verifiedAt: ledger.verifiedAt } : {}),
+			verification: ledger.verification.filter((entry) => entry.source.file !== file),
+		});
+	const state = readClioState(cwd);
+	if (state && handbookPath === join(cwd, "CLIO-CODER.md") && isBootstrapGenerationState(generation))
+		writeClioState(cwd, { ...state, lastBootstrap: generation });
+}
+
 export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposalResult {
 	const resolved = resolveProposal(cwd, ref);
 	if ("error" in resolved) return { ok: false, reason: resolved.error };
 	const proposalPath = resolved.path;
-	let sidecar: { sourceHash?: unknown; proposalHash?: unknown; handbookPath?: unknown };
+	let sidecar: { sourceHash?: unknown; proposalHash?: unknown; handbookPath?: unknown; generation?: unknown };
 	let bytes: Buffer;
 	try {
 		sidecar = JSON.parse(readFileSync(`${proposalPath}.json`, "utf8")) as typeof sidecar;
@@ -3035,19 +3074,17 @@ export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposa
 	} catch {
 		return { ok: false, proposalPath, reason: "the proposal or its .json sidecar cannot be read" };
 	}
-	const sha = (data: string | Buffer): string => createHash("sha256").update(data).digest("hex");
-	if (sidecar.proposalHash !== sha(bytes))
+	if (sidecar.proposalHash !== sha256(bytes))
 		return { ok: false, proposalPath, reason: "the proposal was edited after it was written" };
 	const handbookPath = proposalTarget(cwd, sidecar.handbookPath);
 	if (handbookPath === null)
 		return { ok: false, proposalPath, reason: "the proposal names a target that is not a handbook in this project" };
-	let current: string | null = null;
+	let currentHash: string | null;
 	try {
-		current = readFileSync(handbookPath, "utf8");
+		currentHash = hashExistingFile(handbookPath);
 	} catch {
-		// A handbook that does not exist yet hashes to null.
+		return { ok: false, proposalPath, reason: `${relative(cwd, handbookPath)} cannot be read` };
 	}
-	const currentHash = current === null ? null : sha(current);
 	if (sidecar.sourceHash !== currentHash)
 		return {
 			ok: false,
@@ -3055,6 +3092,7 @@ export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposa
 			reason: `${relative(cwd, handbookPath)} changed since the proposal was written; draft it again`,
 		};
 	safeResourceWrite(handbookPath, bytes);
+	recordAcceptedProposal(cwd, handbookPath, sidecar.generation);
 	return { ok: true, proposalPath, handbookPath };
 }
 
@@ -3321,6 +3359,7 @@ async function runBootstrapWork(
 	input.signal?.throwIfAborted();
 	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
 	const originalClioMdText = readExistingClioMdText(cwd);
+	const originalClioMdHash = hashExistingFile(join(cwd, "CLIO-CODER.md"));
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
 	const existingClioMdText = useExistingClioMdAsSource ? originalClioMdText : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
@@ -3537,13 +3576,15 @@ async function runBootstrapWork(
 		}
 	}
 	const readNames = siblingFiles.map((file) => file.path).sort((a, b) => a.localeCompare(b));
-	const absorb = handbookLedger
-		? buildAbsorbReport(
-				handbookLedger,
-				compileReport,
-				readNames.map((path) => (isAbsolute(path) ? relative(cwd, path) : path)),
-			)
-		: undefined;
+	// Only a run that read a sibling handbook has something to report.
+	const absorb =
+		handbookLedger && readNames.length > 0
+			? buildAbsorbReport(
+					handbookLedger,
+					compileReport,
+					readNames.map((path) => (isAbsolute(path) ? relative(cwd, path) : path)),
+				)
+			: undefined;
 	const absorbed = (): { absorb?: AbsorbReport } => (absorb ? { absorb } : {});
 	const previewStatus = gitStatus(cwd);
 	if (input.preview === true) {
@@ -3587,7 +3628,7 @@ async function runBootstrapWork(
 				!hadClioMd || (replaceClioMd && generation.mode !== "existing") || (input.adopt && existingParsed);
 			const sourceChanged = hadClioMd !== existsSync(clioMdPath) || originalClioMdText !== readExistingClioMdText(cwd);
 			if (shouldPropose || (wouldPublish && sourceChanged)) {
-				proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdText, absorb);
+				proposalPath = writeClioMdProposal(cwd, now, output, generation, originalClioMdHash, absorb);
 				if (sourceChanged)
 					warn(input.io, "CLIO-CODER.md changed during initialization; the generated draft was saved as a proposal.\n");
 				return "proposed";

@@ -91,7 +91,7 @@ function isNonemptyString(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
 }
 
-function isBootstrapGenerationState(value: unknown): value is BootstrapGenerationState {
+export function isBootstrapGenerationState(value: unknown): value is BootstrapGenerationState {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const obj = value as Record<string, unknown>;
 	for (const key of ["repairRan", "repairProducedHandbook"])

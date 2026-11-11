@@ -1,5 +1,5 @@
 import type { DomainContract } from "../../core/domain-loader.js";
-import type { RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
+import type { AcceptProposalResult, RunBootstrapInput, RunBootstrapResult } from "./bootstrap.js";
 import type { RunContextClearInput, RunContextClearResult } from "./clear.js";
 import type { ParsedClioMd } from "./clio-md.js";
 import type { RunContextRefreshInput, RunContextRefreshResult } from "./refresh.js";
@@ -55,6 +55,8 @@ export interface ContextContract extends DomainContract {
 	cancelOperation?(sessionId: string, cwd: string, operationId?: string): boolean;
 	runBootstrap(input?: RunBootstrapInput): Promise<RunBootstrapResult>;
 	runContextClear(input?: RunContextClearInput): Promise<RunContextClearResult>;
+	/** Write a reviewed handbook proposal (`context init --accept`), reported as a context-init operation. */
+	acceptProposal?(input?: { cwd?: string; ref?: string }): AcceptProposalResult;
 	/**
 	 * Rebuild the codemap index and `.clio-coder` state without touching project handbooks.
 	 * Markdown wiki updates require the explicit refresh input flag.

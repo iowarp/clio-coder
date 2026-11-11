@@ -10,12 +10,15 @@ export interface ContextInitOptions {
 	includeGlobalImports?: boolean;
 	heuristic?: boolean;
 	depth?: BootstrapDepth;
+	/** Write a reviewed proposal instead of generating: the newest, or `acceptRef`. */
+	accept?: boolean;
+	acceptRef?: string;
 }
 
 export interface ContextInitFlag {
 	flag: string;
 	aliases?: ReadonlyArray<string>;
-	field: Exclude<keyof ContextInitOptions, "depth">;
+	field: Exclude<keyof ContextInitOptions, "depth" | "acceptRef">;
 }
 
 export const CONTEXT_INIT_FLAG_TABLE: ReadonlyArray<ContextInitFlag> = [
@@ -26,6 +29,7 @@ export const CONTEXT_INIT_FLAG_TABLE: ReadonlyArray<ContextInitFlag> = [
 	{ flag: "--propose", field: "proposeClioMd" },
 	{ flag: "--global", aliases: ["--include-global"], field: "includeGlobalImports" },
 	{ flag: "--heuristic", field: "heuristic" },
+	{ flag: "--accept", field: "accept" },
 ];
 
 /** The ONE place the rewrite => apply implication lives. */
@@ -38,6 +42,13 @@ export function applyInitImplications(options: ContextInitOptions): ContextInitO
 
 /** Conflict validation. Returns a usage-error string or null. */
 export function validateInitOptions(options: ContextInitOptions): string | null {
+	if (options.accept === true) {
+		const others = CONTEXT_INIT_FLAG_TABLE.filter(({ field }) => field !== "accept" && options[field] === true);
+		if (others.length > 0 || options.depth !== undefined)
+			return `clio-coder context init: --accept takes only a proposal path or id, not ${[...others.map(({ flag }) => flag), ...(options.depth ? ["--depth"] : [])].join(" ")}`;
+	} else if (options.acceptRef !== undefined) {
+		return `clio-coder context init: unexpected argument: ${options.acceptRef}`;
+	}
 	if (
 		options.proposeClioMd === true &&
 		(options.adopt === true || options.applyClioMd === true || options.rewriteClioMd === true)

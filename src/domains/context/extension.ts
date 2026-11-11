@@ -13,7 +13,7 @@ import { foldDecisionBoard } from "../session/decision-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { detectProjectTypeHint, type ProjectType } from "../session/workspace/project-type.js";
 import { adoptionSourcesChanged } from "./adoption.js";
-import { runBootstrap } from "./bootstrap.js";
+import { acceptHandbookProposal, proposalId, runBootstrap } from "./bootstrap.js";
 import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
@@ -435,7 +435,10 @@ export function createContextBundle(
 					warnings.push(`${result.summary.adoption.conflictCount} import conflicts detected.`);
 				if (result.preload.mode === "partial" || result.preload.mode === "synopsis")
 					warnings.push(`Project instructions: ${result.preload.label}`);
-				if (result.summary.action === "proposed") warnings.push("Review the proposal before /context init --apply.");
+				if (result.summary.action === "proposed" && result.summary.proposalPath)
+					warnings.push(
+						`Review the proposal, then write it with /context init --accept ${proposalId(result.summary.proposalPath)}.`,
+					);
 				operation.finish(result.summary.action === "previewed" ? "previewed" : "completed", "Context init finished", {
 					facts: bootstrapOperationFacts(result),
 					warnings: warnings.slice(0, 8),
@@ -466,6 +469,29 @@ export function createContextBundle(
 				});
 				throw err;
 			}
+		},
+		acceptProposal(input) {
+			const cwd = input?.cwd ?? process.cwd();
+			const operation = beginOperation("context-init", cwd);
+			const result = acceptHandbookProposal(cwd, input?.ref);
+			const shown = (path: string): string => relative(cwd, path) || path;
+			if (result.ok) {
+				contextState.invalidate(cwd);
+				if (cwd === lastCwd) startupHints = collectStartupHints(cwd, options);
+				operation.finish("completed", "Proposal accepted", {
+					facts: [
+						{ kind: "updated", unit: "paths", count: 1, paths: [shown(result.handbookPath)] },
+						{ kind: "read", unit: "paths", count: 1, paths: [shown(result.proposalPath)] },
+					],
+				});
+			} else {
+				operation.finish("failed", `context init --accept refused: ${result.reason}`, {
+					...(result.proposalPath
+						? { facts: [{ kind: "preserved", unit: "paths", count: 1, paths: [shown(result.proposalPath)] }] }
+						: {}),
+				});
+			}
+			return result;
 		},
 		async runContextClear(input) {
 			const operation = beginOperation("context-clear", input?.cwd ?? process.cwd(), input?.signal);

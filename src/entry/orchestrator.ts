@@ -3479,9 +3479,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			includeGlobalImports?: boolean;
 			heuristic?: boolean;
 			depth?: "quick" | "standard" | "deep";
+			accept?: boolean;
+			acceptRef?: string;
 		},
 		runIo?: RunIo,
 	) => {
+		if (options.accept === true) {
+			if (!contextDomain?.acceptProposal) throw new Error("context domain unavailable");
+			const accepted = contextDomain.acceptProposal({
+				cwd: process.cwd(),
+				...(options.acceptRef ? { ref: options.acceptRef } : {}),
+			});
+			if (!accepted.ok) throw new Error(`context init --accept refused: ${accepted.reason}`);
+			runIo?.stdout(`Wrote ${accepted.handbookPath} from ${accepted.proposalPath}\n`);
+			return accepted;
+		}
 		// Context init explores the repo with the configured target by
 		// default, grounded in the freshly built codewiki, and falls back to the
 		// deterministic heuristic when no target is reachable. --heuristic and

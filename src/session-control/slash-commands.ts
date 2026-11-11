@@ -2493,6 +2493,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						...CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
 						{ name: "--depth", takesValue: true, values: ["quick", "standard", "deep"] },
 					],
+					positionals: [{ name: "proposal", required: false }],
 				},
 				refresh: {},
 				// The terminal confirms a reset in its own chooser. A host with no chooser
@@ -2517,6 +2518,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					const options: ContextInitOptions = {};
 					const depth = parsed.flags.get("--depth");
 					if (depth === "quick" || depth === "standard" || depth === "deep") options.depth = depth;
+					if (parsed.positionals[0]) options.acceptRef = parsed.positionals[0];
 					for (const { flag, aliases = [], field } of CONTEXT_INIT_FLAG_TABLE) {
 						if ([flag, ...aliases].some((name) => parsed.flags.has(name))) options[field] = true;
 					}
