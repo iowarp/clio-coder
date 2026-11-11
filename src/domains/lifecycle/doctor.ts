@@ -18,6 +18,7 @@ import {
 	type HarnessIssue,
 	validateHarness,
 } from "../agents/harness-validate.js";
+import { shadowedPlaybooks } from "../agents/playbook.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
@@ -1580,6 +1581,26 @@ async function systemOneEngineFindings(
  * same issues one per line for feeding back to whoever wrote the file.
  */
 export function runDoctorHarnessChecks(workspaceRoot: string = process.cwd()): DoctorFinding[] {
+	return [...harnessFindings(workspaceRoot), ...playbookShadowFindings(workspaceRoot)];
+}
+
+/** A user or project playbook that replaces a builtin's or the operator's of the same name, so it is not silent. */
+function playbookShadowFindings(workspaceRoot: string): DoctorFinding[] {
+	let shadowed: ReturnType<typeof shadowedPlaybooks>;
+	try {
+		shadowed = shadowedPlaybooks(workspaceRoot);
+	} catch {
+		return [];
+	}
+	return shadowed.map((entry) => ({
+		ok: true,
+		level: "warn" as const,
+		name: `playbook ${entry.name}`,
+		detail: `the ${entry.by} playbook ${entry.byPath} replaces the ${entry.source} one at ${entry.path}; /fleet run ${entry.name} runs the ${entry.by} file`,
+	}));
+}
+
+function harnessFindings(workspaceRoot: string): DoctorFinding[] {
 	let input: HarnessInput;
 	let issues: HarnessIssue[];
 	try {

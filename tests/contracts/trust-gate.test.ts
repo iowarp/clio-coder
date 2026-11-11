@@ -18,6 +18,7 @@ import {
 } from "../../src/core/workspace-trust.js";
 import { disableExtension, installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { INTEROP_AGENT_KINDS } from "../../src/domains/interop/registry.js";
+import { runDoctorHarnessChecks } from "../../src/domains/lifecycle/doctor.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { loadUserHooks, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
 import { buildUserHookRegistrations, spawnSyncCommandRunner } from "../../src/domains/middleware/hooks-io.js";
@@ -569,6 +570,21 @@ test("S3-03: a real ACP child excludes inherited credentials and accepts only ex
 		} finally {
 			await transport.forceTerminate();
 		}
+	} finally {
+		home.restore();
+	}
+});
+
+test("doctor names a project playbook that replaces a builtin of the same name", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-playbook-shadow-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder", "playbooks"), { recursive: true });
+		writeFileSync(join(workspace, ".clio-coder", "playbooks", "build-review.md"), "---\nname: build-review\n---\n");
+		const row = runDoctorHarnessChecks(workspace).find((finding) => finding.name === "playbook build-review");
+		ok(row);
+		strictEqual(row.level, "warn");
+		match(row.detail, /project playbook .* replaces the builtin one/u);
 	} finally {
 		home.restore();
 	}

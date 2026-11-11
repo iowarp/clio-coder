@@ -1038,6 +1038,27 @@ function playbookSources(cwd: string): ReadonlyArray<{ dir: string; source: Play
 	];
 }
 
+/**
+ * Playbook files a later source hides: a user or project playbook with a builtin's or an earlier
+ * source's name replaces it, so `/fleet run <name>` runs the later file. Doctor names each one.
+ */
+export function shadowedPlaybooks(
+	cwd: string,
+): Array<{ name: string; path: string; source: PlaybookSource; by: PlaybookSource; byPath: string }> {
+	const seen = new Map<string, { path: string; source: PlaybookSource }>();
+	const shadowed: Array<{ name: string; path: string; source: PlaybookSource; by: PlaybookSource; byPath: string }> = [];
+	for (const { dir, source } of playbookSources(cwd)) {
+		for (const file of listDirectory(dir)) {
+			const name = basename(file, ".md");
+			const path = join(dir, file);
+			const previous = seen.get(name);
+			if (previous !== undefined) shadowed.push({ name, ...previous, by: source, byPath: path });
+			seen.set(name, { path, source });
+		}
+	}
+	return shadowed;
+}
+
 function locatePlaybook(cwd: string, name: string): { path: string; source: PlaybookSource; rootPath?: string } | null {
 	for (const source of [...playbookSources(cwd)].reverse()) {
 		const candidate = join(source.dir, `${name}.md`);
