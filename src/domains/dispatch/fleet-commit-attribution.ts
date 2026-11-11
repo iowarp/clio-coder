@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "./execution-plan.js";
 
@@ -57,6 +58,33 @@ export function deriveFleetCommitAttribution(input: {
 		...(run === undefined ? {} : { run }),
 		...(decisions === undefined ? {} : { decisions }),
 	};
+}
+
+const PACKAGE_CONFIG_FILES = new Set(["package.json", ".npmrc", "pnpm-workspace.yaml"]);
+
+/**
+ * The check's own files among `changedPaths` (repository-relative): a package manifest or package-manager config,
+ * whose scripts a check may run, or a file the check's argv names. A pass over files the worker wrote earns no
+ * `Tested-by` trailer. Directories the argv names are the code under check, not the check, so they do not count.
+ */
+export function changedCheckFiles(
+	command: { argv: ReadonlyArray<string>; cwd: string },
+	changedPaths: Iterable<string>,
+): string[] {
+	const operands = new Set<string>();
+	for (const [index, token] of command.argv.entries()) {
+		const value = token.startsWith("-") ? (token.includes("=") ? token.slice(token.indexOf("=") + 1) : "") : token;
+		if (value === "" || /\s/u.test(value) || (index === 0 && !value.includes("/"))) continue;
+		const resolved = posix.normalize(posix.join(command.cwd, value));
+		if (!resolved.startsWith("../") && !posix.isAbsolute(resolved)) operands.add(resolved);
+	}
+	const hits = new Set<string>();
+	for (const path of changedPaths) {
+		const segments = path.split("/");
+		if (segments.includes("node_modules")) continue;
+		if (PACKAGE_CONFIG_FILES.has(segments.at(-1) ?? "") || operands.has(path)) hits.add(path);
+	}
+	return [...hits].sort();
 }
 
 const NO_OP_COMMANDS = new Set(["true", ":"]);

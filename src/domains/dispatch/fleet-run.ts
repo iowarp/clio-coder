@@ -66,7 +66,7 @@ import {
 import { gateRouteCorrelation, requestExecutionRole } from "./execution-role.js";
 import type { ExecutionSchedulerAdapter } from "./execution-scheduler.js";
 import { type ExecutionPlanResult, type ExecutionStepResult, executePlan } from "./execution-scheduler.js";
-import { deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
+import { changedCheckFiles, deriveFleetCommitAttribution, isVacuousCheckArgv } from "./fleet-commit-attribution.js";
 import { createFleetEventJournal, fleetManifestDigest, fleetStepEntryDigest } from "./fleet-event-journal.js";
 import { gateBaselineFailure, gateFailureLines } from "./fleet-gate.js";
 import { acquireFleetWorkspaceLock } from "./fleet-workspace-lock.js";
@@ -1225,7 +1225,27 @@ async function runFleetHoldingWorkspace(
 					commitBaseline = commitPointSnapshot(workspaceRoot);
 					if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 				}
-				if (step.verification === true) validationFresh = outcome.report.passed && !isVacuousCheckArgv(command.argv);
+				if (step.verification === true) {
+					// A pass over check files a worker in this run wrote proves only that the worker's check agrees
+					// with the worker; it stays a pass but earns no Tested-by, and the run says why.
+					const selfWritten: string[] = [];
+					const writers: string[] = [];
+					if (outcome.report.passed) {
+						for (const [stepId, receipt] of receiptsByStep) {
+							const source = livePlan.steps.find((candidate) => candidate.id === stepId);
+							if (source?.kind !== "agent" || source.scope !== "workspace") continue;
+							const files = changedCheckFiles(command, receipt.changedPaths);
+							if (files.length === 0) continue;
+							writers.push(stepId);
+							selfWritten.push(...files);
+						}
+					}
+					validationFresh = outcome.report.passed && !isVacuousCheckArgv(command.argv) && writers.length === 0;
+					if (writers.length > 0)
+						notice(
+							`step ${step.id}: check passed without Tested-by: worker step${writers.length === 1 ? "" : "s"} ${writers.map((id) => `'${id}'`).join(", ")} changed the check's own files (${[...new Set(selfWritten)].sort().join(", ")})`,
+						);
+				}
 				if (!telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry.context))
 					throw new Error(`fleet code step '${step.id}' settlement could not be enqueued`);
 				await rootTelemetry.flush();

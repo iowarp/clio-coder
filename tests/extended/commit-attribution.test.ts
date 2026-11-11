@@ -25,6 +25,7 @@ import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { installWindowsLauncher, windowsLaunchFile } from "../../src/core/windows-launcher.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "../../src/domains/dispatch/execution-plan.js";
 import {
+	changedCheckFiles,
 	deriveFleetCommitAttribution,
 	isVacuousCheckArgv,
 } from "../../src/domains/dispatch/fleet-commit-attribution.js";
@@ -597,5 +598,36 @@ describe("vacuous loop checks", () => {
 			["true", "x"],
 		])
 			strictEqual(isVacuousCheckArgv(argv), false, argv.join(" "));
+	});
+
+	it("a check over files a worker changed earns no Tested-by", () => {
+		const changed = [
+			"src/a.ts",
+			"tests/a.test.ts",
+			"packages/x/package.json",
+			"node_modules/y/package.json",
+			"README.md",
+		];
+		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "tests/a.test.ts"], cwd: "" }, changed), [
+			"packages/x/package.json",
+			"tests/a.test.ts",
+		]);
+		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "a.test.ts"], cwd: "tests" }, changed), [
+			"packages/x/package.json",
+			"tests/a.test.ts",
+		]);
+		deepStrictEqual(changedCheckFiles({ argv: ["pnpm", "test"], cwd: "" }, ["package.json", ".npmrc"]), [
+			".npmrc",
+			"package.json",
+		]);
+		deepStrictEqual(changedCheckFiles({ argv: ["bash", "./scripts/check.sh"], cwd: "" }, ["scripts/check.sh"]), [
+			"scripts/check.sh",
+		]);
+		deepStrictEqual(changedCheckFiles({ argv: ["vitest", "--config=vitest.config.ts"], cwd: "" }, ["vitest.config.ts"]), [
+			"vitest.config.ts",
+		]);
+		// The code under check is not the check: directory operands and unrelated files do not count.
+		deepStrictEqual(changedCheckFiles({ argv: ["biome", "check", "src", "."], cwd: "" }, ["src/a.ts", "README.md"]), []);
+		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "../outside.ts"], cwd: "" }, ["outside.ts"]), []);
 	});
 });
