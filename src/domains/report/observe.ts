@@ -51,7 +51,9 @@ export function renderObservation(observation: ReportObservation): string {
 		case "turn-ended": {
 			const { stopReason, cause, stage, retries } = observation.values;
 			const on = cause !== null ? ` on \`${word(cause)}\`` : "";
-			const at = stage !== null ? ` at stage \`${word(stage)}\`` : "";
+			// A stage locates a failure; a turn that ended normally on `stop` has none worth naming.
+			const normal = stopReason === "stop" && cause === null;
+			const at = stage !== null && !normal ? ` at stage \`${word(stage)}\`` : "";
 			const after = retries > 0 ? ` after ${count(retries)} ${retries === 1 ? "retry" : "retries"}` : "";
 			return `The last turn ended (\`${word(stopReason)}\`)${on}${at}${after}.`;
 		}

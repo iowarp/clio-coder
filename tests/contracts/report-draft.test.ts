@@ -163,3 +163,13 @@ test("a target name inside a runtime id or billing provider word is not masked i
 	const { text } = scrubText("the copilot-sdk runtime and github-copilot billing failed on copilot", withTarget);
 	strictEqual(text, "the copilot-sdk runtime and github-copilot billing failed on <target>");
 });
+
+test("a turn that ended normally names no stage", () => {
+	const normal: ReportDraft = {
+		...draft("it worked"),
+		observed: [{ code: "turn-ended", values: { stopReason: "stop", cause: null, stage: "firstToken", retries: 0 } }],
+	};
+	const body = renderReport(normal, identity).body;
+	ok(body.includes("The last turn ended (`stop`)."));
+	ok(!body.includes("at stage"));
+});
