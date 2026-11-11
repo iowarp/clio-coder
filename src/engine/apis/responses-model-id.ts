@@ -65,7 +65,8 @@ export function observeResponsesModelId<T extends StreamOptions>(
 				if (event.type === "done") event.message.responseModelIdObservation = observation();
 				else if (event.type === "error") {
 					event.error.responseModelIdObservation = observation();
-					event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
+					if (event.error.errorMessage !== undefined)
+						event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
 				}
 				if (quota !== null && (event.type === "done" || event.type === "error")) {
 					const terminal = event.type === "done" ? event.message : event.error;

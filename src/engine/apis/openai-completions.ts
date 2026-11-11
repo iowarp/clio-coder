@@ -438,7 +438,8 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
 					}
 					// A proxy refusal and an unreachable provider read the same in the SDK's wording.
-					event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
+					if (event.error.errorMessage !== undefined)
+						event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
 					if (capture.contentFilter && event.error.stopReason === "error") {
 						event.error.errorMessage = providerContentFilterMessage(event.error.errorMessage ?? "");
 					}

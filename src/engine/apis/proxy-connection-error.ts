@@ -9,6 +9,8 @@ const CONNECTION_FAILURE =
  * Pi appends the transport cause to the SDK's `Connection error.` (`Connection error.: connect ECONNREFUSED ...`); the
  * note goes before it. Other messages, direct requests and already-annotated messages come back unchanged.
  */
+export function withProxyConnectionNote(message: string, baseUrl: string | undefined): string;
+export function withProxyConnectionNote(message: string | undefined, baseUrl: string | undefined): string | undefined;
 export function withProxyConnectionNote(message: string | undefined, baseUrl: string | undefined): string | undefined {
 	if (message === undefined || message.includes("(through proxy ")) return message;
 	const trimmed = message.trim();

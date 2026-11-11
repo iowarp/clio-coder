@@ -200,7 +200,8 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 						}
 					}
 					if (event.type === "error") {
-						terminal.errorMessage = withProxyConnectionNote(terminal.errorMessage, model.baseUrl);
+						if (terminal.errorMessage !== undefined)
+							terminal.errorMessage = withProxyConnectionNote(terminal.errorMessage, model.baseUrl);
 					}
 					annotate(terminal);
 				}

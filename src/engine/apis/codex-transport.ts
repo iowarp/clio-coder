@@ -80,7 +80,8 @@ export function observeCodexTransport<T extends StreamOptions>(
 			if (finished) return;
 			finished = true;
 			if (message.stopReason === "error") {
-				message.errorMessage = withProxyConnectionNote(message.errorMessage, model.baseUrl);
+				if (message.errorMessage !== undefined)
+					message.errorMessage = withProxyConnectionNote(message.errorMessage, model.baseUrl);
 			}
 			const after = sessionId ? bridge?.getOpenAICodexWebSocketDebugStats(sessionId) : undefined;
 			const diff = sessionId && !call.overlap ? difference(before, after) : null;

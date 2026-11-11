@@ -2,14 +2,14 @@ import { ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { installProxyFromEnv, proxyEnvSummary, proxyForUrl } from "../../src/core/proxy-env.js";
 import { observeAnthropicResponse } from "../../src/engine/apis/anthropic-response.js";
 import { observeCodexTransport } from "../../src/engine/apis/codex-transport.js";
 import { withProxyConnectionNote } from "../../src/engine/apis/proxy-connection-error.js";
 import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
-import type { Api, AssistantMessage, Model } from "../../src/engine/types.js";
+import type { Api, Model } from "../../src/engine/types.js";
 
 let proxyHits = 0;
 
