@@ -17,7 +17,7 @@ import {
 	claimsProjectRoot,
 	readClaims,
 } from "./store.js";
-import type { ClaimEdgeRecord, ClaimRecord } from "./types.js";
+import type { ClaimRecord } from "./types.js";
 
 export const CLAIM_CAPTURE_REGISTRATION_ID = "observer.claims-capture";
 const HYPOTHESIS_CAPTURE_REGISTRATION_ID = "observer.hypothesis-capture";
@@ -343,12 +343,13 @@ export async function recordHostVerificationClaims(input: {
  */
 async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Promise<void> {
 	const edges = await appendClaims(claims);
-	const contradictions = edges.filter((edge) => edge.kind === "contradicts");
-	if (contradictions.length === 0) return;
-	const byProject = new Map<string, ClaimEdgeRecord[]>();
-	for (const edge of contradictions) byProject.set(edge.project, [...(byProject.get(edge.project) ?? []), edge]);
-	for (const [project, group] of byProject) {
+	// Every project this append touched, so a contradiction whose regression did not land earlier is retried here.
+	const projects = new Set([...claims.map((claim) => claim.project), ...edges.map((edge) => edge.project)]);
+	for (const project of projects) {
 		const log = readClaims(project);
+		const regressed = new Set(log.regressions.map((regression) => regression.edge));
+		const group = log.edges.filter((edge) => edge.kind === "contradicts" && !regressed.has(edge.id));
+		if (group.length === 0) continue;
 		const claimsById = new Map(log.records.map((claim) => [claim.id, claim]));
 		const overturned = group.flatMap((edge) => {
 			const later = claimsById.get(edge.from);
@@ -359,7 +360,13 @@ async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Prom
 		const inputs = overturned.flatMap(({ later, backing }) =>
 			backing.map((claim) => ({ refs: claimBackingRefs(claim), note: claimRegressionNote(later, claim) })),
 		);
-		const reached = await recordClaimRegressions(clioDataDir(), inputs);
+		let reached: Awaited<ReturnType<typeof recordClaimRegressions>>;
+		try {
+			reached = await recordClaimRegressions(clioDataDir(), inputs);
+		} catch {
+			// No regression line is written, so the contradiction stays pending and the next append retries it.
+			continue;
+		}
 		let index = 0;
 		const records = overturned.map(({ edge, backing }) => {
 			const memory = new Set<string>();
