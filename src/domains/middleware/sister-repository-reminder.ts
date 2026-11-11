@@ -12,9 +12,12 @@ const NONE: ReadonlyArray<MiddlewareEffect> = [];
 /**
  * When the main agent reads, lists, searches or edits files in a repository
  * the session did not start in, appends that repository's invariants to the
- * tool result as one labeled reminder: once per repository, and again only
- * when its compile changes. The session's own handbook is untouched, and the
- * reminder lands in the next request without recompiling the system prompt.
+ * tool result as one labeled reminder: once per repository in each session,
+ * and again only when its compile changes. It reads the cached compile and
+ * never compiles: until the first compile lands nothing is appended, and a
+ * later tool result there carries it. The session's own handbook is untouched,
+ * and the reminder lands in the next request without recompiling the system
+ * prompt.
  */
 export function createSisterRepositoryReminderRegistration(
 	deps: { getCwd?: () => string } = {},
@@ -33,11 +36,11 @@ export function createSisterRepositoryReminderRegistration(
 			const cwd = getCwd();
 			const root = sisterRepositoryRoot(isAbsolute(path) ? path : resolve(cwd, path), cwd);
 			if (root === null) return NONE;
-			const rules = sisterRepositoryRules(root);
+			const rules = sisterRepositoryRules(root)?.rules ?? null;
 			if (rules === null) return NONE;
-			const identity = repositoryIdentity(root);
-			if (delivered.get(identity) === rules.hash) return NONE;
-			delivered.set(identity, rules.hash);
+			const key = `${input.sessionId ?? ""}\0${repositoryIdentity(root)}`;
+			if (delivered.get(key) === rules.hash) return NONE;
+			delivered.set(key, rules.hash);
 			const message = sisterRepositoryReminder(rules);
 			return message === null ? NONE : [{ kind: "annotate_tool_result", severity: "info", message }];
 		},

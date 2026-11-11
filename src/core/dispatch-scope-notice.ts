@@ -17,6 +17,7 @@ const SCOPE_NOTICE_CODES: Record<DispatchScopeNoticePayload["code"], true> = {
 	write_roots_overlap: true,
 	mcp_sandbox_no_network: true,
 	sister_handbook_untrusted: true,
+	sister_handbook_pending: true,
 	worker_merged: true,
 };
 

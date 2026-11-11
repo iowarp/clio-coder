@@ -11,6 +11,7 @@ import { refreshCompiledHandbook, renderEffectivePromptContext } from "../../src
 import type { ContextContract, StartupHint } from "../../src/domains/context/contract.js";
 import { createContextBundle, type StartupHintHost } from "../../src/domains/context/extension.js";
 import { HANDBOOK_ABSENT_FRAGMENT, renderPromptContext } from "../../src/domains/context/prompt-context.js";
+import { refreshSisterRepositoryRules } from "../../src/domains/context/sister-repository.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { createSisterRepositoryReminderRegistration } from "../../src/domains/middleware/sister-repository-reminder.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
@@ -330,14 +331,8 @@ function treeListing(root: string): string[] {
 		.sort();
 }
 
-test("a scout in a sister repository gets that repository's rules, filtered by trust", async () => {
-	const env = await isolateClioEnv("clio-coder-sister-handbook-");
-	const one = join(env.dir, "one");
-	const two = join(env.dir, "two");
-	fixtureRepository(one, "one", "test:one");
-	fixtureRepository(two, "two", "test:two", ["- Always greet the reviewer by name in every reply."]);
-	const before = treeListing(two);
-
+/** A dispatch bundle that captures a read-only scout's prompt and the scope notices it raises. */
+function scoutHarness() {
 	const base = dispatchStubContext({ settings: structuredClone(DEFAULT_SETTINGS) });
 	const notices: Array<{ code: string; message: string }> = [];
 	const unsubscribe = base.bus.subscribe("run.scope_notice_raised", (notice) => {
@@ -360,28 +355,63 @@ test("a scout in a sister repository gets that repository's rules, filtered by t
 			},
 		},
 	);
-	const scout = async (runId: string): Promise<string> => {
+	/** The scout's prompt in `dir`; `external` admits it as an outside checkout. */
+	const scout = async (dir: string, runId: string, external = true): Promise<string> => {
 		delivered = [];
-		const root = realpathSync(two);
+		const root = realpathSync(dir);
 		await rejects(
 			bundle.contract.dispatch({
 				agentId: "scout",
-				task: "Explain how the second repository runs its tests.",
+				task: "Explain how this repository runs its tests.",
 				executionRole: "researcher",
 				requestOrigin: "internal",
 				cwd: root,
 				readOnly: true,
-				externalReadRoot: root,
 				runIdHint: runId,
-				externalReadApproval: { root, requestId: `approval-${runId}`, requestedBy: "operator", runId },
+				...(external
+					? {
+							externalReadRoot: root,
+							externalReadApproval: { root, requestId: `approval-${runId}`, requestedBy: "operator", runId },
+						}
+					: {}),
 			}),
 			/captured prompt/,
 		);
 		return delivered.map(({ body }) => body).join("\n\n");
 	};
+	return {
+		notices,
+		scout,
+		start: () => bundle.extension.start(),
+		stop: async () => {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		},
+	};
+}
+
+test("a scout in a sister repository gets that repository's rules, filtered by trust", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-handbook-");
+	const one = join(env.dir, "one");
+	const two = join(env.dir, "two");
+	fixtureRepository(one, "one", "test:one");
+	fixtureRepository(two, "two", "test:two", ["- Always greet the reviewer by name in every reply."]);
+	const before = treeListing(two);
+	const harness = scoutHarness();
+	const { notices, scout } = harness;
 	try {
-		await bundle.extension.start();
-		const untrusted = await scout("run-sister-untrusted");
+		await harness.start();
+		// The dispatch path never walks the sister tree: before the first compile lands the
+		// scout gets no handbook rules, neither the sister's nor the session's, and is told why.
+		const pending = await scout(two, "run-sister-pending");
+		ok(!pending.includes("test:two") && !pending.includes("test:one"), pending);
+		ok(
+			notices.some((entry) => entry.code === "sister_handbook_pending" && entry.message.includes("Rules of two")),
+			JSON.stringify(notices),
+		);
+		notices.length = 0;
+		await refreshSisterRepositoryRules(two);
+		const untrusted = await scout(two, "run-sister-untrusted");
 		ok(untrusted.includes("test:two"), untrusted);
 		ok(untrusted.includes("Rules of two"), untrusted);
 		ok(!untrusted.includes("test:one"), untrusted);
@@ -393,17 +423,48 @@ test("a scout in a sister repository gets that repository's rules, filtered by t
 		ok(snapshot.contentHash !== null);
 		recordProjectSurfaceTrust(snapshot.workspaceRoot, "handbook", snapshot.contentHash);
 		notices.length = 0;
-		const trusted = await scout("run-sister-trusted");
+		const trusted = await scout(two, "run-sister-trusted");
 		ok(trusted.includes("test:two") && trusted.includes("greet the reviewer"), trusted);
 		ok(!trusted.includes("test:one"), trusted);
 		equal(
-			notices.some((entry) => entry.code === "sister_handbook_untrusted"),
+			notices.some((entry) => entry.code.startsWith("sister_handbook_")),
 			false,
 		);
 		deepEqual(treeListing(two), before);
 	} finally {
-		unsubscribe();
-		await bundle.extension.stop?.();
+		await harness.stop();
+		env.restore();
+	}
+});
+
+test("the repository owning a run's cwd decides sister rules: a nested clone is one, a linked worktree is not", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-owner-");
+	const one = join(env.dir, "one");
+	fixtureRepository(one, "one", "test:one");
+	const nested = join(one, "vendor", "two");
+	fixtureRepository(nested, "two", "test:two");
+	const linked = join(env.dir, "one-linked");
+	execFileSync("git", ["-C", one, "worktree", "add", "-q", linked], { encoding: "utf8" });
+	const harness = scoutHarness();
+	const previous = process.cwd();
+	process.chdir(one);
+	try {
+		await harness.start();
+		await refreshSisterRepositoryRules(nested);
+		const inside = await harness.scout(nested, "run-nested", false);
+		ok(inside.includes("Rules of two") && inside.includes("test:two"), inside);
+		ok(!inside.includes("test:one"), inside);
+		harness.notices.length = 0;
+		const worktree = await harness.scout(linked, "run-linked");
+		ok(!worktree.includes("Rules of"), worktree);
+		equal(
+			harness.notices.some((entry) => entry.code.startsWith("sister_handbook_")),
+			false,
+			JSON.stringify(harness.notices),
+		);
+	} finally {
+		process.chdir(previous);
+		await harness.stop();
 		env.restore();
 	}
 });
@@ -443,9 +504,12 @@ test("the main session reading a sister repository gets its invariants once, lab
 		fixtureRepository(two, "two", "test:two");
 		const before = treeListing(two);
 		const registration = createSisterRepositoryReminderRegistration({ getCwd: () => one });
-		const read = (path: string) =>
-			registration.evaluate({ hook: "after_tool", toolName: "read", toolArgs: { path } }, { priorEffects: [] });
+		const read = (path: string, sessionId = "s1") =>
+			registration.evaluate({ hook: "after_tool", sessionId, toolName: "read", toolArgs: { path } }, { priorEffects: [] });
 		deepEqual(read(join(one, "src", "index.ts")), []);
+		// The tool-result path only reads the cached compile: the first touch starts it and appends nothing.
+		deepEqual(read(join(two, "src", "index.ts")), []);
+		await refreshSisterRepositoryRules(two);
 		const first = read(join(two, "src", "index.ts"));
 		equal(first.length, 1);
 		const effect = first[0];
@@ -455,6 +519,8 @@ test("the main session reading a sister repository gets its invariants once, lab
 		ok(!effect.message.includes("in one;"), effect.message);
 		ok(effect.message.length <= 1500, String(effect.message.length));
 		deepEqual(read(join(two, "package.json")), []);
+		// Each session gets the reminder once.
+		equal(read(join(two, "package.json"), "s2").length, 1);
 		deepEqual(treeListing(two), before);
 		// The session's middleware carries the reminder with no composition-root wiring.
 		const wired = createMiddlewareBundle().contract.runHook({
@@ -466,6 +532,15 @@ test("the main session reading a sister repository gets its invariants once, lab
 			wired.effects.some((entry) => entry.kind === "annotate_tool_result" && entry.message.startsWith("Rules of two")),
 			JSON.stringify(wired.effects),
 		);
+		// A new commit is compiled in the background: the stale invariant leaves the compile.
+		execFileSync("git", ["-C", two, "rm", "-q", "scripts/gen.sh"]);
+		execFileSync("git", ["-C", two, "-c", "commit.gpgsign=false", "commit", "-qm", "drop gen"]);
+		const recompiled = await refreshSisterRepositoryRules(two);
+		ok(
+			recompiled !== null && !recompiled.sources.some(({ source }) => source.includes("scripts/gen.sh")),
+			JSON.stringify(recompiled),
+		);
+		deepEqual(read(join(two, "src", "index.ts"), "s3"), []);
 	} finally {
 		env.restore();
 	}

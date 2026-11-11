@@ -190,6 +190,8 @@ import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from ".
 import {
 	type SisterRepositoryRules,
 	sisterRepositoryNotice,
+	sisterRepositoryPendingNotice,
+	sisterRepositoryRoot,
 	sisterRepositoryRules,
 } from "../context/sister-repository.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
@@ -1539,7 +1541,9 @@ function workerProjectPrompt(
 }
 
 /** A sister repository's compile as the worker's project context: that repository's rules and nothing of the session's. */
-function sisterProjectPrompt(rules: SisterRepositoryRules): ProjectPromptContext {
+function sisterProjectPrompt(rules: SisterRepositoryRules | null): ProjectPromptContext {
+	if (rules === null)
+		return { text: "", clioMd: null, warnings: [], handbookFiles: [], handbookSources: [], supportFragments: [] };
 	return {
 		text: rules.sources.map(({ source, path }) => renderProjectContextFragment(source, path)).join("\n\n"),
 		clioMd: null,
@@ -5976,19 +5980,29 @@ export function createDispatchBundle(
 		const personaBody = workerPersonaBody(req, recipe, hasCanonicalContext);
 		const hasBoundSkills =
 			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
-		// A checkout admitted outside the session's workspace is another
-		// repository: its own rules apply, filtered by its handbook trust.
-		const sister = req.externalReadRoot !== undefined ? sisterRepositoryRules(cwd) : null;
-		const sisterNotice = sister === null ? null : sisterRepositoryNotice(sister);
-		if (sisterNotice !== null) {
+		// A cwd owned by another repository than the session's (an outside
+		// checkout, a submodule or a nested clone; not a linked worktree of the
+		// session's own) takes that repository's rules, filtered by its handbook
+		// trust, from the cached compile only.
+		const sessionRoot = req.taskWorktree?.root ?? req.protectedArtifactRemap?.sourceRoot ?? process.cwd();
+		const sister = sisterRepositoryRoot(cwd, sessionRoot) === null ? null : sisterRepositoryRules(cwd);
+		const sisterNotice =
+			sister === null
+				? null
+				: sister.rules === null
+					? { code: "sister_handbook_pending" as const, message: sisterRepositoryPendingNotice(sister) }
+					: { code: "sister_handbook_untrusted" as const, message: sisterRepositoryNotice(sister.rules) };
+		if (sisterNotice?.message) {
 			context.bus.emit("run.scope_notice_raised", {
-				code: "sister_handbook_untrusted",
+				code: sisterNotice.code,
 				level: "warning",
-				message: sisterNotice,
+				message: sisterNotice.message,
 			});
 		}
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
-			...(sister !== null && !sister.trusted ? { projectCustomization: "operator-only" as const } : {}),
+			// The handbook trust pins only the handbook files, so another repository's
+			// `.clio-coder/rules` and project profile never enter, trusted or not.
+			...(sister !== null ? { projectCustomization: "operator-only" as const } : {}),
 			...(req.turnConstraints ? { turnConstraints: req.turnConstraints } : {}),
 			...(readOnly ? { readOnly: true } : {}),
 			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
@@ -6026,7 +6040,7 @@ export function createDispatchBundle(
 		const tier = sister !== null ? "bounded" : spec.projectContextTier;
 		const projectPrompt =
 			sister !== null
-				? sisterProjectPrompt(sister)
+				? sisterProjectPrompt(sister.rules)
 				: projectContext && tier === "bounded"
 					? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap)
 					: null;
