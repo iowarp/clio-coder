@@ -193,6 +193,19 @@ async function settleLatestInteractiveFrame(
 }
 
 /** Production factories stay here so the composition root does not own them. */
+/** How long a lone ESC waits for the rest of a key sequence where the operator set nothing; pi-tui's local default is 10 ms. */
+const LOCAL_ESCAPE_TIMEOUT_MS = "50";
+
+/**
+ * At 10 ms a laggy terminal split an arrow key into Escape, which interrupts the
+ * turn, and `[A` in the composer. Over SSH pi-tui already waits 100 ms; an
+ * explicit `PI_TUI_ESC_TIMEOUT` wins.
+ */
+export function applyEscapeTimeoutDefault(env: NodeJS.ProcessEnv = process.env): void {
+	if (env.PI_TUI_ESC_TIMEOUT !== undefined || env.SSH_CONNECTION || env.SSH_TTY) return;
+	env.PI_TUI_ESC_TIMEOUT = LOCAL_ESCAPE_TIMEOUT_MS;
+}
+
 export function createProcessInteractiveShell(
 	options: {
 		tuiMode?: TuiMode;
@@ -345,7 +358,12 @@ export function createProcessInteractiveShell(
 	try {
 		setStreamPacingActive(options.streamPacingActive === true);
 		shell = createInteractiveShell({
-			createTerminal: options.testing?.createTerminal ?? (() => new ProcessTerminal()),
+			createTerminal:
+				options.testing?.createTerminal ??
+				(() => {
+					applyEscapeTimeoutDefault();
+					return new ProcessTerminal();
+				}),
 			createTui: (terminal) => {
 				const testTui = options.testing?.createTui?.(terminal);
 				if (testTui) return testTui;

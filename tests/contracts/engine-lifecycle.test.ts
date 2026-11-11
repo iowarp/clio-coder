@@ -39,7 +39,11 @@ import { guardToolArgumentStream } from "../../src/engine/tool-argument-stream.j
 import { Text, TUI_KEYBINDINGS } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentTool, EngineModel } from "../../src/engine/types.js";
 import { routeUnattachedToolCalls } from "../../src/engine/unattached-tool-call.js";
-import { createInteractiveShell, type InteractiveShellTui } from "../../src/interactive/interactive-shell.js";
+import {
+	applyEscapeTimeoutDefault,
+	createInteractiveShell,
+	type InteractiveShellTui,
+} from "../../src/interactive/interactive-shell.js";
 
 it("leaves the main screen intact when a fullscreen shell stops", () => {
 	for (const mode of ["fullscreen", "regular"] as const) {
@@ -787,5 +791,19 @@ describe("engine TUI: keybinding table and alternate-screen render seams", () =>
 			terminal.writes.some((chunk) => chunk.includes("hello fullscreen")),
 			"the frame reached the terminal",
 		);
+	});
+});
+
+describe("lone ESC timeout", () => {
+	it("waits 50 ms locally, keeps pi-tui's SSH default, and yields to an explicit setting", () => {
+		const local: NodeJS.ProcessEnv = {};
+		applyEscapeTimeoutDefault(local);
+		strictEqual(local.PI_TUI_ESC_TIMEOUT, "50");
+		const ssh: NodeJS.ProcessEnv = { SSH_TTY: "/dev/pts/1" };
+		applyEscapeTimeoutDefault(ssh);
+		strictEqual(ssh.PI_TUI_ESC_TIMEOUT, undefined);
+		const set: NodeJS.ProcessEnv = { PI_TUI_ESC_TIMEOUT: "25" };
+		applyEscapeTimeoutDefault(set);
+		strictEqual(set.PI_TUI_ESC_TIMEOUT, "25");
 	});
 });
