@@ -102,5 +102,7 @@ describe("safety gate findings", () => {
 		const long = Array.from({ length: 50_000 }, () => "a").join("/");
 		strictEqual(kind({ tool: ToolNames.Read, args: { path: long } }), "block");
 		strictEqual(kind({ tool: ToolNames.Bash, args: { command: `cat ${long}` } }, "yolo"), "block");
+		const content = JSON.stringify(Array.from({ length: 900 }, (_, i) => `https://example.test/a/b/c/d/${i}`));
+		strictEqual(kind({ tool: ToolNames.Write, args: { path: "out.json", content } }, "yolo"), "allow");
 	});
 });

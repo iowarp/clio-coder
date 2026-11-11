@@ -4653,11 +4653,15 @@ const OVERSIZED_PATH_RULE_ID = "oversized-path";
  * token is refused before any of them run.
  */
 const MAX_PATH_SEGMENTS = 4096;
+const PATH_BEARING_ARGS = ["path", "paths", "cwd", "command", "argv", "file", "target", "root"] as const;
 
 /** The first string argument holding a whitespace-free run with more than MAX_PATH_SEGMENTS separators. */
 function oversizedPathToken(args: Record<string, unknown> | undefined): string | null {
 	if (args === undefined) return null;
-	for (const value of Object.values(args)) {
+	// Only path and command arguments are walked; file content (write, edit)
+	// may hold any number of slashes and is never resolved as a path.
+	for (const key of PATH_BEARING_ARGS) {
+		const value = args[key];
 		const strings = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
 		for (const text of strings) {
 			if (typeof text !== "string" || text.length <= MAX_PATH_SEGMENTS) continue;
