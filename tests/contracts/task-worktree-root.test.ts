@@ -24,6 +24,7 @@ import {
 	cleanupTaskWorktree,
 	createTaskWorktree,
 	recoverTaskWorktrees,
+	shareTaskWorktreeDependencies,
 	withStrayWrites,
 } from "../../src/tools/task-worktree.js";
 import {
@@ -199,6 +200,32 @@ describe("task worktree root", () => {
 		strictEqual(existsSync(task.path), false);
 		strictEqual(existsSync(claim), false);
 		strictEqual(git(root, "branch", "--list", "clio-coder/task/*"), "");
+	});
+
+	it("shares each workspace package's ignored node_modules, not only the root's", () => {
+		writeFileSync(join(root, ".gitignore"), ".clio-coder/\nnode_modules/\n");
+		writeFileSync(join(root, "package.json"), '{"name":"ws"}\n');
+		writeFileSync(join(root, "pnpm-workspace.yaml"), 'packages:\n  - "."\n  - "apps/*"\n');
+		for (const pkg of ["one", "two"]) {
+			mkdirSync(join(root, "apps", pkg), { recursive: true });
+			writeFileSync(join(root, "apps", pkg, "package.json"), `{"name":"${pkg}"}\n`);
+		}
+		git(root, "add", ".");
+		git(root, "commit", "-q", "-m", "workspace");
+		mkdirSync(join(root, "node_modules", "root-dep"), { recursive: true });
+		mkdirSync(join(root, "apps", "one", "node_modules", "playwright-core"), { recursive: true });
+		mkdirSync(join(root, "apps", "two", "node_modules", "two-dep"), { recursive: true });
+		const resolved = resolveWorktreeRoot({ setting: "tmpfs", projectRoot: root, remoteEligible: false, facts: facts() });
+		strictEqual(prepareWorktreeParent(resolved), null);
+		const task = createTaskWorktree(root, "run-ws", undefined, "merge", resolved.parent);
+		const roots = shareTaskWorktreeDependencies(task);
+		ok(existsSync(join(task.path, "node_modules", "root-dep")));
+		ok(existsSync(join(task.path, "apps", "one", "node_modules", "playwright-core")));
+		ok(existsSync(join(task.path, "apps", "two", "node_modules", "two-dep")));
+		ok(roots.includes(root));
+		ok(roots.includes(join(root, "apps", "one")));
+		strictEqual(git(task.path, "status", "--porcelain"), "");
+		cleanupTaskWorktree(task, true);
 	});
 
 	it("refuses ownership of a path outside the parent it was created under", () => {

@@ -875,6 +875,14 @@ only: when `fleet.nodes` is non-empty a run may be placed on another host, which
 reaches the worktree by the project-root path, so task worktrees stay on disk.
 Compete candidates always stay under the project root.
 
+A task worktree outside the project root starts with no installed dependencies, so Clio links the
+project's own: the root `node_modules` and `.venv`, and the `node_modules` of each workspace
+package that `pnpm-workspace.yaml` `packages` or `package.json` `workspaces` names (for example
+`apps/*`). Each one is linked only when its manifest and lockfile inputs match the project's,
+Git ignores the path, and the worktree has no such directory yet; the worktree gets a real
+ignored directory holding one link per entry, and the worker's sandbox keeps the project
+checkout read-only. Source: `shareTaskWorktreeDependencies` in `src/tools/task-worktree.ts`.
+
 Each task worktree is claimed by `.clio-coder/worktrees/<runId>.task-owner.json`,
 which always stays under the project root and records the working tree's path,
 the branch, the base commit, the apply mode, and a lease on the Clio Coder process
