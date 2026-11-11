@@ -51,6 +51,30 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 	strictEqual(bus.listeners("session.started").length, before);
 });
 
+test("a load failure already written to stderr hands the CLI a short summary instead of the cause again", async () => {
+	const failing: DomainModule = {
+		manifest: { name: "config", dependsOn: [] },
+		createExtension: () => ({
+			contract: {},
+			extension: {
+				start() {
+					throw new Error("settings.yaml failed validation:\n  safety.rosters: unknown key");
+				},
+			},
+		}),
+	};
+	const printed = await loadDomains<FixtureMap>([failing]).then(
+		() => undefined,
+		(error: { reportedSummary?: string }) => error.reportedSummary,
+	);
+	strictEqual(printed, "Domain 'config' failed to load; the cause is printed above");
+	const silent = await loadDomains<FixtureMap>([failing], { diagnostic() {} }).then(
+		() => undefined,
+		(error: { reportedSummary?: string; message: string }) => error.reportedSummary ?? error.message,
+	);
+	strictEqual(silent, "Domain 'config' failed to load: settings.yaml failed validation:\n  safety.rosters: unknown key");
+});
+
 test("a rejected domain factory unwinds started dependencies", async () => {
 	let stopped = false;
 	await rejects(

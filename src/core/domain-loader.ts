@@ -171,7 +171,9 @@ export async function loadDomains<M extends object = DomainContractMap>(
 			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(
 				`[clio-coder:domain] load failed: ${name}: ${message}\n`,
 			);
-			throw new DomainLoadError(name, error);
+			// The default diagnostic already put the cause on stderr; a CLI that prints
+			// the thrown error uses the short form instead of repeating it.
+			throw new DomainLoadError(name, error, options.diagnostic === undefined);
 		}
 	}
 
@@ -223,8 +225,13 @@ class DomainLoadError extends Error {
 	constructor(
 		public readonly domain: string,
 		public override readonly cause: unknown,
+		reported = false,
 	) {
 		super(`Domain '${domain}' failed to load: ${cause instanceof Error ? cause.message : String(cause)}`);
 		this.name = "DomainLoadError";
+		if (reported) this.reportedSummary = `Domain '${domain}' failed to load; the cause is printed above`;
 	}
+
+	/** Set when the cause already reached stderr, so the CLI prints this line instead of the whole message. */
+	readonly reportedSummary?: string;
 }

@@ -489,7 +489,8 @@ main(process.argv.slice(2))
 		process.exitCode = code;
 	})
 	.catch(async (err) => {
-		printError(err instanceof Error ? err.message : String(err));
+		const reported = (err as { reportedSummary?: unknown } | null)?.reportedSummary;
+		printError(typeof reported === "string" ? reported : err instanceof Error ? err.message : String(err));
 		process.exitCode = 1;
 		// A usage error is the caller's, not a crash; anything else leaves a record the next session can offer to report.
 		if (!/UsageError$/u.test((err as { constructor?: { name?: string } } | null)?.constructor?.name ?? "")) {
