@@ -143,6 +143,16 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "hoare",
+			"source": "./library/plugins/hoare",
+			"description": "Hoare-logic correctness review: states pre- and postconditions, loop invariants and variants for named functions, derives the verification conditions with language-specific hazard obligations for C/C++, Python and Fortran, and discharges each by a declared prover check or a written argument. Every obligation carries an honest status (mechanized, modeled, argued, assumed, refuted, unknown), so an argued proof is never reported as a machine-checked one. Ships a read-only verifier agent that answers a verifier-report, a /hoare:review prompt and a build-review playbook.",
+			"version": "0.1.0",
+			"license": "Apache-2.0",
+			"author": {
+				"name": "IOWarp"
+			}
+		},
+		{
 			"name": "hpc",
 			"source": "./library/plugins/hpc",
 			"description": "HPC pack: Slurm job arrays and sweeps through the clio-kit Slurm server, Lmod and Spack software environments, parallel HDF5 and MPI-IO, Darshan I/O analysis, and ChronoLog run records. The skills drive the cluster's own command-line tools; the clio-kit Slurm server needs one online launch to build its environment before it runs offline.",
