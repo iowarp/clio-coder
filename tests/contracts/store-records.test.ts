@@ -162,6 +162,35 @@ describe("store records", () => {
 			deepStrictEqual(body.used, [{ tag: "inputs", blob: "sim.h5", bytes: 2, sha256: null }]);
 		}));
 
+	it("keeps clio-core tag and blob names apart: tag a blob b/c is not tag a/b blob c", () =>
+		withBackend(async (_local, root) => {
+			const paths: string[] = [];
+			let spaceTags: string[] = [];
+			const host = {
+				state: "ready",
+				hello: null,
+				call: async (op: string, args: { tag?: string; blob?: string }) => {
+					if (op === "facts") return { durable: true };
+					if (op === "statBlob") {
+						paths.push(`/${args.tag}/${args.blob}`);
+						return { stat: null };
+					}
+					if (op === "listTags") return { tags: spaceTags };
+					throw new Error(`unexpected host op ${op}`);
+				},
+				stderrTail: () => "",
+				close: async () => {},
+			} as unknown as CoreHost;
+			const backend = await createClioCoreStoreBackend(root, host, { cacheRoot: join(root, "..", "cache") });
+			await backend.statBlob("results", "raw/x");
+			await backend.statBlob("results/raw", "x");
+			strictEqual(paths.length, 2);
+			ok(paths[0] !== paths[1], paths.join(" "));
+			const prefix = paths[1]?.slice(1, paths[1].lastIndexOf("/results")) ?? "";
+			spaceTags = [`${prefix}/results`, `${prefix}/results%2Fraw`];
+			deepStrictEqual(await backend.listTags(), ["results", "results/raw"]);
+		}));
+
 	it("reports each drift value", () => {
 		const put = { identity: { bytes: 2, modifiedMs: 5, sha256: null } } as StoreRecord;
 		strictEqual(driftOf(put, { bytes: 2, modifiedMs: 5, version: null }), "none");

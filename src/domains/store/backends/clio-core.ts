@@ -149,7 +149,8 @@ export async function createClioCoreStoreBackend(
 
 	const physical = (tag: string): string => {
 		checkTag(tag);
-		return `${spacePrefix}${tag}`;
+		// One path segment per tag, as the local layout does: tag "a" blob "b/c" and tag "a/b" blob "c" stay apart.
+		return `${spacePrefix}${encodeTagSegment(tag)}`;
 	};
 	const writable = (): void => {
 		if (!durable) throw new StoreRefusal("unavailable", `Refusing the write: ${NOT_DURABLE}.`);
@@ -250,7 +251,13 @@ export async function createClioCoreStoreBackend(
 				const { tags } = await host.call("listTags", { pattern: `^${escapeRegExp(spacePrefix)}.*` });
 				return tags
 					.filter((name) => name.startsWith(spacePrefix))
-					.map((name) => name.slice(spacePrefix.length))
+					.flatMap((name) => {
+						try {
+							return [decodeTagSegment(name.slice(spacePrefix.length))];
+						} catch {
+							return [];
+						}
+					})
 					.filter((tag) => validateTagName(tag, { allowRecords: true }) === null)
 					.sort();
 			}),
@@ -397,12 +404,16 @@ export async function createClioCoreStoreBackend(
 				}
 			}
 			if (options.mount === undefined) return null;
-			// A mount path does not show where a tag with '/' ends, so the split must name an existing blob.
+			// The first segment under the project is the encoded tag; the rest is the blob.
 			const viewed = await segmentsUnder(path.join(options.mount, spacePrefix));
-			for (let split = 1; viewed !== null && split < viewed.length; split++) {
-				const ref = named(viewed.slice(0, split).join("/"), viewed.slice(split).join("/"));
-				if (ref !== null && (await statBlob(ref.tag, ref.blob).catch(() => null)) !== null) return ref;
+			if (viewed === null || viewed.length < 2) return null;
+			let ref: ReturnType<typeof named>;
+			try {
+				ref = named(decodeTagSegment(viewed[0] ?? ""), viewed.slice(1).join("/"));
+			} catch {
+				return null;
 			}
+			if (ref !== null && (await statBlob(ref.tag, ref.blob).catch(() => null)) !== null) return ref;
 			return null;
 		},
 	};
