@@ -3,6 +3,7 @@ import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { resolvePackageRoot } from "../../core/package-root.js";
 import type { AgentsContract } from "../agents/contract.js";
 import { listPlaybooks } from "../agents/playbook.js";
 import { type AgentSpec, isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
@@ -342,7 +343,7 @@ export function createPromptsBundle(
 			const compiled = compileWorker(table, {
 				...workerInputs,
 				...(profile === "v2" && workerInputs.promptProfile === undefined ? { promptProfile: "v2" as const } : {}),
-				additionalFragments: customization.fragments,
+				additionalFragments: [...clioRepoAwarenessFragments(cwd), ...customization.fragments],
 			});
 			return {
 				...compiled,
@@ -699,10 +700,15 @@ function catalogFragments(catalogs: CatalogSnapshot, inputs: SessionPromptInputs
 function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 	const awareness = detectClioCoderRepo(cwd);
 	if (!awareness.isClioCoderRepo || !awareness.repoRoot) return [];
+	const packageRoot = resolve(resolvePackageRoot());
+	const running =
+		packageRoot === resolve(awareness.repoRoot)
+			? "The Clio running this session was built from this tree. Rebuilding it replaces files under running sessions; see the live-edit table in clio-coder-dev before you build."
+			: `The Clio running this session was built from ${JSON.stringify(packageRoot)}, a different tree. Its prompt fragments, built-in recipes and tool code come from there; edits in this workspace are not what you are running. Test a workspace change in a candidate built from the workspace, and never rebuild, relink or reinstall the running install.`;
 	const body = [
 		"# Clio Source Tree",
-		"This workspace is Clio Coder's own source tree.",
-		`Source repository root: ${JSON.stringify(awareness.repoRoot)}.`,
+		`This workspace is Clio Coder's own source tree, at ${JSON.stringify(awareness.repoRoot)}.`,
+		running,
 		"When running inside this repo, Clio can modify its own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
 		"Shared contribution/publishing/push/PR/release requires explicit user intent and normal Git/GitHub etiquette. Do not imply autonomous publishing.",
 	].join("\n");
@@ -724,14 +730,14 @@ function selfDevelopmentSkillFragments(
 	autonomy: string,
 ): RenderedPromptFragment[] {
 	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
-	// On T3 a headless run loaded both skills and the 12 KB CONTRIBUTING.md they
-	// point to before its first edit, about 25 KB resent on every later request
-	// for sprint and handoff guidance a stated bug fix never uses. A headless
-	// run keeps them discoverable in the catalog and works from the code.
+	const listCall = 'gateway(op="call", capability="context", args={scope:"skills"})';
+	const loadCall = (name: string) => `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`;
+	// The T3 cost (about 25 KB resent per request) came from the CONTRIBUTING.md
+	// pointer the skills used to carry; without it a headless edit loads them.
 	if (inputs.headless === true) {
 		const body = [
 			"# Self-development skills",
-			"clio-coder-dev and clio-coder-test guide operator-led development of this checkout: sprint packets, handoffs and release discipline. A headless task takes its conventions, test conventions included, from the code and its neighboring tests, and does not load these skills.",
+			`For a task that changes this repository, load clio-coder-dev before the first edit and clio-coder-test before choosing checks: ${loadCall("clio-coder-dev")}, ${loadCall("clio-coder-test")}. Skip both for a question or a read-only task.`,
 		].join("\n");
 		return [
 			{
@@ -744,8 +750,6 @@ function selfDevelopmentSkillFragments(
 		];
 	}
 	const activation = isAutonomyLevel(autonomy);
-	const listCall = 'gateway(op="call", capability="context", args={scope:"skills"})';
-	const loadCall = (name: string) => `gateway(op="call", capability="context", args={scope:"skills",name:"${name}"})`;
 	const body = [
 		"# Self-development skills",
 		"For a task that changes Clio's source, harness, prompts, or library, clio-coder-dev guides the editing step and clio-coder-test the validation step. Skip both for unrelated or self-contained questions.",
@@ -753,7 +757,7 @@ function selfDevelopmentSkillFragments(
 		activation
 			? `Load each one when its step arrives, without waiting for a separate skill request: ${loadCall("clio-coder-dev")} once you have read the code and are about to make the first edit, ${loadCall("clio-coder-test")} once the change is made and you are choosing how to validate it. Never load both up front or for a step the task does not reach; a loaded skill is resent on every later request. Reuse already loaded guidance; do not load every reference or the whole catalog.`
 			: "Only the operator activates skills at this autonomy level. Suggest /skill clio-coder-dev or /skill clio-coder-test when relevant, then continue permitted work without waiting or bypassing the activation gate.",
-		"Read CONTRIBUTING.md and the assigned sprint packet from the detected repository root. A plan or skill does not launch an unapproved implementation sprint or authorize publication.",
+		"The brief or spec is the assignment; a plan or skill does not authorize publication.",
 	].join("\n");
 	return [
 		{

@@ -206,6 +206,20 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	match(automatic.systemPrompt, /without waiting for a separate skill request/);
 	match(automatic.systemPrompt, /Never load both up front or for a step the task does not reach/);
 	strictEqual(automatic.systemPrompt.includes("## Establish the actual assignment"), false);
+	const headless = await prompt({ ...inputs, headless: true });
+	match(headless.systemPrompt, /load clio-coder-dev before the first edit/);
+	strictEqual(headless.systemPrompt.includes("does not load these skills"), false);
+	const worker = await bundle.contract.compileWorkerPrompt({
+		cwd,
+		persona: { id: "agent.test", relPath: "inline/test", body: "Test worker.", contentHash: "test", dynamic: false },
+		providerSupportsTools: true,
+		toolNames: ["read"],
+		toolPromptHints: [],
+		hasCanonicalContext: false,
+		hasBoundSkills: false,
+		onPermission: "deny",
+	});
+	match(worker.systemPrompt, /# Clio Source Tree/);
 	for (const disabled of [
 		{ ...inputs, skillDiscoveryEnabled: false },
 		{ ...inputs, providerSupportsTools: false },
