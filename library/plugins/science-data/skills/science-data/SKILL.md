@@ -1,6 +1,14 @@
 ---
 name: science-data
 description: "Finds and explores scientific data: where is the data, which dataset a store tag holds, and how to keep results with provenance. Reads HDF5, NetCDF, Parquet and CSV read-only with Clio's data tool for structure, slices and summary statistics, then the clio-kit parquet and pandas servers for aggregation, correlations and statistical tests, and the hdf5 server or h5py only for what those cannot do. Not for converting data files."
+triggers:
+  - what variables are in the simulation output
+  - where is the data
+  - which dataset holds the results
+  - what is in this data file
+  - list the columns and fields
+  - summarize the simulation results
+  - keep the results in the store
 ---
 
 # Scientific data, one tool at a time

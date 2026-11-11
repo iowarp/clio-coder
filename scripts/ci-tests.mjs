@@ -66,6 +66,7 @@ export const coreTests = [
 	"dispatch-session-ownership",
 	"detached-batch-wake",
 	"run-script-store-inputs",
+	"library-skill-ranking",
 	"dispatch-prefix-stagger",
 	"monitor-steer-tools",
 	"dispatch-write-root-request",
