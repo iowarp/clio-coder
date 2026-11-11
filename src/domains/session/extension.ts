@@ -1,3 +1,4 @@
+import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import { sessionTelemetryContext } from "../../core/telemetry/context.js";
@@ -439,11 +440,34 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 	};
 
+	/** Custom entry type that records a dispatch scope notice in the session. */
+	const SCOPE_NOTICE_CUSTOM_TYPE = "clio-coder.scope-notice";
+	let unsubscribeScopeNotices: (() => void) | null = null;
+
 	const extension: DomainExtension = {
 		async start() {
-			// Sessions are created lazily by the CLI; nothing to do on boot.
+			// Sessions are created lazily by the CLI. Dispatch scope notices reach
+			// every surface only on the live bus; record each in the open session so
+			// a warning such as an overlapping write root stays checkable afterwards.
+			unsubscribeScopeNotices =
+				context.bus.subscribe?.("run.scope_notice_raised", (payload) => {
+					const notice = readDispatchScopeNotice(payload);
+					if (notice === null || !state) return;
+					try {
+						appendEntry(state, {
+							kind: "custom",
+							customType: SCOPE_NOTICE_CUSTOM_TYPE,
+							parentTurnId: null,
+							data: { code: notice.code, level: notice.level, message: notice.message },
+						});
+					} catch {
+						// Advisory only; the live notice already reached the operator.
+					}
+				}) ?? null;
 		},
 		async stop() {
+			unsubscribeScopeNotices?.();
+			unsubscribeScopeNotices = null;
 			if (!state) return;
 			try {
 				await performCheckpoint(state, "shutdown");

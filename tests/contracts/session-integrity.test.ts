@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall, resolveRecallByPath } from "../../src/domains/context/working-set/recall.js";
@@ -771,4 +772,32 @@ describe("session integrity", () => {
 			});
 		}
 	}
+});
+
+describe("dispatch scope notices", () => {
+	it("persist in the session record so a warning is checkable after the fact", async () => {
+		const scratch = await isolateClioEnv("clio-coder-scope-notice-");
+		const bus = createTelemetryHub();
+		const bundle = createSessionBundle({ bus } as unknown as DomainContext);
+		try {
+			await bundle.extension.start();
+			const message = "warning: parallel tasks declare overlapping intent.write_roots; their changes may conflict:";
+			bus.emit("run.scope_notice_raised", { code: "write_roots_overlap", level: "warning", message });
+			bundle.contract.create({ cwd: scratch.dir });
+			bus.emit("run.scope_notice_raised", { code: "write_roots_overlap", level: "warning", message });
+			bus.emit("run.scope_notice_raised", { code: "not_a_notice", level: "warning", message } as never);
+			const notices = bundle.contract
+				.readEntries()
+				.filter((entry) => entry.kind === "custom" && entry.customType === "clio-coder.scope-notice");
+			strictEqual(notices.length, 1);
+			deepStrictEqual((notices[0] as { data?: unknown }).data, {
+				code: "write_roots_overlap",
+				level: "warning",
+				message,
+			});
+		} finally {
+			await bundle.extension.stop?.();
+			scratch.restore();
+		}
+	});
 });
