@@ -376,8 +376,9 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 			const guard = outsideConfigGuard(operation.repository) ?? deps.guard;
 			// A status or diff passes any racily dirty file through its clean filter, so a driver the
 			// repository's own config names, there before the session or not, never runs from Clio's
-			// probes, at any autonomy.
-			const local = guard.executableConfig(operation.repository).filter(repositoryFilter);
+			// probes, at any autonomy. A checkout Clio writes still smudges through it, or a git-crypt or
+			// git-annex file would land as ciphertext or a pointer.
+			const local = operation.writes === true ? [] : guard.executableConfig(operation.repository).filter(repositoryFilter);
 			const filters = neutralize(local);
 			// Such a filter has no -c that turns it off, so the read is refused, drift or not.
 			if (filters.unneutralized.length > 0) {

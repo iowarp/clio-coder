@@ -23,7 +23,8 @@ import path from "node:path";
  * driver), the read carries the same per-key overrides a mutation gets, or is
  * refused with {@link InternalGitRefusedError} when a changed key cannot be
  * overridden from the command line. A filter driver the repository's own
- * config names is turned off for every read, drift or not.
+ * config names is turned off for every read, drift or not, but not for an
+ * operation that pins hooks off and writes files, which smudges through it.
  *
  * An operation that runs hooks or other configured commands (worktree add,
  * checkout, merge, commit, ref updates, fetch, push) also asks the installed
@@ -192,6 +193,12 @@ export interface InternalGitOperation {
 	repository: string;
 	/** `git worktree add`, `git merge`, `git commit`. */
 	operation: string;
+	/**
+	 * True for an operation that turns hooks off itself and writes the index or work tree (snapshot plumbing,
+	 * a reproduce worktree, fleet change return): its checkout runs the repository's filters, so a git-crypt or
+	 * git-annex file is written as the repository stores it, and only drift is overridden.
+	 */
+	writes?: true;
 }
 
 /**
@@ -279,7 +286,7 @@ export function internalGitArgv(args: ReadonlyArray<string>, cwd?: string): stri
 		!read && !pinsHooksOff(globals)
 			? policyOverrides(operation)
 			: CONFIG_RUNNING_READS.has(subcommand) || !read
-				? readOverrides(operation)
+				? readOverrides(read ? operation : { ...operation, writes: true })
 				: [];
 	return [
 		...INTERNAL_GIT_BASE_OPTIONS,

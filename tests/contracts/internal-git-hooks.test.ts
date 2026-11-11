@@ -6,6 +6,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	utimesSync,
@@ -14,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { installInternalGitPolicy } from "../../src/core/internal-git.js";
+import { installInternalGitPolicy, internalGitArgv } from "../../src/core/internal-git.js";
 import { createGitHooksFingerprinter } from "../../src/core/sandbox/git-hooks-fingerprint.js";
 import { git as researchGit } from "../../src/domains/research/git.js";
 import { createGitHookDriftGuard } from "../../src/domains/safety/hook-drift.js";
@@ -328,6 +329,35 @@ test("a repository's stock git-lfs filter stays on for Clio's reads, and one wit
 		null,
 		"a repository lfs extension refuses the read",
 	);
+	rmSync(scratch, { recursive: true, force: true });
+});
+
+test("Clio's own checkouts that pin hooks off still smudge through the repository's filter: a reproduce worktree add and a fleet merge", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const { root, scratch } = repository();
+	const base = git(root, "rev-parse", "HEAD");
+	// A git-crypt or git-annex style repository: its own config names the driver that turns stored bytes into files.
+	const smudge = join(scratch, "smudge.sh");
+	writeFileSync(smudge, "#!/bin/sh\ntr a-z A-Z\n");
+	chmodSync(smudge, 0o755);
+	git(root, "config", "filter.crypt.smudge", smudge);
+	git(root, "config", "filter.crypt.clean", "cat");
+	writeFileSync(join(root, ".gitattributes"), "b.txt filter=crypt\n");
+	writeFileSync(join(root, "b.txt"), "two\n");
+	git(root, "add", ".gitattributes", "b.txt");
+	git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "filtered");
+	const head = git(root, "rev-parse", "HEAD");
+	const landing = join(scratch, "landing");
+	git(root, "worktree", "add", "-q", "--detach", landing, base);
+	session(root, scratch);
+
+	const tree = join(scratch, "reproduce");
+	const pinned = ["-c", "core.hooksPath=/dev/null"];
+	execFileSync("git", internalGitArgv(["-C", root, ...pinned, "worktree", "add", "--detach", "--quiet", tree, head]));
+	strictEqual(readFileSync(join(tree, "b.txt"), "utf8"), "TWO\n", "the reproduce worktree holds smudged files");
+	execFileSync("git", internalGitArgv(["-C", landing, ...pinned, "merge", "--ff-only", "--no-edit", head]));
+	strictEqual(readFileSync(join(landing, "b.txt"), "utf8"), "TWO\n", "the fleet merge lands smudged files");
+	ok(internalGitArgv(["-C", root, "status"]).includes("filter.crypt.smudge="), "Clio's reads still turn it off");
 	rmSync(scratch, { recursive: true, force: true });
 });
 
