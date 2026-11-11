@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, join, posix, relative, sep } from "node:path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
+import { testRunExecutes } from "../../tools/verify/test-files.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "./execution-plan.js";
 
 export interface FleetCommitPriorResult {
@@ -119,17 +120,24 @@ function readPackageScripts(workspaceRoot: string, dir: string): Readonly<Record
 	}
 }
 
+interface RanCommand {
+	argv: ReadonlyArray<string>;
+	cwd: string;
+}
+
 /**
- * The repository-relative files a command names. With `workspaceRoot`, a package-manager command also names the
- * files its package.json script (with its pre and post scripts, and scripts it runs in turn) names.
+ * The repository-relative files a command names, and into `ran` the command and, with `workspaceRoot`, each command
+ * its package.json script (with its pre and post scripts, and scripts it runs in turn) runs, whose files count too.
  */
 function commandOperands(
-	command: { argv: ReadonlyArray<string>; cwd: string },
+	command: RanCommand,
 	workspaceRoot: string | undefined,
 	operands: Set<string>,
+	ran: RanCommand[],
 	depth: number,
 	seen: Set<string>,
 ): void {
+	ran.push(command);
 	for (const [index, token] of command.argv.entries()) {
 		const value = token.startsWith("-") ? (token.includes("=") ? token.slice(token.indexOf("=") + 1) : "") : token;
 		if (value === "" || /\s/u.test(value) || (index === 0 && !value.includes("/"))) continue;
@@ -152,7 +160,7 @@ function commandOperands(
 				.split(/\s+/u)
 				.map((token) => token.replace(/^(["'])(.*)\1$/u, "$2"))
 				.filter((token) => token !== "");
-			if (argv.length > 0) commandOperands({ argv, cwd: command.cwd }, workspaceRoot, operands, depth + 1, seen);
+			if (argv.length > 0) commandOperands({ argv, cwd: command.cwd }, workspaceRoot, operands, ran, depth + 1, seen);
 		}
 	}
 }
@@ -161,9 +169,10 @@ function commandOperands(
  * The check's own files among `changedPaths` (repository-relative), over every command the check step ran: its
  * registered command and each changed-test command a loop check added. They are any package manifest or
  * package-manager config, any runner, compiler or build config (`isCheckConfigFile`), any file a command names, and,
- * given `workspaceRoot`, any file named by the package.json script a package-manager command runs. A pass over files
- * the worker wrote earns no `Tested-by` trailer. Directories a command names are the code under check, not the check,
- * so they do not count. A command's `cwd` is repository-relative, or absolute under `workspaceRoot`.
+ * given `workspaceRoot`, any file named by the package.json script a package-manager command runs, and any test one of
+ * those commands' test runners could execute through its own discovery or path filters (`pnpm test` running
+ * `node --test` picks up a test the worker added). A pass over files the worker wrote earns no `Tested-by` trailer.
+ * Other files under a directory a command names are the code under check, not the check, so they do not count. A command's `cwd` is repository-relative, or absolute under `workspaceRoot`.
  */
 export function changedCheckFiles(
 	commands: ReadonlyArray<{ argv: ReadonlyArray<string>; cwd: string }>,
@@ -171,6 +180,7 @@ export function changedCheckFiles(
 	workspaceRoot?: string,
 ): string[] {
 	const operands = new Set<string>();
+	const ran: RanCommand[] = [];
 	const seen = new Set<string>();
 	for (const command of commands) {
 		let cwd = command.cwd;
@@ -179,13 +189,17 @@ export function changedCheckFiles(
 			cwd = relative(workspaceRoot, cwd).split(sep).join("/");
 			if (cwd.startsWith("..") || isAbsolute(cwd)) continue;
 		}
-		commandOperands({ argv: command.argv, cwd }, workspaceRoot, operands, 0, seen);
+		commandOperands({ argv: command.argv, cwd }, workspaceRoot, operands, ran, 0, seen);
 	}
+	// Paths resolve against the workspace, or any root when there is none: only their relation to a cwd matters.
+	const base = workspaceRoot ?? resolve(sep);
+	const executes = (path: string) =>
+		ran.some((command) => testRunExecutes(command.argv, resolve(base, command.cwd), resolve(base, path)));
 	const hits = new Set<string>();
 	for (const path of changedPaths) {
 		const segments = path.split("/");
 		if (segments.includes("node_modules")) continue;
-		if (isCheckConfigFile(segments.at(-1) ?? "") || operands.has(path)) hits.add(path);
+		if (isCheckConfigFile(segments.at(-1) ?? "") || operands.has(path) || executes(path)) hits.add(path);
 	}
 	return [...hits].sort();
 }

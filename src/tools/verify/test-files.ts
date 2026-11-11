@@ -321,6 +321,71 @@ function unwrapRunner(argv: string[]): UnwrappedRunner {
 	}
 }
 
+/**
+ * Whether a test command could execute the test at `absolute` through its runner's own discovery or path filters:
+ * `node --test` (or tsx) and jest or vitest, wrapped or not, pytest and unittest, `go test` and `cargo test`. A file
+ * outside `cwd`, or one that does not look like a test, is never one; a command it names directly is its caller's
+ * concern. An option the reader cannot place keeps the file, since a test it might run is never proved independent.
+ */
+export function testRunExecutes(argv: ReadonlyArray<string>, cwd: string, absolute: string): boolean {
+	const relative = path.relative(cwd, absolute).split(path.sep).join("/");
+	if (relative === "" || relative.startsWith("../") || path.isAbsolute(relative)) return false;
+	const words = unwrapRunner([...argv]).argv;
+	const runner = javascriptRunner(words);
+	if (runner !== null && !/\.[cm]?[jt]sx?$/u.test(relative)) return false;
+	if (runner === "node") {
+		if (!isTestFile(relative) && !isNodeTestDirectoryFile(relative)) return false;
+		return nodeRunsFile(words, cwd, absolute) !== false;
+	}
+	if (runner !== null) {
+		if (!isTestFile(relative)) return false;
+		// Positionals are path filters; a word after an option that takes no `=` may be its value, never a filter.
+		const filters = words
+			.slice(1)
+			.filter(
+				(word, index, rest) =>
+					!word.startsWith("-") &&
+					!["run", "watch", "dev"].includes(word) &&
+					!(rest[index - 1]?.startsWith("-") && !rest[index - 1]?.includes("=")),
+			);
+		return filters.length === 0 || filters.some((filter) => pathFilterMatches(filter, relative));
+	}
+	const executable = executableName(words[0] ?? "");
+	const python = /^python(?:3(?:\.\d+)?)?$/u.test(executable);
+	const module = python && words[1] === "-m" ? words[2] : undefined;
+	if (executable === "pytest" || executable === "py.test" || module === "pytest") {
+		if (!/(?:^|\/)test_[^/]*\.py$|_test\.py$/u.test(relative)) return false;
+		const targets = words
+			.slice(module === undefined ? 1 : 3)
+			.filter((word) => !word.startsWith("-"))
+			.map((word) => word.split("::")[0] ?? "");
+		return targets.length === 0 || targets.some((target) => pathFilterMatches(target, relative));
+	}
+	if (module === "unittest") return /(?:^|\/)test[^/]*\.py$/u.test(relative);
+	if (executable === "go" && words[1] === "test") {
+		if (!relative.endsWith("_test.go")) return false;
+		const directory = path.posix.dirname(relative);
+		const packages = words.slice(2).filter((word) => !word.startsWith("-"));
+		if (packages.length === 0) return directory === ".";
+		return packages.some((target) => {
+			const clean = target.replace(/^\.\/?/u, "");
+			if (clean === "..." || clean === "/...") return true;
+			if (clean.endsWith("/...")) return `${directory}/`.startsWith(`${clean.slice(0, -3)}`);
+			return directory === (clean === "" ? "." : clean);
+		});
+	}
+	if (executable === "cargo" && words[1] === "test") return /(?:^|\/)tests\/.*\.rs$/u.test(relative);
+	return false;
+}
+
+/** A runner's path filter: the file, a directory holding it, a glob over it, or (jest and vitest) a substring. */
+function pathFilterMatches(filter: string, relative: string): boolean {
+	const clean = filter.replace(/^\.\//u, "").replace(/\/$/u, "");
+	if (clean === "" || clean === ".") return true;
+	if (relative === clean || relative.startsWith(`${clean}/`) || relative.includes(clean)) return true;
+	return GLOB_CHARACTER.test(clean) && globPattern(clean).test(relative);
+}
+
 /** The project-local binary npm would put first on PATH, or null when none is installed inside the workspace. */
 function localBinary(workspaceRoot: string, from: string, executable: string): string | null {
 	if (executable.includes("/") || executable === "node" || executable === "env") return executable;

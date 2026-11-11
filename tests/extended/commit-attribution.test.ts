@@ -683,6 +683,29 @@ describe("vacuous loop checks", () => {
 		}
 	});
 
+	it("counts a worker's test the check's runner executes through its own discovery", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-check-discovery-"));
+		try {
+			writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "pnpm exec node --test" } }));
+			const changed = ["src/a.ts", "tests/new.test.ts", "web/b.spec.ts", "py/test_x.py", "pkg/x_test.go", "README.md"];
+			const files = (argv: string[], cwd = "") => changedCheckFiles([{ argv, cwd }], changed, root);
+			// `pnpm test` runs `node --test`, whose discovery picks up any test a worker added.
+			deepStrictEqual(files(["pnpm", "test"]), ["tests/new.test.ts", "web/b.spec.ts"]);
+			deepStrictEqual(files(["npx", "vitest", "run", "web"]), ["web/b.spec.ts"]);
+			deepStrictEqual(files(["jest", "--config", "jest.json"]), ["tests/new.test.ts", "web/b.spec.ts"]);
+			deepStrictEqual(files(["python3", "-m", "pytest", "py"]), ["py/test_x.py"]);
+			deepStrictEqual(files(["go", "test", "./..."]), ["pkg/x_test.go"]);
+			// A runner given files, another directory, or a cwd the test is outside of does not run it.
+			deepStrictEqual(files(["node", "--test", "tests/old.test.ts"]), []);
+			deepStrictEqual(files(["vitest", "run", "api"]), []);
+			deepStrictEqual(files(["go", "test"]), []);
+			deepStrictEqual(files(["node", "--test"], "web"), ["web/b.spec.ts"]);
+			deepStrictEqual(files(["biome", "check", "."]), []);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("a fleet loop check whose changed-test run executes a worker's test earns no Tested-by", async () => {
 		const { compileExecutionPlan } = await import("../../src/domains/dispatch/execution-plan.js");
 		const { executeFleetRun } = await import("../../src/domains/dispatch/fleet-run.js");
