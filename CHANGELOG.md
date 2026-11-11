@@ -192,6 +192,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The desktop app opening a session another Clio Coder still has open no longer marks that session ended, so it can no longer be deleted while in use (#420).
 - Ending an abandoned session and deleting a session take the same lock as resume, so a concurrent resume can no longer have its live session marked ended or deleted. ACP `session/delete` reports `session_open` in that case.
 - Two read-only runs in one checkout at once no longer fail with `checkout_writer_lease_held`; read-only runs never take the exclusive checkout writer lease (#420).
+- A state-file lock held from another pid namespace on the same host (Apptainer `--pid` or `--containall`) is judged by that namespace's own pid and the boot id, so a host session no longer takes a live container session's settings, credentials or admission lock; on kernels without `NSpid` (before 4.1) it waits out a 30 s backstop instead. Both sides need this version.
 
 ### Loops and yolo
 
@@ -296,6 +297,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder context init --accept [<proposal>]` writes a reviewed proposal to the handbook byte for byte, and refuses when the handbook changed since the proposal was written. The TUI accepts one too (`/context init --accept <id>`), and an accepted proposal clears the verify findings it resolved.
 - Generated handbooks are shaped for workers: generated invariants are capped at 16 rules and 3,000 characters, Tests and Gotchas come first, and generated Conventions, Tests, Gotchas, Git and Docs sections reach every worker; sections you wrote keep their place and scope.
 - `context init` also reads Cursor rules, GitHub Copilot instruction files, and Windsurf, Cline and Aider instruction sources, and Clio Coder does not write into their directories. The heuristic draft no longer adds rules about Clio Coder's own repository, and `--global` reads through the interop home, so `CLIO_CODER_INTEROP_HOME=none` disables it.
+- A repository with no `CLIO-CODER.md` gets a handbook compiled in the background from its checkers, tree facts and verified adopted rules, with no model call and no write outside `.clio-coder/state/`; sessions and workers read it from the next session, and `clio-coder context` names it.
 
 ### Memory
 
@@ -371,7 +373,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Preflight refuses a second node entry for a machine another node already holds, and setup does not keep such an entry; a node that is the client's own machine passes with a note.
 - Node installs prune install directories older than a week beyond the newest three, and `fleet nodes discover` marks peers that are already registered nodes.
 - Running priced workers are stopped once session spend reaches `safety.limits.sessionCostUsd` in every mode; unpriced, zero-rate and delegated runs keep running.
-- `fleet.staggerSharedPrefix: true` (off by default) starts parallel workers that share a prompt prefix after the first one streams, at most 15 s later, so they read its prompt cache instead of prefilling the prefix again.
+- Parallel workers that share a prompt prefix start after the first one streams, at most 15 s later, so they read its prompt cache instead of prefilling the prefix again; `fleet.staggerSharedPrefix` (on by default) turns it off. Every worker handle of the batch returns at once, only the worker's start waits, its run row names a live process meanwhile, and it joins the batch's agent board when it starts.
 - A run on a node that lacks an optional SDK fails once instead of retrying and names `clio-coder fleet nodes tools install <node> copilot-sdk|claude-sdk`, which now installs those SDKs on the node.
 - A relayed worker frame from a fleet node words a missing-component remedy for that node, `clio-coder fleet nodes tools install <node> <component> --yes` run from the client, instead of the worker-local `tools install` command.
 - On a state directory shared by several hosts, starting Clio Coder on another host no longer expires a running fleet plan's reservation; another host's reservations expire only 15 minutes past their estimate. The `local` node and loopback endpoints are counted per host, a dead host's leases are reclaimed after five minutes, capacity denials name the holding host, and `session terminate --force` releases them.
