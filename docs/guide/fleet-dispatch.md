@@ -517,7 +517,7 @@ of four inputs:
 | --- | --- |
 | cpu | usable CPUs from `os.availableParallelism()`, which honors affinity masks such as a Slurm cpuset |
 | memory | (available memory minus a 2 GiB reserve) divided by 1 GiB per worker |
-| cgroup | the same formula over the headroom inside a cgroup memory limit, when one is set: `memory.max` minus the working set (`memory.current` minus `inactive_file` from `memory.stat`), so page cache the kernel can reclaim does not count; without `memory.stat` it is Node's `process.availableMemory()` |
+| cgroup | when a cgroup memory limit is set: (the headroom minus a 512 MiB reserve) divided by 1 GiB per worker. The headroom is `memory.max` minus the working set, `anon` plus `shmem` (plus `kernel` where reported) from `memory.stat`, so file pages the kernel can reclaim do not count; without `memory.stat` it is Node's `process.availableMemory()`. The reserve is smaller than the host's because the host kernel is not charged to the cgroup |
 | cap | 8 |
 
 The 1 GiB per-worker estimate covers workers that run compilers, type checkers

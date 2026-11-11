@@ -56,7 +56,7 @@ describe("fleet.concurrency auto resolution", () => {
 
 	it("sizes from a cgroup limit before host memory", () => {
 		const capacity = resolveLocalConcurrency("auto", host({ cgroupAvailableBytes: 5 * GiB }));
-		strictEqual(capacity.limit, 3);
+		strictEqual(capacity.limit, 4);
 		strictEqual(capacity.bound, "cgroup");
 	});
 
@@ -145,16 +145,33 @@ describe("cgroup headroom", () => {
 	}
 	const counters = { "memory.max": `${7 * GiB}\n`, "memory.current": "4000000000\n" };
 
-	it("counts the working set, not reclaimable page cache, so a container that read large files keeps its workers", () => {
-		const facts = probe({ ...counters, "memory.stat": "anon 190000000\nfile 3600000000\ninactive_file 3400000000\n" });
-		strictEqual(facts.cgroupAvailableBytes, 7 * GiB - 600_000_000);
-		deepStrictEqual(resolveLocalConcurrency("auto", facts), { limit: 4, bound: "cpu" });
+	it("sizes a 7 GiB container from anon and shmem with a small reserve, so the main session's file reads cost no worker", () => {
+		// Two samples of one container, just before and just after a three-way dispatch that read large files.
+		const b = (gib: number) => Math.round(gib * GiB);
+		const before = probe({
+			"memory.max": `${7 * GiB}\n`,
+			"memory.current": `${b(6.49)}\n`,
+			"memory.stat": `anon ${b(0.43)}\nfile ${b(5.83)}\nactive_file ${b(0.95)}\ninactive_file ${b(4.57)}\nshmem ${b(0.23)}\n`,
+		});
+		const after = probe({
+			"memory.max": `${7 * GiB}\n`,
+			"memory.current": `${b(4.33)}\n`,
+			"memory.stat": `anon ${b(0.88)}\nfile ${b(3.2)}\nkernel ${b(0.1)}\nactive_file ${b(0.05)}\ninactive_file ${b(2.92)}\nshmem ${b(0.24)}\n`,
+		});
+		strictEqual(before.cgroupAvailableBytes, 7 * GiB - b(0.43) - b(0.23));
+		strictEqual(after.cgroupAvailableBytes, 7 * GiB - b(0.88) - b(0.24) - b(0.1));
+		deepStrictEqual(resolveLocalConcurrency("auto", before), { limit: 4, bound: "cpu" });
+		deepStrictEqual(resolveLocalConcurrency("auto", after), { limit: 4, bound: "cpu" });
+		deepStrictEqual(resolveLocalConcurrency("auto", { ...after, cgroupAvailableBytes: 3.6 * GiB }), {
+			limit: 3,
+			bound: "cgroup",
+		});
 	});
 
 	it("falls back to the process probe when memory.stat is missing", () => {
 		const facts = probe(counters);
 		strictEqual(facts.cgroupAvailableBytes, 3.26 * GiB);
-		deepStrictEqual(resolveLocalConcurrency("auto", facts), { limit: 1, bound: "cgroup" });
+		deepStrictEqual(resolveLocalConcurrency("auto", facts), { limit: 2, bound: "cgroup" });
 	});
 });
 

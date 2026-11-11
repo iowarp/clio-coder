@@ -54,6 +54,12 @@ export const WORKER_MEMORY_ESTIMATE_BYTES = 1024 * 1024 * 1024;
 /** Memory left for the OS, the orchestrator, and local inference servers. */
 export const OS_MEMORY_RESERVE_BYTES = 2 * 1024 * 1024 * 1024;
 
+/**
+ * Reserve inside a cgroup limit. The host kernel is not charged to the cgroup,
+ * and the orchestrator's own memory is already in its working set.
+ */
+export const CGROUP_MEMORY_RESERVE_BYTES = 512 * 1024 * 1024;
+
 /** Minimum spacing between host samples. */
 export const HOST_SAMPLE_INTERVAL_MS = 30_000;
 
@@ -63,8 +69,8 @@ export function resolveGlobalConcurrency(configured: "auto" | number | undefined
 	return Math.max(1, Math.floor(configured));
 }
 
-function workersFor(bytes: number): number {
-	return Math.max(1, Math.floor((bytes - OS_MEMORY_RESERVE_BYTES) / WORKER_MEMORY_ESTIMATE_BYTES));
+function workersFor(bytes: number, reserveBytes = OS_MEMORY_RESERVE_BYTES): number {
+	return Math.max(1, Math.floor((bytes - reserveBytes) / WORKER_MEMORY_ESTIMATE_BYTES));
 }
 
 /**
@@ -86,7 +92,10 @@ export function resolveLocalConcurrency(
 		{ limit: workersFor(facts.availableMemoryBytes + clioHeldBytes), bound: "memory" },
 	];
 	if (facts.cgroupAvailableBytes !== null)
-		candidates.push({ limit: workersFor(facts.cgroupAvailableBytes + clioHeldBytes), bound: "cgroup" });
+		candidates.push({
+			limit: workersFor(facts.cgroupAvailableBytes + clioHeldBytes, CGROUP_MEMORY_RESERVE_BYTES),
+			bound: "cgroup",
+		});
 	let best = candidates[0] as LocalCapacity;
 	for (const candidate of candidates) if (candidate.limit < best.limit) best = candidate;
 	return best;
@@ -174,20 +183,25 @@ function readCgroupFile(dir: string, name: string): string | null {
 
 /**
  * Headroom inside a cgroup v2 limit counting only the working set:
- * memory.max - (memory.current - inactive_file). memory.current includes page
- * cache the kernel reclaims on demand, so a container that has read large files
- * would otherwise look full and size one worker. Null when memory.stat or the
- * counters cannot be read; `limitBytes` stands in for a memory.max of `max`,
+ * memory.max - (anon + shmem + kernel). memory.current also counts file pages,
+ * active ones included, that the kernel reclaims under pressure, so a container
+ * whose main session reads large files would otherwise lose workers to its own
+ * page cache. `kernel` counts only where the kernel reports it. Null when
+ * memory.stat has no `anon`; `limitBytes` stands in for a memory.max of `max`,
  * where the binding limit sits on an ancestor cgroup.
  */
 function cgroupWorkingSetHeadroom(dir: string, limitBytes: number): number | null {
 	const stat = readCgroupFile(dir, "memory.stat");
-	const current = Number(readCgroupFile(dir, "memory.current")?.trim());
-	const inactive = stat?.match(/^inactive_file (\d+)$/mu)?.[1];
-	if (inactive === undefined || !Number.isFinite(current)) return null;
+	const counter = (name: string): number | undefined => {
+		const value = stat?.match(new RegExp(`^${name} (\\d+)$`, "mu"))?.[1];
+		return value === undefined ? undefined : Number(value);
+	};
+	const anon = counter("anon");
+	if (anon === undefined) return null;
+	const workingSet = anon + (counter("shmem") ?? 0) + (counter("kernel") ?? 0);
 	const max = Number(readCgroupFile(dir, "memory.max")?.trim());
 	const limit = Number.isFinite(max) && max > 0 ? max : limitBytes;
-	return Math.max(0, limit - Math.max(0, current - Number(inactive)));
+	return Math.max(0, limit - workingSet);
 }
 
 /** Read this process's host facts. Tests inject facts instead of calling this. */
