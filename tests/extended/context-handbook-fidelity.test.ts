@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { parseBootstrapModelOutput } from "../../src/domains/context/bootstrap-prompt.js";
-import { loadProjectClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "../../src/domains/context/clio-md.js";
+import {
+	demoteHandbookHeadings,
+	loadProjectClioMd,
+	parseClioMd,
+	serializeClioMd,
+	tryReadClioMd,
+} from "../../src/domains/context/clio-md.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { runContextRefresh } from "../../src/domains/context/refresh.js";
@@ -119,7 +125,8 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				const { projectName, identity, conventions, invariants, sections } = prompt.clioMd ?? {};
 				deepStrictEqual({ projectName, identity, conventions, invariants, sections }, projection);
 			}
-			strictEqual(prompt.text.includes(source), true);
+			// Preload lowers each heading one level and changes nothing else.
+			strictEqual(prompt.text.includes(demoteHandbookHeadings(source)), true);
 			const bundle = createPromptsBundle({
 				bus: createTelemetryHub(),
 				getContract(name) {
@@ -135,7 +142,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 				});
 				strictEqual(compiled.projectPreload?.mode, "full", "fixture must fit the unchanged preload budget");
 				deepStrictEqual(compiled.projectHandbookFiles, [path]);
-				strictEqual(compiled.systemPrompt.includes(source), true);
+				strictEqual(compiled.systemPrompt.includes(demoteHandbookHeadings(source)), true);
 			} finally {
 				await bundle.extension.stop?.();
 			}
@@ -212,7 +219,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 		strictEqual(refreshed.codewikiEntries, 1);
 		strictEqual(refreshed.clioMd, "unchanged");
 		deepStrictEqual(readFileSync(path), Buffer.from(source));
-		strictEqual(renderPromptContext(cwd).text.includes(source), true);
+		strictEqual(renderPromptContext(cwd).text.includes(demoteHandbookHeadings(source)), true);
 	});
 
 	it("keeps empty and unreadable authored files unavailable without fabricating metadata", () => {
@@ -262,7 +269,11 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			});
 			strictEqual(compiled.projectPreload?.mode, "full", "fixture must fit the unchanged preload budget");
 			deepStrictEqual(compiled.projectHandbookFiles, [path]);
-			strictEqual(compiled.systemPrompt.includes(authored), true, "the final model prompt must retain the source");
+			strictEqual(
+				compiled.systemPrompt.includes(demoteHandbookHeadings(authored)),
+				true,
+				"the final model prompt must retain the source",
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}
@@ -276,7 +287,11 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			writeFileSync(path, source);
 			const prompt = renderPromptContext(cwd);
 			deepStrictEqual(prompt.handbookFiles, [path]);
-			strictEqual(prompt.text.includes(source), true, "the model must receive the complete authored source");
+			strictEqual(
+				prompt.text.includes(demoteHandbookHeadings(source)),
+				true,
+				"the model must receive the complete authored source",
+			);
 			strictEqual(prompt.clioMd?.identity, "The first identity paragraph.");
 			deepStrictEqual(prompt.clioMd?.warnings, [
 				"trailing content after fingerprint footer omitted from structured fields",
@@ -288,7 +303,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			strictEqual((await runContextRefresh({ cwd })).clioMd, "unchanged");
 			const expected = source;
 			deepStrictEqual(readFileSync(path), Buffer.from(expected), "all authored bytes must survive");
-			strictEqual(renderPromptContext(cwd).text.includes(expected), true);
+			strictEqual(renderPromptContext(cwd).text.includes(demoteHandbookHeadings(expected)), true);
 			strictEqual((await runContextRefresh({ cwd })).clioMd, "unchanged");
 			deepStrictEqual(readFileSync(path), Buffer.from(expected));
 		});
@@ -353,10 +368,11 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 		const childPath = join(child, "CLIO-CODER.md");
 		writeFileSync(childPath, base);
 		const inherited = renderPromptContext(child);
+		const preloaded = demoteHandbookHeadings(authored);
 		deepStrictEqual(inherited.handbookFiles, [path, childPath]);
-		strictEqual(inherited.text.includes(authored), true);
+		strictEqual(inherited.text.includes(preloaded), true);
 		strictEqual(inherited.text.includes(base), true);
-		strictEqual(inherited.text.indexOf(authored) < inherited.text.indexOf(base), true);
+		strictEqual(inherited.text.indexOf(preloaded) < inherited.text.indexOf(base), true);
 		writeFileSync(path, authored + "Ancestor guidance.\n\n".repeat(600));
 		const bounded = selectProjectPreload(renderPromptContext(child), true);
 		strictEqual(bounded.classification.mode, "partial");
@@ -371,7 +387,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 		const replaced = renderPromptContext(child);
 		deepStrictEqual(replaced.handbookFiles, [overridePath]);
 		strictEqual(replaced.text.includes(override), true);
-		strictEqual(replaced.text.includes(authored), false);
+		strictEqual(replaced.text.includes(preloaded), false);
 		strictEqual(replaced.text.includes(base), false);
 		strictEqual(replaced.clioMd, null);
 		const replacement = selectProjectPreload(replaced, true);

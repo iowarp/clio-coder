@@ -19,6 +19,7 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative } from "node:path";
 import type { AgentCapabilityClass } from "../agents/spec.js";
+import { demoteHandbookHeadings } from "./clio-md.js";
 import { type ProjectRule, selectActiveRules } from "./project-rules.js";
 
 export type HandbookAudience = "all" | "write" | "verify" | "docs" | "git" | "orchestrator";
@@ -357,8 +358,8 @@ export function selectWorkerHandbook(
 					`Rules not selected for this task, from: ${omitted.join("; ")}. Read ${handbook.path} if the task reaches them.`,
 				);
 			}
-			lines.push("</project-handbook>");
-			blocks.push(lines.join("\n"));
+			const [open, ...body] = lines;
+			blocks.push([open, demoteHandbookHeadings(body.join("\n")), "</project-handbook>"].join("\n"));
 		}
 		return blocks.join("\n\n");
 	};

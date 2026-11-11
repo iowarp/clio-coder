@@ -105,6 +105,22 @@ describe("worker handbook selection", () => {
 		ok(selected.text.includes(PATH), "omitted rules point at the full handbook");
 	});
 
+	it("sits the handbook's headings one level below the worker prompt's sections", () => {
+		const selected = selectWorkerHandbook(handbooks, {
+			audience: workerHandbookAudience("coder", "workspace-edit"),
+			cwd: "/repo",
+			workingPaths: ["apps/web/client/Strip.tsx"],
+			maxChars: 4000,
+		});
+		const headings = selected.text.split("\n").filter((line) => line.startsWith("#"));
+		ok(headings.includes("## Demo"));
+		ok(headings.includes("### Hard invariants"));
+		ok(
+			headings.every((line) => line.startsWith("## ") || line.startsWith("### ")),
+			headings.join(" | "),
+		);
+	});
+
 	it("routes release rules to git-master and verification rules to the verifier", () => {
 		const git = selectWorkerHandbook(handbooks, {
 			audience: workerHandbookAudience("git-master", "workspace-edit"),
@@ -173,7 +189,7 @@ describe("worker handbook selection", () => {
 		);
 	});
 
-	it("renders a handbook that fits whole in document order, unchanged", () => {
+	it("renders a handbook that fits whole in document order, headings one level down", () => {
 		const small = compileHandbook(
 			"# Small\n\nSmall is a tool.\n\n## Hard invariants\n\n1. Never touch home.\n\n## Conventions\n\n- Imports end in `.js`.\n",
 			PATH,
@@ -187,7 +203,7 @@ describe("worker handbook selection", () => {
 		});
 		strictEqual(
 			selected.text,
-			`<project-handbook path="${PATH}" rules="2/2">\n# Small\nSmall is a tool.\n\n## Hard invariants\n1. Never touch home.\n\n## Conventions\n- Imports end in \`.js\`.\n</project-handbook>`,
+			`<project-handbook path="${PATH}" rules="2/2">\n## Small\nSmall is a tool.\n\n### Hard invariants\n1. Never touch home.\n\n### Conventions\n- Imports end in \`.js\`.\n</project-handbook>`,
 		);
 	});
 });

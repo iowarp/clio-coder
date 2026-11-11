@@ -403,9 +403,35 @@ function escapeXmlAttribute(value: string): string {
 	return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+const FENCE = /^ {0,3}(`{3,}|~{3,})/u;
+const ATX_HEADING = /^( {0,3})(#{1,5})(?=[ \t]|$)/u;
+
+/**
+ * Pushes a handbook's ATX headings one level down, outside fenced code, so its
+ * own `# Title` sits under the prompt's sections instead of beside them.
+ * Level-six headings stay; the line count never changes.
+ */
+export function demoteHandbookHeadings(text: string): string {
+	let fence: string | null = null;
+	return text
+		.split("\n")
+		.map((line) => {
+			const marker = FENCE.exec(line)?.[1];
+			if (marker !== undefined) {
+				if (fence === null) fence = marker;
+				else if (marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
+				return line;
+			}
+			return fence === null ? line.replace(ATX_HEADING, "$1#$2") : line;
+		})
+		.join("\n");
+}
+
 export function renderProjectContextFragment(parsed: ParsedClioMd | string, sourcePath?: string): string {
 	const source = sourcePath ? ` path="${escapeXmlAttribute(sourcePath)}"` : "";
-	if (typeof parsed === "string") return `<project-context${source}>\n${parsed}\n</project-context>`;
+	if (typeof parsed === "string") {
+		return `<project-context${source}>\n${demoteHandbookHeadings(parsed)}\n</project-context>`;
+	}
 	const sections: string[] = [`# ${parsed.projectName}`, parsed.identity];
 	if (parsed.conventions.length > 0) {
 		sections.push("## Conventions", ...parsed.conventions.map((item) => `- ${item}`));

@@ -59,3 +59,37 @@ describe("project handbook budget", () => {
 		strictEqual(prompt.includes("LAST RULE"), true);
 	});
 });
+
+describe("preloaded handbook headings", () => {
+	it("sit one level below the prompt's sections, outside fenced code only", () => {
+		const source = [
+			"# Gridstats",
+			"## Conventions",
+			"```sh",
+			"# a shell comment",
+			"```",
+			"~~~",
+			"## still code",
+			"~~~",
+			"###### Deepest",
+			"#hashtag",
+		].join("\n");
+		strictEqual(
+			renderProjectContextFragment(source, "/repo/CLIO-CODER.md"),
+			[
+				'<project-context path="/repo/CLIO-CODER.md">',
+				"## Gridstats",
+				"### Conventions",
+				"```sh",
+				"# a shell comment",
+				"```",
+				"~~~",
+				"## still code",
+				"~~~",
+				"###### Deepest",
+				"#hashtag",
+				"</project-context>",
+			].join("\n"),
+		);
+	});
+});
