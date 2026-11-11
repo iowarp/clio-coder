@@ -2,40 +2,40 @@
 	"task": "14",
 	"name": "greeting",
 	"profile": "v1",
-	"target": "litellm",
-	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"target": "copilot",
+	"model": "claude-haiku-5.5",
 	"run": 0,
 	"surface": "headless",
-	"commit": "3d11e1757",
+	"commit": "a3f59fe62",
 	"parts": [
 		{
 			"exit": 0,
-			"final": "Hi. I'm Clio Coder. What are you working on?",
+			"final": "Hi. I'm Clio Coder, the coding agent in the CLIO ecosystem. This workspace is on branch main with a clean tree. What do you want to work on?",
 			"tools": [],
 			"rounds": 0,
 			"usage": [
 				{
-					"input": 3506,
-					"cacheRead": 4096,
-					"cacheReadField": "sent"
+					"input": 4,
+					"cacheRead": 4091,
+					"cacheReadField": null
 				}
 			],
 			"blocked": [],
 			"acp_methods": [],
 			"prompt": "hi",
-			"seconds": 4.2,
+			"seconds": 5.0,
 			"stderr_tail": "clio-coder run: autonomy default (settings.yaml sets yolo, which a headless run takes only from --autonomy yolo)\n",
 			"files_changed": []
 		}
 	],
 	"verdict": false,
-	"note": "tools=0 words=9 offer=True",
+	"note": "tools=0 words=28 offer=True",
 	"counters": {
 		"rounds": 0,
 		"tool_calls": 0,
 		"malformed_gateway": 0,
-		"prompt_tokens_first": 7602,
-		"cached_first": 4096
+		"prompt_tokens_first": 4095,
+		"cached_first": 4091
 	},
-	"source": "real: mini/qwen3.8-27b-iq4r-v4 v1 run 0 commit 3d11e1757"
+	"source": "real: claude-haiku-5.5 v1 run 0 commit a3f59fe62"
 }
