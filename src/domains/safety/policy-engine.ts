@@ -1841,6 +1841,17 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 
 	const engine: SafetyPolicyEngine = {
 		evaluate(rawCall, posture, scope) {
+			const oversized = oversizedPathToken(rawCall.args);
+			if (oversized !== null) {
+				return blockDecision(baseDecision(rawCall, classify(rawCall), cwd, posture, commandArg(rawCall.args)), {
+					ruleId: OVERSIZED_PATH_RULE_ID,
+					reasonCode: OVERSIZED_PATH_RULE_ID,
+					reasons: [
+						`an argument holds a path of more than ${MAX_PATH_SEGMENTS} segments, longer than any path the system can open; it is refused unexamined`,
+					],
+					policySource: "builtin-classifier",
+				});
+			}
 			const gate = rawCall.tool === ToolNames.Verify ? taskGateUnderJudgment(rawCall) : null;
 			const decision =
 				gate === null ? evaluateScoped(rawCall, posture, scope) : evaluateTaskGate(rawCall, gate, posture, scope);
@@ -2561,6 +2572,7 @@ export const YOLO_ADMITTED_REASON_PREFIX = "yolo-admitted:";
 const YOLO_HELD_RULE_IDS: ReadonlySet<string> = new Set([
 	"write-root",
 	"bash-empty-command",
+	"oversized-path",
 	"verify-cwd-invalid",
 	"project-policy-invalid",
 	YOLO_SANDBOX_REQUIRED_RULE_ID,
@@ -4631,4 +4643,32 @@ function projectScriptPreview(command: string, cwd: string): string {
 		}
 	}
 	return `Repository command: ${command}. Its test/build files and dependencies execute with the child process permissions.`;
+}
+
+const OVERSIZED_PATH_RULE_ID = "oversized-path";
+/**
+ * Linux opens paths of at most 4096 bytes, so no real path has more segments
+ * than this. The path walks cost grows with the segment count, so a longer
+ * token is refused before any of them run.
+ */
+const MAX_PATH_SEGMENTS = 4096;
+
+/** The first string argument holding a whitespace-free run with more than MAX_PATH_SEGMENTS separators. */
+function oversizedPathToken(args: Record<string, unknown> | undefined): string | null {
+	if (args === undefined) return null;
+	for (const value of Object.values(args)) {
+		const strings = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+		for (const text of strings) {
+			if (typeof text !== "string" || text.length <= MAX_PATH_SEGMENTS) continue;
+			let separators = 0;
+			for (let index = 0; index < text.length; index += 1) {
+				const code = text.charCodeAt(index);
+				if (code === 47 || code === 92) {
+					separators += 1;
+					if (separators > MAX_PATH_SEGMENTS) return text;
+				} else if (code === 32 || code === 9 || code === 10 || code === 13) separators = 0;
+			}
+		}
+	}
+	return null;
 }

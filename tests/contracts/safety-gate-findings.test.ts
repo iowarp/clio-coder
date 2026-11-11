@@ -74,4 +74,10 @@ describe("safety gate findings", () => {
 			strictEqual(bash(command), "block", command);
 		}
 	});
+
+	it("refuses a path argument longer than any real path without walking it", () => {
+		const long = Array.from({ length: 50_000 }, () => "a").join("/");
+		strictEqual(kind({ tool: ToolNames.Read, args: { path: long } }), "block");
+		strictEqual(kind({ tool: ToolNames.Bash, args: { command: `cat ${long}` } }, "yolo"), "block");
+	});
 });
