@@ -2241,7 +2241,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		watchSelectedDispatch,
 		steerSelectedDispatch,
 		cancelSelectedDispatch,
-		notifyMovedKey: (text) => notify("info", text, "dispatch-board:moved-key"),
 		// The same Esc and Ctrl+C that stop a local command stop an attachment read.
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash() || cancelSubmitExpansions(),
 		isStreaming: () =>

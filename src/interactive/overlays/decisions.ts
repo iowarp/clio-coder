@@ -27,7 +27,7 @@ import {
 	statusChip,
 	toneRole,
 } from "../theme/index.js";
-import { confirmOnceRail, listJump, movedKeyNotice } from "./confirm-once.js";
+import { confirmOnceRail, listJump } from "./confirm-once.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
 
@@ -373,11 +373,6 @@ class DecisionsOverlayBody implements Component {
 		if (matchesKey(data, "enter") || data === "\n" || matchesKey(data, "tab")) {
 			const key = decisionRowKey(selected.interview.interviewId, selected.decision.key);
 			this.expandedKey = this.expandedKey === key ? null : key;
-			this.requestRender();
-			return;
-		}
-		if (matchesKey(data, "s")) {
-			this.status = { kind: "warning", text: movedKeyNotice("s", "x") };
 			this.requestRender();
 			return;
 		}

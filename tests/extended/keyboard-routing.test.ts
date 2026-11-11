@@ -107,7 +107,6 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		runCancel: 0,
 		steer: 0,
 	};
-	const moved: string[] = [];
 	editor.onSubmit = () => {
 		counts.submit++;
 	};
@@ -209,9 +208,6 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		steerSelectedDispatch: () => {
 			counts.steer++;
 		},
-		notifyMovedKey: (text: string) => {
-			moved.push(text);
-		},
 		cancelSelectedDispatch: () => {
 			counts.runCancel++;
 		},
@@ -281,7 +277,6 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		close,
 		overlays,
 		active,
-		moved,
 		state: () => state,
 		mount(next: OverlayState, factory: () => ReturnType<typeof tui.showOverlay>) {
 			state = next;
@@ -848,7 +843,6 @@ it("m steers a fleet run; the old s and d answer with their new key and do nothi
 	assert.equal(f.counts.steer, 0, "s no longer steers");
 	f.terminal.input("m");
 	assert.equal(f.counts.steer, 1);
-	assert.deepEqual(f.moved, ["d is now Enter here", "s is now m here"]);
 });
 it("x asks once before it cancels a fleet run; another key keeps the run", () => {
 	const f = fixture();
@@ -894,7 +888,7 @@ it("closes a real extension panel and cycles Interop kinds with encoded c only i
 	assert.equal(f.state(), "interop", "the filter and then search mode are layers before close");
 	f.terminal.input("u");
 	f.terminal.input("s");
-	assert.deepEqual(notices.slice(1), ["u is now s here", "Adoption destination: project."]);
+	assert.deepEqual(notices.slice(1), ["Adoption destination: project."]);
 });
 
 it("Interop x asks once before it declines a proposal; another key keeps the row", () => {

@@ -44,7 +44,6 @@ import {
 	tableRows,
 	titleRow,
 } from "../theme/index.js";
-import { movedKeyNotice } from "./confirm-once.js";
 import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
@@ -719,8 +718,6 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				reset();
 				ctx.notice("info", `Adoption destination: ${settings.scope}.`);
 			},
-			p: () => ctx.notice("info", movedKeyNotice("p", "s")),
-			u: () => ctx.notice("info", movedKeyNotice("u", "s")),
 			c: () => {
 				settings.filter = KIND_CYCLE[(KIND_CYCLE.indexOf(settings.filter) + 1) % KIND_CYCLE.length];
 				reset();
@@ -759,7 +756,6 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 			},
 			a: (item) => decide(item, deps.accept),
 			x: (item) => decide(item, deps.decline),
-			d: () => ctx.notice("info", movedKeyNotice("d", "x")),
 		},
 		onClose: close,
 	});

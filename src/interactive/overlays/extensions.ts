@@ -26,7 +26,6 @@ import {
 	statusSeverity,
 	titleRow,
 } from "../theme/index.js";
-import { movedKeyNotice } from "./confirm-once.js";
 import { detailWithHead, type ListOverlayItem, markdownRows, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
@@ -379,7 +378,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 		...(operator
 			? {
 					globalHints: [{ key: "R", verb: "restart all" }],
-					globalActions: { R: reload, r: () => ctx.notice("info", movedKeyNotice("r", "R")) },
+					globalActions: { R: reload },
 					confirmGlobal: { R: { verb: "restart", label: "every extension" } },
 				}
 			: {}),

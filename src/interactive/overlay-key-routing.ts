@@ -1,7 +1,6 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { decodePrintableKey, isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
 import { backOutOneLayer } from "./escape-layers.js";
-import { movedKeyNotice } from "./overlays/confirm-once.js";
 import {
 	MUTATION_PREVIEW_KEY,
 	PERMISSION_STOP_KEY,
@@ -91,8 +90,6 @@ export interface DispatchBoardOverlayKeyDeps {
 	selectNextDispatch: () => void;
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
-	/** One line naming a moved letter's new key. */
-	notifyMovedKey?: (text: string) => void;
 	/** First `x` asks: false arms the selected run and holds the key; true means it was armed, so cancel. */
 	confirmCancelSelectedDispatch?: () => boolean;
 	/** Any key other than `x` keeps the run. */
@@ -273,11 +270,6 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 	}
 	if (matchesKey(data, "m")) {
 		deps.steerSelectedDispatch();
-		return true;
-	}
-	// E-21: steer moved to m and detail is Enter; the old letters answer for one release and do nothing.
-	if (matchesKey(data, "s") || matchesKey(data, "d")) {
-		deps.notifyMovedKey?.(matchesKey(data, "s") ? movedKeyNotice("s", "m") : movedKeyNotice("d", "Enter"));
 		return true;
 	}
 	if (matchesKey(data, "x")) {

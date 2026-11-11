@@ -21,7 +21,6 @@ import {
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
-import { movedKeyNotice } from "./confirm-once.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 /** Rows the list shows while the frame has not said how many it has. */
@@ -449,10 +448,6 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		if (data === "p") {
 			this.currentCwdOnly = !this.currentCwdOnly;
 			this.rebuildRows();
-			return;
-		}
-		if (data === "s") {
-			this.setStatus(movedKeyNotice("s", "o"));
 			return;
 		}
 		if (data === "o") {

@@ -33,7 +33,6 @@ import {
 import { type OverlayHandle, stripTerminalSequences, type TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
 import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
-import { movedKeyNotice } from "./confirm-once.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -664,7 +663,6 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				redraw();
 				deps.notice("info", "Library re-read from disk.");
 			},
-			R: () => deps.notice("info", movedKeyNotice("R", "r")),
 		},
 		hints,
 		onSelect: open,

@@ -143,8 +143,6 @@ export interface InteractiveInputRuntimeDeps {
 	watchSelectedDispatch: () => boolean;
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
-	/** One line when a moved Fleet Runs letter is pressed (E-21). */
-	notifyMovedKey?: (text: string) => void;
 	cancelActiveEditorBash: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
@@ -591,7 +589,6 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					},
 					steerSelectedDispatch: deps.steerSelectedDispatch,
 					cancelSelectedDispatch: deps.cancelSelectedDispatch,
-					...(deps.notifyMovedKey !== undefined ? { notifyMovedKey: deps.notifyMovedKey } : {}),
 					confirmCancelSelectedDispatch: () => {
 						const board = deps.dispatchBoard;
 						if (board.armCancel === undefined || board.cancelArmed === undefined) return true;

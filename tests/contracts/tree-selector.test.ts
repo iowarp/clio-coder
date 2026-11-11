@@ -120,7 +120,6 @@ it("cycles sort order with stable timestamp ties and preserves the selected turn
 	deepStrictEqual(f.order(), ["oldest", "branch", "marker", "newest"]);
 	f.view.handleInput("s");
 	deepStrictEqual(f.order(), ["oldest", "branch", "marker", "newest"], "s moved to o and does nothing");
-	match(f.text(), /s is now o here/u);
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, ["branch"]);
 });

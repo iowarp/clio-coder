@@ -37,7 +37,6 @@ test("x asks once before it supersedes a decision; another key keeps it", () => 
 		[...frame.renderDockBody(100, DOCK_BODY_ROWS_MAX), ...frame.render(100)].map(stripTerminalSequences).join("\n");
 	frame.handleInput?.("s");
 	deepStrictEqual(superseded, [], "s moved to x and does nothing");
-	match(rail(), /s is now x here/u);
 	frame.handleInput?.("x");
 	deepStrictEqual(superseded, [], "the first s only asks");
 	match(rail(), /x again/u);
