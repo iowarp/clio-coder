@@ -11,7 +11,7 @@ The store keeps files as blobs in named tags outside the working tree, with a re
 | `clio-coder store tags` | List this project's tags with their class and blob count. |
 | `clio-coder store ls <tag> [pattern]` | List blobs in a tag; `pattern` is a regular expression matched against the whole name, at most 256 characters, with no backreferences and no quantified group that contains another quantifier (such as `(a+)+`). |
 | `clio-coder store put <tag> <file> [--blob <name>] [--note <text>]` | Store a file; creates the tag (class input) when missing. |
-| `clio-coder store get <tag>:<blob> [--to <path>]` | Print a path to a read-only copy of the blob (local backend), or copy it to `--to`. Edits to that path never reach the stored blob. |
+| `clio-coder store get <tag>:<blob> [--to <path>]` | Print a path to a read-only copy of the blob, or copy it to `--to`. Edits to that path never reach the stored blob. |
 | `clio-coder store stat\|history <tag>:<blob>` | Show the blob and its record, or every record for it. |
 | `clio-coder store verify <tag> [pattern] [--hash-large]` | Compare blobs with their records; exit 1 unless every blob is ok. `pattern` follows the `ls` limits. |
 | `clio-coder store rm <tag>:<blob> --yes` | Delete one blob; without `--yes` it only prints what it would delete. |
