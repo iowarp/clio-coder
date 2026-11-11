@@ -785,8 +785,20 @@ test("a runtime that never answers abort still releases the session's hold", asy
 	const session = fake().sessions.at(-1) as FakeSession & { abort: () => Promise<void> };
 	ok(session);
 	session.abort = () => new Promise<void>(() => undefined);
-	disposeCopilotConversations("hung-session");
-	await new Promise((resolve) => setTimeout(resolve, 3_500));
+	// The dispose RPC deadline runs on a mocked clock, so the wait ends on the disconnect and release themselves,
+	// never on host speed. Each round fires every timer due within one deadline; setImmediate is not mocked, so real
+	// I/O in dispose still runs between rounds, and real time only bounds a stuck dispose.
+	mock.timers.enable({ apis: ["setTimeout"] });
+	try {
+		disposeCopilotConversations("hung-session");
+		const until = Date.now() + 30_000;
+		while (!(fake().disconnected.includes(session.sessionId) && !fake().referenced) && Date.now() < until) {
+			mock.timers.tick(3_000);
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+	} finally {
+		mock.timers.reset();
+	}
 	ok(fake().disconnected.includes(session.sessionId), "dispose moves on to disconnect");
 	strictEqual(fake().referenced, false, "no hold outlives the unanswered abort");
 });
