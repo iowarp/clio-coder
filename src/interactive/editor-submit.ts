@@ -113,6 +113,8 @@ export interface EditorSubmitSessionTranscript {
 
 export interface EditorSubmitDeps {
 	askEgg?: import("../tools/ask-user.js").AskUserHandler;
+	/** Opens the arcade egg when the text is its trigger phrase; true means the text was consumed. */
+	arcadeEgg?: (text: string) => boolean;
 	onLocalEntry?: (entry: SessionEntry) => void;
 	onLocalBashRunning?: (running: boolean, command?: string, settled?: ShellSettlement) => void;
 	onLocalBashCancelling?: () => void;
@@ -491,6 +493,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			if (deps.chat.resumeAutonomy?.() === true) deps.ui.requestRender();
 			return;
 		}
+		// The arcade egg draws over the TUI and hands it back untouched, launchpad included.
+		if (deps.arcadeEgg?.(literalText)) return;
 		deps.collapseLaunchpadBeforeSubmit?.();
 		// An @ mention of a path, not an @agent steer: the token has a / or a dot.
 		if (/(?:^|\s)@[\w~-]*[./][\w./-]+/u.test(literalText)) deps.recordFeature?.("@");
@@ -686,7 +690,11 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		void (async () => {
 			// A flushed entry was expanded when it was queued; its display and the
 			// paths it inlined travel with it instead of being expanded again.
-			if (!flushed && (await deps.chat.discoverOperatorEgg?.(unguardPastedEditorOperator(text), deps.askEgg))) {
+			if (
+				!flushed &&
+				(deps.arcadeEgg?.(unguardPastedEditorOperator(text)) ||
+					(await deps.chat.discoverOperatorEgg?.(unguardPastedEditorOperator(text), deps.askEgg)))
+			) {
 				if (snapshot.owns()) setLiteralText("");
 				return;
 			}

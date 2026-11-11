@@ -108,6 +108,8 @@ type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArc
 
 export interface InteractiveSlashRuntimeDeps {
 	openTransientAskUser?: AskUserHandler;
+	/** Opens the arcade egg when the text is its trigger phrase; true means the text was consumed. */
+	arcadeEgg?: (text: string) => boolean;
 	/** Note a harness feature the operator used, for demo guidance. */
 	recordFeature?: (feature: string) => void;
 	keyboardActions?: SlashCommandContext["keyboardActions"];
@@ -477,7 +479,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			}
 			if (
 				operatorText !== undefined &&
-				(await deps.chat.discoverOperatorEgg?.(operatorText, deps.openTransientAskUser ?? deps.openAskUser))
+				(deps.arcadeEgg?.(operatorText) ||
+					(await deps.chat.discoverOperatorEgg?.(operatorText, deps.openTransientAskUser ?? deps.openAskUser)))
 			)
 				return;
 			let expanded: InteractiveSlashSubmitExpansion;

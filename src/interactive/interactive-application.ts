@@ -40,6 +40,7 @@ import { expandSubmitText, type SubmitExpansion } from "../domains/resources/sub
 import type { AutonomyReport } from "../domains/safety/autonomy-window.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
+import { isArcadeTrigger } from "../domains/session/easter-eggs.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
@@ -64,6 +65,7 @@ import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ApplicationController } from "./application-controller.js";
+import { type ArcadeSession, openArcadeOverlay } from "./arcade-overlay.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorAside, OPERATOR_COMMAND_ENTRY, TURN_HUMAN_WAIT_ENTRY } from "./command-output.js";
@@ -1263,6 +1265,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		for (const controller of submitExpansions) controller.abort();
 		return true;
 	};
+	// The arcade egg owns every key while it is open; closing it hands the TUI back as it was.
+	let arcade: ArcadeSession | null = null;
+	const openArcadeEgg = (text: string): boolean => {
+		if (!isArcadeTrigger(text) || arcade?.isOpen()) return false;
+		arcade = openArcadeOverlay(tui);
+		return true;
+	};
 	const slashRuntime = createInteractiveSlashRuntime({
 		recordFeature,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
@@ -1443,6 +1452,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(renderTrace ? { onSubmitPhase: (seq, phase) => renderTrace.recordSubmitPhase(seq, phase) } : {}),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openTransientAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
+		arcadeEgg: openArcadeEgg,
 		openSkillsHub: (request) => openSkillsHubState(request),
 		openUsage: (tab) => openUsageOverlayState(tab),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
@@ -1531,6 +1541,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		expandSubmit: expandSubmitCancellable,
 		notify,
 		askEgg: (questions, options) => openTransientAskUserOverlayState(questions, options),
+		arcadeEgg: openArcadeEgg,
 		askSendNow: async (runningTools) => {
 			const stop = "Stop it and send now";
 			const wait = "Send after it finishes";
@@ -2344,6 +2355,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		registerInputListener: (listener) => {
 			const handleInput: typeof listener = (data) => {
+				if (arcade?.isOpen()) {
+					arcade.handleInput(data);
+					return { consume: true };
+				}
 				lastOperatorInputAt = Date.now();
 				reportOffers?.poke();
 				const overlayState = overlayLifecycle.getState();

@@ -16,6 +16,14 @@ function normalize(text: string): string {
 		.replace(/[.!?,;:… ]+$/u, "");
 }
 
+const ARCADE_ALIASES = ["insert coin", "clio, insert coin"] as const;
+
+/** The arcade egg is presentation only: the phrase opens a terminal game and never reaches the model. */
+export function isArcadeTrigger(text: string): boolean {
+	const said = normalize(text);
+	return ARCADE_ALIASES.some((alias) => alias === said);
+}
+
 /** Ephemeral presentation opt-in; neither discovery nor consent admits any tool action. */
 export function createConversationEggs(deps: {
 	identity(): string | null;
