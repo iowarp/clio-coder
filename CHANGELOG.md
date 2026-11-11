@@ -90,6 +90,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `/panes` shows as unavailable in sessions without a pane host, and music leaves the palette, `/help`, the `?` card and the Ctrl+G menu while it is off. Argument completion lists thinking levels, playbooks, rosters, worker profiles, external agents, runs, pane presets and paths.
 - The steering queue box previews at most three messages, with `+N more` leading its key row, and the idle hint changes only when you learn a key, not every minute.
 - Settings number rows no longer preview steps on Space that Enter then ignored.
+- Attended sessions ask the model for a one-line reason before a call that will park for approval, and `ask_user` options describe what choosing each one leads to.
 
 ### Sign-in, setup and providers
 
@@ -109,6 +110,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first. When a model server refuses without a key, setup offers to store one and rechecks the same address, and long model names use the terminal's width.
 - A lab or site can publish one setup file. `clio-coder configure --import <path-or-https-url>` shows where prompts will go, asks once and connects (without a terminal it prints the changes and asks for `--yes`); first-run setup offers the same as "A setup file from my lab or team". The file may name only targets, the variable or sign-in profile each reads its key from, and the chat and fleet routes; a literal key or any other setting is refused.
 - The first launch sets up a model before it asks about the folder. The installer ends with the next step for your machine (a key or model server it found) and, while the launcher is not on `PATH`, a command that runs as printed.
+- Setup and the `/model` picker no longer offer embedding or rerank models as chat models. A server's metadata (LiteLLM `mode`, LM Studio type) decides, and otherwise ids naming embed or rerank are left out; naming one explicitly still selects it.
 
 ### Shared folders and sessions
 
@@ -125,6 +127,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The job tool and yolo guidance tell the agent to wire every condition when asked to wait on several things (one job each or one combined `until`), and to use `until_stopped` for open-ended waits (#450).
 - Contained yolo runs dispatch plans (several tasks, compete, council, a Scout or Documenter pipeline, remote placement) with yolo authority instead of refusing them as needing you. Workers keep default's permits, ask routes and sandbox, and the main session keeps its sandbox, snapshots and safety judge.
 - Pressing Esc before the loop guard's hard stop leaves the turn stopped; yolo no longer continues it.
+- Headless runs and yolo sessions tell the model to open its final reply with where the task stands against the request (done, partly done or not done) and to name any unmet part; "Done" is reserved for a fully met request.
 
 ### Security and sandbox
 
@@ -164,6 +167,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 
 - Launchers prove the launch token instead of sending it, and browser launches use a single-use ticket valid for 60 seconds, so the launch token is no longer kept in browser storage or passed on an opener's command line.
 - Browsers signed in under 0.7.0 stay connected after the upgrade: the stored launch token is exchanged once for a client credential and deleted. Windows opened by `clio-coder gui` or reopened with a remembered credential no longer land on "Open your launch link", and the Reconnect field accepts the `#ticket=` link `clio-coder gui` prints.
+- The approval card shows why a call stopped (the safety-net rule or the autonomy level), the size and sha256 digest of a parked write or edit, and the recorded task, matching the terminal card.
 
 ### Context and compaction
 
@@ -205,6 +209,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `reset` and `uninstall` remove the data and cache directories of a `CLIO_CODER_HOME` home an earlier version created, instead of keeping them and exiting 1.
 - `clio-coder uninstall` and `reset` no longer delete a root they cannot prove is Clio Coder's own (for example `CLIO_CODER_CONFIG_DIR=~/.config`); it is kept and named, and `CLIO_CODER_HOME` set to the home directory is refused.
 - A new HPC clusters guide covers installing on a login node (old Node.js or glibc, a proxy, no internet) and connecting a model from there.
+- Packaged docs no longer link to repository-only files; they point at GitHub, and lint fails a packaged doc whose relative link leaves the npm package.
+- The installation guide explains npm's install-scripts warning for `@google/genai` and `protobufjs`: both scripts are safe to skip, and it shows how to silence the warning.
 
 ### Windows
 
@@ -255,6 +261,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 
 ### Fixes
 
+- A diagnostic bundle (`report --bundle`, `report selftest`) can be built for a session that used a Copilot target: a run's response-model label is anonymized instead of refusing the bundle, and a target id inside `copilot-sdk` or `github-copilot` is no longer taken for a leak.
 - `clio-coder run` no longer prints a reminder written for the model (such as the citation check) on stderr; it prints a one-line "reminder to the model: <gist>", matching the TUI row.
 - A mistyped slash command left in the composer no longer turns the next command into a prompt: `/modle/thinking` is refused like `/modle`.
 - A settings file that fails to load prints its problem once instead of twice.
