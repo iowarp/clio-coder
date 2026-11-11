@@ -170,6 +170,7 @@ compatible with models that do not support strict sampling.
 | Scroll styling callbacks and `OverlayHandle.getBounds()` | Clio Coder uses public track/thumb styling callbacks and delegates bounds to the mounted frame. |
 | Component mouse handling and alt-screen controls | Clio Coder composes compatible Pi components and supplies mouse wiring for its custom components. `clearOnShrink` defaults to false. |
 | `AgentTool.replay` | Clio Coder leaves the optional replay policy unset and uses `Agent` with its own durable session spine. |
+| pi-tui `PI_TUI_ESC_TIMEOUT` (how long a lone ESC waits for the rest of a key sequence) | pi-tui reads it; per the comment in [interactive-shell.ts](../../src/interactive/interactive-shell.ts) its local default is 10 ms and over SSH it waits 100 ms. Before starting the interactive TUI, `applyEscapeTimeoutDefault` sets it to `50` in `process.env` when it is unset and neither `SSH_CONNECTION` nor `SSH_TTY` is set, so a laggy local terminal does not split an arrow key into Escape (which interrupts the turn) plus `[A` in the composer. An operator-set value always wins. |
 | OpenAI-compatible `vllmPriority` | Available through Pi's compatibility setting; Clio Coder has no scheduler-priority setting. |
 
 Environment-key parity includes `qwen-token-plan-individual` →

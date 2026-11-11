@@ -906,7 +906,7 @@ Arguments:
 - `method` (optional). HTTP method (default `GET`).
 - `headers` (optional). Key-value request headers.
 - `body` (optional). Request body string.
-- `timeout_ms` (optional). Request timeout in milliseconds (default 30000).
+- `timeout_ms` (optional). Request timeout in milliseconds (default 30000, maximum 600000). A larger value is clamped to 600000 rather than rejected, a fractional value is floored, and a missing, zero or negative value uses the default.
 - `max_bytes` (optional). Max bytes returned (default 600000, capped at 5MB).
 - `format` (optional). Content parsing format: `auto` (default, converts HTML to Markdown), `markdown`, or `raw`. Any other value errors.
 

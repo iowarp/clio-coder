@@ -75,6 +75,7 @@ These names follow an upstream or operating-system convention. They are not subs
 | `VISUAL`, `EDITOR` | External editor command, with `VISUAL` taking precedence ([external-editor.ts](../../src/core/external-editor.ts)). |
 | `TERM`, `COLORTERM`, `COLORFGBG`, `TERM_PROGRAM`, `WT_SESSION` | Terminal capability, color-depth, background, keybinding, and desktop-notification adaptation. These variables describe the terminal rather than Clio Coder policy. |
 | `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy ([stream-pacing-policy.ts](../../src/interactive/stream-pacing-policy.ts)). |
+| `PI_TUI_ESC_TIMEOUT` | Milliseconds pi-tui waits after a lone ESC for the rest of a key sequence. When unset on a local (non-SSH) terminal, Clio sets it to `50` before the interactive TUI starts; an explicit value is left alone ([interactive-shell.ts](../../src/interactive/interactive-shell.ts)). See [Pi SDK boundary](../architecture/pi-boundary.md). |
 | `COLUMNS` | Fallback text width for non-TTY CLI output ([text-layout.ts](../../src/cli/text-layout.ts)). |
 | `VIRTUAL_ENV` | Python interpreter for typed Python verify entries when the project has neither a uv lock nor a `.venv`: Clio uses `$VIRTUAL_ENV/bin/python` (`Scripts/python.exe` on Windows) before looking for `python` or `python3` on `PATH` ([toolchain.ts](../../src/tools/verify/toolchain.ts)). |
 | `TZ` | Local timestamp formatting ([format-time.ts](../../src/interactive/format-time.ts)). |
