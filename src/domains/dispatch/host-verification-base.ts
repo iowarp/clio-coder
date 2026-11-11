@@ -23,7 +23,7 @@ function searchBound(worktreePath: string): string {
 }
 
 /** The nearest node_modules from `start` upward, never above `bound`. */
-export function nearestNodeModules(start: string, bound: string): string | null {
+function nearestNodeModules(start: string, bound: string): string | null {
 	let dir = resolve(start);
 	const limit = resolve(bound);
 	for (;;) {
