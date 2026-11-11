@@ -1285,11 +1285,41 @@ function collectInvokedWriteTargets(segment: ReadonlyArray<string>, out: string[
 		if (args.length >= 2 && destination !== undefined) out.push(destination);
 		return;
 	}
-	if (executable === "cp" || executable === "mv") {
+	if (executable === "cp" || executable === "mv" || executable === "install") {
 		const args = pathArgs(segment, cmdIndex);
+		const targetDir = targetDirectoryOption(segment, cmdIndex);
+		if (targetDir !== null) {
+			out.push(targetDir);
+			for (const source of args) {
+				if (source !== targetDir) out.push(path.posix.join(targetDir, path.posix.basename(source)));
+			}
+			return;
+		}
 		const destination = args.at(-1);
 		if (args.length >= 2 && destination !== undefined) out.push(destination);
+		return;
 	}
+	if (executable === "dd") {
+		for (const arg of segment.slice(cmdIndex + 1)) {
+			if (arg.startsWith("of=") && arg.length > 3) out.push(arg.slice(3));
+		}
+	}
+}
+
+/** The directory of `-t DIR`, `-tDIR` or `--target-directory[=]DIR`, when the command names one. */
+function targetDirectoryOption(segment: ReadonlyArray<string>, commandIndex: number): string | null {
+	for (let index = commandIndex + 1; index < segment.length; index += 1) {
+		const token = segment[index];
+		if (token === undefined) continue;
+		if (token === "--") break;
+		if (token === "-t" || token === "--target-directory") return segment[index + 1] ?? null;
+		if (token.startsWith("--target-directory=")) return token.slice("--target-directory=".length);
+		if (/^-[^-]*t/u.test(token)) {
+			const rest = token.slice(token.indexOf("t") + 1);
+			return rest.length > 0 ? rest : (segment[index + 1] ?? null);
+		}
+	}
+	return null;
 }
 
 /**

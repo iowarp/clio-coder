@@ -850,6 +850,23 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (pathBlock !== null) {
 			return { reasonCode: pathBlock.reasonCode, reasons: [pathBlock.reason], policySource: "project-policy" };
 		}
+		// A shell target is also judged from every directory a literal cd in the
+		// command reaches, so `cd .clio-coder && echo x > safety.yaml` meets the
+		// same rail as `echo x > .clio-coder/safety.yaml`.
+		if (call.tool === ToolNames.Bash) {
+			for (const candidate of candidates) {
+				const decision = evaluatePathPolicy(
+					candidate.operation === "delete" ? deletes : pathPolicy,
+					candidate.operation,
+					candidate.lexical,
+					callCwd,
+					walkMemo,
+				);
+				if (decision.kind === "block") {
+					return { reasonCode: decision.reasonCode, reasons: [decision.reason], policySource: "project-policy" };
+				}
+			}
+		}
 		// Bash reads of zero-access paths. pathPolicyTargets extracts only
 		// write/delete targets from bash, so `cat .env` used to run and its
 		// output persisted into the transcript and evidence previews. Any

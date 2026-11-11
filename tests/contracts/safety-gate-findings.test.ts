@@ -59,4 +59,19 @@ describe("safety gate findings", () => {
 			strictEqual(bash(oracle), "block", oracle);
 		}
 	});
+
+	it("the safety.yaml rail follows a literal cd and every common writer", () => {
+		const bash = (command: string) => kind({ tool: ToolNames.Bash, args: { command } });
+		for (const command of [
+			"cd .clio-coder && echo x > safety.yaml",
+			"cd .clio-coder && rm safety.yaml",
+			"dd if=/dev/null of=.clio-coder/safety.yaml",
+			"install /dev/null .clio-coder/safety.yaml",
+			"cp -t .clio-coder x/safety.yaml",
+			"cd .clio-coder && cp -t . x/safety.yaml",
+			"cd .git && rm hooks/pre-commit",
+		]) {
+			strictEqual(bash(command), "block", command);
+		}
+	});
 });
