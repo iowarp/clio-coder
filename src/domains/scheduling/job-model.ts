@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { snapshotTurnConstraints } from "../../core/turn-constraints.js";
 import type {
+	JobCondition,
 	JobCreateInput,
 	JobEvidence,
 	JobOwner,
@@ -16,6 +17,8 @@ export const JOB_HISTORY_LIMIT = 10;
 export const JOB_SESSION_LIMIT = 32;
 export const JOB_SUMMARY_BYTES = 2048;
 export const JOB_JSON_BYTES = 16_384;
+/** Further conditions a command job may wait on besides its own until, so a poll stays one bounded occurrence. */
+export const JOB_CONDITION_LIMIT = 7;
 const MAX_DURATION_MS = 31 * 24 * 60 * 60_000;
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -65,6 +68,25 @@ function validateJobPredicate(predicate: JobPredicate): JobPredicate {
 		throw new Error("job: ordered comparisons require a number");
 	return { path: [...predicate.path], op: predicate.op, ...(value !== undefined ? { value } : {}) };
 }
+function validateCommandVector(argv: unknown, digest: unknown): asserts argv is readonly string[] {
+	if (!Array.isArray(argv) || argv.length < 1 || argv.length > 128)
+		throw new Error("job: argv requires 1..128 literal arguments");
+	if (argv.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw new Error("job: invalid argv");
+	text(argv[0], 4096, "executable");
+	if (Buffer.byteLength(JSON.stringify(argv)) > 16_384) throw new Error("job: argv too large");
+	if (digest !== undefined && (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)))
+		throw new Error("job: invalid executable digest");
+}
+function validateJobCondition(condition: JobCondition): JobCondition {
+	if (!object(condition)) throw new Error("job: invalid condition");
+	keys(condition, ["argv", "executableSha256", "until"], "condition");
+	validateCommandVector(condition.argv, condition.executableSha256);
+	return {
+		argv: [...condition.argv],
+		...(condition.executableSha256 !== undefined ? { executableSha256: condition.executableSha256 } : {}),
+		until: validateJobPredicate(condition.until),
+	};
+}
 /** A main turn does real work, so its clock must outlast a slow build or a long external wait (#445). */
 export const JOB_MAIN_TIMEOUT_DEFAULT_MS = 3_600_000;
 const JOB_COMMAND_TIMEOUT_DEFAULT_MS = 60_000;
@@ -102,22 +124,19 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 	if (!object(input.runner)) throw new Error("job: runner required");
 	let runner: JobSpec["runner"];
 	if (input.runner.kind === "command") {
-		keys(input.runner, ["kind", "argv", "executableSha256"], "command runner");
-		if (!Array.isArray(input.runner.argv) || input.runner.argv.length < 1 || input.runner.argv.length > 128)
-			throw new Error("job: argv requires 1..128 literal arguments");
-		if (input.runner.argv.some((arg) => typeof arg !== "string" || arg.includes("\0")))
-			throw new Error("job: invalid argv");
-		text(input.runner.argv[0], 4096, "executable");
-		if (Buffer.byteLength(JSON.stringify(input.runner.argv)) > 16_384) throw new Error("job: argv too large");
-		if (
-			input.runner.executableSha256 !== undefined &&
-			(typeof input.runner.executableSha256 !== "string" || !/^[a-f0-9]{64}$/.test(input.runner.executableSha256))
-		)
-			throw new Error("job: invalid executable digest");
+		keys(input.runner, ["kind", "argv", "executableSha256", "also"], "command runner");
+		validateCommandVector(input.runner.argv, input.runner.executableSha256);
+		const also = input.runner.also;
+		if (also !== undefined) {
+			if (!Array.isArray(also) || also.length < 1 || also.length > JOB_CONDITION_LIMIT)
+				throw new Error(`job: also takes 1..${JOB_CONDITION_LIMIT} further conditions`);
+			if (input.until === undefined) throw new Error("job: further conditions require the job's own until");
+		}
 		runner = {
 			kind: "command",
 			argv: [...input.runner.argv],
 			...(input.runner.executableSha256 !== undefined ? { executableSha256: input.runner.executableSha256 } : {}),
+			...(also !== undefined ? { also: also.map(validateJobCondition) } : {}),
 		};
 	} else if (input.runner.kind === "main") {
 		keys(input.runner, ["kind", "prompt"], "main runner");
@@ -181,6 +200,51 @@ export function matchesJobPredicate(predicate: JobPredicate, json: unknown): boo
 		case "gte":
 			return value >= predicate.value;
 	}
+}
+/**
+ * One condition's poll as a multi-condition occurrence records it: only the value its predicate reads, so several
+ * commands' output fits one bounded evidence record and the controller still decides the match itself.
+ */
+export interface JobConditionEvidence {
+	complete: boolean;
+	json?: unknown;
+}
+export function projectJobPredicate(predicate: JobPredicate, json: unknown): unknown {
+	let value = json;
+	for (const segment of predicate.path) {
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, segment)) return {};
+		value = (value as Record<string, unknown>)[segment];
+	}
+	// No predicate compares a whole object, so an empty one stands in for it and keeps the record small.
+	if (value !== null && typeof value === "object") value = {};
+	return predicate.path.reduceRight<unknown>((inner, segment) => ({ [segment]: inner }), value);
+}
+/** The host's verdict on every condition a command job waits on, in order: its own until first, then each of also. */
+export function jobConditionsMet(spec: JobSpec, evidence: JobEvidence): boolean[] {
+	if (spec.until === null || spec.runner.kind !== "command") return [];
+	const usable = ["succeeded", "noop"].includes(evidence.outcome) && evidence.jsonComplete;
+	const also = spec.runner.also;
+	if (also === undefined) return [usable && matchesJobPredicate(spec.until, evidence.json)];
+	const polls = Array.isArray(evidence.json) ? (evidence.json as unknown[]) : [];
+	return [spec.until, ...also.map((condition) => condition.until)].map((predicate, index) => {
+		const poll = polls[index];
+		return (
+			usable &&
+			object(poll) &&
+			poll.complete === true &&
+			Object.hasOwn(poll, "json") &&
+			matchesJobPredicate(predicate, poll.json)
+		);
+	});
+}
+/** The commands of the conditions the last poll did not see hold, worded for the turn the wait wakes. */
+export function jobPendingConditions(spec: JobSpec, evidence: JobEvidence | null): string[] {
+	if (spec.runner.kind !== "command" || spec.runner.also === undefined || evidence === null) return [];
+	const met = jobConditionsMet(spec, evidence);
+	const argvs = [spec.runner.argv, ...spec.runner.also.map((condition) => condition.argv)];
+	return argvs.flatMap((argv, index) =>
+		met[index] === true ? [] : [clipJobText([argv[0]?.split("/").at(-1) ?? "", ...argv.slice(1)].join(" "), 120)],
+	);
 }
 export function jobHasUnresolvedCleanup(job: JobRecord): boolean {
 	return (

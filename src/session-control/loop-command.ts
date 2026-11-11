@@ -440,6 +440,16 @@ function predicateText(predicate: JobPredicate): string {
 		: `${path} ${OPERATOR_SYMBOLS[predicate.op]} ${JSON.stringify(predicate.value)}`;
 }
 
+/** A job's further conditions, one line each, so status shows everything the host waits on. */
+function alsoLines(job: JobRecord): string[] {
+	const runner = job.spec.runner;
+	if (runner.kind !== "command" || runner.also === undefined) return [];
+	return runner.also.map((condition) => {
+		const [program = "", ...rest] = condition.argv;
+		return `and command ${preview([program.split("/").pop() ?? program, ...rest].join(" "), 72)} until ${predicateText(condition.until)}`;
+	});
+}
+
 function runnerText(job: JobRecord): string {
 	const runner = job.spec.runner;
 	if (runner.kind === "main") return `main turn "${preview(runner.prompt, TASK_PREVIEW_CHARS)}"`;
@@ -566,6 +576,7 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 	if (job.spec.until !== null) {
 		lines.push(
 			`until ${predicateText(job.spec.until)} · on match ${job.spec.onMatch.kind === "notice" ? "notice" : `main turn "${preview(job.spec.onMatch.prompt, TASK_PREVIEW_CHARS)}"`}`,
+			...alsoLines(job),
 		);
 	}
 	if (job.active !== null) lines.push("running now");
@@ -617,6 +628,7 @@ export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: numb
 					? "notice"
 					: `main turn follow-up · follow-up timeout ${formatLoopDuration(jobExecutionTimeoutMs(job.spec, "delivery"))}${args.timeout_ms === undefined ? " (default)" : ""}`
 			}`,
+			...alsoLines(job),
 		);
 	}
 	lines.push(

@@ -6,14 +6,26 @@ export interface JobOwner {
 	readonly cwd: string;
 	readonly generation: string;
 }
-export type JobRunner =
-	| { readonly kind: "command"; readonly argv: readonly string[]; readonly executableSha256?: string }
-	| { readonly kind: "main"; readonly prompt: string };
 export interface JobPredicate {
 	readonly path: readonly string[];
 	readonly op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "exists";
 	readonly value?: string | number | boolean | null;
 }
+/** A further wait condition on a command job: its own pinned command and predicate, checked by the host each poll. */
+export interface JobCondition {
+	readonly argv: readonly string[];
+	readonly executableSha256?: string;
+	readonly until: JobPredicate;
+}
+export type JobRunner =
+	| {
+			readonly kind: "command";
+			readonly argv: readonly string[];
+			readonly executableSha256?: string;
+			/** The job matches only when the spec's until and every one of these hold in the same occurrence. */
+			readonly also?: readonly JobCondition[];
+	  }
+	| { readonly kind: "main"; readonly prompt: string };
 export type JobMatchAction = { readonly kind: "notice" } | { readonly kind: "main_turn"; readonly prompt: string };
 export interface JobCreateInput {
 	readonly intervalMs: number;

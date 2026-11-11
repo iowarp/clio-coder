@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
 import { scrubbedCommandEnv } from "../core/bash-exec.js";
-import type { JobRunner } from "../core/job-types.js";
+import type { JobCondition, JobPredicate, JobRunner } from "../core/job-types.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { JOB_CONDITION_LIMIT, type JobConditionEvidence, projectJobPredicate } from "../domains/scheduling/index.js";
 import type { JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import type { HostEffectCall } from "./registry.js";
 
@@ -81,18 +82,46 @@ export function prepareJobCommand(argv: unknown, cwd: string): Extract<JobRunner
 	});
 }
 
+/** Pin every further condition's executable the same way the job's own command is pinned. */
+export function prepareJobConditions(also: unknown, cwd: string): JobCondition[] {
+	if (!Array.isArray(also) || also.length === 0 || also.length > JOB_CONDITION_LIMIT)
+		throw new Error(`job: also takes 1..${JOB_CONDITION_LIMIT} further conditions, each {argv, until}.`);
+	return also.map((entry: unknown) => {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+			throw new Error("job: each also condition is {argv, until}.");
+		const { argv, until, ...rest } = entry as Record<string, unknown>;
+		if (Object.keys(rest).length > 0 || until === undefined)
+			throw new Error("job: each also condition is {argv, until}.");
+		const pinned = prepareJobCommand(argv, cwd);
+		return {
+			argv: pinned.argv,
+			...(pinned.executableSha256 === undefined ? {} : { executableSha256: pinned.executableSha256 }),
+			until: structuredClone(until) as JobPredicate,
+		};
+	});
+}
+
+function jobCommands(runner: Extract<JobRunner, { kind: "command" }>): ReadonlyArray<{
+	readonly argv: readonly string[];
+	readonly executableSha256?: string;
+}> {
+	return [runner, ...(runner.also ?? [])];
+}
+
 export function attestJobCommand(runner: Extract<JobRunner, { kind: "command" }>): void {
-	const file = runner.argv[0];
-	if (
-		!file ||
-		!isAbsolute(file) ||
-		realpathSync(file) !== file ||
-		!runner.executableSha256 ||
-		executableHash(file) !== runner.executableSha256
-	)
-		throw new Error(
-			"Job executable identity changed or is unavailable; create a newly admitted job for the current executable.",
-		);
+	for (const command of jobCommands(runner)) {
+		const file = command.argv[0];
+		if (
+			!file ||
+			!isAbsolute(file) ||
+			realpathSync(file) !== file ||
+			!command.executableSha256 ||
+			executableHash(file) !== command.executableSha256
+		)
+			throw new Error(
+				"Job executable identity changed or is unavailable; create a newly admitted job for the current executable.",
+			);
+	}
 }
 
 /**
@@ -102,15 +131,13 @@ export function attestJobCommand(runner: Extract<JobRunner, { kind: "command" }>
  */
 export function jobCommandEffect(runner: JobRunner, cwd: string): readonly HostEffectCall[] {
 	if (runner.kind !== "command") return [];
-	return [
-		{
-			label: "scheduled command",
-			call: {
-				tool: ToolNames.Bash,
-				args: { command: runner.argv.map(shellQuote).join(" "), cwd, unsandboxed: true },
-			},
+	return jobCommands(runner).map((command, index) => ({
+		label: index === 0 ? "scheduled command" : `scheduled condition ${index + 1} command`,
+		call: {
+			tool: ToolNames.Bash,
+			args: { command: command.argv.map(shellQuote).join(" "), cwd, unsandboxed: true },
 		},
-	];
+	}));
 }
 
 /** At yolo nobody is there to log a CLI in, so the code host tokens pass despite the credential scrub (#445). */
@@ -133,17 +160,21 @@ function firstStderrLine(stderr: string): string | undefined {
 	return line === undefined ? undefined : line.slice(0, 200);
 }
 
-/** The command gets the environment bash gets, credentials scrubbed, so cluster tools it calls work. */
-export async function executeJobCommand(
+interface CommandPoll {
+	failed: boolean;
+	json: unknown;
+	jsonComplete: boolean;
+	cleanupUnresolved: boolean;
+	report: Record<string, unknown>;
+}
+
+async function pollCommand(
+	argv: readonly string[],
 	context: JobExecutionContext,
-	autonomy?: AutonomyLevel,
-	envPolicy: SandboxEnvPolicy = { passEnv: [], secretNames: [] },
-): Promise<JobRunResult> {
-	const runner = context.job.spec.runner;
-	if (runner.kind !== "command") throw new Error("Command job runner received a main occurrence.");
-	attestJobCommand(runner);
-	if (!context.start()) return { outcome: "deferred", summary: "Job execution is no longer admitted." };
-	const result = await runCommandVector(runner.argv[0] as string, runner.argv.slice(1), {
+	autonomy: AutonomyLevel | undefined,
+	envPolicy: SandboxEnvPolicy,
+): Promise<CommandPoll> {
+	const result = await runCommandVector(argv[0] as string, argv.slice(1), {
 		cwd: context.job.owner.cwd,
 		workspaceRoot: context.job.owner.cwd,
 		timeoutMs: context.job.spec.timeoutMs,
@@ -171,8 +202,11 @@ export async function executeJobCommand(
 		result.exitCode !== 0;
 	const stderrHead = failed ? firstStderrLine(result.stderr) : undefined;
 	return {
-		outcome: failed ? "failed" : "succeeded",
-		summary: JSON.stringify({
+		failed,
+		json,
+		jsonComplete,
+		cleanupUnresolved: result.cleanupIncomplete === true || result.pipeDrainIncomplete === true,
+		report: {
 			argv: [result.file, ...result.args],
 			cwd: result.cwd,
 			exitCode: result.exitCode,
@@ -184,10 +218,64 @@ export async function executeJobCommand(
 			...(stderrHead === undefined ? {} : { stderrHead }),
 			stdout: result.stdout,
 			stderr: result.stderr,
-		}),
-		json,
-		jsonComplete,
-		cleanupUnresolved: result.cleanupIncomplete === true || result.pipeDrainIncomplete === true,
+		},
+	};
+}
+
+/**
+ * The command gets the environment bash gets, credentials scrubbed, so cluster tools it calls work. A job with
+ * further conditions polls every one of their commands too and records what each predicate reads, so the controller
+ * decides the match from what the host saw rather than from one command's word for the others.
+ */
+export async function executeJobCommand(
+	context: JobExecutionContext,
+	autonomy?: AutonomyLevel,
+	envPolicy: SandboxEnvPolicy = { passEnv: [], secretNames: [] },
+): Promise<JobRunResult> {
+	const runner = context.job.spec.runner;
+	if (runner.kind !== "command") throw new Error("Command job runner received a main occurrence.");
+	attestJobCommand(runner);
+	if (!context.start()) return { outcome: "deferred", summary: "Job execution is no longer admitted." };
+	const also = runner.also;
+	if (also === undefined) {
+		const poll = await pollCommand(runner.argv, context, autonomy, envPolicy);
+		return {
+			outcome: poll.failed ? "failed" : "succeeded",
+			summary: JSON.stringify(poll.report),
+			json: poll.json,
+			jsonComplete: poll.jsonComplete,
+			cleanupUnresolved: poll.cleanupUnresolved,
+			evidenceRefs: [],
+			costUsd: 0,
+			...(poll.failed ? { errorClass: "execution" as const } : {}),
+		};
+	}
+	const until = context.job.spec.until;
+	if (until === null) throw new Error("Command job conditions require the job's own until.");
+	const conditions = [{ argv: runner.argv, until }, ...also];
+	const polls: Array<{ condition: number; poll: CommandPoll }> = [];
+	for (const [index, condition] of conditions.entries()) {
+		if (context.signal.aborted) break;
+		polls.push({ condition: index + 1, poll: await pollCommand(condition.argv, context, autonomy, envPolicy) });
+		if (polls.at(-1)?.poll.cleanupUnresolved === true) break;
+	}
+	const failed = polls.length < conditions.length || polls.some(({ poll }) => poll.failed);
+	const conditionEvidence: JobConditionEvidence[] = conditions.map((condition, index) => {
+		const poll = polls[index]?.poll;
+		return poll === undefined || poll.failed || !poll.jsonComplete
+			? { complete: false }
+			: { complete: true, json: projectJobPredicate(condition.until, poll.json) };
+	});
+	// A failing condition leads, so the first exit code and stderr line a person reads are the ones that matter.
+	const reports = [...polls]
+		.sort((left, right) => Number(right.poll.failed) - Number(left.poll.failed))
+		.map(({ condition, poll }) => ({ condition, ...poll.report, stdout: String(poll.report.stdout).slice(0, 400) }));
+	return {
+		outcome: failed ? "failed" : "succeeded",
+		summary: JSON.stringify(reports),
+		json: conditionEvidence,
+		jsonComplete: true,
+		cleanupUnresolved: polls.some(({ poll }) => poll.cleanupUnresolved),
 		evidenceRefs: [],
 		costUsd: 0,
 		...(failed ? { errorClass: "execution" as const } : {}),

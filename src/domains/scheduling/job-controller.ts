@@ -12,12 +12,13 @@ import {
 	clipJobText,
 	JOB_HISTORY_LIMIT,
 	JOB_SESSION_LIMIT,
+	jobConditionsMet,
 	jobEvidence,
 	jobExecutionTimeoutMs,
 	jobHasUnresolvedCleanup,
 	jobIsComplete,
+	jobPendingConditions,
 	jobSpecHash,
-	matchesJobPredicate,
 	normalizeJobOwner,
 	normalizeJobSpec,
 	sameJobOwner,
@@ -217,7 +218,14 @@ export function createJobController(options: JobControllerOptions): JobControlle
 	): void {
 		const counted = continuationCountsAgainstCap(cause);
 		if (counted) draft.clockResumes = (draft.clockResumes ?? 0) + 1;
-		const detail = cause === "failure" && evidence.summary ? `: ${evidence.summary.slice(0, 200)}` : "";
+		const pending =
+			cause === "job_exhausted" || cause === "job_deadline" ? jobPendingConditions(draft.spec, evidence) : [];
+		const detail =
+			cause === "failure" && evidence.summary
+				? `: ${evidence.summary.slice(0, 200)}`
+				: pending.length > 0
+					? `; still pending: ${pending.join("; ")}`
+					: "";
 		draft.delivery = {
 			id: `${draft.id}:clock-resume:${counted ? draft.clockResumes : randomUUID()}`,
 			occurrenceId,
@@ -483,9 +491,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			const matched =
 				draft.generation === execution.generation &&
 				draft.spec.until !== null &&
-				["succeeded", "noop"].includes(evidence.outcome) &&
-				evidence.jsonComplete &&
-				matchesJobPredicate(draft.spec.until, evidence.json);
+				jobConditionsMet(draft.spec, evidence).every(Boolean);
 			if (matched) {
 				draft.reason = "condition";
 				if (draft.state !== "paused") draft.state = "terminal";

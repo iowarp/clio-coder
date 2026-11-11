@@ -10,7 +10,7 @@ import {
 	turnDelegatesTool,
 } from "../core/turn-constraints.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
-import { jobExecutionTimeoutMs, normalizeJobSpec } from "../domains/scheduling/index.js";
+import { JOB_CONDITION_LIMIT, jobExecutionTimeoutMs, normalizeJobSpec } from "../domains/scheduling/index.js";
 import type { JobController, JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import { StringEnum } from "../engine/ai.js";
 import {
@@ -19,6 +19,7 @@ import {
 	executeJobCommand,
 	jobCommandEffect,
 	prepareJobCommand,
+	prepareJobConditions,
 } from "./job-command.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
 
@@ -37,6 +38,17 @@ export interface JobToolDeps {
 	admissionRefusal?(runner: JobRunner, owner: JobOwner, constraints: TurnConstraints | null): string | null;
 }
 
+function predicateSchema(description: string) {
+	return Type.Object(
+		{
+			path: Type.Array(Type.String()),
+			op: StringEnum(["eq", "ne", "lt", "lte", "gt", "gte", "exists"]),
+			value: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()])),
+		},
+		{ description },
+	);
+}
+
 type PreparedJob =
 	| { kind: "create"; input: JobCreateInput; owner: JobOwner }
 	| { kind: "control"; action: "pause" | "resume" | "stop" | "cancel"; id: string; owner: JobOwner; job: JobRecord }
@@ -45,10 +57,14 @@ type PreparedJob =
 
 function jobToolResult(job: JobRecord): ToolResult {
 	const scope = `session ${job.owner.sessionId}; cwd=${job.owner.cwd}`;
+	const conditions =
+		job.spec.runner.kind === "command" && job.spec.runner.also !== undefined
+			? `; waits on ${job.spec.runner.also.length + 1} conditions, all checked each poll`
+			: "";
 	const bounds = `${job.spec.untilStopped === true ? "runs until stopped" : job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.timeoutDefaulted === true ? " (default)" : ""}${job.spec.onMatch.kind === "main_turn" ? `; follow-up timeout=${jobExecutionTimeoutMs(job.spec, "delivery")}ms` : ""}${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
 	return {
 		kind: "ok",
-		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.spec.constraints?.allowedTools === undefined ? "" : `; allow=${JSON.stringify(job.spec.constraints.allowedTools)}`}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,
+		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}${conditions}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.spec.constraints?.allowedTools === undefined ? "" : `; allow=${JSON.stringify(job.spec.constraints.allowedTools)}`}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,
 		details: { job },
 	};
 }
@@ -76,6 +92,7 @@ export function createJobTool(deps: JobToolDeps): {
 		"on_match",
 		"follow_up",
 		"until_stopped",
+		"also",
 	]);
 	const prepare = (raw: Record<string, unknown>): Record<string, unknown> => {
 		if (prepared.has(raw)) return raw;
@@ -133,6 +150,14 @@ export function createJobTool(deps: JobToolDeps): {
 				throw new Error(
 					"job: main repetition takes prompt and finite bounds; command predicates and match delivery require runner=command.",
 				);
+			if (args.also !== undefined && (runner.kind !== "command" || args.until === undefined))
+				throw new Error(
+					"job: also adds conditions to a runner=command job with its own until; the job matches only when every until holds.",
+				);
+			const commandRunner =
+				runner.kind === "command" && args.also !== undefined
+					? { ...runner, also: prepareJobConditions(args.also, owner.cwd) }
+					: runner;
 			if (runner.kind === "command" && args.prompt !== undefined)
 				throw new Error(
 					"job: command polling does not take prompt; use follow_up with on_match=main_turn for explicit analysis.",
@@ -186,7 +211,7 @@ export function createJobTool(deps: JobToolDeps): {
 						});
 			const input: JobCreateInput = {
 				intervalMs: args.every_ms,
-				runner,
+				runner: commandRunner,
 				...(args.count === undefined ? {} : { count: args.count as number }),
 				...(args.timeout_ms === undefined ? {} : { timeoutMs: args.timeout_ms as number }),
 				...(duration === undefined ? {} : { deadlineAt: Date.now() + (duration as number) }),
@@ -208,7 +233,7 @@ export function createJobTool(deps: JobToolDeps): {
 		name: ToolNames.Job,
 		placement: "gateway",
 		description:
-			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. A job without count or for_ms defaults to five starts. until_stopped=true runs it until the operator stops it (or until matches); use it when the operator says to keep going until they say so. until wires one predicate: to wait on several conditions, create one job per condition or one until command that matches only when all are met, never leaving a condition only in the conversation. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
+			"Create and control bounded session-owned interval jobs. main repeats an explicit prompt; command polls exact argv without a shell. The first run is due immediately after creation, then every interval. A job without count or for_ms defaults to five starts. until_stopped=true runs it until the operator stops it (or until matches); use it when the operator says to keep going until they say so. To wait on several conditions (CI and a cluster run, a file and a check), give one command job also=[{argv, until}, ...] next to its own argv and until: every poll the host runs each command and checks each predicate itself, and the job matches only when all hold at once. Never leave a condition only in the conversation. Each occurrence rechecks current policy; scheduling approval never approves future effects. Use allow=[capability names] to enforce a main job tool boundary regardless of autonomy; prompt text alone does not restrict tools. Observe with monitor(job_id=...).",
 		parameters: Type.Object({
 			action: StringEnum(["create", "pause", "resume", "stop", "cancel"]),
 			job_id: Type.Optional(Type.String()),
@@ -226,14 +251,7 @@ export function createJobTool(deps: JobToolDeps): {
 			argv: Type.Optional(Type.Array(Type.String())),
 			cwd: Type.Optional(Type.String()),
 			until: Type.Optional(
-				Type.Object(
-					{
-						path: Type.Array(Type.String()),
-						op: StringEnum(["eq", "ne", "lt", "lte", "gt", "gte", "exists"]),
-						value: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Null()])),
-					},
-					{ description: "command only: end the job when complete stdout JSON at path matches op and value." },
-				),
+				predicateSchema("command only: end the job when complete stdout JSON at path matches op and value."),
 			),
 			on_match: Type.Optional(
 				StringEnum(["notice", "main_turn"], {
@@ -243,6 +261,19 @@ export function createJobTool(deps: JobToolDeps): {
 			follow_up: Type.Optional(Type.String({ description: "main_turn prompt, at most 8192 characters." })),
 			until_stopped: Type.Optional(
 				Type.Boolean({ description: "Run until the operator stops or cancels it; no count or for_ms." }),
+			),
+			also: Type.Optional(
+				Type.Array(
+					Type.Object({
+						argv: Type.Array(Type.String()),
+						until: predicateSchema("this condition's command: its complete stdout JSON at path matches op and value."),
+					}),
+					{
+						minItems: 1,
+						maxItems: JOB_CONDITION_LIMIT,
+						description: "command with until: further conditions; the job matches only when every until holds in one poll.",
+					},
+				),
 			),
 		}),
 		baseActionClass: "dispatch",

@@ -15,7 +15,7 @@ import { createJobRuntime } from "../../src/entry/job-runtime.js";
 import type { ChatLoop } from "../../src/session-control/chat-loop.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createJobTool } from "../../src/tools/job.js";
-import { prepareJobCommand } from "../../src/tools/job-command.js";
+import { executeJobCommand, prepareJobCommand, prepareJobConditions } from "../../src/tools/job-command.js";
 import { createJobMonitorTool } from "../../src/tools/monitor-jobs.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
@@ -531,6 +531,48 @@ describe("job ownership, scheduling and execution settlement", () => {
 		const done = present(host.get(created.id, owner));
 		strictEqual(done.reason, "condition");
 		strictEqual(done.delivery?.state, "delivered");
+	});
+	it("matches a multi-condition wait only when the host sees every condition hold (#450)", async () => {
+		const flag = join(scratch.dir, "cluster-done");
+		const host = make({ run: (context) => executeJobCommand(context) });
+		const created = await host.create(
+			{
+				intervalMs: 1000,
+				count: 3,
+				runner: {
+					...prepareJobCommand(["node", "-e", 'console.log(JSON.stringify({ ci: "success" }))'], scratch.dir),
+					also: prepareJobConditions(
+						[
+							{
+								argv: [
+									"node",
+									"-e",
+									`console.log(JSON.stringify({ done: require("fs").existsSync(${JSON.stringify(flag)}) }))`,
+								],
+								until: { path: ["done"], op: "eq", value: true },
+							},
+						],
+						scratch.dir,
+					),
+				},
+				until: { path: ["ci"], op: "eq", value: "success" },
+			},
+			owner,
+		);
+		const id = created.id;
+		clock += 1000;
+		host.tick();
+		for (let i = 0; i < 200 && present(host.get(id, owner)).settled < 1; i++) await new Promise((r) => setTimeout(r, 10));
+		const waiting = present(host.get(id, owner));
+		strictEqual(waiting.state, "active");
+		strictEqual(waiting.reason, null);
+		writeFileSync(flag, "");
+		clock += 1000;
+		host.tick();
+		for (let i = 0; i < 200 && present(host.get(id, owner)).settled < 2; i++) await new Promise((r) => setTimeout(r, 10));
+		const matched = present(host.get(id, owner));
+		strictEqual(matched.reason, "condition");
+		strictEqual(matched.starts, 2);
 	});
 	it("admits through the parent registry and refuses model-supplied authority", async () => {
 		const host = make();
