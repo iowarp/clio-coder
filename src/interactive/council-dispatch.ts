@@ -11,7 +11,7 @@
 
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { voteTally } from "../session-control/poll.js";
+import { councilShortfall, voteTally } from "../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../session-control/slash-commands.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -34,7 +34,8 @@ export async function dispatchCouncilThroughRegistry(
 	if (verdict.kind === "not_visible") return { status: "error", message: verdict.reason };
 	const tally = voteTally(verdict.result.details);
 	const extra = tally !== undefined ? { tally } : {};
+	const partial = councilShortfall(verdict.result.details);
 	return verdict.result.kind === "error"
-		? { status: "error", message: verdict.result.message, ...extra }
+		? { status: "error", message: verdict.result.message, ...extra, ...(partial !== undefined ? { partial } : {}) }
 		: { status: "ok", ...extra };
 }

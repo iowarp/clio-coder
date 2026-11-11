@@ -124,6 +124,31 @@ export function formatPollTally(tally: Readonly<Record<string, number>>, partici
 	return [`poll: ${voted} of ${participants} voted; ${headline}`, ...lines].join("\n");
 }
 
+/**
+ * The final-round members that failed while at least one other answered, from a council result's `details.council`.
+ * Undefined when every member answered or none did: only the mixed case is a partial council.
+ */
+export function councilShortfall(
+	details: Readonly<Record<string, unknown>> | undefined,
+): { answered: number; total: number; failed: string[] } | undefined {
+	const council = details?.council;
+	if (council === null || typeof council !== "object") return undefined;
+	const raw = (council as { members?: unknown }).members;
+	if (!Array.isArray(raw)) return undefined;
+	const members = raw.filter(
+		(member): member is { label?: unknown; round?: unknown; failed?: unknown } =>
+			member !== null && typeof member === "object",
+	);
+	const finalRound = Math.max(...members.map((member) => (typeof member.round === "number" ? member.round : 1)));
+	const finals = members.filter((member) => (typeof member.round === "number" ? member.round : 1) === finalRound);
+	const failed = finals
+		.filter((member) => member.failed !== undefined)
+		.map((member) => String(member.label ?? "member"));
+	const answered = finals.length - failed.length;
+	if (answered === 0 || failed.length === 0) return undefined;
+	return { answered, total: finals.length, failed };
+}
+
 /** The vote tally a council result carries in `details.council.synthesis`, when it ran a vote. */
 export function voteTally(details: Readonly<Record<string, unknown>> | undefined): Record<string, number> | undefined {
 	const council = details?.council;

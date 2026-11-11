@@ -197,3 +197,26 @@ test("a vote task that lists options gets a neutral verdict placeholder; others 
 	match(polled, /\{"verdict":"<one of: a\|b\|c>","text":/);
 	ok(!polled.includes('"verdict":"yes"'));
 });
+
+test("a council with one answer and one failed member reports partial, not failed", async () => {
+	const registry = {
+		invoke: async () => ({
+			kind: "ok",
+			result: {
+				kind: "error",
+				message: "[alpha] t/m\nyes\n\n[broken] dead/dead-model\n\n[synthesis] none\nnone",
+				details: {
+					council: {
+						members: [
+							{ label: "alpha", round: 1, answer: "yes" },
+							{ label: "broken", round: 1, answer: "", failed: { reason: "ECONNREFUSED" } },
+						],
+						synthesis: { kind: "none" },
+					},
+				},
+			},
+		}),
+	} as never;
+	const outcome = await dispatchCouncilThroughRegistry(registry, { mode: "council" });
+	deepStrictEqual(outcome.status === "error" ? outcome.partial : outcome, { answered: 1, total: 2, failed: ["broken"] });
+});

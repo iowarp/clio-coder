@@ -28,7 +28,7 @@ import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
 import { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
-import { voteTally } from "../../session-control/poll.js";
+import { councilShortfall, voteTally } from "../../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
@@ -63,6 +63,14 @@ function tallyOf(details: Readonly<Record<string, unknown>> | undefined): { tall
 	return tally !== undefined ? { tally } : {};
 }
 
+/** A council where some members answered and some failed, so `/council` over ACP says partial as the TUI does. */
+function partialOf(details: Readonly<Record<string, unknown>> | undefined): {
+	partial?: { answered: number; total: number; failed: string[] };
+} {
+	const partial = councilShortfall(details);
+	return partial !== undefined ? { partial } : {};
+}
+
 /** One dispatch the operator asked for by command, announced, admitted and settled as a model's call is. */
 export async function runHostDispatch(
 	registry: Pick<ToolRegistry, "invoke">,
@@ -83,7 +91,12 @@ export async function runHostDispatch(
 			: verdict.kind === "not_visible"
 				? { status: "error", message: verdict.reason }
 				: verdict.result.kind === "error"
-					? { status: "error", message: verdict.result.message, ...tallyOf(verdict.result.details) }
+					? {
+							status: "error",
+							message: verdict.result.message,
+							...tallyOf(verdict.result.details),
+							...partialOf(verdict.result.details),
+						}
 					: { status: "ok", ...tallyOf(verdict.result.details) };
 	const text =
 		verdict.kind === "ok" && verdict.result.kind === "ok"

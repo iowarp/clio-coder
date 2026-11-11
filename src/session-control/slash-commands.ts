@@ -423,7 +423,13 @@ export type SetThinkingLevelResult =
 export type CouncilDispatchOutcome =
 	| { status: "ok"; tally?: Record<string, number> }
 	| { status: "blocked"; reason: string }
-	| { status: "error"; message: string; tally?: Record<string, number> };
+	| {
+			status: "error";
+			message: string;
+			tally?: Record<string, number>;
+			/** Set when some final-round members answered and others failed. */
+			partial?: { answered: number; total: number; failed: string[] };
+	  };
 
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string; flowRuleIds?: ReadonlyArray<string> }
@@ -1014,7 +1020,12 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 			ctx.standingTurnConstraints?.(),
 		);
 		if (outcome.status === "blocked") ctx.notice("warn", councilRefusalWords(outcome.reason));
-		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
+		else if (outcome.status === "error" && outcome.partial !== undefined) {
+			// The card already reads partial; one answer stands, so this is not a failed council.
+			const { answered, total, failed } = outcome.partial;
+			ctx.notice("warn", `/council partial: ${answered} of ${total} members answered; ${failed.join(", ")} failed`);
+		} else if (outcome.status === "error")
+			ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
 	} catch (err) {
 		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
 	}
