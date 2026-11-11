@@ -14,6 +14,7 @@ import {
 import {
 	cleanupDispatchReservations,
 	createDispatchReservation,
+	DEFAULT_RESERVATION_TTL_MS,
 	getDispatchReservation,
 	releaseDispatchReservation,
 	releaseDispatchReservationMember,
@@ -324,4 +325,40 @@ it("counts another host's loopback endpoint lease only when it runs on a named n
 	const here = acquireCapacityLease({ assignmentId: "here", nodeId: "local", endpointKey, limits: cap });
 	releaseCapacityLease(here.leaseId);
 	releaseCapacityLease(onNamed.leaseId);
+});
+
+it("a running member's lease heartbeat keeps its plan current for hosts that cannot probe the owner", async (t) => {
+	const reservation = reserve();
+	let clock = Date.now();
+	// The heartbeat timer is unref'd; ticking it by hand keeps the renewal deterministic on every Node.
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const controller = createCapacityAdmissionController({ limits: () => limits, now: () => clock, heartbeatMs: 5 });
+	try {
+		const admitted = await controller.admit({
+			assignmentId: "task-1",
+			nodeId: "local",
+			endpointKey,
+			deadlineAt: clock + 1_000,
+			reservation: { ownerId: reservation.ownerId, memberId: "task-1" },
+		});
+		// The first wave runs for an hour; only its lease heartbeat speaks for the plan meanwhile.
+		clock += 60 * 60_000;
+		t.mock.timers.tick(5);
+		// stop() settles the renewal the tick started.
+		await controller.stop();
+		strictEqual(
+			Date.parse(getDispatchReservation(reservation.ownerId)?.expiresAt ?? ""),
+			clock + DEFAULT_RESERVATION_TTL_MS,
+			"the heartbeat did not refresh the plan's expiry",
+		);
+		// A sibling host sharing the state directory judges the plan by that expiry alone.
+		const state = readCapacityStateUnsafe();
+		state.reservations = state.reservations.map((record) => ({ ...(record as object), host: "other-host" }));
+		writeCapacityStateUnsafe(state);
+		strictEqual(cleanupDispatchReservations({ nowMs: clock }), 0);
+		strictEqual(getDispatchReservation(reservation.ownerId)?.status, "active");
+		releaseCapacityLease(admitted.lease.leaseId);
+	} finally {
+		await controller.stop();
+	}
 });

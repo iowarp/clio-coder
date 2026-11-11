@@ -20,7 +20,7 @@ import {
 	renameCapacityLeaseAssignment,
 	renewCapacityLeasesUnsafe,
 } from "./capacity-lease.js";
-import { transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
+import { refreshReservationsForLeasesUnsafe, transferDispatchReservationToLeaseUnsafe } from "./reservation-store.js";
 
 /**
  * Dispatch admission gate. Given a worker's requested scope and the
@@ -546,7 +546,10 @@ export function createCapacityAdmissionController(options: {
 			return;
 		}
 		heartbeatRun = transact(() => {
-			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, now());
+			const renewedAt = now();
+			const { renewed, missing } = renewCapacityLeasesUnsafe(owned, renewedAt, undefined, (file, renewedLeases) =>
+				refreshReservationsForLeasesUnsafe(file, renewedLeases, renewedAt),
+			);
 			// Applied under the lock: a lease released before this section is gone
 			// from both maps, and one released after it must not be resurrected.
 			for (const lease of renewed) if (leases.has(lease.leaseId)) leases.set(lease.leaseId, lease);

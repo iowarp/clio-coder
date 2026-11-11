@@ -584,6 +584,8 @@ export function renewCapacityLeasesUnsafe(
 	leaseIds: ReadonlyArray<string>,
 	nowMs = Date.now(),
 	ttlMs = DEFAULT_CAPACITY_LEASE_TTL_MS,
+	/** Runs before the write, so state that rides on a lease renews in the same transaction. */
+	onRenewedUnderLock?: (file: CapacityStateFile, renewed: ReadonlyArray<CapacityLease>) => void,
 ): { renewed: CapacityLease[]; missing: string[] } {
 	const file = readCapacityStateUnsafe();
 	const byId = new Map(file.leases.map((lease) => [lease.leaseId, lease]));
@@ -601,7 +603,10 @@ export function renewCapacityLeasesUnsafe(
 		lease.expiresAt = expiresAt;
 		renewed.push(lease);
 	}
-	if (renewed.length > 0) writeCapacityStateUnsafe(file);
+	if (renewed.length > 0) {
+		onRenewedUnderLock?.(file, renewed);
+		writeCapacityStateUnsafe(file);
+	}
 	return { renewed: renewed.map(clone), missing };
 }
 export function releaseCapacityLease(leaseId: string): boolean {

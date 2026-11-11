@@ -27,7 +27,8 @@ export const DEFAULT_RESERVATION_TTL_MS = 15 * 60_000;
 /**
  * A reservation owned on another host cannot be probed from here, so it is
  * reclaimed only once it is this far past its expiry. The owner refreshes the
- * expiry as it consumes members, so only a lost node's plan gets this old.
+ * expiry as it consumes members and on every heartbeat of a running member's
+ * lease, so only a lost node's plan gets this old.
  */
 const FOREIGN_RESERVATION_GRACE_MS = 15 * 60_000;
 
@@ -377,12 +378,46 @@ function reservationTransferLease(input: ReservationTransferInput): AcquireCapac
 			if (member?.status !== "held") throw new Error(`dispatch: reservation member '${input.memberId}' is not held`);
 			member.status = "consumed";
 			member.consumedAt = new Date(nowMs).toISOString();
-			// Hosts that cannot probe this owner judge it by its expiry; a live plan keeps it current.
-			const refreshed = nowMs + DEFAULT_RESERVATION_TTL_MS;
-			if (refreshed > Date.parse(record.expiresAt)) record.expiresAt = new Date(refreshed).toISOString();
+			refreshExpiry(record, nowMs);
 			state.reservations = records.map(copyRecord);
 		},
 	};
+}
+
+/** Hosts that cannot probe a plan's owner judge it by its expiry; a live plan keeps it current. */
+function refreshExpiry(record: DispatchReservationRecord, nowMs: number): void {
+	const refreshed = nowMs + DEFAULT_RESERVATION_TTL_MS;
+	if (refreshed > Date.parse(record.expiresAt)) record.expiresAt = new Date(refreshed).toISOString();
+}
+
+/**
+ * Extend the active plans behind renewed member leases, under the caller's capacity lock. A member can run
+ * far longer than the plan's lifetime, and without this a sibling host expires the plan mid-run and its
+ * next member is refused.
+ */
+export function refreshReservationsForLeasesUnsafe(
+	state: CapacityStateFile,
+	leases: ReadonlyArray<{ reservationOwnerId: string | null }>,
+	nowMs: number,
+): void {
+	const owners = new Set(
+		leases.flatMap((lease) => (lease.reservationOwnerId === null ? [] : [lease.reservationOwnerId])),
+	);
+	if (owners.size === 0) return;
+	let records: DispatchReservationRecord[];
+	try {
+		records = parseReservations(state.reservations);
+	} catch {
+		return; // a damaged plan store must not stop the leases renewing; admission reports it
+	}
+	let changed = false;
+	for (const record of records) {
+		if (record.status !== "active" || !owners.has(record.ownerId)) continue;
+		const before = record.expiresAt;
+		refreshExpiry(record, nowMs);
+		changed ||= record.expiresAt !== before;
+	}
+	if (changed) state.reservations = records.map(copyRecord);
 }
 
 /**
