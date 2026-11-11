@@ -1,12 +1,13 @@
 import { deepStrictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { runtimeEscapeMasksUnder } from "../../src/core/sandbox/worker-process.js";
 
 describe("worker sandbox masks root-equivalent daemon sockets", () => {
-	const root = mkdtempSync(join(tmpdir(), "clio-daemon-sockets-"));
+	// Masks are realpath'd, so the root must be too when TMPDIR has a symlinked component (macOS /var).
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-daemon-sockets-")));
 	after(() => rmSync(root, { recursive: true, force: true }));
 
 	it("masks container and virtualization daemon sockets that exist under the root", () => {
