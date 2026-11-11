@@ -698,7 +698,6 @@ const COMPOSITION_ROOT_FUNCTIONS: ReadonlySet<string> = new Set([
 	"readFlowSessionEntries",
 	"readRecentSessionEntriesForContract",
 	"bindAcpHandoff",
-	"startupWorktreeRootSetting",
 ]);
 
 /** The composition root's size after the 0.7.0 refactor, with room for wiring only. */

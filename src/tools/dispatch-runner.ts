@@ -1382,7 +1382,7 @@ async function runCompete(
 	// Startup recovery intentionally sweeps only groups that another lifecycle
 	// durably marked cleanup-ready after all of its workers settled. Active,
 	// preserved, and malformed crash leftovers remain untouched.
-	recoverCleanupReadyCompeteGroups(requestedRoot);
+	await recoverCleanupReadyCompeteGroups(requestedRoot);
 	const group = newGateGroupId("compete");
 	// Compete opens no agent ledger. A shared board let candidates read each
 	// other's live posts, which correlates attempts that are meant to be
@@ -1914,7 +1914,7 @@ async function runApplyWinner(
 	if (!isGitRepository(root)) {
 		return { kind: "error", message: `dispatch: apply_winner requires a git repository at ${root}` };
 	}
-	recoverCleanupReadyCompeteGroups(root);
+	await recoverCleanupReadyCompeteGroups(root);
 	const ownership = loadCompeteGroup(root, group);
 	if (ownership === null) {
 		return {

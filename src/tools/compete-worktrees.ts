@@ -33,6 +33,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
@@ -163,20 +164,42 @@ function validRunLease(value: unknown): value is CompeteRunLease {
 	);
 }
 
-function waitForProcessExit(pid: number, birthToken: string): boolean {
+interface LeasedProcessExit {
+	pid: number;
+	birthToken: string;
+}
+
+function leasedProcessGone({ pid, birthToken }: LeasedProcessExit): boolean {
+	const snapshot = processSnapshot(pid);
+	return !snapshot.alive || snapshot.birthToken !== birthToken;
+}
+
+function waitForProcessExit(exit: LeasedProcessExit): boolean {
 	const deadline = Date.now() + PROCESS_EXIT_GRACE_MS;
 	const sleeper = new Int32Array(new SharedArrayBuffer(4));
 	while (Date.now() < deadline) {
-		const snapshot = processSnapshot(pid);
-		if (!snapshot.alive || snapshot.birthToken !== birthToken) return true;
+		if (leasedProcessGone(exit)) return true;
 		Atomics.wait(sleeper, 0, 0, PROCESS_POLL_MS);
 	}
-	const finalSnapshot = processSnapshot(pid);
-	return !finalSnapshot.alive || finalSnapshot.birthToken !== birthToken;
+	return leasedProcessGone(exit);
 }
 
-/** Terminate only the exact process identity durably leased to this group. */
-function terminateRunLease(lease: CompeteRunLease): boolean {
+/** The same grace as waitForProcessExit, polled without holding the event loop. */
+async function waitForProcessExitAsync(exit: LeasedProcessExit): Promise<boolean> {
+	const deadline = Date.now() + PROCESS_EXIT_GRACE_MS;
+	while (Date.now() < deadline) {
+		if (leasedProcessGone(exit)) return true;
+		await sleep(PROCESS_POLL_MS);
+	}
+	return leasedProcessGone(exit);
+}
+
+/**
+ * Terminate only the exact process identity durably leased to this group:
+ * SIGTERM, then SIGKILL. After each signal the step yields the process for its
+ * driver to wait on and resumes with whether it exited.
+ */
+function* terminateRunLeaseSteps(lease: CompeteRunLease): Generator<LeasedProcessExit, boolean, boolean> {
 	if (lease.pid === null) return true;
 	const snapshot = processSnapshot(lease.pid);
 	if (!snapshot.alive) return true;
@@ -184,20 +207,29 @@ function terminateRunLease(lease: CompeteRunLease): boolean {
 	if (lease.birthToken !== snapshot.birthToken) return true;
 
 	const target = lease.processGroup && process.platform !== "win32" ? -lease.pid : lease.pid;
-	try {
-		process.kill(target, "SIGTERM");
-	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ESRCH") return true;
-		return false;
+	for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+		try {
+			process.kill(target, signal);
+		} catch (err) {
+			return (err as NodeJS.ErrnoException).code === "ESRCH";
+		}
+		if (yield { pid: lease.pid, birthToken: lease.birthToken }) return true;
 	}
-	if (waitForProcessExit(lease.pid, lease.birthToken)) return true;
-	try {
-		process.kill(target, "SIGKILL");
-	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ESRCH") return true;
-		return false;
-	}
-	return waitForProcessExit(lease.pid, lease.birthToken);
+	return false;
+}
+
+function terminateRunLease(lease: CompeteRunLease): boolean {
+	const steps = terminateRunLeaseSteps(lease);
+	let step = steps.next();
+	while (!step.done) step = steps.next(waitForProcessExit(step.value));
+	return step.value;
+}
+
+async function terminateRunLeaseAsync(lease: CompeteRunLease): Promise<boolean> {
+	const steps = terminateRunLeaseSteps(lease);
+	let step = steps.next();
+	while (!step.done) step = steps.next(await waitForProcessExitAsync(step.value));
+	return step.value;
 }
 
 function validateGroup(group: string): void {
@@ -814,6 +846,9 @@ export function settleRecoveredCompeteDecision(
 	return ownership;
 }
 
+/** The last queued recovery of each canonical root. */
+const recoveryTails = new Map<string, Promise<void>>();
+
 /**
  * Recover restart leftovers without guessing ownership.
  *
@@ -825,11 +860,33 @@ export function settleRecoveredCompeteDecision(
  *
  * This function is safe at orchestrator startup and before every compete
  * operation. A failed termination keeps the ownership proof and worktrees.
+ * Termination waits without holding the event loop, and recoveries of one
+ * root run one at a time, so a compete operation never sweeps a group that a
+ * startup recovery is still terminating.
  */
 export function recoverCleanupReadyCompeteGroups(
 	root: string,
 	options: CompeteRecoveryOptions = {},
-): CompeteRecoveryResult {
+): Promise<CompeteRecoveryResult> {
+	let key: string;
+	try {
+		key = canonicalRoot(root);
+	} catch (err) {
+		return Promise.reject(err);
+	}
+	const run = (recoveryTails.get(key) ?? Promise.resolve()).then(() => recoverCompeteGroups(key, options));
+	const tail = run.then(
+		() => {},
+		() => {},
+	);
+	recoveryTails.set(key, tail);
+	void tail.then(() => {
+		if (recoveryTails.get(key) === tail) recoveryTails.delete(key);
+	});
+	return run;
+}
+
+async function recoverCompeteGroups(root: string, options: CompeteRecoveryOptions): Promise<CompeteRecoveryResult> {
 	const canonical = canonicalRoot(root);
 	const parent = competeParent(canonical);
 	const result: CompeteRecoveryResult = { cleaned: [], preserved: [], failed: [] };
@@ -860,7 +917,8 @@ export function recoverCleanupReadyCompeteGroups(
 				result.preserved.push(entry.name);
 				continue;
 			}
-			const unterminated = manifest.runs.filter((run) => !terminateRunLease(run));
+			const unterminated: CompeteRunLease[] = [];
+			for (const run of manifest.runs) if (!(await terminateRunLeaseAsync(run))) unterminated.push(run);
 			if (unterminated.length > 0) {
 				result.failed.push({
 					group: entry.name,

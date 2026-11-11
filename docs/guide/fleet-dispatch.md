@@ -956,7 +956,8 @@ removes it.
 <summary>What crash recovery removes, preserves, and refuses to touch</summary>
 
 At the next start in the same checkout, a claim that is still `active` while its
-owner is gone is a crash.
+owner is gone is a crash. Recovery runs once the first frame is up, and no
+dispatch is admitted until it has finished.
 
 A worktree with no commit beyond its base and no modified, staged, or untracked
 file is removed with its branch, and so is one whose tmpfs working tree a reboot
@@ -1297,10 +1298,13 @@ including abort, and every removed candidate is first archived under a recovery 
 
 The compete group is a durable transaction owner. Its manifest records the
 coordinator identity and every admitted worker process before the dispatch
-handle is returned. At orchestrator startup, Clio uses process birth tokens
+handle is returned. When the orchestrator restarts, Clio uses process birth tokens
 to distinguish the leased process from PID reuse, terminates an abandoned
 worker or ACP process group, and then removes the group's registered
-worktrees and branches. If a judge output is waiting in the decision journal,
+worktrees and branches. This recovery starts once the first frame is up (at
+session start for a headless or ACP run), so its termination grace never holds
+the screen or input; the first dispatch waits for it to finish before it is
+admitted. If a judge output is waiting in the decision journal,
 the workers are quiesced but the candidates remain until that output is bound
 to a judge run whose seal verifies; a recovered winner is preserved for
 operator inspection rather than silently auto-applied after restart.

@@ -22,6 +22,11 @@ export type {
 	DispatchAssignment,
 } from "./assignment.js";
 export type { AssignmentVerdictOwner, DurableAssignmentRecord } from "./assignment-store.js";
+export {
+	createWorktreeBootRecovery,
+	type WorktreeBootRecovery,
+	type WorktreeBootRecoveryOptions,
+} from "./boot-recovery.js";
 export { endpointCapacityHolders, endpointCapacityUsage } from "./capacity-lease.js";
 export type { CodeStepOutcome, CodeStepRecord, CodeStepRunInput } from "./code-step.js";
 export {

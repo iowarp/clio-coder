@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // Keep the development gate small and source-only. Package, platform and
 // historical regressions stay available through their explicit commands.
 export const coreTests = [
+	"boot-recovery",
 	"node-tools-remedy-relay",
 	"provider-oauth-apikey-env",
 	"cost-ceiling-side-calls",

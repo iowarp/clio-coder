@@ -302,6 +302,7 @@ import {
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
+import type { WorktreeBootRecovery } from "./boot-recovery.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope, workerBudgetFromEnvelope } from "./budget-envelope.js";
 import { cancelDetail, FLEET_CANCEL_DETAIL, takeRunCancelRequest } from "./cancel-requests.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
@@ -801,6 +802,12 @@ export interface DispatchBundleOptions {
 	 * `journal: null` so a tool-path run is transcribed once, not twice.
 	 */
 	journalRunEvents?: boolean;
+	/**
+	 * Restart worktree recovery that boot starts after the first frame. The
+	 * ledger scan and every admission wait for it; admission starts it if boot
+	 * has not yet. Absent, start() scans the ledger itself before it returns.
+	 */
+	bootRecovery?: WorktreeBootRecovery;
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
@@ -3841,6 +3848,9 @@ export function createDispatchBundle(
 	// Durable evidence owner used by shadow observation and active readiness.
 	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
 	let ledger: Ledger | null = null;
+	// The ledger scan and assignment reconcile, after restart worktree recovery (start()).
+	let startupRecovery: Promise<void> = Promise.resolve();
+	let startupRecovered = false;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
 	// Phase D: the trusted broker for worker asks routed to the main agent. It
@@ -10002,6 +10012,12 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunResult>;
 	}> {
+		// Restart recovery settles before any run is admitted, so no stale
+		// worktree or abandoned lease is reused (boot-recovery.ts).
+		if (!startupRecovered) {
+			void options?.bootRecovery?.start();
+			await startupRecovery;
+		}
 		// A retry re-enters here with the request it was first admitted under, so
 		// only a request that has never been stamped takes the current session.
 		const sessionOrigin = options?.getSessionOrigin?.();
@@ -10977,67 +10993,77 @@ export function createDispatchBundle(
 			// No in-memory executor survives a process restart, so every active
 			// side-store lease from an earlier bundle is orphaned and must expire.
 			cleanupDispatchReservations({ startup: true, nowMs: now() });
-			ledger = openLedger({
+			const runLedger = openLedger({
 				get maxRuns() {
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
 				},
 			});
-			// Symphony P10: restart recovery from durable artifacts. A row whose
-			// host died settles from its run's journal, or closes as stalled.
-			try {
-				const recovery = recoverAbandonedRuns(ledger, {
-					journalUnsealed: (runId) => {
-						const directory = telemetryRunDirectory(clioStateDir(), runId);
-						return existsSync(telemetryJournalPath(directory)) && !existsSync(telemetryBundlePath(directory));
-					},
-				});
-				for (const { runId, settlement } of recovery.unsettled)
-					void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), settlement)).catch(
-						(error) => reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
-					);
-				// A terminal row persisted before its journal's seal landed gets that seal now (#434).
-				for (const runId of recovery.unsealed)
-					void trackDurableWrite(sealSettledRunJournal(telemetryRunDirectory(clioStateDir(), runId))).catch((error) =>
-						reportDispatchDiagnostic(`seal the journal of run ${runId}`, error),
-					);
-				if (recovery.abandoned > 0 || recovery.sealed > 0) {
-					await ledger.persist();
-					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
-						process.stderr.write(`[dispatch] ledger recovery: sealed=${recovery.sealed} abandoned=${recovery.abandoned}\n`);
+			ledger = runLedger;
+			const recoverRuns = async (): Promise<void> => {
+				// Symphony P10: restart recovery from durable artifacts. A row whose
+				// host died settles from its run's journal, or closes as stalled.
+				try {
+					const recovery = recoverAbandonedRuns(runLedger, {
+						journalUnsealed: (runId) => {
+							const directory = telemetryRunDirectory(clioStateDir(), runId);
+							return existsSync(telemetryJournalPath(directory)) && !existsSync(telemetryBundlePath(directory));
+						},
+					});
+					for (const { runId, settlement } of recovery.unsettled)
+						void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), settlement)).catch(
+							(error) => reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
+						);
+					// A terminal row persisted before its journal's seal landed gets that seal now (#434).
+					for (const runId of recovery.unsealed)
+						void trackDurableWrite(sealSettledRunJournal(telemetryRunDirectory(clioStateDir(), runId))).catch((error) =>
+							reportDispatchDiagnostic(`seal the journal of run ${runId}`, error),
+						);
+					if (recovery.abandoned > 0 || recovery.sealed > 0) {
+						await runLedger.persist();
+						if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
+							process.stderr.write(`[dispatch] ledger recovery: sealed=${recovery.sealed} abandoned=${recovery.abandoned}\n`);
+						}
 					}
+				} catch {
+					// Recovery is best-effort; a failed scan never blocks startup.
 				}
-			} catch {
-				// Recovery is best-effort; a failed scan never blocks startup.
-			}
-			// Reconcile durable assignments orphaned in `running` by a crash: the
-			// in-memory registry and retry queue do not survive restart, so an
-			// orphan can never settle without this pass. Resolves each against
-			// durable ledger evidence so wait/collect never hang on it.
-			try {
-				const reconciledLedger = ledger;
-				const reconciled = await reconcileOrphanAssignments({
-					listRunning: () => listStoredAssignments().filter((record) => record.status === "running"),
-					ownerAlive: assignmentProcessOwnerAlive,
-					lookupAttempt: (runId) => {
-						const envelope = reconciledLedger?.get(runId) ?? null;
-						if (!envelope) return null;
-						return {
-							runId,
-							terminal: envelope.status !== "running",
-							succeeded: envelope.outcome === "succeeded",
-						};
-					},
-					settle: (assignmentId, terminalRunId, status, owner) =>
-						settleStoredAssignment(assignmentId, terminalRunId, status, owner),
-				});
-				if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_CODER_INTERACTIVE !== "1") {
-					process.stderr.write(
-						`[dispatch] assignment reconcile: recovered=${reconciled.recovered} abandoned=${reconciled.abandoned}\n`,
-					);
+				// Reconcile durable assignments orphaned in `running` by a crash: the
+				// in-memory registry and retry queue do not survive restart, so an
+				// orphan can never settle without this pass. Resolves each against
+				// durable ledger evidence so wait/collect never hang on it.
+				try {
+					const reconciled = await reconcileOrphanAssignments({
+						listRunning: () => listStoredAssignments().filter((record) => record.status === "running"),
+						ownerAlive: assignmentProcessOwnerAlive,
+						lookupAttempt: (runId) => {
+							const envelope = runLedger.get(runId) ?? null;
+							if (!envelope) return null;
+							return {
+								runId,
+								terminal: envelope.status !== "running",
+								succeeded: envelope.outcome === "succeeded",
+							};
+						},
+						settle: (assignmentId, terminalRunId, status, owner) =>
+							settleStoredAssignment(assignmentId, terminalRunId, status, owner),
+					});
+					if ((reconciled.recovered > 0 || reconciled.abandoned > 0) && process.env.CLIO_CODER_INTERACTIVE !== "1") {
+						process.stderr.write(
+							`[dispatch] assignment reconcile: recovered=${reconciled.recovered} abandoned=${reconciled.abandoned}\n`,
+						);
+					}
+				} catch {
+					// Reconciliation is best-effort; a failure never blocks startup.
 				}
-			} catch {
-				// Reconciliation is best-effort; a failure never blocks startup.
-			}
+			};
+			// Boot starts its worktree recovery after the first frame; the scan
+			// follows it, so abandoned rows observe the workers it terminated.
+			const bootRecovery = options?.bootRecovery;
+			startupRecovery = bootRecovery ? bootRecovery.settled.then(recoverRuns) : recoverRuns();
+			void startupRecovery.then(() => {
+				startupRecovered = true;
+			});
+			if (!bootRecovery) await startupRecovery;
 			startHeartbeatWatchdog();
 			probeEndpointsAtDefaultBound();
 		},
@@ -11051,6 +11077,9 @@ export function createDispatchBundle(
 				rejectStop = reject;
 			});
 			void (async () => {
+				// A recovery already under way finishes before the drain and the final
+				// ledger flush; one boot never started stays for the next boot.
+				if (options?.bootRecovery?.started !== false) await startupRecovery;
 				// Shutdown is process-local. The durable machine-wide drain belongs to
 				// the operator: setting it here would deny admission in every sibling
 				// Clio process, and a crash before the clearing write would wedge the

@@ -101,16 +101,15 @@ import { runOperatorRecall } from "../domains/context/working-set/operator-recal
 import { createSessionRereadPort } from "../domains/context/working-set/session-reread.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
-import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
 import {
 	compileFleetRunPreview,
 	createDispatchDomainModule,
+	createWorktreeBootRecovery,
 	executeFleetRun,
 	fleetRouteResolver,
 	runUsageFromCallRecords,
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
-import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import {
 	createExtensionRuntimeHookBridge,
 	ExtensionsDomainModule,
@@ -380,14 +379,11 @@ import { BUILTIN_SLASH_COMMANDS, formatExtensionReloadNotice } from "../session-
 import { runWatchdogReview } from "../session-control/watchdog-run.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
 import { registerAllTools } from "../tools/bootstrap.js";
-import { isGitRepository, recoverCleanupReadyCompeteGroups } from "../tools/compete-worktrees.js";
 import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.js";
 import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { acpHostReadOnlySource, createRegistry } from "../tools/registry.js";
 import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
-import { gitCheckoutRoot, recoverTaskWorktrees } from "../tools/task-worktree.js";
-import { allowedWorktreeParents } from "../tools/worktree-root.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -768,67 +764,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
-	// A hard-killed coordinator cannot run domain drains. Reconcile its compete
-	// process leases before dispatch startup scans the ledger, so abandoned rows
-	// observe dead workers and no stale worktree can be reused by this boot.
-	if (isGitRepository(process.cwd())) {
-		try {
-			const pendingGate = readPendingGateDecisions();
-			const pendingCompeteGroups = new Set<string>();
-			for (const handle of pendingGate.records) {
-				if (handle.record.kind === "output" && handle.record.topology === "compete") {
-					pendingCompeteGroups.add(handle.record.group);
-				} else if (handle.record.kind === "decision" && handle.record.decision.topology === "compete") {
-					pendingCompeteGroups.add(handle.record.decision.group);
-				}
-			}
-			const durableDecisions = readGateDecisionArtifacts();
-			const confirmedGroups = new Set(
-				durableDecisions
-					.filter(
-						({ artifact }) =>
-							artifact.topology === "compete" &&
-							(artifact.outcome === "operator-confirmed" || normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied"),
-					)
-					.map(({ artifact }) => artifact.group),
-			);
-			for (const { artifact } of durableDecisions) {
-				if (artifact.topology === "compete" && artifact.outcome === "winner" && !confirmedGroups.has(artifact.group)) {
-					pendingCompeteGroups.add(artifact.group);
-				}
-			}
-			const recovery = recoverCleanupReadyCompeteGroups(process.cwd(), {
-				preserveActiveGroups: pendingCompeteGroups,
-				preserveAllActive: pendingGate.errors.length > 0,
-			});
-			for (const failure of recovery.failed) {
-				bootStderr(`[dispatch] compete recovery preserved ${failure.group}: ${failure.message}\n`);
-			}
-		} catch (err) {
-			bootStderr(`[dispatch] compete recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
-		}
-		// Task worktrees (`worktree: true`) get the same restart sweep: a dead
-		// owner's empty worktree goes, one holding work stays and is named once.
-		try {
-			// Dispatch creates them under the checkout root, which a session started
-			// in a subdirectory is not.
-			const checkout = gitCheckoutRoot(process.cwd()) ?? process.cwd();
-			// A configured absolute root is only known from settings; the disk and
-			// tmpfs locations are recognized whatever the settings say.
-			const worktreeRootSetting = options.startupSettings?.fleet.worktrees.root ?? startupWorktreeRootSetting();
-			const recovery = recoverTaskWorktrees(checkout, allowedWorktreeParents(worktreeRootSetting, checkout));
-			for (const kept of recovery.preserved) {
-				bootStderr(
-					`[dispatch] task worktree recovery preserved ${kept.runId}: ${kept.reason} on ${kept.branch}; inspect with git log ${kept.base}..${kept.branch}\n`,
-				);
-			}
-			for (const failure of recovery.failed) {
-				bootStderr(`[dispatch] task worktree recovery preserved ${failure.runId}: ${failure.message}\n`);
-			}
-		} catch (err) {
-			bootStderr(`[dispatch] task worktree recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
-		}
-	}
+	// A hard-killed coordinator leaves compete groups and task worktrees behind.
+	// Their recovery starts once the first frame is up; dispatch holds its ledger
+	// scan and every admission until it settles.
+	const worktreeRecovery = createWorktreeBootRecovery({
+		cwd: process.cwd(),
+		...(options.startupSettings ? { worktreeRootSetting: options.startupSettings.fleet.worktrees.root } : {}),
+	});
 	// The first turn since the orchestrator graph loaded.
 	await bootPhaseBoundary?.();
 
@@ -983,6 +925,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// dispatch all have to leave the same transcript behind, and only
 				// the last of the three ever reaches that registry.
 				journalRunEvents: true,
+				bootRecovery: worktreeRecovery,
 			}),
 		],
 		{ diagnostic: bootStderr, ...(bootPhaseBoundary ? { beforeEach: bootPhaseBoundary } : {}) },
@@ -1034,6 +977,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const acpMode = options.acp !== undefined;
 	const interactive = !options.headless && !acpMode && process.env.CLIO_CODER_INTERACTIVE === "1";
 	if (interactive || acpMode) dispatch?.warmRouteHistory?.();
+	// Headless and ACP boots paint no frame; recovery starts with the session.
+	if (!interactive) void worktreeRecovery.start();
 	if (!interactive && !options.headless && !acpMode) {
 		bootStdout(buildBanner());
 		if (process.env.CLIO_CODER_TIMING === "1") bootStdout(`${timer.report()}\n`);
@@ -4563,12 +4508,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						// Every reload subscriber exists now; a settings write held
 						// during hydration reloads here.
 						config?.releaseReloads?.();
+						void worktreeRecovery.start();
 					},
 				}
 			: {
 					onFirstFrameCommit: () => {
 						timer.mark("first TUI paint");
 						recordBoot();
+						void worktreeRecovery.start();
 					},
 				}),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
@@ -4767,13 +4714,4 @@ function bindAcpHandoff(deps: HandoffServiceDeps): AcpHandoffControl {
 		prepare: (goal) => prepareHandoff(deps, goal),
 		commit: (draft, document) => commitHandoff(deps, draft, document),
 	};
-}
-
-/** The configured task worktree root, or the default when settings cannot be read this early in boot. */
-function startupWorktreeRootSetting(): string {
-	try {
-		return readSettings().fleet.worktrees.root;
-	} catch {
-		return "disk";
-	}
 }
