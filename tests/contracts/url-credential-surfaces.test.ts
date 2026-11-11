@@ -12,7 +12,12 @@ import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
 import { appendRunFeed, holdBack, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
-import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
+import {
+	createRedactionTally,
+	redactCommandOutputSecrets,
+	redactSecretSegments,
+	redactSecretsText,
+} from "../../src/domains/evidence/redact.js";
 import {
 	endsInOpenCredential,
 	headGuardAfter,
@@ -1439,4 +1444,20 @@ test("a git token arriving in short deltas never paints any of its characters", 
 		ok(!frame.includes("ghp_") && !frame.includes("Ab1"), frame);
 	}
 	ok(!redactStreamingSecretString(text, true).includes("Ab1"));
+});
+
+test("a quoted secret is redacted as one whole value and counted", () => {
+	for (const redact of [redactCommandOutputSecrets, redactSecretsText]) {
+		for (const [input, leaks] of [
+			['TOKEN="a b c"', ["a b c", " b ", 'c"']],
+			["--password 'a b'", ["a b", " b'"]],
+		] as const) {
+			const tally = createRedactionTally();
+			const out = redact(input, tally);
+			for (const leak of leaks) ok(!out.includes(leak), `${redact.name}: ${out}`);
+			ok(tally.count >= 1, `${redact.name} counted nothing for ${input}`);
+		}
+		const masked = "Authorization: ******";
+		strictEqual(redact(masked, createRedactionTally()), masked);
+	}
 });
