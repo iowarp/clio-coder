@@ -73,7 +73,15 @@ export const COUNCIL_VOTE_MEMBER_DIRECTIVE = [
  * the approval artifact shows the exact ask the member receives.
  */
 export function renderCouncilVoteMemberTask(originalTask: string): string {
-	return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE].join("\n\n");
+	// A task that lists its options (as /poll writes them) gets a neutral verdict placeholder, so the shape's
+	// example "yes" is not copied as a ballot. Every other council keeps the directive byte for byte.
+	const listed = /^Choose exactly one of these options: (.+)\. Your verdict is that option, verbatim\.$/mu.exec(
+		originalTask,
+	);
+	if (listed === null) return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE].join("\n\n");
+	const placeholder = `<one of: ${(listed[1] ?? "").split(", ").join("|")}>`;
+	const shape = COUNCIL_BALLOT_SHAPE.replace('"verdict":"yes"', `"verdict":${JSON.stringify(placeholder)}`);
+	return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE.replace(COUNCIL_BALLOT_SHAPE, shape)].join("\n\n");
 }
 
 /**

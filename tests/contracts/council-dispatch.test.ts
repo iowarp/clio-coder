@@ -184,3 +184,16 @@ test("/poll seats n independent vote members cycling over --models and tallies t
 	strictEqual(buildPollDispatchArgs({ participants: 6, question: "q" }, { target: "chat" }).ok, false);
 	match(formatPollTally({ tabs: 2, spaces: 1 }, 3), /^poll: 3 of 3 voted; majority: tabs\n {2}tabs {4}## 2 \(67%\)/);
 });
+
+test("a vote task that lists options gets a neutral verdict placeholder; others keep the directive", async () => {
+	const { renderCouncilVoteMemberTask, COUNCIL_VOTE_MEMBER_DIRECTIVE } = await import(
+		"../../src/domains/dispatch/gate-role-prompts.js"
+	);
+	const { renderPollQuestion } = await import("../../src/session-control/poll.js");
+	strictEqual(renderCouncilVoteMemberTask("plain"), `plain\n\n${COUNCIL_VOTE_MEMBER_DIRECTIVE}`);
+	const polled = renderCouncilVoteMemberTask(
+		renderPollQuestion({ participants: 3, question: "q", options: ["a", "b", "c"] }),
+	);
+	match(polled, /\{"verdict":"<one of: a\|b\|c>","text":/);
+	ok(!polled.includes('"verdict":"yes"'));
+});
