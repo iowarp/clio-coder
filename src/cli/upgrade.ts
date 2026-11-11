@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { initializeClioHome, recordHomeDowngrade } from "../core/init.js";
+import { appliedMigrationIds, initializeClioHome, recordHomeDowngrade } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../core/xdg.js";
 import { createUpdateLog, deferredUpdateTarget, installHold } from "../domains/lifecycle/deferred-update.js";
@@ -238,6 +238,37 @@ function installedVersionAt(prefix: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+function scriptFilesUnder(dir: string): string[] {
+	try {
+		return readdirSync(dir, { withFileTypes: true, recursive: true })
+			.filter((entry) => entry.isFile() && /\.[cm]?js$/.test(entry.name))
+			.map((entry) => join(entry.parentPath, entry.name));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * The applied migration ids the package at `packageRoot` never mentions, which it cannot know it already ran; null
+ * when its bundle cannot be read. A registered id appears in the bundle as a string literal.
+ */
+function migrationsUnknownTo(packageRoot: string, applied: ReadonlyArray<string>): string[] | null {
+	const files = scriptFilesUnder(join(packageRoot, "dist"));
+	if (files.length === 0) return null;
+	const unknown = new Set(applied);
+	for (const file of files) {
+		if (unknown.size === 0) break;
+		let text: string;
+		try {
+			text = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		for (const id of unknown) if (text.includes(`"${id}"`)) unknown.delete(id);
+	}
+	return applied.filter((id) => unknown.has(id));
 }
 
 /** The Node that runs `installation`: its managed runtime for install.sh, else this process's. */
@@ -577,12 +608,35 @@ export async function runUpgradeCommand(
 			return 1;
 		}
 		// The older binary refuses a home a newer version stamped; record the rollback as an accepted downgrade.
-		if (installedVersionAt(record.previous) !== null) recordHomeDowngrade(previousVersion);
+		// A rollback to a newer version has nothing to accept and keeps the home's record as it is.
+		let downgrade: { accepted: string[] | null } | { error: string } | null = null;
+		if (installedVersionAt(record.previous) !== null) {
+			try {
+				if (recordHomeDowngrade(previousVersion, { onlyFromNewer: true }))
+					downgrade = {
+						accepted: migrationsUnknownTo(installerPackageRoot(record.previous), appliedMigrationIds()),
+					};
+			} catch (err) {
+				downgrade = { error: err instanceof Error ? err.message : String(err) };
+			}
+		}
 		// The installer's own lines, without its tag, are the record of what changed.
 		for (const line of result.stdout.split(/\r?\n/)) {
 			const text = line.replace(/^\[install\]\s*/, "").trim();
 			if (text) presenter.completedStep(`${text.charAt(0).toUpperCase()}${text.slice(1)}`);
 		}
+		if (downgrade !== null && "error" in downgrade)
+			presenter.warn(
+				`Could not record ${previousVersion} as this home's version (${downgrade.error}); it asks before opening the home, and headless runs need CLIO_CODER_ALLOW_OLDER=1`,
+			);
+		else if (downgrade?.accepted === null)
+			presenter.note(
+				`${previousVersion} opens this home without asking; its package could not be read to list the migrations it does not know.`,
+			);
+		else if (downgrade !== null && downgrade.accepted.length > 0)
+			presenter.note(
+				`${previousVersion} opens this home without asking and accepts the migrations it does not know: ${downgrade.accepted.join(", ")}.`,
+			);
 		presenter.note(`Sessions already running keep ${before}; ${RESUME_HINT} to continue one on ${previousVersion}.`);
 		presenter.done("Done");
 		return 0;

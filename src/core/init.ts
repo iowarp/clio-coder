@@ -290,19 +290,28 @@ function newerHomeOf(metadata: InstallMetadata, runningVersion: string, stateDir
 	return { version: metadata.version, unknownMigrations };
 }
 
-function unknownAppliedMigrations(stateDir: string): string[] {
-	const registered = new Set<string>([...REGISTERED_MIGRATION_IDS, ...RETIRED_MIGRATION_IDS]);
+function appliedMigrations(stateDir: string): string[] {
 	for (const path of [migrationManifestPath(), legacyMigrationManifestPath(stateDir)]) {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8")) as { applied?: unknown };
 			if (!Array.isArray(parsed.applied)) return [];
-			return parsed.applied.filter((id): id is string => typeof id === "string" && !registered.has(id));
+			return parsed.applied.filter((id): id is string => typeof id === "string");
 		} catch {
 			return [];
 		}
 	}
 	return [];
+}
+
+function unknownAppliedMigrations(stateDir: string): string[] {
+	const registered = new Set<string>([...REGISTERED_MIGRATION_IDS, ...RETIRED_MIGRATION_IDS]);
+	return appliedMigrations(stateDir).filter((id) => !registered.has(id));
+}
+
+/** The migration ids this home's manifest records as applied. */
+export function appliedMigrationIds(): string[] {
+	return appliedMigrations(resolveClioDirs().state);
 }
 
 /** The newer Clio that last used this home, or null. Reads only; writes nothing. */
@@ -316,14 +325,20 @@ export function detectNewerHome(): NewerHome | null {
  * The operator accepted running an older Clio on a newer home: record the
  * downgrade so later boots do not ask, and the home is that version's again.
  * `version` defaults to the running one; `upgrade --rollback` passes the
- * version it switched the launcher to, whose binary reads this record.
+ * version it switched the launcher to, whose binary reads this record, with
+ * `onlyFromNewer` so a rollback to a newer version records nothing. True when
+ * the record was written.
  */
-export function recordHomeDowngrade(version: string = readClioVersion()): void {
+export function recordHomeDowngrade(
+	version: string = readClioVersion(),
+	options: { onlyFromNewer?: boolean } = {},
+): boolean {
 	const stateDir = clioStateDir();
 	const installPath = join(stateDir, "home.json");
-	withStateFileLockSync(installPath, () => {
+	return withStateFileLockSync(installPath, () => {
 		const metadata = readInstallMetadata(installPath);
-		if (!metadata) return;
+		if (!metadata) return false;
+		if (options.onlyFromNewer && !isNewerRelease(metadata.version, version)) return false;
 		const payload: InstallMetadata = {
 			version,
 			...(metadata.installedAt !== undefined ? { installedAt: metadata.installedAt } : {}),
@@ -334,6 +349,7 @@ export function recordHomeDowngrade(version: string = readClioVersion()): void {
 			nodeVersion: process.version,
 		};
 		safeResourceWrite(installPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+		return true;
 	});
 }
 

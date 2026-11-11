@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { runUpgradeCommand } from "../../src/cli/upgrade.js";
 import { detectNewerHome, initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
@@ -15,6 +15,7 @@ import {
 	npmInstallArgs,
 } from "../../src/domains/lifecycle/install-method.js";
 import { listMigrations } from "../../src/domains/lifecycle/migrations/index.js";
+import { migrationManifestPath } from "../../src/domains/lifecycle/migrations/registry-ids.js";
 import { describeUpgradeNotice } from "../../src/domains/lifecycle/upgrade-notice.js";
 import { isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 
@@ -375,42 +376,86 @@ test("rollback refuses manager-owned installs before any child command", (t) => 
 	assert.match(named.stdout, /npm install -g --prefix .* @iowarp\/clio-coder@0\.6\.9/);
 });
 
+async function rollBackTo(
+	homeDir: string,
+	version: string,
+	distSource = "",
+): Promise<{ code: number; stamped: { version: string; downgradedFrom?: string }; messages: string[] }> {
+	const root = join(homeDir, "install");
+	const previous = join(root, "versions", version);
+	const pkg = join(previous, "lib/node_modules/@iowarp/clio-coder");
+	mkdirSync(join(pkg, "dist/cli"), { recursive: true });
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ version }));
+	writeFileSync(join(pkg, "dist/cli/index.js"), distSource);
+	mkdirSync(join(root, "scripts"), { recursive: true });
+	writeFileSync(join(root, "scripts", "install.sh"), "echo '[install] switched'\n");
+	const written: string[] = [];
+	// The test runner reports through stdout as binary frames; only the command's own text is captured.
+	const forward = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array) => boolean;
+	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+		if (typeof chunk !== "string") return forward(chunk);
+		written.push(chunk);
+		return true;
+	});
+	let code: number;
+	try {
+		code = await runUpgradeCommand(["--rollback", "--json"], {
+			inspectInstallation: () => ({
+				kind: "installer",
+				root,
+				entry: join(root, "versions", "current", "dist/cli/index.js"),
+				prefix: join(root, "versions", "current"),
+				installer: {
+					root,
+					node: process.execPath,
+					nodeVersion: "24",
+					nodeBuild: "linux-x64",
+					current: join(root, "versions", "current"),
+					previous,
+					launcher: join(homeDir, "bin", "clio-coder"),
+					channel: "latest",
+				},
+			}),
+		});
+	} finally {
+		write.mock.restore();
+	}
+	const report = JSON.parse(written.join("")) as { steps?: Array<{ message: string }> };
+	return {
+		code,
+		stamped: JSON.parse(readFileSync(join(homeDir, "state", "home.json"), "utf8")),
+		messages: (report.steps ?? []).map((step) => step.message),
+	};
+}
+
 test("a native rollback leaves the older version able to open the home the newer one used", {
 	skip: process.platform === "win32",
 }, async (t) => {
 	const home = await isolateClioEnv("clio-rollback-home-");
 	t.after(() => home.restore());
 	initializeClioHome();
-	const root = join(home.dir, "install");
-	const previous = join(root, "versions", "0.7.0");
-	mkdirSync(join(previous, "lib/node_modules/@iowarp/clio-coder"), { recursive: true });
-	writeFileSync(join(previous, "lib/node_modules/@iowarp/clio-coder/package.json"), '{"version":"0.7.0"}');
-	mkdirSync(join(root, "scripts"), { recursive: true });
-	writeFileSync(join(root, "scripts", "install.sh"), "echo '[install] switched'\n");
-	const code = await runUpgradeCommand(["--rollback", "--json"], {
-		inspectInstallation: () => ({
-			kind: "installer",
-			root,
-			entry: join(root, "versions", "current", "dist/cli/index.js"),
-			prefix: join(root, "versions", "current"),
-			installer: {
-				root,
-				node: process.execPath,
-				nodeVersion: "24",
-				nodeBuild: "linux-x64",
-				current: join(root, "versions", "current"),
-				previous,
-				launcher: join(home.dir, "bin", "clio-coder"),
-				channel: "latest",
-			},
-		}),
-	});
+	writeFileSync(
+		migrationManifestPath(),
+		JSON.stringify({ applied: ["2026-09-01-settings-v2", "2099-01-01-from-the-newer-version"] }),
+	);
+	const { code, stamped, messages } = await rollBackTo(home.dir, "0.7.0", 'const ids = ["2026-09-01-settings-v2"];\n');
 	assert.equal(code, 0);
-	const stamped = JSON.parse(readFileSync(join(home.dir, "state", "home.json"), "utf8")) as {
-		version: string;
-		downgradedFrom?: string;
-	};
 	assert.deepEqual([stamped.version, stamped.downgradedFrom], ["0.7.0", readClioVersion()]);
+	const accepted = messages.filter((message) => message.includes("2099-01-01-from-the-newer-version"));
+	assert.equal(accepted.length, 1, messages.join("\n"));
+	assert.ok(!accepted[0]?.includes("2026-09-01-settings-v2"), accepted[0]);
+});
+
+test("rolling back to a newer version records no downgrade", { skip: process.platform === "win32" }, async (t) => {
+	const home = await isolateClioEnv("clio-rollback-forward-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const homeJson = join(home.dir, "state", "home.json");
+	const before = { ...JSON.parse(readFileSync(homeJson, "utf8")), version: "0.7.0", upgradedFrom: "0.6.9" };
+	writeFileSync(homeJson, JSON.stringify(before));
+	const { code, stamped } = await rollBackTo(home.dir, readClioVersion());
+	assert.equal(code, 0);
+	assert.deepEqual(stamped, before);
 });
 
 test("upgrade refuses while another registered session runs from an npm prefix the deferred wrapper owns", async (t) => {

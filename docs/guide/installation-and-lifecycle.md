@@ -665,10 +665,14 @@ and exits 0. A real run relays the installer's lines,
 `Rolled back to <previous>; <replaced> stays installed and another rollback returns to it`
 and `Background updates disabled until explicitly enabled`, then notes that sessions
 already running keep the old version and that starting `clio-coder` in the project
-and typing `/resume` continues one on the restored version. A successful rollback also
-records the restored version in `home.json` as an accepted downgrade, so the older version opens
-the home the newer one used without the newer-version prompt and without `CLIO_CODER_ALLOW_OLDER=1`
-for headless runs and ACP. A failed installer run exits 1 with
+and typing `/resume` continues one on the restored version. When the restored version is older
+than the one `home.json` records, a successful rollback also records it there as an accepted
+downgrade, so the older version opens the home the newer one used without the newer-version prompt
+and without `CLIO_CODER_ALLOW_OLDER=1` for headless runs and ACP, and a note lists the applied
+migrations the restored version does not know. A rollback to a newer version (the second rollback
+returning to the version just replaced) leaves `home.json` as it is, and that version's next start
+records the upgrade. If the record cannot be written, a warning says the restored version will ask
+first. A failed installer run exits 1 with
 `Rollback failed; the active version is unchanged`. A version pin moves to the
 restored version, so the next bare `upgrade` keeps that version, and the second line then ends with
 `; pinned <version>`. `--rollback` cannot combine with `--post-install`,
