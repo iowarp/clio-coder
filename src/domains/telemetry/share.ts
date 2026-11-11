@@ -446,7 +446,38 @@ export interface SharePlan {
  */
 function sharedHeader(header: SegmentHeader, installId: string): SegmentHeader {
 	const { chainHead: _chainHead, ...rest } = header;
-	return { ...rest, clockOrigin: { ...header.clockOrigin, host: installId, birthToken: null } };
+	return { ...rest, clockOrigin: { host: installId, ...UNLINKABLE_CLOCK } };
+}
+
+/**
+ * A shared header's process identity and clock epoch. The real pid and the process's wall-clock birth would link every
+ * share of one process, so a share carries the schema's least values instead; the local journal keeps the real ones.
+ */
+const UNLINKABLE_CLOCK = { pid: 1, birthToken: null, monoEpochWallMs: 0 } as const;
+
+/**
+ * A settings fingerprint as one share carries it: re-keyed with that share's own random key, so equal settings give
+ * equal values within one share and unrelated values across two shares of one install. Each form keeps its shape (a
+ * 64-hex commitment hash, a 64-hex digest, or an anonymous id), so the projection still holds as a fixed point.
+ */
+function rekeyFingerprint(value: unknown, shareKey: Buffer): unknown {
+	const mac = (text: string) => createHmac("sha256", shareKey).update(`settingsFingerprint\0${text}`).digest("hex");
+	if (typeof value === "string") return value.startsWith("anon_") ? `anon_${mac(value).slice(0, 16)}` : mac(value);
+	if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as { hash?: unknown }).hash === "string")
+		return { ...value, hash: mac((value as { hash: string }).hash) };
+	return value;
+}
+
+/** Every `settingsFingerprint` field in a record's payload, re-keyed for one share (see rekeyFingerprint). */
+function rekeySettingsFingerprints(value: unknown, shareKey: Buffer): unknown {
+	if (Array.isArray(value)) return value.map((item) => rekeySettingsFingerprints(item, shareKey));
+	if (!value || typeof value !== "object") return value;
+	return Object.fromEntries(
+		Object.entries(value).map(([key, item]) => [
+			key,
+			key === "settingsFingerprint" ? rekeyFingerprint(item, shareKey) : rekeySettingsFingerprints(item, shareKey),
+		]),
+	);
 }
 
 /** An identity or path as a share below research carries it: an id stable for this installation, not the value. */
@@ -477,6 +508,8 @@ interface ShareProjectionOptions {
 	models: "keep" | "anonymize";
 	tally?: ProjectionTally;
 	anonymized?: Map<AnonKind, Set<string>>;
+	/** This share's own random key; settings fingerprints are re-keyed with it so two shares cannot be linked. */
+	shareKey?: Buffer;
 }
 
 function admits(profile: ShareProfileDefinition, record: { tier: Tier; cc: ContentClass }): "tier" | "class" | null {
@@ -508,7 +541,7 @@ export function sealSharedScope(input: {
 		schemaSet: header.schemaSet,
 		mode: header.mode,
 		capture: { ...header.capture, content: header.capture.content && profile === "research" },
-		clockOrigin: { host: installId, pid: process.pid, birthToken: null, monoEpochWallMs: now.getTime() },
+		clockOrigin: { host: installId, ...UNLINKABLE_CLOCK },
 		writer,
 	};
 	const lines = [...input.lines, closing].map(encodeTelemetryLine);
@@ -601,6 +634,7 @@ function filterScope(
 		}
 		return anonymousId(shareSource, kind, value);
 	};
+	const shareKey = options.shareKey ?? randomBytes(32);
 	const tally = createRedactionTally();
 	const kept: Array<SegmentHeader | TelemetryRecord> = [];
 	let previousHeader = "";
@@ -623,12 +657,19 @@ function filterScope(
 			// redacting it would count a secret that was never there on every worker record.
 			const local = row.record.origin ? { ...row.record, origin: { ...row.record.origin, birthToken: null } } : row.record;
 			const redacted = redactTelemetryValue(local, tally, true);
-			const record = projectRecord(redacted, profile, projection, anonymize, options.tally);
+			const projected = projectRecord(redacted, profile, projection, anonymize, options.tally);
+			const record =
+				projected === null
+					? null
+					: ({
+							...projected,
+							data: rekeySettingsFingerprints(projected.data, shareKey),
+						} as TelemetryRecord);
 			if (record === null) {
 				dropped.unlisted += 1;
 				continue;
 			}
-			if (record !== redacted && canonicalJson(record.data) !== canonicalJson(redacted.data)) dropped.projected += 1;
+			if (projected && projected !== redacted && canonicalJson(projected.data) !== canonicalJson(redacted.data)) dropped.projected += 1;
 			kept.push(record.origin ? { ...record, origin: { ...record.origin, host: installId } } : record);
 		}
 	}
@@ -745,6 +786,7 @@ export function planShare(input: {
 	const now = input.now ?? new Date();
 	const options: ShareProjectionOptions = {
 		models: input.models ?? "keep",
+		shareKey: randomBytes(32),
 		...(input.inventory ? { tally: createProjectionTally(), anonymized: new Map<AnonKind, Set<string>>() } : {}),
 	};
 	const plan: SharePlan = {
