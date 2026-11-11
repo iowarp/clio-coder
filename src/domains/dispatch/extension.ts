@@ -7853,14 +7853,16 @@ export function createDispatchBundle(
 							return null;
 						const started = spawnNow();
 						timing.workerSpawnedAt = new Date(now()).toISOString();
-						followerWorker = started;
-						onFollowerStarted?.(started);
 						return started;
 					},
 					{ now, monotonicNow },
 					// Until the worker exists this process vouches for the run, as it does behind a merge card, so another
 					// Clio on this state directory does not recover a held follower as abandoned.
 					process.pid,
+					(started) => {
+						followerWorker = started;
+						onFollowerStarted?.(started);
+					},
 				);
 			} else worker = spawnNow();
 		} catch (error) {

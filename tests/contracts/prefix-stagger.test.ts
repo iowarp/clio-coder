@@ -189,12 +189,23 @@ test("a held follower's run row names a live process, then its worker's pid once
 	}
 });
 
-test("every member of a board batch receives a post made after admission", async () => {
+test("a held follower receives the board posts made during its hold once its worker starts", async () => {
 	await isolateDispatchState();
 	const spawned: Array<{ worker: SpawnedWorker; finish: () => void; sent: unknown[] }> = [];
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
-	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+	const context = dispatchStubContext({ settings });
+	// The start hook joins the board, then publishes run.started.
+	let starts = 0;
+	let followerStarted!: () => void;
+	const followerLive = new Promise<void>((resolve) => {
+		followerStarted = resolve;
+	});
+	context.bus.subscribe("run.started", () => {
+		starts += 1;
+		if (starts === 2) followerStarted();
+	});
+	const bundle = makeDispatchBundle(context, {
 		spawnWorker: () => {
 			const next = { ...fakeWorker(), sent: [] as unknown[] };
 			spawned.push(next);
@@ -220,21 +231,20 @@ test("every member of a board batch receives a post made after admission", async
 			ledger: { id: ledgerId, sequence: 0 },
 		};
 		const batch = await bundle.contract.dispatchBatch([request, request]);
-		// Each member's prompt lists the board roster as it stood at admission, so the members never share a
-		// prefix and none is held; a held follower would still subscribe only once its worker starts.
-		strictEqual(spawned.length, 2);
+		// The board rides after the prompt the members share, so the second member holds behind the first.
+		strictEqual(spawned.length, 1, "the follower is held behind its leader");
 		const posted = await appendAgentLedgerEntry(
 			ledgerId,
 			{ runId: "other-run", assignmentId: "other-run", agentId: "coder", nodeId: "local" },
-			{ kind: "message", to: "all", text: "posted after admission" },
+			{ kind: "message", to: "all", text: "posted during the hold" },
 		);
 		ok(posted.ok);
 		publishAgentLedgerEntry(ledgerId, posted.entry);
-		for (const member of spawned) {
-			const delivered = JSON.stringify(member.sent);
-			ok(delivered.includes("posted after admission"), `a member never received the board: ${delivered}`);
-			member.finish();
-		}
+		spawned[0]?.finish();
+		await followerLive;
+		const delivered = JSON.stringify(spawned[1]?.sent ?? []);
+		ok(delivered.includes("posted during the hold"), `the held follower never received the board: ${delivered}`);
+		spawned[1]?.finish();
 		await batch.finalPromise.catch(() => undefined);
 	} finally {
 		for (const worker of spawned) worker.finish();

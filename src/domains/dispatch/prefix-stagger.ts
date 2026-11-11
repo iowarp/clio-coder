@@ -72,13 +72,15 @@ const ABORTED_BEFORE_START: SpawnedWorkerResult = { exitCode: null, signal: "SIG
  * A worker handle that exists at once and starts its real worker only after `wait` resolves, so a batch returns a
  * follower's handle before the shared-prefix hold ends. `abort()` during the wait ends it and no worker starts; `start`
  * returning null means the run was cancelled meanwhile. The heartbeat reads as live while held, and `pid` reads as
- * `heldPid` (the process that vouches for the run) until the worker exists.
+ * `heldPid` (the process that vouches for the run) until the worker exists. `send` returns false until then;
+ * `onStarted` runs once it forwards to the worker.
  */
 export function startAfterPrefixHold(
 	wait: (signal: AbortSignal) => Promise<void>,
 	start: () => SpawnedWorker | null,
 	clock: { now: () => number; monotonicNow: () => number },
 	heldPid: number | null = null,
+	onStarted?: (worker: SpawnedWorker) => void,
 ): SpawnedWorker {
 	const local = new AbortController();
 	let real: SpawnedWorker | null = null;
@@ -86,6 +88,7 @@ export function startAfterPrefixHold(
 		await wait(local.signal);
 		if (local.signal.aborted) return null;
 		real = start();
+		if (real !== null) onStarted?.(real);
 		return real;
 	})();
 	const heartbeatAt: HeartbeatStamp = {
