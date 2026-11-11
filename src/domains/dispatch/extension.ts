@@ -7724,6 +7724,8 @@ export function createDispatchBundle(
 		// A held follower's worker starts after its run row exists; this moves the row onto the real process.
 		let heldFollower = false;
 		let onFollowerStarted: ((started: SpawnedWorker) => void) | null = null;
+		// Kept so a follower released before its run row exists still gets that row's start bookkeeping.
+		let followerWorker: SpawnedWorker | null = null;
 		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
@@ -7813,6 +7815,7 @@ export function createDispatchBundle(
 							return null;
 						const started = spawnNow();
 						timing.workerSpawnedAt = new Date(now()).toISOString();
+						followerWorker = started;
 						onFollowerStarted?.(started);
 						return started;
 					},
@@ -8502,15 +8505,6 @@ export function createDispatchBundle(
 			// spawned retry out of `active`, so snapshot and abort could not see it.
 			// A failed write leaves the row dirty for the terminal persist (#428).
 			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
-			if (heldFollower) {
-				const runId = envelope.id;
-				onFollowerStarted = (started) => {
-					// Replace only this process's own vouch; a row that settled meanwhile keeps what it recorded.
-					if (ledgerRef.get(runId)?.pid !== process.pid) return;
-					ledgerRef.update(runId, { pid: started.pid });
-					void persistLedgerInBackground(ledgerRef, runId);
-				};
-			}
 
 			// Fleet-visibility facts for the board: node placement, gate role,
 			// reroute lineage depth, and the model context window for the
@@ -8530,7 +8524,35 @@ export function createDispatchBundle(
 					? { contextWindow: lifecycle.target.modelCapabilities.contextWindow }
 					: {}),
 			};
-			if (req.lineage !== undefined) {
+			const runId = envelope.id;
+			const startedLineage = lineage;
+			const journalContext = runJournal?.context ?? sinklessRunContext(runId, req.ownerSessionId);
+			const publishStarted = (live: SpawnedWorker): void => {
+				context.bus.emit(
+					"run.started",
+					{
+						runId,
+						agentId: req.agentId,
+						task: req.task,
+						agentAudience: lifecycle.agentAudience,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId: lifecycle.target.target.id,
+						wireModelId: lifecycle.target.wireModelId,
+						runtimeId: lifecycle.target.runtime.id,
+						runtimeKind: lifecycle.runtimeKind,
+						pid: live.pid,
+						...(live.processCommand !== undefined ? { processCommand: live.processCommand } : {}),
+						...fleetIdentity,
+						...routeMoveFields(req, lifecycle.target.target.id, lifecycle.target.wireModelId),
+						assignmentId: startedLineage.rootRunId,
+						attempt: startedLineage.attempt,
+						...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
+					},
+					journalContext,
+				);
+			};
+			// A held follower is admitted with its row, but run.started waits for its child process to be live.
+			if (req.lineage !== undefined || heldFollower) {
 				context.bus.emit(
 					"run.enqueued",
 					{
@@ -8548,28 +8570,21 @@ export function createDispatchBundle(
 					runJournal?.context,
 				);
 			}
-			context.bus.emit(
-				"run.started",
-				{
-					runId: envelope.id,
-					agentId: req.agentId,
-					task: req.task,
-					agentAudience: lifecycle.agentAudience,
-					requestOrigin: lifecycle.requestOrigin,
-					targetId: lifecycle.target.target.id,
-					wireModelId: lifecycle.target.wireModelId,
-					runtimeId: lifecycle.target.runtime.id,
-					runtimeKind: lifecycle.runtimeKind,
-					pid: worker.pid,
-					...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
-					...fleetIdentity,
-					...routeMoveFields(req, lifecycle.target.target.id, lifecycle.target.wireModelId),
-					assignmentId: lineage.rootRunId,
-					attempt: lineage.attempt,
-					...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
-				},
-				runJournal?.context ?? sinklessRunContext(envelope.id, req.ownerSessionId),
-			);
+			if (heldFollower) {
+				onFollowerStarted = (started) => {
+					// Replace only this process's own vouch; a row that settled meanwhile keeps what it recorded.
+					if (ledgerRef.get(runId)?.pid !== process.pid) return;
+					try {
+						ledgerRef.update(runId, { pid: started.pid });
+						void persistLedgerInBackground(ledgerRef, runId);
+						publishStarted(started);
+					} catch (error) {
+						// The worker is already live; its run settles through the worker as any other does.
+						reportDispatchDiagnostic("record a held follower's start", error);
+					}
+				};
+				if (followerWorker !== null) onFollowerStarted(followerWorker);
+			} else publishStarted(worker);
 		} catch (error) {
 			// A capture started above would otherwise keep its manifest at "recording".
 			if (envelope !== undefined) recordingJournal.terminal(envelope.id, "failed");

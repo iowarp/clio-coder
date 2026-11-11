@@ -1,9 +1,10 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchPrefixGroup } from "../../src/domains/dispatch/contract.js";
 import {
 	claimSharedPrefix,
+	PREFIX_HOLD_CAP_MS,
 	startAfterPrefixHold,
 	waitForPrefixLeader,
 } from "../../src/domains/dispatch/prefix-stagger.js";
@@ -100,6 +101,25 @@ test("abort during the hold ends the follower cleanly without starting its worke
 	strictEqual(starts.join(","), "lead");
 });
 
+test("the cap releases a follower whose leader never streams", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const groups = new Map<string, DispatchPrefixGroup>();
+	const lead = claimSharedPrefix(groups, "shared", "lead");
+	const follow = claimSharedPrefix(groups, "shared", "follow");
+	ok(lead);
+	strictEqual(follow?.role, "follower");
+	let now = 100;
+	const held = waitForPrefixLeader(lead.group, { now: () => now });
+	t.mock.timers.tick(PREFIX_HOLD_CAP_MS - 1);
+	await new Promise((resolve) => setImmediate(resolve));
+	strictEqual(lead.group.isReleased(), false);
+	now = 100 + PREFIX_HOLD_CAP_MS;
+	t.mock.timers.tick(1);
+	deepStrictEqual(await held, { role: "follower", leaderRunId: "lead", heldMs: PREFIX_HOLD_CAP_MS });
+	strictEqual(lead.group.isReleased(), true);
+	strictEqual(claimSharedPrefix(groups, "shared", "late"), null);
+});
+
 test("a held follower's run row names a live process, then its worker's pid once it starts", async () => {
 	await isolateDispatchState();
 	const spawned: Array<{ worker: SpawnedWorker; finish: () => void }> = [];
@@ -110,12 +130,18 @@ test("a held follower's run row names a live process, then its worker's pid once
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	// The fake workers end without a result; a retry would start workers nothing finishes.
 	settings.fleet.retry.maxRetries = 0;
-	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+	const context = dispatchStubContext({ settings });
+	const started: Array<{ pid: number | null; processCommand?: string | undefined }> = [];
+	context.bus.subscribe("run.started", (payload) => {
+		started.push({ pid: payload.pid, processCommand: payload.processCommand });
+	});
+	const bundle = makeDispatchBundle(context, {
 		spawnWorker: () => {
 			const next = fakeWorker();
 			spawned.push(next);
 			if (spawned.length === 2) followerStarted();
-			return { ...next.worker, pid: 4_000 + spawned.length };
+			const pid = 4_000 + spawned.length;
+			return { ...next.worker, pid, processCommand: JSON.stringify(["worker", String(pid)]) };
 		},
 	});
 	await bundle.extension.start();
@@ -132,11 +158,15 @@ test("a held follower's run row names a live process, then its worker's pid once
 		strictEqual(rows.length, 2);
 		// Recovery in a second Clio settles a row whose pid is not alive, so a held row is vouched for by this process.
 		for (const row of rows) strictEqual(typeof row.pid, "number", `${row.id} has no live pid while held`);
+		// run.started means the child process is live, so a held follower has not started yet.
+		deepStrictEqual(started, [{ pid: 4_001, processCommand: '["worker","4001"]' }]);
 		// The leader exits, which releases the hold and starts the follower.
 		spawned[0]?.finish();
 		await followerSpawned;
 		const followerPid = rows.map((row) => bundle.contract.getRun(row.id)?.pid).find((pid) => pid === 4_002);
 		strictEqual(followerPid, 4_002);
+		deepStrictEqual(started[1], { pid: 4_002, processCommand: '["worker","4002"]' });
+		strictEqual(started.length, 2);
 		spawned[1]?.finish();
 		await batch.finalPromise.catch(() => undefined);
 	} finally {
