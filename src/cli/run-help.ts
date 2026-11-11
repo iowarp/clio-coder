@@ -39,7 +39,8 @@ Flags:
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd; after a yolo
                             autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
-  --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer is not a no-op (see below)
+  --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer or an answer/proposal
+                            turn is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole run; exit 124 on expiry
   --verify "<cmd>"          an acceptance check for this run only, repeatable: bash runs it in the run's cwd after
                             the turn, and the finish gate counts the agent's own run of it (see below)
@@ -101,6 +102,8 @@ Bookkeeping and reports cannot recover blocks. An unresolved blocked run with no
 "failed" and outcomeDetail "noop".
 A successful limitation call also fails, with outcomeDetail "limitation".
 --fail-on-noop additionally fails runs whose tools all failed without a block.
+With --turn-mode answer or proposal the task asked for no change, so it never fails as a no-op, --fail-on-noop
+included: blocked or failed calls leave it at exit 0 with its answer, and stderr names any blocked calls in one line.
 The flag applies to the main agent only.
 
 --timeout <seconds> bounds the whole run, boot included. On expiry the run

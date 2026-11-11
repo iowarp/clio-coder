@@ -362,7 +362,8 @@ of a successful read withheld by the loop guard also adds no unresolved block.
 The separate rule for a run with no successful tools still applies.
 
 A run started with `--turn-mode answer` or `--turn-mode proposal` asked for no
-change, so `noop` is always false for it and neither rule fails it. A blocked
+change, so `noop` is always false for it and neither rule fails it, even under
+`--fail-on-noop` when every call failed. A blocked
 call along the way stays in `safety.blockedAttempts`, and when the run exits 0
 stderr names those calls in one line, for example
 `clio-coder run: answered with 1 blocked call: bash (yolo-sandbox-required)`.
