@@ -158,7 +158,7 @@ test("a chat route at an address a project chose says to define it in user setti
 	noteProjectTargets([{ id: "lab-gateway", url }]);
 	// A key in the shell does not change it: Clio sends none to an address a project chose.
 	process.env.OPENAI_API_KEY = "sk-test";
-	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings.`;
+	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its key in OPENAI_API_KEY.`;
 	const missing = firstMissing(readSettings());
 	assert.ok(missing);
 	assert.deepEqual(describeMissing(missing), { sentence });
@@ -169,6 +169,6 @@ test("a chat route at an address a project chose says to define it in user setti
 		target: { ...base, credential: { available: false, provider: "openai", envVariable: "LAB_KEY", projectUrl: url } },
 	});
 	assert.deepEqual(pure.stage === "needs" && pure.missing, [
-		{ kind: "credential", target: "t", provider: "openai", projectUrl: url },
+		{ kind: "credential", target: "t", provider: "openai", projectUrl: url, variable: "LAB_KEY" },
 	]);
 });

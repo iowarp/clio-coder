@@ -80,6 +80,7 @@ function setupFactsFor(settings: Readonly<ClioSettings>): SetupFacts {
 			available: auth.available,
 			provider: auth.providerId,
 			...(envVariable ? { envVariable } : {}),
+			...(runtime.credentialsEnvVar !== undefined ? { runtimeEnvVariable: runtime.credentialsEnvVar } : {}),
 			...(projectUrl !== null ? { projectUrl } : {}),
 		};
 	}
