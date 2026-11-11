@@ -182,10 +182,12 @@ changed since approval, one card lists them before the session starts:
 settings by top-level area and each connection's address, safety by rule
 counts, hooks by event and command, and extensions and plugins by name. A
 surface that changed is marked `changed since you trusted it`. **Review** (the
-default) prints each file in full and returns to the card; **Trust all** records
+default) prints each file in full, and for hooks the repository scripts the
+hooks file names, whose bytes the approval pins, then returns to the card; **Trust all** records
 the same approvals the `--hash` form below records and applies them to this
-launch; **Open without it** starts without them and shows one notice instead of
-a notice per file. Headless runs, ACP and the GUI keep the per-file notices.
+launch; **Open without it** (also Esc) starts without them and shows one notice instead of
+a notice per file. `q` or Ctrl+C quits without opening a session and exits 1.
+Headless runs, ACP and the GUI keep the per-file notices.
 
 | Surface | Files |
 | --- | --- |
@@ -447,7 +449,7 @@ Names retired in 0.8.0 answer for this release only, with a notice, and are remo
 | `/mcp` | `/mcp \| /mcp trust <id> [class] \| /mcp untrust <id>` | List MCP servers (bare, or `list`) or manage explicit trust for project MCP servers with optional action class |
 | `/extensions` | `/extensions [dev\|mute\|unmute [target] \| leave]` | Inspect extensions, manage development and muted runtimes for this session, or leave the active extension workspace with `leave`. `/reload extensions` reloads them. See [Extensions](harness-extensions.md#running-and-managing-runtimes). |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--read-only] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch and `--read-only` runs the worker [read-only](../architecture/safety-model.md#read-only-runs), on runtimes that can enforce it. |
-| `/delegate` | retired in 0.8.0 | Now `/run <agent-id> <task>`; `/delegate` stays hidden for one release so ACP clients keep working. |
+| `/delegate` | retired in 0.8.0 | Now `/run <agent-id> <task>`; `/delegate` stays hidden for one release so ACP clients keep working. A `/delegate` naming a Clio recipe runs it through `/run`, and a form it cannot parse says it is now `/run` and shows `/run` usage. |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). `Enter` on a finished draft puts it in the composer, unsent |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
@@ -581,6 +583,16 @@ show equal percentages are never merged.
 | Unknown slash command | Rejected before model submission. Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
 
 The command spellings and arguments are the [slash-command registry](../../src/session-control/slash-commands.ts); this table calls out only session workflows that need explanation.
+
+### Keys in list overlays
+
+List overlays share one key model ([confirm-once.ts](../../src/interactive/overlays/confirm-once.ts)):
+
+- **Move and page.** ↑/↓ (and `j`/`k` in Tree, Tasks, Decisions and Research) move the selection. PgUp, PgDn and Home page Decisions, Research, the steering queue, Fleet runs, Fleet approval, Handoff and Drafts; End jumps to the bottom only where the overlay knows it.
+- **Detail.** Tab opens the selected row's detail in Decisions and Fleet runs, and opens a review path in the Library; Enter also opens a fleet run's detail.
+- **Action letters.** `x` is the destructive letter, and in Tasks (drop), the steering queue (remove), Memory (reject), Fleet runs (cancel) and Decisions (supersede) it asks once: the rail shows `x again` to confirm, and any other key keeps the row. `x` also removes in the Library and declines in Interop. Other letters: `o` orders the Tree, `m` steers a fleet run, `r` refreshes the Library, `R` restarts extensions in Extensions after asking once, and `s` sets scope in Interop.
+- **Moved letters.** For 0.8.0 only, a letter that moved answers in its old overlay with one line, `<old> is now <new> here`, and does nothing else: Decisions `s`→`x`, Tree `s`→`o`, Fleet runs `s`→`m` and `d`→Enter, Interop `d`→`x` and `p`/`u`→`s`, Library `R`→`r`, Extensions `r`→`R`.
+- **Filters.** In Help, typing goes to the filter, even after an arrow key. A filter given with `/view <text>` clears on the first Esc, and the next Esc closes the viewer. In Interop, Esc first leaves a pending plan, then closes.
 
 ### Change the model with /model
 
