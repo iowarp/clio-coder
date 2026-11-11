@@ -374,6 +374,10 @@ class Core:
                 "unavailable",
                 f"Deleting a tag needs {DEL_TAG_BINDING}, which the installed iowarp-core does not bind; tag {args['tag']} is unchanged.",
             )
+        # A data tag's blobs are files under /<tag>, each its own CTE tag, so AsyncDelTag leaves them: without
+        # this they outlive the tag, stay charged to the space and come back unrecorded when it is re-created.
+        if self.fs is not None:
+            self.remove_tree(self.fs, f"/{args['tag']}")
         tag_id = self.existing_tag_id(args["tag"])
         if tag_id is None:
             return {}
@@ -381,6 +385,50 @@ class Core:
         with self.tag_lock:
             self.tag_ids.pop(args["tag"], None)
         return {}
+
+    def remove_tree(self, fs, root):
+        """Removes every file under root the way del_blob removes one, then the directories, deepest first."""
+        files, directories = [], []
+        try:
+            self.collect_tree(fs, root, files, directories)
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                return
+            raise
+        for path in files:
+            try:
+                native("remove", fs.remove, path)
+            except OSError as error:
+                if not (error.errno in (errno.ENOENT, errno.ENOTDIR, errno.EIO) and self.blob_stat(fs, path) is None):
+                    raise
+        rmdir = getattr(fs, "rmdir", None)
+        for directory in directories:
+            try:
+                if rmdir is None:
+                    raise OSError(errno.ENOSYS, "this clio_cfs_ext has no rmdir", directory)
+                native("rmdir", rmdir, directory)
+            except OSError:
+                # A directory with no file under it holds no blob, so one the binding cannot remove is left.
+                if self.files_under(fs, directory):
+                    raise
+
+    def collect_tree(self, fs, directory, files, directories):
+        for entry in native("readdir", fs.readdir, directory):
+            path = f"{directory}/{entry}"
+            if stat_mode.S_ISDIR(native("stat", fs.stat, path)["mode"]):
+                self.collect_tree(fs, path, files, directories)
+            else:
+                files.append(path)
+        directories.append(directory)
+
+    def files_under(self, fs, directory):
+        files = []
+        try:
+            self.collect_tree(fs, directory, files, [])
+        except OSError as error:
+            if error.errno not in (errno.ENOENT, errno.ENOTDIR):
+                raise
+        return files
 
     def set_tag_xattr(self, args):
         self.need_binding("AsyncTagSetXattr")

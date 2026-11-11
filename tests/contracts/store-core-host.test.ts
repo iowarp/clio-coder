@@ -1,4 +1,4 @@
-import { ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -171,7 +171,7 @@ class Cte:
         @staticmethod
         def Dynamic(): return None
 core = object.__new__(host.Core)
-core.cte, core.client, core.tag_ids, core.tag_lock = Cte, Client(), {"t": 5}, threading.Lock()
+core.cte, core.client, core.tag_ids, core.tag_lock, core.fs = Cte, Client(), {"t": 5}, threading.Lock(), None
 out = {}
 try:
     core.get_record({"tag": "t", "blob": "r1"})
@@ -216,4 +216,97 @@ test("the Python host names a record lost at a restart and deletes tags through 
 	strictEqual(out.oldPut, "written");
 	strictEqual(JSON.stringify(out.records), '["b#00000001"]', "a physical (encoded) records tag lists its records");
 	ok(out.refuseBy < 3, `a stopped runtime is refused as unavailable within 3 s, not ${out.refuseBy} s`);
+});
+
+// A fake clio filesystem: a blob is a file under /<tag>, and its bytes count against the space until it is removed.
+const PY_RM_TAG = String.raw`
+import errno, importlib.util, json, os, sys, threading
+spec = importlib.util.spec_from_file_location("host", sys.argv[1])
+host = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(host)
+class Future:
+    def done(self): return True
+    def wait(self, _): return 0
+class Client:
+    def __init__(self): self.deleted = []
+    def AsyncDelTag(self, tag_id):
+        self.deleted.append(tag_id)
+        return Future()
+class Cte:
+    Client = Client
+class Fs:
+    def __init__(self): self.files, self.dirs = {}, {"/"}
+    def used(self): return sum(len(data) for data in self.files.values())
+    def mkdir(self, path):
+        if path in self.dirs: raise FileExistsError(errno.EEXIST, "exists", path)
+        self.dirs.add(path)
+    def open(self, path, flags, mode):
+        self.files[path] = b""
+        return path
+    def pwrite(self, fd, data, offset):
+        self.files[fd] = self.files[fd][:offset] + bytes(data)
+        return len(data)
+    def fsync(self, fd): pass
+    def close(self, fd): pass
+    def rename(self, old, new): self.files[new] = self.files.pop(old)
+    def remove(self, path):
+        if path not in self.files: raise OSError(errno.EIO, "remove failed", path)
+        del self.files[path]
+    def children(self, path):
+        names = {p[len(path) + 1:].split("/")[0] for p in list(self.files) + list(self.dirs) if p.startswith(path + "/")}
+        return sorted(names)
+    def readdir(self, path):
+        if path not in self.dirs: raise FileNotFoundError(errno.ENOENT, "no such directory", path)
+        return self.children(path)
+    def stat(self, path):
+        if path in self.dirs: return {"mode": 0o040755, "size": 0, "mtime_ns": 0}
+        if path not in self.files: raise FileNotFoundError(errno.ENOENT, "no such file", path)
+        return {"mode": 0o100644, "size": len(self.files[path]), "mtime_ns": 1_000_000}
+class FsWithRmdir(Fs):
+    def rmdir(self, path):
+        if self.children(path): raise OSError(errno.ENOTEMPTY, "not empty", path)
+        self.dirs.discard(path)
+out = {}
+for name, fs in (("rmdir", FsWithRmdir()), ("noRmdir", Fs())):
+    core = object.__new__(host.Core)
+    tag, records = "agentspace/pk/t", "agentspace/pk/t%2F.records"
+    core.cte, core.client, core.fs = Cte, Client(), fs
+    core.tag_ids, core.tag_lock = {tag: 5, records: 6}, threading.Lock()
+    core.tag_exists = lambda name: False
+    def put(blob, data):
+        source = os.path.join(sys.argv[3], "source")
+        open(source, "wb").write(data)
+        core.put_blob_from_file({"tag": tag, "blob": blob, "source": source}, lambda n: None)
+    put("a", b"aa")
+    put("b", b"bbb")
+    put("sub/c", b"cccc")
+    before = fs.used()
+    core.del_tag({"tag": tag})
+    core.del_tag({"tag": records})
+    after = fs.used()
+    put("seed", b"s")
+    listed = core.list_blobs({"tag": tag, "offset": 0, "limit": 10})["names"]
+    out[name] = {"before": before, "after": after, "listed": listed, "deleted": core.client.deleted, "dirs": sorted(fs.dirs)}
+open(sys.argv[2], "w").write(json.dumps(out))
+`;
+
+test("the Python host's rm-tag removes the tag's blobs, so a re-created tag lists only new ones", () => {
+	const script = join(scratch, "py-rm-tag.py");
+	writeFileSync(script, PY_RM_TAG);
+	const result = join(scratch, "py-rm-tag.json");
+	const host = join(process.cwd(), "assets", "core-host", "clio_core_host.py");
+	const run = spawnSync("python3", ["-B", script, host, result, scratch], { encoding: "utf8" });
+	strictEqual(run.status, 0, run.stderr);
+	const out = JSON.parse(readFileSync(result, "utf8")) as Record<
+		string,
+		{ before: number; after: number; listed: string[]; deleted: number[]; dirs: string[] }
+	>;
+	for (const [name, seen] of Object.entries(out)) {
+		deepStrictEqual([seen.before, seen.after], [9, 0], `${name}: the removed bytes leave the space`);
+		deepStrictEqual(seen.listed, ["seed"], name);
+		deepStrictEqual(seen.deleted, [5, 6], name);
+	}
+	// With rmdir the old directories go too; without it only empty ones are left, and they list no blob.
+	ok(!out.rmdir?.dirs.includes("/agentspace/pk/t/sub"), JSON.stringify(out.rmdir?.dirs));
+	ok(out.noRmdir?.dirs.includes("/agentspace/pk/t/sub"), JSON.stringify(out.noRmdir?.dirs));
 });
