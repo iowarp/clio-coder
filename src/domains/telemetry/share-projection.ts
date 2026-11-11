@@ -725,6 +725,7 @@ const EVIDENCE = /^([a-z][a-z0-9-]{0,31}):([A-Za-z0-9_.-]{1,64})(?:@([a-z][a-z0-
  * built-in missing here is only anonymized or dropped, never leaked.
  */
 export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
+	"build:replaced@self-repository",
 	"check:completion-evidence@turn-end",
 	"check:uncited-line-numbers@final-answer",
 	"count:enumerated-steps@operator-request",
