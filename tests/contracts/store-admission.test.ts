@@ -92,6 +92,6 @@ describe("store safety admission", () => {
 		doesNotMatch(authority, /Read class: runs at every autonomy level/u);
 		match(authority, /create, put and note are write class/u);
 		match(authority, /remove[^.;]*destructive/u);
-		match(authority, /worker's store is read-only/u);
+		match(authority, /otherwise its store is read-only/u);
 	});
 });
