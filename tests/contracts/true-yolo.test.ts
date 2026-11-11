@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual, throws } fr
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
@@ -330,6 +330,8 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		["rm -rf ~", "rm-home-or-root"],
 		["rm -r -f ~/*", "rm-home-or-root"],
 		["rm -rf ~/..", "yolo-floor-delete-target"],
+		[`rm -rf ~${userInfo().username}`, "yolo-floor-delete-target"],
+		[`rm -rf ~${userInfo().username}/`, "yolo-floor-delete-target"],
 		[`rm -rf ${dirname(homedir())}`, "yolo-floor-delete-target"],
 		["sudo rm -rf /usr/lib", "yolo-floor-delete-target"],
 		["cd / && rm -rf *", "yolo-floor-delete-target"],

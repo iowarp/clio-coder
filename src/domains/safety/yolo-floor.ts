@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import type { DamageControlRule } from "./damage-control.js";
@@ -139,11 +139,27 @@ function inSystemTree(abs: string): boolean {
 	return abs.startsWith("/") && top.startsWith("lib");
 }
 
-/** Home and its real path, read once per judgment. */
+/** The operator's account name and passwd home, which `~name` expands to; null when the host has none. */
+function ownAccount(): { name: string; home: string } | null {
+	try {
+		const info = userInfo();
+		return info.username.length > 0 && info.homedir.length > 0 ? { name: info.username, home: info.homedir } : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Home, the account's passwd home, and their real paths, read once per judgment. */
 function homeForms(): string[] {
-	const home = path.resolve(homedir());
-	const real = canonicalizePath(home);
-	return real === null || real === home ? [home] : [home, real];
+	const forms = new Set<string>();
+	const account = ownAccount();
+	for (const spelled of [homedir(), ...(account !== null ? [account.home] : [])]) {
+		const home = path.resolve(spelled);
+		forms.add(home);
+		const real = canonicalizePath(home);
+		if (real !== null) forms.add(real);
+	}
+	return [...forms];
 }
 
 /**
@@ -163,10 +179,18 @@ function floorTargetReason(abs: string, homes: ReadonlyArray<string>, workspace:
 	return inSystemTree(abs) ? `${abs} in a system tree` : null;
 }
 
-/** `~`, `$HOME` and `${HOME}` at the start of a word, expanded; null for any other run-time word. */
+/**
+ * `~`, `~name` for the operator's own account, `$HOME` and `${HOME}` at the start of a word, expanded; null for any
+ * other run-time word.
+ */
 function expandHomeWord(word: string): string | null {
 	const home = homedir();
-	const expanded = word.replace(/^(?:~(?=\/|$)|\$\{HOME\}|\$HOME(?![\w]))/u, home);
+	const account = ownAccount();
+	const named =
+		account !== null && (word === `~${account.name}` || word.startsWith(`~${account.name}/`))
+			? `${account.home}${word.slice(account.name.length + 1)}`
+			: word;
+	const expanded = named.replace(/^(?:~(?=\/|$)|\$\{HOME\}|\$HOME(?![\w]))/u, home);
 	return /[$`]/u.test(expanded) ? null : expanded;
 }
 
