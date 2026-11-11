@@ -19,7 +19,7 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { createLocalStoreBackend } from "../../src/domains/store/backends/local.js";
-import { workspaceCapabilitySignals } from "../../src/domains/store/index.js";
+import { workspaceCapabilitySignals, workspaceStoreTags } from "../../src/domains/store/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { mainPromptCacheIdentity } from "../../src/session-control/prompt-cache-identity.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -265,6 +265,7 @@ it("names store and data on a data question once the project store holds a tag, 
 		const reminder = createSkillsReminderRegistration({
 			countModelVisibleSkills: () => 0,
 			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates }),
+			cwd: () => env.dir,
 		});
 		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });
 		return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
@@ -285,7 +286,7 @@ it("names store and data on a data question once the project store holds a tag, 
 			.sort(),
 		["data", "store"],
 	);
-	assert.match(note(question), /This project's store holds tagged data; store op=tags lists it\./u);
+	assert.match(note(question), /This project's store holds tagged data \(tags `sim`\); store op=tags lists them\./u);
 	assert.deepEqual(
 		named(unrelated).filter((id) => id !== "store" && id !== "data"),
 		[],
@@ -293,6 +294,34 @@ it("names store and data on a data question once the project store holds a tag, 
 	);
 	const skills = gate.rank({ kind: "skills", task: question, limit: 3, candidates });
 	assert.ok(!skills.some((match) => match.workspaceSignal), "a skill ranking carries no store signal");
+});
+
+it("names at most five store tags in the turn hint, never a records tag, and counts the rest", async (t) => {
+	const env = await isolateClioEnv("clio-coder-capability-store-tags-");
+	t.after(() => env.restore());
+	const backend = createLocalStoreBackend(env.dir);
+	for (const tag of ["g", "f", "e", "d", "c", "b", "a"]) await backend.getOrCreateTag(tag);
+	await backend.getOrCreateTag("a/.records");
+	assert.deepEqual(workspaceStoreTags(env.dir), ["a", "b", "c", "d", "e", "f", "g"]);
+	const reminder = createSkillsReminderRegistration({
+		countModelVisibleSkills: () => 0,
+		rankCapabilities: () => [
+			{ id: ToolNames.Store, description: "store", score: 1, workspaceSignal: true },
+			{ id: ToolNames.Data, description: "data", score: 1, workspaceSignal: true },
+		],
+		cwd: () => env.dir,
+	});
+	const effects = reminder.evaluate({
+		hook: "turn_start",
+		text: "What is in the simulation output?",
+		metadata: { conversationMessages: 0 },
+	});
+	const text = effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
+	assert.match(
+		text,
+		/This project's store holds tagged data \(tags `a`, `b`, `c`, `d`, `e` and 2 more\); store op=tags lists them\./u,
+	);
+	assert.doesNotMatch(text, /records/u);
 });
 
 it("reads the store signal again only when the store or its tag list changed", async (t) => {

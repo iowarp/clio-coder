@@ -1,6 +1,7 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import { workspaceStoreTags } from "../store/index.js";
 import { type CapabilityMatch, capabilityWorthNaming } from "./capability-gate.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSkillSuggestionWait, SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE } from "./stalled-turn.js";
@@ -47,6 +48,18 @@ export interface SkillsReminderDeps {
 	 * every surface taught before the level became the opt-in.
 	 */
 	modelMayActivateSkills?(): boolean;
+	/** The workspace whose project store tags a store hint names; the process cwd by default. */
+	cwd?(): string;
+}
+
+const STORE_TAGS_NAMED = 5;
+const STORE_TAG_CHARS = 40;
+
+/** At most five tag names, each clipped, then a count of the rest, so a large store keeps the hint short. */
+function storeTagList(tags: ReadonlyArray<string>): string {
+	const named = tags.slice(0, STORE_TAGS_NAMED).map((tag) => `\`${clip(tag, STORE_TAG_CHARS)}\``);
+	const rest = tags.length - named.length;
+	return `${named.join(", ")}${rest > 0 ? ` and ${rest} more` : ""}`;
 }
 
 const NO_EFFECTS: ReadonlyArray<MiddlewareEffect> = [];
@@ -59,11 +72,16 @@ function clip(text: string, limit: number): string {
 	return `${(space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:.-]+$/u, "")}…`;
 }
 
+function storeSignalled(capabilities: ReadonlyArray<CapabilityMatch>): boolean {
+	return capabilities.slice(0, 3).some((match) => match.workspaceSignal && match.id === ToolNames.Store);
+}
+
 function rankedSkillsReminder(
 	matches: ReadonlyArray<CapabilityMatch>,
 	modelActivation: boolean,
 	capabilities: ReadonlyArray<CapabilityMatch> = [],
 	contextPlacement: "direct" | "gateway" = "direct",
+	storeTags: ReadonlyArray<string> = [],
 ): string {
 	const lines = matches
 		.slice(0, 5)
@@ -83,9 +101,11 @@ function rankedSkillsReminder(
 						: `Suggest \`${SKILL_SUGGESTION_ANCHOR}\` with the chosen name, then continue without waiting; only the operator loads a skill.`,
 				];
 	const names = capabilities.slice(0, 3).map((match) => match.id);
-	const store = capabilities.slice(0, 3).some((match) => match.workspaceSignal && match.id === ToolNames.Store)
-		? " This project's store holds tagged data; store op=tags lists it."
-		: "";
+	const store = !storeSignalled(capabilities)
+		? ""
+		: storeTags.length > 0
+			? ` This project's store holds tagged data (tags ${storeTagList(storeTags)}); store op=tags lists them.`
+			: " This project's store holds tagged data; store op=tags lists it.";
 	return [
 		...skills,
 		...(names.length > 0
@@ -255,7 +275,13 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 							.filter((match) => turnAllowsTool(constraints, match.id) && capabilityWorthNaming(match, task))
 							.slice(0, 3)
 					: [];
-				const ids = JSON.stringify([matches.map((match) => match.id), capabilities.map((match) => match.id)]);
+				const storeTags = storeSignalled(capabilities) ? workspaceStoreTags(deps.cwd?.() ?? process.cwd()) : [];
+				const ids = JSON.stringify([
+					matches.map((match) => match.id),
+					capabilities.map((match) => match.id),
+					storeTags.slice(0, STORE_TAGS_NAMED),
+					storeTags.length,
+				]);
 				if ((matches.length === 0 && capabilities.length === 0) || ids === rankedIds) return NO_EFFECTS;
 				rankedIds = ids;
 				const shown = deps.verifyRankedSkills?.(matches) ?? matches;
@@ -271,6 +297,7 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 							deps.modelMayActivateSkills?.() ?? false,
 							capabilities,
 							deps.contextPlacement?.() ?? "direct",
+							storeTags,
 						),
 					},
 				];
