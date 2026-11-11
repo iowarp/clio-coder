@@ -19,6 +19,7 @@ import {
 	holdUnresolvedUserinfo,
 	redactFinalUrlCredentials,
 	redactSecretString,
+	redactStreamingSecretString,
 	redactStreamingUrlCredentials,
 	redactUrlCredentials,
 	UrlCredentialStreamFilter,
@@ -1428,4 +1429,14 @@ test("both redactors and worker refusals hide command, header and token credenti
 		];
 		for (const out of shown) for (const secret of secrets) ok(!out.includes(secret), `${out} leaks ${secret}`);
 	}
+});
+
+test("a git token arriving in short deltas never paints any of its characters", () => {
+	const token = `ghp_${"Ab1".repeat(12)}`;
+	const text = `run with ${token} now`;
+	for (let end = 8; end <= text.length; end += 8) {
+		const frame = redactStreamingSecretString(text.slice(0, end));
+		ok(!frame.includes("ghp_") && !frame.includes("Ab1"), frame);
+	}
+	ok(!redactStreamingSecretString(text, true).includes("Ab1"));
 });

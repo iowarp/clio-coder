@@ -667,12 +667,17 @@ export function dropShortCutHead(text: string, guard: CutHeadGuard): string {
 	return trimmed.length === 0 ? text : trimmed;
 }
 
+const OPEN_GIT_TOKEN_RE = /\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]*$/u;
+
 /**
  * Redact text that may still grow. Only a stream that completed releases a hold through full redaction: after an abort or
  * an error no later text can resolve it, so the last frame reads like the open one (#446).
  */
 export function redactStreamingSecretString(value: string, completed = false): string {
-	return redactSecretString(completed ? value : holdUnresolvedUserinfo(holdOpenQuotedSecret(value)));
+	if (completed) return redactSecretString(value);
+	// A git token still arriving is too short for its shape; its prefix stays off the frame until it can be redacted whole.
+	const held = holdUnresolvedUserinfo(holdOpenQuotedSecret(value)).replace(OPEN_GIT_TOKEN_RE, "");
+	return redactSecretString(held);
 }
 
 /** {@link redactStreamingSecretString} under the URL rule alone, for model prose an operator reads (#446). */
