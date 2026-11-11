@@ -130,6 +130,23 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 
 runStoreBackendConformance("local", openStoreBackend);
 
+test("local: a blob named *.tmp is listed; only the backend's own temp siblings are hidden", async () => {
+	const env = await isolateClioEnv("clio-coder-store-tmp-");
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		const backend = await openStoreBackend(cwd);
+		const source = join(env.dir, "s");
+		writeFileSync(source, "s");
+		await backend.getOrCreateTag("t");
+		await backend.putBlobFromFile("t", "keep.tmp", source);
+		writeFileSync(join(storeTagDir(cwd, "t"), ".keep.tmp.123.0123456789ab.tmp"), "in flight");
+		deepStrictEqual((await backend.listBlobs("t", { offset: 0, limit: 10 })).names, ["keep.tmp"]);
+	} finally {
+		env.restore();
+	}
+});
+
 test("local: every store directory is 0700 and every file 0600 under umask 022", async () => {
 	const env = await isolateClioEnv("clio-coder-store-modes-");
 	const umask = process.umask(0o022);
