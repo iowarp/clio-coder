@@ -74,10 +74,16 @@ export function orderSectionsForWorkers<T extends ClioMdSection>(sections: Reado
  * A rule citing a path two directories deep is scoped to that path for workers.
  * The generator's citation rule puts such paths on most lines, so the sections
  * whose rules hold anywhere say `paths=none`; Change recipes stay path-scoped.
- * Conventions follow the leading Tests and Gotchas sections.
+ * Conventions follow the leading Tests and Gotchas sections. A section the
+ * operator wrote keeps its scope and place: `authoredTitles` names them.
  */
-export function markWorkerScopes(output: BootstrapStructuredOutput): BootstrapStructuredOutput {
+export function markWorkerScopes(
+	output: BootstrapStructuredOutput,
+	authoredTitles: ReadonlyArray<string> = [],
+): BootstrapStructuredOutput {
+	const authored = new Set(authoredTitles);
 	const sections = (output.sections ?? []).map((section) => {
+		if (authored.has(section.title)) return section;
 		if (!UNSCOPED_SECTIONS.some((pattern) => pattern.test(section.title))) return section;
 		const lines = section.body.split("\n");
 		if (OVERRIDE_LINE.test(lines.find((line) => line.trim().length > 0)?.trim() ?? "")) return section;
@@ -88,7 +94,11 @@ export function markWorkerScopes(output: BootstrapStructuredOutput): BootstrapSt
 		return { ...section, body: `${PATHS_NONE}\n${rest}` };
 	});
 	let leading = 0;
-	while (leading < sections.length && sectionRank(sections[leading]?.title ?? "") < LEADING_SECTIONS.length)
+	while (
+		leading < sections.length &&
+		!authored.has(sections[leading]?.title ?? "") &&
+		sectionRank(sections[leading]?.title ?? "") < LEADING_SECTIONS.length
+	)
 		leading += 1;
 	const { sectionsBeforeConventions: _before, ...rest } = output;
 	return {
@@ -104,6 +114,8 @@ export interface ProtectedHandbook {
 	invariants: ReadonlyArray<string>;
 	/** Each section's carried blocks under its title. The model's additions to that section fit like any other. */
 	sections: ReadonlyArray<ClioMdSection>;
+	/** Titles of the sections the operator wrote, which keep their place and scope. */
+	authoredTitles?: ReadonlyArray<string>;
 }
 
 /**
@@ -145,7 +157,12 @@ export function fitGeneratedHandbook(
 		return carried ? [carried] : [];
 	});
 	const size = (): { chars: number; lines: number } => {
-		const text = serializeClioMd(markWorkerScopes({ ...result, sections: [...(result.sections ?? []), ...reserved] }));
+		const text = serializeClioMd(
+			markWorkerScopes(
+				{ ...result, sections: [...(result.sections ?? []), ...reserved] },
+				protectedContent?.authoredTitles,
+			),
+		);
 		return { chars: text.length, lines: text.trimEnd().split("\n").length };
 	};
 	const fits = (): boolean => {

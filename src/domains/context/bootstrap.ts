@@ -2334,9 +2334,21 @@ function stabilizeGeneratedOutput(
 	for (const section of retainedOrdinarySections) {
 		if (modelSections.has(section)) onModelSectionRetained?.();
 	}
+	// A section the operator wrote, kept from the handbook or carried from the replaced one, keeps its place
+	// and its scope; generated sections are ordered for workers in the places left between them.
+	const authoredTitles = new Set(
+		[...existingSections, ...carriedBlocks].map((section) => section.title.replace(/\s+/g, " ").trim().toLowerCase()),
+	);
+	const authoredSection = (section: ClioMdSection): boolean =>
+		authoredTitles.has(section.title.replace(/\s+/g, " ").trim().toLowerCase());
+	const authoredSections = retainedOrdinarySections.filter(authoredSection);
+	const generatedInOrder = orderSectionsForWorkers(
+		retainedOrdinarySections.filter((section) => !authoredSection(section)),
+	);
 	onProtected?.({
 		invariants: protectedInvariants,
 		sections: [...carriedSections].map(([section, blocks]) => ({ title: section.title, body: blocks.join("\n") })),
+		authoredTitles: authoredSections.map((section) => section.title),
 	});
 	const fixIds = (line: string): string => correctedRuleIds(line, checkerRules, report);
 	return {
@@ -2346,10 +2358,12 @@ function stabilizeGeneratedOutput(
 		conventions: retainedConventions.map(fixIds),
 		invariants: retainedInvariants.map(fixIds),
 		sections: [
-			...orderSectionsForWorkers(retainedOrdinarySections).map((section) => {
-				const body = handbookBlocks(section.body).map(fixIds).join("\n");
-				return body === section.body ? section : { ...section, body };
-			}),
+			...retainedOrdinarySections
+				.map((section) => (authoredSection(section) ? section : (generatedInOrder.shift() ?? section)))
+				.map((section) => {
+					const body = handbookBlocks(section.body).map(fixIds).join("\n");
+					return body === section.body ? section : { ...section, body };
+				}),
 			...(verification ? [verification] : []),
 		],
 	};
@@ -3548,6 +3562,7 @@ async function runBootstrapWork(
 					`  warning: the carried and authored hard invariants and carried section blocks exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
 				),
 			),
+			protectedContent?.authoredTitles,
 		);
 	}
 	if (shouldGenerate && generation.mode === "model") {

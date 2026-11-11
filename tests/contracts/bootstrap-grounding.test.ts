@@ -1515,3 +1515,52 @@ it("shapes a generated handbook so a 6000-character coder compile reaches its Te
 	}).text;
 	ok(worker.includes("Tests rule 1") && worker.includes("Gotchas rule 1"), worker);
 });
+
+it("context init --apply keeps the layout and scope of the sections the operator wrote", async () => {
+	const authoredTests = "- Widget snapshots under `src/widgets/render.ts` run with `node --test`.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		serializeClioMd({
+			projectName: "harbor",
+			identity: "A widget renderer.",
+			invariants: [],
+			conventions: [],
+			sections: [
+				{ title: "Widgets", body: "- `renderWidget` in `src/widgets/render.ts` returns one string." },
+				{ title: "Tests", body: authoredTests },
+			],
+		}),
+	);
+	await runBootstrap({
+		cwd,
+		applyClioMd: true,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [],
+				conventions: [],
+				sections: [
+					{
+						title: "Change recipes",
+						body: "- A new widget kind registers through `renderWidget` in `src/widgets/render.ts`.",
+					},
+					{ title: "Gotchas", body: "- `src/index.ts` re-exports `renderWidget` from `src/widgets/render.ts`." },
+				],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const titles = [...handbook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+	deepStrictEqual(
+		titles.filter((title) => title !== "Verification expectations"),
+		["Conventions", "Widgets", "Tests", "Gotchas", "Change recipes"].filter((title) => titles.includes(title)),
+	);
+	ok(
+		titles.indexOf("Widgets") < titles.indexOf("Tests") && titles.indexOf("Tests") < titles.indexOf("Gotchas"),
+		handbook,
+	);
+	ok(handbook.includes(`## Tests\n\n${authoredTests}`), handbook);
+	ok(handbook.includes("## Gotchas\n\n<!-- clio: paths=none -->\n"), handbook);
+});
