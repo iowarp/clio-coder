@@ -48,6 +48,16 @@ say so.
 > app is in alpha. Commands and settings can change between minor releases, so
 > check the [changelog](CHANGELOG.md) when upgrading.
 
+## What's new in 0.8.0
+
+- **Safe to share one folder.** A second terminal gets its own session and panes, and the sandbox hides other tools' logins.
+- **Headless `run` you can automate on.** One `run_end` frame, meaningful exit codes, cost caps that trip, proxies honored.
+- **A per-project store** for results and datasets, with a record of where each file came from.
+- **Reports you review first** and encrypted shares in your own gist, deleted with `forget` or after 180 days.
+- **Setup and installs that work the first time**, including `configure --import` for a lab's setup file and a full uninstall.
+
+0.8.0 changes some behavior; see the [changelog](CHANGELOG.md) and its Upgrade notes before upgrading.
+
 ## Get started
 
 You need a model that supports tool calling. Linux, macOS, and WSL are the
