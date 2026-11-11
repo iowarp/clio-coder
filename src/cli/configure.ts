@@ -32,6 +32,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
+	recordTargetCheck,
 	recordTargetModelSnapshot,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
@@ -154,6 +155,8 @@ Non-interactive flags:
   --lifecycle <user-managed|clio-coder-managed>
                                    resident model lifecycle policy
   --set-orchestrator               use this target for chat
+  --verify                         with --id: send one short test request first; save only if it answers
+  --no-verify                      guided setup saves without sending its test request
   --set-background                 use this target for proactive task memory
   --set-fleet-default              use this target for the fleet default
   --context-window <N>             capability override
@@ -196,6 +199,8 @@ interface ParsedArgs {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	/** `--verify` true, `--no-verify` false, absent leaves each path's default. */
+	verify?: boolean;
 }
 
 function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
@@ -315,6 +320,12 @@ function parseSetupArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			}
 			case "--set-orchestrator":
 				out.setOrchestrator = true;
+				break;
+			case "--verify":
+				out.verify = true;
+				break;
+			case "--no-verify":
+				out.verify = false;
 				break;
 			case "--set-background":
 				out.setBackground = true;
@@ -630,6 +641,34 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
+	}
+	if (args.verify === true) {
+		if (!descriptor.defaultModel) {
+			printError(`--verify needs a model for target ${args.id}; pass --model`);
+			return 2;
+		}
+		const { chatTestFix, sendChatTest } = await import("./chat-test.js");
+		const key = args.apiKey ?? (apiKeyEnv !== undefined ? process.env[apiKeyEnv] : undefined);
+		const outcome = await sendChatTest({
+			runtime,
+			target: descriptor,
+			model: descriptor.defaultModel,
+			...(key !== undefined && key !== "" ? { apiKey: key } : {}),
+		});
+		if (!outcome.ok) {
+			printError(
+				`test request to ${args.id} / ${descriptor.defaultModel} failed: ${outcome.message}. ${chatTestFix(outcome, {
+					provider: runtime.displayName,
+					model: descriptor.defaultModel,
+					...(url !== undefined ? { url } : {}),
+				})} Nothing was saved.`,
+			);
+			return 1;
+		}
+		recordTargetCheck(descriptor, descriptor.defaultModel, outcome.latencyMs);
+		process.stdout.write(
+			`Testing ${args.id} / ${descriptor.defaultModel} ... answered in ${(outcome.latencyMs / 1000).toFixed(1)} s.\n`,
+		);
 	}
 	if (args.apiKey && apiKeyRef) {
 		auth.setApiKey(apiKeyRef, args.apiKey);
@@ -2065,7 +2104,7 @@ async function runConfigSectionsMenu(
 	}
 }
 
-async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams): Promise<number> {
+async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams, verify = true): Promise<number> {
 	let selected = readSettings().targets.length === 0 ? 0 : 2;
 	const exitCode = () => (readSettings().chat.target ? 0 : 130);
 	for (;;) {
@@ -2094,7 +2133,10 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 			// Every other launcher entry opens on a clean screen. Without this the
 			// launcher's banner stayed stacked above the wizard's own header.
 			rl.clearScreen();
-			const code = await runOnboardingWizard(streams, { mode: first ? "first" : "add" });
+			const code = await runOnboardingWizard(streams, {
+				mode: first ? "first" : "add",
+				verify,
+			});
 			if (code === 0 && first) return 0;
 			if (code === 130 && first) return exitCode();
 		} else if (selected === 1) {
@@ -2158,6 +2200,7 @@ async function runInteractive(
 			return runOnboardingWizard(streams, {
 				mode: readSettings().targets.length === 0 ? "first" : "add",
 				runtime: preselectedRuntime,
+				verify: defaults.verify !== false,
 			});
 		return await runTargetSetupInteractive(rl, preselectedRuntime, defaults);
 	}
@@ -2182,8 +2225,8 @@ async function runInteractive(
 	// A first run that the bare `clio-coder` start sent here has one thing to do. The launcher would put
 	// a second welcome above the wizard's own and offer three entries that lead nowhere with no target.
 	if (canRunOnboarding(streams) && startsChat && readSettings().targets.length === 0)
-		return runOnboardingWizard(streams, { mode: "first", startsChat });
-	if (canRunOnboarding(streams)) return runConfigLauncher(rl, streams);
+		return runOnboardingWizard(streams, { mode: "first", startsChat, verify: defaults.verify !== false });
+	if (canRunOnboarding(streams)) return runConfigLauncher(rl, streams, defaults.verify !== false);
 
 	if (readSettings().targets.length === 0) {
 		// Dumb terminals retain the numbered setup path.

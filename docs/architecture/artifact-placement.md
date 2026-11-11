@@ -135,6 +135,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | --- | --- |
 | `v8-compile-cache/` | Node compile cache |
 | `provider-target-models/<key>.json` | Per-target model discovery snapshots |
+| `provider-target-checks/<key>.json` | The last setup test request a target's model answered; read for 24 hours so a just-tested route starts as checked |
 | `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when Clio closes the conversation |
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |

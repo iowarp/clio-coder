@@ -172,6 +172,7 @@ export {
 	runtimeModelListSource,
 	supportGroupLabel,
 } from "./support.js";
+export { readTargetCheck, recordTargetCheck } from "./target-check-record.js";
 export {
 	readTargetModelSnapshot,
 	recordTargetModelSnapshot,

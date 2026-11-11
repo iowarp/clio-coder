@@ -43,6 +43,7 @@ import {
 	buildProviderSupportEntry,
 	isOrchestratorEligibleRuntime,
 	listProviderSupportEntries,
+	recordTargetCheck,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
 	runtimeListsModelsLive,
@@ -53,6 +54,8 @@ import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-htt
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { observeHostCapacityFacts, resolveLocalConcurrency } from "../domains/scheduling/local-capacity.js";
+import type { ChatTestOutcome, SendChatTest } from "./chat-test.js";
+import { chatTestFix, sendChatTest } from "./chat-test.js";
 import type { ConfigureWizardHost } from "./configure-host.js";
 import { commitImport, describeImport, importChangesNothing, prepareImport } from "./configure-import.js";
 import type { ConfigureCategory } from "./configure-layout.js";
@@ -161,9 +164,11 @@ interface Answers {
 	unreachable?: string | undefined;
 	/** The sign-in was put off or failed, so the wizard ends with nothing saved and names the login command. */
 	signInLater?: string | undefined;
+	/** The test request before Save: how long the model took to answer, or "skipped" when saved anyway. */
+	tested?: { latencyMs: number } | "skipped" | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported";
+type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported" | "fix";
 
 type Have = "key" | "subscription" | "server" | "file";
 
@@ -193,6 +198,8 @@ interface Wizard {
 	startsChat: boolean;
 	/** Row on the rail, at the wizard's shared label column. */
 	answer: (label: string, value: string) => void;
+	/** Save first sends one short test request; null when this run saves without one. */
+	sendTest: SendChatTest | null;
 }
 
 interface Step {
@@ -1473,7 +1480,7 @@ const REVIEW_STEP: Step = {
 					truncate(`Connection: ${answers.targetId}`, wizard.host ? 36 : 70),
 					truncate(`Model: ${answers.model}`, wizard.host ? 36 : 70),
 					...verificationSummary(answers),
-					"No generation or quality/tool tests.",
+					wizard.sendTest ? "Save sends one short test message first." : "No generation or quality/tool tests.",
 					"GPU/VRAM and model fit not checked.",
 					`Automatic local workers: ${capacity.limit}`,
 					answers.mode === "first" ? "Save sets the chat and fleet model." : "Existing routes stay in place.",
@@ -1493,6 +1500,7 @@ const REVIEW_STEP: Step = {
 			});
 			if (result.kind !== "selected") return result.kind;
 			if (result.value === "model") return "model";
+			if (result.value === "save" && wizard.sendTest) return testBeforeSave(wizard, answers, wizard.sendTest);
 			if (result.value !== "details")
 				return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
 			const detailPages = [
@@ -1557,6 +1565,74 @@ const REVIEW_STEP: Step = {
 	},
 };
 
+/**
+ * Send the test request and stay on its screen until it answers or the person
+ * chooses: try again, change the key or address, or save anyway.
+ */
+async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTest): Promise<StepOutcome> {
+	const runtime = answers.runtime;
+	const model = answers.model;
+	if (!runtime || model === undefined) return "next";
+	const label = `${answers.targetId} / ${model}`;
+	for (;;) {
+		wizard.presenter.note(`Testing ${label} ...`);
+		const target = draftDescriptor(answers, runtime, true);
+		const apiKey =
+			answers.apiKeyLiteral ??
+			(answers.credential === "env" && answers.apiKeyEnv ? process.env[answers.apiKeyEnv] : undefined);
+		const outcome: ChatTestOutcome = await send({
+			runtime,
+			target,
+			model,
+			...(apiKey !== undefined && apiKey !== "" ? { apiKey } : {}),
+		});
+		if (outcome.ok) {
+			answers.tested = { latencyMs: outcome.latencyMs };
+			wizard.presenter.completedStep(`Testing ${label} ... answered in ${(outcome.latencyMs / 1000).toFixed(1)} s.`);
+			return "next";
+		}
+		const fix = chatTestFix(outcome, {
+			provider: runtime.displayName,
+			model,
+			...(answers.url !== undefined ? { url: answers.url } : {}),
+		});
+		wizard.presenter.warn(`${label} did not answer: ${truncate(outcome.message, 200)}`);
+		const result = await wizard.select<"retry" | "fix" | "model" | "save" | "cancel">({
+			heading: ["", chalk.bold("The test request failed"), fix],
+			choices: [
+				{ value: "retry", label: "Try again" },
+				{ value: "fix", label: "Change the key or address" },
+				...(outcome.httpStatus === 404 ? [{ value: "model" as const, label: "Choose a different model" }] : []),
+				{ value: "save", label: "Save anyway", hint: "saved as not checked" },
+				{ value: "cancel", label: "Cancel setup" },
+			],
+			railPrefix: wizard.rail,
+			backLabel: "review",
+			clearOnExit: true,
+			input: wizard.input,
+			output: wizard.output,
+		});
+		if (result.kind === "quit") return "quit";
+		if (result.kind === "back") return "back";
+		if (result.value === "retry") continue;
+		if (result.value === "save") {
+			answers.tested = "skipped";
+			return "next";
+		}
+		return result.value;
+	}
+}
+
+/** Where "Change the key or address" goes: the key screen, else the credential question, else the address. */
+function fixStep(answers: Answers): Step {
+	if (KEY_STEP.applies(answers)) return KEY_STEP;
+	if (answers.runtime?.auth === "api-key") {
+		answers.keyGiven = undefined;
+		return CREDENTIAL_STEP;
+	}
+	return URL_STEP.applies(answers) ? URL_STEP : REVIEW_STEP;
+}
+
 // Credential steps come before the URL step: a runtime that needs or may need a
 // key (litellm, every cloud runtime, keyed openai-compat) has to have one in
 // hand before the URL step probes reachability, or the probe reads as
@@ -1612,7 +1688,13 @@ function applyAnswers(
 export async function runOnboardingWizard(
 	streams: OnboardingStreams,
 	options:
-		| { mode: "first" | "add"; runtime?: RuntimeDescriptor; startsChat?: boolean }
+		| {
+				mode: "first" | "add";
+				runtime?: RuntimeDescriptor;
+				startsChat?: boolean;
+				/** Send one short test request before Save; a function replaces the real request in tests. */
+				verify?: boolean | SendChatTest;
+		  }
 		| { mode: "edit"; target: TargetDescriptor } = {
 		mode: "first",
 	},
@@ -1638,6 +1720,12 @@ export async function runOnboardingWizard(
 		answer: (label, value) => {
 			presenter.fields([[label.padEnd(LABEL_WIDTH), truncate(value, Math.max(12, columns - LABEL_WIDTH - 6))]]);
 		},
+		sendTest:
+			options.mode === "edit" || options.verify === undefined || options.verify === false
+				? null
+				: options.verify === true
+					? sendChatTest
+					: options.verify,
 	};
 
 	presenter.header(
@@ -1653,6 +1741,8 @@ export async function runOnboardingWizard(
 	const rows = (streams.out as { rows?: number }).rows ?? 24;
 	if (rows >= 20)
 		presenter.note("Choose what you already use. Clio checks the endpoint and model list when the provider allows it.");
+	if (wizard.sendTest)
+		presenter.note("Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).");
 	// "Nothing is saved" read as false to a first-run user who then found the
 	// settings.yaml and credentials.yaml templates the home bootstrap writes. Those
 	// hold no choice of theirs; the sentence is about the choices.
@@ -1751,6 +1841,11 @@ export async function runOnboardingWizard(
 		if (outcome === "credential") {
 			direction = 1;
 			cursor = STEPS.indexOf(CREDENTIAL_STEP);
+			continue;
+		}
+		if (outcome === "fix") {
+			direction = 1;
+			cursor = STEPS.indexOf(fixStep(answers));
 			continue;
 		}
 		// Leaving the list "Choose a different model" opened returns to the review with the model unchanged.
@@ -1864,6 +1959,8 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 		}
 
 		updateSettings((settings) => applyAnswers(settings, answers, descriptor, chatEligible));
+		if (typeof answers.tested === "object" && answers.model !== undefined)
+			recordTargetCheck(descriptor, answers.model, answers.tested.latencyMs);
 		wizard.host?.onTargetSaved?.();
 	} catch (error) {
 		presenter.fail("settings were not written", error instanceof Error ? error.message : String(error));
@@ -1881,6 +1978,13 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 	if (answers.mode === "first" && answers.thinking !== undefined)
 		presenter.completedStep(`thinking level ${answers.thinking}`);
 	presenter.completedStep(`settings written to ${shortenPath(settingsPath())}`);
+	if (typeof answers.tested === "object")
+		presenter.completedStep(
+			answers.mode === "first"
+				? "Saved. Chat and workers use this model. Change it any time with /model or /config."
+				: "Saved. The model answered its test request.",
+		);
+	else if (answers.tested === "skipped") presenter.warn(`${targetId} was saved without a passed test request.`);
 
 	if (contextWindowUndiscovered(descriptor, answers.probe ?? null)) {
 		presenter.warn(

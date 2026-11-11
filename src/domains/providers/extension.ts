@@ -28,6 +28,7 @@ import { createProfileKnowledgeBase } from "./profile-knowledge.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { runtimeNotRegistered } from "./retired-runtimes.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
+import { readTargetCheck } from "./target-check-record.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
@@ -77,6 +78,13 @@ function probeRefusedCredential(probe: ProbeResult): boolean {
 
 function emptyHealth(): TargetHealth {
 	return { status: "unknown", lastCheckAt: null, lastError: null, latencyMs: null };
+}
+
+/** Before any probe, a request setup sent to this target's default model and saw answered is a passed check. */
+function startingHealth(target: TargetDescriptor): TargetHealth {
+	const check = target.defaultModel ? readTargetCheck(target) : null;
+	if (check === null || check.model !== target.defaultModel) return emptyHealth();
+	return { status: "healthy", lastCheckAt: check.answeredAt, lastError: null, latencyMs: check.latencyMs };
 }
 
 function availabilityFor(
@@ -493,7 +501,7 @@ export function createProvidersBundle(
 		const catalogOnlyFailure = probe?.failureKind === "catalog-unavailable";
 		const health: TargetHealth =
 			healthProbe === null
-				? (previous?.health ?? emptyHealth())
+				? (previous?.health ?? startingHealth(target))
 				: {
 						status: healthy ? (unservedDefault === null ? "healthy" : "degraded") : catalogOnlyFailure ? "degraded" : "down",
 						lastCheckAt: new Date().toISOString(),

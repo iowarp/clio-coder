@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
 import { parse } from "yaml";
+import type { SendChatTest } from "../../src/cli/chat-test.js";
 import { runConfigureCommand } from "../../src/cli/configure.js";
 import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
 import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
@@ -578,6 +579,86 @@ describe("contracts/configure-onboarding", () => {
 			match(readFileSync(join(testEnv.settingsFile, "..", "credentials.yaml"), "utf8"), new RegExp(key, "u"));
 		} finally {
 			testEnv.cleanup();
+		}
+	});
+
+	it("sends one test request before Save: a refused key saves nothing, a good key or Save anyway saves", async () => {
+		const checks = (root: string) =>
+			(readdirSync(root, { recursive: true }) as string[]).filter((file) => file.includes("provider-target-checks/"));
+		const fixed = unconfiguredEnv();
+		const sent: string[] = [];
+		const refuseBad: SendChatTest = async ({ apiKey }) => {
+			sent.push(apiKey ?? "");
+			return apiKey === "sk-ant-good-key"
+				? { ok: true, latencyMs: 1200 }
+				: { ok: false, message: "401 invalid x-api-key", httpStatus: 401 };
+		};
+		try {
+			const result = await runWizard(
+				fixed.env,
+				[
+					{ waitFor: "What do you have?", keys: [ENTER] },
+					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "The test request failed", keys: [DOWN, ENTER] },
+					{ waitFor: "Paste your API key", keys: [..."sk-ant-good-key".split(""), ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+				],
+				{ mode: "first", verify: refuseBad },
+			);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			const screen = plainText(result.transcript());
+			ok(screen.includes("one short test message"), screen);
+			ok(screen.includes("Anthropic refused the key (401)"), screen);
+			match(screen, /answered in 1\.2 s\./u);
+			ok(screen.includes("Saved. Chat and workers use this model."), screen);
+			deepStrictEqual(sent, ["sk-ant-bad-key", "sk-ant-good-key"]);
+			const credentials = readFileSync(join(fixed.settingsFile, "..", "credentials.yaml"), "utf8");
+			ok(credentials.includes("sk-ant-good-key") && !credentials.includes("sk-ant-bad-key"), credentials);
+			strictEqual(checks(fixed.root).length, 1, "the answered request marks the target checked");
+		} finally {
+			fixed.cleanup();
+		}
+
+		const anyway = unconfiguredEnv();
+		try {
+			const result = await runWizard(
+				anyway.env,
+				[
+					{ waitFor: "What do you have?", keys: [ENTER] },
+					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "The test request failed", keys: [DOWN, DOWN, ENTER] },
+				],
+				{ mode: "first", verify: refuseBad },
+			);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			match(readFileSync(anyway.settingsFile, "utf8"), /runtime: anthropic/u);
+			ok(plainText(result.transcript()).includes("saved without a passed test request"));
+			strictEqual(checks(anyway.root).length, 0, "Save anyway leaves the target unchecked");
+		} finally {
+			anyway.cleanup();
+		}
+
+		const refused = unconfiguredEnv();
+		try {
+			const result = await runWizard(
+				refused.env,
+				[
+					{ waitFor: "What do you have?", keys: [ENTER] },
+					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "The test request failed", keys: [CTRL_C] },
+				],
+				{ mode: "first", verify: refuseBad },
+			);
+			strictEqual(result.code, 130);
+			ok(
+				!existsSync(refused.settingsFile) || !/runtime: anthropic/u.test(readFileSync(refused.settingsFile, "utf8")),
+				"a refused key saves nothing",
+			);
+		} finally {
+			refused.cleanup();
 		}
 	});
 
