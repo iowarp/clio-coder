@@ -28,6 +28,7 @@ export * from "./overlay-key-routing.js";
 import type { OverlayState } from "./overlay-key-routing.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import type { SettingsCenterRowId, SettingsSectionId } from "./overlays/settings.js";
+import { createPermissionSettleWindow } from "./permission-settle.js";
 
 // Runtime lifecycle construction lives beside the pure modal key router so the
 // application composition root no longer owns the mutable overlay state.
@@ -240,12 +241,7 @@ export interface OverlayLifecycleController {
 	dispose(): void;
 }
 
-/** How long a fresh permission card ignores Enter, so a key already in flight cannot allow it unread. */
-const PERMISSION_SETTLE_MS = 400;
-
 export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): OverlayLifecycleController {
-	const now = deps.now ?? (() => performance.now());
-	let permissionOpenedAt = Number.NEGATIVE_INFINITY;
 	const {
 		tui,
 		footer,
@@ -293,9 +289,12 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	 * reference when the dialog closes drops the text with it.
 	 */
 	let permissionBody: PermissionOverlayBodyHandle | null = null;
-	let permissionSettleTimer: ReturnType<typeof setTimeout> | null = null;
+	const permissionSettle = createPermissionSettleWindow({
+		now: deps.now ?? (() => performance.now()),
+		requestRender: () => tui.requestRender(),
+	});
 	const isPermissionSettling = (): boolean =>
-		overlayTransitions.state === "permission-confirm" && now() - permissionOpenedAt < PERMISSION_SETTLE_MS;
+		overlayTransitions.state === "permission-confirm" && permissionSettle.settling();
 	const inspectionHint = (): import("./permission-hint.js").PermissionInspectionHint => {
 		if (permissionBody === null || !permissionBody.canInspect()) return "none";
 		return permissionBody.isInspecting() ? "open" : "closed";
@@ -363,15 +362,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 				isPermissionSettling,
 			);
 			permissionBody = body;
-			permissionOpenedAt = now();
-			// The allow row is dimmed while Enter is ignored; nothing else may paint
-			// when the window ends, so the card asks for its own frame then.
-			if (permissionSettleTimer !== null) clearTimeout(permissionSettleTimer);
-			permissionSettleTimer = setTimeout(() => {
-				permissionSettleTimer = null;
-				tui.requestRender();
-			}, PERMISSION_SETTLE_MS);
-			permissionSettleTimer.unref?.();
+			permissionSettle.open();
 			const handle = showOverlayFrame(tui, body, {
 				// The card takes the editor's rails and keeps the draft editable under
 				// it: a steer typed while the call is parked is what the CONFIRM rail
@@ -809,8 +800,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		},
 		cancelAskUser: overlayAskUser.cancel,
 		dispose: () => {
-			if (permissionSettleTimer !== null) clearTimeout(permissionSettleTimer);
-			permissionSettleTimer = null;
+			permissionSettle.dispose();
 			overlayPermission?.dispose();
 			overlayAskUser?.dispose();
 		},

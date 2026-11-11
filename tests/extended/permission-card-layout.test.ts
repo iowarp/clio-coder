@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { PermissionResolvedPayload } from "../../src/core/telemetry/live-events.js";
@@ -25,6 +25,7 @@ import {
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
 } from "../../src/interactive/permission-overlay.js";
+import { createPermissionSettleWindow, PERMISSION_SETTLE_MS } from "../../src/interactive/permission-settle.js";
 import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool-execution.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 import { keyCap } from "../../src/interactive/theme/primitives.js";
@@ -452,5 +453,38 @@ test("a key on the card holds its countdown, and a 0 window waits forever (#421)
 		} finally {
 			f.cleanup();
 		}
+	}
+});
+
+test("the settle window paints once when it ends, restarts for a replacing card, and never after dispose", () => {
+	mock.timers.enable({ apis: ["setTimeout", "Date"] });
+	try {
+		let renders = 0;
+		const settle = createPermissionSettleWindow({ now: () => Date.now(), requestRender: () => renders++ });
+		settle.open();
+		mock.timers.tick(PERMISSION_SETTLE_MS - 1);
+		strictEqual(settle.settling(), true);
+		strictEqual(renders, 0);
+		mock.timers.tick(1);
+		strictEqual(settle.settling(), false);
+		strictEqual(renders, 1);
+		mock.timers.tick(PERMISSION_SETTLE_MS * 4);
+		strictEqual(renders, 1, "the end-of-window frame fires once");
+
+		settle.open();
+		mock.timers.tick(PERMISSION_SETTLE_MS / 2);
+		settle.open();
+		mock.timers.tick(PERMISSION_SETTLE_MS / 2);
+		strictEqual(renders, 1, "a replacing card restarts the window instead of painting the old one's end");
+		strictEqual(settle.settling(), true);
+		mock.timers.tick(PERMISSION_SETTLE_MS);
+		strictEqual(renders, 2, "one frame for the two cards, at the second card's end");
+
+		settle.open();
+		settle.dispose();
+		mock.timers.tick(PERMISSION_SETTLE_MS * 2);
+		strictEqual(renders, 2, "no frame after dispose");
+	} finally {
+		mock.timers.reset();
 	}
 });
