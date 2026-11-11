@@ -812,7 +812,11 @@ a version change or a rebuild since this process started.
 When the build a running session started from is replaced on disk, the session
 warns once, then keeps a short `build replaced · /restart` line in the footer
 until the process ends, so `/restart` clears it. A feature whose code the
-rebuild deleted prints the reinstall advice instead of a stack. In Clio Coder's
+rebuild deleted shows the reinstall advice as a notice instead of a stack, and
+the session keeps running. Over ACP the failed request carries the
+`incomplete_installation` code and asks the client to restart the agent from the
+editor. Every build, each `pnpm run dev` watch rebuild included, writes a fresh
+id to `dist/build.json`. In Clio Coder's
 own source tree, running from that tree's build, the model is also told once
 that the code it edited is not what runs and to `/restart` before verifying.
 

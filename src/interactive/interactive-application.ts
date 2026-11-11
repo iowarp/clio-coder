@@ -2434,6 +2434,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			editorChrome: presentation.editorChrome,
 			admitSubmission: (submission) => editorSubmit.admitCapturedText(submission.rawText, lease.abortSignal),
 			undeliveredMessages,
+			notice: (text) => {
+				notifications.add({ level: "warning", text, key: "build:missing-module" });
+				tui.requestRender();
+			},
 			onHydratedFrame: (frameId, interactivity) => {
 				deps.onHydratedFrameCommit?.(frameId, interactivity);
 			},

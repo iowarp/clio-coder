@@ -18,17 +18,29 @@ function missingModulePath(message: string): string | null {
 	return isAbsolute(specifier) ? specifier : null;
 }
 
-/**
- * Turn a missing Clio-owned lazy chunk into an actionable reinstall message.
- * Errors for user extensions, hooks, or any module outside this installation's
- * generated `dist` directory remain untouched.
- */
-export function incompleteInstallationAdvice(err: unknown): string | null {
+type IncompleteKind = "build_replaced" | "checkout_incomplete" | "install_incomplete";
+
+interface IncompleteInstallation {
+	kind: IncompleteKind;
+	message: string;
+	outputDir: string;
+}
+
+/** Test seams: the generated output directory and the build id this process loaded. */
+export interface IncompleteInstallationOptions {
+	outputDir?: string;
+	runningId?: string | null;
+}
+
+function classifyIncompleteInstallation(
+	err: unknown,
+	options: IncompleteInstallationOptions,
+): IncompleteInstallation | null {
 	if ((err as NodeJS.ErrnoException | undefined)?.code !== "ERR_MODULE_NOT_FOUND") return null;
 	const message = err instanceof Error ? err.message : String(err);
 	let outputDir: string;
 	try {
-		outputDir = join(resolvePackageRoot(), "dist");
+		outputDir = options.outputDir ?? join(resolvePackageRoot(), "dist");
 	} catch {
 		return null;
 	}
@@ -36,14 +48,29 @@ export function incompleteInstallationAdvice(err: unknown): string | null {
 	if (!missing) return null;
 	const fromOutput = relative(outputDir, missing);
 	if (fromOutput === "" || fromOutput.startsWith("..") || isAbsolute(fromOutput)) return null;
+	const running = options.runningId === undefined ? runningBuildId : options.runningId;
 	try {
 		const disk = JSON.parse(readFileSync(join(outputDir, "build.json"), "utf8"));
-		if (runningBuildId && disk.id && disk.id !== runningBuildId)
-			return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart the process that reported this error. For a background GUI server, run clio-coder gui background restart --if-idle from a separate terminal, then reload the app. For a private or foreground GUI server, stop it and relaunch the original GUI command. Rebuilding does not update modules already loaded by a running process. Run clio-coder doctor to identify other stale processes.`;
+		if (running && disk.id && disk.id !== running) return { kind: "build_replaced", message, outputDir };
 	} catch {
 		// Older and interrupted builds have no completion record; use the repair advice below.
 	}
-	if (existsSync(join(dirname(outputDir), ".git")))
+	if (existsSync(join(dirname(outputDir), ".git"))) return { kind: "checkout_incomplete", message, outputDir };
+	return { kind: "install_incomplete", message, outputDir };
+}
+
+/**
+ * Turn a missing Clio-owned lazy chunk into an actionable reinstall message.
+ * Errors for user extensions, hooks, or any module outside this installation's
+ * generated `dist` directory remain untouched.
+ */
+export function incompleteInstallationAdvice(err: unknown, options: IncompleteInstallationOptions = {}): string | null {
+	const found = classifyIncompleteInstallation(err, options);
+	if (!found) return null;
+	const { message, outputDir } = found;
+	if (found.kind === "build_replaced")
+		return `${message}\nThis running Clio loaded a build that has since been replaced. Finish active work and restart the process that reported this error. For a background GUI server, run clio-coder gui background restart --if-idle from a separate terminal, then reload the app. For a private or foreground GUI server, stop it and relaunch the original GUI command. Rebuilding does not update modules already loaded by a running process. Run clio-coder doctor to identify other stale processes.`;
+	if (found.kind === "checkout_incomplete")
 		return `${message}\nThis checkout build is incomplete. Run: pnpm --dir ${shellQuote(dirname(outputDir))} run build. Then restart Clio. If doctor still starts, clio-coder doctor --fix performs the rebuild.`;
 	return [
 		`${message}`,
@@ -56,4 +83,24 @@ export function incompleteInstallationAdvice(err: unknown): string | null {
 		"  bun add -g @iowarp/clio-coder        # Bun install",
 		"  pnpm run install:local              # source checkout",
 	].join("\n");
+}
+
+/**
+ * The same diagnosis for an ACP client: host-authored, single-line and free of
+ * paths, because the wire never carries text the thrower chose. An ACP client
+ * reloads Clio by restarting the agent, so the advice names that, not a GUI.
+ */
+export function incompleteInstallationAcpAdvice(
+	err: unknown,
+	options: IncompleteInstallationOptions = {},
+): { reason: IncompleteKind; message: string } | null {
+	const found = classifyIncompleteInstallation(err, options);
+	if (!found) return null;
+	const message =
+		found.kind === "build_replaced"
+			? "this Clio agent loaded a build that has since been replaced; restart the agent from your editor to load the new build"
+			: found.kind === "checkout_incomplete"
+				? "this Clio checkout build is incomplete; run pnpm run build in the checkout, then restart the agent from your editor"
+				: "this Clio Coder installation is incomplete; reinstall @iowarp/clio-coder, then restart the agent from your editor";
+	return { reason: found.kind, message };
 }

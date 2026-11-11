@@ -6,6 +6,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
+import { incompleteInstallationAcpAdvice } from "../../core/incomplete-installation.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import {
@@ -192,6 +193,15 @@ function handlerErrorFrame(id: string | number, err: unknown, diagnostics?: (lin
 		return jsonRpcError(id, err.rpcCode, message, acpErrorData(err.detail));
 	}
 	diagnostics?.(`internal error: ${acpErrorMessage(err)}`);
+	// A lazy chunk a rebuild deleted: the client gets host text naming the agent restart.
+	const advice = incompleteInstallationAcpAdvice(err);
+	if (advice)
+		return jsonRpcError(
+			id,
+			-32603,
+			advice.message,
+			acpErrorData({ code: "incomplete_installation", reason: advice.reason }),
+		);
 	return jsonRpcError(id, -32603, ACP_INTERNAL_ERROR_MESSAGE, acpErrorData({ code: "internal_error" }));
 }
 

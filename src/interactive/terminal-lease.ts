@@ -79,6 +79,8 @@ export interface TerminalLeaseAdoption {
 	admitSubmission: (submission: BootSubmission) => Promise<void>;
 	/** The operator's queued messages still waiting for a slot, which exiting abandons. */
 	undeliveredMessages?: () => readonly string[];
+	/** Shows a warning notice; a missing lazy chunk after a rebuild lands here instead of ending the session. */
+	notice?: (text: string) => void;
 	onHydratedFrame?: (frameId: number | null, interactivity: BootInteractivity) => void;
 }
 
@@ -397,11 +399,17 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	});
 	// A throw in a render or event handler, or a stray rejection, still runs the
 	// shutdown hooks: the drain hook restores the terminal and the draft is recovered.
-	const onProcessFault = (error: unknown): void => {
-		// Never throws: a crash the next session can offer to report, written before shutdown.
-		writeCrashRecord(error, "tui");
+	let faultNotice: ((text: string) => void) | undefined;
+	const onProcessFault = (error: unknown, origin?: unknown): void => {
 		// A lazy chunk a rebuild deleted under this session gets the reinstall advice, not a stack.
 		const advice = incompleteInstallationAdvice(error);
+		// A rejected lazy import broke one feature, not the loaded session: say so and keep running.
+		if (advice && origin !== "uncaughtException" && faultNotice) {
+			faultNotice(advice);
+			return;
+		}
+		// Never throws: a crash the next session can offer to report, written before shutdown.
+		writeCrashRecord(error, "tui");
 		lease.writeDiagnostic(
 			"stderr",
 			advice
@@ -588,6 +596,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			// input, and SIGINT become Stage 1 as one JavaScript turn.
 			editorChrome = adoption.editorChrome;
 			undeliveredMessages = adoption.undeliveredMessages;
+			faultNotice = adoption.notice;
 			inputDelegate = applicationInput;
 			host.replace(adoption.root);
 			tui.setFocus(editor);

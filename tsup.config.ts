@@ -15,7 +15,37 @@ import {
 
 const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
-const buildId = randomUUID();
+/** Minted at each build's start, so every watch rebuild records an id that matches its own chunks. */
+let buildId = randomUUID();
+
+/** The build id module; only its chunk changes from one build to the next. */
+const BUILD_ID_MODULE = /[\\/]src[\\/]core[\\/]build-id\.ts$/;
+
+/**
+ * Gives each esbuild run, watch rebuilds included, a fresh id and serves it as
+ * the content of src/core/build-id.ts. A config-level `define` is evaluated once
+ * when this file loads, which made every watch rebuild share one id.
+ */
+export const buildIdPlugin = {
+	name: "clio-build-id",
+	setup(build: {
+		onStart(callback: () => void): void;
+		onLoad(options: { filter: RegExp }, callback: () => { contents: string; loader: "ts" }): void;
+	}): void {
+		build.onStart(() => {
+			buildId = randomUUID();
+		});
+		build.onLoad({ filter: BUILD_ID_MODULE }, () => ({
+			contents: `export const runningBuildId: string | null = ${JSON.stringify(buildId)};\n`,
+			loader: "ts",
+		}));
+	},
+};
+
+/** The id the most recent build carries; `onSuccess` writes it to dist/build.json. */
+export function currentBuildId(): string {
+	return buildId;
+}
 
 /**
  * Commit and dirty flag of the checkout being bundled, injected as constants so
@@ -116,7 +146,8 @@ const entries = {
 
 export default defineConfig({
 	entry: entries,
-	define: { __CLIO_GUI_BUNDLED__: "true", __CLIO_BUILD_ID__: JSON.stringify(buildId), ...buildProvenanceDefines() },
+	define: { __CLIO_GUI_BUNDLED__: "true", ...buildProvenanceDefines() },
+	esbuildPlugins: [buildIdPlugin],
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
