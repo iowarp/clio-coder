@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
 	closeSync,
 	existsSync,
@@ -18,7 +18,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
@@ -597,6 +597,7 @@ async function uninstallInactive(
 		try {
 			mkdirSync(lock);
 			safeResourceWrite(join(lock, "pid"), `${process.pid}\n`);
+			safeResourceWrite(join(lock, "host"), `${installLockHost()}\n`);
 			safeResourceWrite(join(lock, "uninstall"), "1\n");
 		} catch (error) {
 			presenter.fail(
@@ -900,6 +901,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		try {
 			mkdirSync(installLock);
 			safeResourceWrite(join(installLock, "pid"), `${process.pid}\n`);
+			safeResourceWrite(join(installLock, "host"), `${installLockHost()}\n`);
 			safeResourceWrite(join(installLock, "uninstall"), "1\n");
 		} catch (error) {
 			presenter.fail(
@@ -1158,5 +1160,32 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 				}
 			}
 		}
+	}
+}
+
+/** The host id install.sh records in `.install-lock/host`, so it can reclaim a lock this process leaves behind. */
+function installLockHost(): string {
+	for (const file of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+		try {
+			const id = readFileSync(file, "utf8").replace(/[ \n]/gu, "");
+			if (id) return withPidNamespace(id);
+		} catch {}
+	}
+	if (process.platform === "darwin") {
+		try {
+			const out = execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8" });
+			const id = /"IOPlatformUUID" = "([^"]+)"/u.exec(out)?.[1];
+			if (id) return withPidNamespace(id);
+		} catch {}
+	}
+	return withPidNamespace(hostname());
+}
+
+/** install.sh appends the pid namespace, so a container sharing the machine id never reclaims the host's lock. */
+function withPidNamespace(id: string): string {
+	try {
+		return `${id}/${readlinkSync("/proc/self/ns/pid")}`;
+	} catch {
+		return id;
 	}
 }

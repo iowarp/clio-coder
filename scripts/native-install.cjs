@@ -2,11 +2,40 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const crypto = require("node:crypto");
 const os = require("node:os");
 const MARK = "# clio-coder-installer launcher";
+
+/** The host id install.sh records in `.install-lock/host`, so it can reclaim a lock this process leaves behind. */
+function installLockHost() {
+	for (const file of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+		try {
+			const id = fs.readFileSync(file, "utf8").replace(/[ \n]/gu, "");
+			if (id) return withPidNamespace(id);
+		} catch {}
+	}
+	if (process.platform === "darwin") {
+		try {
+			const out = execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], {
+				encoding: "utf8",
+			});
+			const id = /"IOPlatformUUID" = "([^"]+)"/u.exec(out)?.[1];
+			if (id) return withPidNamespace(id);
+		} catch {}
+	}
+	return withPidNamespace(os.hostname());
+}
+
+/** install.sh appends the pid namespace, so a container sharing the machine id never reclaims the host's lock. */
+function withPidNamespace(id) {
+	try {
+		return `${id}/${fs.readlinkSync("/proc/self/ns/pid")}`;
+	} catch {
+		return id;
+	}
+}
 
 function atomic(file, text, mode = 0o600) {
 	const temp = `${file}.${crypto.randomUUID()}.tmp`;
@@ -702,6 +731,7 @@ async function main() {
 			if (!dryRun) {
 				fs.writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
 				fs.writeFileSync(path.join(lock, "hostname"), `${os.hostname()}\n`);
+				fs.writeFileSync(path.join(lock, "host"), `${installLockHost()}\n`);
 			}
 			const result = prune(root, { dryRun });
 			if (args.includes("--json")) process.stdout.write(`${JSON.stringify(result)}\n`);
