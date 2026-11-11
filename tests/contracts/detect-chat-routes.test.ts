@@ -163,3 +163,16 @@ test("headless borrowing counts model-less keys and takes --model for the only o
 	assert.equal(withModel.kind === "one" ? withModel.settings.chat.model : withModel.kind, "claude-haiku-5-5");
 	assert.equal(readFileSync(settingsPath(), "utf8"), before);
 });
+
+test("a local server's first chat model is adopted, never an embedding model listed before it", async (t) => {
+	const home = await isolateClioEnv("clio-route-embed-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const readJson = async (input: string) => {
+		const url = new URL(input);
+		if (url.pathname === "/api/tags") return { models: [{ name: "nomic-embed-text:latest" }, { name: "qwen3:8b" }] };
+		throw new Error("absent");
+	};
+	const routes = await detectChatRoutes(readSettings(), readJson);
+	assert.equal(routes.find((route) => route.runtime.id === "ollama")?.model, "qwen3:8b");
+});

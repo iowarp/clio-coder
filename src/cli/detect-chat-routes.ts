@@ -8,6 +8,7 @@ import type { Candidate } from "../domains/lifecycle/setup-status.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import { detectCopilotLogin } from "../domains/providers/copilot-setup.js";
 import { isOrchestratorEligibleRuntime } from "../domains/providers/eligibility.js";
+import { offeredAsChatModel } from "../domains/providers/index.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { buildProviderSupportEntry } from "../domains/providers/support.js";
@@ -84,7 +85,11 @@ async function localModels(readJson: typeof readLoopbackJson): Promise<Map<strin
 							data?: { id?: string }[];
 							models?: { name?: string }[];
 						};
-						const model = url.endsWith("/api/tags") ? body.models?.[0]?.name : body.data?.[0]?.id;
+						// The first chat model: a server's list can start with an embedding model.
+						const ids = url.endsWith("/api/tags")
+							? (body.models ?? []).map((entry) => entry?.name)
+							: (body.data ?? []).map((entry) => entry?.id);
+						const model = ids.find((id) => typeof id === "string" && id.trim() !== "" && offeredAsChatModel(id));
 						if (!controller.signal.aborted && typeof model === "string" && model.trim()) {
 							models.set(new URL(url).origin, model);
 						}
