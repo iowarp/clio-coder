@@ -82,7 +82,7 @@ export interface GlobalCliFlags {
 	autonomy?: AutonomyLevel;
 	/** `--allow-tools`/`--delegate-tools` before any subcommand: the interactive session's tool limits. */
 	toolLimits?: SessionToolLimits;
-	/** `--session-file <path>` before any subcommand, made absolute: where the interactive session writes its exit record. */
+	/** `--session-file <path>` before any subcommand, made absolute: where the interactive session keeps its live lane record and writes its exit record. */
 	sessionFile?: string;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,

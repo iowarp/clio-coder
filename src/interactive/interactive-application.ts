@@ -634,6 +634,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		? createSessionFileRecorder({ path: deps.sessionFile, snapshot: () => exitSummary.snapshot(), cwd: process.cwd() })
 		: null;
 	if (sessionFile) {
+		// The live record follows the permission card the operator sees; chat events reach it through the ingress below.
+		deps.bus.subscribe("approval.requested", (payload) => sessionFile.observeApprovalRequested(payload));
+		deps.bus.subscribe("approval.resolved", () => sessionFile.observeApprovalResolved());
 		// A clean exit records first with what ended it; a signal records in the drain while the session is still
 		// readable; anything else that ends the process records at exit. /restart hands the record to its child.
 		const recordAt = (code: number): void => {
@@ -1152,6 +1155,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onChatEventIngress: (event) => {
 			turnUsage?.observe(event);
 			exitSummary.observeChat(event);
+			sessionFile?.observeChat(event);
 			recordChatEventIngress(event);
 			presentation.recordChatEvent(event);
 		},

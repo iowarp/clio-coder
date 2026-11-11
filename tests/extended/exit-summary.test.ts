@@ -264,6 +264,7 @@ test("--session-file writes one atomic 0600 record from the exit snapshot, which
 			turns: 2,
 			cwd: "/work",
 			endedAt: "2026-11-06T00:00:00.000Z",
+			state: "ended",
 		});
 		// No conversation still leaves an outcome on record; an unwritable path warns instead of throwing at exit.
 		const empty = join(dir, "empty.json");
@@ -279,6 +280,45 @@ test("--session-file writes one atomic 0600 record from the exit snapshot, which
 		});
 		strictEqual(blocked.record("quit", 0), false);
 		match(warnings.join("\n"), /could not write the session record/u);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("--session-file keeps a live lane state at turn ends and permission cards until the exit record", () => {
+	const dir = mkdtempSync(join(tmpdir(), "clio-session-live-"));
+	try {
+		const path = join(dir, "live.json");
+		const recorder = createSessionFileRecorder({
+			path,
+			cwd: "/work",
+			now: () => new Date("2026-11-06T00:00:00.000Z"),
+			snapshot: () => ({ sessionId: "session-1", sessionName: null, turns: 1, models: [] }) as never,
+		});
+		const read = () => JSON.parse(readFileSync(path, "utf8"));
+		recorder.observeChat({ type: "agent_start" } as ChatLoopEvent);
+		strictEqual(read().state, "working");
+		recorder.observeChat({ type: "message_end", message: { role: "assistant", stopReason: "stop" } } as never);
+		recorder.observeChat({ type: "agent_end", messages: [] } as never);
+		const idle = read();
+		deepStrictEqual([idle.state, idle.turns, idle.lastTurn.stopReason, idle.waitingOn], ["idle", 1, "stop", undefined]);
+		ok("build" in idle);
+		recorder.observeChat({ type: "agent_start" } as ChatLoopEvent);
+		recorder.observeChat({
+			type: "tool_execution_start",
+			toolCallId: "c1",
+			toolName: "bash",
+			args: { command: "curl https://user:hunter2@example.com" },
+		} as never);
+		recorder.observeApprovalRequested({ tool: "bash", actionClass: "execute" });
+		const parked = read();
+		deepStrictEqual([parked.state, parked.waitingOn.tool], ["awaiting-approval", "bash"]);
+		ok(!parked.waitingOn.text.includes("hunter2"));
+		recorder.observeApprovalResolved();
+		deepStrictEqual([read().state, read().waitingOn], ["working", undefined]);
+		recorder.record("quit", 0);
+		deepStrictEqual([read().state, read().outcome], ["ended", "quit"]);
+		deepStrictEqual(readdirSync(dir), ["live.json"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
