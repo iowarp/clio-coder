@@ -60,7 +60,7 @@ describe("memory scope boundary", () => {
 		);
 	});
 
-	it("applies a subdirectory's record only when that directory resolves to the active repository", () => {
+	it("applies a subdirectory's record only when that directory resolves to the active repository", (t) => {
 		const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-memory-subdir-")));
 		roots.push(root);
 		const repo = join(root, "repo");
@@ -84,7 +84,10 @@ describe("memory scope boundary", () => {
 				.sort();
 		deepStrictEqual(selected(repo), ["repo-sub"], "a nested repository's subdirectory stays its own");
 		const plainIdentity = canonicalMemoryRepositoryIdentity(plain);
-		if (plainIdentity?.key !== plain) return; // The temp root sits inside a repository on this host.
+		if (plainIdentity?.key !== plain) {
+			t.skip("the temp directory sits inside a repository on this host, so no directory outside Git exists here");
+			return;
+		}
 		deepStrictEqual(selected(plain), [], "a directory outside Git does not collect its subdirectories' records");
 	});
 
