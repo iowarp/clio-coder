@@ -891,9 +891,22 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		ok(!existsSync(join(stateDir, "reports", `${shareId}.gist.json`)), "the gist request file was left behind");
 
 		out = "";
-		strictEqual(await runReport(["forget", sent], deps), 0);
+		let asked = "";
+		const declined: ReportCliDeps = {
+			...deps,
+			interactive: true,
+			confirm: async (heading) => {
+				asked = heading;
+				return false;
+			},
+		};
+		strictEqual(await runReport(["forget", sent], declined), 0);
 		deepStrictEqual(deleted, [`gists/${gistId}`]);
 		ok(out.includes(`deleted the encrypted share ${shareId}`), out);
+		// The one-line request is shown on issue #452 and asked about, and a no posts nothing.
+		ok(out.includes(`on issue #452:\n  Please delete the diagnostic bundle for report ${sent}.\n`), out);
+		strictEqual(asked, "Post this comment?");
+		strictEqual(commented, 0);
 		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
 		ok(!existsSync(reportBundlePath(stateDir, sent)));
 

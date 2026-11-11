@@ -513,6 +513,30 @@ export async function postDiscussion(
 	return createDiscussion(title, bodyPath, target, gh, deps.run ?? runReportCommand, options);
 }
 
+/** The one comment `report forget` may leave on a filed report: the report id and nothing else (R-20). */
+export function bundleDeletionComment(reportId: string): string {
+	return `Please delete the diagnostic bundle for report ${reportId}.`;
+}
+
+/** Posts {@link bundleDeletionComment} on the report's issue; called only after the reporter confirmed it. */
+export async function requestBundleDeletion(
+	gh: string,
+	issue: number,
+	reportId: string,
+	deps: { run?: ReportCommandRunner; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ url: string } | { failed: string }> {
+	const run = deps.run ?? runReportCommand;
+	const result = await run(
+		gh,
+		["issue", "comment", String(issue), "--repo", GH_REPOSITORY, "--body", bundleDeletionComment(reportId)],
+		{ timeoutMs: REPORT_GH_TIMEOUT_MS, env: ghEnvironment(deps.env ?? process.env) },
+	);
+	if (result.exitCode !== 0)
+		return { failed: failure("gh issue comment", result.stdout, result.stderr, result.timedOut) };
+	const comment = /https:\/\/github\.com\/\S+#issuecomment-\d+/u.exec(result.stdout);
+	return { url: comment?.[0] ?? issueUrl(issue) };
+}
+
 async function addToIssue(
 	id: string,
 	action: Exclude<ReportAction, { kind: "create" }>,

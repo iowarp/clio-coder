@@ -6,6 +6,7 @@ import { clioStateDir } from "../core/xdg.js";
 import {
 	applyReportEdit,
 	type BuiltBundle,
+	bundleDeletionComment,
 	type ConsentScope,
 	checkLastAttempt,
 	composeReportDraft,
@@ -45,6 +46,7 @@ import {
 	reportMarkdownPath,
 	reportRows,
 	reportShare,
+	requestBundleDeletion,
 	routeFor,
 	runReportSend,
 	SHARE_RETENTION_DAYS,
@@ -131,6 +133,8 @@ export interface ReportCliDeps {
 	identitySettings?: IdentitySettings;
 	changelog?: string | null;
 	now?: () => Date;
+	/** Asks yes or no in a terminal; a test answers it instead of a keypress. */
+	confirm?: (heading: string, hint: string) => Promise<boolean>;
 }
 
 interface ComposeArgs {
@@ -929,8 +933,46 @@ async function sendSaved(
 	return confirmAndSend(draft, io, { ...args, saved });
 }
 
+/** The maintainers may already hold a copy: offer the one-line deletion request, and post it only on a yes. */
+async function askToDeleteCopy(io: Io, gh: string, issue: number, id: string): Promise<number> {
+	const comment = bundleDeletionComment(id);
+	io.out(
+		`The maintainers may already hold a copy. This comment asks them to delete it, on issue #${issue}:\n  ${comment}\n`,
+	);
+	const confirm =
+		io.deps.confirm ??
+		(async (heading: string, hint: string) => {
+			const choice = await promptSelect<"post" | "skip">({
+				heading,
+				choices: [
+					{ value: "post", label: "post it", hint },
+					{ value: "skip", label: "do not post", hint: "post nothing" },
+				],
+				backLabel: "do not post",
+				clearOnExit: true,
+				settleMs: REPORT_PROMPT_SETTLE_MS,
+			});
+			return choice.kind === "selected" && choice.value === "post";
+		});
+	if (!io.interactive || !(await confirm("Post this comment?", `one comment on issue #${issue}, through gh`))) {
+		io.out("Not posted. Post it yourself on the issue to ask for the copy to be deleted.\n");
+		return 0;
+	}
+	const posted = await requestBundleDeletion(gh, issue, id, {
+		env: io.env,
+		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+	});
+	if ("failed" in posted) {
+		fail(io, `the gist is deleted, but the comment was not posted: ${posted.failed}`);
+		return 1;
+	}
+	io.out(`posted ${posted.url}\n`);
+	return 0;
+}
+
 async function forget(io: Io, id: string): Promise<number> {
 	let deletedShare: string | null = null;
+	let posting = 0;
 	const share = reportShare(io.stateDir, id);
 	if (share !== null) {
 		const gh = (await loadFindGh(io.deps))();
@@ -950,18 +992,21 @@ async function forget(io: Io, id: string): Promise<number> {
 		updateShareReceipt(io.stateDir, share.shareId, { deletedAt: (io.deps.now?.() ?? new Date()).toISOString() });
 		deletedShare = `deleted the encrypted share ${share.shareId} (gist ${share.receipt.gistId})`;
 		io.out(`${deletedShare}\n`);
+		const filed = outboxEntry(io.stateDir, id);
+		if (filed?.state === "sent" && filed.route === "issue" && filed.number !== null)
+			posting = await askToDeleteCopy(io, gh, filed.number, id);
 	}
 	const result = forgetReport(io.stateDir, id);
 	if (!result.ok && deletedShare !== null) {
 		io.out(`${result.reason}\n`);
-		return 0;
+		return posting;
 	}
 	if (!result.ok) {
 		fail(io, `${result.reason}${result.reason.startsWith("no report") ? "; clio-coder report status lists them" : ""}`);
 		return 1;
 	}
 	io.out(`${result.message}\n`);
-	return 0;
+	return posting;
 }
 
 function security(io: Io): number {

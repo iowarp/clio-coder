@@ -225,6 +225,7 @@ export {
 	type ReportTextReply,
 } from "./text-flow.js";
 export {
+	bundleDeletionComment,
 	checkLastAttempt,
 	detectTransport,
 	findDiscussionCategory,
@@ -237,6 +238,7 @@ export {
 	type ReportAction,
 	type ReportRoute,
 	type ReportTransport,
+	requestBundleDeletion,
 	routeFor,
 	type SendResult,
 	sendReport,
