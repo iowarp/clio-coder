@@ -49,14 +49,15 @@ touches a protected path (the verifier catalog and every file the checks
 name), or changes a file outside --scope is archived without measuring.
 
 start options:
-  --check <id>              objective check id (required)
+  --check <id>              objective check id, or <sweep>/<run> for one run of a sweep (required)
   --metric <key>            payload key to optimize (required)
   --direction min|max       which way is better (required)
   --max-iterations <N>      hard stop on iterations (required)
   --min-improvement <frac>  relative improvement to clear (default ${RESEARCH_DEFAULT_MIN_IMPROVEMENT})
   --trials <N>              interleaved base/candidate pairs (default ${RESEARCH_DEFAULT_TRIALS})
   --scope <glob>            files a change may touch; repeatable (default: any unprotected file)
-  --gate <id>               check that must pass on every candidate; repeatable
+  --gate <id>               check that must pass on every candidate; <sweep>/<run> names one run,
+                            a bare sweep id every run; repeatable
   --goal <text>             extra direction for the agent
   --autonomy default|yolo   the agent's autonomy (default: default); yolo is contained
   --max-wall-minutes <M>    campaign-wide deadline: ends the agent run, measurement or

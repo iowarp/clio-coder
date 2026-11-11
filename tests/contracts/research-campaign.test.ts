@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
@@ -1061,6 +1061,94 @@ describe("research review fixes", () => {
 		const firstTests = claims.hypothesisTests.filter((test) => test.hypothesis === first.id);
 		ok(firstTests.length >= 2, "the second campaign's run is bound to the first campaign's hypothesis");
 		ok(claims.hypothesisTests.every((test) => test.outcome === "tested" && test.claim === undefined));
+	});
+});
+
+describe("research sweeps", () => {
+	const sweepFiles = {
+		"value.txt": "100\n",
+		"score.js":
+			"const fs=require('fs');process.stdout.write(JSON.stringify({score:Number(fs.readFileSync(process.argv[2]+'/w.txt','utf8'))*Number(fs.readFileSync('value.txt','utf8'))}))\n",
+		"ok.js": "process.exit(require('fs').existsSync(process.argv[2]+'/ok')?0:1)\n",
+		"runs/a/w.txt": "1\n",
+		"runs/a/ok": "",
+		"runs/b/w.txt": "2\n",
+		"runs/b/ok": "",
+		".clio-coder/verifiers.yaml": JSON.stringify({
+			version: 2,
+			checks: [
+				{ ...commandCheck("score", ["node", "score.js"]), runs: "runs" },
+				{ ...commandCheck("ok", ["node", "ok.js"]), runs: "runs" },
+			],
+		}),
+	};
+	const open = (repo: string, check: string, gates: string[]): ResearchCampaign =>
+		openResearchCampaign({
+			cwd: repo,
+			objective: { check, metric: "score", direction: "min", minImprovement: 0.05, trials: 3 },
+			gates,
+			scope: [],
+			budget: { maxIterations: 1, allowUnpriced: false },
+			allowNoisy: false,
+			keep: false,
+			agent: {},
+		});
+
+	it("optimizes one run of a sweep and gates on every run of another, each run's directory on its argv", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo(sweepFiles);
+		const campaign = open(repo, "score/b", ["ok"]);
+		strictEqual(campaign.objective.check, "score/b");
+		deepStrictEqual(campaign.gates, ["ok/a", "ok/b"]);
+		deepStrictEqual(
+			campaign.checks.map((check) => [check.id, check.command.at(-1), "runs" in check]),
+			[
+				["score/b", "runs/b", false],
+				["ok/a", "runs/a", false],
+				["ok/b", "runs/b", false],
+			],
+		);
+		ok(campaign.protected.includes("runs/a") && campaign.protected.includes("runs/b"));
+		deepStrictEqual(open(repo, "score/a", ["ok/b"]).gates, ["ok/b"]);
+
+		const outcome = await runResearchCampaign(campaign, {
+			agent: async (request) => {
+				writeFileSync(join(request.worktree, "value.txt"), "50\n");
+				return done;
+			},
+		});
+		strictEqual(outcome.reason, "max-iterations");
+		const view = summarizeCampaign(campaign.project, campaign.id);
+		deepStrictEqual(
+			view.iterations.map((iteration) => iteration.outcome),
+			["ratcheted"],
+		);
+		deepStrictEqual(
+			view.iterations[0]?.gates.map((gate) => [gate.check, gate.passed]),
+			[
+				["ok/a", true],
+				["ok/b", true],
+			],
+		);
+	});
+
+	it("refuses a bare sweep objective, an unknown run, and a run directory the campaign's HEAD does not hold", async (t) => {
+		const env = await isolateClioEnv("clio-coder-research-home-");
+		t.after(() => env.restore());
+		const repo = scratchRepo(sweepFiles);
+		throws(() => open(repo, "score", []), /'score' is a sweep over runs; name one run as score\/<run> \(runs: a, b\)/);
+		throws(() => open(repo, "score/c", []), /run directory runs\/c is not a directory inside the workspace/);
+		throws(() => open(repo, "score/..", []), /must be one directory name under runs/);
+		throws(() => open(repo, "score/a", ["sane/a"]), /check 'sane\/a' is not declared/);
+		mkdirSync(join(repo, "runs", "c"));
+		writeFileSync(join(repo, "runs", "c", "w.txt"), "3\n");
+		throws(() => open(repo, "score/c", []), /run directory runs\/c is not committed/);
+		throws(() => open(repo, "score/a", ["ok"]), /run directory runs\/c is not committed/);
+		git(repo, "add", "runs/c");
+		git(repo, "commit", "-q", "-m", "run c");
+		writeFileSync(join(repo, "runs", "a", "w.txt"), "9\n");
+		throws(() => open(repo, "score/a", []), /run directory runs\/a has uncommitted changes/);
 	});
 });
 

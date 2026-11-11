@@ -79,6 +79,18 @@ export function checkoutDetached(worktree: string, commit: string): void {
 }
 
 /**
+ * How `commit` holds `path` against the checkout: `missing` when the commit has no file there, `changed` when the
+ * checkout adds, edits or removes a file under it (ignored files aside), `same` otherwise. Every research worktree
+ * starts from a commit, so a check input the base commit does not hold as the checkout does is not what gets measured.
+ */
+export function committedState(root: string, commit: string, path: string): "missing" | "changed" | "same" {
+	const spec = `:(literal)${path}`;
+	if (git(root, ["ls-tree", "-r", "--name-only", "-z", commit, "--", spec]).length === 0) return "missing";
+	const changed = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--", spec]);
+	return changed.length > 0 ? "changed" : "same";
+}
+
+/**
  * Untracked, unignored entries of a worktree, repository-relative. A directory that holds only untracked files is one
  * `dir/` entry, so a cache directory a check creates is named once whatever files land in it later.
  */

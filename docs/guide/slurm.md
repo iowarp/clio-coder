@@ -179,6 +179,8 @@ never submits, polls or cancels; those go through the five capabilities above.
    `.clio-coder/verifiers.yaml` entry with `runs: <directory>`; verify appends
    the run directory to its command and refuses a bare call or a run outside
    that directory. See [Project verifier catalog](tool-usage.md#project-verifier-catalog).
+   `clio-coder research start` and `clio-coder arena run --check` take the
+   same `<check>/<run>` form; see [Research and Arena](research-and-arena.md).
 5. **Tabulate.** `clio-coder claims list --check <check> --json` feeds the
    helper's `aggregate`, which writes `results.tsv` and `results.md`. Every
    run gets a verdict: `agrees`, `disagrees`, `unverified`, `run failed`,

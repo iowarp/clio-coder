@@ -19,6 +19,7 @@ import {
 	loadProjectVerifierCatalog,
 	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
 } from "../../tools/verify/catalog.js";
+import { resolveSweepRun, sweepRunNames } from "../../tools/verify/resolve.js";
 import { claimsProjectRoot } from "../claims/index.js";
 import { type AgentRunner, hypothesisFromSummary, iterationPrompt } from "./agent.js";
 import { budgetStop, nextRunLimits } from "./budget.js";
@@ -29,6 +30,7 @@ import {
 	changedPaths,
 	checkoutDetached,
 	cleanWorktree,
+	committedState,
 	commitWorktree,
 	createResearchRef,
 	environmentEntries,
@@ -117,15 +119,44 @@ export function openResearchCampaign(input: OpenCampaignInput): ResearchCampaign
 	const catalog = loadProjectVerifierCatalog(root);
 	if (!catalog.ok) throw new ResearchOpenError(`the verifier catalog cannot be read: ${catalog.reason}`);
 	const declared = catalog.source?.checks ?? [];
+	const undeclared = (id: string): ResearchOpenError =>
+		new ResearchOpenError(
+			`check '${id}' is not declared in ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}${declared.length > 0 ? ` (declared: ${declared.map((entry) => entry.id).join(", ")})` : ""}`,
+		);
+	// One run of a sweep is frozen as its own check, `<id>/<run>`, with the run directory on its argv as verify runs
+	// it. Each worktree starts from the base commit, so the run directory must be committed exactly as checked out.
+	const sweepRun = (owner: DeclaredCheck, run: string): DeclaredCheck => {
+		const resolved = resolveSweepRun(root, owner, run);
+		if (!resolved.ok) throw new ResearchOpenError(`check '${owner.id}/${run}': ${resolved.message}`);
+		const state = committedState(root, base, resolved.run);
+		if (state !== "same")
+			throw new ResearchOpenError(
+				`check '${owner.id}/${run}': run directory ${resolved.run} ${state === "missing" ? "is not committed" : "has uncommitted changes"}; commit it, every research worktree starts from HEAD`,
+			);
+		const { runs: _runs, ...check } = resolved.check;
+		return { ...check, id: `${owner.id}/${run}` };
+	};
 	const find = (id: string): DeclaredCheck => {
 		const check = declared.find((entry) => entry.id === id);
-		if (check === undefined)
-			throw new ResearchOpenError(
-				`check '${id}' is not declared in ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}${declared.length > 0 ? ` (declared: ${declared.map((entry) => entry.id).join(", ")})` : ""}`,
-			);
+		if (check === undefined) {
+			const separator = id.indexOf("/");
+			const owner = separator > 0 ? declared.find((entry) => entry.id === id.slice(0, separator)) : undefined;
+			if (owner?.runs === undefined) throw undeclared(id);
+			return sweepRun(owner, id.slice(separator + 1));
+		}
 		if (check.runs !== undefined)
-			throw new ResearchOpenError(`check '${id}' is a sweep (runs); name one run per campaign`);
+			throw new ResearchOpenError(
+				`check '${id}' is a sweep over ${check.runs}; name one run as ${id}/<run> (runs: ${sweepRunNames(root, check).join(", ") || "none"})`,
+			);
 		return check;
+	};
+	// A gate naming a whole sweep gates on every run of it.
+	const gateIdsOf = (id: string): string[] => {
+		const sweep = declared.find((entry) => entry.id === id && entry.runs !== undefined);
+		if (sweep === undefined) return [id];
+		const runs = sweepRunNames(root, sweep);
+		if (runs.length === 0) throw new ResearchOpenError(`gate '${id}' is a sweep with no runs under ${sweep.runs}`);
+		return runs.map((run) => `${id}/${run}`);
 	};
 	const objectiveCheck = find(input.objective.check);
 	if (objectiveCheck.kind === "reproduce")
@@ -134,7 +165,9 @@ export function openResearchCampaign(input: OpenCampaignInput): ResearchCampaign
 		);
 	// A --gate naming the objective stays a gate, and a judged objective is always one: its reference comparison must
 	// pass before a candidate can ratchet. The check itself is frozen once.
-	const gateIds = [...new Set([...(judgedKind(objectiveCheck) ? [objectiveCheck.id] : []), ...input.gates])];
+	const gateIds = [
+		...new Set([...(judgedKind(objectiveCheck) ? [objectiveCheck.id] : []), ...input.gates.flatMap(gateIdsOf)]),
+	];
 	const gates = gateIds.filter((id) => id !== objectiveCheck.id).map(find);
 	const protectedPaths = [
 		PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,

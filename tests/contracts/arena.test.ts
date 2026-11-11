@@ -406,7 +406,10 @@ const { join } = require("node:path");
 const args = process.argv.slice(2);
 if (args[0] === "verifiers") {
   const catalog = join(".clio-coder", "verifiers.yaml");
-  const declared = existsSync(catalog) && readFileSync(catalog, "utf8").includes("id: " + args[2]);
+  const text = existsSync(catalog) ? readFileSync(catalog, "utf8") : "";
+  const declared = text.includes("id: " + args[2].split("/")[0]);
+  const needs = (text.match(/# needs: (.*)/) || [null, ""])[1].split(",").filter(Boolean);
+  for (const need of needs) console.log("need " + need + "=" + (existsSync(need) ? readFileSync(need, "utf8").trim() : "MISSING"));
   console.log("check " + args[2] + (declared ? ": pass" : ": not declared"));
   process.exit(declared ? 0 : 1);
 }
@@ -418,6 +421,7 @@ if (process.env.ARENA_ENV_DIR) writeFileSync(join(process.env.ARENA_ENV_DIR, arg
 if (process.env.ARENA_PID_DIR) writeFileSync(join(process.env.ARENA_PID_DIR, model + ".pid"), String(process.pid));
 writeFileSync(join(cwd, "answer.txt"), model + "\\n");
 if (model === "settings") { require("node:fs").mkdirSync(join(cwd, ".clio-coder"), { recursive: true }); writeFileSync(join(cwd, ".clio-coder", "settings.json"), "{}\\n"); }
+if (model === "tamper") writeFileSync(join(cwd, "ref", "expected.json"), (existsSync(join(cwd, "ref", "expected.json")) ? "saw-ref " : "") + "tampered\\n");
 if (model === "catalog") require("node:fs").appendFileSync(join(cwd, ".clio-coder", "verifiers.yaml"), "# edited\\n");
 const out = (f) => process.stdout.write(JSON.stringify(f) + "\\n");
 out({ type: "session", id: "fake-" + model });
@@ -699,6 +703,77 @@ describe("arena runner", () => {
 		const untouched = diffOf(checked, "m1");
 		assert.equal(untouched.files, 1);
 		assert.doesNotMatch(untouched.patch, /verifiers\.yaml/);
+	});
+
+	it("copies the uncommitted files a --check names into each worktree and judges with the source's bytes", async () => {
+		const { repo, fake, gitIn } = scratchRepo();
+		writeFileSync(join(repo, "judge.js"), "committed\n");
+		writeFileSync(join(repo, ".gitignore"), "ignored/\n");
+		gitIn("add", "-A");
+		gitIn("commit", "-qm", "judge");
+		mkdirSync(join(repo, ".clio-coder"));
+		writeFileSync(
+			join(repo, ".clio-coder/verifiers.yaml"),
+			`# needs: judge.js,ref/expected.json,runs/r1/in.txt,runs/r2/in.txt,ignored/x.txt
+version: 2
+checks:
+  - id: judge
+    description: judge one run
+    kind: numeric-compare
+    command: [node, judge.js, ignored/x.txt]
+    reference: ref/expected.json
+    tolerance: { absolute: 0 }
+    runs: runs
+    cwd: .
+    timeoutMs: 30000
+    tags: []
+`,
+		);
+		writeFileSync(join(repo, "judge.js"), "edited\n");
+		for (const [path, text] of [
+			["ref/expected.json", "reference"],
+			["runs/r1/in.txt", "run one"],
+			["runs/r2/in.txt", "run two"],
+			["ignored/x.txt", "ignored"],
+		] as const) {
+			mkdirSync(join(repo, path, ".."), { recursive: true });
+			writeFileSync(join(repo, path), `${text}\n`);
+		}
+		const result = await runArenaMatch({
+			cwd: repo,
+			prompt: "write your model name",
+			contenders: [
+				{ target: "t", model: "m1" },
+				{ target: "t", model: "tamper" },
+			],
+			timeoutSeconds: 30,
+			check: "judge/r1",
+			clio: { file: process.execPath, args: [fake] },
+			env: {},
+		});
+		assert.equal(result.status, "complete", result.error ?? "");
+		for (const contender of result.contenders) {
+			const tail = contender.facts?.check?.tail ?? "";
+			assert.match(tail, /need judge\.js=edited\n/, tail);
+			assert.match(tail, /need ref\/expected\.json=reference\n/, tail);
+			assert.match(tail, /need runs\/r1\/in\.txt=run one\n/, tail);
+			assert.match(tail, /need runs\/r2\/in\.txt=MISSING\n/, tail);
+			assert.match(tail, /need ignored\/x\.txt=MISSING\n/, tail);
+			assert.match(tail, /check judge\/r1: pass/, tail);
+		}
+		const diffOf = (model: string) => {
+			const contender = result.contenders.find((entry) => entry.model === model);
+			assert.ok(contender);
+			const patch = readFileSync(join(arenaRoot(repo), result.id, `contender-${contender.index + 1}.diff`), "utf8");
+			return { files: contender.facts?.diff?.files, patch };
+		};
+		const plain = diffOf("m1");
+		assert.equal(plain.files, 1, plain.patch);
+		assert.doesNotMatch(plain.patch, /judge\.js|expected\.json|in\.txt/);
+		const tampered = diffOf("tamper");
+		assert.equal(tampered.files, 2, tampered.patch);
+		assert.match(tampered.patch, /\+saw-ref tampered/);
+		assert.equal(gitIn("worktree", "list").toString().trim().split("\n").length, 1);
 	});
 
 	it("refuses a --check the source project does not declare before any contender starts", async () => {

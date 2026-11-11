@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
@@ -168,21 +168,24 @@ export function verifyResolutionArgv(
 
 const RUN_NAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/u;
 
+/** One run of a sweep check, resolved: the check with the run directory on its argv, and that directory. */
+export type SweepRunResolution = { ok: true; check: DeclaredCheck; run: string } | { ok: false; message: string };
+
 /**
  * One run of a sweep check: `<id>/<run>` names a directory directly under the check's `runs`, and the check's argv
  * gains that directory as its last argument, written relative to the check's cwd. The run directory is part of the
  * argv, so the safety scan, the approval card and the claim the result records all name the run that was judged.
  */
-function resolveRunCheck(workspaceRoot: string, check: DeclaredCheck, run: string): VerifyResolution {
+export function resolveSweepRun(workspaceRoot: string, check: DeclaredCheck, run: string): SweepRunResolution {
 	if (check.runs === undefined) {
 		return {
-			kind: "unresolved",
+			ok: false,
 			message: `'${check.id}' declares no runs directory, so it takes no run; call it as check="${check.id}".`,
 		};
 	}
 	if (!RUN_NAME_PATTERN.test(run) || run.length > 128) {
 		return {
-			kind: "unresolved",
+			ok: false,
 			message: `run '${run}' must be one directory name under ${check.runs} (letters, digits, '.', '_', '-', at most 128 characters).`,
 		};
 	}
@@ -193,13 +196,32 @@ function resolveRunCheck(workspaceRoot: string, check: DeclaredCheck, run: strin
 		resolveSafeCwd(realpathSync(resolved), realpathSync(workspaceRoot));
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		return {
-			kind: "unresolved",
-			message: `run directory ${declaredRun} is not a directory inside the workspace (${reason}).`,
-		};
+		return { ok: false, message: `run directory ${declaredRun} is not a directory inside the workspace (${reason}).` };
 	}
 	const argument = path.posix.relative(check.cwd === "." ? "" : check.cwd, declaredRun) || ".";
-	return { kind: "catalog", check: { ...check, command: [...check.command, argument] }, run: declaredRun };
+	return { ok: true, check: { ...check, command: [...check.command, argument] }, run: declaredRun };
+}
+
+/** The runs a sweep check can judge: the directory names under its `runs` that `<id>/<run>` accepts, sorted. */
+export function sweepRunNames(workspaceRoot: string, check: DeclaredCheck): string[] {
+	if (check.runs === undefined) return [];
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(resolveSafeCwd(check.runs, workspaceRoot), { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	return entries
+		.filter((entry) => entry.isDirectory() && RUN_NAME_PATTERN.test(entry.name) && entry.name.length <= 128)
+		.map((entry) => entry.name)
+		.sort();
+}
+
+function resolveRunCheck(workspaceRoot: string, check: DeclaredCheck, run: string): VerifyResolution {
+	const resolved = resolveSweepRun(workspaceRoot, check, run);
+	return resolved.ok
+		? { kind: "catalog", check: resolved.check, run: resolved.run }
+		: { kind: "unresolved", message: resolved.message };
 }
 
 function resolveWithDiscovery(

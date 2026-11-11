@@ -54,6 +54,13 @@ checks:
 A `perf-budget` check works as an objective too: its `wall_ms` falls back to the measured duration. A `reproduce` check
 cannot be an objective, but it can be a gate.
 
+A sweep check (one with `runs: <directory>`, see [Parameter sweeps](slurm.md#parameter-sweeps)) takes one run at a
+time, as `verify` does. `--check <sweep>/<run>` optimizes the metric of that run, and `--gate <sweep>/<run>` gates on
+it; the run directory is appended to the check's command and is protected like every other file the check names. A
+bare sweep id is refused as the objective, with the runs it holds listed, and as a `--gate` it gates on every run
+directory present when the campaign opens, each recorded as its own `<sweep>/<run>` gate. Each worktree starts from
+`HEAD`, so a run directory that is not committed, or has uncommitted changes, is refused when the campaign opens.
+
 Install what the checks need in the project before the campaign starts, not through the agent. Each candidate is
 measured and gated as its commit plus the environment its worktree had before the agent ran, such as installed
 dependencies or build output a checkout step leaves. The worktrees sit under `.clio-coder/worktrees/` inside the
@@ -180,9 +187,14 @@ removed after each contender's diff is saved. Outside Git, or with `--read-only`
 prompt that starts with `-`.
 
 `--check <id>` dry-runs one verifier in each contender's worktree when it finishes. An id the project cannot resolve is
-refused before any contender starts. The project's `.clio-coder/verifiers.yaml` is copied into each worktree, committed or
-not, and replaces any copy a contender wrote. Files the check reads, such as reference outputs or inputs, are not copied,
-so commit them.
+refused before any contender starts. A sweep check takes one run, `--check <sweep>/<run>`. The project's
+`.clio-coder/verifiers.yaml` is copied into each worktree, committed or not, and replaces any copy a contender wrote. So
+are the uncommitted files the check names: untracked or changed files under each path on its command (the run
+directory of a sweep included), its `reference` or `baseline` file and a `reproduce` check's pinned inputs. They are
+copied before the contender starts and again before the check runs, so the check reads the project's bytes, and the
+diff leaves each one out while it still holds them. Ignored files and links are not copied, and a check that names
+more than 256 uncommitted files or 64 MiB is refused before any contender starts; commit those inputs instead. A file
+the check reads without naming it, such as one its script opens, must be committed.
 
 `--autonomy yolo` runs every contender as contained yolo, with the same rules as a research campaign: the sandbox, the
 judge and your autonomous caps stay on, and a call that would need you is refused back to the contender. All
@@ -230,8 +242,8 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
 ## Limits
 
-- Research optimizes one metric of one check at a time and runs one candidate per iteration. Parameter sweeps and
-  parallel candidates are not supported yet. `research resume` keeps the campaign's budget; it cannot raise it.
+- Research optimizes one metric of one check, or of one run of a sweep, at a time and runs one candidate per
+  iteration. Parallel candidates are not supported yet. `research resume` keeps the campaign's budget; it cannot raise it.
 - `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs. The pin also reaches every `clio-coder` such a run starts from bash, and setting it to another value does not widen it.
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
 - Arena contenders do not inherit your whole environment. Each gets the safe command variables (`PATH`, `HOME`, `USER`,

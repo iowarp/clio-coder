@@ -11,7 +11,7 @@ import {
 	writeFileSync,
 	writeSync,
 } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { join, posix, relative, resolve, sep } from "node:path";
 import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
@@ -27,8 +27,8 @@ import {
 	registerCompeteGroupRun,
 	settleCompeteGroupRun,
 } from "../../tools/compete-worktrees.js";
-import { PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
-import { resolveVerifyCall } from "../../tools/verify/resolve.js";
+import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
+import { resolveVerifyCall, type VerifyResolution } from "../../tools/verify/resolve.js";
 import { withContainedYoloPin } from "../safety/autonomy.js";
 import { blindOrder, labelForContender, newArenaSeed } from "./blind.js";
 import { type ArenaEnvPolicy, arenaContenderEnv } from "./contender-env.js";
@@ -118,36 +118,37 @@ export function validateArenaRunInput(input: Pick<ArenaRunInput, "contenders" | 
 	}
 }
 
-/** The catalog the harness copied into a worktree for `--check`: its repository-relative path and the bytes written. */
-interface CopiedCatalog {
+/** A file the harness copied into a worktree for `--check`: its repository-relative path and the bytes written. */
+interface CopiedFile {
 	path: string;
 	bytes: Buffer;
 }
+
+/** Bounds on the uncommitted files a `--check` names; past them the match is refused and the files must be committed. */
+const CHECK_INPUT_MAX_FILES = 256;
+const CHECK_INPUT_MAX_BYTES = 64 * 1024 * 1024;
 
 interface ArenaPlace {
 	cwd: string;
 	workspaceRoot: string;
 	worktree: string | null;
-	catalog: CopiedCatalog | null;
+	copied: CopiedFile[];
+	/** The uncommitted files the `--check` names, copied in with the catalog. */
+	inputs: ReadonlyArray<string>;
 }
 
 /**
  * Stage everything the contender left, then diff it against the shared baseline, outside the repository's
- * `.clio-coder/`. The catalog the harness copied in is left out too while it still holds exactly what the harness
- * wrote; a contender's edit to it stays in the diff.
+ * `.clio-coder/`. The catalog and check inputs the harness copied in are left out too while each still holds exactly
+ * what the harness wrote; a contender's edit to one stays in the diff.
  */
-function captureDiff(
-	worktree: string,
-	baseline: string,
-	diffPath: string,
-	copied: CopiedCatalog | null,
-): ArenaDiffStat {
+function captureDiff(worktree: string, baseline: string, diffPath: string, copied: CopiedFile[]): ArenaDiffStat {
 	const pathspec = ["--", ".", ":(exclude).clio-coder"];
-	if (copied !== null) {
-		const target = join(worktree, copied.path);
+	for (const file of copied) {
+		const target = join(worktree, file.path);
 		const stat = lstatSync(target, { throwIfNoEntry: false });
-		if (stat?.isFile() === true && readFileSync(target).equals(copied.bytes))
-			pathspec.push(`:(exclude,literal)${copied.path}`);
+		if (stat?.isFile() === true && readFileSync(target).equals(file.bytes))
+			pathspec.push(`:(exclude,literal)${file.path}`);
 	}
 	// Staging takes no exclude: git refuses an exclude that names an ignored path, and a project that ignores
 	// `.clio-coder/` still gets the catalog copied in. The exclusions apply only to the diffs read below.
@@ -160,42 +161,119 @@ function captureDiff(
 /** A `--check` id the source project does not declare, refused before any contender starts. */
 export class ArenaCheckError extends Error {}
 
-function refuseUndeclaredCheck(cwd: string, id: string): void {
+function refuseUndeclaredCheck(cwd: string, id: string): VerifyResolution {
 	const resolution = resolveVerifyCall(cwd, { check: id });
 	if (resolution.kind === "unresolved") throw new ArenaCheckError(`arena --check ${id}: ${resolution.message}`);
+	return resolution;
 }
 
 /**
- * A contender's worktree is cut from HEAD, so a catalog the project keeps untracked or ignored is not in it, and a
- * tracked one may be stale beside the operator's edits. The check is judged by the source project's catalog: it is
- * copied in before the contender starts and again before the check runs, over anything the contender left there.
- * This runs outside the sandbox, so it never follows a link the worktree holds: a directory on the way that is a link
- * (committed or planted) refuses the copy, and whatever sits at the catalog path, a link included, is removed and
- * the file created fresh.
+ * Paths a declared check names, relative to the project: each argv entry (from the check's cwd, and as written), the
+ * reference and baseline files, and a reproduce check's pinned inputs. A sweep run's directory is on the argv.
  */
-function copySourceCatalog(sourceCwd: string, worktree: string, contenderCwd: string): CopiedCatalog | null {
-	const source = join(sourceCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH);
-	if (!existsSync(source)) return null;
-	const parts = relative(worktree, join(contenderCwd, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH))
+function pathsNamedByCheck(check: DeclaredCheck): string[] {
+	const base = check.cwd === "." ? "" : check.cwd;
+	const named = new Set<string>();
+	const add = (path: string): void => {
+		const normalized = posix.normalize(path);
+		if (normalized === "." || normalized.startsWith("../") || normalized === ".." || posix.isAbsolute(normalized)) return;
+		named.add(normalized);
+	};
+	for (const arg of check.command) {
+		if (arg.length === 0 || arg.startsWith("-") || arg.includes("\0")) continue;
+		add(posix.join(base, arg));
+		add(arg);
+	}
+	if (check.numeric?.reference !== undefined) add(check.numeric.reference);
+	if (check.perf?.baseline !== undefined) add(check.perf.baseline);
+	for (const pin of check.reproduce?.inputs ?? []) add(pin.path);
+	if (check.reproduce?.compare.mode === "reference") add(check.reproduce.compare.reference);
+	return [...named];
+}
+
+/**
+ * The files under the paths a catalog check names that a worktree cut from HEAD would not hold as the project does:
+ * untracked (not ignored) or changed since HEAD. Only regular files count; a link is never followed or copied.
+ */
+function uncommittedCheckInputs(cwd: string, id: string, check: DeclaredCheck): string[] {
+	const named = pathsNamedByCheck(check);
+	if (named.length === 0) return [];
+	const listed = git(cwd, [
+		"ls-files",
+		"-z",
+		"--others",
+		"--modified",
+		"--exclude-standard",
+		"--",
+		...named.map((path) => `:(literal)${path}`),
+	]);
+	const inputs = new Set<string>();
+	let bytes = 0;
+	for (const path of listed.split("\0")) {
+		if (path.length === 0 || path.startsWith("../") || path === PROJECT_VERIFIER_CATALOG_RELATIVE_PATH) continue;
+		if (inputs.has(path)) continue;
+		const stat = lstatSync(join(cwd, path), { throwIfNoEntry: false });
+		if (stat?.isFile() !== true) continue;
+		inputs.add(path);
+		bytes += stat.size;
+		if (inputs.size > CHECK_INPUT_MAX_FILES || bytes > CHECK_INPUT_MAX_BYTES)
+			throw new ArenaCheckError(
+				`arena --check ${id}: the files it names hold more than ${CHECK_INPUT_MAX_FILES} uncommitted files or ${CHECK_INPUT_MAX_BYTES / (1024 * 1024)} MiB; commit them`,
+			);
+	}
+	return [...inputs].sort();
+}
+
+/**
+ * Write `bytes` at `path` (relative to the contender's cwd) in a worktree. This runs outside the sandbox, so it never
+ * follows a link the worktree holds: a directory on the way that is a link (committed or planted) refuses the copy,
+ * and whatever sits at the path, a link included, is removed and the file created fresh.
+ */
+function writeIntoWorktree(worktree: string, contenderCwd: string, path: string, bytes: Buffer): CopiedFile {
+	const parts = relative(worktree, join(contenderCwd, path))
 		.split(sep)
 		.filter((part) => part.length > 0);
 	const name = parts.pop();
-	if (name === undefined || parts.includes("..")) throw new Error(`the verifier catalog is outside the worktree`);
+	const label = path === PROJECT_VERIFIER_CATALOG_RELATIVE_PATH ? "the verifier catalog" : path;
+	if (name === undefined || parts.includes("..")) throw new Error(`${label} is outside the worktree`);
 	let dir = realpathSync(worktree);
 	for (const part of parts) {
 		dir = join(dir, part);
 		const stat = lstatSync(dir, { throwIfNoEntry: false });
 		if (stat === undefined) mkdirSync(dir);
 		else if (!stat.isDirectory())
-			throw new Error(
-				`refusing to copy the verifier catalog: ${relative(worktree, dir)} is not a directory in the worktree`,
-			);
+			throw new Error(`refusing to copy ${label}: ${relative(worktree, dir)} is not a directory in the worktree`);
 	}
 	const target = join(dir, name);
 	if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) unlinkSync(target);
-	const bytes = readFileSync(source);
 	writeFileSync(target, bytes, { flag: "wx" });
 	return { path: [...parts, name].join("/"), bytes };
+}
+
+/**
+ * A contender's worktree is cut from HEAD, so a catalog or check input the project keeps untracked is not in it, and
+ * a tracked one may be stale beside the operator's edits. The check is judged by the source project's files: the
+ * catalog and the uncommitted inputs the check names are copied in before the contender starts and again before the
+ * check runs, over anything the contender left there. A source input that is no longer a regular file is skipped.
+ */
+function copyCheckFiles(
+	sourceCwd: string,
+	worktree: string,
+	contenderCwd: string,
+	inputs: ReadonlyArray<string>,
+): CopiedFile[] {
+	const copied: CopiedFile[] = [];
+	for (const path of [PROJECT_VERIFIER_CATALOG_RELATIVE_PATH, ...inputs]) {
+		const source = join(sourceCwd, path);
+		if (
+			path === PROJECT_VERIFIER_CATALOG_RELATIVE_PATH
+				? !existsSync(source)
+				: lstatSync(source, { throwIfNoEntry: false })?.isFile() !== true
+		)
+			continue;
+		copied.push(writeIntoWorktree(worktree, contenderCwd, path, readFileSync(source)));
+	}
+	return copied;
 }
 
 async function runCheck(input: ArenaRunInput, cwd: string, id: string): Promise<ArenaCheckFact> {
@@ -270,14 +348,14 @@ async function runContender(
 	let check: ArenaCheckFact | null = null;
 	if (place.worktree !== null && match.baselineSha !== null) {
 		try {
-			diff = captureDiff(place.worktree, match.baselineSha, contenderDiffPath(dir, contender.index), place.catalog);
+			diff = captureDiff(place.worktree, match.baselineSha, contenderDiffPath(dir, contender.index), place.copied);
 		} catch (caught) {
 			error = error ?? `diff: ${errorText(caught)}`;
 		}
 	}
 	if (input.check) {
 		try {
-			if (place.worktree !== null) copySourceCatalog(resolve(input.cwd), place.worktree, place.cwd);
+			if (place.worktree !== null) copyCheckFiles(resolve(input.cwd), place.worktree, place.cwd, place.inputs);
 			check = await runCheck(input, place.cwd, input.check);
 		} catch (caught) {
 			check = { id: input.check, exitCode: null, tail: errorText(caught) };
@@ -325,8 +403,12 @@ function blindSlot(match: ArenaMatch, index: number): number {
 export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 	validateArenaRunInput(input);
 	const cwd = resolve(input.cwd);
-	if (input.check) refuseUndeclaredCheck(cwd, input.check);
+	const resolution = input.check ? refuseUndeclaredCheck(cwd, input.check) : null;
 	const base = input.readOnly === true || !isGitRepository(cwd) ? null : baselineOf(cwd);
+	const inputs =
+		base !== null && input.check && resolution?.kind === "catalog"
+			? uncommittedCheckInputs(cwd, input.check, resolution.check)
+			: [];
 	const projectRoot = base?.root ?? cwd;
 	const root = arenaRoot(projectRoot);
 	const id = newArenaMatchId();
@@ -368,19 +450,25 @@ export async function runArenaMatch(input: ArenaRunInput): Promise<ArenaMatch> {
 				// position, so a path an agent quotes back says nothing the label does not.
 				const slot = blindSlot(match, contender.index);
 				const worktree: CandidateWorktree = await createCandidateWorktreeMapped(ownership, slot, base.sha);
-				let catalog: CopiedCatalog | null = null;
+				let copied: CopiedFile[] = [];
 				if (input.check) {
 					try {
-						catalog = copySourceCatalog(cwd, worktree.path, join(worktree.path, sub));
+						copied = copyCheckFiles(cwd, worktree.path, join(worktree.path, sub), inputs);
 					} catch {
 						// The copy before the check repeats this and reports a refusal as the check's result.
 					}
 				}
-				places.push({ cwd: join(worktree.path, sub), workspaceRoot: worktree.path, worktree: worktree.path, catalog });
+				places.push({
+					cwd: join(worktree.path, sub),
+					workspaceRoot: worktree.path,
+					worktree: worktree.path,
+					copied,
+					inputs,
+				});
 				registerCompeteGroupRun(ownership, { runId: `${id}-${slot}`, pid: null, runtimeKind: "subprocess" });
 			}
 		} else {
-			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null, catalog: null });
+			for (const _ of match.contenders) places.push({ cwd, workspaceRoot: cwd, worktree: null, copied: [], inputs: [] });
 		}
 		input.onProgress?.(
 			`match ${id}: ${match.contenders.length} contenders, ${match.isolation}, autonomy ${match.autonomy === "yolo" ? "yolo (contained)" : "default"}`,
