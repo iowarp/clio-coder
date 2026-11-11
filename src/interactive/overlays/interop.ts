@@ -735,6 +735,14 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 			},
 		},
 		hints,
+		// E-21: decline asks once, like every destructive list key.
+		confirmActions: {
+			x: {
+				verb: "decline",
+				label: (item) => item.cells?.lead ?? item.label,
+				applies: (item) => item.id.startsWith("proposal:"),
+			},
+		},
 		actions: {
 			i: preview,
 			b: () => {

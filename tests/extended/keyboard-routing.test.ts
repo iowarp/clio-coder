@@ -897,6 +897,37 @@ it("closes a real extension panel and cycles Interop kinds with encoded c only i
 	assert.deepEqual(notices.slice(1), ["u is now s here", "Adoption destination: project."]);
 });
 
+it("Interop x asks once before it declines a proposal; another key keeps the row", () => {
+	const f = fixture();
+	const declined: string[] = [];
+	const ctx = {
+		notice: noop,
+		interop: {
+			report: () => null,
+			proposals: () => [
+				{
+					kind: "claude-code",
+					label: "Claude Code",
+					fingerprint: "f",
+					entry: { id: "claude-code", command: "npx", args: [] },
+					needsNetworkInstall: false,
+				},
+			],
+			configured: () => [],
+			accept: noop,
+			decline: (kind: string) => declined.push(kind),
+		},
+	} as unknown as SlashCommandContext;
+	f.mount("interop", () => openInteropOverlay(f.tui, ctx, f.close));
+	f.terminal.input("x");
+	assert.deepEqual(declined, [], "the first x only arms");
+	f.terminal.input("j");
+	f.terminal.input("x");
+	assert.deepEqual(declined, [], "another key disarmed it, so this x arms again");
+	f.terminal.input("x");
+	assert.deepEqual(declined, ["claude-code"]);
+});
+
 it("scrolls the expanded footer with a draft while overlays and search retain keyboard ownership", () => {
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,

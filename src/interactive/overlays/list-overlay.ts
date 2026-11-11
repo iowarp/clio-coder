@@ -171,6 +171,11 @@ export interface ListOverlayOptions {
 	globalHints?: ReadonlyArray<HintEntry>;
 	/** Global keys that ask once (E-21): the first press arms and shows the rail, the same key again runs it. */
 	confirmGlobal?: Record<string, { verb: string; label: string }>;
+	/** Row keys that ask once on the row they act on; `applies` limits it to the rows the key changes. */
+	confirmActions?: Record<
+		string,
+		{ verb: string; label: (item: ListOverlayItem) => string; applies?: (item: ListOverlayItem) => boolean }
+	>;
 	/**
 	 * An inner level Esc leaves before it closes the overlay, such as a package's
 	 * member list. `active` is asked by the footer so the key it advertises is the
@@ -235,6 +240,8 @@ function groupedByBestMatch(ranked: readonly ListOverlayItem[]): ListOverlayItem
 export class ListOverlayView implements Component {
 	/** A confirmGlobal key pressed once and waiting for its second press. */
 	private armedGlobal: string | null = null;
+	/** A confirmActions key pressed once on a row and waiting for its second press there. */
+	private armedAction: { key: string; id: string } | null = null;
 	private viewportRows = 24;
 	private selectedIndex = 0;
 	private filterText = "";
@@ -563,6 +570,16 @@ export class ListOverlayView implements Component {
 		const action = this.options.actions?.[data];
 		if (!action) return false;
 		const selectedItem = filteredItems[this.selectedIndex];
+		const ask = this.options.confirmActions?.[data];
+		const armed = this.armedAction;
+		this.armedAction = null;
+		if (selectedItem && ask && (ask.applies?.(selectedItem) ?? true)) {
+			if (armed?.key !== data || armed.id !== selectedItem.id) {
+				this.armedAction = { key: data, id: selectedItem.id };
+				this.onChange();
+				return true;
+			}
+		}
 		if (selectedItem) action(selectedItem);
 		return true;
 	}
@@ -682,6 +699,11 @@ export class ListOverlayView implements Component {
 		const armed = this.armedGlobal !== null ? this.options.confirmGlobal?.[this.armedGlobal] : undefined;
 		if (this.armedGlobal !== null && armed !== undefined)
 			return { entries: confirmOnceRail(this.armedGlobal, armed.verb, armed.label), esc: this.escapeVerb() };
+		const armedRow = this.armedAction;
+		const armedAsk = armedRow !== null ? this.options.confirmActions?.[armedRow.key] : undefined;
+		const armedItem = armedRow !== null ? this.items.find((item) => item.id === armedRow.id) : undefined;
+		if (armedRow !== null && armedAsk !== undefined && armedItem !== undefined)
+			return { entries: confirmOnceRail(armedRow.key, armedAsk.verb, armedAsk.label(armedItem)), esc: this.escapeVerb() };
 		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		// Navigation before actions, which is the order a narrowing footer drops in:
@@ -1443,6 +1465,10 @@ export class ListOverlayView implements Component {
 		data = localKey(data);
 		if (this.armedGlobal !== null && data !== this.armedGlobal) {
 			this.armedGlobal = null;
+			this.onChange();
+		}
+		if (this.armedAction !== null && data !== this.armedAction.key) {
+			this.armedAction = null;
 			this.onChange();
 		}
 		if (matchesKey(data, "escape")) {
