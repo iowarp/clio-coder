@@ -93,7 +93,7 @@ test("after Trust all, each project connection names the key or sign-in it still
 		trustProjectCard(model);
 		const needs = () => projectConnectionNeeds(workspace, readStrictLayeredSettings(workspace).settings);
 		const gateway =
-			"lab-gateway points at https://llm.lab.example.org/v1, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its key in OPENAI_API_KEY.";
+			"lab-gateway points at https://llm.lab.example.org/v1, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its own key variable (auth.apiKeyEnvVar).";
 		deepStrictEqual(needs(), [
 			"openai has no key or sign-in stored. Run: clio-coder auth login openai (or press Enter on /config)",
 			gateway,

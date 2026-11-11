@@ -19,10 +19,11 @@ export interface RouteFact {
 export type Missing =
 	/**
 	 * No stored key or sign-in for the provider the target authenticates as. With `projectUrl` the target points at
-	 * an address a project chose, which never receives the operator's keys, so only defining it in user settings helps;
-	 * `variable` names the environment variable the target would read its key from there.
+	 * an address a project chose, which never receives the operator's keys, so only defining it in user settings helps.
+	 * No key variable is suggested for it: the project picked the address, so naming the variable its settings or the
+	 * runtime read would steer the operator's real key there.
 	 */
-	| { kind: "credential"; target: string; provider: string; projectUrl?: string; variable?: string }
+	| { kind: "credential"; target: string; provider: string; projectUrl?: string }
 	/** The target names the environment variable its key comes from, and it is not set. */
 	| { kind: "env"; target: string; variable: string }
 	| { kind: "unreachable"; target: string; url: string; detail: string }
@@ -62,8 +63,6 @@ export interface SetupTargetFacts {
 		available: boolean;
 		provider: string;
 		envVariable?: string;
-		/** The runtime's own key variable, used when the target names none. */
-		runtimeEnvVariable?: string;
 		projectUrl?: string;
 	};
 	/** The last reachability check, when one ran. */
@@ -111,7 +110,6 @@ export function setupStatus<TargetDraft = unknown>(facts: SetupFacts<TargetDraft
 		if (model === undefined) missing.push({ kind: "model", target: target.id });
 		const credential = target.credential;
 		if (credential !== undefined && !credential.available) {
-			const variable = credential.envVariable ?? credential.runtimeEnvVariable;
 			missing.push(
 				credential.projectUrl !== undefined
 					? {
@@ -119,7 +117,6 @@ export function setupStatus<TargetDraft = unknown>(facts: SetupFacts<TargetDraft
 							target: target.id,
 							provider: credential.provider,
 							projectUrl: credential.projectUrl,
-							...(variable !== undefined ? { variable } : {}),
 						}
 					: credential.envVariable !== undefined
 						? { kind: "env", target: target.id, variable: credential.envVariable }
@@ -150,7 +147,7 @@ export function describeMissing(
 		case "credential": {
 			if (missing.projectUrl !== undefined)
 				return {
-					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so Clio sends it none of your keys. To use it, define ${missing.target} in your user settings${missing.variable !== undefined ? ` with its key in ${missing.variable}` : ""}.`,
+					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so Clio sends it none of your keys. To use it, define ${missing.target} in your user settings with its own key variable (auth.apiKeyEnvVar).`,
 				};
 			const command = `clio-coder auth login ${missing.provider}`;
 			const sentence = `${missing.provider} has no key or sign-in stored. Run: ${command}`;

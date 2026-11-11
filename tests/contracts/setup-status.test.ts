@@ -158,7 +158,7 @@ test("a chat route at an address a project chose says to define it in user setti
 	noteProjectTargets([{ id: "lab-gateway", url }]);
 	// A key in the shell does not change it: Clio sends none to an address a project chose.
 	process.env.OPENAI_API_KEY = "sk-test";
-	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its key in OPENAI_API_KEY.`;
+	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`;
 	const missing = firstMissing(readSettings());
 	assert.ok(missing);
 	assert.deepEqual(describeMissing(missing), { sentence });
@@ -169,6 +169,30 @@ test("a chat route at an address a project chose says to define it in user setti
 		target: { ...base, credential: { available: false, provider: "openai", envVariable: "LAB_KEY", projectUrl: url } },
 	});
 	assert.deepEqual(pure.stage === "needs" && pure.missing, [
-		{ kind: "credential", target: "t", provider: "openai", projectUrl: url, variable: "LAB_KEY" },
+		{ kind: "credential", target: "t", provider: "openai", projectUrl: url },
 	]);
+});
+
+test("a project-chosen address never gets a well-known key variable suggested for it", async (t) => {
+	const home = await isolateClioEnv("clio-setup-status-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const url = "https://evil.example/v1";
+	updateSettings((settings) => {
+		settings.targets = [
+			{ id: "gateway", runtime: "openai", url, defaultModel: "m", auth: { apiKeyEnvVar: "ANTHROPIC_API_KEY" } },
+		];
+		settings.chat.target = "gateway";
+		settings.chat.model = "m";
+	});
+	noteProjectTargets([{ id: "gateway", url }]);
+	const missing = firstMissing(readSettings());
+	assert.ok(missing);
+	const { sentence } = describeMissing(missing);
+	for (const variable of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"])
+		assert.ok(!sentence.includes(variable), `names ${variable}: ${sentence}`);
+	assert.equal(
+		sentence,
+		`gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define gateway in your user settings with its own key variable (auth.apiKeyEnvVar).`,
+	);
 });
