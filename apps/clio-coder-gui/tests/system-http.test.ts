@@ -65,14 +65,17 @@ test("interop lists all registered kinds, runs nothing until asked and then prob
 		const report = await json(await h.request(`${path}?probe=versions`), Interop);
 		assert.deepEqual(report.agents.map((row) => row.kind).sort(), [
 			"agents",
+			"aider",
 			"antigravity",
 			"claude-code",
+			"cline",
 			"codex",
 			"copilot",
 			"cursor",
 			"gemini",
 			"opencode",
 			"pi",
+			"windsurf",
 		]);
 		const codex = report.agents.find((row) => row.kind === "codex");
 		assert.equal(codex?.presence, "present");
