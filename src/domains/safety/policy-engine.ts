@@ -31,6 +31,7 @@ import {
 	type ClassifierCall,
 	classify,
 	normalizeCallPaths,
+	STORE_UNGRANTED_ARG,
 } from "./action-classifier.js";
 import { downloadedFiles, findDeletesNotFollowing, removedAbsolutePaths, unpackedTargets } from "./command-readings.js";
 import {
@@ -622,7 +623,10 @@ const WRITE_ROOT_TOOLS = new Set<string>([ToolNames.Write, ToolNames.Edit, ToolN
  * call's path arguments.
  */
 function writeRootTargetPath(call: ClassifierCall, cwd: string = process.cwd()): string | null {
-	if (call.tool === ToolNames.Store) return storeWriteTarget(cwd, call.args);
+	if (call.tool === ToolNames.Store) {
+		// A call this session may not make writes nothing; the tool refuses it with how to get a grant.
+		return call.args?.[STORE_UNGRANTED_ARG] === true ? null : storeWriteTarget(cwd, call.args);
+	}
 	if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
 	const target = pathArg(call.args);
 	if (target !== null) return target;

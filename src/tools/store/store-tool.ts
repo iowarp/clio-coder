@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { observeFileHash } from "../../core/run-records.js";
 import { isRecordsTag, STORE_REPLACES_ARG, validateBlobName, validateTagName } from "../../core/store-paths.js";
+import { STORE_UNGRANTED_ARG } from "../../domains/safety/action-classifier.js";
 import {
 	openStoreBackend,
 	type StoreBackend,
@@ -35,6 +36,7 @@ import {
 	STORE_OPS,
 	STORE_TOOL_NAME,
 	type StoreOp,
+	storeAccessRefusal,
 	storeToolSurface,
 } from "./surface.js";
 
@@ -59,10 +61,8 @@ export interface StoreToolDeps {
 	openBackend?: (cwd: string) => Promise<StoreBackend>;
 }
 
-const WRITE_OPS: ReadonlySet<StoreOp> = new Set(["create", "put", "note", "remove"]);
 const READ_ONLY_REFUSAL =
 	"store: this session can read the store but not write to it; the dispatching session puts results";
-const GRANTABLE_OPS: ReadonlySet<StoreOp> = new Set(["put", "note"]);
 const LIST_DEFAULT_LIMIT = 100;
 const LIST_MAX_LIMIT = 500;
 const TAG_CLASSES: ReadonlySet<string> = new Set<StoreTagClass>(["input", "output", "cache", "archive"]);
@@ -449,22 +449,18 @@ export function createStoreTool(deps: StoreToolDeps): ToolSpec {
 	const getCwd = deps.getCwd ?? (() => process.cwd());
 	return {
 		...storeToolSurface,
-		prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args, getCwd()),
+		prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args, getCwd(), deps),
 		async run(rawArgs, options?: ToolInvokeOptions): Promise<ToolResult> {
 			const args = prepareStoreArguments(rawArgs);
 			const op = typeof args.op === "string" ? args.op : "";
 			if (!isStoreOp(op)) {
 				return { kind: "error", message: `store: op must be one of ${STORE_OPS.join(", ")}; got '${op}'` };
 			}
-			if (!deps.writable && WRITE_OPS.has(op)) {
-				const tag = typeof args.tag === "string" ? args.tag : "";
-				if (!GRANTABLE_OPS.has(op) || deps.grant === undefined) return { kind: "error", message: READ_ONLY_REFUSAL };
-				if (!deps.grant.tags.includes(tag)) {
-					return {
-						kind: "error",
-						message: `store: this run has no grant for tag '${tag}'; the dispatcher grants it with tags: ["${tag}"]`,
-					};
-				}
+			const refusal = storeAccessRefusal(args, deps);
+			if (refusal !== null) return { kind: "error", message: refusal };
+			// Admission read a marked write as a read; a marker this session did not earn refuses too.
+			if (args[STORE_UNGRANTED_ARG] === true) {
+				return { kind: "error", message: READ_ONLY_REFUSAL };
 			}
 			const reservation = reserveObservation(STORE_OBSERVATION_SELF_CAP_BYTES, options);
 			const subject = typeof args.tag === "string" ? `${op} ${args.tag}` : op;

@@ -222,7 +222,11 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			lazyTool(
 				{
 					...storeToolSurface,
-					prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args, getWorkspaceRoot()),
+					prepareAdmissionArguments: (args) =>
+						prepareStoreAdmissionArguments(args, getWorkspaceRoot(), {
+							writable: deps.storeWritable === true,
+							...(deps.storeGrant !== undefined ? { grant: deps.storeGrant } : {}),
+						}),
 					resolveAdmissionFacts: async (args) =>
 						(await import("./store/store-tool.js")).storeAdmissionFacts(args, getWorkspaceRoot()),
 				},

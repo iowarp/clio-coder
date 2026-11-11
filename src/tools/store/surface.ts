@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { ToolNames } from "../../core/tool-names.js";
+import { STORE_UNGRANTED_ARG } from "../../domains/safety/action-classifier.js";
 import { StringEnum } from "../../engine/ai.js";
 import type { ToolSurface } from "../lazy-tool.js";
 import { resolveToCwd } from "../path-utils.js";
@@ -76,13 +77,37 @@ export function prepareStoreArguments(args: Record<string, unknown>): Record<str
 	return out;
 }
 
+/** What this session may write: the main session everything, a worker only its granted tags. */
+export interface StoreAccess {
+	writable: boolean;
+	grant?: { tags: ReadonlyArray<string> };
+}
+
+const STORE_WRITE_OPS: ReadonlySet<string> = new Set(["create", "put", "note", "remove"]);
+const STORE_GRANTABLE_OPS: ReadonlySet<string> = new Set(["put", "note"]);
+const READ_ONLY_REFUSAL =
+	"store: this session can read the store but not write to it; the dispatching session puts results";
+
+/** The refusal for a write this session may not make, or null when it may. */
+export function storeAccessRefusal(args: Record<string, unknown>, access: StoreAccess): string | null {
+	const op = typeof args.op === "string" ? args.op : "";
+	if (access.writable || !STORE_WRITE_OPS.has(op)) return null;
+	if (!STORE_GRANTABLE_OPS.has(op) || access.grant === undefined) return READ_ONLY_REFUSAL;
+	const tag = typeof args.tag === "string" ? args.tag : "";
+	if (access.grant.tags.includes(tag)) return null;
+	return `store: this run has no grant for tag '${tag}'; the dispatcher grants it with tags: ["${tag}"]`;
+}
+
 /** Freeze the normalized call, `path` made absolute, so admission judges exactly what the tool will do. */
 export function prepareStoreAdmissionArguments(
 	args: Record<string, unknown>,
 	cwd = process.cwd(),
+	access: StoreAccess = { writable: true },
 ): Record<string, unknown> {
 	const prepared = prepareStoreArguments(args);
+	delete prepared[STORE_UNGRANTED_ARG];
 	if (typeof prepared.path === "string" && prepared.path.length > 0) prepared.path = resolveToCwd(prepared.path, cwd);
+	if (storeAccessRefusal(prepared, access) !== null) prepared[STORE_UNGRANTED_ARG] = true;
 	return prepared;
 }
 
@@ -113,5 +138,5 @@ export const storeToolSurface: ToolSurface = {
 	baseActionClass: "read",
 	executionMode: "sequential",
 	prepareArguments: prepareStoreArguments,
-	prepareAdmissionArguments: prepareStoreAdmissionArguments,
+	prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args),
 };

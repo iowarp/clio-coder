@@ -734,6 +734,13 @@ function isRegularFile(target: string): boolean {
 }
 
 /**
+ * Set on a store write's admission arguments, never by the model, when this session may not make
+ * it (a worker without a grant for the tag). Admission reads the call as the refusal it will be and
+ * names no write target, so the tool answers with how to get the grant instead of a write-root refusal.
+ */
+export const STORE_UNGRANTED_ARG = "__storeUngranted";
+
+/**
  * The store is one tool with read, write and destructive ops, and its writes
  * land in Clio's own data directory rather than at the `path` argument, which
  * for `put` is the source. So each op is judged for what it does, and a write
@@ -753,6 +760,8 @@ function classifyStore(args: Record<string, unknown> | undefined): Classificatio
 	}
 	// tags, list, stat, get, and a missing or unknown op, which the tool rejects.
 	if (!STORE_WRITE_OPS.has(op)) return { actionClass: "read", reasons: [] };
+	// The tool refuses a marked call before it touches the store; any marker makes it refuse.
+	if (args?.[STORE_UNGRANTED_ARG] === true) return { actionClass: "read", reasons: ["store-ungranted"] };
 	const sourceArg = args?.path ?? args?.file_path ?? args?.file;
 	if (op === "put" && typeof sourceArg === "string" && sourceArg.length > 0) {
 		const source = resolveCandidate(sourceArg);

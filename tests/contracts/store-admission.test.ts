@@ -69,6 +69,19 @@ describe("store safety admission", () => {
 		strictEqual(put.reasonCode, "write-root");
 	});
 
+	it("tells a worker without a grant to ask for one, ahead of the write-root rule", async () => {
+		writeFileSync(join(cwd, "a.txt"), "result\n");
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd, writeRoots: ["src/"] }),
+			autonomy: () => "default",
+			principal: "worker",
+		});
+		registry.register(createStoreTool({ getCwd: () => cwd, writable: false, grant: { tags: ["fleet"] } }));
+		const verdict = await registry.invoke({ tool: ToolNames.Store, args: { op: "put", tag: "sim", path: "a.txt" } });
+		const text = verdict.kind === "ok" ? (verdict.result.kind === "error" ? verdict.result.message : "") : verdict.reason;
+		match(text, /no grant for tag 'sim'.*tags: \["sim"\]/u);
+	});
+
 	it("admits a cd into this project's store directory and not another project's", () => {
 		const own = storeProjectDir(cwd);
 		const other = storeProjectDir(scratch.dir);
