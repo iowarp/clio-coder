@@ -73,10 +73,11 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The store lives under the data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path. Its files are owner-only (0600 files, 0700 directories). `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing can recover it afterwards.
 - Writers that break the same stale store lock take turns, so only one of them holds the lock.
 - `clio-coder store` reaches the store from a shell: `tags`, `ls`, `stat`, `history`, `verify`, `put`, `get`, `rm-tag`, `adopt` (move the store of a checkout that moved) and `where`.
-- An opt-in clio-core backend: `clio-coder store backend clio-core` probes the interpreter, the clio-core daemon, its version, the host and durability, and selects clio-core for the data directory only when every check passes. Clio Coder processes share one daemon through a bundled Python host. A selected clio-core that cannot attach fails the call and never falls back to local. `store backend local` removes the selection, and switching never moves data. Local stays the default.
+- An opt-in clio-core backend: `clio-coder store backend clio-core` probes the interpreter, the clio-core daemon, its version, the host and durability, and selects clio-core for the data directory only when every check passes. Clio Coder processes share one daemon through a bundled Python host. A selected clio-core that cannot attach fails the call and never falls back to local. `store backend local` removes the selection, and switching never moves data. Local stays the default. The clio-core backend is experimental in 0.8.0 and needs a clio-core build at commit 6c54cdbf or later; the store guide says how to get one.
 - A dispatch can grant a worker store tags (`tags`) to `put` and `note` into; without a grant the worker's store stays read-only and the dispatching session puts results. With the clio-core backend selected the grant also reaches a worker on an SSH fleet node; with the local backend that grant is still refused.
 - The science-data skill starts from the store and grants its output tag to the workers it dispatches. The science-data pack 0.2.1 requires Clio Coder 0.8.0.
-- The store guide in the docs covers choosing a backend and what clio-core keeps across a restart. A clio-core put over an existing blob is refused and points to `store remove`, and tag and blob names can no longer alias each other. A clio-core record put is synced before the call returns, so its history survives a clio-core runtime crash.
+- The store guide in the docs covers choosing a backend and what clio-core keeps across a restart. A clio-core put over an existing blob asks first, as a replace does on the local backend, and tag and blob names can no longer alias each other. A clio-core record put is synced before the call returns, so its history survives a clio-core runtime crash.
+- A clio-core call fails within 3 seconds when the runtime stops answering, a process killed by a signal releases the shared clio-core daemon, and with `--mount` the model may read the path `store get` returns.
 
 ### Reports to the maintainers
 
@@ -171,6 +172,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Pressing Esc before the loop guard's hard stop leaves the turn stopped; yolo no longer continues it.
 - Headless runs and yolo sessions tell the model to open its final reply with where the task stands against the request (done, partly done or not done) and to name any unmet part; "Done" is reserved for a fully met request.
 - Yolo's floor refuses deleting your home directory spelled `~yourname`, as it already did for `~` and `$HOME`.
+- A scheduled `job` command is judged as the uncontained call it is, so a command its direct `bash` call may run is no longer refused, and a refusal no longer talks about host verification.
 
 ### Security and sandbox
 
@@ -238,6 +240,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Compaction no longer cuts inside a tool batch, so replay keeps the assistant's text and signed thinking.
 - GitHub Copilot routes compact against the prompt budget Copilot enforces for the model (its default tier: 200K tokens for Claude models and 100K for Claude Haiku 5.5, where the model listing reports a 1M context window), and a Copilot "prompt budget" or context-limit refusal is treated as a context overflow, so a long session compacts and retries instead of stopping on every turn. A summary too large for the compaction model stops before it is sent and says to choose a larger compaction model.
 - `context init` merges a handbook rule stated twice in different words, keeping the first wording, in invariants, conventions and each section's bullets (two rules citing different checker ids never merge). A rule citing a checker id that another id of that checker matches clearly better gets the id corrected, an id the checker lacks is reported, and preview lists the merges.
+- Compaction no longer extends a live provider session when the summary's output reservation would not fit the context window; it summarizes in a fresh request instead.
 
 ### Memory
 
@@ -320,6 +323,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer.
 - `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer.
 - A task that names its check as an exact command ("verify by running: <cmd>", a backticked command after "by running", or "run `<cmd>` to verify") withholds the merge when the worker never ran that command to a clean exit, through the shell or a passing `verify` check, even if its other calls succeeded. `npm test`, `pnpm test` and `npm run test` name the same script. Plain "by running the tests" names no command.
+- A task worktree outside the project also links the `node_modules` of each workspace package the project declares (such as `apps/*`), beside the root `node_modules` and `.venv`, so a check that builds or typechecks a workspace package passes in the worktree.
+- Checks you name in the turn that dispatches work (`pnpm run <id>`, a backticked `<id>` or `verify(check="<id>")`) are attached to every task from that turn, so the merge gate enforces them even when the coordinator does not pass them on. Only checks the project declares are taken.
+- Council and poll members, which answer in prose by design, are no longer marked "no tools" or unchecked, and the exit summary counts a worker that failed over to another attempt once.
 
 ### Extensions and MCP
 
@@ -408,7 +414,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A fifth `clio-coder` in one folder runs without panes until another exits. Per-launch pane hosts are verified on Linux only.
 - Waiting on several conditions relies on the agent wiring each one, as its guidance asks; Clio Coder does not check that every condition the operator named has a job.
 - A machine attaching to a 0.7.0 node reports that the node did not answer rather than a version mismatch. After the desktop app's server restarts, a browser window without a remembered credential needs `clio-coder gui` again, and that command then focuses the old, disconnected window on Linux (WSL closes it). A launch ticket stays in the browser opener's command line for up to 60 seconds.
-- The project store's local backend lives on one host: a worker on a fleet node sees that node's own store. `put` copies bytes rather than linking. The clio-core backend is opt-in and keeps no blob versions. The store has been exercised on Linux only.
+- The project store's local backend lives on one host: a worker on a fleet node sees that node's own store. `put` copies bytes rather than linking. The clio-core backend is opt-in, experimental and keeps no blob versions. The store has been exercised on Linux only.
 - When a project's settings define `targets`, headless `run` with no saved chat route borrows none of your own saved targets either, since the project's list replaces yours; pass `--target <id>`.
 - A command job at unconfined yolo ignores a `sandbox: required` request.
 - An OAuth target that also names `auth.apiKeyEnvVar` becomes unusable while that variable is set.
