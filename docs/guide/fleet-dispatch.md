@@ -976,6 +976,20 @@ stderr in text mode and a `dispatch_scope_notice` event in `--json`, the ACP
 such as `write: src/a.ts; checks: test`, with up to three entries per list and `(+N)` for
 the rest. A read root that is only the workspace is the default and is left out.
 
+### Store tag grants
+
+A worker's `store` is read-only unless the dispatch grants it tags: `tags: ["results"]`
+on the request or on one item of `tasks` (an item's value overrides the default) lets that
+worker `put` and `note` into those existing tags only. The field is not on the compact
+`dispatch` schema attached to the model; `gateway describe dispatch` teaches it. Admission
+refuses a grant to a read-only run, to a tag that does not exist yet (create it with
+`store create` first), to an ACP delegation target, and to a remote node while the store
+backend is local. A run that declares write roots gets each granted tag's directory and
+its records directory added to them. In a parallel batch, a writer that holds a grant and
+declares no write roots is confined to its granted store directories, so several such
+writers can run side by side without `parallel_writer_conflict`; declare
+`intent.write_roots` if that worker must also edit the workspace.
+
 Verification values are declared check ids, never shell commands. Admission
 resolves each id from a package script or `.clio-coder/verifiers.yaml`
 ([quality-policy.md](quality-policy.md) covers declared checks, including the judged

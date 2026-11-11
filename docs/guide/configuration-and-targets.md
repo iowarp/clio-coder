@@ -308,6 +308,8 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 
 On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. The profile exists but remains unverified on macOS, as the availability check reports. `required` refuses worker commands if the backend is unavailable.
 
+Inside a container, bubblewrap must be installed in the image, and the container runtime must allow unprivileged user namespaces and mounts. Default Docker and Podman seccomp and AppArmor profiles usually forbid them; the availability check then reports `bubblewrap cannot create a sandbox here` and names the kernel or enclosing container as the cause. Under `required` every worker command is then refused. Run the container with a profile that permits the namespaces, or use `auto` and accept that commands run unsandboxed there.
+
 ### Interface
 
 | Key | Default | When it applies |
