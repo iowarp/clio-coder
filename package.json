@@ -68,6 +68,7 @@
 		"dist",
 		"!dist/**/*.map",
 		"!dist/metafile*.json",
+		"!dist/builds",
 		"bin/clio-coder.cjs",
 		"scripts/install.sh",
 		"scripts/install.ps1",
@@ -105,6 +106,7 @@
 	},
 	"scripts": {
 		"build": "node --import tsx scripts/build.ts && node --import tsx scripts/build-source-pack.ts && node --import tsx scripts/build-codewiki-asset.ts",
+		"build:release": "node --import tsx scripts/build.ts --clean && node --import tsx scripts/build-source-pack.ts && node --import tsx scripts/build-codewiki-asset.ts",
 		"dev": "node --import tsx scripts/build.ts --watch",
 		"clean": "rm -rf dist",
 		"check": "node scripts/check.mjs",

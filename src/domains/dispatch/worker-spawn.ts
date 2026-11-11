@@ -35,6 +35,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withClioAgentEnvironment } from "../../core/agent-environment.js";
+import { runningBuildId } from "../../core/build-id.js";
 import {
 	enableClioCompileCache,
 	publishClioCompileCache,
@@ -81,6 +82,15 @@ import {
 
 export type { WorkerSpec } from "../../worker/spec-contract.js";
 export { WorkerChannelFailure } from "./worker-protocol.js";
+
+/**
+ * A worker that cannot import a chunk usually started from a dist/ a later
+ * build pruned; name the parent's build so the operator knows which one.
+ */
+export function missingChunkNotice(stderr: string, buildId: string | null): string | null {
+	if (!/ERR_MODULE_NOT_FOUND|Cannot find module/u.test(stderr)) return null;
+	return `[worker] A module of the parent's build ${buildId ?? "(source run)"} is missing from dist/; a later build may have pruned it. Restart Clio to load the current build.\n`;
+}
 
 export interface WorkerProcessCleanup extends ProcessGroupCleanupStatus {
 	pipeDrainIncomplete: boolean;
@@ -922,6 +932,8 @@ function attachWorkerChannel(
 		if (!sawSpawnError && !announceAccepted && !announceFailed) {
 			announceFailed = true;
 			appendStderr("[worker] Missing worker attestation: peer exited before announcing its route identity\n");
+			const notice = missingChunkNotice(stderrTail.toString("utf8"), runningBuildId);
+			if (notice !== null) appendStderr(notice);
 		}
 		const code = leaderExit?.code ?? child.exitCode;
 		const signal = leaderExit?.signal ?? child.signalCode;

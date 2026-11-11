@@ -320,6 +320,27 @@ for (const prefix of REQUIRED_PREFIXES) {
 
 checkSourcePack();
 checkExtensionDeclarations();
+checkBuildInventory();
+
+/**
+ * Development builds keep chunks a running process may still import; a
+ * release must come from a clean build, so every packed dist/ script is one
+ * dist/build.json lists, and the per-build records under dist/builds/ stay out.
+ */
+function checkBuildInventory() {
+	let listed;
+	try {
+		listed = new Set(JSON.parse(readFileSync(join(packageRoot, "dist", "build.json"), "utf8")).files);
+	} catch {
+		errors.push("dist/build.json is missing or unreadable");
+		return;
+	}
+	for (const file of files) {
+		if (file.startsWith("dist/builds/")) errors.push(`build record in package: ${file}`);
+		else if (file.startsWith("dist/") && file.endsWith(".js") && !listed.has(file.slice(5)))
+			errors.push(`dist script not in dist/build.json (stale chunk; build with --clean): ${file}`);
+	}
+}
 
 /**
  * The tarball must agree with the source-pack plan computed from this

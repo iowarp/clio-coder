@@ -126,7 +126,8 @@ export async function prepare(directory, credits) {
 		),
 	);
 	for (const check of checks) if (check.status === "rejected") throw check.reason;
-	run("pnpm", ["run", "build"]);
+	// A clean build, so no chunk a development build retained for a running process ships.
+	run("pnpm", ["run", "build:release"]);
 	// Build metadata is qualification evidence, excluded from the npm package.
 	// It lets the Stage 0 budget check inspect the chunks extracted from the archive.
 	writeFileSync(join(directory, "metafile-esm.json"), readFileSync(join(root, "dist/metafile-esm.json")));
