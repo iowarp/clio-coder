@@ -28,3 +28,4 @@ export {
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "./storage.js";
+export { applyTargetCredentialPlan, planTargetCredentialRemoval } from "./target-credential.js";

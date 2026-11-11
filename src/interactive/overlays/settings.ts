@@ -53,13 +53,20 @@ import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
 import type { RouteBreakerView } from "../../domains/dispatch/contract.js";
 import type { InteropAgentId, InteropProposal } from "../../domains/interop/index.js";
 import { delegationEntryForKind, interopAgentKind } from "../../domains/interop/index.js";
-import type { CapabilityFlags, ProvidersContract, TargetHealth, TargetStatus } from "../../domains/providers/index.js";
 import {
+	applyTargetCredentialPlan,
+	type CapabilityFlags,
 	endpointCapacitiesForStatuses,
 	endpointCapacityForStatus,
+	getRuntimeRegistry,
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
+	type ProvidersContract,
+	planTargetCredentialRemoval,
 	resolveModelRuntimeCapabilitiesForProviders,
+	type TargetDescriptor,
+	type TargetHealth,
+	type TargetStatus,
 	targetRequiresAuth,
 	thinkingLevelChoiceLabel,
 	thinkingLevelFromChoiceLabel,
@@ -4077,6 +4084,24 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			});
 		});
 	};
+	// A target removed from user settings takes the key it owned, as `clio-coder targets remove` does;
+	// after it is gone no command can name that key.
+	const removedTargetCredential = (plan: SettingsChangePlan): string | null => {
+		const auth = deps.providers?.auth;
+		if (!auth || !plan.rowId.startsWith("targets.") || plan.selectedValue !== "remove") return null;
+		const targetId = plan.rowId.slice("targets.".length);
+		const removed = plan.original.targets.find((target) => target.id === targetId);
+		const remaining = deps.getSettings().targets;
+		if (!removed || remaining.some((target) => target.id === targetId)) return null;
+		return applyTargetCredentialPlan(
+			planTargetCredentialRemoval(removed as TargetDescriptor, remaining, getRuntimeRegistry().list()),
+			{
+				isStored: (key) => auth.getStored(key) !== null,
+				remove: (key) => auth.remove(key),
+				damageReason: () => auth.damageReason(),
+			},
+		);
+	};
 	const targetOperations = new Map<string, { operation: "connect" | "probe"; token: object }>();
 	const buildOptions: BuildSettingItemsOptions = {
 		getSettings: deps.getSettings,
@@ -4119,7 +4144,12 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			// Only a committed edit counts: a canceled or refused one never reaches this line.
 			if (isShortcutRow(items.find((entry) => entry.id === plan.rowId)))
 				center.setShortcuts(rememberChangedSetting(plan.rowId));
-			deps.notice?.("success", formatSettingChangeNotice(plan.rowId, plan.selectedValue, scope), `settings:${plan.rowId}`);
+			const credential = scope === "global" ? removedTargetCredential(plan) : null;
+			deps.notice?.(
+				"success",
+				`${formatSettingChangeNotice(plan.rowId, plan.selectedValue, scope)}${credential ? `; ${credential}` : ""}`,
+				`settings:${plan.rowId}`,
+			);
 			refreshRows();
 		},
 		onAddTarget: () => launchWizard(),

@@ -49,7 +49,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder targets fleet [--json]` | Show the fleet default (`fleet.default`, set by `targets use <id> --fleet-model <model>`) and the configured fleet profiles, each with its target, runtime, model, thinking level, and settings source. `--json` prints `{ "default": ..., "profiles": [...] }`, with `default` null when unset. `targets workers` is an accepted alias. |
 | `clio-coder targets profile list\|set\|remove\|rename\|bind\|unbind\|bindings` | Manage named fleet profiles and agent bindings. `list [--json]` and `bindings [--json]` read; `set <name> <id>` takes `--model` and `--thinking`; `remove <name>` takes `--force`; `rename <old> <new>` renames; `bind <agentId> <profileName>` and `unbind <agentId>` attach and detach an agent. `clio-coder targets profile <name> <id>` is the short form of `profile set`, and `targets worker` is an accepted alias for `targets profile`. |
 | `clio-coder targets convert <id> --runtime <runtimeId>` | Convert older local target definitions to a runtime-specific target. |
-| `clio-coder targets remove <id>` | Remove a target. |
+| `clio-coder targets remove <id>` | Remove a target, with the key only it used. |
 | `clio-coder targets rename <old> <new>` | Rename a target id. |
 | `clio-coder models [search] [--target <id>] [--json] [--offline]` | List models. Live probing is the default; `--offline` skips it. |
 | `clio-coder paths [--json]` | Print the resolved config, data, state and cache roots, the installer root and whether this binary runs from it, the launcher, and where a new project `.clio-coder/` entry goes from this directory. |

@@ -322,9 +322,13 @@ function remembered(resolution: AuthResolution): AuthResolution {
 	return resolution;
 }
 
+/** The credentials-store entry a target reads: its own profile or key ref, else its runtime's. */
+export function targetCredentialKey(target: TargetDescriptor, runtime: RuntimeAuthMetadata): string {
+	return target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
+}
+
 export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuthMetadata): AuthTarget {
-	const providerId =
-		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
+	const providerId = targetCredentialKey(target, runtime);
 	const authTarget: AuthTarget = {
 		providerId,
 		targetId: target.id,

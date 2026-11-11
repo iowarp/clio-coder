@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { readApiKey, runAuthCommand } from "../../src/cli/auth.js";
+import { runTargetRemove } from "../../src/cli/configure.js";
 import { listLogoutChoices } from "../../src/cli/provider-target.js";
 
 const LOGOUT_SETTINGS = [
@@ -30,6 +31,12 @@ const RUNTIME = "openai";
 const STORED_KEY = "sk-not-a-real-key-already-stored";
 
 async function captureAuth(args: ReadonlyArray<string>): Promise<{ code: number; stdout: string; stderr: string }> {
+	return captureCli(() => runAuthCommand(args));
+}
+
+async function captureCli(
+	run: () => number | Promise<number>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	const outWrite = process.stdout.write.bind(process.stdout);
 	const errWrite = process.stderr.write.bind(process.stderr);
 	let stdout = "";
@@ -44,7 +51,7 @@ async function captureAuth(args: ReadonlyArray<string>): Promise<{ code: number;
 		return true;
 	}) as typeof process.stderr.write;
 	try {
-		const code = await runAuthCommand(args);
+		const code = await run();
 		return { code, stdout, stderr };
 	} finally {
 		process.stdout.write = outWrite;
@@ -336,6 +343,102 @@ describe("contracts/auth logout of a key stored for the desktop app", () => {
 		} finally {
 			if (saved === undefined) delete process.env.CLIO_TEST_LAB_KEY;
 			else process.env.CLIO_TEST_LAB_KEY = saved;
+			scratch.restore();
+		}
+	});
+});
+
+describe("contracts/targets remove and the removed target's stored key", () => {
+	it("drops the key the target owned and keeps the runtime's key, saying which", async () => {
+		const scratch = await isolateClioEnv("clio-coder-target-remove-key-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(
+				join(configDir, "settings.yaml"),
+				[
+					"version: 2",
+					"targets:",
+					"  - id: openai",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: target:openai",
+					"  - id: mirror",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: openai",
+					"",
+				].join("\n"),
+			);
+			const credentials = join(configDir, "credentials.yaml");
+			writeFileSync(
+				credentials,
+				[
+					"version: 2",
+					"entries:",
+					"  openai:",
+					"    type: api_key",
+					'    key: "sk-runtime-not-real"',
+					"  target:openai:",
+					"    type: api_key",
+					`    key: "${STORED_KEY}"`,
+					"",
+				].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const own = await captureCli(() => runTargetRemove("openai"));
+			strictEqual(own.code, 0, own.stderr);
+			ok(own.stdout.includes("removed its stored key target:openai"), own.stdout);
+			let left = readFileSync(credentials, "utf8");
+			ok(!left.includes("target:openai"), left);
+			ok(/^\s+openai:/mu.test(left), left);
+
+			const shared = await captureCli(() => runTargetRemove("mirror"));
+			strictEqual(shared.code, 0, shared.stderr);
+			ok(shared.stdout.includes("kept the stored key openai"), shared.stdout);
+			left = readFileSync(credentials, "utf8");
+			ok(/^\s+openai:/mu.test(left), left);
+		} finally {
+			scratch.restore();
+		}
+	});
+
+	it("keeps a key another target still reads", async () => {
+		const scratch = await isolateClioEnv("clio-coder-target-remove-shared-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(
+				join(configDir, "settings.yaml"),
+				[
+					"version: 2",
+					"targets:",
+					"  - id: work-a",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: target:work",
+					"  - id: work-b",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyRef: target:work",
+					"",
+				].join("\n"),
+			);
+			const credentials = join(configDir, "credentials.yaml");
+			writeFileSync(
+				credentials,
+				["version: 2", "entries:", "  target:work:", "    type: api_key", `    key: "${STORED_KEY}"`, ""].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const removed = await captureCli(() => runTargetRemove("work-a"));
+			strictEqual(removed.code, 0, removed.stderr);
+			ok(removed.stdout.includes("kept the stored key target:work: work-b still uses it"), removed.stdout);
+			ok(readFileSync(credentials, "utf8").includes("target:work"));
+		} finally {
 			scratch.restore();
 		}
 	});

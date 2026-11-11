@@ -348,3 +348,59 @@ test("Connect by URL saves a connection from a URL and a model inside the hosted
 		env.restore();
 	}
 });
+
+test("Remove target saved globally drops the key the target owned and keeps the runtime's key", () => {
+	if (getRuntimeRegistry().list().length === 0) registerBuiltinRuntimes(getRuntimeRegistry());
+	let settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [
+		{ id: "work", runtime: "openai", defaultModel: "gpt-5", auth: { apiKeyRef: "target:work" } },
+		{ id: "team", runtime: "openai", defaultModel: "gpt-5" },
+	];
+	const stored = new Set(["target:work", "openai"]);
+	const notices: string[] = [];
+	const tui = {
+		terminal: { rows: 30 },
+		requestRender() {},
+		showOverlay() {
+			return { hide() {} };
+		},
+	} as unknown as TUI;
+	const providers = {
+		list: () => [],
+		probeTarget: async () => null,
+		probeAllLive: async () => {},
+		getRuntime: () => null,
+		auth: {
+			getStored: (key: string) => (stored.has(key) ? { type: "api_key" } : null),
+			remove: (key: string) => void stored.delete(key),
+			damageReason: () => null,
+		},
+	};
+	for (const targetId of ["work", "team"]) {
+		const parent = openSettingsOverlay(tui, {
+			getSettings: () => settings,
+			providers: providers as never,
+			writeSettings(next) {
+				settings = next;
+			},
+			notice: (_level, text) => void notices.push(text),
+			onClose() {},
+			section: "targets",
+			rowId: `targets.${targetId}`,
+		});
+		const frame = dockTop(tui)?.frame as unknown as Component;
+		frame.handleInput?.("\r");
+		frame.handleInput?.("\x1b[A"); // Remove target, the last action
+		frame.handleInput?.("\r");
+		frame.handleInput?.("\x1b[B"); // Apply and save globally
+		frame.handleInput?.("\r");
+		parent.hide();
+	}
+	deepStrictEqual(
+		settings.targets.map((target) => target.id),
+		[],
+	);
+	deepStrictEqual([...stored], ["openai"]);
+	ok(notices[0]?.includes("removed its stored key target:work"), notices.join("\n"));
+	ok(notices[1]?.includes("kept the stored key openai: it is the openai runtime's own key"), notices.join("\n"));
+});

@@ -23,7 +23,12 @@ import { renderUsdLimit } from "../core/telemetry/render.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import {
+	applyTargetCredentialPlan,
+	openAuthStorage,
+	planTargetCredentialRemoval,
+	targetRequiresAuth,
+} from "../domains/providers/auth/index.js";
 import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import {
 	buildProviderSupportEntry,
@@ -1223,14 +1228,26 @@ async function runTargetSetupInteractive(
 }
 
 export function runTargetRemove(id: string): number {
-	if (!readSettings().targets.some((e) => e.id === id)) {
+	const removed = readSettings().targets.find((e) => e.id === id);
+	if (!removed) {
 		printError(`no target with id ${id}`);
 		return 1;
 	}
 	updateSettings((settings) => {
 		removeTargetFromSettings(settings, id);
 	});
-	printOk(`removed target ${id}`);
+	// Once the target is gone no command can name the key it owned, so it goes now.
+	ensureRegistryPopulated();
+	const auth = openAuthStorage();
+	const credential = applyTargetCredentialPlan(
+		planTargetCredentialRemoval(removed, readSettings().targets, getRuntimeRegistry().list()),
+		{
+			isStored: (key) => auth.get(key) !== undefined,
+			remove: (key) => auth.remove(key),
+			damageReason: () => auth.damageReason(),
+		},
+	);
+	printOk(`removed target ${id}${credential ? `; ${credential}` : ""}`);
 	return 0;
 }
 

@@ -24,8 +24,10 @@ export type {
 	OAuthCredential,
 } from "./auth/index.js";
 export {
+	applyTargetCredentialPlan,
 	authNotRequiredStatus,
 	openAuthStorage,
+	planTargetCredentialRemoval,
 	resolveAuthTarget,
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
