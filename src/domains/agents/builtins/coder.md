@@ -12,7 +12,7 @@ capabilityClass: workspace-edit
 permissions: {git: worktree}
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 50, readReserve: 5, synthesis: true, maximum: {toolCalls: 150, readReserve: 16}}
+budget: {toolCalls: 150, readReserve: 5, synthesis: true}
 resultContract: {kind: mutation-report}
 tags: [implementation, repair, refactor]
 ---

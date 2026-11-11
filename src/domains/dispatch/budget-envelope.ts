@@ -275,8 +275,8 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 
 /**
  * The budget a worker enforces. An advisory envelope gains a hard ceiling at
- * the recipe's maximum, clamped to `fleet.limits.toolCallsPerRun`, and never
- * below the estimate or revision the request was admitted with.
+ * `fleet.limits.toolCallsPerRun`, tightened to the recipe's explicit maximum
+ * when it declares one, and never below the estimate or revision the request was admitted with.
  */
 export function workerBudgetFromEnvelope(envelope: RunToolBudgetEnvelope): RunToolBudgetEnvelope["effective"] & {
 	ceiling?: number;
@@ -284,7 +284,10 @@ export function workerBudgetFromEnvelope(envelope: RunToolBudgetEnvelope): RunTo
 	const effective = envelope.effective;
 	if (effective.mode !== "advisory") return effective;
 	const floor = Math.max(effective.toolCalls, effective.revision?.toolCalls ?? 0);
-	return { ...effective, ceiling: Math.max(floor, Math.min(envelope.policy.maximum.toolCalls, effective.hardCap)) };
+	const limit = envelope.policy.exact
+		? effective.hardCap
+		: Math.min(envelope.policy.maximum.toolCalls, effective.hardCap);
+	return { ...effective, ceiling: Math.max(floor, limit) };
 }
 
 export function formatBudgetPolicy(envelope: RunToolBudgetEnvelope): string {

@@ -104,10 +104,10 @@ escalation reason ([budget-envelope.ts](../../src/domains/dispatch/budget-envelo
 The envelope runs in one of two modes; [built-in-agents.md](built-in-agents.md) describes the recipe side.
 In the default advisory mode, `toolCalls` is an estimate. At that count the worker gets
 one reminder that tools stay available until a hard ceiling. The ceiling is the larger of
-the admitted estimate (or revision estimate) and the smaller of the recipe's
-`maximum.toolCalls` and `fleet.limits.toolCallsPerRun` (default 150). A recipe without
-`maximum` uses its default `toolCalls` as the maximum, and raising `budget.toolCalls`
-raises the floor of the ceiling. Native workers stop at the ceiling. The Claude SDK
+the admitted estimate (or revision estimate) and `fleet.limits.toolCallsPerRun`
+(default 300), tightened to the recipe's `maximum.toolCalls` when the recipe declares one.
+A recipe without `maximum` runs up to `fleet.limits.toolCallsPerRun`, and raising
+`budget.toolCalls` raises the floor of the ceiling. Native workers stop at the ceiling. The Claude SDK
 runtime mediates each call and, once the ceiling is reached, denies every further tool
 call ([sdk-runtime.ts](../../src/engine/claude/sdk-runtime.ts)). In enforced mode, which
 covers native read-only `scout`, `provenance` and `context-bootstrap` runs whose recipe has

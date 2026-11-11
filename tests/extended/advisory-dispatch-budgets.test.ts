@@ -311,6 +311,9 @@ describe("dispatch advisory admission and explicit authority", () => {
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...advisory, hardCap: 30 })).ceiling, 30);
 		const admitted = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 50, readReserve: 2 } });
 		equal(workerBudgetFromEnvelope(admitted).ceiling, 50);
+		const noMaximum = { ...base, policy: { toolCalls: 50, readReserve: 5, synthesis: false }, hardCap: 400 };
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(noMaximum)).ceiling, 400);
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 50);
 
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {

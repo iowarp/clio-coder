@@ -12,7 +12,7 @@ capabilityClass: workspace-edit
 permissions: {git: worktree}
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 40, readReserve: 5, synthesis: true}
+budget: {toolCalls: 100, readReserve: 5, synthesis: true}
 resultContract: {kind: mutation-report}
 tags: [tests, regression, validation]
 ---

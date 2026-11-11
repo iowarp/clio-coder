@@ -831,8 +831,8 @@ export const DEFAULT_SETTINGS = {
 		worktrees: { root: "disk" },
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
-			toolCallsPerRun: GUARDRAIL_DEFAULTS.workerToolCallCap,
-			internalRunTimeoutMs: GUARDRAIL_DEFAULTS.internalDispatchTimeoutMs,
+			toolCallsPerRun: 300,
+			internalRunTimeoutMs: 2700000,
 		},
 		history: { maxRuns: GUARDRAIL_DEFAULTS.maxDispatchRuns, journal: true },
 	} as FleetSettings,
@@ -1044,8 +1044,8 @@ fleet:
     routeCooldownMs: 15000
     breakerThreshold: 1
   limits:
-    toolCallsPerRun: 150
-    internalRunTimeoutMs: 900000
+    toolCallsPerRun: 300
+    internalRunTimeoutMs: 2700000
   history:
     maxRuns: 1000
     journal: true

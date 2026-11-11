@@ -214,8 +214,8 @@ explains worker route selection.
 | `fleet.retry.routeCooldownMs` | `15000` | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | next dispatch |
 | `fleet.worktrees.root` | `disk` | next dispatch |
-| `fleet.limits.toolCallsPerRun` | `150` | next dispatch; a project layer can only tighten it |
-| `fleet.limits.internalRunTimeoutMs` | `900000` | next dispatch; a project layer can only tighten it |
+| `fleet.limits.toolCallsPerRun` | `300` | next dispatch; a project layer can only tighten it |
+| `fleet.limits.internalRunTimeoutMs` | `2700000` | next dispatch; a project layer can only tighten it |
 | `fleet.history.maxRuns` | `1000` | next dispatch |
 | `fleet.history.journal` | `true` | next dispatch |
 
