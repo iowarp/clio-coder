@@ -59,7 +59,7 @@ Usage:
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
-  clio-coder --session-file <path>     on exit, write this session's record (id, outcome, usage, model) as JSON
+  clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
