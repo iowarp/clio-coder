@@ -724,7 +724,7 @@ const EVIDENCE = /^([a-z][a-z0-9-]{0,31}):([A-Za-z0-9_.-]{1,64})(?:@([a-z][a-z0-
  * keeps its matcher and scope only when both are ones these use, with its subject anonymized; else it is dropped. A
  * built-in missing here is only anonymized or dropped, never leaked.
  */
-const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
+export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"check:completion-evidence@turn-end",
 	"check:uncited-line-numbers@final-answer",
 	"count:enumerated-steps@operator-request",
@@ -921,7 +921,8 @@ function projectField(
 		return mapStrings(value, (text) => (TOKEN.test(text) ? readable("token", text) : anonymize("name", text)));
 	if (projection === "evidence") {
 		if (typeof value !== "string") return DROP;
-		if (BUILTIN_EVIDENCE.has(value)) return readable("token", value);
+		// A fixed harness constant, like a `keep` vocabulary: not listed as readable, and its `@` fits no inventory name.
+		if (BUILTIN_EVIDENCE.has(value)) return value;
 		const parts = EVIDENCE.exec(value);
 		const [, matcher = "", subject = "", scope] = parts ?? [];
 		if (!parts || !EVIDENCE_MATCHERS.has(matcher) || (scope !== undefined && !EVIDENCE_SCOPES.has(scope))) return DROP;

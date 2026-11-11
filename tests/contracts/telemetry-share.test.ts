@@ -34,6 +34,7 @@ import {
 	verifyShareArchive,
 	writeShare,
 } from "../../src/domains/telemetry/share.js";
+import { BUILTIN_EVIDENCE } from "../../src/domains/telemetry/share-projection.js";
 
 const SECRET = ["sk-proj", "0123456789abcdefghijklmnop"].join("-");
 const HOST = "operator-laptop.example";
@@ -694,7 +695,10 @@ test("a session where a built-in middleware fired shares under every profile, it
 		} as const;
 		for (const profile of SHARE_PROFILE_NAMES) {
 			const { scopes, skipped } = resolveShareScopes(stateDir, selection);
-			const plan = planShare({ scopes, skipped, profile, source: freshShareSource(), writer });
+			const plan = planShare({ scopes, skipped, profile, source: freshShareSource(), writer, inventory: true });
+			// A report bundle's envelope carries this inventory and admits only name-shaped strings in it.
+			for (const text of Object.values(plan.inventory?.readable ?? {}).flat())
+				match(text, /^[A-Za-z][A-Za-z0-9_.:-]*$/u, profile);
 			const out = join(root, `${profile}.tar.gz`);
 			await writeShare(plan, out);
 			strictEqual(verifyShareArchive(await readFile(out)).failure, null, profile);
@@ -717,4 +721,18 @@ test("a session where a built-in middleware fired shares under every profile, it
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("every evidence literal a built-in rule records is one a share keeps verbatim", async () => {
+	const { readdir } = await import("node:fs/promises");
+	const src = new URL("../../src/", import.meta.url);
+	const found = new Set<string>();
+	for (const entry of await readdir(src, { recursive: true })) {
+		if (!entry.endsWith(".ts")) continue;
+		const text = await readFile(new URL(entry, src), "utf8");
+		for (const hit of text.matchAll(/evidence: "([a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}@[a-z][a-z0-9-]{0,31})"/gu))
+			if (hit[1] !== undefined) found.add(hit[1]);
+	}
+	ok(found.size > 10);
+	deepStrictEqual([...found].filter((text) => !BUILTIN_EVIDENCE.has(text)).sort(), []);
 });
