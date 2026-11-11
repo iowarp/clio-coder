@@ -248,7 +248,10 @@ function Install-ClioCoder {
 				if (-not $env:CLIO_CODER_NODE_KEYRING) { try { Get-File $KeyringUrl $keyring } catch { $keyring = $null; $unsignedReason = "the Node.js release keys could not be fetched" } }
 				if ($keyring) {
 					$unsignedReason = "gpgv could not check the signature"
-					$status = & $gpgv.Source --status-fd 1 --keyring $keyring --output "$sums.verified" "$sums.asc" 2>$null
+					$status = & $gpgv.Source --status-fd 1 --keyring $keyring --output "$sums.verified" "$sums.asc" 2>"$sums.gpg.err"
+					$toolError = (Get-Content -LiteralPath "$sums.gpg.err" -Raw -ErrorAction SilentlyContinue) -match "(?i)keyblock resource|keyring|unsupported|invalid packet"
+					# A key outside the release keyring is definitive; a gpgv that cannot read the keyring is not.
+					if (($status -match "NO_PUBKEY") -and -not $toolError) { $unsignedReason = "SHASUMS256.txt is signed by a key outside the Node.js release keyring" }
 					if ($status -match "BADSIG") { Fail "the OpenPGP signature on SHASUMS256.txt is BAD; refusing to install" }
 					if ($status -match "VALIDSIG") { $sums = "$sums.verified"; $signed = $true; Ok "SHASUMS256.txt signature verified against the Node.js release keys" }
 				}
@@ -256,7 +259,10 @@ function Install-ClioCoder {
 			if (-not $signed) {
 				if ($env:CLIO_CODER_REQUIRE_SIGNATURE -eq "1") { Fail "CLIO_CODER_REQUIRE_SIGNATURE=1, but no verified signature covers SHASUMS256.txt" }
 				# A signature that could be checked and was missing or did not verify fails closed unless explicitly waived.
-				$checkable = $unsignedReason -eq "no SHASUMS256.txt.asc signature" -or $unsignedReason -eq "gpgv could not check the signature"
+				# Definitive only: nodejs.org itself served no signature, or an unknown key signed it.
+				$officialOrigin = -not $Options.NodeZip -and $OfficialBase -eq "https://nodejs.org/dist"
+				if ($officialOrigin -and -not (Test-Path -LiteralPath "$sums.asc")) { $unsignedReason = "nodejs.org served no SHASUMS256.txt.asc signature" }
+				$checkable = $unsignedReason -eq "nodejs.org served no SHASUMS256.txt.asc signature" -or $unsignedReason -eq "SHASUMS256.txt is signed by a key outside the Node.js release keyring"
 				if ($checkable -and $env:CLIO_CODER_REQUIRE_SIGNATURE -ne "0") { Fail "$unsignedReason; refusing to install. CLIO_CODER_REQUIRE_SIGNATURE=0 relies on the checksum alone." }
 				Say "$unsignedReason; verifying the checksum from SHASUMS256.txt over HTTPS"
 			}

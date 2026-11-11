@@ -48,7 +48,7 @@ describe("contracts/install-script", () => {
 		strictEqual(text.indexOf("\nmain() {"), text.lastIndexOf("\nmain() {"));
 	});
 
-	it("fails closed when a checkable Node signature is missing or does not verify", () => {
+	it("fails closed only on a definitive Node signature failure", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-install-sig-"));
 		try {
 			const mirror = join(root, "mirror");
@@ -58,12 +58,20 @@ describe("contracts/install-script", () => {
 			writeFileSync(join(release, tarball), "not a node tarball");
 			const sum = createHash("sha256").update("not a node tarball").digest("hex");
 			writeFileSync(join(release, "SHASUMS256.txt"), `${sum}  ${tarball}\n`);
-			// A gpgv that knows no key: it never reports VALIDSIG.
+			// A gpgv whose status and stderr come from FAKE_GPG: bad, nokey or toolerror.
 			const bin = join(root, "bin");
 			mkdirSync(bin);
 			writeFileSync(
 				join(bin, "gpgv"),
-				"#!/bin/sh\necho '[GNUPG:] ERRSIG 0 1 8 00 0 9'\necho 'gpgv: Can not check signature: No public key' >&2\n",
+				[
+					"#!/bin/sh",
+					'case "$FAKE_GPG" in',
+					"bad) echo '[GNUPG:] BADSIG 0 node' ;;",
+					"nokey) echo '[GNUPG:] ERRSIG 0 1 8 00 0 9'; echo '[GNUPG:] NO_PUBKEY 0'; echo 'gpgv: Can not check signature: No public key' >&2 ;;",
+					"toolerror) echo '[GNUPG:] NO_PUBKEY 0'; echo 'gpgv: keyblock resource `pubring.kbx: invalid keyring' >&2 ;;",
+					"esac",
+					"",
+				].join("\n"),
 			);
 			chmodSync(join(bin, "gpgv"), 0o755);
 			writeFileSync(join(root, "pubring.kbx"), "");
@@ -76,16 +84,26 @@ describe("contracts/install-script", () => {
 					CLIO_CODER_NODE_KEYRING: join(root, "pubring.kbx"),
 					...env,
 				});
-			const missing = install();
-			strictEqual(missing.code, 1, missing.stderr);
-			match(missing.stderr, /no SHASUMS256\.txt\.asc signature.*refusing to install/u);
+			const checksummed = /checksum verified for node-v24\.11\.1-linux-x64\.tar\.gz/u;
+			// A custom mirror without a signature keeps the checksum-only warning.
+			const unsigned = install();
+			match(unsigned.stderr, /no SHASUMS256\.txt\.asc signature at file:/u);
+			match(`${unsigned.stdout}${unsigned.stderr}`, checksummed);
 			writeFileSync(join(release, "SHASUMS256.txt.asc"), "signature");
-			const unknown = install();
+			const toolError = install({ FAKE_GPG: "toolerror" });
+			match(toolError.stderr, /could not check the SHASUMS256\.txt signature/u);
+			match(`${toolError.stdout}${toolError.stderr}`, checksummed);
+			const bad = install({ FAKE_GPG: "bad" });
+			strictEqual(bad.code, 1, bad.stderr);
+			match(bad.stderr, /signature on SHASUMS256\.txt is BAD/u);
+			const unknown = install({ FAKE_GPG: "nokey" });
 			strictEqual(unknown.code, 1, unknown.stderr);
-			match(unknown.stderr, /did not verify with gpgv.*refusing to install/u);
-			// The explicit opt-out installs on the checksum alone; the junk tarball then fails to unpack.
-			const optOut = install({ CLIO_CODER_REQUIRE_SIGNATURE: "0" });
-			match(`${optOut.stdout}${optOut.stderr}`, /checksum verified for node-v24\.11\.1-linux-x64\.tar\.gz/u);
+			match(unknown.stderr, /outside the Node\.js release keyring; refusing to install/u);
+			// The explicit opt-out installs on the checksum alone.
+			match(
+				`${install({ FAKE_GPG: "nokey", CLIO_CODER_REQUIRE_SIGNATURE: "0" }).stderr}`,
+				/CLIO_CODER_REQUIRE_SIGNATURE=0/u,
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
