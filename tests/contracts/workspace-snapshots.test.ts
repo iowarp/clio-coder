@@ -13,6 +13,7 @@ import {
 	type WorkspaceSnapshotRequest,
 } from "../../src/domains/workspace-snapshots/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { snapshotWhat } from "../../src/interactive/overlays/rewind.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -344,5 +345,15 @@ describe("registry snapshot trigger", () => {
 		ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict));
 		ok(verdict.result.output.startsWith(`${ToolNames.Write} ran`));
 		ok(verdict.result.output.includes("no snapshot: not a git repository"), verdict.result.output);
+	});
+});
+
+describe("snapshot list labels", () => {
+	it("says what the snapshot came before without naming Clio's internal store tool", () => {
+		strictEqual(snapshotWhat({ reason: "turn-start", tool: "store" }), "before a turn's changes");
+		strictEqual(
+			snapshotWhat({ reason: "turn-start", tool: ToolNames.Edit }),
+			`before a turn's changes · ${ToolNames.Edit}`,
+		);
 	});
 });

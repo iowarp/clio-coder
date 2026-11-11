@@ -62,3 +62,13 @@ describe("one usage answer", () => {
 		match(bare.notices[0]?.[1] ?? "", /^usage: \/run /u);
 	});
 });
+
+describe("commands that became keys", () => {
+	it("answers a bare /interrupt with its key and spends the line", () => {
+		const bare = context();
+		strictEqual(dispatchSlashCommand(parseSlashCommand("/interrupt"), bare.ctx), "accepted");
+		deepStrictEqual(bare.notices, [["info", "/interrupt is now a key: press Alt+S."]]);
+		const typo = context();
+		strictEqual(dispatchSlashCommand(parseSlashCommand("/constructor"), typo.ctx), "rejected");
+	});
+});

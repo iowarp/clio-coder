@@ -86,6 +86,22 @@ const FACT_OPTIONS = { labelRole: "fieldName" as const, stack: "never" as const 
 /** Paths or refs a detail lists before counting the rest. */
 const DETAIL_LIST_SHOWN = 12;
 
+/** What a snapshot was taken before, in words; reasons the service does not name pass through. */
+const SNAPSHOT_REASON_WORDS: Readonly<Record<string, string>> = {
+	"turn-start": "before a turn's changes",
+	destructive: "before a destructive call",
+};
+/** Clio's own bookkeeping tools: naming one would not tell the operator what the turn changed. */
+const INTERNAL_SNAPSHOT_TOOLS: ReadonlySet<string> = new Set(["store"]);
+
+export function snapshotWhat(record: Pick<WorkspaceSnapshotRecord, "reason" | "tool">): string {
+	const reason = Object.hasOwn(SNAPSHOT_REASON_WORDS, record.reason)
+		? (SNAPSHOT_REASON_WORDS[record.reason] ?? record.reason)
+		: record.reason;
+	if (record.tool === undefined || INTERNAL_SNAPSHOT_TOOLS.has(record.tool)) return reason;
+	return `${reason} · ${record.tool}`;
+}
+
 /**
  * Rows for the snapshot list, one per snapshot, newest first as the service
  * returns them. The clock is enough while every snapshot is from one day; a
@@ -103,7 +119,7 @@ function rewindListItems(
 	const days = new Set(records.map((record) => dateLocal(record.at)));
 	return records.map((record) => {
 		const when = days.size > 1 ? `${dateLocal(record.at)} ${clockLocal(record.at)}` : clockLocal(record.at);
-		const what = record.tool !== undefined ? `${record.reason} · ${record.tool}` : record.reason;
+		const what = snapshotWhat(record);
 		return {
 			id: String(record.n),
 			label: `#${record.n} ${when} ${what}`,

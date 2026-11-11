@@ -3851,6 +3851,15 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			});
 			return "accepted";
 		}
+		// A command that became a key is answered with that key, and the line is
+		// spent like any command that ran: nothing in it is left to correct.
+		const key =
+			refusal || !Object.hasOwn(COMMANDS_NOW_KEYS, command.token) ? undefined : COMMANDS_NOW_KEYS[command.token];
+		if (key !== undefined && command.text.trim() === `/${command.token}`) {
+			ctx.notice("info", `/${command.token} is now a key: press ${key}.`);
+			ctx.render?.();
+			return "accepted";
+		}
 		const closest = refusal ? null : closestCommand(command.token);
 		ctx.notice(
 			"error",
@@ -3991,6 +4000,14 @@ export function matchCommandReference(
 	}
 	return out;
 }
+
+/** Commands that became keys, with the key that does the same thing now. */
+const COMMANDS_NOW_KEYS: Readonly<Record<string, string>> = {
+	interrupt: "Alt+S",
+	editor: "Alt+G",
+	background: "Ctrl+G d",
+	notifications: "Ctrl+G x",
+};
 
 function editDistance(a: string, b: string): number {
 	let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
