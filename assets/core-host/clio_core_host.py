@@ -256,7 +256,8 @@ class Core:
             time.sleep(0.01)
         guarded = (*XATTR_METHODS, PUT_IF_ABSENT)
         self.missing = [f"clio_cte_core_ext.Client.{name}" for name in guarded if not hasattr(cte.Client, name)]
-        self.missing.append(DEL_TAG_BINDING)
+        if not hasattr(cte.Client, "AsyncDelTag"):
+            self.missing.append(DEL_TAG_BINDING)
         self.fs = None
         self.fs_problem = ""
         try:
@@ -367,10 +368,18 @@ class Core:
         return {"tags": sorted(set(names))}
 
     def del_tag(self, args):
-        raise Refusal(
-            "unavailable",
-            f"Deleting a tag needs {DEL_TAG_BINDING}, which no iowarp-core release binds yet; tag {args['tag']} is unchanged.",
-        )
+        if not hasattr(self.cte.Client, "AsyncDelTag"):
+            raise Refusal(
+                "unavailable",
+                f"Deleting a tag needs {DEL_TAG_BINDING}, which the installed iowarp-core does not bind; tag {args['tag']} is unchanged.",
+            )
+        tag_id = self.existing_tag_id(args["tag"])
+        if tag_id is None:
+            return {}
+        check_rc(rc_of(self.client.AsyncDelTag(tag_id), "DelTag"), "DelTag")
+        with self.tag_lock:
+            self.tag_ids.pop(args["tag"], None)
+        return {}
 
     def set_tag_xattr(self, args):
         self.need_binding("AsyncTagSetXattr")
@@ -421,7 +430,15 @@ class Core:
         size = 0 if tag_id is None else self.record_size(tag_id, args["blob"])
         if size == 0:
             return {"data": None}
-        data = result_of(self.client.AsyncGetBlob(tag_id, args["blob"], size, 0), "GetBlob")
+        try:
+            data = result_of(self.client.AsyncGetBlob(tag_id, args["blob"], size, 0), "GetBlob")
+        except RuntimeError as error:
+            # iowarp-core raises on a failed get: a record put shortly before a runtime crash keeps its size, not its body.
+            raise Refusal(
+                "io",
+                f"Record {args['tag']}:{args['blob']} was lost at a clio-core restart ({error}); "
+                "records written within about 10 s of a runtime crash may not survive it.",
+            ) from error
         return {"data": base64.b64encode(data).decode("ascii")}
 
     def path_of(self, args):

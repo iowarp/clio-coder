@@ -1,5 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -130,4 +131,57 @@ test("killing the host mid-call rejects with StoreRefusal and leaves the parent 
 	} finally {
 		await host.close();
 	}
+});
+
+// The Python host's ops against a fake clio_cte_core_ext client; no runtime needed.
+const PY_CORE = String.raw`
+import importlib.util, json, sys, threading
+spec = importlib.util.spec_from_file_location("host", sys.argv[1])
+host = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(host)
+class Future:
+    def __init__(self, value=None, error=None, code=0):
+        self.value, self.error, self.code = value, error, code
+    def done(self): return True
+    def wait(self, _): return self.code
+    def result(self, _):
+        if self.error: raise self.error
+        return self.value
+deleted = []
+class Client:
+    def AsyncGetBlobSize(self, tag_id, blob, query): return Future(7)
+    def AsyncGetBlob(self, tag_id, blob, size, flags):
+        return Future(error=RuntimeError("AsyncGetBlob failed with return code 62"))
+    def AsyncDelTag(self, tag_id):
+        deleted.append(tag_id)
+        return Future()
+class Cte:
+    Client = Client
+    class PoolQuery:
+        @staticmethod
+        def Dynamic(): return None
+core = object.__new__(host.Core)
+core.cte, core.client, core.tag_ids, core.tag_lock = Cte, Client(), {"t": 5}, threading.Lock()
+out = {}
+try:
+    core.get_record({"tag": "t", "blob": "r1"})
+except host.Refusal as error:
+    out["get"] = [error.reason, error.message]
+core.del_tag({"tag": "t"})
+out["deleted"], out["cached"] = deleted, "t" in core.tag_ids
+open(sys.argv[2], "w").write(json.dumps(out))
+`;
+
+test("the Python host names a record lost at a restart and deletes tags through AsyncDelTag", () => {
+	const script = join(scratch, "py-core.py");
+	writeFileSync(script, PY_CORE);
+	const result = join(scratch, "py-core.json");
+	const host = join(process.cwd(), "assets", "core-host", "clio_core_host.py");
+	const run = spawnSync("python3", ["-B", script, host, result], { encoding: "utf8" });
+	strictEqual(run.status, 0, run.stderr);
+	const out = JSON.parse(readFileSync(result, "utf8")) as { get: [string, string]; deleted: number[]; cached: boolean };
+	strictEqual(out.get[0], "io");
+	ok(/t:r1 was lost at a clio-core restart/u.test(out.get[1]), out.get[1]);
+	strictEqual(JSON.stringify(out.deleted), "[5]");
+	strictEqual(out.cached, false);
 });
