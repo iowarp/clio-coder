@@ -2198,9 +2198,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			if (selected.warning) bootStderr(`Clio Coder: ${selected.warning}\n`);
 		} else if (selected.error || options.apiKey) {
-			const exitCode = options.apiKey || selected.error?.includes("not chat-eligible") ? 2 : 1;
+			const exitCode = options.apiKey || /^no models match|not chat-eligible/u.test(selected.error ?? "") ? 2 : 1;
 			writeRunDiagnostic(
-				`Clio Coder: ${selected.error ?? "--api-key supplied but the model target could not be resolved"}\n`,
+				`clio-coder run: ${selected.error ?? "--api-key supplied but the model target could not be resolved"}\n`,
 			);
 			await termination.shutdown(exitCode);
 			return { exitCode, bootTimeMs: timer.snapshot().totalMs };

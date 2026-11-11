@@ -73,6 +73,17 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 		strictEqual(await turn(["a new question"]), "other-model");
 	});
 
+	it("refuses a --model that matches nothing as a run usage error", async () => {
+		const result = await runCli(["run", "--model", "nope/x", "hi"], {
+			env: scratch.env,
+			cwd: scratch.root,
+			timeoutMs: 60_000,
+			cli: CLI,
+		});
+		strictEqual(result.code, 2, result.stderr);
+		ok(result.stderr.includes('clio-coder run: no models match pattern "nope/x"'), result.stderr);
+	});
+
 	it("lets an explicit --model beat the resumed route", async () => {
 		saveChatModel("mock-model");
 		strictEqual(await turn(["pick a colour"]), "mock-model");
