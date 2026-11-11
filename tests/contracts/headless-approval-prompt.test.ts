@@ -139,6 +139,26 @@ describe("interactive-only guidance in the session prompt", () => {
 		strictEqual(prompt(true), prompt(true), "the headless prompt is byte-stable");
 	});
 
+	it("names no interactive surface headless, and headless yolo waits in bash instead of a job", () => {
+		const tier = (name: string, promptProfile: "v1" | "v2") => {
+			const { inputs } = JSON.parse(
+				readFileSync(new URL(`../fixtures/prompt-tiers/${name}.inputs.json`, import.meta.url), "utf8"),
+			) as { inputs: Parameters<typeof compile>[1] };
+			return compile(loadFragments(), { ...inputs, sessionInputs: { ...inputs.sessionInputs, promptProfile } })
+				.systemPrompt;
+		};
+		for (const promptProfile of ["v1", "v2"] as const) {
+			for (const name of ["headless-default", "headless-yolo"]) {
+				const prompt = tier(name, promptProfile);
+				for (const absent of ["/rewind", "/fleet run", "ask_user", "decision tool", "- `job`"]) {
+					ok(!prompt.includes(absent), `${name} ${promptProfile} names ${absent}`);
+				}
+				strictEqual(prompt.includes("clio_docs"), prompt.includes("- `clio_docs`"), `${name} ${promptProfile}`);
+			}
+			ok(tier("headless-yolo", promptProfile).includes("A headless `clio-coder run` cannot own a job"));
+		}
+	});
+
 	it("keeps clause evidence and conditional reproduction tests in unattended prompts only", () => {
 		const table = loadFragments();
 		const main = (headless: boolean) =>
