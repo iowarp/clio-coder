@@ -255,6 +255,9 @@ function Install-ClioCoder {
 			}
 			if (-not $signed) {
 				if ($env:CLIO_CODER_REQUIRE_SIGNATURE -eq "1") { Fail "CLIO_CODER_REQUIRE_SIGNATURE=1, but no verified signature covers SHASUMS256.txt" }
+				# A signature that could be checked and was missing or did not verify fails closed unless explicitly waived.
+				$checkable = $unsignedReason -eq "no SHASUMS256.txt.asc signature" -or $unsignedReason -eq "gpgv could not check the signature"
+				if ($checkable -and $env:CLIO_CODER_REQUIRE_SIGNATURE -ne "0") { Fail "$unsignedReason; refusing to install. CLIO_CODER_REQUIRE_SIGNATURE=0 relies on the checksum alone." }
 				Say "$unsignedReason; verifying the checksum from SHASUMS256.txt over HTTPS"
 			}
 			$expected = (Get-Content -LiteralPath $sums | Where-Object { $_ -match "^([0-9a-f]{64})\s+$([regex]::Escape($zipName))$" } | Select-Object -First 1) -replace "\s.*$", ""

@@ -104,6 +104,7 @@ Environment for restricted networks:
   CLIO_CODER_NODE_UNOFFICIAL_MIRROR  Same, for unofficial-builds.nodejs.org
   CLIO_CODER_NODE_KEYRING            Local copy of the Node.js release keyring
   CLIO_CODER_REQUIRE_SIGNATURE=1     Fail unless the OpenPGP signature verifies
+  CLIO_CODER_REQUIRE_SIGNATURE=0     Accept a missing or unverified signature
   CLIO_CODER_NODE_BUILD              Force a build: linux-x64, linux-arm64,
                                      linux-x64-glibc-217, linux-x64-musl,
                                      linux-arm64-musl, darwin-x64, darwin-arm64
@@ -351,7 +352,7 @@ verify_signature() {
 		keyring="$work/pubring.kbx"
 		if ! download "$NODE_KEYRING_URL" "$keyring"; then
 			warn "could not fetch the Node.js release keys from $NODE_KEYRING_URL; signature not checked"
-			return 0
+				return 0
 		fi
 	fi
 	# A private GNUPGHOME keeps this away from your own keyrings and trust db.
@@ -371,7 +372,8 @@ verify_signature() {
 		printf '%s\n' "$work/SHASUMS256.verified"
 		return 0
 	fi
-	warn "could not check the SHASUMS256.txt signature with $gpg_tool ($(head -n 1 "$work/gpg.err" 2>/dev/null)); relying on the checksum file fetched over HTTPS"
+	# Runs in a command substitution, so the reason goes through a file.
+	printf 'the SHASUMS256.txt signature did not verify with %s (%s)\n' "$gpg_tool" "$(head -n 1 "$work/gpg.err" 2>/dev/null)" >"$work/unsigned"
 }
 
 # Fetch, verify and unpack Node into $runtime_dir.
@@ -404,8 +406,10 @@ install_node_runtime() {
 
 	sums_file="$work/SHASUMS256.txt"
 	signed=0
+	unsigned_reason=""
 	if [ -f "$work/SHASUMS256.txt.asc" ]; then
 		verified="$(verify_signature "$work/SHASUMS256.txt.asc")"
+		if [ -f "$work/unsigned" ]; then unsigned_reason="$(cat "$work/unsigned")"; fi
 		if [ -n "$verified" ]; then
 			sums_file="$verified"
 			signed=1
@@ -413,9 +417,18 @@ install_node_runtime() {
 		fi
 	elif [ "$node_official" = 0 ]; then
 		log "unofficial-builds publishes no signature; verifying the checksum only"
+	elif have gpgv || have gpg; then
+		unsigned_reason="no SHASUMS256.txt.asc signature came with SHASUMS256.txt"
 	fi
 	if [ "$signed" = 0 ] && [ "${CLIO_CODER_REQUIRE_SIGNATURE:-}" = 1 ]; then
 		fail "CLIO_CODER_REQUIRE_SIGNATURE=1, but no verified signature covers SHASUMS256.txt"
+	fi
+	# A signature that could be checked and was missing or did not verify fails closed; only an
+	# explicit CLIO_CODER_REQUIRE_SIGNATURE=0 installs on the HTTPS checksum alone.
+	if [ -n "$unsigned_reason" ]; then
+		[ "${CLIO_CODER_REQUIRE_SIGNATURE:-}" = 0 ] ||
+			fail "$unsigned_reason; refusing to install. CLIO_CODER_REQUIRE_SIGNATURE=0 relies on the checksum alone."
+		warn "$unsigned_reason; CLIO_CODER_REQUIRE_SIGNATURE=0, so relying on the checksum file fetched over HTTPS"
 	fi
 
 	expected="$(awk -v f="$tarball_name" '$2 == f {print $1}' "$sums_file")"

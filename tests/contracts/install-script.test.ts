@@ -5,7 +5,8 @@
  */
 import { match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -14,11 +15,11 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SCRIPT = join(ROOT, "scripts", "install.sh");
 
-function run(args: string[]) {
+function run(args: string[], env: Record<string, string> = {}) {
 	const home = mkdtempSync(join(tmpdir(), "clio-coder-install-script-"));
 	try {
 		const result = spawnSync("sh", [SCRIPT, ...args], {
-			env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "C" },
+			env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "C", ...env },
 			input: "",
 			encoding: "utf8",
 		});
@@ -45,6 +46,49 @@ describe("contracts/install-script", () => {
 		const text = readFileSync(SCRIPT, "utf8");
 		match(text, /\nmain "\$@"\n$/u, "main is the last line");
 		strictEqual(text.indexOf("\nmain() {"), text.lastIndexOf("\nmain() {"));
+	});
+
+	it("fails closed when a checkable Node signature is missing or does not verify", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-install-sig-"));
+		try {
+			const mirror = join(root, "mirror");
+			const release = join(mirror, "v24.11.1");
+			mkdirSync(release, { recursive: true });
+			const tarball = "node-v24.11.1-linux-x64.tar.gz";
+			writeFileSync(join(release, tarball), "not a node tarball");
+			const sum = createHash("sha256").update("not a node tarball").digest("hex");
+			writeFileSync(join(release, "SHASUMS256.txt"), `${sum}  ${tarball}\n`);
+			// A gpgv that knows no key: it never reports VALIDSIG.
+			const bin = join(root, "bin");
+			mkdirSync(bin);
+			writeFileSync(
+				join(bin, "gpgv"),
+				"#!/bin/sh\necho '[GNUPG:] ERRSIG 0 1 8 00 0 9'\necho 'gpgv: Can not check signature: No public key' >&2\n",
+			);
+			chmodSync(join(bin, "gpgv"), 0o755);
+			writeFileSync(join(root, "pubring.kbx"), "");
+			const install = (env: Record<string, string> = {}) =>
+				run(["--version", "v0.6.0", "--node-version", "24.11.1"], {
+					PATH: `${bin}:/usr/bin:/bin`,
+					TMPDIR: root,
+					CLIO_CODER_NODE_MIRROR: `file://${mirror}`,
+					CLIO_CODER_NODE_BUILD: "linux-x64",
+					CLIO_CODER_NODE_KEYRING: join(root, "pubring.kbx"),
+					...env,
+				});
+			const missing = install();
+			strictEqual(missing.code, 1, missing.stderr);
+			match(missing.stderr, /no SHASUMS256\.txt\.asc signature.*refusing to install/u);
+			writeFileSync(join(release, "SHASUMS256.txt.asc"), "signature");
+			const unknown = install();
+			strictEqual(unknown.code, 1, unknown.stderr);
+			match(unknown.stderr, /did not verify with gpgv.*refusing to install/u);
+			// The explicit opt-out installs on the checksum alone; the junk tarball then fails to unpack.
+			const optOut = install({ CLIO_CODER_REQUIRE_SIGNATURE: "0" });
+			match(`${optOut.stdout}${optOut.stderr}`, /checksum verified for node-v24\.11\.1-linux-x64\.tar\.gz/u);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("rejects version specs that could reach a different package or a shell", () => {
