@@ -154,6 +154,8 @@ export async function borrowHeadlessRoute(
 		// The boot path reports unreadable settings with its own diagnostic.
 		return null;
 	}
+	// A project that chose its targets chose the route too; borrowing anything else would override that choice.
+	if (projectTargets) return null;
 	if (classifyDefaultTarget(settings).kind !== "no-target") return null;
 	if (targetId !== undefined && settings.targets.some((target) => target.id === targetId)) return null;
 	const { headlessChatRoute } = await import("./detect-chat-routes.js");
